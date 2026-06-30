@@ -9,6 +9,65 @@ psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f in
 The local `docker-compose.yml` also mounts `init.sql` into PostgreSQL's init directory. It runs
 automatically only when the named PostgreSQL volume is created for the first time.
 
+## `instruments`
+
+One row stores one version of one tradable product:
+
+- `symbol`: normalized market symbol, for example `BTC-USDT`.
+- `version`: immutable config version.
+- `instrument_type` / `contract_type`: product category, currently perpetual linear contracts.
+- `base_asset` / `quote_asset` / `settle_asset`: display, pricing, and settlement assets.
+- `price_tick_size` / `quantity_step_size`: order price and quantity increments.
+- `min_order_qty` / `max_order_qty` / `min_notional` / `max_notional`: order bounds.
+- `supported_order_types` / `supported_time_in_force`: order-entry constraints.
+- `max_leverage`, margin rates, funding config, and `impact_notional`: risk and funding inputs.
+- `status`: `PRE_TRADING`, `TRADING`, `HALT`, `SETTLING`, or `CLOSED`.
+
+Primary key:
+
+```sql
+PRIMARY KEY (symbol, version)
+```
+
+## `instrument_current_versions`
+
+One row points each symbol to its current config version:
+
+```sql
+PRIMARY KEY (symbol)
+```
+
+Downstream services should use this table to read the current snapshot. Historical versions are kept
+in `instruments`.
+
+## `instrument_symbol_sequences`
+
+One row atomically allocates the next immutable instrument config version per symbol:
+
+```sql
+PRIMARY KEY (symbol)
+```
+
+Admin writes use this table instead of `MAX(version) + 1`, so multiple instrument provider nodes can
+handle concurrent changes without assigning the same version.
+
+## `instrument_risk_brackets`
+
+Risk limit brackets for a specific `symbol + version`. Matching and risk services use these to
+resolve max leverage and margin rates by position notional.
+
+## `instrument_index_sources`
+
+External spot-source configuration for index price calculation:
+
+- REST endpoint and parser.
+- WebSocket endpoint and subscription payload.
+- quote currency and target quote currency.
+- USD/USDT conversion source and conversion direction.
+- source weight and enabled flag.
+
+The index price provider reads this table dynamically.
+
 ## `candlestick_candles`
 
 One row represents one OHLCV candle:

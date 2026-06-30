@@ -10,12 +10,14 @@ This repository is the root reactor for exchange backend modules. Each business 
 
 - `surprising-dependencies`: centralized dependency versions copied from `surprising-wallet`.
 - `surprising-parent`: shared parent POM copied from `surprising-wallet`.
+- `surprising-instrument`: perpetual instrument configuration and product-rule center.
 - `surprising-candlestick`: perpetual candlestick service.
 - `surprising-price`: perpetual index price and mark price services.
 
 ## Module Documentation
 
 - [surprising-candlestick](surprising-candlestick/README.md)
+- [surprising-instrument](surprising-instrument/README.md)
 - [surprising-price](surprising-price/README.md)
 
 ## Build
@@ -39,6 +41,7 @@ This is a new project, so all initial schema is kept in root [init.sql](init.sql
 docker compose up -d postgres kafka
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
+mvn -pl :surprising-instrument-provider -am spring-boot:run
 mvn -pl :surprising-candlestick-provider -am spring-boot:run
 mvn -pl :surprising-index-price-provider -am spring-boot:run
 mvn -pl :surprising-mark-price-provider -am spring-boot:run
@@ -46,12 +49,14 @@ mvn -pl :surprising-mark-price-provider -am spring-boot:run
 
 Ports:
 
+- `9080`: instrument configuration service.
 - `9081`: candlestick service.
 - `9082`: index price and FX service.
 - `9083`: mark price service.
 
 ## Kafka Topics
 
+- `surprising.instrument.events.v1`: instrument configuration change events.
 - `surprising.perp.trade.events.v1`: perpetual trade input.
 - `surprising.perp.candle.events.v1`: candlestick snapshot output.
 - `surprising.perp.index.price.v1`: index price output.
@@ -66,6 +71,7 @@ All market-data topics use `symbol` as the Kafka key.
 ## API Smoke Checks
 
 ```bash
+curl 'http://localhost:9080/api/v1/instruments/latest?symbol=BTC-USDT'
 curl 'http://localhost:9081/api/v1/candlestick/candles/latest?symbol=BTC-USDT&period=1m'
 curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
 curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
@@ -76,6 +82,7 @@ curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
 
 - Run at least two instances of each provider.
 - Use Kafka topic replication factor `3` in production.
+- Instrument is the single source for symbols and trading rules.
 - Candlestick state scales with Kafka Streams partitions and local RocksDB state stores.
 - Index and mark price providers use PostgreSQL symbol leases and database sequences to avoid duplicate multi-node publishing and sequence rollback.
 - WebSocket fanout should be a separate service consuming Kafka output topics, not part of the calculators.

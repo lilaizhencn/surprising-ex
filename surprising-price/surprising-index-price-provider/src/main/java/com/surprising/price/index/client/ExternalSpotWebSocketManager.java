@@ -2,6 +2,7 @@ package com.surprising.price.index.client;
 
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.model.SourceQuote;
+import com.surprising.price.index.service.IndexInstrumentConfigService;
 import com.surprising.price.index.service.LatestSourceQuoteStore;
 import jakarta.annotation.PreDestroy;
 import java.net.URI;
@@ -20,6 +21,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
@@ -32,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -40,6 +43,7 @@ public class ExternalSpotWebSocketManager {
     private static final Logger log = LoggerFactory.getLogger(ExternalSpotWebSocketManager.class);
 
     private final IndexPriceProperties properties;
+    private final IndexInstrumentConfigService indexInstrumentConfigService;
     private final ExternalSpotPriceClient externalSpotPriceClient;
     private final LatestSourceQuoteStore latestSourceQuoteStore;
     private final HttpClient httpClient;
@@ -48,9 +52,11 @@ public class ExternalSpotWebSocketManager {
     private volatile boolean running;
 
     public ExternalSpotWebSocketManager(IndexPriceProperties properties,
+                                        IndexInstrumentConfigService indexInstrumentConfigService,
                                         ExternalSpotPriceClient externalSpotPriceClient,
                                         LatestSourceQuoteStore latestSourceQuoteStore) {
         this.properties = properties;
+        this.indexInstrumentConfigService = indexInstrumentConfigService;
         this.externalSpotPriceClient = externalSpotPriceClient;
         this.latestSourceQuoteStore = latestSourceQuoteStore;
         this.httpClient = HttpClient.newBuilder()
@@ -71,13 +77,16 @@ public class ExternalSpotWebSocketManager {
         }
 
         running = true;
-        grouped.forEach((url, sources) -> {
-            WsSession session = new WsSession(url, sources);
-            sessions.put(url, session);
-            connect(session);
-        });
+        refreshConnections(grouped);
         long intervalMs = Math.max(1000L, properties.getWebSocket().getHealthCheckInterval().toMillis());
         scheduler.scheduleAtFixedRate(this::checkIdleSessions, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
+    }
+
+    @Scheduled(fixedDelayString = "${surprising.price.index.instrument.refresh-delay-ms:30000}")
+    public void refreshConnections() {
+        if (running && properties.getWebSocket().isEnabled()) {
+            refreshConnections(groupedSources());
+        }
     }
 
     @PreDestroy
@@ -94,7 +103,7 @@ public class ExternalSpotWebSocketManager {
 
     private Map<String, List<TrackedSource>> groupedSources() {
         Map<String, List<TrackedSource>> grouped = new LinkedHashMap<>();
-        for (IndexPriceProperties.SymbolConfig symbol : properties.getSymbols()) {
+        for (IndexPriceProperties.SymbolConfig symbol : indexInstrumentConfigService.symbols()) {
             for (IndexPriceProperties.SourceConfig source : symbol.getSources()) {
                 if (source.isEnabled() && source.isWebsocketEnabled() && hasText(source.getWebsocketUrl())) {
                     grouped.computeIfAbsent(source.getWebsocketUrl(), ignored -> new ArrayList<>())
@@ -103,6 +112,27 @@ public class ExternalSpotWebSocketManager {
             }
         }
         return grouped;
+    }
+
+    private void refreshConnections(Map<String, List<TrackedSource>> grouped) {
+        sessions.forEach((url, session) -> {
+            if (!grouped.containsKey(url) && sessions.remove(url, session)) {
+                WebSocket webSocket = session.webSocket.getAndSet(null);
+                if (webSocket != null) {
+                    webSocket.abort();
+                }
+            }
+        });
+        grouped.forEach((url, sources) -> {
+            WsSession session = sessions.computeIfAbsent(url, ignored -> new WsSession(url, sources));
+            session.updateSources(sources);
+            WebSocket webSocket = session.webSocket.get();
+            if (webSocket == null) {
+                connect(session);
+            } else {
+                subscribeNewSources(webSocket, session);
+            }
+        });
     }
 
     private void connect(WsSession session) {
@@ -172,7 +202,7 @@ public class ExternalSpotWebSocketManager {
     private void handlePayload(WsSession session, String payload) {
         Instant receivedAt = Instant.now();
         boolean matched = false;
-        for (TrackedSource trackedSource : session.sources) {
+        for (TrackedSource trackedSource : session.sources()) {
             Optional<SourceQuote> quote = externalSpotPriceClient.parseWebSocketPayload(
                     trackedSource.source(), payload, receivedAt);
             if (quote.isPresent() && quote.get().healthy()) {
@@ -182,6 +212,15 @@ public class ExternalSpotWebSocketManager {
         }
         if (matched) {
             session.reconnectAttempts.set(0);
+        }
+    }
+
+    private void subscribeNewSources(WebSocket webSocket, WsSession session) {
+        for (TrackedSource trackedSource : session.sources()) {
+            String message = trackedSource.source().getWebsocketSubscribeMessage();
+            if (hasText(message) && session.sentSubscribeMessages.add(message)) {
+                webSocket.sendText(message, true);
+            }
         }
     }
 
@@ -202,13 +241,16 @@ public class ExternalSpotWebSocketManager {
         public void onOpen(WebSocket webSocket) {
             session.lastFrameEpochMillis.set(System.currentTimeMillis());
             Set<String> subscribeMessages = new LinkedHashSet<>();
-            for (TrackedSource trackedSource : session.sources) {
+            for (TrackedSource trackedSource : session.sources()) {
                 String message = trackedSource.source().getWebsocketSubscribeMessage();
                 if (hasText(message)) {
                     subscribeMessages.add(message);
                 }
             }
-            subscribeMessages.forEach(message -> webSocket.sendText(message, true));
+            subscribeMessages.forEach(message -> {
+                session.sentSubscribeMessages.add(message);
+                webSocket.sendText(message, true);
+            });
             webSocket.request(1);
         }
 
@@ -253,7 +295,8 @@ public class ExternalSpotWebSocketManager {
 
     private static class WsSession {
         private final String url;
-        private final List<TrackedSource> sources;
+        private final CopyOnWriteArrayList<TrackedSource> sources = new CopyOnWriteArrayList<>();
+        private final Set<String> sentSubscribeMessages = ConcurrentHashMap.newKeySet();
         private final AtomicReference<WebSocket> webSocket = new AtomicReference<>();
         private final AtomicBoolean connecting = new AtomicBoolean();
         private final AtomicBoolean reconnectScheduled = new AtomicBoolean();
@@ -262,7 +305,16 @@ public class ExternalSpotWebSocketManager {
 
         private WsSession(String url, List<TrackedSource> sources) {
             this.url = url;
-            this.sources = List.copyOf(sources);
+            updateSources(sources);
+        }
+
+        private void updateSources(List<TrackedSource> latestSources) {
+            sources.clear();
+            sources.addAll(latestSources);
+        }
+
+        private List<TrackedSource> sources() {
+            return List.copyOf(sources);
         }
     }
 

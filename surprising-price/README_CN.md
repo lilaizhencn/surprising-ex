@@ -28,6 +28,8 @@ Surprising Exchange 合约指数价格和标记价格模块。
 
 这个模块刻意和 K 线服务分开。指数价格和标记价格是风控输入，K 线是行情历史聚合。分开部署可以避免风控价格被 K 线查询或 WebSocket 推送压力影响。
 
+合约清单和交易规则来自 `surprising-instrument`。指数价格 provider 默认从 `instruments + instrument_index_sources` 当前版本动态读取 symbol 和外部指数源；`application.yml` 中的静态 BTC/ETH 源仅作为数据库未初始化时的兜底。
+
 ## 指数价格
 
 指数价格服务默认使用外部交易所 WebSocket 长连接接收 ticker，标准化价格，剔除过期源和异常源，重新归一化权重，然后为每个 symbol 发布一个公允指数价格。REST 只用于冷启动、WebSocket 缓存过期后的兜底，以及人工排障。
@@ -175,6 +177,9 @@ markPrice = clamp(rawMark, indexPrice * (1 - clampRatio), indexPrice * (1 + clam
 | `surprising.price.index.calculation.min-valid-sources` | `3` | 每个 symbol 最少有效外部源数量。 |
 | `surprising.price.index.web-socket.idle-timeout` | `20s` | 外部 WS 无任何帧超过该时间后重连。 |
 | `surprising.price.index.web-socket.reconnect-max-delay` | `30s` | 外部 WS 最大重连退避。 |
+| `surprising.price.index.instrument.enabled` | `true` | 从 `surprising-instrument` 数据表动态读取 symbol 和指数源。 |
+| `surprising.price.index.instrument.refresh-delay-ms` | `30000` | instrument 快照刷新周期。 |
+| `surprising.price.index.instrument.fallback-to-static-symbols` | `true` | instrument 表为空或不可用时使用 YAML 静态 symbol。 |
 | `surprising.price.index.coordination.lease-duration` | `15s` | 指数价格 symbol 租约时长。 |
 | `surprising.price.index.fiat.refresh-delay-ms` | `3600000` | 法币汇率刷新周期。 |
 | `surprising.price.index.fiat.stable-coin.refresh-delay-ms` | `10000` | USDT/USD 稳定币桥接刷新周期。 |

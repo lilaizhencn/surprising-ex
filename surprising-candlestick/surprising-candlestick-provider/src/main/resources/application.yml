@@ -56,5 +56,6 @@ surprising:
     query:
       max-limit: 1500
     symbols:
-      accept-unknown-symbols: true
+      accept-unknown-symbols: false
+      source: INSTRUMENT
       refresh-delay-ms: 30000

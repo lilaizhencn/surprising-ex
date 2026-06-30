@@ -47,6 +47,10 @@ surprising:
         enabled: true
         node-id: ${HOSTNAME:${random.uuid}}
         lease-duration: 15s
+      instrument:
+        enabled: true
+        refresh-delay-ms: 30000
+        fallback-to-static-symbols: true
       fiat:
         enabled: true
         refresh-delay-ms: 3600000

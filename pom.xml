@@ -15,6 +15,7 @@
     <modules>
         <module>surprising-dependencies</module>
         <module>surprising-parent</module>
+        <module>surprising-instrument</module>
         <module>surprising-candlestick</module>
         <module>surprising-price</module>
     </modules>

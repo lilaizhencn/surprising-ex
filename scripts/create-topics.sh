@@ -53,6 +53,12 @@ fi
 
 kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
+  --topic surprising.instrument.events.v1 \
+  --partitions "${PARTITIONS}" \
+  --replication-factor "${REPLICATION_FACTOR}"
+
+kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+  --create --if-not-exists \
   --topic surprising.perp.trade.events.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"

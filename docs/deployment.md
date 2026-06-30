@@ -7,6 +7,12 @@ Create the perpetual trade input topic with enough partitions for your active sy
 ```bash
 kafka-topics.sh --bootstrap-server localhost:9092 \
   --create --if-not-exists \
+  --topic surprising.instrument.events.v1 \
+  --partitions 24 \
+  --replication-factor 3
+
+kafka-topics.sh --bootstrap-server localhost:9092 \
+  --create --if-not-exists \
   --topic surprising.perp.trade.events.v1 \
   --partitions 24 \
   --replication-factor 3
@@ -38,6 +44,11 @@ psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f in
 
 The root `init.sql` creates:
 
+- `instruments`: immutable product-rule snapshots keyed by `(symbol, version)`.
+- `instrument_current_versions`: current version pointer per symbol.
+- `instrument_symbol_sequences`: atomic instrument version allocator per symbol.
+- `instrument_risk_brackets`: risk tiers keyed by `(symbol, version, bracket_no)`.
+- `instrument_index_sources`: index component source config keyed by `(symbol, version, source)`.
 - `candlestick_symbols`: optional symbol registry.
 - `candlestick_candles`: OHLCV storage keyed by `(symbol, period, open_time)`.
 - `price_index_ticks`: index price ticks keyed by `(symbol, sequence)`.
@@ -74,14 +85,16 @@ Recommended production settings:
 1. Start PostgreSQL and Kafka.
 2. Apply `init.sql`.
 3. Create Kafka topics with `scripts/create-topics.sh`.
-4. Start candlestick providers.
-5. Start index price providers.
-6. Start mark price providers after index, book ticker, trade, and funding-rate topics are available.
-7. Start WebSocket/fanout services that consume candle, index, and mark output topics.
+4. Start instrument providers.
+5. Start candlestick providers.
+6. Start index price providers.
+7. Start mark price providers after index, book ticker, trade, and funding-rate topics are available.
+8. Start WebSocket/fanout services that consume candle, index, and mark output topics.
 
 ## API Smoke Tests
 
 ```bash
+curl 'http://localhost:9080/api/v1/instruments/latest?symbol=BTC-USDT'
 curl 'http://localhost:9081/api/v1/candlestick/candles/latest?symbol=BTC-USDT&period=1m'
 curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
 curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
@@ -98,6 +111,7 @@ curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
 - Index and mark providers use `price_symbol_leases` so only one live node publishes a given `module + symbol`.
 - Index and mark providers use `price_symbol_sequences` so a failover cannot reset sequence numbers.
 - External-source failures are stored in component/audit records; unusable index prices are not published.
+- Instrument changes are immutable versions; downstream services replace local cache after reading current snapshots or consuming `surprising.instrument.events.v1`.
 
 ## Troubleshooting
 
@@ -125,18 +139,22 @@ Default behavior:
 surprising:
   candlestick:
     symbols:
-      accept-unknown-symbols: true
+      accept-unknown-symbols: false
+      source: INSTRUMENT
 ```
 
-With this mode, a new trading pair starts producing candles as soon as trading publishes keyed Kafka records.
+With this mode, a new trading pair starts producing candles after `surprising-instrument` exposes it
+in the current `instruments` snapshot. The index price provider also reads current symbols and index
+sources from `instruments + instrument_index_sources`.
 
-Strict registry mode:
+Legacy registry fallback:
 
 ```yaml
 surprising:
   candlestick:
     symbols:
       accept-unknown-symbols: false
+      source: CANDLESTICK_SYMBOLS
       refresh-delay-ms: 30000
 ```
 

@@ -10,12 +10,14 @@ Surprising 交易所后端服务。
 
 - `surprising-dependencies`：从 `surprising-wallet` 复制过来的统一依赖版本管理模块。
 - `surprising-parent`：从 `surprising-wallet` 复制过来的公共父 POM。
+- `surprising-instrument`：合约基础配置和产品规则中心。
 - `surprising-candlestick`：合约 K 线服务。
 - `surprising-price`：合约指数价格和标记价格服务。
 
 ## 模块文档
 
 - [surprising-candlestick](surprising-candlestick/README_CN.md)
+- [surprising-instrument](surprising-instrument/README_CN.md)
 - [surprising-price](surprising-price/README_CN.md)
 
 ## 构建
@@ -39,6 +41,7 @@ psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f in
 docker compose up -d postgres kafka
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
+mvn -pl :surprising-instrument-provider -am spring-boot:run
 mvn -pl :surprising-candlestick-provider -am spring-boot:run
 mvn -pl :surprising-index-price-provider -am spring-boot:run
 mvn -pl :surprising-mark-price-provider -am spring-boot:run
@@ -46,12 +49,14 @@ mvn -pl :surprising-mark-price-provider -am spring-boot:run
 
 端口：
 
+- `9080`：合约基础配置服务。
 - `9081`：K 线服务。
 - `9082`：指数价格和法币汇率服务。
 - `9083`：标记价格服务。
 
 ## Kafka Topics
 
+- `surprising.instrument.events.v1`：合约配置变更事件。
 - `surprising.perp.trade.events.v1`：合约成交输入。
 - `surprising.perp.candle.events.v1`：K 线快照输出。
 - `surprising.perp.index.price.v1`：指数价格输出。
@@ -66,6 +71,7 @@ mvn -pl :surprising-mark-price-provider -am spring-boot:run
 ## API 快速检查
 
 ```bash
+curl 'http://localhost:9080/api/v1/instruments/latest?symbol=BTC-USDT'
 curl 'http://localhost:9081/api/v1/candlestick/candles/latest?symbol=BTC-USDT&period=1m'
 curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
 curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
@@ -76,6 +82,7 @@ curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
 
 - 每个 provider 至少部署 2 个实例。
 - Kafka topic replication factor 生产建议为 `3`。
+- Instrument 是全系统唯一 symbol 和交易规则配置源。
 - K 线服务用 Kafka Streams + RocksDB 分区状态，按 Kafka partition 水平扩展。
 - 指数价格和标记价格服务用 PostgreSQL 的 symbol 租约和数据库 sequence 避免多节点重复发布和 sequence 回退。
 - WebSocket 推送服务应独立消费 Kafka 输出 topic，不要放进 K 线或价格计算服务里。

@@ -19,7 +19,7 @@ K 线服务按多节点部署设计，采用分区化行情数据流水线：
 - Kafka Streams 使用 RocksDB state store 保存热 K 线状态、成交幂等状态、待落库 dirty snapshot、每个 symbol 的最新 sequence。
 - PostgreSQL 只接收周期性的完整快照 upsert。服务不会在每笔成交时读取数据库 K 线行。
 - 合约 K 线变更事件发送到 `surprising.perp.candle.events.v1`，websocket/行情推送服务应独立消费这个 topic。
-- 默认自动接收新交易对。设置 `surprising.candlestick.symbols.accept-unknown-symbols=false` 后，只有 `candlestick_symbols.enabled=true` 的 symbol 会被处理。
+- 默认从 `surprising-instrument` 的 `instruments` 当前版本读取启用交易对。设置 `surprising.candlestick.symbols.source=CANDLESTICK_SYMBOLS` 后，才使用旧的 `candlestick_symbols` 表。
 
 ## 多节点核心机制
 
@@ -162,6 +162,9 @@ surprising:
       application-id: surprising-candlestick-v1
     stream:
       threads: 2
+    symbols:
+      accept-unknown-symbols: false
+      source: INSTRUMENT
 ```
 
 ## WebSocket 监听和推送

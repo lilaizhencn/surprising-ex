@@ -26,6 +26,7 @@ public class IndexPriceService {
     private static final String SEQUENCE_MODULE = "price-index";
 
     private final IndexPriceProperties properties;
+    private final IndexInstrumentConfigService indexInstrumentConfigService;
     private final ExternalSpotPriceClient externalSpotPriceClient;
     private final LatestSourceQuoteStore latestSourceQuoteStore;
     private final IndexPriceCalculator indexPriceCalculator;
@@ -34,12 +35,14 @@ public class IndexPriceService {
     private final String nodeId;
 
     public IndexPriceService(IndexPriceProperties properties,
+                             IndexInstrumentConfigService indexInstrumentConfigService,
                              ExternalSpotPriceClient externalSpotPriceClient,
                              LatestSourceQuoteStore latestSourceQuoteStore,
                              IndexPriceCalculator indexPriceCalculator,
                              IndexPriceRepository indexPriceRepository,
                              KafkaTemplate<String, Object> kafkaTemplate) {
         this.properties = properties;
+        this.indexInstrumentConfigService = indexInstrumentConfigService;
         this.externalSpotPriceClient = externalSpotPriceClient;
         this.latestSourceQuoteStore = latestSourceQuoteStore;
         this.indexPriceCalculator = indexPriceCalculator;
@@ -50,7 +53,7 @@ public class IndexPriceService {
 
     @Scheduled(fixedDelayString = "${surprising.price.index.calculation.poll-delay-ms:1000}")
     public void pollAndPublish() {
-        for (IndexPriceProperties.SymbolConfig symbolConfig : properties.getSymbols()) {
+        for (IndexPriceProperties.SymbolConfig symbolConfig : indexInstrumentConfigService.symbols()) {
             try {
                 publishSymbol(symbolConfig);
             } catch (Exception ex) {

@@ -15,9 +15,8 @@ import org.springframework.stereotype.Service;
 /**
  * Runtime symbol gate for dynamic market enablement.
  *
- * <p>By default the service accepts new symbols automatically. In strict mode it periodically
- * refreshes {@code candlestick_symbols} so operations can enable or disable markets without
- * restarting K-line nodes.</p>
+ * <p>By default strict mode reads the current instrument snapshot. Legacy deployments can switch
+ * {@code surprising.candlestick.symbols.source} back to {@code CANDLESTICK_SYMBOLS}.</p>
  */
 public class SymbolRegistryService {
 
@@ -47,7 +46,7 @@ public class SymbolRegistryService {
         }
         try {
             Set<String> symbols = ConcurrentHashMap.newKeySet();
-            jdbcTemplate.query("SELECT symbol FROM candlestick_symbols WHERE enabled = TRUE", rs -> {
+            jdbcTemplate.query(symbolQuery(), rs -> {
                 symbols.add(CandleKey.normalizeSymbol(rs.getString("symbol")));
             });
             enabledSymbols = Set.copyOf(symbols);
@@ -61,5 +60,20 @@ public class SymbolRegistryService {
             return true;
         }
         return enabledSymbols.contains(CandleKey.normalizeSymbol(symbol));
+    }
+
+    private String symbolQuery() {
+        String source = properties.getSymbols().getSource();
+        if ("CANDLESTICK_SYMBOLS".equalsIgnoreCase(source)) {
+            return "SELECT symbol FROM candlestick_symbols WHERE enabled = TRUE";
+        }
+        return """
+                SELECT i.symbol
+                  FROM instruments i
+                  JOIN instrument_current_versions c
+                    ON c.symbol = i.symbol AND c.version = i.version
+                 WHERE i.instrument_type = 'PERPETUAL'
+                   AND i.status IN ('PRE_TRADING', 'TRADING', 'HALT')
+                """;
     }
 }

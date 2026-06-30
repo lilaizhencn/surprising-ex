@@ -15,6 +15,7 @@ public class IndexPriceProperties {
     private WebSocket webSocket = new WebSocket();
     private Fiat fiat = new Fiat();
     private Coordination coordination = new Coordination();
+    private Instrument instrument = new Instrument();
     private List<SymbolConfig> symbols = new ArrayList<>();
 
     public Kafka getKafka() {
@@ -63,6 +64,14 @@ public class IndexPriceProperties {
 
     public void setCoordination(Coordination coordination) {
         this.coordination = coordination;
+    }
+
+    public Instrument getInstrument() {
+        return instrument;
+    }
+
+    public void setInstrument(Instrument instrument) {
+        this.instrument = instrument;
     }
 
     public List<SymbolConfig> getSymbols() {
@@ -453,6 +462,36 @@ public class IndexPriceProperties {
 
         public void setLeaseDuration(Duration leaseDuration) {
             this.leaseDuration = leaseDuration;
+        }
+    }
+
+    public static class Instrument {
+        private boolean enabled = true;
+        private long refreshDelayMs = 30000L;
+        private boolean fallbackToStaticSymbols = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public long getRefreshDelayMs() {
+            return refreshDelayMs;
+        }
+
+        public void setRefreshDelayMs(long refreshDelayMs) {
+            this.refreshDelayMs = refreshDelayMs;
+        }
+
+        public boolean isFallbackToStaticSymbols() {
+            return fallbackToStaticSymbols;
+        }
+
+        public void setFallbackToStaticSymbols(boolean fallbackToStaticSymbols) {
+            this.fallbackToStaticSymbols = fallbackToStaticSymbols;
         }
     }
 

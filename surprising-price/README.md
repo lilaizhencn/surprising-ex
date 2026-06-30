@@ -30,6 +30,10 @@ The module is intentionally separate from candlestick aggregation. Index and mar
 inputs, while candlesticks are market-data history. Keeping them separate avoids coupling risk
 calculation to K-line query or WebSocket fanout load.
 
+The symbol universe and trading rules come from `surprising-instrument`. The index provider reads
+current symbols and external index sources dynamically from `instruments + instrument_index_sources`;
+static BTC/ETH YAML sources are only a fallback before database initialization.
+
 ## Index Price
 
 The index price provider uses external venue WebSocket tickers by default, normalizes prices,
@@ -189,6 +193,9 @@ Production recommendations:
 | `surprising.price.index.calculation.min-valid-sources` | `3` | Minimum valid external sources per symbol. |
 | `surprising.price.index.web-socket.idle-timeout` | `20s` | Reconnect when no external WS frame arrives within this window. |
 | `surprising.price.index.web-socket.reconnect-max-delay` | `30s` | Maximum external WS reconnect backoff. |
+| `surprising.price.index.instrument.enabled` | `true` | Dynamically read symbols and index sources from `surprising-instrument` tables. |
+| `surprising.price.index.instrument.refresh-delay-ms` | `30000` | Instrument snapshot refresh interval. |
+| `surprising.price.index.instrument.fallback-to-static-symbols` | `true` | Use static YAML symbols when instrument tables are empty or unavailable. |
 | `surprising.price.index.coordination.lease-duration` | `15s` | Index symbol lease duration. |
 | `surprising.price.index.fiat.refresh-delay-ms` | `3600000` | Fiat FX refresh interval. |
 | `surprising.price.index.fiat.stable-coin.refresh-delay-ms` | `10000` | USDT/USD stable bridge refresh interval. |

@@ -195,6 +195,7 @@ public class CandlestickProperties {
 
     public static class Symbols {
         private boolean acceptUnknownSymbols = true;
+        private String source = "INSTRUMENT";
         private long refreshDelayMs = 30000L;
 
         public boolean isAcceptUnknownSymbols() {
@@ -203,6 +204,14 @@ public class CandlestickProperties {
 
         public void setAcceptUnknownSymbols(boolean acceptUnknownSymbols) {
             this.acceptUnknownSymbols = acceptUnknownSymbols;
+        }
+
+        public String getSource() {
+            return source;
+        }
+
+        public void setSource(String source) {
+            this.source = source;
         }
 
         public long getRefreshDelayMs() {

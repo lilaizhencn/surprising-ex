@@ -19,7 +19,7 @@ The candlestick service is designed for multi-node deployment and follows a part
 - Kafka Streams uses RocksDB state stores for hot candle state, trade idempotency, dirty snapshots, and latest sequence per symbol.
 - PostgreSQL receives periodic full-snapshot upserts. The service never reads a candle row for every trade.
 - Perpetual candle update events are emitted to `surprising.perp.candle.events.v1`; websocket/push services should consume that topic separately.
-- New symbols are accepted automatically by default. Set `surprising.candlestick.symbols.accept-unknown-symbols=false` to require `candlestick_symbols.enabled=true`.
+- Enabled symbols are read from the current `surprising-instrument` snapshot by default. Set `surprising.candlestick.symbols.source=CANDLESTICK_SYMBOLS` to use the legacy `candlestick_symbols` table.
 
 ## Multi-Node Mechanism
 
@@ -163,6 +163,9 @@ surprising:
       application-id: surprising-candlestick-v1
     stream:
       threads: 2
+    symbols:
+      accept-unknown-symbols: false
+      source: INSTRUMENT
 ```
 
 ## WebSocket Fanout
