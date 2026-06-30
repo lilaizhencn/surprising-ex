@@ -1,0 +1,64 @@
+server:
+  port: 9081
+
+spring:
+  application:
+    name: surprising-candlestick-provider
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 4
+      connection-timeout: 3000
+      validation-timeout: 1000
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
+
+surprising:
+  candlestick:
+    periods: [ "1m", "5m", "15m", "30m", "1h", "4h", "1d" ]
+    kafka:
+      bootstrap-servers: localhost:9092
+      trade-topic: surprising.perp.trade.events.v1
+      candle-topic: surprising.perp.candle.events.v1
+      application-id: surprising-candlestick-v1
+    stream:
+      threads: 2
+      state-dir: data/kafka-streams
+      commit-interval: 1s
+      dedupe-retention: 3d
+      dedupe-cleanup-max-entries: 10000
+    rocksdb:
+      block-cache-size: 256MB
+      write-buffer-size: 64MB
+      write-buffer-manager-size: 256MB
+      max-write-buffer-number: 3
+      block-size: 16KB
+      max-background-jobs: 2
+      target-file-size-base: 64MB
+      bytes-per-sync: 1MB
+      compression-type: LZ4_COMPRESSION
+      bloom-filter-enabled: true
+      bloom-filter-bits-per-key: 10.0
+    flush:
+      interval: 1s
+      max-batch-size: 1000
+    query:
+      max-limit: 1500
+    symbols:
+      accept-unknown-symbols: true
+      refresh-delay-ms: 30000
