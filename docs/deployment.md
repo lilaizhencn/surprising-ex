@@ -1,4 +1,4 @@
-# Candlestick Deployment
+# Deployment
 
 ## Kafka Topics
 
@@ -30,10 +30,22 @@ For local Docker Compose, use replication factor `1`.
 
 ## PostgreSQL
 
-Flyway creates:
+Initialize the schema from repository root:
+
+```bash
+psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
+```
+
+The root `init.sql` creates:
 
 - `candlestick_symbols`: optional symbol registry.
 - `candlestick_candles`: OHLCV storage keyed by `(symbol, period, open_time)`.
+- `price_index_ticks`: index price ticks keyed by `(symbol, sequence)`.
+- `price_index_components`: index component audit rows keyed by `(symbol, sequence, source)`.
+- `price_symbol_leases`: active publisher ownership keyed by `(module, symbol)`.
+- `price_symbol_sequences`: database-allocated price sequence keyed by `(module, symbol)`.
+- `price_exchange_rates`: fiat and stable-coin bridge rates keyed by `(base_currency, quote_currency)`.
+- `price_mark_ticks`: mark price ticks keyed by `(symbol, sequence)`.
 
 The query API uses fixed table names and parameter binding. It does not concatenate user input into table names.
 
@@ -45,6 +57,37 @@ Recommended production settings:
 - For very large history, add native PostgreSQL range partitioning by `open_time` or move closed candles into TimescaleDB hypertables.
 - Keep `surprising.candlestick.flush.max-batch-size` between `500` and `5000` depending on DB latency.
 
+## Price Provider Feeds
+
+- Run the index provider with external venue WebSocket enabled for production.
+- REST polling is only a cold-start and stale-cache fallback; do not size production around REST for every symbol/source pair.
+- Keep `surprising.price.index.web-socket.reconnect-initial-delay` and `reconnect-max-delay` conservative enough to avoid reconnect storms after provider incidents.
+- Store customer-facing fiat conversion rates in `price_exchange_rates`; app and gateway requests should query local APIs.
+- Use a paid FX provider with SLA in production, and keep the default public endpoint only for development or backup.
+- Keep `surprising.price.*.coordination.enabled=true` for multi-node deployments.
+- Set `surprising.price.*.coordination.node-id` to a stable pod name, hostname, or instance id.
+- Keep `coordination.lease-duration` several times longer than the publish interval. Default is `15s`.
+- Do not publish index or mark prices when PostgreSQL is unavailable; lease and sequence guarantees depend on PostgreSQL.
+
+## Deployment Order
+
+1. Start PostgreSQL and Kafka.
+2. Apply `init.sql`.
+3. Create Kafka topics with `scripts/create-topics.sh`.
+4. Start candlestick providers.
+5. Start index price providers.
+6. Start mark price providers after index, book ticker, trade, and funding-rate topics are available.
+7. Start WebSocket/fanout services that consume candle, index, and mark output topics.
+
+## API Smoke Tests
+
+```bash
+curl 'http://localhost:9081/api/v1/candlestick/candles/latest?symbol=BTC-USDT&period=1m'
+curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
+curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
+curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
+```
+
 ## Failure Behavior
 
 - Duplicate trades are dropped by `symbol + tradeId`.
@@ -52,6 +95,19 @@ Recommended production settings:
 - Dirty candle snapshots are stored in a persistent RocksDB state store before PostgreSQL flush.
 - PostgreSQL writes are full-snapshot upserts, so retrying the same dirty snapshot is idempotent.
 - Perpetual candle update Kafka events are separate from DB persistence. A websocket service should consume the candle topic and maintain its own client fanout.
+- Index and mark providers use `price_symbol_leases` so only one live node publishes a given `module + symbol`.
+- Index and mark providers use `price_symbol_sequences` so a failover cannot reset sequence numbers.
+- External-source failures are stored in component/audit records; unusable index prices are not published.
+
+## Troubleshooting
+
+- `price_symbol_leases` owner does not move after a node dies: wait until `lease_until`; if it is far in the future, verify node clock synchronization.
+- Price sequence has gaps: expected after failed attempts. Investigate only if a sequence moves backwards, which should not happen.
+- Index price missing: inspect `price_index_components` for `STALE`, `OUTLIER`, `ERROR`, or conversion failure reasons.
+- Binance returns `451` or Bybit returns `403`: collector egress region/IP is blocked by the venue.
+- WebSocket reconnect loop: check venue connectivity, ping/pong behavior, idle timeout, and egress firewall.
+- Kafka consumer lag: increase topic partitions, provider instances, or stream threads. Do not create one topic per symbol.
+- RocksDB restore is slow: check changelog topic retention, local state directory persistence, disk throughput, and container file descriptor limits.
 
 ## Trading Integration Checklist
 

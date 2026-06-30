@@ -1,0 +1,44 @@
+server:
+  port: 9083
+
+spring:
+  application:
+    name: surprising-mark-price-provider
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  price:
+    mark:
+      kafka:
+        bootstrap-servers: localhost:9092
+        group-id: surprising-mark-price-v1
+      topics:
+        index-price-topic: surprising.perp.index.price.v1
+        book-ticker-topic: surprising.perp.book.ticker.v1
+        trade-topic: surprising.perp.trade.events.v1
+        funding-rate-topic: surprising.perp.funding.rate.v1
+        mark-price-topic: surprising.perp.mark.price.v1
+        mark-price-audit-topic: surprising.perp.mark.price.audit.v1
+      calculation:
+        publish-delay-ms: 1000
+        basis-window: 60s
+        max-input-age: 5s
+        clamp-ratio: 0.03
+        default-funding-interval-hours: 8
+        scale: 18
+      coordination:
+        enabled: true
+        node-id: ${HOSTNAME:${random.uuid}}
+        lease-duration: 15s

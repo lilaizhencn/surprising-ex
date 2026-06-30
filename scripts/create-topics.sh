@@ -62,3 +62,39 @@ kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --topic surprising.perp.candle.events.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
+
+kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+  --create --if-not-exists \
+  --topic surprising.perp.index.price.v1 \
+  --partitions "${PARTITIONS}" \
+  --replication-factor "${REPLICATION_FACTOR}"
+
+kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+  --create --if-not-exists \
+  --topic surprising.perp.index.components.v1 \
+  --partitions "${PARTITIONS}" \
+  --replication-factor "${REPLICATION_FACTOR}"
+
+kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+  --create --if-not-exists \
+  --topic surprising.perp.book.ticker.v1 \
+  --partitions "${PARTITIONS}" \
+  --replication-factor "${REPLICATION_FACTOR}"
+
+kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+  --create --if-not-exists \
+  --topic surprising.perp.funding.rate.v1 \
+  --partitions "${PARTITIONS}" \
+  --replication-factor "${REPLICATION_FACTOR}"
+
+kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+  --create --if-not-exists \
+  --topic surprising.perp.mark.price.v1 \
+  --partitions "${PARTITIONS}" \
+  --replication-factor "${REPLICATION_FACTOR}"
+
+kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+  --create --if-not-exists \
+  --topic surprising.perp.mark.price.audit.v1 \
+  --partitions "${PARTITIONS}" \
+  --replication-factor "${REPLICATION_FACTOR}"

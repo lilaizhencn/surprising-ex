@@ -234,6 +234,7 @@ Kafka 消息示例：
 
 ```bash
 docker compose up -d postgres kafka
+psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
 mvn -pl :surprising-candlestick-provider -am spring-boot:run
 ```
