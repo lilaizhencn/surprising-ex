@@ -1,0 +1,151 @@
+package com.surprising.trading.order.service;
+
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.PlaceOrderRequest;
+import com.surprising.trading.api.model.TimeInForce;
+import com.surprising.trading.order.config.TradingOrderProperties;
+import com.surprising.trading.order.model.InstrumentRule;
+import com.surprising.trading.order.model.InstrumentRuleLookup;
+import com.surprising.trading.order.model.MarkPriceLookup;
+import com.surprising.trading.order.model.ValidationResult;
+import java.util.OptionalLong;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+@Component
+public class OrderValidator {
+
+    private final InstrumentRuleLookup instrumentRuleLookup;
+    private final TradingOrderProperties properties;
+    private final MarkPriceLookup markPriceLookup;
+
+    public OrderValidator(InstrumentRuleLookup instrumentRuleLookup) {
+        this(instrumentRuleLookup, new TradingOrderProperties(), (symbol, instrumentVersion, maxAgeMs) -> OptionalLong.empty());
+    }
+
+    @Autowired
+    public OrderValidator(InstrumentRuleLookup instrumentRuleLookup,
+                          TradingOrderProperties properties,
+                          MarkPriceLookup markPriceLookup) {
+        this.instrumentRuleLookup = instrumentRuleLookup;
+        this.properties = properties;
+        this.markPriceLookup = markPriceLookup;
+    }
+
+    public ValidationResult validate(PlaceOrderRequest request) {
+        if (request.userId() <= 0) {
+            return ValidationResult.reject("userId must be positive");
+        }
+        if (request.side() == null || request.orderType() == null || request.timeInForce() == null) {
+            return ValidationResult.reject("side, orderType and timeInForce are required");
+        }
+        if (request.quantitySteps() <= 0) {
+            return ValidationResult.reject("quantitySteps must be positive");
+        }
+
+        InstrumentRule rule = instrumentRuleLookup.currentRule(request.symbol())
+                .orElse(null);
+        if (rule == null) {
+            return ValidationResult.reject("unknown symbol");
+        }
+        if (!"TRADING".equals(rule.status())) {
+            return ValidationResult.reject("instrument is not trading");
+        }
+        if (!rule.supportedOrderTypes().contains(request.orderType().name())) {
+            return ValidationResult.reject("order type is not supported");
+        }
+        if (!rule.supportedTimeInForce().contains(request.timeInForce().name())) {
+            return ValidationResult.reject("time in force is not supported");
+        }
+        if (request.quantitySteps() < rule.minQuantitySteps()) {
+            return ValidationResult.reject("quantity is below minimum step limit");
+        }
+        if (request.quantitySteps() > rule.maxQuantitySteps()) {
+            return ValidationResult.reject("quantity is above maximum step limit");
+        }
+        if (request.reduceOnly() && !rule.reduceOnlyEnabled()) {
+            return ValidationResult.reject("reduce-only is disabled");
+        }
+        if (request.postOnly() && !rule.postOnlyEnabled()) {
+            return ValidationResult.reject("post-only is disabled");
+        }
+        if (request.timeInForce() == TimeInForce.GTX && (!request.postOnly() || request.orderType() != OrderType.LIMIT)) {
+            return ValidationResult.reject("GTX requires a post-only limit order");
+        }
+        if (request.postOnly() && request.orderType() != OrderType.LIMIT) {
+            return ValidationResult.reject("post-only requires a limit order");
+        }
+        if (request.orderType() == OrderType.MARKET) {
+            return validateMarket(request, rule);
+        }
+        return validateLimit(request, rule);
+    }
+
+    private ValidationResult validateMarket(PlaceOrderRequest request, InstrumentRule rule) {
+        if (!rule.marketOrderEnabled()) {
+            return ValidationResult.reject("market order is disabled");
+        }
+        if (request.priceTicks() != 0) {
+            return ValidationResult.reject("market order priceTicks must be zero");
+        }
+        if (request.timeInForce() != TimeInForce.IOC && request.timeInForce() != TimeInForce.FOK) {
+            return ValidationResult.reject("market order requires IOC or FOK");
+        }
+        OptionalLong markPriceTicks = markPriceLookup.latestMarkPriceTicks(request.symbol(), rule.version(),
+                properties.getRisk().getMarketMaxMarkAgeMs());
+        if (markPriceTicks.isEmpty()) {
+            return ValidationResult.reject("mark price unavailable");
+        }
+        long lowerPriceTicks;
+        long upperPriceTicks;
+        try {
+            lowerPriceTicks = OrderMarginMath.lowerBoundPriceTicks(request.orderType(), request.priceTicks(),
+                    markPriceTicks.getAsLong(), properties.getRisk().getMarketMaxSlippagePpm());
+            upperPriceTicks = OrderMarginMath.upperBoundPriceTicks(request.orderType(), request.priceTicks(),
+                    markPriceTicks.getAsLong(), properties.getRisk().getMarketMaxSlippagePpm());
+        } catch (ArithmeticException ex) {
+            return ValidationResult.reject("notional overflow");
+        }
+        return validateNotionalRange(request, rule, lowerPriceTicks, upperPriceTicks);
+    }
+
+    private ValidationResult validateLimit(PlaceOrderRequest request, InstrumentRule rule) {
+        if (request.priceTicks() <= 0) {
+            return ValidationResult.reject("limit order priceTicks must be positive");
+        }
+        return validateNotionalRange(request, rule, request.priceTicks(), request.priceTicks());
+    }
+
+    private ValidationResult validateNotionalRange(PlaceOrderRequest request,
+                                                   InstrumentRule rule,
+                                                   long lowerPriceTicks,
+                                                   long upperPriceTicks) {
+        long minExecutionNotionalUnits;
+        long maxExecutionNotionalUnits;
+        try {
+            // Reject overflow instead of wrapping notional and accepting an unsafe order.
+            minExecutionNotionalUnits = notionalUnits(request, rule, lowerPriceTicks);
+            maxExecutionNotionalUnits = lowerPriceTicks == upperPriceTicks
+                    ? minExecutionNotionalUnits
+                    : notionalUnits(request, rule, upperPriceTicks);
+        } catch (ArithmeticException ex) {
+            return ValidationResult.reject("notional overflow");
+        }
+        if (minExecutionNotionalUnits < rule.minNotionalUnits()) {
+            return ValidationResult.reject("notional is below minimum limit");
+        }
+        if (maxExecutionNotionalUnits > rule.maxNotionalUnits()) {
+            return ValidationResult.reject("notional is above maximum limit");
+        }
+        return ValidationResult.ok(rule.version());
+    }
+
+    private long notionalUnits(PlaceOrderRequest request, InstrumentRule rule, long effectivePriceTicks) {
+        if (rule.contractType() == ContractType.INVERSE_PERPETUAL) {
+            return Math.multiplyExact(request.quantitySteps(), rule.notionalMultiplierUnits());
+        }
+        return Math.multiplyExact(Math.multiplyExact(effectivePriceTicks, request.quantitySteps()),
+                rule.notionalMultiplierUnits());
+    }
+}

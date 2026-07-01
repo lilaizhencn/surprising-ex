@@ -121,10 +121,6 @@ public class IndexPriceService {
         if (configured != null && !configured.isBlank()) {
             return configured.trim();
         }
-        String hostname = System.getenv("HOSTNAME");
-        if (hostname != null && !hostname.isBlank()) {
-            return hostname.trim();
-        }
         return "index-" + UUID.randomUUID();
     }
 

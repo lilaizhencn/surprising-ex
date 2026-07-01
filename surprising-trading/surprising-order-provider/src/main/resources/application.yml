@@ -1,0 +1,34 @@
+server:
+  port: 9084
+
+spring:
+  application:
+    name: surprising-order-provider
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 5
+      connection-timeout: 3000
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  trading:
+    order:
+      kafka:
+        bootstrap-servers: localhost:9092
+        order-commands-topic: surprising.perp.order.commands.v1
+        order-events-topic: surprising.perp.order.events.v1
+      outbox:
+        batch-size: 200
+        publish-delay-ms: 200
+        send-timeout: 3s
+      risk:
+        market-max-slippage-ppm: 10000
+        market-max-mark-age-ms: 5000

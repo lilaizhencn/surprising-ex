@@ -28,6 +28,10 @@ Surprising Exchange 合约指数价格和标记价格模块。
 
 这个模块刻意和 K 线服务分开。指数价格和标记价格是风控输入，K 线是行情历史聚合。分开部署可以避免风控价格被 K 线查询或 WebSocket 推送压力影响。
 
+外部行情采集和展示 API 保留 decimal 价格。交易、风控、强平、资金费结算和 ADL 的持久边界是
+`price_mark_ticks.mark_price_units`：标记价格先转换成 quote asset 最小单位。消费方再用自己锁定的
+`instrument.price_tick_units` 把这个 long 值转换成版本对应的 ticks。
+
 合约清单和交易规则来自 `surprising-instrument`。指数价格 provider 默认从 `instruments + instrument_index_sources` 当前版本动态读取 symbol 和外部指数源；`application.yml` 中的静态 BTC/ETH 源仅作为数据库未初始化时的兜底。
 
 ## 指数价格

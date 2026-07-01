@@ -30,6 +30,11 @@ The module is intentionally separate from candlestick aggregation. Index and mar
 inputs, while candlesticks are market-data history. Keeping them separate avoids coupling risk
 calculation to K-line query or WebSocket fanout load.
 
+External price collection and display APIs keep decimal prices. The durable boundary for trading,
+risk, liquidation, funding settlement, and ADL is `price_mark_ticks.mark_price_units`: the mark price
+converted once into quote-asset smallest units. Those consumers convert that long value into
+version-specific ticks with their pinned `instrument.price_tick_units`.
+
 The symbol universe and trading rules come from `surprising-instrument`. The index provider reads
 current symbols and external index sources dynamically from `instruments + instrument_index_sources`;
 static BTC/ETH YAML sources are only a fallback before database initialization.

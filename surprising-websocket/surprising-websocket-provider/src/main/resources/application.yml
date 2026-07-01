@@ -1,0 +1,41 @@
+server:
+  port: 9093
+
+spring:
+  application:
+    name: surprising-websocket-provider
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  websocket:
+    kafka:
+      bootstrap-servers: localhost:9092
+      # Horizontal fanout requires each WebSocket node to receive public market data locally.
+      # Keep this unique per pod/instance; using the same group across all nodes would deliver
+      # each Kafka record to only one node.
+      group-id: surprising-websocket-${random.uuid}
+      concurrency: 2
+      candle-topic: surprising.perp.candle.events.v1
+      trade-topic: surprising.perp.trade.events.v1
+      order-book-depth-topic: surprising.perp.orderbook.depth.v1
+      index-price-topic: surprising.perp.index.price.v1
+      mark-price-topic: surprising.perp.mark.price.v1
+      funding-rate-topic: surprising.perp.funding.rate.v1
+      order-events-topic: surprising.perp.order.events.v1
+      match-results-topic: surprising.perp.match.results.v1
+      match-trades-topic: surprising.perp.match.trades.v1
+      position-events-topic: surprising.account.position.events.v1
+    session:
+      max-subscriptions: 200
+      outbound-queue-capacity: 1000
+      send-timeout: 5s
+    security:
+      user-id-header: X-User-Id
+      allowed-origins:
+        - "*"
+    fanout:
+      candle-partial-coalesce-window: 250ms

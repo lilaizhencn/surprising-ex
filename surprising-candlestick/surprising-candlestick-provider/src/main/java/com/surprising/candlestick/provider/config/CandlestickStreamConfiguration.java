@@ -1,6 +1,5 @@
 package com.surprising.candlestick.provider.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.candlestick.api.model.TradeEvent;
 import com.surprising.candlestick.provider.aggregation.CandleAccumulator;
@@ -81,15 +80,14 @@ public class CandlestickStreamConfiguration {
     @Bean
     public KStream<String, CandleUpdatedEvent> candlestickTopology(
             StreamsBuilder streamsBuilder,
-            ObjectMapper objectMapper,
             CandlestickProperties properties,
             CandleSink candleSink,
             SymbolRegistryService symbolRegistryService) {
 
-        Serde<TradeEvent> tradeSerde = jsonSerde(TradeEvent.class, objectMapper);
-        Serde<CandleUpdatedEvent> updateSerde = jsonSerde(CandleUpdatedEvent.class, objectMapper);
-        Serde<CandleAccumulator> accumulatorSerde = jsonSerde(CandleAccumulator.class, objectMapper);
-        Serde<CandleSnapshot> snapshotSerde = jsonSerde(CandleSnapshot.class, objectMapper);
+        Serde<TradeEvent> tradeSerde = jsonSerde(TradeEvent.class);
+        Serde<CandleUpdatedEvent> updateSerde = jsonSerde(CandleUpdatedEvent.class);
+        Serde<CandleAccumulator> accumulatorSerde = jsonSerde(CandleAccumulator.class);
+        Serde<CandleSnapshot> snapshotSerde = jsonSerde(CandleSnapshot.class);
 
         // Persistent stores are backed by RocksDB and restored from Kafka Streams changelog topics.
         streamsBuilder.addStateStore(Stores.keyValueStoreBuilder(
@@ -122,8 +120,8 @@ public class CandlestickStreamConfiguration {
         return updates;
     }
 
-    private <T> JsonSerde<T> jsonSerde(Class<T> type, ObjectMapper objectMapper) {
-        JsonSerde<T> serde = new JsonSerde<>(type, objectMapper);
+    private <T> JsonSerde<T> jsonSerde(Class<T> type) {
+        JsonSerde<T> serde = new JsonSerde<>(type);
         serde.ignoreTypeHeaders();
         serde.noTypeInfo();
         return serde;

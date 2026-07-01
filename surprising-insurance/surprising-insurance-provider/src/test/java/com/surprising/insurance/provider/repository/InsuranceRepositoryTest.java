@@ -1,0 +1,206 @@
+package com.surprising.insurance.provider.repository;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.sql.ResultSet;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
+
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
+class InsuranceRepositoryTest {
+
+    @Mock
+    private JdbcTemplate jdbcTemplate;
+
+    @Test
+    void duplicateFundAdjustmentDoesNotUpdateBalanceAgain() throws Exception {
+        InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
+
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class), eq("USDT")))
+                .thenReturn(1_000L);
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
+                eq("insurance-ledger"))).thenReturn(101L);
+        when(jdbcTemplate.update(contains("INSERT INTO insurance_fund_ledger"), any(Object[].class)))
+                .thenReturn(0);
+        when(jdbcTemplate.query(contains("FROM insurance_fund_ledger"), anyRowMapper(), eq("ops-1"), eq("USDT")))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("amount_units")).thenReturn(500L);
+                    when(rs.getString("reason")).thenReturn("REPLAYED_REQUEST");
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+        when(jdbcTemplate.query(contains("FROM insurance_fund_balances"), anyRowMapper(), eq("USDT"), eq("USDT")))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getString("asset")).thenReturn("USDT");
+                    when(rs.getLong("balance_units")).thenReturn(1_000L);
+                    when(rs.getTimestamp("updated_at")).thenReturn(java.sql.Timestamp.from(
+                            java.time.Instant.parse("2026-07-01T00:00:00Z")));
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+
+        var response = repository.adjustFund("USDT", 500L, "ops-1", "REPLAYED_REQUEST");
+
+        assertThat(response.balanceUnits()).isEqualTo(1_000L);
+        verify(jdbcTemplate, never()).update(contains("UPDATE insurance_fund_balances"), any(Object[].class));
+    }
+
+    @Test
+    void duplicateFundAdjustmentWithDifferentPayloadFailsBeforeBalanceMutation() throws Exception {
+        InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
+
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class), eq("USDT")))
+                .thenReturn(1_000L);
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
+                eq("insurance-ledger"))).thenReturn(101L);
+        when(jdbcTemplate.update(contains("INSERT INTO insurance_fund_ledger"), any(Object[].class)))
+                .thenReturn(0);
+        when(jdbcTemplate.query(contains("FROM insurance_fund_ledger"), anyRowMapper(), eq("ops-1"), eq("USDT")))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("amount_units")).thenReturn(500L);
+                    when(rs.getString("reason")).thenReturn("INITIAL_FUND");
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+
+        assertThatThrownBy(() -> repository.adjustFund("USDT", 600L, "ops-1", "INITIAL_FUND"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("conflicting duplicate insurance fund reference");
+        verify(jdbcTemplate, never()).update(contains("UPDATE insurance_fund_balances"), any(Object[].class));
+    }
+
+    @Test
+    void coverageFailsWhenFundLedgerInsertIsSkippedByConflict() throws Exception {
+        InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
+
+        when(jdbcTemplate.query(contains("FROM account_deficits"), anyRowMapper(), eq(1)))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("user_id")).thenReturn(1001L);
+                    when(rs.getString("asset")).thenReturn("USDT");
+                    when(rs.getLong("deficit_units")).thenReturn(500L);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class), eq("USDT")))
+                .thenReturn(1_000L);
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
+                eq("insurance-coverage"))).thenReturn(201L);
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
+                eq("insurance-ledger"))).thenReturn(202L);
+        when(jdbcTemplate.update(contains("INSERT INTO insurance_deficit_coverages"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE insurance_fund_balances"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_deficits"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("INSERT INTO insurance_fund_ledger"), any(Object[].class)))
+                .thenReturn(0);
+
+        assertThatThrownBy(() -> repository.coverDeficits(1))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("insurance fund ledger");
+
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO account_ledger_entries"), any(Object[].class));
+    }
+
+    @Test
+    void coverDeficitsPartiallyCoversDeficitAndLeavesResidualForAdl() throws Exception {
+        InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
+
+        when(jdbcTemplate.query(contains("FROM account_deficits"), anyRowMapper(), eq(1)))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("user_id")).thenReturn(4004L);
+                    when(rs.getString("asset")).thenReturn("USDT");
+                    when(rs.getLong("deficit_units")).thenReturn(1_000L);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class), eq("USDT")))
+                .thenReturn(600L);
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
+                eq("insurance-coverage"))).thenReturn(9501L);
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
+                eq("insurance-ledger"))).thenReturn(9601L);
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO account_sequences"), eq(Long.class),
+                eq("ledger-entry"))).thenReturn(9701L);
+        when(jdbcTemplate.update(contains("INSERT INTO insurance_deficit_coverages"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE insurance_fund_balances"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_deficits"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("INSERT INTO insurance_fund_ledger"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+
+        int coveredRows = repository.coverDeficits(1);
+
+        assertThat(coveredRows).isEqualTo(1);
+        verify(jdbcTemplate).update(contains("INSERT INTO insurance_deficit_coverages"),
+                eq(9501L), eq(4004L), eq("USDT"), eq(1_000L), eq(600L), eq(400L),
+                eq("PARTIALLY_COVERED"), eq("DEFICIT_COVERAGE"), any(java.sql.Timestamp.class),
+                any(java.sql.Timestamp.class));
+        verify(jdbcTemplate).update(contains("UPDATE insurance_fund_balances"),
+                eq(0L), any(java.sql.Timestamp.class), eq("USDT"));
+        verify(jdbcTemplate).update(contains("UPDATE account_deficits"),
+                eq(400L), any(java.sql.Timestamp.class), eq(4004L), eq("USDT"));
+        verify(jdbcTemplate).update(contains("INSERT INTO insurance_fund_ledger"),
+                eq(9601L), eq("USDT"), eq(-600L), eq(0L), eq("DEFICIT_COVERAGE"),
+                eq("9501"), eq("COVER_ACCOUNT_DEFICIT"), any(java.sql.Timestamp.class));
+        verify(jdbcTemplate).update(contains("INSERT INTO account_ledger_entries"),
+                eq(9701L), eq(4004L), eq("USDT"), eq(600L), eq(-400L),
+                eq("9501"), any(java.sql.Timestamp.class));
+    }
+
+    @Test
+    void coverDeficitsLeavesRowsForFutureScanWhenFundIsEmpty() throws Exception {
+        InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
+
+        when(jdbcTemplate.query(contains("FROM account_deficits"), anyRowMapper(), eq(1)))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("user_id")).thenReturn(4004L);
+                    when(rs.getString("asset")).thenReturn("USDT");
+                    when(rs.getLong("deficit_units")).thenReturn(1_000L);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class), eq("USDT")))
+                .thenReturn(0L);
+
+        int coveredRows = repository.coverDeficits(1);
+
+        assertThat(coveredRows).isZero();
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO insurance_deficit_coverages"),
+                any(Object[].class));
+        verify(jdbcTemplate, never()).update(contains("UPDATE account_deficits"), any(Object[].class));
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO account_ledger_entries"), any(Object[].class));
+    }
+
+    @SuppressWarnings("unchecked")
+    private RowMapper<Object> anyRowMapper() {
+        return any(RowMapper.class);
+    }
+}

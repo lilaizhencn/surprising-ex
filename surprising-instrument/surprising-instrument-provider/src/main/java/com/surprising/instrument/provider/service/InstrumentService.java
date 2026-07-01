@@ -71,15 +71,17 @@ public class InstrumentService {
         InstrumentResponse current = latest(symbol);
         InstrumentUpsertRequest request = new InstrumentUpsertRequest(
                 current.symbol(), current.instrumentType(), current.contractType(), current.baseAsset(),
-                current.quoteAsset(), current.settleAsset(), current.contractSize(), current.contractValueAsset(),
-                current.priceTickSize(), current.quantityStepSize(), current.minOrderQty(), current.maxOrderQty(),
-                current.minNotional(), current.maxNotional(), current.pricePrecision(), current.quantityPrecision(),
+                current.quoteAsset(), current.settleAsset(), current.contractMultiplierPpm(), current.contractValueAsset(),
+                current.priceTickUnits(), current.quantityStepUnits(), current.minQuantitySteps(), current.maxQuantitySteps(),
+                current.minNotionalUnits(), current.maxNotionalUnits(), current.notionalMultiplierUnits(),
+                current.pricePrecision(), current.quantityPrecision(),
                 current.supportedOrderTypes(), current.supportedTimeInForce(), current.postOnlyEnabled(),
-                current.reduceOnlyEnabled(), current.marketOrderEnabled(), current.maxLeverage(),
-                current.initialMarginRate(), current.maintenanceMarginRate(), current.maxPositionNotional(),
-                current.fundingIntervalHours(), current.interestRate(), current.fundingRateCap(),
-                current.fundingRateFloor(), current.impactNotional(), current.minValidIndexSources(), status,
-                Instant.now(), current.riskLimitBrackets(), current.indexSources());
+                current.reduceOnlyEnabled(), current.marketOrderEnabled(), current.maxLeveragePpm(),
+                current.initialMarginRatePpm(), current.maintenanceMarginRatePpm(), current.makerFeeRatePpm(),
+                current.takerFeeRatePpm(), current.maxPositionNotionalUnits(), current.fundingIntervalHours(),
+                current.interestRatePpm(), current.fundingRateCapPpm(), current.fundingRateFloorPpm(),
+                current.impactNotionalUnits(), current.minValidIndexSources(), status, Instant.now(),
+                current.riskLimitBrackets(), current.indexSources());
         return upsert(request, InstrumentEventType.STATUS_CHANGED);
     }
 

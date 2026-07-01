@@ -1,16 +1,19 @@
 package com.surprising.price.index.controller;
 
-import com.surprising.price.api.client.IndexPriceRpcApi;
+import com.surprising.price.api.PriceApiPaths;
 import com.surprising.price.api.model.IndexPriceQueryResponse;
 import com.surprising.price.api.model.IndexPriceResponse;
 import com.surprising.price.index.repository.IndexPriceRepository;
 import java.time.Instant;
 import org.springframework.http.HttpStatus;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
-public class IndexPriceController implements IndexPriceRpcApi {
+public class IndexPriceController {
 
     private final IndexPriceRepository indexPriceRepository;
 
@@ -18,14 +21,19 @@ public class IndexPriceController implements IndexPriceRpcApi {
         this.indexPriceRepository = indexPriceRepository;
     }
 
-    @Override
-    public IndexPriceResponse latestIndexPrice(String symbol) {
+    @GetMapping(PriceApiPaths.INDEX_BASE_PATH + "/latest")
+    public IndexPriceResponse latestIndexPrice(@RequestParam("symbol") String symbol) {
         return indexPriceRepository.latest(normalizeSymbol(symbol))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "index price not found"));
     }
 
-    @Override
-    public IndexPriceQueryResponse history(String symbol, Instant startTime, Instant endTime, int limit) {
+    @GetMapping(PriceApiPaths.INDEX_BASE_PATH + "/history")
+    public IndexPriceQueryResponse history(@RequestParam("symbol") String symbol,
+                                           @RequestParam("startTime")
+                                           @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant startTime,
+                                           @RequestParam("endTime")
+                                           @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant endTime,
+                                           @RequestParam(value = "limit", defaultValue = "500") int limit) {
         validateRange(startTime, endTime);
         String normalized = normalizeSymbol(symbol);
         int safeLimit = Math.min(limit, 5000);

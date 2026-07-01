@@ -3,7 +3,6 @@ package com.surprising.instrument.provider.service;
 import com.surprising.instrument.api.model.IndexSourceConfig;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.api.model.RiskLimitBracket;
-import java.math.BigDecimal;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -14,21 +13,23 @@ public class InstrumentValidator {
 
     public void validate(InstrumentUpsertRequest request) {
         requireSymbol(request.symbol());
-        requirePositive("contractSize", request.contractSize());
-        requirePositive("priceTickSize", request.priceTickSize());
-        requirePositive("quantityStepSize", request.quantityStepSize());
-        requireRange("orderQty", request.minOrderQty(), request.maxOrderQty());
-        requireRange("notional", request.minNotional(), request.maxNotional());
-        requirePositive("maxLeverage", request.maxLeverage());
-        requirePositive("initialMarginRate", request.initialMarginRate());
-        requirePositive("maintenanceMarginRate", request.maintenanceMarginRate());
-        requirePositive("maxPositionNotional", request.maxPositionNotional());
-        requirePositive("impactNotional", request.impactNotional());
+        requirePositive("contractMultiplierPpm", request.contractMultiplierPpm());
+        requirePositive("priceTickUnits", request.priceTickUnits());
+        requirePositive("quantityStepUnits", request.quantityStepUnits());
+        requireRange("quantity steps", request.minQuantitySteps(), request.maxQuantitySteps());
+        requireRange("notional units", request.minNotionalUnits(), request.maxNotionalUnits());
+        requirePositive("notionalMultiplierUnits", request.notionalMultiplierUnits());
+        requirePositive("maxLeveragePpm", request.maxLeveragePpm());
+        requirePositive("initialMarginRatePpm", request.initialMarginRatePpm());
+        requirePositive("maintenanceMarginRatePpm", request.maintenanceMarginRatePpm());
+        requireFeeRate("makerFeeRatePpm", request.makerFeeRatePpm());
+        requireFeeRate("takerFeeRatePpm", request.takerFeeRatePpm());
+        requirePositive("maxPositionNotionalUnits", request.maxPositionNotionalUnits());
+        requirePositive("impactNotionalUnits", request.impactNotionalUnits());
         if (request.fundingIntervalHours() <= 0) {
             throw new IllegalArgumentException("fundingIntervalHours must be positive");
         }
-        if (request.fundingRateCap() == null || request.fundingRateFloor() == null
-                || request.fundingRateCap().compareTo(request.fundingRateFloor()) < 0) {
+        if (request.fundingRateCapPpm() < request.fundingRateFloorPpm()) {
             throw new IllegalArgumentException("fundingRateCap must be greater than or equal to fundingRateFloor");
         }
         if (request.minValidIndexSources() <= 0) {
@@ -42,26 +43,26 @@ public class InstrumentValidator {
         if (brackets == null || brackets.isEmpty()) {
             throw new IllegalArgumentException("at least one risk limit bracket is required");
         }
-        BigDecimal previousCap = BigDecimal.ZERO;
+        long previousCap = 0L;
         int expected = 1;
         for (RiskLimitBracket bracket : brackets) {
             if (bracket.bracketNo() != expected++) {
                 throw new IllegalArgumentException("risk brackets must start at 1 and be contiguous");
             }
-            if (bracket.notionalFloor() == null || bracket.notionalFloor().signum() < 0) {
+            if (bracket.notionalFloorUnits() < 0) {
                 throw new IllegalArgumentException("risk bracket notionalFloor must be non-negative");
             }
-            requirePositive("risk bracket notionalCap", bracket.notionalCap());
-            if (bracket.notionalCap().compareTo(bracket.notionalFloor()) <= 0) {
+            requirePositive("risk bracket notionalCapUnits", bracket.notionalCapUnits());
+            if (bracket.notionalCapUnits() <= bracket.notionalFloorUnits()) {
                 throw new IllegalArgumentException("risk bracket notionalCap must be greater than notionalFloor");
             }
-            if (bracket.notionalFloor().compareTo(previousCap) != 0) {
+            if (bracket.notionalFloorUnits() != previousCap) {
                 throw new IllegalArgumentException("risk bracket notional ranges must be contiguous");
             }
-            requirePositive("risk bracket maxLeverage", bracket.maxLeverage());
-            requirePositive("risk bracket initialMarginRate", bracket.initialMarginRate());
-            requirePositive("risk bracket maintenanceMarginRate", bracket.maintenanceMarginRate());
-            previousCap = bracket.notionalCap();
+            requirePositive("risk bracket maxLeveragePpm", bracket.maxLeveragePpm());
+            requirePositive("risk bracket initialMarginRatePpm", bracket.initialMarginRatePpm());
+            requirePositive("risk bracket maintenanceMarginRatePpm", bracket.maintenanceMarginRatePpm());
+            previousCap = bracket.notionalCapUnits();
         }
     }
 
@@ -81,7 +82,10 @@ public class InstrumentValidator {
             if (source.enabled()) {
                 enabledCount++;
             }
-            requirePositive("index source weight", source.weight());
+            requirePositive("index source weightPpm", source.weightPpm());
+            if (source.fallbackWeightMultiplierPpm() < 0) {
+                throw new IllegalArgumentException("index source fallbackWeightMultiplierPpm must be non-negative");
+            }
         }
         if (enabledCount < minValidSources) {
             throw new IllegalArgumentException("enabled index sources must be >= minValidIndexSources");
@@ -94,17 +98,23 @@ public class InstrumentValidator {
         }
     }
 
-    private void requireRange(String name, BigDecimal min, BigDecimal max) {
+    private void requireRange(String name, long min, long max) {
         requirePositive("min " + name, min);
         requirePositive("max " + name, max);
-        if (max.compareTo(min) < 0) {
+        if (max < min) {
             throw new IllegalArgumentException("max " + name + " must be greater than or equal to min " + name);
         }
     }
 
-    private void requirePositive(String name, BigDecimal value) {
-        if (value == null || value.signum() <= 0) {
+    private void requirePositive(String name, long value) {
+        if (value <= 0) {
             throw new IllegalArgumentException(name + " must be positive");
+        }
+    }
+
+    private void requireFeeRate(String name, long value) {
+        if (value < -1_000_000L || value > 1_000_000L) {
+            throw new IllegalArgumentException(name + " must be within +/- 100%");
         }
     }
 }

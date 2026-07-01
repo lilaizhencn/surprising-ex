@@ -23,20 +23,22 @@ public class InstrumentRepository {
     private static final String INSERT_INSTRUMENT_SQL = """
             INSERT INTO instruments (
                 symbol, version, instrument_type, contract_type, base_asset, quote_asset, settle_asset,
-                contract_size, contract_value_asset, price_tick_size, quantity_step_size,
-                min_order_qty, max_order_qty, min_notional, max_notional,
+                contract_multiplier_ppm, contract_value_asset, price_tick_units, quantity_step_units,
+                min_quantity_steps, max_quantity_steps, min_notional_units, max_notional_units,
+                notional_multiplier_units,
                 price_precision, quantity_precision, supported_order_types, supported_time_in_force,
                 post_only_enabled, reduce_only_enabled, market_order_enabled,
-                max_leverage, initial_margin_rate, maintenance_margin_rate, max_position_notional,
-                funding_interval_hours, interest_rate, funding_rate_cap, funding_rate_floor,
-                impact_notional, min_valid_index_sources, status, effective_time, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm,
+                maker_fee_rate_ppm, taker_fee_rate_ppm, max_position_notional_units,
+                funding_interval_hours, interest_rate_ppm, funding_rate_cap_ppm, funding_rate_floor_ppm,
+                impact_notional_units, min_valid_index_sources, status, effective_time, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     private static final String INSERT_BRACKET_SQL = """
             INSERT INTO instrument_risk_brackets (
-                symbol, version, bracket_no, notional_floor, notional_cap,
-                max_leverage, initial_margin_rate, maintenance_margin_rate
+                symbol, version, bracket_no, notional_floor_units, notional_cap_units,
+                max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
@@ -44,8 +46,8 @@ public class InstrumentRepository {
             INSERT INTO instrument_index_sources (
                 symbol, version, source, enabled, base_url, path, source_symbol, parser,
                 quote_currency, target_quote_currency, conversion_base_url, conversion_path,
-                conversion_parser, conversion_mode, conversion_operation, fallback_weight_multiplier,
-                websocket_enabled, websocket_url, websocket_subscribe_message, websocket_parser, weight
+                conversion_parser, conversion_mode, conversion_operation, fallback_weight_multiplier_ppm,
+                websocket_enabled, websocket_url, websocket_subscribe_message, websocket_parser, weight_ppm
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
@@ -75,16 +77,17 @@ public class InstrumentRepository {
         jdbcTemplate.update(INSERT_INSTRUMENT_SQL,
                 symbol, version, request.instrumentType().name(), request.contractType().name(),
                 asset(request.baseAsset()), asset(request.quoteAsset()), asset(request.settleAsset()),
-                request.contractSize(), asset(request.contractValueAsset()),
-                request.priceTickSize(), request.quantityStepSize(), request.minOrderQty(), request.maxOrderQty(),
-                request.minNotional(), request.maxNotional(), request.pricePrecision(), request.quantityPrecision(),
+                request.contractMultiplierPpm(), asset(request.contractValueAsset()),
+                request.priceTickUnits(), request.quantityStepUnits(), request.minQuantitySteps(),
+                request.maxQuantitySteps(), request.minNotionalUnits(), request.maxNotionalUnits(),
+                request.notionalMultiplierUnits(), request.pricePrecision(), request.quantityPrecision(),
                 csv(request.supportedOrderTypes()), csv(request.supportedTimeInForce()),
                 request.postOnlyEnabled(), request.reduceOnlyEnabled(), request.marketOrderEnabled(),
-                request.maxLeverage(), request.initialMarginRate(), request.maintenanceMarginRate(),
-                request.maxPositionNotional(), request.fundingIntervalHours(), request.interestRate(),
-                request.fundingRateCap(), request.fundingRateFloor(), request.impactNotional(),
-                request.minValidIndexSources(), request.status().name(), Timestamp.from(effectiveTime),
-                Timestamp.from(now), Timestamp.from(now));
+                request.maxLeveragePpm(), request.initialMarginRatePpm(), request.maintenanceMarginRatePpm(),
+                request.makerFeeRatePpm(), request.takerFeeRatePpm(), request.maxPositionNotionalUnits(),
+                request.fundingIntervalHours(), request.interestRatePpm(), request.fundingRateCapPpm(),
+                request.fundingRateFloorPpm(), request.impactNotionalUnits(), request.minValidIndexSources(),
+                request.status().name(), Timestamp.from(effectiveTime), Timestamp.from(now), Timestamp.from(now));
         insertBrackets(symbol, version, request.riskLimitBrackets());
         insertSources(symbol, version, request.indexSources());
     }
@@ -141,11 +144,11 @@ public class InstrumentRepository {
                 ps.setString(1, symbol);
                 ps.setLong(2, version);
                 ps.setInt(3, bracket.bracketNo());
-                ps.setBigDecimal(4, bracket.notionalFloor());
-                ps.setBigDecimal(5, bracket.notionalCap());
-                ps.setBigDecimal(6, bracket.maxLeverage());
-                ps.setBigDecimal(7, bracket.initialMarginRate());
-                ps.setBigDecimal(8, bracket.maintenanceMarginRate());
+                ps.setLong(4, bracket.notionalFloorUnits());
+                ps.setLong(5, bracket.notionalCapUnits());
+                ps.setLong(6, bracket.maxLeveragePpm());
+                ps.setLong(7, bracket.initialMarginRatePpm());
+                ps.setLong(8, bracket.maintenanceMarginRatePpm());
             }
 
             @Override
@@ -178,12 +181,12 @@ public class InstrumentRepository {
                 ps.setString(13, source.conversionParser());
                 ps.setString(14, defaultText(source.conversionMode(), "DISCOUNT"));
                 ps.setString(15, defaultText(source.conversionOperation(), "MULTIPLY"));
-                ps.setBigDecimal(16, defaultDecimal(source.fallbackWeightMultiplier(), java.math.BigDecimal.valueOf(0.5)));
+                ps.setLong(16, positiveOrDefault(source.fallbackWeightMultiplierPpm(), 500_000L));
                 ps.setBoolean(17, source.websocketEnabled());
                 ps.setString(18, source.websocketUrl());
                 ps.setString(19, source.websocketSubscribeMessage());
                 ps.setString(20, source.websocketParser());
-                ps.setBigDecimal(21, source.weight());
+                ps.setLong(21, source.weightPpm());
             }
 
             @Override
@@ -204,14 +207,15 @@ public class InstrumentRepository {
                 rs.getString("base_asset"),
                 rs.getString("quote_asset"),
                 rs.getString("settle_asset"),
-                rs.getBigDecimal("contract_size"),
+                rs.getLong("contract_multiplier_ppm"),
                 rs.getString("contract_value_asset"),
-                rs.getBigDecimal("price_tick_size"),
-                rs.getBigDecimal("quantity_step_size"),
-                rs.getBigDecimal("min_order_qty"),
-                rs.getBigDecimal("max_order_qty"),
-                rs.getBigDecimal("min_notional"),
-                rs.getBigDecimal("max_notional"),
+                rs.getLong("price_tick_units"),
+                rs.getLong("quantity_step_units"),
+                rs.getLong("min_quantity_steps"),
+                rs.getLong("max_quantity_steps"),
+                rs.getLong("min_notional_units"),
+                rs.getLong("max_notional_units"),
+                rs.getLong("notional_multiplier_units"),
                 rs.getInt("price_precision"),
                 rs.getInt("quantity_precision"),
                 list(rs.getString("supported_order_types")),
@@ -219,15 +223,17 @@ public class InstrumentRepository {
                 rs.getBoolean("post_only_enabled"),
                 rs.getBoolean("reduce_only_enabled"),
                 rs.getBoolean("market_order_enabled"),
-                rs.getBigDecimal("max_leverage"),
-                rs.getBigDecimal("initial_margin_rate"),
-                rs.getBigDecimal("maintenance_margin_rate"),
-                rs.getBigDecimal("max_position_notional"),
+                rs.getLong("max_leverage_ppm"),
+                rs.getLong("initial_margin_rate_ppm"),
+                rs.getLong("maintenance_margin_rate_ppm"),
+                rs.getLong("maker_fee_rate_ppm"),
+                rs.getLong("taker_fee_rate_ppm"),
+                rs.getLong("max_position_notional_units"),
                 rs.getInt("funding_interval_hours"),
-                rs.getBigDecimal("interest_rate"),
-                rs.getBigDecimal("funding_rate_cap"),
-                rs.getBigDecimal("funding_rate_floor"),
-                rs.getBigDecimal("impact_notional"),
+                rs.getLong("interest_rate_ppm"),
+                rs.getLong("funding_rate_cap_ppm"),
+                rs.getLong("funding_rate_floor_ppm"),
+                rs.getLong("impact_notional_units"),
                 rs.getInt("min_valid_index_sources"),
                 InstrumentStatus.valueOf(rs.getString("status")),
                 rs.getTimestamp("effective_time").toInstant(),
@@ -239,18 +245,18 @@ public class InstrumentRepository {
 
     private List<RiskLimitBracket> riskLimitBrackets(String symbol, long version) {
         return jdbcTemplate.query("""
-                SELECT bracket_no, notional_floor, notional_cap, max_leverage,
-                       initial_margin_rate, maintenance_margin_rate
+                SELECT bracket_no, notional_floor_units, notional_cap_units, max_leverage_ppm,
+                       initial_margin_rate_ppm, maintenance_margin_rate_ppm
                   FROM instrument_risk_brackets
                  WHERE symbol = ? AND version = ?
                  ORDER BY bracket_no ASC
                 """, (rs, rowNum) -> new RiskLimitBracket(
                 rs.getInt("bracket_no"),
-                rs.getBigDecimal("notional_floor"),
-                rs.getBigDecimal("notional_cap"),
-                rs.getBigDecimal("max_leverage"),
-                rs.getBigDecimal("initial_margin_rate"),
-                rs.getBigDecimal("maintenance_margin_rate")), symbol, version);
+                rs.getLong("notional_floor_units"),
+                rs.getLong("notional_cap_units"),
+                rs.getLong("max_leverage_ppm"),
+                rs.getLong("initial_margin_rate_ppm"),
+                rs.getLong("maintenance_margin_rate_ppm")), symbol, version);
     }
 
     private List<IndexSourceConfig> indexSources(String symbol, long version) {
@@ -273,12 +279,12 @@ public class InstrumentRepository {
                 rs.getString("conversion_parser"),
                 rs.getString("conversion_mode"),
                 rs.getString("conversion_operation"),
-                rs.getBigDecimal("fallback_weight_multiplier"),
+                rs.getLong("fallback_weight_multiplier_ppm"),
                 rs.getBoolean("websocket_enabled"),
                 rs.getString("websocket_url"),
                 rs.getString("websocket_subscribe_message"),
                 rs.getString("websocket_parser"),
-                rs.getBigDecimal("weight")), symbol, version);
+                rs.getLong("weight_ppm")), symbol, version);
     }
 
     private List<String> list(String csv) {
@@ -306,7 +312,7 @@ public class InstrumentRepository {
         return value == null || value.isBlank() ? fallback : value;
     }
 
-    private java.math.BigDecimal defaultDecimal(java.math.BigDecimal value, java.math.BigDecimal fallback) {
-        return value == null ? fallback : value;
+    private long positiveOrDefault(long value, long fallback) {
+        return value > 0 ? value : fallback;
     }
 }

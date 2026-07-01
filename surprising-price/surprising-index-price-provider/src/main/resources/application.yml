@@ -45,7 +45,7 @@ surprising:
         health-check-interval: 5s
       coordination:
         enabled: true
-        node-id: ${HOSTNAME:${random.uuid}}
+        node-id:
         lease-duration: 15s
       instrument:
         enabled: true

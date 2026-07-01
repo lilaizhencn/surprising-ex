@@ -1,0 +1,285 @@
+package com.surprising.trading.matching.config;
+
+import java.time.Duration;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "surprising.trading.matching")
+public class MatchingProperties {
+
+    private Kafka kafka = new Kafka();
+    private Engine engine = new Engine();
+    private Recovery recovery = new Recovery();
+    private Protection protection = new Protection();
+    private Outbox outbox = new Outbox();
+
+    public Kafka getKafka() {
+        return kafka;
+    }
+
+    public void setKafka(Kafka kafka) {
+        this.kafka = kafka;
+    }
+
+    public Engine getEngine() {
+        return engine;
+    }
+
+    public void setEngine(Engine engine) {
+        this.engine = engine;
+    }
+
+    public Protection getProtection() {
+        return protection;
+    }
+
+    public Recovery getRecovery() {
+        return recovery;
+    }
+
+    public void setRecovery(Recovery recovery) {
+        this.recovery = recovery;
+    }
+
+    public void setProtection(Protection protection) {
+        this.protection = protection;
+    }
+
+    public Outbox getOutbox() {
+        return outbox;
+    }
+
+    public void setOutbox(Outbox outbox) {
+        this.outbox = outbox;
+    }
+
+    public static class Kafka {
+        private String bootstrapServers = "localhost:9092";
+        private String groupId = "surprising-matching-v1";
+        private String orderCommandsTopic = "surprising.perp.order.commands.v1";
+        private String matchResultsTopic = "surprising.perp.match.results.v1";
+        private String matchTradesTopic = "surprising.perp.match.trades.v1";
+        private String orderBookDepthTopic = "surprising.perp.orderbook.depth.v1";
+        private int concurrency = 2;
+        private boolean restartOnPartitionReassignment = true;
+        private long partitionAssignmentStartupGraceMs = 30000L;
+
+        public String getBootstrapServers() {
+            return bootstrapServers;
+        }
+
+        public void setBootstrapServers(String bootstrapServers) {
+            this.bootstrapServers = bootstrapServers;
+        }
+
+        public String getGroupId() {
+            return groupId;
+        }
+
+        public void setGroupId(String groupId) {
+            this.groupId = groupId;
+        }
+
+        public String getOrderCommandsTopic() {
+            return orderCommandsTopic;
+        }
+
+        public void setOrderCommandsTopic(String orderCommandsTopic) {
+            this.orderCommandsTopic = orderCommandsTopic;
+        }
+
+        public String getMatchResultsTopic() {
+            return matchResultsTopic;
+        }
+
+        public void setMatchResultsTopic(String matchResultsTopic) {
+            this.matchResultsTopic = matchResultsTopic;
+        }
+
+        public String getMatchTradesTopic() {
+            return matchTradesTopic;
+        }
+
+        public void setMatchTradesTopic(String matchTradesTopic) {
+            this.matchTradesTopic = matchTradesTopic;
+        }
+
+        public String getOrderBookDepthTopic() {
+            return orderBookDepthTopic;
+        }
+
+        public void setOrderBookDepthTopic(String orderBookDepthTopic) {
+            this.orderBookDepthTopic = orderBookDepthTopic;
+        }
+
+        public int getConcurrency() {
+            return concurrency;
+        }
+
+        public void setConcurrency(int concurrency) {
+            this.concurrency = concurrency;
+        }
+
+        public boolean isRestartOnPartitionReassignment() {
+            return restartOnPartitionReassignment;
+        }
+
+        public void setRestartOnPartitionReassignment(boolean restartOnPartitionReassignment) {
+            this.restartOnPartitionReassignment = restartOnPartitionReassignment;
+        }
+
+        public long getPartitionAssignmentStartupGraceMs() {
+            return partitionAssignmentStartupGraceMs;
+        }
+
+        public void setPartitionAssignmentStartupGraceMs(long partitionAssignmentStartupGraceMs) {
+            this.partitionAssignmentStartupGraceMs = partitionAssignmentStartupGraceMs;
+        }
+    }
+
+    public static class Engine {
+        private String exchangeId = "surprising-perp";
+        private int matchingEngines = 1;
+        private int riskEngines = 1;
+        private int orderBookDepthForPostOnly = 1;
+        private int orderBookDepthLevels = 50;
+        private long orderBookSnapshotIntervalEvents = 1000L;
+        private int initialSymbolRefreshDelayMs = 30000;
+
+        public String getExchangeId() {
+            return exchangeId;
+        }
+
+        public void setExchangeId(String exchangeId) {
+            this.exchangeId = exchangeId;
+        }
+
+        public int getMatchingEngines() {
+            return matchingEngines;
+        }
+
+        public void setMatchingEngines(int matchingEngines) {
+            this.matchingEngines = matchingEngines;
+        }
+
+        public int getRiskEngines() {
+            return riskEngines;
+        }
+
+        public void setRiskEngines(int riskEngines) {
+            this.riskEngines = riskEngines;
+        }
+
+        public int getOrderBookDepthForPostOnly() {
+            return orderBookDepthForPostOnly;
+        }
+
+        public void setOrderBookDepthForPostOnly(int orderBookDepthForPostOnly) {
+            this.orderBookDepthForPostOnly = orderBookDepthForPostOnly;
+        }
+
+        public int getOrderBookDepthLevels() {
+            return orderBookDepthLevels;
+        }
+
+        public void setOrderBookDepthLevels(int orderBookDepthLevels) {
+            this.orderBookDepthLevels = orderBookDepthLevels;
+        }
+
+        public long getOrderBookSnapshotIntervalEvents() {
+            return orderBookSnapshotIntervalEvents;
+        }
+
+        public void setOrderBookSnapshotIntervalEvents(long orderBookSnapshotIntervalEvents) {
+            this.orderBookSnapshotIntervalEvents = orderBookSnapshotIntervalEvents;
+        }
+
+        public int getInitialSymbolRefreshDelayMs() {
+            return initialSymbolRefreshDelayMs;
+        }
+
+        public void setInitialSymbolRefreshDelayMs(int initialSymbolRefreshDelayMs) {
+            this.initialSymbolRefreshDelayMs = initialSymbolRefreshDelayMs;
+        }
+    }
+
+    public static class Recovery {
+        private boolean openOrderBookRestoreEnabled = true;
+        private int openOrderBatchSize = 10000;
+
+        public boolean isOpenOrderBookRestoreEnabled() {
+            return openOrderBookRestoreEnabled;
+        }
+
+        public void setOpenOrderBookRestoreEnabled(boolean openOrderBookRestoreEnabled) {
+            this.openOrderBookRestoreEnabled = openOrderBookRestoreEnabled;
+        }
+
+        public int getOpenOrderBatchSize() {
+            return openOrderBatchSize;
+        }
+
+        public void setOpenOrderBatchSize(int openOrderBatchSize) {
+            this.openOrderBatchSize = openOrderBatchSize;
+        }
+    }
+
+    public static class Protection {
+        private boolean selfTradePreventionEnabled = true;
+        private long marketMaxSlippagePpm = 10_000L;
+        private long marketMaxMarkAgeMs = 5_000L;
+
+        public boolean isSelfTradePreventionEnabled() {
+            return selfTradePreventionEnabled;
+        }
+
+        public void setSelfTradePreventionEnabled(boolean selfTradePreventionEnabled) {
+            this.selfTradePreventionEnabled = selfTradePreventionEnabled;
+        }
+
+        public long getMarketMaxSlippagePpm() {
+            return marketMaxSlippagePpm;
+        }
+
+        public void setMarketMaxSlippagePpm(long marketMaxSlippagePpm) {
+            this.marketMaxSlippagePpm = marketMaxSlippagePpm;
+        }
+
+        public long getMarketMaxMarkAgeMs() {
+            return marketMaxMarkAgeMs;
+        }
+
+        public void setMarketMaxMarkAgeMs(long marketMaxMarkAgeMs) {
+            this.marketMaxMarkAgeMs = marketMaxMarkAgeMs;
+        }
+    }
+
+    public static class Outbox {
+        private int batchSize = 500;
+        private long publishDelayMs = 100L;
+        private Duration sendTimeout = Duration.ofSeconds(3);
+
+        public int getBatchSize() {
+            return batchSize;
+        }
+
+        public void setBatchSize(int batchSize) {
+            this.batchSize = batchSize;
+        }
+
+        public long getPublishDelayMs() {
+            return publishDelayMs;
+        }
+
+        public void setPublishDelayMs(long publishDelayMs) {
+            this.publishDelayMs = publishDelayMs;
+        }
+
+        public Duration getSendTimeout() {
+            return sendTimeout;
+        }
+
+        public void setSendTimeout(Duration sendTimeout) {
+            this.sendTimeout = sendTimeout;
+        }
+    }
+}

@@ -1,0 +1,39 @@
+server:
+  port: 9089
+
+spring:
+  application:
+    name: surprising-funding-provider
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 4
+      connection-timeout: 3000
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  funding:
+    kafka:
+      bootstrap-servers: localhost:9092
+      funding-rate-topic: surprising.perp.funding.rate.v1
+    calculation:
+      publish-delay-ms: 1000
+      max-mark-age: 10s
+    settlement:
+      settle-delay-ms: 1000
+      batch-size: 20
+    outbox:
+      batch-size: 200
+      publish-delay-ms: 200
+      send-timeout: 3s
+    coordination:
+      enabled: true
+      node-id:
+      lease-duration: 15s

@@ -13,19 +13,47 @@ Surprising 交易所后端服务。
 - `surprising-instrument`：合约基础配置和产品规则中心。
 - `surprising-candlestick`：合约 K 线服务。
 - `surprising-price`：合约指数价格和标记价格服务。
+- `surprising-trading`：合约订单入口和 exchange-core 撮合。
+- `surprising-account`：账户余额、余额流水和合约持仓服务。
+- `surprising-risk`：保证金率、风险快照和爆仓候选服务。
+- `surprising-liquidation`：强平候选执行和 reduce-only 平仓订单服务。
+- `surprising-funding`：永续合约资金费率发布和结算服务。
+- `surprising-insurance`：保险基金和穿仓亏损覆盖服务。
+- `surprising-adl`：保险基金耗尽后的自动减仓亏损分摊服务。
+- `surprising-websocket`：面向前端的水平扩展 WebSocket 推送服务，负责行情、订单、成交和持仓实时推送。
+- `surprising-gateway`：面向前端/BFF 的统一 REST API 网关。
+- `surprising-integration-test`：订单、撮合、账户、风控、强平、资金费、保险基金和 ADL 链路的跨模块验证。
 
 ## 模块文档
 
+- [永续合约交易教程和系统实现说明](docs/perpetual-contract-tutorial_CN.md)
 - [surprising-candlestick](surprising-candlestick/README_CN.md)
 - [surprising-instrument](surprising-instrument/README_CN.md)
 - [surprising-price](surprising-price/README_CN.md)
+- [surprising-trading](surprising-trading/README_CN.md)
+- [surprising-account](surprising-account/README_CN.md)
+- [surprising-risk](surprising-risk/README_CN.md)
+- [surprising-liquidation](surprising-liquidation/README_CN.md)
+- [surprising-funding](surprising-funding/README_CN.md)
+- [surprising-insurance](surprising-insurance/README_CN.md)
+- [surprising-adl](surprising-adl/README_CN.md)
+- [surprising-websocket](surprising-websocket/README_CN.md)
+- [surprising-gateway](surprising-gateway/README_CN.md)
 
 ## 构建
+
+使用 JDK 21。matching provider 依赖 exchange-core/OpenHFT Chronicle，运行时需要下面的 Java module 参数。
 
 ```bash
 mvn test
 mvn -DskipTests package
 ```
+
+```bash
+export JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
+```
+
+Provider 打包会保留普通 jar 作为模块依赖产物，并额外生成带 `exec` classifier 的 Spring Boot 可执行 jar，例如 `surprising-order-provider-1.0.0-SNAPSHOT-exec.jar`。
 
 ## 数据库初始化
 
@@ -45,6 +73,17 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 mvn -pl :surprising-candlestick-provider -am spring-boot:run
 mvn -pl :surprising-index-price-provider -am spring-boot:run
 mvn -pl :surprising-mark-price-provider -am spring-boot:run
+mvn -pl :surprising-order-provider -am spring-boot:run
+JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED" \
+mvn -pl :surprising-matching-provider -am spring-boot:run
+mvn -pl :surprising-account-provider -am spring-boot:run
+mvn -pl :surprising-risk-provider -am spring-boot:run
+mvn -pl :surprising-liquidation-provider -am spring-boot:run
+mvn -pl :surprising-funding-provider -am spring-boot:run
+mvn -pl :surprising-insurance-provider -am spring-boot:run
+mvn -pl :surprising-adl-provider -am spring-boot:run
+mvn -pl :surprising-websocket-provider -am spring-boot:run
+mvn -pl :surprising-gateway-provider -am spring-boot:run
 ```
 
 端口：
@@ -53,16 +92,33 @@ mvn -pl :surprising-mark-price-provider -am spring-boot:run
 - `9081`：K 线服务。
 - `9082`：指数价格和法币汇率服务。
 - `9083`：标记价格服务。
+- `9084`：订单入口服务。
+- `9085`：exchange-core 撮合服务。
+- `9086`：账户和持仓服务。
+- `9087`：风险服务。
+- `9088`：强平执行服务。
+- `9089`：资金费率服务。
+- `9090`：保险基金服务。
+- `9091`：ADL 服务。
+- `9093`：前端 WebSocket 推送服务。
+- `9094`：统一 REST API 网关。
 
 ## Kafka Topics
 
 - `surprising.instrument.events.v1`：合约配置变更事件。
 - `surprising.perp.trade.events.v1`：合约成交输入。
 - `surprising.perp.candle.events.v1`：K 线快照输出。
+- `surprising.perp.order.commands.v1`：订单撮合命令。
+- `surprising.perp.order.events.v1`：订单入口事件。
+- `surprising.perp.match.results.v1`：撮合结果事件。
+- `surprising.perp.match.trades.v1`：撮合成交事件，long 定点数。
+- `surprising.perp.orderbook.depth.v1`：exchange-core L2 盘口 `SNAPSHOT`/`DELTA` 事件，供前端深度推送消费。
+- `surprising.account.position.events.v1`：账户持仓变化事件，供私有 WebSocket 推送消费。
+- `surprising.perp.liquidation.candidates.v1`：爆仓候选事件。
 - `surprising.perp.index.price.v1`：指数价格输出。
 - `surprising.perp.index.components.v1`：指数成分审计输出。
 - `surprising.perp.book.ticker.v1`：合约盘口最优价输入。
-- `surprising.perp.funding.rate.v1`：资金费率输入。
+- `surprising.perp.funding.rate.v1`：资金费率输出，供 mark price 服务消费。
 - `surprising.perp.mark.price.v1`：标记价格输出。
 - `surprising.perp.mark.price.audit.v1`：标记价格审计输出。
 
@@ -76,6 +132,48 @@ curl 'http://localhost:9081/api/v1/candlestick/candles/latest?symbol=BTC-USDT&pe
 curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
 curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
 curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
+curl -X POST 'http://localhost:9084/api/v1/trading/orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientOrderId":"cli-1001-1","symbol":"BTC-USDT","side":"BUY","orderType":"LIMIT","timeInForce":"GTC","priceTicks":650000,"quantitySteps":10,"reduceOnly":false,"postOnly":false}'
+curl 'http://localhost:9089/api/v1/funding/rates/latest?symbol=BTC-USDT'
+curl 'http://localhost:9090/api/v1/insurance/balances?asset=USDT'
+curl 'http://localhost:9091/api/v1/adl/queue?asset=USDT&limit=100'
+curl 'http://localhost:9094/api/v1/gateway/candlestick/candles/latest?symbol=BTC-USDT&period=1m'
+curl 'http://localhost:9094/api/v1/gateway/account/1001/positions' -H 'X-User-Id: 1001'
+```
+
+前端 REST 流量默认走 `surprising-gateway` 的 `9094` 端口。
+实时流量走 `surprising-websocket` 的 `/ws/v1`；公共频道包括 K 线、成交、盘口深度、指数价格、标记价格和资金费率，私有频道包括订单、撮合成交和持仓。
+
+## 本地集成 Smoke
+
+使用临时 PostgreSQL 跑数据库级链路检查：
+
+```bash
+./scripts/integration-smoke.sh
+mvn -pl :surprising-integration-test -am test
+```
+
+脚本会导入 [init.sql](init.sql)，验证 instrument version 锁定、U 本位线性合约、币本位反向合约、资金费 notional 折算、风险快照、强平候选幂等、保险基金亏损覆盖和 ADL 亏损转移记账。设置 `RUN_MAVEN=true` 可以在同一次执行里顺带运行单元测试。
+integration-test 模块使用真实 exchange-core 和内存 Kafka/DB adapter，验证下单、撮合、账户结算、U 本位线性和币本位反向用户 reduce-only 主动平仓、风险候选生成、强平单生成、强平成交回写、资金费结算、保险基金覆盖和 ADL 剩余亏损转移这些 Java 链路。
+
+如果本地可用 Docker，可以运行真实 Kafka/PostgreSQL 进程级交易 smoke：
+
+```bash
+./scripts/kafka-trading-smoke.sh
+```
+
+它会创建隔离的 smoke 数据库，启动 order/matching/account providers，通过 REST 提交可成交的对手单，等待 exchange-core 撮合和 account Kafka 结算，再重放同一条 match-trade payload 验证账户幂等。
+更重的进程级测试会同时启动 WebSocket，并验证全部成交、部分成交后撤单、只撤单、全部撤单、并发用户、持仓正确性、盘口深度推送和私有推送接收：
+
+```bash
+PAIR_COUNT=50 LOAD_CONCURRENCY=16 ./scripts/kafka-trading-load-smoke.sh
+```
+
+这个脚本会优先使用 `docker compose` 或 `docker-compose`；如果本机只有 Docker daemon，会 fallback 到直接 `docker run` 启动单机 PostgreSQL/Kafka。`PAIR_COUNT` 控制并发撮合场景里的 maker/taker 用户组数量。如果本地已有其他 Kafka 镜像，可以通过 `KAFKA_IMAGE` 指定复用。
+
+盘口深度客户端应先拉公共 REST 快照，再套 WebSocket 增量：
+
+```bash
+curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50'
 ```
 
 ## 生产部署要点
@@ -83,9 +181,41 @@ curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
 - 每个 provider 至少部署 2 个实例。
 - Kafka topic replication factor 生产建议为 `3`。
 - Instrument 是全系统唯一 symbol 和交易规则配置源。
+- Trading 订单入口使用 long 定点数：`priceTicks`、`quantitySteps` 和资产 `units` 对齐 exchange-core；订单、撮合、账户、风控、强平、资金费、保险基金和 ADL 核心链路都不使用 BigDecimal。小数只允许存在于外部行情/汇率解析、后台录入、展示和报表边界。
+- Matching 使用 `exchange-core` 真实订单簿消费订单命令，输出 long 定点数撮合结果和成交事件。
+- Matching 启动时从 PostgreSQL 恢复开放的 `LIMIT` + `GTC/GTX` 订单簿；遇到不安全的 Kafka partition 重新分配会重启，让 failover 走新鲜 DB 恢复。
+- Matching 在 command 已解析但处理失败时也会退出，让 Kafka 重放发生在 DB 订单簿恢复之后，而不是在可能已被修改的内存订单簿上重试。
+- Matching 释放订单冻结保证金时要求 `locked_units` 足额；不足会失败并触发重启恢复，不能把异常冻结余额静默释放成可用余额。
+- 市价单在订单入口使用新鲜 mark price 的可成交区间校验 notional，matching 再按买卖方向保护价提交 exchange-core；线性合约市价单无论 BUY/SELL 都按上边界冻结初始保证金，保证 SELL 市价单吃到高买价时不会抵押不足。matching 会拒绝会自成交的 taker 订单。
+- Account 消费撮合成交，按 `tradeId` 幂等更新 long-based 净持仓，把开仓成交保证金迁移到持仓保证金，并把已实现盈亏结算进余额。
+- Account 和 Funding 的亏损结算只会扣持仓保证金支撑的 locked collateral；未成交订单冻结不会被 PnL 或资金费扣款消耗。
+- Risk 使用 mark price、instrument 风险参数和 account 持仓/余额生成保证金快照和爆仓候选。
+- Risk provider 使用 PostgreSQL `risk_scan_leases` 按 `userId + settleAsset` 协调扫描，多节点部署时不会对同一个风险组重复写快照或候选。
+- Liquidation 消费爆仓候选，复核风险并前置撤同方向用户 reduce-only 平仓挂单后，按实时完整持仓生成分阶段 reduce-only 市价平仓订单进入统一订单/撮合链路。
+- Liquidation 会把过期或缺失的风险快照视为非强平状态；`surprising.liquidation.risk.max-snapshot-age` 默认 `5s`。
+- Liquidation 创建强平订单时走 fail-fast：交易订单、订单事件或审计行被冲突跳过都会回滚候选事务。
+- 风控扫描、强平执行、资金费率发布、资金费结算、保险基金覆盖、ADL 扫描都有显式 `*.enabled` 运营开关，用于事故暂停。
+- Funding 基于 mark/index premium 和 instrument 利率/上限/下限计算 long ppm 资金费率，并把到期资金费结算到账户余额。
+- Insurance 使用 long 资产单位覆盖显式账户亏损，并同时写保险基金流水和账户流水。
+- ADL 在保险基金耗尽后处理剩余亏损，削减盈利高优先级仓位，并把实现盈利转去覆盖 deficit。
 - K 线服务用 Kafka Streams + RocksDB 分区状态，按 Kafka partition 水平扩展。
 - 指数价格和标记价格服务用 PostgreSQL 的 symbol 租约和数据库 sequence 避免多节点重复发布和 sequence 回退。
+- 订单入口用 PostgreSQL 幂等键、原子 sequence 和 outbox `FOR UPDATE SKIP LOCKED` 支持多节点部署。
+- 当前 matching 已接入真实 exchange-core 订单簿，交易链路端到端使用 long ticks/steps。
+- matching command topic 必须以 `symbol` 作为 key；matching 扩展依赖 Kafka partition 和受控实例数，不做每 symbol 一个线程。
+- Matching 会把 L2 盘口深度发布成 `SNAPSHOT` 加按价格档绝对状态变化的 `DELTA`，topic 是 `surprising.perp.orderbook.depth.v1`。delta 中 `quantitySteps=0` 表示删除该价格档。客户端先拉 `GET /api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50`，再应用 `previousSequence` 等于本地 sequence 的 WebSocket 增量；断号或重连后要丢弃本地盘口，重新拉快照，再继续应用增量。
+- REST 客户端可以传 `X-Trace-Id`；gateway 和 order provider 会清洗或生成该值，交易事件会一路携带到订单事件、撮合结果、撮合成交和账户持仓推送。撮合引擎产生的事件必须保留这个字段，因为它连接 HTTP 请求、Kafka 重放、数据库审计行和 WebSocket/账户私有更新。
+- 交易链路 Kafka producer 使用幂等 `acks=all` 发布；Kafka consumer 关闭 auto commit，使用 cooperative-sticky assignment 和 record 级 ack，失败记录会通过幂等 DB 状态迁移重放。
+- Kafka record key 和 payload `symbol` 不一致时消费者会拒绝处理，因为错误 key 会破坏单 symbol 顺序保证。
+- Outbox 发布是至少一次投递；Kafka 发送失败后会按有上限的指数退避重试，下游状态迁移保持幂等。
+- 订单入口已冻结初始保证金；账户成交处理会把开仓成交保证金迁移到持仓保证金，并在平仓时释放旧持仓保证金。
+- 用户主动平仓订单在进入撮合 command 前会经过 reduce-only 校验。
+- Risk 发现爆仓候选；liquidation 会把候选转成分阶段 reduce-only 平仓订单，强平不会被用户已有 reduce-only 挂单阻塞。
+- Insurance 吸收 `account_deficits`；保险基金耗尽后的剩余亏损由 ADL 处理。生产上线前还需要压测、监控阈值、真实集群熔断演练和多进程 Kafka 证据。
 - WebSocket 推送服务应独立消费 Kafka 输出 topic，不要放进 K 线或价格计算服务里。
+- 每个 WebSocket 节点必须使用唯一 Kafka consumer group，让公共行情事件到达所有节点做本地 fanout；不要让所有 WebSocket pod 共用一个 group。
+- 用户持仓推送从 account 结算事务后的 outbox 产生，再由 WebSocket 消费并按已认证用户订阅过滤。
+- 统一 REST 网关是无状态、白名单代理。各业务模块仍保留内部 API；前端/BFF 不应单独配置每个模块地址，而应通过 gateway 入口访问。
 - 外部交易所行情采集以 WebSocket 为主，REST 只做冷启动和兜底。
 - 法币汇率只用于展示和估值提示，不参与合约风控核心价格替代。
 
@@ -93,3 +223,4 @@ curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
 
 - [部署说明](docs/deployment.md)
 - [数据库设计](docs/database.md)
+- [集成验证报告](docs/integration-report_CN.md)

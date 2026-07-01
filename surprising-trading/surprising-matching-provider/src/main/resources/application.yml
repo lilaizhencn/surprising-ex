@@ -1,0 +1,52 @@
+server:
+  port: 9085
+
+spring:
+  application:
+    name: surprising-matching-provider
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 4
+      connection-timeout: 3000
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  trading:
+    matching:
+      kafka:
+        bootstrap-servers: localhost:9092
+        group-id: surprising-matching-v1
+        order-commands-topic: surprising.perp.order.commands.v1
+        match-results-topic: surprising.perp.match.results.v1
+        match-trades-topic: surprising.perp.match.trades.v1
+        order-book-depth-topic: surprising.perp.orderbook.depth.v1
+        concurrency: 2
+        restart-on-partition-reassignment: true
+        partition-assignment-startup-grace-ms: 30000
+      engine:
+        exchange-id: surprising-perp
+        matching-engines: 1
+        risk-engines: 1
+        order-book-depth-for-post-only: 1
+        order-book-depth-levels: 50
+        order-book-snapshot-interval-events: 1000
+        initial-symbol-refresh-delay-ms: 30000
+      recovery:
+        open-order-book-restore-enabled: true
+        open-order-batch-size: 10000
+      protection:
+        self-trade-prevention-enabled: true
+        market-max-slippage-ppm: 10000
+        market-max-mark-age-ms: 5000
+      outbox:
+        batch-size: 500
+        publish-delay-ms: 100
+        send-timeout: 3s

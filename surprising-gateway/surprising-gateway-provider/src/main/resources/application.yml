@@ -1,0 +1,73 @@
+server:
+  port: 9094
+
+spring:
+  application:
+    name: surprising-gateway-provider
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  gateway:
+    security:
+      user-id-header: X-User-Id
+      require-identity-for-private-routes: true
+    http-client:
+      connect-timeout: 1s
+      read-timeout: 5s
+    routes:
+      instrument:
+        base-url: http://localhost:9080
+        target-prefix: /api/v1/instruments
+        private-route: false
+      candlestick:
+        base-url: http://localhost:9081
+        target-prefix: /api/v1/candlestick
+        private-route: false
+      price-index:
+        base-url: http://localhost:9082
+        target-prefix: /api/v1/price/index
+        private-route: false
+      price-fx:
+        base-url: http://localhost:9082
+        target-prefix: /api/v1/price/fx
+        private-route: false
+      price-mark:
+        base-url: http://localhost:9083
+        target-prefix: /api/v1/price/mark
+        private-route: false
+      trading:
+        base-url: http://localhost:9084
+        target-prefix: /api/v1/trading/orders
+        private-route: true
+      trading-market:
+        base-url: http://localhost:9085
+        target-prefix: /api/v1/trading/market
+        private-route: false
+      account:
+        base-url: http://localhost:9086
+        target-prefix: /api/v1/accounts
+        private-route: true
+      risk:
+        base-url: http://localhost:9087
+        target-prefix: /api/v1/risk
+        private-route: true
+      liquidation:
+        base-url: http://localhost:9088
+        target-prefix: /api/v1/liquidations
+        private-route: true
+      funding:
+        base-url: http://localhost:9089
+        target-prefix: /api/v1/funding
+        private-route: false
+      insurance:
+        base-url: http://localhost:9090
+        target-prefix: /api/v1/insurance
+        private-route: true
+      adl:
+        base-url: http://localhost:9091
+        target-prefix: /api/v1/adl
+        private-route: true

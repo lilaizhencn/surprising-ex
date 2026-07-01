@@ -6,6 +6,7 @@ import java.time.Instant;
 public record MarkPriceResponse(
         String symbol,
         BigDecimal markPrice,
+        long markPriceUnits,
         BigDecimal indexPrice,
         BigDecimal price1,
         BigDecimal price2,

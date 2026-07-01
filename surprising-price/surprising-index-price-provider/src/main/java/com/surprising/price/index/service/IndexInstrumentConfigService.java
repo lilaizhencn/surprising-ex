@@ -67,8 +67,8 @@ public class IndexInstrumentConfigService {
                 SELECT i.symbol, i.min_valid_index_sources,
                        s.source, s.enabled, s.base_url, s.path, s.source_symbol, s.parser,
                        s.quote_currency, s.target_quote_currency, s.conversion_base_url, s.conversion_path,
-                       s.conversion_parser, s.conversion_mode, s.conversion_operation, s.fallback_weight_multiplier,
-                       s.websocket_enabled, s.websocket_url, s.websocket_subscribe_message, s.websocket_parser, s.weight
+                       s.conversion_parser, s.conversion_mode, s.conversion_operation, s.fallback_weight_multiplier_ppm,
+                       s.websocket_enabled, s.websocket_url, s.websocket_subscribe_message, s.websocket_parser, s.weight_ppm
                   FROM instruments i
                   JOIN instrument_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
@@ -116,17 +116,17 @@ public class IndexInstrumentConfigService {
         source.setConversionParser(rs.getString("conversion_parser"));
         source.setConversionMode(rs.getString("conversion_mode"));
         source.setConversionOperation(rs.getString("conversion_operation"));
-        source.setFallbackWeightMultiplier(defaultDecimal(rs.getBigDecimal("fallback_weight_multiplier"), BigDecimal.ONE));
+        source.setFallbackWeightMultiplier(ppm(rs.getLong("fallback_weight_multiplier_ppm"), BigDecimal.ONE));
         source.setWebsocketEnabled(rs.getBoolean("websocket_enabled"));
         source.setWebsocketUrl(rs.getString("websocket_url"));
         source.setWebsocketSubscribeMessage(rs.getString("websocket_subscribe_message"));
         source.setWebsocketParser(rs.getString("websocket_parser"));
-        source.setWeight(defaultDecimal(rs.getBigDecimal("weight"), BigDecimal.ONE));
+        source.setWeight(ppm(rs.getLong("weight_ppm"), BigDecimal.ONE));
         return source;
     }
 
-    private BigDecimal defaultDecimal(BigDecimal value, BigDecimal fallback) {
-        return value == null ? fallback : value;
+    private BigDecimal ppm(long value, BigDecimal fallback) {
+        return value > 0 ? BigDecimal.valueOf(value, 6) : fallback;
     }
 
     private IndexPriceProperties.SymbolConfig copySymbol(IndexPriceProperties.SymbolConfig source) {

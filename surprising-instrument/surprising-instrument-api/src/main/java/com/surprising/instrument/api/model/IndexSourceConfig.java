@@ -1,7 +1,5 @@
 package com.surprising.instrument.api.model;
 
-import java.math.BigDecimal;
-
 public record IndexSourceConfig(
         String source,
         boolean enabled,
@@ -16,10 +14,10 @@ public record IndexSourceConfig(
         String conversionParser,
         String conversionMode,
         String conversionOperation,
-        BigDecimal fallbackWeightMultiplier,
+        long fallbackWeightMultiplierPpm,
         boolean websocketEnabled,
         String websocketUrl,
         String websocketSubscribeMessage,
         String websocketParser,
-        BigDecimal weight) {
+        long weightPpm) {
 }

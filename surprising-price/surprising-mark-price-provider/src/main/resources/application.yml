@@ -40,5 +40,5 @@ surprising:
         scale: 18
       coordination:
         enabled: true
-        node-id: ${HOSTNAME:${random.uuid}}
+        node-id:
         lease-duration: 15s

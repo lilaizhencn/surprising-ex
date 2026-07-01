@@ -1,6 +1,5 @@
 package com.surprising.price.mark.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PerpBookTickerEvent;
@@ -21,6 +20,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class MarkPriceService {
@@ -145,10 +145,6 @@ public class MarkPriceService {
     private String resolveNodeId(String configured) {
         if (configured != null && !configured.isBlank()) {
             return configured.trim();
-        }
-        String hostname = System.getenv("HOSTNAME");
-        if (hostname != null && !hostname.isBlank()) {
-            return hostname.trim();
         }
         return "mark-" + UUID.randomUUID();
     }

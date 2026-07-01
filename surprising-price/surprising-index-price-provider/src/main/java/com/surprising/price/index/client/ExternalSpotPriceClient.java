@@ -1,7 +1,5 @@
 package com.surprising.price.index.client;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.surprising.price.api.model.SourceStatus;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.model.SourceQuote;
@@ -22,6 +20,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 @Component
 public class ExternalSpotPriceClient {
@@ -189,10 +189,10 @@ public class ExternalSpotPriceClient {
         }
 
         JsonNode result = root.path("result");
-        if (!result.fieldNames().hasNext()) {
+        if (result.propertyNames().isEmpty()) {
             throw new IllegalArgumentException("Kraken response has no ticker result");
         }
-        String instrument = result.fieldNames().next();
+        String instrument = result.propertyNames().iterator().next();
         JsonNode ticker = result.path(instrument);
         BigDecimal bid = decimal(ticker.path("b"), 0);
         BigDecimal ask = decimal(ticker.path("a"), 0);

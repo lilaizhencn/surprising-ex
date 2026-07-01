@@ -1,7 +1,6 @@
 package com.surprising.instrument.provider.controller;
 
-import com.surprising.instrument.api.client.InstrumentAdminRpcApi;
-import com.surprising.instrument.api.client.InstrumentRpcApi;
+import com.surprising.instrument.api.InstrumentApiPaths;
 import com.surprising.instrument.api.model.InstrumentQueryResponse;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
@@ -9,11 +8,16 @@ import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.provider.service.InstrumentService;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
-public class InstrumentController implements InstrumentRpcApi, InstrumentAdminRpcApi {
+public class InstrumentController {
 
     private final InstrumentService instrumentService;
 
@@ -21,8 +25,8 @@ public class InstrumentController implements InstrumentRpcApi, InstrumentAdminRp
         this.instrumentService = instrumentService;
     }
 
-    @Override
-    public InstrumentResponse latest(String symbol) {
+    @GetMapping(InstrumentApiPaths.BASE_PATH + "/latest")
+    public InstrumentResponse latest(@RequestParam("symbol") String symbol) {
         try {
             return instrumentService.latest(symbol);
         } catch (IllegalArgumentException ex) {
@@ -32,8 +36,8 @@ public class InstrumentController implements InstrumentRpcApi, InstrumentAdminRp
         }
     }
 
-    @Override
-    public InstrumentResponse version(String symbol, long version) {
+    @GetMapping(InstrumentApiPaths.BASE_PATH + "/version")
+    public InstrumentResponse version(@RequestParam("symbol") String symbol, @RequestParam("version") long version) {
         try {
             return instrumentService.version(symbol, version);
         } catch (IllegalArgumentException ex) {
@@ -43,13 +47,14 @@ public class InstrumentController implements InstrumentRpcApi, InstrumentAdminRp
         }
     }
 
-    @Override
-    public InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status) {
+    @GetMapping(InstrumentApiPaths.BASE_PATH + "/list")
+    public InstrumentQueryResponse list(@RequestParam(value = "type", required = false) InstrumentType type,
+                                        @RequestParam(value = "status", required = false) InstrumentStatus status) {
         return instrumentService.list(type, status);
     }
 
-    @Override
-    public InstrumentResponse upsert(InstrumentUpsertRequest request) {
+    @PostMapping(InstrumentApiPaths.ADMIN_BASE_PATH + "/upsert")
+    public InstrumentResponse upsert(@RequestBody InstrumentUpsertRequest request) {
         try {
             return instrumentService.upsert(request);
         } catch (IllegalArgumentException ex) {
@@ -57,8 +62,9 @@ public class InstrumentController implements InstrumentRpcApi, InstrumentAdminRp
         }
     }
 
-    @Override
-    public InstrumentResponse updateStatus(String symbol, InstrumentStatus status) {
+    @PostMapping(InstrumentApiPaths.ADMIN_BASE_PATH + "/{symbol}/status")
+    public InstrumentResponse updateStatus(@PathVariable("symbol") String symbol,
+                                           @RequestParam("status") InstrumentStatus status) {
         try {
             return instrumentService.updateStatus(symbol, status);
         } catch (IllegalArgumentException ex) {

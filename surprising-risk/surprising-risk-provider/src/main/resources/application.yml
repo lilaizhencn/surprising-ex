@@ -1,0 +1,38 @@
+server:
+  port: 9087
+
+spring:
+  application:
+    name: surprising-risk-provider
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 4
+      connection-timeout: 3000
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  risk:
+    kafka:
+      bootstrap-servers: localhost:9092
+      liquidation-candidates-topic: surprising.perp.liquidation.candidates.v1
+    calculation:
+      scan-delay-ms: 1000
+      warning-margin-ratio-ppm: 800000
+      liquidation-margin-ratio-ppm: 1000000
+      max-mark-age: 10s
+    coordination:
+      enabled: true
+      node-id:
+      lease-duration: 15s
+    outbox:
+      batch-size: 200
+      publish-delay-ms: 200
+      send-timeout: 3s

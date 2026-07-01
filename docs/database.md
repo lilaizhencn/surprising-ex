@@ -15,12 +15,13 @@ One row stores one version of one tradable product:
 
 - `symbol`: normalized market symbol, for example `BTC-USDT`.
 - `version`: immutable config version.
-- `instrument_type` / `contract_type`: product category, currently perpetual linear contracts.
+- `instrument_type` / `contract_type`: product category, currently perpetual contracts.
 - `base_asset` / `quote_asset` / `settle_asset`: display, pricing, and settlement assets.
-- `price_tick_size` / `quantity_step_size`: order price and quantity increments.
-- `min_order_qty` / `max_order_qty` / `min_notional` / `max_notional`: order bounds.
+- `price_tick_units` / `quantity_step_units`: integer tick and step sizes in quote/base asset smallest units.
+- `min_quantity_steps` / `max_quantity_steps` / `min_notional_units` / `max_notional_units`: order bounds in long units.
+- `notional_multiplier_units`: for `LINEAR_PERPETUAL`, settlement units per `priceTick * quantityStep`; for `INVERSE_PERPETUAL`, quote face-value units per contract step.
 - `supported_order_types` / `supported_time_in_force`: order-entry constraints.
-- `max_leverage`, margin rates, funding config, and `impact_notional`: risk and funding inputs.
+- `max_leverage_ppm`, margin-rate ppm fields, `maker_fee_rate_ppm`, `taker_fee_rate_ppm`, funding ppm fields, and `impact_notional_units`: risk, trading-fee, and funding inputs.
 - `status`: `PRE_TRADING`, `TRADING`, `HALT`, `SETTLING`, or `CLOSED`.
 
 Primary key:
@@ -64,7 +65,7 @@ External spot-source configuration for index price calculation:
 - WebSocket endpoint and subscription payload.
 - quote currency and target quote currency.
 - USD/USDT conversion source and conversion direction.
-- source weight and enabled flag.
+- source `weight_ppm`, `fallback_weight_multiplier_ppm`, and enabled flag.
 
 The index price provider reads this table dynamically.
 
@@ -203,6 +204,8 @@ One row represents one calculated mark price snapshot:
 
 - `sequence`: database-allocated monotonic sequence per symbol.
 - `mark_price`: final mark price after median and clamp.
+- `mark_price_units`: final mark price converted once into quote-asset smallest units. Core modules convert this long
+  value to version-specific ticks with `instrument.price_tick_units`.
 - `index_price`: latest index input.
 - `price1`: funding convergence price.
 - `price2`: index plus moving-average basis.
@@ -216,3 +219,252 @@ Primary key:
 ```sql
 PRIMARY KEY (symbol, sequence)
 ```
+
+## Funding Tables
+
+`funding_rate_ticks` stores predicted funding rates using long ppm values:
+
+- `funding_rate_ppm`: final clamped funding rate in parts per million.
+- `premium_rate_ppm`: `(markPrice - indexPrice) / indexPrice * 1_000_000`.
+- `interest_rate_ppm`: instrument interest rate converted to ppm.
+- `funding_time`: UTC interval boundary when the rate should settle.
+
+`funding_settlements` stores one settlement batch per `symbol + funding_time`.
+The unique index on `(symbol, funding_time)` prevents duplicate settlement across multiple funding-provider nodes.
+
+`funding_payments` stores each user payment for a settlement:
+
+- Positive `amount_units`: user receives funding.
+- Negative `amount_units`: user pays funding.
+- `notional_units`: position notional in settlement-asset smallest units.
+
+The funding provider writes `account_ledger_entries` with `reference_type = FUNDING` and applies
+payments to `account_balances` / `account_deficits` in the same transaction.
+
+## Risk Tables
+
+`risk_account_snapshots` stores account-level margin state by `snapshot_id`, including wallet balance,
+unrealized PnL, equity, maintenance margin, margin ratio, and status.
+
+`risk_position_snapshots` stores the position-level inputs used for each account snapshot:
+
+- `signed_quantity_steps`: long exposure from `account_positions`.
+- `mark_price_ticks`: latest usable mark price converted from `price_mark_ticks.mark_price_units` to
+  exchange-core ticks with the position's pinned `instrument_version`.
+- `notional_units`, `unrealized_pnl_units`, and `maintenance_margin_units`: long settlement-asset units.
+
+Risk, funding, liquidation, and ADL read instrument parameters and mark quote units from PostgreSQL, convert them to
+version-specific mark ticks, then
+calculate contract notional/PnL/margin amounts through shared Java `PerpetualContractMath` long
+formulas with exact integer intermediates.
+
+`risk_scan_leases` coordinates active-active risk providers by `user_id + settle_asset`:
+
+- `owner_id`: current scanner node for the account asset group.
+- `lease_until`: when another node may take over if the owner stops renewing.
+- `updated_at`: local lease update time.
+
+Primary key:
+
+```sql
+PRIMARY KEY (user_id, settle_asset)
+```
+
+The expiry index keeps stale-owner cleanup and operational inspection cheap:
+
+```sql
+CREATE INDEX risk_scan_leases_expiry_idx
+    ON risk_scan_leases (lease_until);
+```
+
+`risk_liquidation_candidates` stores liquidation inputs. A candidate is not execution proof; the
+liquidation provider must re-check latest risk before submitting a reduce-only close order.
+
+Core indexes:
+
+```sql
+CREATE UNIQUE INDEX risk_liquidation_candidates_snapshot_uidx
+    ON risk_liquidation_candidates (snapshot_id, user_id, symbol);
+
+CREATE UNIQUE INDEX risk_liquidation_candidates_active_uidx
+    ON risk_liquidation_candidates (user_id, symbol)
+    WHERE status IN ('NEW', 'PROCESSING');
+
+CREATE INDEX risk_liquidation_candidates_status_idx
+    ON risk_liquidation_candidates (status, event_time ASC);
+```
+
+`risk_scan_leases` prevents live nodes from concurrently writing snapshots for the same `user_id + settle_asset`.
+The active candidate unique index is the second guard: it prevents duplicate live liquidation
+candidates for the same account position even after lease failover or replay. Once the prior
+candidate is `COMPLETED` or `CANCELED`, a later scan may create the next staged liquidation candidate if the account is still unsafe.
+Risk insertion should target only the partial active-candidate index for `DO NOTHING`; candidate-id
+or snapshot uniqueness conflicts are data-integrity issues and must fail rather than being treated
+as normal duplicate scans.
+
+## Insurance Tables
+
+`insurance_fund_balances` stores the current insurance fund balance per settlement asset.
+Amounts are long asset units and are never negative.
+
+`insurance_fund_ledger` stores immutable fund balance changes:
+
+- Positive `amount_units`: fund deposit or operational top-up.
+- Negative `amount_units`: fund withdrawal or account deficit coverage.
+- `(reference_type, reference_id, asset)` is unique for idempotency.
+
+`insurance_deficit_coverages` stores actual coverage attempts that paid a positive amount from the
+fund. If the fund has no balance, the deficit remains in `account_deficits` and no empty coverage row
+is written.
+
+Insurance coverage writes `account_ledger_entries` with `reference_type = INSURANCE_COVERAGE`.
+Coverage reduces explicit deficit and does not credit available balance.
+
+Core indexes:
+
+```sql
+CREATE UNIQUE INDEX insurance_fund_ledger_reference_uidx
+    ON insurance_fund_ledger (reference_type, reference_id, asset);
+
+CREATE INDEX insurance_coverages_user_time_idx
+    ON insurance_deficit_coverages (user_id, created_at DESC);
+```
+
+## ADL Tables
+
+`adl_events` stores auto-deleveraging executions after the insurance fund is depleted:
+
+- `deficit_user_id`: user whose `account_deficits` row is being covered.
+- `target_user_id`: profitable account whose position is reduced.
+- `closed_quantity_steps`: reduced position size.
+- `realized_profit_units`: target-side profit realized by the ADL close.
+- `covered_units`: amount transferred to cover the deficit.
+- `remaining_deficit_units`: deficit left after this ADL event.
+- `priority_score_ppm`: long ADL queue score derived from profit rate and effective leverage.
+
+ADL writes these account ledger reference types:
+
+- `ADL_REALIZED_PNL`: target account realizes PnL from the reduced position.
+- `ADL_TRANSFER`: target account transfers part of realized PnL to cover deficit.
+- `ADL_COVERAGE`: deficit account receives coverage by reducing `account_deficits`.
+
+Core indexes:
+
+```sql
+CREATE INDEX adl_events_deficit_user_time_idx
+    ON adl_events (deficit_user_id, created_at DESC);
+
+CREATE INDEX adl_events_asset_symbol_time_idx
+    ON adl_events (asset, symbol, created_at DESC);
+```
+
+## Trading And Account Margin Tables
+
+`trading_orders` stores the accepted/rejected order state using long ticks and steps:
+
+- `instrument_version`: instrument snapshot used by the accepted order. Rejected unknown-symbol orders may have no version.
+- `price_ticks`: exchange-core price ticks.
+- `quantity_steps`, `executed_quantity_steps`, `remaining_quantity_steps`: exchange-core size steps.
+- `reduce_only` and `post_only`: execution flags.
+- `(user_id, client_order_id)` is unique when `client_order_id` is present.
+- `trading_orders_stp_open_idx` supports self-trade prevention checks by user, symbol, side, and price.
+- `trading_orders_recovery_idx` supports startup order-book recovery by scanning open `LIMIT` + `GTC/GTX` orders in maker-priority order.
+
+`trading_match_results` stores one idempotent result per matching command:
+
+- `command_id` is the idempotency key.
+- `instrument_version` is the taker command/order version.
+- `trace_id` is copied from the order command and links the result to the originating REST request.
+- `trading_match_results_success_place_idx` lets the recovery query confirm that an open order had a successful `PLACE` result before restoring it into exchange-core.
+
+`trading_match_trades` stores `taker_instrument_version` and `maker_instrument_version`. Account
+settlement uses those side-specific versions because maker orders can be older than the taker command.
+`trace_id` is copied from the taker command that produced the trade and is forwarded to account position
+events.
+
+`trading_order_events` stores `trace_id` from the HTTP order or cancel request. Use it with
+`trading_match_results.trace_id`, `trading_match_trades.trace_id`, Kafka topic/partition/offset, and
+the relevant ids (`order_id`, `command_id`, `trade_id`) when tracing a user request across the trading
+chain.
+The `trading_order_events_trace_idx`, `trading_match_results_trace_idx`, and
+`trading_match_trades_trace_idx` partial indexes support incident-time lookups for non-null trace ids.
+The same side-specific versions are used for maker/taker fee ppm, so changing the current fee schedule
+does not reinterpret older resting orders.
+
+`account_margin_reservations` tracks initial margin reserved by order entry:
+
+- `reserved_units`: total order margin moved from `available_units` to `locked_units`.
+- `released_units`: order margin returned to `available_units` after rejection, cancel, terminal immediate order, or close-only fill.
+- `position_margin_units`: order margin already moved into position collateral after an opening fill.
+- `released_units + position_margin_units <= reserved_units` prevents double release or double consumption.
+- `order_id` references `trading_orders(order_id)`, so a reservation cannot exist without an order row.
+- Order entry inserts the order before reserving margin; a duplicate `clientOrderId` therefore returns the existing order without locking funds again. The insert conflict target is only the partial `(user_id, client_order_id)` index, so `order_id` or unrelated uniqueness conflicts fail.
+
+`account_position_margins` tracks current position collateral by `user_id + symbol + asset`.
+Opening fills increase this table by consuming order reservation. Closing fills release it
+proportionally back to `account_balances.available_units`.
+Opening fills are required to consume an existing non-reduce-only order reservation. Missing
+reservation rows or skipped margin migration updates fail the account trade transaction instead
+of creating an uncollateralized position.
+
+`account_deficits` tracks bankruptcy deficits without allowing negative `account_balances` columns.
+Realized profits first clear deficits, then increase `available_units`. Realized losses reduce
+`available_units`, then the portion of `locked_units` backed by `account_position_margins`, and any remainder
+increases `deficit_units`. Order-reservation locked funds are not eligible for PnL, trading-fee, or funding-fee loss
+debits. When position-backed locked collateral is consumed, the matching `account_position_margins`
+rows are reduced under `FOR UPDATE` so later position-margin releases cannot over-credit available balance.
+
+`account_positions` stores net perpetual exposure:
+
+- `instrument_version`: contract version for the current non-zero exposure. It is `NULL` when the position is flat.
+- `signed_quantity_steps`: positive for long, negative for short.
+- `entry_price_ticks`: average entry in exchange-core ticks.
+- `realized_pnl_units`: realized PnL accumulator in the instrument settlement asset. Closing fills are
+  written to `account_ledger_entries` as `TRADE_PNL`.
+- Maker/taker fee debits or rebates are written to `account_ledger_entries` as `TRADE_FEE`.
+
+The account provider deduplicates `trading_match_trades` with `account_processed_trades(symbol, trade_id)`.
+All balance and margin transitions run inside one PostgreSQL transaction and lock the affected
+position/margin rows with `FOR UPDATE`. Position, balance, deficit, ledger, reservation, and
+position-margin writes are fail-fast when an expected row is not written.
+For `TRADE_PNL` and `TRADE_FEE`, both the ledger insert and the balance-after backfill must touch one row; trade
+deduplication is handled by `account_processed_trades(symbol, trade_id)`, not by skipping trade ledger
+conflicts.
+
+`account_outbox_events` stores account-side Kafka events written inside the same transaction as the
+account state change. It currently carries `POSITION_UPDATED` events for WebSocket private position
+pushes:
+
+- `id`: database-allocated outbox id.
+- `topic`: Kafka destination, for example `surprising.account.position.events.v1`.
+- `event_key`: Kafka key, currently the normalized symbol.
+- `payload`: JSONB event body.
+- `attempts`, `next_attempt_at`, `published_at`, and `last_error`: retry and publish state.
+- `POSITION_UPDATED` payloads carry the original match-trade `traceId`, so WebSocket/private-account
+  pushes can be correlated with the order and matching rows.
+
+Indexes:
+
+```sql
+CREATE INDEX account_outbox_pending_idx
+    ON account_outbox_events (next_attempt_at, id)
+    WHERE published_at IS NULL;
+
+CREATE INDEX account_outbox_aggregate_idx
+    ON account_outbox_events (aggregate_type, aggregate_id);
+```
+
+The publisher claims pending rows with `FOR UPDATE SKIP LOCKED`, so multiple account-provider nodes
+can drain the outbox safely. Publishing is at-least-once; consumers should deduplicate by event id,
+trade id, or their own latest-position version rules.
+
+## Liquidation Tables
+
+`liquidation_orders` audits each liquidation candidate outcome:
+
+- `SUBMITTED` rows must have positive `quantity_steps`.
+- `CANCELED` rows may have `quantity_steps = 0` when the account has recovered or the position is gone.
+- The provider locks live `account_positions`, locks existing same-side reduce-only `trading_orders`, writes cancel-request events/commands for them, and then sizes the staged liquidation order from `abs(livePosition)`.
+- Existing user reduce-only orders must not reduce liquidation capacity; otherwise a far-away GTC close order could block forced liquidation.
+- Strong liquidation order creation does not use broad conflict suppression on `trading_orders`; uniqueness violations roll the transaction back.
+- Sizing first attempts risk-bracket reduction, then configured partial close ratios, and only fully closes when the margin ratio is above the full-close threshold.

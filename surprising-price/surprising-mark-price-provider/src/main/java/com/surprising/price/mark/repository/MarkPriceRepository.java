@@ -16,10 +16,19 @@ public class MarkPriceRepository {
 
     private static final String INSERT_SQL = """
             INSERT INTO price_mark_ticks (
-                symbol, sequence, mark_price, index_price, price1, price2, last_trade_price,
+                symbol, sequence, mark_price, mark_price_units, index_price, price1, price2, last_trade_price,
                 best_bid_price, best_ask_price, funding_rate, next_funding_time, time_until_funding_seconds,
                 basis_average, basis_window_seconds, clamp_low, clamp_high, status, event_time
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            )
+            SELECT ?, ?, ?,
+                   CAST(round(? * qs.scale_units) AS BIGINT),
+                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+              FROM instruments i
+              JOIN instrument_current_versions c
+                ON c.symbol = i.symbol AND c.version = i.version
+              JOIN account_asset_scales qs
+                ON qs.asset = i.quote_asset
+             WHERE i.symbol = ?
             ON CONFLICT (symbol, sequence) DO NOTHING
             """;
 
@@ -65,11 +74,16 @@ public class MarkPriceRepository {
     }
 
     public void save(MarkPriceEvent event) {
-        jdbcTemplate.update(INSERT_SQL, event.symbol(), event.sequence(), event.markPrice(), event.indexPrice(),
+        int rows = jdbcTemplate.update(INSERT_SQL, event.symbol(), event.sequence(), event.markPrice(),
+                event.markPrice(), event.indexPrice(),
                 event.price1(), event.price2(), event.lastTradePrice(), event.bestBidPrice(), event.bestAskPrice(),
                 event.fundingRate(), Timestamp.from(event.nextFundingTime()), event.timeUntilFundingSeconds(),
                 event.basisAverage(), event.basisWindowSeconds(), event.clampLow(), event.clampHigh(),
-                event.status().name(), Timestamp.from(event.eventTime()));
+                event.status().name(), Timestamp.from(event.eventTime()), event.symbol());
+        if (rows != 1) {
+            throw new IllegalStateException("mark price insert failed for " + event.symbol()
+                    + " sequence=" + event.sequence());
+        }
     }
 
     public Optional<MarkPriceResponse> latest(String symbol) {
@@ -83,6 +97,7 @@ public class MarkPriceRepository {
         List<MarkPriceResponse> rows = jdbcTemplate.query(sql, (rs, rowNum) -> new MarkPriceResponse(
                 rs.getString("symbol"),
                 rs.getBigDecimal("mark_price"),
+                rs.getLong("mark_price_units"),
                 rs.getBigDecimal("index_price"),
                 rs.getBigDecimal("price1"),
                 rs.getBigDecimal("price2"),
@@ -115,6 +130,7 @@ public class MarkPriceRepository {
         return jdbcTemplate.query(sql, (rs, rowNum) -> new MarkPriceResponse(
                         rs.getString("symbol"),
                         rs.getBigDecimal("mark_price"),
+                        rs.getLong("mark_price_units"),
                         rs.getBigDecimal("index_price"),
                         rs.getBigDecimal("price1"),
                         rs.getBigDecimal("price2"),

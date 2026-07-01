@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.surprising</groupId>
+        <artifactId>surprising-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../surprising-parent/pom.xml</relativePath>
+    </parent>
+
+    <artifactId>surprising-insurance</artifactId>
+    <packaging>pom</packaging>
+    <name>surprising-insurance</name>
+    <description>Insurance fund and bankruptcy deficit coverage services</description>
+
+    <modules>
+        <module>surprising-insurance-api</module>
+        <module>surprising-insurance-provider</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-insurance-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>

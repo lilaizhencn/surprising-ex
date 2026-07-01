@@ -1,0 +1,29 @@
+server:
+  port: 9091
+
+spring:
+  application:
+    name: surprising-adl-provider
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 4
+      connection-timeout: 3000
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  adl:
+    scanner:
+      scan-delay-ms: 1000
+      min-deficit-age-ms: 10000
+      max-mark-age-ms: 5000
+      batch-size: 50
+      max-deleverages-per-deficit: 20
+      candidate-multiplier: 5

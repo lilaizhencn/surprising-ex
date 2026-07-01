@@ -1,0 +1,30 @@
+package com.surprising.funding.provider.config;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.Map;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.serialization.StringSerializer;
+import org.junit.jupiter.api.Test;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+
+class FundingKafkaConfigurationTest {
+
+    @Test
+    void producerUsesDurableIdempotentSettings() {
+        FundingProperties properties = new FundingProperties();
+        properties.getKafka().setBootstrapServers("kafka-h:9092");
+
+        var factory = (DefaultKafkaProducerFactory<String, String>)
+                new FundingKafkaConfiguration().fundingProducerFactory(properties);
+
+        Map<String, Object> config = factory.getConfigurationProperties();
+        assertThat(config).containsEntry(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka-h:9092");
+        assertThat(config).containsEntry(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        assertThat(config).containsEntry(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        assertThat(config).containsEntry(ProducerConfig.ACKS_CONFIG, "all");
+        assertThat(config).containsEntry(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+        assertThat(config).containsEntry(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
+        assertThat(config).containsEntry(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
+    }
+}
