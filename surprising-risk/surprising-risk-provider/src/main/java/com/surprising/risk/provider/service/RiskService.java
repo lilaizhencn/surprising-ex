@@ -10,6 +10,7 @@ import com.surprising.risk.api.model.RiskPositionSnapshotResponse;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.model.CalculatedPositionRisk;
+import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
 import com.surprising.risk.provider.repository.RiskOutboxRepository;
 import com.surprising.risk.provider.repository.RiskRepository;
@@ -87,14 +88,14 @@ public class RiskService {
         if (!properties.getCalculation().isEnabled()) {
             return;
         }
-        RiskGroupKey key = riskRepository.riskGroupForPositionEvent(userId, normalizeSymbol(symbol),
+        PositionRiskTarget target = riskRepository.riskTargetForPositionEvent(userId, normalizeSymbol(symbol),
                 instrumentVersion).orElse(null);
-        if (key == null) {
+        if (target == null) {
             log.debug("Position update did not resolve to a risk group userId={} symbol={} version={}",
                     userId, symbol, instrumentVersion);
             return;
         }
-        scanRiskGroup(key);
+        scanRiskGroup(target.riskGroupKey(), target);
     }
 
     private boolean ownsRiskGroup(RiskGroupKey key) {
@@ -105,15 +106,20 @@ public class RiskService {
     }
 
     private void scanRiskGroup(RiskGroupKey key) {
+        scanRiskGroup(key, null);
+    }
+
+    private void scanRiskGroup(RiskGroupKey key, PositionRiskTarget eventTarget) {
         if (!ownsRiskGroup(key)) {
             return;
         }
         transactionTemplate.executeWithoutResult(status -> {
             List<CalculatedPositionRisk> positions = riskRepository.calculatePositions(key,
                     properties.getCalculation().getMaxMarkAge());
-            if (!positions.isEmpty()) {
-                scanGroup(key, positions, Instant.now());
+            if (positions.isEmpty() && riskRepository.hasOpenPositions(key)) {
+                return;
             }
+            scanGroup(key, positions, eventTarget, Instant.now());
         });
     }
 
@@ -133,7 +139,10 @@ public class RiskService {
         return new LiquidationCandidateQueryResponse(rows.size(), rows);
     }
 
-    private void scanGroup(RiskGroupKey key, List<CalculatedPositionRisk> positions, Instant now) {
+    private void scanGroup(RiskGroupKey key,
+                           List<CalculatedPositionRisk> positions,
+                           PositionRiskTarget eventTarget,
+                           Instant now) {
         long walletBalance = riskRepository.walletBalanceUnits(key.userId(), key.settleAsset());
         long unrealizedPnl = sumUnrealizedPnl(positions);
         long maintenanceMargin = sumMaintenanceMargin(positions);
@@ -157,6 +166,12 @@ public class RiskService {
             if (accountStatus == RiskStatus.LIQUIDATION) {
                 createCandidate(account, position, positionMarginRatio, now);
             }
+        }
+        if (eventTarget != null && positions.stream().noneMatch(position -> position.symbol().equals(eventTarget.symbol()))) {
+            CalculatedPositionRisk flatPosition = new CalculatedPositionRisk(eventTarget.userId(),
+                    eventTarget.symbol(), eventTarget.instrumentVersion(), eventTarget.settleAsset(),
+                    0L, 0L, 0L, 0L, 0L, 0L);
+            riskRepository.savePositionSnapshot(snapshotId, flatPosition, 0L, RiskStatus.NORMAL, now);
         }
     }
 

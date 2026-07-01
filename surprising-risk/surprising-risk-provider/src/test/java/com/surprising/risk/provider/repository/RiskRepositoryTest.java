@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import com.surprising.risk.api.model.RiskAccountSnapshotResponse;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.risk.provider.model.CalculatedPositionRisk;
+import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -138,21 +139,40 @@ class RiskRepositoryTest {
     }
 
     @Test
-    void riskGroupForPositionEventUsesEventVersionOrCurrentVersionFallback() {
+    void riskTargetForPositionEventUsesEventVersionOrCurrentVersionFallback() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("BTC-USDT"),
-                eq(7L), eq(7L), eq("BTC-USDT"))).thenReturn(List.of(new RiskGroupKey(1001L, "USDT")));
+                eq(7L), eq(7L), eq("BTC-USDT")))
+                .thenReturn(List.of(new PositionRiskTarget(1001L, "BTC-USDT", 7L, "USDT")));
 
-        Optional<RiskGroupKey> key = repository.riskGroupForPositionEvent(1001L, "BTC-USDT", 7L);
+        Optional<PositionRiskTarget> target = repository.riskTargetForPositionEvent(1001L, "BTC-USDT", 7L);
 
-        assertThat(key).contains(new RiskGroupKey(1001L, "USDT"));
+        assertThat(target).contains(new PositionRiskTarget(1001L, "BTC-USDT", 7L, "USDT"));
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("BTC-USDT"),
                 eq(7L), eq(7L), eq("BTC-USDT"));
         assertThat(sql.getValue())
+                .contains("i.version AS instrument_version")
                 .contains("WHEN ? > 0 THEN ?")
                 .contains("instrument_current_versions")
                 .contains("WHERE cv.symbol = ?");
+    }
+
+    @Test
+    void hasOpenPositionsChecksRiskGroupWithoutMarkFreshnessFilter() {
+        RiskRepository repository = new RiskRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("USDT"))).thenReturn(List.of(1));
+
+        boolean exists = repository.hasOpenPositions(new RiskGroupKey(1001L, "USDT"));
+
+        assertThat(exists).isTrue();
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("USDT"));
+        assertThat(sql.getValue())
+                .contains("FROM account_positions p")
+                .contains("JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version")
+                .contains("p.signed_quantity_steps <> 0")
+                .doesNotContain("price_mark_ticks");
     }
 
     @Test

@@ -7,6 +7,7 @@ import com.surprising.risk.api.model.RiskAccountSnapshotResponse;
 import com.surprising.risk.api.model.RiskPositionSnapshotResponse;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.risk.provider.model.CalculatedPositionRisk;
+import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
 import com.surprising.risk.provider.service.RiskMath;
 import java.sql.Timestamp;
@@ -61,9 +62,11 @@ public class RiskRepository {
                 afterUserId, afterSettleAsset, cappedLimit);
     }
 
-    public Optional<RiskGroupKey> riskGroupForPositionEvent(long userId, String symbol, long instrumentVersion) {
+    public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId, String symbol, long instrumentVersion) {
         String sql = """
                 SELECT CAST(? AS bigint) AS user_id,
+                       i.symbol,
+                       i.version AS instrument_version,
                        i.settle_asset
                   FROM instruments i
                  WHERE i.symbol = ?
@@ -77,10 +80,25 @@ public class RiskRepository {
                        END
                  LIMIT 1
                 """;
-        return jdbcTemplate.query(sql, (rs, rowNum) -> new RiskGroupKey(rs.getLong("user_id"),
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new PositionRiskTarget(
+                rs.getLong("user_id"),
+                rs.getString("symbol"),
+                rs.getLong("instrument_version"),
                 rs.getString("settle_asset")), userId, symbol, instrumentVersion, instrumentVersion, symbol)
                 .stream()
                 .findFirst();
+    }
+
+    public boolean hasOpenPositions(RiskGroupKey key) {
+        return jdbcTemplate.query("""
+                SELECT 1
+                  FROM account_positions p
+                  JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
+                 WHERE p.user_id = ?
+                   AND i.settle_asset = ?
+                   AND p.signed_quantity_steps <> 0
+                 LIMIT 1
+                """, (rs, rowNum) -> rs.getInt(1), key.userId(), key.settleAsset()).stream().findFirst().isPresent();
     }
 
     public List<CalculatedPositionRisk> calculatePositions(Duration maxMarkAge) {

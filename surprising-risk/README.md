@@ -65,6 +65,9 @@ for the affected `userId + settleAsset` group, using the event `symbol` and pinn
 risk group. If the event version is `0`, the provider falls back to `instrument_current_versions` so a flat-position
 event can still resolve the settlement asset. This event-driven path reduces liquidation latency; the keyset scheduled
 scanner remains the safety net for missed Kafka events, stale marks, replays, and operator pauses.
+If the event closes the last open position in that account asset group, risk-provider still writes an account snapshot
+with zero unrealized PnL, zero maintenance margin, and `NORMAL` status. It also writes a zero-quantity position snapshot
+for the event symbol so latest position-risk queries do not return stale nonzero exposure.
 
 ## Kafka
 
@@ -168,6 +171,9 @@ Port:
   prevents duplicate writers if events are replayed or two nodes race on the same `userId + settleAsset` group.
 - The position-event consumer rejects records whose Kafka key does not match payload `symbol`. This keeps symbol
   ordering and partitioning invariants aligned with matching, account, and liquidation modules.
+- A position event that produces no calculated positions is not automatically treated as flat. The provider first checks
+  whether the `userId + settleAsset` group still has open positions; if it does, the empty result is treated as stale or
+  missing marks and no misleading `NORMAL` snapshot is written.
 - If any open position in a `userId + settleAsset` group has no fresh mark price, the whole group is skipped for that
   pass. Partial account-risk aggregation is not allowed because it can understate maintenance margin.
 - The database keeps at most one active `NEW/PROCESSING` liquidation candidate per `userId + symbol`; a later scan can create a new candidate only after the previous one is `COMPLETED` or `CANCELED`.

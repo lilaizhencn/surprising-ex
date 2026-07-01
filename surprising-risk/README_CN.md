@@ -61,6 +61,8 @@ account_positions + account_balances + account_deficits
 provider 还会消费 `surprising.account.position.events.v1`。账户完成成交结算并更新持仓后，会触发对应
 `userId + settleAsset` 组立即扫描；risk 会用事件里的 `symbol` 和持仓锁定的 `instrumentVersion` 定位风险组。
 如果事件版本是 `0`，会回退查 `instrument_current_versions`，这样完全平仓后的事件仍能定位结算资产。这个事件驱动链路用于降低爆仓发现延迟；keyset 定时扫描仍是兜底，用来覆盖 Kafka 漏处理、mark 过期、重放和人工暂停后的恢复。
+如果该事件关闭了账户资产组里的最后一个开放持仓，risk-provider 仍会写一条账户快照：未实现盈亏为 0、
+维持保证金为 0、状态为 `NORMAL`。同时会给该事件 symbol 写一条 0 仓位 position snapshot，避免最新持仓风险查询继续返回旧的非零仓位。
 
 ## Kafka
 
@@ -155,6 +157,8 @@ mvn -pl :surprising-risk-provider -am spring-boot:run
 - 扫描器使用 `userId + settleAsset` keyset 分页，并依赖 `account_positions_open_scan_idx` 部分索引避免在抢租约前加载全量持仓。不要改成 offset 分页；offset 在持仓变化时会越来越慢，也可能跳过或重复账户组。
 - 持仓事件扫描和定时扫描都会走同一个 `risk_scan_leases` ownership guard 和同一个账户组事务。Kafka consumer group 先减少重复事件处理，PostgreSQL 租约再防止事件重放或多节点竞争时出现重复写快照/候选。
 - 持仓事件消费者会拒绝 Kafka key 和 payload `symbol` 不一致的记录，保证 symbol 分区和顺序语义与撮合、账户、强平模块一致。
+- 如果持仓事件计算结果为空，provider 不会直接假设账户已经平仓。它会先检查该 `userId + settleAsset`
+  组是否仍有开放持仓；如果仍有开放持仓，空结果会被视为 mark 过期或缺失，本轮不写误导性的 `NORMAL` 快照。
 - 如果某个 `userId + settleAsset` 组里任何开放持仓没有新鲜 mark price，本轮会跳过整个组。风险聚合不允许只计算部分持仓，否则会低估维持保证金。
 - 数据库保证同一个 `userId + symbol` 同时最多只有一个 `NEW/PROCESSING` 爆仓候选；上一个候选进入 `COMPLETED` 或 `CANCELED` 后，后续扫描才能生成新的候选。
 - 风险快照和 outbox 写入必须影响 1 行；如果 insert/update 被冲突或异常状态跳过，risk-provider 会 fail-fast 并回滚当前事务。

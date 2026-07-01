@@ -253,6 +253,11 @@ unrealized PnL, equity, maintenance margin, margin ratio, and status.
   exchange-core ticks with the position's pinned `instrument_version`.
 - `notional_units`, `unrealized_pnl_units`, and `maintenance_margin_units`: long settlement-asset units.
 
+When an account position event closes a symbol completely, risk-provider writes a zero-quantity position snapshot for
+that symbol. In that flat snapshot, `entry_price_ticks` and `mark_price_ticks` are `0`, and the account snapshot carries
+zero unrealized PnL and zero maintenance margin. This prevents `latestPositions` from showing stale nonzero exposure
+after a full close.
+
 Risk, funding, liquidation, and ADL read instrument parameters and mark quote units from PostgreSQL, convert them to
 version-specific mark ticks, then
 calculate contract notional/PnL/margin amounts through shared Java `PerpetualContractMath` long

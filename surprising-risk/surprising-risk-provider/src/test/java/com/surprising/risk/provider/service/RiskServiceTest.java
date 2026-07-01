@@ -11,6 +11,7 @@ import com.surprising.risk.provider.model.CalculatedPositionRisk;
 import com.surprising.risk.provider.repository.RiskOutboxRepository;
 import com.surprising.risk.provider.repository.RiskRepository;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
+import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
 import java.util.Comparator;
 import java.time.Duration;
@@ -76,7 +77,7 @@ class RiskServiceTest {
                         10L, 65_000L, 65_000L, 650_000L, 0L, 100L),
                 new CalculatedPositionRisk(2002L, "ETH-USDT", 7L, "USDT",
                         10L, 3_500L, 3_500L, 35_000L, 0L, 100L));
-        riskRepository.positionEventGroup = Optional.of(new RiskGroupKey(2002L, "USDT"));
+        riskRepository.positionEventTarget = Optional.of(new PositionRiskTarget(2002L, "ETH-USDT", 7L, "USDT"));
         riskRepository.walletBalanceUnits = 1_000_000L;
         RiskProperties properties = new RiskProperties();
         properties.getCoordination().setEnabled(false);
@@ -103,7 +104,7 @@ class RiskServiceTest {
     @Test
     void positionUpdateDoesNothingWhenCalculationIsDisabled() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
-        riskRepository.positionEventGroup = Optional.of(new RiskGroupKey(1001L, "USDT"));
+        riskRepository.positionEventTarget = Optional.of(new PositionRiskTarget(1001L, "BTC-USDT", 7L, "USDT"));
         RiskProperties properties = new RiskProperties();
         properties.getCalculation().setEnabled(false);
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
@@ -123,7 +124,7 @@ class RiskServiceTest {
     @Test
     void positionUpdateRespectsRiskGroupLease() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
-        riskRepository.positionEventGroup = Optional.of(new RiskGroupKey(1001L, "USDT"));
+        riskRepository.positionEventTarget = Optional.of(new PositionRiskTarget(1001L, "BTC-USDT", 7L, "USDT"));
         riskRepository.scanLeaseAcquired = false;
         RiskProperties properties = new RiskProperties();
         properties.getCoordination().setNodeId("risk-node-b");
@@ -141,6 +142,69 @@ class RiskServiceTest {
         assertThat(riskRepository.savedAccounts).isZero();
         assertThat(outboxRepository.enqueued).isZero();
         assertThat(transactionManager.commits).isZero();
+    }
+
+    @Test
+    void positionUpdateWritesFlatRiskSnapshotsWhenPositionIsClosed() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        riskRepository.positions = List.of();
+        riskRepository.positionEventTarget = Optional.of(new PositionRiskTarget(1001L, "BTC-USDT", 7L, "USDT"));
+        riskRepository.walletBalanceUnits = 1_000_000L;
+        RiskProperties properties = new RiskProperties();
+        properties.getCoordination().setEnabled(false);
+        FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
+        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+
+        service.scanPositionUpdate(1001L, "BTC-USDT", 0L);
+
+        assertThat(riskRepository.positionEventResolveCalls).isEqualTo(1);
+        assertThat(riskRepository.calculateCalls).isEqualTo(1);
+        assertThat(riskRepository.savedAccounts).isEqualTo(1);
+        assertThat(riskRepository.lastAccountSnapshot.status()).isEqualTo(RiskStatus.NORMAL);
+        assertThat(riskRepository.lastAccountSnapshot.walletBalanceUnits()).isEqualTo(1_000_000L);
+        assertThat(riskRepository.lastAccountSnapshot.unrealizedPnlUnits()).isZero();
+        assertThat(riskRepository.lastAccountSnapshot.maintenanceMarginUnits()).isZero();
+        assertThat(riskRepository.lastAccountSnapshot.marginRatioPpm()).isZero();
+        assertThat(riskRepository.savedPositions).isEqualTo(1);
+        assertThat(riskRepository.savedPositionSnapshots).singleElement().satisfies(position -> {
+            assertThat(position.symbol()).isEqualTo("BTC-USDT");
+            assertThat(position.instrumentVersion()).isEqualTo(7L);
+            assertThat(position.signedQuantitySteps()).isZero();
+            assertThat(position.entryPriceTicks()).isZero();
+            assertThat(position.markPriceTicks()).isZero();
+            assertThat(position.notionalUnits()).isZero();
+            assertThat(position.unrealizedPnlUnits()).isZero();
+            assertThat(position.maintenanceMarginUnits()).isZero();
+        });
+        assertThat(outboxRepository.enqueued).isZero();
+        assertThat(transactionManager.commits).isEqualTo(1);
+        assertThat(transactionManager.rollbacks).isZero();
+    }
+
+    @Test
+    void positionUpdateDoesNotWriteFlatSnapshotWhenOpenPositionsRemainButMarksAreStale() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        riskRepository.positions = List.of();
+        riskRepository.openPositionsExist = true;
+        riskRepository.positionEventTarget = Optional.of(new PositionRiskTarget(1001L, "BTC-USDT", 7L, "USDT"));
+        RiskProperties properties = new RiskProperties();
+        properties.getCoordination().setEnabled(false);
+        FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
+        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+
+        service.scanPositionUpdate(1001L, "BTC-USDT", 7L);
+
+        assertThat(riskRepository.calculateCalls).isEqualTo(1);
+        assertThat(riskRepository.hasOpenPositionsCalls).isEqualTo(1);
+        assertThat(riskRepository.savedAccounts).isZero();
+        assertThat(riskRepository.savedPositions).isZero();
+        assertThat(outboxRepository.enqueued).isZero();
+        assertThat(transactionManager.commits).isEqualTo(1);
+        assertThat(transactionManager.rollbacks).isZero();
     }
 
     @Test
@@ -283,18 +347,22 @@ class RiskServiceTest {
                 "BTC-USDT", 7L, "USDT", 10L, 65_000L, 60_000L, 600_000L, -100L, 100L));
         private Set<String> unreadableCandidateSymbols = Set.of();
         private final Map<Long, CalculatedPositionRisk> candidatePositions = new HashMap<>();
+        private final List<CalculatedPositionRisk> savedPositionSnapshots = new ArrayList<>();
+        private RiskAccountSnapshotResponse lastAccountSnapshot;
         private int savedAccounts;
         private int savedPositions;
         private boolean returnInsertedCandidate;
         private int calculateCalls;
         private int riskGroupCalls;
         private final List<Integer> riskGroupLimits = new ArrayList<>();
-        private Optional<RiskGroupKey> positionEventGroup = Optional.empty();
+        private Optional<PositionRiskTarget> positionEventTarget = Optional.empty();
         private int positionEventResolveCalls;
         private long lastPositionEventUserId;
         private String lastPositionEventSymbol;
         private long lastPositionEventVersion;
         private long walletBalanceUnits;
+        private boolean openPositionsExist;
+        private int hasOpenPositionsCalls;
         private boolean scanLeaseAcquired = true;
         private int scanLeaseAttempts;
         private String lastOwnerId;
@@ -319,12 +387,14 @@ class RiskServiceTest {
         }
 
         @Override
-        public Optional<RiskGroupKey> riskGroupForPositionEvent(long userId, String symbol, long instrumentVersion) {
+        public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId,
+                                                                       String symbol,
+                                                                       long instrumentVersion) {
             positionEventResolveCalls++;
             lastPositionEventUserId = userId;
             lastPositionEventSymbol = symbol;
             lastPositionEventVersion = instrumentVersion;
-            return positionEventGroup;
+            return positionEventTarget;
         }
 
         @Override
@@ -334,6 +404,14 @@ class RiskServiceTest {
                     .filter(position -> position.userId() == key.userId()
                             && position.settleAsset().equals(key.settleAsset()))
                     .toList();
+        }
+
+        @Override
+        public boolean hasOpenPositions(RiskGroupKey key) {
+            hasOpenPositionsCalls++;
+            return openPositionsExist || positions.stream()
+                    .anyMatch(position -> position.userId() == key.userId()
+                            && position.settleAsset().equals(key.settleAsset()));
         }
 
         @Override
@@ -353,6 +431,7 @@ class RiskServiceTest {
         @Override
         public void saveAccountSnapshot(RiskAccountSnapshotResponse snapshot) {
             savedAccounts++;
+            lastAccountSnapshot = snapshot;
         }
 
         @Override
@@ -362,6 +441,7 @@ class RiskServiceTest {
                                          RiskStatus status,
                                          Instant now) {
             savedPositions++;
+            savedPositionSnapshots.add(position);
         }
 
         @Override

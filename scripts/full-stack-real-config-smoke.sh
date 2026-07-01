@@ -1426,6 +1426,9 @@ topup_close_order="$(place_order_symbol "${ETH_SYMBOL}" "${TOPUP_USER}" "real-to
 wait_order_state "${topup_close_order}" "FILLED" "${TOPUP_QTY}" "0"
 wait_position_symbol "${ETH_SYMBOL}" "${TOPUP_USER}" "0" "0"
 wait_position_symbol "${ETH_SYMBOL}" "${TOPUP_MAKER_USER}" "0" "0"
+wait_sql_equals "top-up user latest risk position is flat" \
+  "SELECT signed_quantity_steps || ':' || notional_units || ':' || maintenance_margin_units FROM risk_position_snapshots WHERE user_id = ${TOPUP_USER} AND symbol = '${ETH_SYMBOL}' ORDER BY event_time DESC, snapshot_id DESC LIMIT 1" \
+  "0:0:0"
 
 echo "Scenario: liquidation links risk, liquidation, matching, account, and insurance"
 adjust_insurance_fund 100000000000 "real-config-insurance-seed-${RUN_ID}"

@@ -993,7 +993,10 @@ CREATE TABLE IF NOT EXISTS risk_position_snapshots (
     CONSTRAINT risk_position_snapshots_instrument_fk
         FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT risk_position_snapshots_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
-    CONSTRAINT risk_position_snapshots_positive_prices CHECK (entry_price_ticks > 0 AND mark_price_ticks > 0),
+    CONSTRAINT risk_position_snapshots_price_check CHECK (
+        (signed_quantity_steps = 0 AND entry_price_ticks = 0 AND mark_price_ticks = 0)
+        OR (signed_quantity_steps <> 0 AND entry_price_ticks > 0 AND mark_price_ticks > 0)
+    ),
     CONSTRAINT risk_position_snapshots_non_negative CHECK (
         notional_units >= 0 AND maintenance_margin_units >= 0 AND margin_ratio_ppm >= 0
     ),
