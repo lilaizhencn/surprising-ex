@@ -15,7 +15,7 @@ Perpetual instrument configuration module for Surprising Exchange. It is the pro
 - Price and quantity rules: tick size, step size, min/max order quantity, notional limits, precision.
 - Order rules: supported order types, time in force, post-only, reduce-only, market-order switches.
 - Risk rules: maximum leverage, initial margin rate, maintenance margin rate, risk limit brackets.
-- Default trading fee schedule: maker/taker fee rates in ppm. Positive values charge the user; negative values represent rebates. User/VIP/market-maker overrides are resolved by order entry and snapshotted on the order.
+- Default trading fee schedule: maker/taker fee rates in ppm. Positive values charge the user; negative values represent rebates. User/VIP/market-maker/promotion overrides are resolved from order-provider `trading_fee_schedules` and snapshotted on the order.
 - Funding configuration: interval, interest rate, cap/floor, impact notional.
 - Index components: external spot source REST/WS config, weights, USD/USDT conversion rules.
 - Versioning: every change creates a new `version`; `instrument_current_versions` switches the current snapshot.
@@ -31,7 +31,7 @@ Instrument configuration is stored in exchange-core-friendly long units:
 - `min_notional_units` / `max_notional_units`: long notional bounds. For `LINEAR_PERPETUAL` they are settlement asset units; for `INVERSE_PERPETUAL` they are quote face-value units.
 - `notional_multiplier_units`: for `LINEAR_PERPETUAL`, settlement units per `priceTick * quantityStep`; for `INVERSE_PERPETUAL`, quote face-value units per contract step.
 - `contract_type` is not descriptive metadata only. Account, risk, funding, liquidation, and ADL formulas branch on it.
-- `maker_fee_rate_ppm` / `taker_fee_rate_ppm`: product default fees. Order entry applies `trading_fee_schedules` overrides and writes the final rates to `trading_orders`; account settlement writes `TRADE_FEE` ledger entries from that order snapshot. Positive values debit the user, and negative values credit a rebate.
+- `maker_fee_rate_ppm` / `taker_fee_rate_ppm`: product default fees. Order entry applies `trading_fee_schedules` overrides and writes the final rates to `trading_orders`; account settlement writes `TRADE_FEE` ledger entries from that order snapshot. Positive values debit the user, and negative values credit a rebate. Default BTC/ETH contracts use maker `200 ppm` and taker `500 ppm`.
 - `*_rate_ppm`, `max_leverage_ppm`, `weight_ppm`: rates, leverage, and weights use ppm.
 
 `surprising-instrument-api` also owns `PerpetualContractMath`, the shared long-unit formula implementation for linear/inverse notional, unrealized PnL, notional-per-step, and maintenance margin. Risk, funding, liquidation, and ADL should call this shared math instead of reimplementing contract formulas in SQL.

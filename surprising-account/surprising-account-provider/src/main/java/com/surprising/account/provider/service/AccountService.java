@@ -118,28 +118,28 @@ public class AccountService {
                 : accountRepository.contractSpec(symbol, current.instrumentVersion());
         long closeSteps = MarginTransferMath.closeSteps(current.signedQuantitySteps(), side, quantitySteps);
         long openSteps = Math.subtractExact(quantitySteps, closeSteps);
-        // Close first: old position margin can be returned before any flipped remainder becomes new exposure.
+        PositionChange change = positionCalculator.apply(current, side, priceTicks, quantitySteps,
+                positionSpec, fillSpec);
+        if (closeSteps > 0) {
+            accountRepository.settleRealizedPnl(userId, positionSpec.settleAsset(), orderId, tradeId, symbol,
+                    normalizedMarginMode, change.realizedPnlDeltaUnits(), eventTime);
+        }
+        if (openSteps > 0) {
+            long actualMarginUnits = MarginTransferMath.openingInitialMarginUnits(fillSpec, priceTicks, openSteps);
+            accountRepository.consumeOrderMargin(orderId, userId, symbol, normalizedMarginMode, openSteps, actualMarginUnits,
+                    orderCompleted, eventTime);
+        }
+        OrderFeeSnapshot feeSnapshot = accountRepository.orderFeeSnapshot(orderId, userId, symbol);
+        long feeRatePpm = taker ? feeSnapshot.takerFeeRatePpm() : feeSnapshot.makerFeeRatePpm();
+        long feeDeltaUnits = TradeFeeMath.feeDeltaUnits(fillSpec, priceTicks, quantitySteps, feeRatePpm);
+        accountRepository.settleTradeFee(userId, fillSpec.settleAsset(), orderId, tradeId, feeDeltaUnits,
+                taker ? "TAKER_FEE" : "MAKER_FEE", feeRatePpm, symbol, normalizedMarginMode, eventTime);
         if (closeSteps > 0) {
             accountRepository.releasePositionMargin(userId, symbol, normalizedMarginMode, closeSteps,
                     Math.absExact(current.signedQuantitySteps()), eventTime);
             accountRepository.releaseOrderMargin(orderId, userId, symbol, closeSteps,
                     orderCompleted && openSteps == 0, eventTime);
         }
-        // Open second: filled opening quantity moves order-reserved margin into position margin accounting.
-        if (openSteps > 0) {
-            long actualMarginUnits = MarginTransferMath.openingInitialMarginUnits(fillSpec, priceTicks, openSteps);
-            accountRepository.consumeOrderMargin(orderId, userId, symbol, normalizedMarginMode, openSteps, actualMarginUnits,
-                    orderCompleted, eventTime);
-        }
-        PositionChange change = positionCalculator.apply(current, side, priceTicks, quantitySteps,
-                positionSpec, fillSpec);
-        accountRepository.settleRealizedPnl(userId, positionSpec.settleAsset(), orderId, tradeId,
-                change.realizedPnlDeltaUnits(), eventTime);
-        OrderFeeSnapshot feeSnapshot = accountRepository.orderFeeSnapshot(orderId, userId, symbol);
-        long feeRatePpm = taker ? feeSnapshot.takerFeeRatePpm() : feeSnapshot.makerFeeRatePpm();
-        long feeDeltaUnits = TradeFeeMath.feeDeltaUnits(fillSpec, priceTicks, quantitySteps, feeRatePpm);
-        accountRepository.settleTradeFee(userId, fillSpec.settleAsset(), orderId, tradeId, feeDeltaUnits,
-                taker ? "TAKER_FEE" : "MAKER_FEE", feeRatePpm, symbol, eventTime);
         PositionResponse updated = accountRepository.updatePosition(userId, symbol, normalizedMarginMode,
                 change.next(), eventTime);
         if (reduceOnlyOrderPruner != null) {

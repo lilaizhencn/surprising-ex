@@ -19,7 +19,7 @@ public class ReduceOnlyValidator {
         if (!request.reduceOnly()) {
             return ValidationResult.ok();
         }
-        var position = positionLookup.lockedPosition(request.userId(), request.symbol()).orElse(null);
+        var position = positionLookup.lockedPosition(request.userId(), request.symbol(), request.marginMode()).orElse(null);
         long signedQuantity = position == null ? 0L : position.signedQuantitySteps();
         if (signedQuantity == 0) {
             return ValidationResult.reject("reduce-only requires an open position");
@@ -32,7 +32,7 @@ public class ReduceOnlyValidator {
             return ValidationResult.reject("reduce-only side does not reduce current position");
         }
         long pendingCloseSteps = positionLookup.lockedOpenReduceOnlySteps(request.userId(), request.symbol(),
-                position.instrumentVersion(), closeSide);
+                request.marginMode(), position.instrumentVersion(), closeSide);
         long availableCloseSteps = Math.subtractExact(Math.absExact(signedQuantity), pendingCloseSteps);
         if (availableCloseSteps <= 0) {
             return ValidationResult.reject("no reducible quantity is available");

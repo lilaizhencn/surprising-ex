@@ -6,6 +6,7 @@ import com.surprising.trading.api.model.OrderCommandEvent;
 import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderEvent;
 import com.surprising.trading.api.model.OrderEventType;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
@@ -36,6 +37,7 @@ public class LiquidationOrderRepository {
     public OrderCommandEvent createReduceOnlyMarketOrder(long candidateId,
                                                          long userId,
                                                          String symbol,
+                                                         MarginMode marginMode,
                                                          long instrumentVersion,
                                                          OrderSide side,
                                                          long quantitySteps,
@@ -52,10 +54,10 @@ public class LiquidationOrderRepository {
                     price_ticks, quantity_steps, executed_quantity_steps, remaining_quantity_steps,
                     margin_mode, maker_fee_rate_ppm, taker_fee_rate_ppm,
                     reduce_only, post_only, status, reject_reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'MARKET', 'IOC', 0, ?, 0, ?, 'CROSS', ?, ?,
+                ) VALUES (?, ?, ?, ?, ?, ?, 'MARKET', 'IOC', 0, ?, 0, ?, ?, ?, ?,
                     TRUE, FALSE, 'ACCEPTED', NULL, ?, ?)
                 """, orderId, userId, clientOrderId, symbol, instrumentVersion, side.name(), quantitySteps, quantitySteps,
-                feeSnapshot.makerFeeRatePpm(), feeSnapshot.takerFeeRatePpm(),
+                MarginMode.defaultIfNull(marginMode).name(), feeSnapshot.makerFeeRatePpm(), feeSnapshot.takerFeeRatePpm(),
                 Timestamp.from(now), Timestamp.from(now));
         if (orderRows != 1) {
             throw new IllegalStateException("failed to create liquidation trading order");
@@ -74,12 +76,24 @@ public class LiquidationOrderRepository {
         }
         OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, commandId, orderId, userId,
                 clientOrderId, symbol, instrumentVersion, side, OrderType.MARKET, TimeInForce.IOC, 0L, quantitySteps,
-                true, false, now);
+                MarginMode.defaultIfNull(marginMode), true, false, now, null);
         enqueue("LIQUIDATION_ORDER", event.orderId(), properties.getKafka().getOrderEventsTopic(), symbol,
                 OrderEventType.ACCEPTED.name(), serializer.apply(event), now);
         enqueue("LIQUIDATION_ORDER", orderId, properties.getKafka().getOrderCommandsTopic(), symbol,
                 OrderCommandType.PLACE.name(), serializer.apply(command), now);
         return command;
+    }
+
+    public OrderCommandEvent createReduceOnlyMarketOrder(long candidateId,
+                                                         long userId,
+                                                         String symbol,
+                                                         long instrumentVersion,
+                                                         OrderSide side,
+                                                         long quantitySteps,
+                                                         Instant now,
+                                                         java.util.function.Function<Object, String> serializer) {
+        return createReduceOnlyMarketOrder(candidateId, userId, symbol, MarginMode.CROSS, instrumentVersion, side,
+                quantitySteps, now, serializer);
     }
 
     private FeeSnapshot feeSnapshot(long userId, String symbol, long instrumentVersion, Instant now) {
@@ -118,11 +132,13 @@ public class LiquidationOrderRepository {
 
     public int cancelOpenReduceOnlyCloseOrders(long userId,
                                                String symbol,
+                                               MarginMode marginMode,
                                                long instrumentVersion,
                                                OrderSide closeSide,
                                                Instant now,
                                                java.util.function.Function<Object, String> serializer) {
-        List<OpenReduceOnlyOrder> orders = lockOpenReduceOnlyCloseOrders(userId, symbol, instrumentVersion, closeSide);
+        List<OpenReduceOnlyOrder> orders = lockOpenReduceOnlyCloseOrders(userId, symbol, marginMode,
+                instrumentVersion, closeSide);
         for (OpenReduceOnlyOrder order : orders) {
             if (order.status() != OrderStatus.CANCEL_REQUESTED) {
                 requestCancel(order, now, serializer);
@@ -132,16 +148,28 @@ public class LiquidationOrderRepository {
         return orders.size();
     }
 
+    public int cancelOpenReduceOnlyCloseOrders(long userId,
+                                               String symbol,
+                                               long instrumentVersion,
+                                               OrderSide closeSide,
+                                               Instant now,
+                                               java.util.function.Function<Object, String> serializer) {
+        return cancelOpenReduceOnlyCloseOrders(userId, symbol, MarginMode.CROSS, instrumentVersion, closeSide, now,
+                serializer);
+    }
+
     private List<OpenReduceOnlyOrder> lockOpenReduceOnlyCloseOrders(long userId,
                                                                     String symbol,
+                                                                    MarginMode marginMode,
                                                                     long instrumentVersion,
                                                                     OrderSide closeSide) {
         return jdbcTemplate.query("""
                 SELECT order_id, user_id, client_order_id, symbol, instrument_version, side, order_type,
-                       time_in_force, price_ticks, quantity_steps, remaining_quantity_steps, status, post_only
+                       time_in_force, price_ticks, quantity_steps, remaining_quantity_steps, margin_mode, status, post_only
                   FROM trading_orders
                  WHERE user_id = ?
                    AND symbol = ?
+                   AND margin_mode = ?
                    AND instrument_version = ?
                    AND side = ?
                    AND reduce_only = TRUE
@@ -160,8 +188,10 @@ public class LiquidationOrderRepository {
                 TimeInForce.valueOf(rs.getString("time_in_force")),
                 rs.getLong("price_ticks"),
                 rs.getLong("quantity_steps"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 OrderStatus.valueOf(rs.getString("status")),
-                rs.getBoolean("post_only")), userId, symbol, instrumentVersion, closeSide.name());
+                rs.getBoolean("post_only")), userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                instrumentVersion, closeSide.name());
     }
 
     private void requestCancel(OpenReduceOnlyOrder order,
@@ -198,7 +228,8 @@ public class LiquidationOrderRepository {
         OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.CANCEL,
                 sequenceRepository.nextTradingSequence("command"), order.orderId(), order.userId(),
                 order.clientOrderId(), order.symbol(), order.instrumentVersion(), order.side(), order.orderType(),
-                order.timeInForce(), order.priceTicks(), order.quantitySteps(), true, order.postOnly(), now);
+                order.timeInForce(), order.priceTicks(), order.quantitySteps(), order.marginMode(), true,
+                order.postOnly(), now, null);
         enqueue("ORDER", order.orderId(), properties.getKafka().getOrderCommandsTopic(), order.symbol(),
                 OrderCommandType.CANCEL.name(), serializer.apply(command), now);
     }
@@ -271,8 +302,12 @@ public class LiquidationOrderRepository {
             TimeInForce timeInForce,
             long priceTicks,
             long quantitySteps,
+            MarginMode marginMode,
             OrderStatus status,
             boolean postOnly) {
+        private OpenReduceOnlyOrder {
+            marginMode = MarginMode.defaultIfNull(marginMode);
+        }
     }
 
     private record FeeSnapshot(long makerFeeRatePpm, long takerFeeRatePpm) {

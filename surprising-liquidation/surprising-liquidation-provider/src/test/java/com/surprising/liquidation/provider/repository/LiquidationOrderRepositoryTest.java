@@ -39,7 +39,7 @@ class LiquidationOrderRepositoryTest {
     void preemptsOpenReduceOnlyCloseOrdersBeforeLiquidationOrder() throws Exception {
         LiquidationOrderRepository repository = repository();
         when(jdbcTemplate.query(contains("FROM trading_orders"), any(RowMapper.class), eq(2002L),
-                eq("BTC-USDT"), eq(8L), eq("SELL"))).thenAnswer(invocation -> {
+                eq("BTC-USDT"), eq("CROSS"), eq(8L), eq("SELL"))).thenAnswer(invocation -> {
                     RowMapper mapper = invocation.getArgument(1);
                     return java.util.List.of(
                             mapper.mapRow(orderRow(101L, "reduce-101", "ACCEPTED"), 0),
@@ -174,6 +174,7 @@ class LiquidationOrderRepositoryTest {
         when(rs.getString("time_in_force")).thenReturn("GTC");
         when(rs.getLong("price_ticks")).thenReturn(88_000L);
         when(rs.getLong("quantity_steps")).thenReturn(3L);
+        when(rs.getString("margin_mode")).thenReturn("CROSS");
         when(rs.getString("status")).thenReturn(status);
         when(rs.getBoolean("post_only")).thenReturn(false);
         return rs;

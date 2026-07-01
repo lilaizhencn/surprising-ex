@@ -8,6 +8,7 @@ import com.surprising.liquidation.provider.model.ClaimedCandidate;
 import com.surprising.liquidation.provider.model.LiquidationCloseState;
 import com.surprising.liquidation.provider.model.LiquidationSizingInput;
 import com.surprising.risk.api.model.RiskStatus;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -33,18 +34,42 @@ public class LiquidationRepository {
                        updated_at = now()
                  WHERE candidate_id = ?
                    AND status = 'NEW'
-                RETURNING candidate_id, snapshot_id, user_id, symbol, settle_asset,
+                RETURNING candidate_id, snapshot_id, user_id, symbol, margin_mode, settle_asset,
                           instrument_version, signed_quantity_steps, mark_price_ticks, margin_ratio_ppm
                 """, (rs, rowNum) -> new ClaimedCandidate(
                 rs.getLong("candidate_id"),
                 rs.getLong("snapshot_id"),
                 rs.getLong("user_id"),
                 rs.getString("symbol"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 rs.getLong("instrument_version"),
                 rs.getString("settle_asset"),
                 rs.getLong("signed_quantity_steps"),
                 rs.getLong("mark_price_ticks"),
                 rs.getLong("margin_ratio_ppm")), candidateId).stream().findFirst();
+    }
+
+    public RiskStatus latestRiskStatus(long userId,
+                                       String symbol,
+                                       MarginMode marginMode,
+                                       long instrumentVersion,
+                                       Duration maxSnapshotAge) {
+        return jdbcTemplate.query("""
+                SELECT status
+                  FROM risk_position_snapshots
+                 WHERE user_id = ?
+                   AND symbol = ?
+                   AND margin_mode = ?
+                   AND instrument_version = ?
+                   AND event_time >= now() - (? * INTERVAL '1 millisecond')
+                 ORDER BY event_time DESC
+                 LIMIT 1
+                """, (rs, rowNum) -> RiskStatus.valueOf(rs.getString("status")),
+                userId, symbol, MarginMode.defaultIfNull(marginMode).name(), instrumentVersion,
+                Math.max(1L, maxSnapshotAge.toMillis()))
+                .stream()
+                .findFirst()
+                .orElse(RiskStatus.NORMAL);
     }
 
     public RiskStatus latestRiskStatus(long userId, String settleAsset, Duration maxSnapshotAge) {
@@ -62,36 +87,54 @@ public class LiquidationRepository {
                 .orElse(RiskStatus.NORMAL);
     }
 
-    public Optional<LiquidationCloseState> lockCloseState(long userId, String symbol, long instrumentVersion) {
+    public Optional<LiquidationCloseState> lockCloseState(long userId,
+                                                          String symbol,
+                                                          MarginMode marginMode,
+                                                          long instrumentVersion) {
         return jdbcTemplate.query("""
                 SELECT signed_quantity_steps
                   FROM account_positions
-                 WHERE user_id = ? AND symbol = ? AND instrument_version = ?
+                 WHERE user_id = ? AND symbol = ? AND margin_mode = ? AND instrument_version = ?
                  FOR UPDATE
                 """, (rs, rowNum) -> new LiquidationCloseState(
-                rs.getLong("signed_quantity_steps")), userId, symbol, instrumentVersion).stream().findFirst();
+                rs.getLong("signed_quantity_steps")), userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                instrumentVersion).stream().findFirst();
     }
 
-    public long lockOpenReduceOnlySteps(long userId, String symbol, long instrumentVersion, OrderSide closeSide) {
+    public Optional<LiquidationCloseState> lockCloseState(long userId, String symbol, long instrumentVersion) {
+        return lockCloseState(userId, symbol, MarginMode.CROSS, instrumentVersion);
+    }
+
+    public long lockOpenReduceOnlySteps(long userId,
+                                        String symbol,
+                                        MarginMode marginMode,
+                                        long instrumentVersion,
+                                        OrderSide closeSide) {
         return jdbcTemplate.query("""
                 SELECT remaining_quantity_steps
                   FROM trading_orders
                  WHERE user_id = ?
                    AND symbol = ?
+                   AND margin_mode = ?
                    AND instrument_version = ?
                    AND side = ?
                    AND reduce_only = TRUE
                    AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                  FOR UPDATE
                 """, (rs, rowNum) -> rs.getLong("remaining_quantity_steps"), userId, symbol,
-                instrumentVersion, closeSide.name())
+                MarginMode.defaultIfNull(marginMode).name(), instrumentVersion, closeSide.name())
                 .stream()
                 .mapToLong(Long::longValue)
                 .reduce(0L, Math::addExact);
     }
 
+    public long lockOpenReduceOnlySteps(long userId, String symbol, long instrumentVersion, OrderSide closeSide) {
+        return lockOpenReduceOnlySteps(userId, symbol, MarginMode.CROSS, instrumentVersion, closeSide);
+    }
+
     public Optional<LiquidationSizingInput> sizingInput(long userId,
                                                         String symbol,
+                                                        MarginMode marginMode,
                                                         long instrumentVersion,
                                                         long availableCloseSteps) {
         String sql = """
@@ -114,7 +157,7 @@ public class LiquidationRepository {
                        ORDER BY event_time DESC
                        LIMIT 1
                   ) pm ON TRUE
-                 WHERE p.user_id = ? AND p.symbol = ? AND p.instrument_version = ?
+                 WHERE p.user_id = ? AND p.symbol = ? AND p.margin_mode = ? AND p.instrument_version = ?
                    AND p.signed_quantity_steps <> 0
                    AND pm.mark_price_ticks > 0
                 """;
@@ -135,7 +178,7 @@ public class LiquidationRepository {
                             Math.absExact(signedQuantitySteps),
                             notionalUnits,
                             notionalPerStepUnits);
-                }, userId, symbol, instrumentVersion)
+                }, userId, symbol, MarginMode.defaultIfNull(marginMode).name(), instrumentVersion)
                 .stream()
                 .findFirst()
                 .map(row -> new LiquidationSizingInput(
@@ -144,6 +187,13 @@ public class LiquidationRepository {
                         row.notionalUnits(),
                         row.notionalPerStepUnits(),
                         bracketFloorNotionalUnits(row.symbol(), row.version(), row.notionalUnits())));
+    }
+
+    public Optional<LiquidationSizingInput> sizingInput(long userId,
+                                                        String symbol,
+                                                        long instrumentVersion,
+                                                        long availableCloseSteps) {
+        return sizingInput(userId, symbol, MarginMode.CROSS, instrumentVersion, availableCloseSteps);
     }
 
     private long bracketFloorNotionalUnits(String symbol, long instrumentVersion, long notionalUnits) {
@@ -197,6 +247,7 @@ public class LiquidationRepository {
                                           long orderId,
                                           long userId,
                                           String symbol,
+                                          MarginMode marginMode,
                                           OrderSide side,
                                           long quantitySteps,
                                           LiquidationOrderStatus status,
@@ -205,12 +256,27 @@ public class LiquidationRepository {
         int rows = jdbcTemplate.update("""
                 INSERT INTO liquidation_orders (
                     liquidation_order_id, candidate_id, order_id, user_id, symbol,
-                    side, quantity_steps, status, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    margin_mode, side, quantity_steps, status, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (candidate_id) DO NOTHING
-                """, liquidationOrderId, candidateId, orderId, userId, symbol, side.name(),
+                """, liquidationOrderId, candidateId, orderId, userId, symbol,
+                MarginMode.defaultIfNull(marginMode).name(), side.name(),
                 quantitySteps, status.name(), reason, Timestamp.from(now));
         return rows == 1;
+    }
+
+    public boolean insertLiquidationOrder(long liquidationOrderId,
+                                          long candidateId,
+                                          long orderId,
+                                          long userId,
+                                          String symbol,
+                                          OrderSide side,
+                                          long quantitySteps,
+                                          LiquidationOrderStatus status,
+                                          String reason,
+                                          Instant now) {
+        return insertLiquidationOrder(liquidationOrderId, candidateId, orderId, userId, symbol, MarginMode.CROSS,
+                side, quantitySteps, status, reason, now);
     }
 
     public List<LiquidationOrderResponse> orders(Long userId, int limit) {
@@ -239,6 +305,7 @@ public class LiquidationRepository {
                 rs.getLong("order_id"),
                 rs.getLong("user_id"),
                 rs.getString("symbol"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 OrderSide.valueOf(rs.getString("side")),
                 rs.getLong("quantity_steps"),
                 LiquidationOrderStatus.valueOf(rs.getString("status")),

@@ -53,15 +53,19 @@ The order provider does not match orders and does not own WebSocket fanout. Orde
 ## Margin Mode
 
 Orders, matching commands, match trades, account reservations, and account positions now carry `marginMode`.
-The default is `CROSS`, which is the only executable mode in the current production path. `ISOLATED` is present in
-the API and database contract, but order entry rejects isolated-margin orders until isolated risk groups,
-isolated funding debits, isolated liquidation, and margin add/remove workflows are completed. This prevents an order
-from being labeled isolated while still being liquidated by the cross-margin risk model.
+The default is `CROSS`. `ISOLATED` is wired through order entry, matching events, account margin, positions,
+risk snapshots, funding, and liquidation. Cross-margin losses, trading fees, and funding payments can use cross
+available balance plus cross position margin as collateral. Isolated margin consumes only the exact
+`userId + symbol + asset + marginMode` position margin and does not touch other symbols or cross balance.
+Manual isolated margin add/remove, margin-mode switching constraints, and hedge-mode `positionSide` are not implemented
+yet, so clients should present one-way net positions.
 
 ## Trading Fees
 
 - `init.sql` defaults `BTC-USDT` and `ETH-USDT` to maker `200 ppm` and taker `500 ppm`, or `0.02% / 0.05%`.
-- `trading_fee_schedules` can configure user-global or per-symbol overrides. Per-symbol user fees win over user-global fees, then the instrument default is used.
+- `trading_fee_schedules` can configure user-global or per-symbol overrides. `source_type` supports `USER_OVERRIDE`, `VIP`, `MARKET_MAKER`, `PROMOTION`, and `RISK_OVERRIDE`. Per-symbol user fees win over user-global fees, then the instrument default is used.
+- Admin APIs: `POST /api/v1/admin/trading/fees/schedules` creates or updates schedules, `POST /api/v1/admin/trading/fees/schedules/{feeScheduleId}/disable` disables a schedule, and `GET /api/v1/admin/trading/fees/schedules` lists schedules.
+- Runtime query: `GET /api/v1/trading/fees/effective?userId=...&symbol=...` returns the current maker/taker ppm and source, such as `INSTRUMENT` or `VIP_SYMBOL`.
 - Order admission writes the final `maker_fee_rate_ppm` and `taker_fee_rate_ppm` to `trading_orders`. Later VIP or promotion changes do not reinterpret already accepted resting orders.
 - The account provider settles fills from the order snapshot and writes `TRADE_FEE` ledger rows with `trade_id`, `order_id`, `symbol`, and `fee_rate_ppm`.
 

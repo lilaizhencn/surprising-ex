@@ -13,6 +13,7 @@ import com.surprising.risk.provider.repository.RiskRepository;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
 import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
+import com.surprising.trading.api.model.MarginMode;
 import java.util.Comparator;
 import java.time.Duration;
 import java.time.Instant;
@@ -359,6 +360,7 @@ class RiskServiceTest {
         private int positionEventResolveCalls;
         private long lastPositionEventUserId;
         private String lastPositionEventSymbol;
+        private MarginMode lastPositionEventMarginMode;
         private long lastPositionEventVersion;
         private long walletBalanceUnits;
         private boolean openPositionsExist;
@@ -389,12 +391,21 @@ class RiskServiceTest {
         @Override
         public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId,
                                                                        String symbol,
+                                                                       MarginMode marginMode,
                                                                        long instrumentVersion) {
             positionEventResolveCalls++;
             lastPositionEventUserId = userId;
             lastPositionEventSymbol = symbol;
+            lastPositionEventMarginMode = marginMode;
             lastPositionEventVersion = instrumentVersion;
             return positionEventTarget;
+        }
+
+        @Override
+        public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId,
+                                                                       String symbol,
+                                                                       long instrumentVersion) {
+            return riskTargetForPositionEvent(userId, symbol, MarginMode.CROSS, instrumentVersion);
         }
 
         @Override
@@ -449,10 +460,22 @@ class RiskServiceTest {
                                                CalculatedPositionRisk position,
                                                RiskStatus positionStatus,
                                                long positionMarginRatioPpm,
+                                               long equityUnits,
                                                long candidateId,
                                                Instant now) {
             candidatePositions.put(candidateId, position);
             return candidateId;
+        }
+
+        @Override
+        public long createLiquidationCandidate(RiskAccountSnapshotResponse account,
+                                               CalculatedPositionRisk position,
+                                               RiskStatus positionStatus,
+                                               long positionMarginRatioPpm,
+                                               long candidateId,
+                                               Instant now) {
+            return createLiquidationCandidate(account, position, positionStatus, positionMarginRatioPpm,
+                    account.equityUnits(), candidateId, now);
         }
 
         @Override

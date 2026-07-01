@@ -381,6 +381,8 @@ CREATE INDEX adl_events_asset_symbol_time_idx
 `trading_fee_schedules` stores user-level fee overrides:
 
 - `symbol IS NULL` is a user-global fee tier; a concrete `symbol` is a per-symbol override.
+- `source_type` records why the override exists: `USER_OVERRIDE`, `VIP`, `MARKET_MAKER`, `PROMOTION`, or `RISK_OVERRIDE`.
+  `tier_code` stores the external VIP/market-maker/program code used by admin systems.
 - Resolution order is per-symbol user fee, then user-global fee, then the instrument default.
 - `effective_time` / `expire_time`, `status`, and descending indexes allow deterministic historical
   activation. The resolved ppm is copied into `trading_orders` before a command is published.
@@ -408,8 +410,9 @@ side's `trading_orders` fee snapshot.
 
 `account_margin_reservations` tracks initial margin reserved by order entry:
 
-- `margin_mode`: order margin mode. Current executable flow is `CROSS`; `ISOLATED` is stored for the
-  future isolated-margin workflow but isolated orders are rejected by order entry until the full risk path is ready.
+- `margin_mode`: order margin mode. `CROSS` and `ISOLATED` are executable. The value is copied from
+  order entry to matching, account settlement, risk, funding, and liquidation so collateral, reduce-only
+  checks, and forced closes stay scoped to the same margin bucket.
 - `reserved_units`: total order margin moved from `available_units` to `locked_units`.
 - `released_units`: order margin returned to `available_units` after rejection, cancel, terminal immediate order, or close-only fill.
 - `position_margin_units`: order margin already moved into position collateral after an opening fill.
@@ -418,22 +421,27 @@ side's `trading_orders` fee snapshot.
 - Order entry inserts the order before reserving margin; a duplicate `clientOrderId` therefore returns the existing order without locking funds again. The insert conflict target is only the partial `(user_id, client_order_id)` index, so `order_id` or unrelated uniqueness conflicts fail.
 
 `account_position_margins` tracks current position collateral by `user_id + symbol + asset + margin_mode`.
-Opening fills increase this table by consuming order reservation. Closing fills release it
-proportionally back to `account_balances.available_units`.
+Opening fills increase this table by consuming order reservation. Closing fills release the remaining
+collateral proportionally back to `account_balances.available_units`.
 Opening fills are required to consume an existing non-reduce-only order reservation. Missing
 reservation rows or skipped margin migration updates fail the account trade transaction instead
 of creating an uncollateralized position.
 
 `account_deficits` tracks bankruptcy deficits without allowing negative `account_balances` columns.
-Realized profits first clear deficits, then increase `available_units`. Realized losses reduce
-`available_units`, then the portion of `locked_units` backed by `account_position_margins`, and any remainder
-increases `deficit_units`. Order-reservation locked funds are not eligible for PnL, trading-fee, or funding-fee loss
-debits. When position-backed locked collateral is consumed, the matching `account_position_margins`
-rows are reduced under `FOR UPDATE` so later position-margin releases cannot over-credit available balance.
+Realized profits first clear deficits, then increase `available_units`. Cross-margin realized losses
+and fees reduce `available_units`, then the portion of cross `locked_units` backed by
+`account_position_margins`, and any remainder increases `deficit_units`. Isolated-margin losses and
+fees do not debit cross available balance; they consume only the exact `user_id + symbol + asset +
+ISOLATED` position collateral, then record any remainder as deficit. Order-reservation locked funds
+are not eligible for PnL, trading-fee, or funding-fee loss debits. When position-backed locked
+collateral is consumed, the matching `account_position_margins` rows are reduced under `FOR UPDATE`
+so later position-margin releases cannot over-credit available balance.
 
 `account_positions` stores net perpetual exposure:
 
-- `margin_mode`: `CROSS` or `ISOLATED`. Current production execution only creates `CROSS` positions.
+- `margin_mode`: `CROSS` or `ISOLATED`. Positions are netted by user, symbol, and margin mode. The
+  current project does not yet add hedge-mode `positionSide`; long and short exposure still collapse
+  into one net position per margin bucket.
 - `instrument_version`: contract version for the current non-zero exposure. It is `NULL` when the position is flat.
 - `signed_quantity_steps`: positive for long, negative for short.
 - `entry_price_ticks`: average entry in exchange-core ticks.

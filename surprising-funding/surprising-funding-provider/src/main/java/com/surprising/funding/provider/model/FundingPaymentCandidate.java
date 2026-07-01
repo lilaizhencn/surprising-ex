@@ -1,11 +1,28 @@
 package com.surprising.funding.provider.model;
 
+import com.surprising.trading.api.model.MarginMode;
+
 public record FundingPaymentCandidate(
         long userId,
         String symbol,
+        MarginMode marginMode,
         String asset,
         long signedQuantitySteps,
         long notionalUnits,
         long fundingRatePpm,
         long amountUnits) {
+
+    public FundingPaymentCandidate {
+        marginMode = MarginMode.defaultIfNull(marginMode);
+    }
+
+    public FundingPaymentCandidate(long userId,
+                                   String symbol,
+                                   String asset,
+                                   long signedQuantitySteps,
+                                   long notionalUnits,
+                                   long fundingRatePpm,
+                                   long amountUnits) {
+        this(userId, symbol, MarginMode.CROSS, asset, signedQuantitySteps, notionalUnits, fundingRatePpm, amountUnits);
+    }
 }

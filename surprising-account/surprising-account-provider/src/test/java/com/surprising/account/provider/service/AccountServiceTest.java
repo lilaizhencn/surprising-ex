@@ -374,9 +374,13 @@ class AccountServiceTest {
                                       String asset,
                                       long orderId,
                                       long tradeId,
+                                      String symbol,
+                                      MarginMode marginMode,
                                       long realizedPnlDeltaUnits,
                                       Instant now) {
             assertThat(asset).isEqualTo("USDT");
+            assertThat(symbol).isIn("BTC-USDT", "ETH-USDT");
+            assertThat(marginMode).isIn(MarginMode.CROSS, MarginMode.ISOLATED);
             pnlByUser.merge(userId, realizedPnlDeltaUnits, Long::sum);
         }
 
@@ -389,9 +393,11 @@ class AccountServiceTest {
                                    String reason,
                                    long feeRatePpm,
                                    String symbol,
+                                   MarginMode marginMode,
                                    Instant now) {
             assertThat(asset).isEqualTo("USDT");
             assertThat(symbol).isIn("BTC-USDT", "ETH-USDT");
+            assertThat(marginMode).isIn(MarginMode.CROSS, MarginMode.ISOLATED);
             OrderFeeSnapshot snapshot = feeSnapshots.get(orderId);
             assertThat(feeRatePpm).isEqualTo("TAKER_FEE".equals(reason)
                     ? snapshot.takerFeeRatePpm()

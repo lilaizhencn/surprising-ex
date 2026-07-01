@@ -169,9 +169,6 @@ public class OrderService {
     }
 
     private ValidationResult validateMarginMode(MarginMode marginMode) {
-        if (marginMode == MarginMode.ISOLATED) {
-            return ValidationResult.reject("isolated margin mode is not enabled", 0L);
-        }
         return ValidationResult.ok(0L);
     }
 

@@ -123,7 +123,8 @@ class AccountRepositoryTest {
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_deficits"), any(Object[].class)))
                 .thenReturn(1);
-        when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(), eq(1001L), eq("USDT")))
+        when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
+                eq(1001L), eq("USDT"), eq("CROSS")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
@@ -143,7 +144,8 @@ class AccountRepositoryTest {
                     return mapper.mapRow(rs, 0);
                 });
 
-        repository.settleRealizedPnl(1001L, "USDT", 5001L, 9001L, -90L, now);
+        repository.settleRealizedPnl(1001L, "USDT", 5001L, 9001L, "BTC-USDT",
+                MarginMode.CROSS, -90L, now);
 
         verify(jdbcTemplate).update(contains("UPDATE account_position_margins"),
                 eq(50L), any(Timestamp.class), eq(1001L), eq("ETH-USDT"), eq("USDT"), eq("CROSS"), eq(50L));
@@ -162,7 +164,8 @@ class AccountRepositoryTest {
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(0);
 
-        assertThatThrownBy(() -> repository.settleRealizedPnl(1001L, "USDT", 5001L, 9001L, 25L, now))
+        assertThatThrownBy(() -> repository.settleRealizedPnl(1001L, "USDT", 5001L, 9001L,
+                "BTC-USDT", MarginMode.CROSS, 25L, now))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("trade pnl ledger insert");
         verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
@@ -179,7 +182,7 @@ class AccountRepositoryTest {
                 .thenReturn(0);
 
         assertThatThrownBy(() -> repository.settleTradeFee(1001L, "USDT", 5001L, 9001L, -25L,
-                "TAKER_FEE", 500L, "BTC-USDT", now))
+                "TAKER_FEE", 500L, "BTC-USDT", MarginMode.CROSS, now))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("trade fee ledger insert");
         verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
@@ -218,7 +221,8 @@ class AccountRepositoryTest {
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_deficits"), any(Object[].class)))
                 .thenReturn(1);
-        when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(), eq(1001L), eq("USDT")))
+        when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
+                eq(1001L), eq("USDT"), eq("CROSS")))
                 .thenReturn(List.of());
         when(jdbcTemplate.queryForObject(contains("SELECT b.available_units"), anyRowMapper(),
                 eq(1001L), eq("USDT"))).thenAnswer(invocation -> {
@@ -231,7 +235,7 @@ class AccountRepositoryTest {
                 });
 
         repository.settleTradeFee(1001L, "USDT", 5001L, 9001L, -25L,
-                "TAKER_FEE", 500L, "BTC-USDT", now);
+                "TAKER_FEE", 500L, "BTC-USDT", MarginMode.CROSS, now);
 
         verify(jdbcTemplate).update(contains("INSERT INTO account_ledger_entries"),
                 eq(1L), eq(1001L), eq("USDT"), eq(-25L), eq("9001:5001"), eq("TAKER_FEE"),

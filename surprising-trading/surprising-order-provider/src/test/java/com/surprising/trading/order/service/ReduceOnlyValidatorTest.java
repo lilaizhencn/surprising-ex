@@ -2,6 +2,7 @@ package com.surprising.trading.order.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
@@ -61,14 +62,16 @@ class ReduceOnlyValidatorTest {
     private ReduceOnlyPositionLookup lookup(long signedQuantitySteps, long pendingCloseSteps) {
         return new ReduceOnlyPositionLookup() {
             @Override
-            public Optional<ReduceOnlyPosition> lockedPosition(long userId, String symbol) {
+            public Optional<ReduceOnlyPosition> lockedPosition(long userId, String symbol, MarginMode marginMode) {
+                assertThat(marginMode).isEqualTo(MarginMode.CROSS);
                 return Optional.of(new ReduceOnlyPosition(signedQuantitySteps,
                         signedQuantitySteps == 0 ? 0L : 1L));
             }
 
             @Override
-            public long lockedOpenReduceOnlySteps(long userId, String symbol, long instrumentVersion,
+            public long lockedOpenReduceOnlySteps(long userId, String symbol, MarginMode marginMode, long instrumentVersion,
                                                   OrderSide closeSide) {
+                assertThat(marginMode).isEqualTo(MarginMode.CROSS);
                 return pendingCloseSteps;
             }
         };

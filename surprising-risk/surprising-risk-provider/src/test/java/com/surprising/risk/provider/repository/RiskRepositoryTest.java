@@ -80,7 +80,7 @@ class RiskRepositoryTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
         assertThat(sql.getValue())
-                .contains("ON CONFLICT (user_id, symbol) WHERE status IN ('NEW', 'PROCESSING') DO NOTHING")
+                .contains("ON CONFLICT (user_id, symbol, margin_mode) WHERE status IN ('NEW', 'PROCESSING') DO NOTHING")
                 .doesNotContain("ON CONFLICT DO NOTHING");
     }
 

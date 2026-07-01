@@ -10,6 +10,7 @@ import com.surprising.risk.provider.model.CalculatedPositionRisk;
 import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
 import com.surprising.risk.provider.service.RiskMath;
+import com.surprising.trading.api.model.MarginMode;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -62,7 +63,10 @@ public class RiskRepository {
                 afterUserId, afterSettleAsset, cappedLimit);
     }
 
-    public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId, String symbol, long instrumentVersion) {
+    public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId,
+                                                                   String symbol,
+                                                                   MarginMode marginMode,
+                                                                   long instrumentVersion) {
         String sql = """
                 SELECT CAST(? AS bigint) AS user_id,
                        i.symbol,
@@ -83,10 +87,15 @@ public class RiskRepository {
         return jdbcTemplate.query(sql, (rs, rowNum) -> new PositionRiskTarget(
                 rs.getLong("user_id"),
                 rs.getString("symbol"),
+                MarginMode.defaultIfNull(marginMode),
                 rs.getLong("instrument_version"),
                 rs.getString("settle_asset")), userId, symbol, instrumentVersion, instrumentVersion, symbol)
                 .stream()
                 .findFirst();
+    }
+
+    public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId, String symbol, long instrumentVersion) {
+        return riskTargetForPositionEvent(userId, symbol, MarginMode.CROSS, instrumentVersion);
     }
 
     public boolean hasOpenPositions(RiskGroupKey key) {
@@ -106,6 +115,7 @@ public class RiskRepository {
                 WITH position_inputs AS (
                     SELECT p.user_id,
                            p.symbol,
+                           p.margin_mode,
                            p.instrument_version,
                            i.contract_type,
                            i.settle_asset,
@@ -116,6 +126,7 @@ public class RiskRepository {
                            p.signed_quantity_steps,
                            p.entry_price_ticks,
                            pm.mark_price_ticks,
+                           COALESCE(position_margin.margin_units, 0) AS position_margin_units,
                            CASE
                                WHEN i.contract_type = 'INVERSE_PERPETUAL' THEN
                                    ROUND((abs(p.signed_quantity_steps)::numeric
@@ -137,11 +148,20 @@ public class RiskRepository {
                            ORDER BY event_time DESC
                            LIMIT 1
                       ) pm ON TRUE
+                      LEFT JOIN LATERAL (
+                          SELECT COALESCE(SUM(m.margin_units), 0) AS margin_units
+                            FROM account_position_margins m
+                           WHERE m.user_id = p.user_id
+                             AND m.symbol = p.symbol
+                             AND m.asset = i.settle_asset
+                             AND m.margin_mode = p.margin_mode
+                      ) position_margin ON TRUE
                      WHERE p.signed_quantity_steps <> 0
                        AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
                 )
                 SELECT pi.user_id,
                        pi.symbol,
+                       pi.margin_mode,
                        pi.instrument_version,
                        pi.contract_type,
                        pi.settle_asset,
@@ -152,7 +172,8 @@ public class RiskRepository {
                        pi.settle_scale_units,
                        pi.signed_quantity_steps,
                        pi.entry_price_ticks,
-                       pi.mark_price_ticks
+                       pi.mark_price_ticks,
+                       pi.position_margin_units
                   FROM position_inputs pi
                   LEFT JOIN LATERAL (
                       SELECT b.maintenance_margin_rate_ppm
@@ -188,6 +209,7 @@ public class RiskRepository {
                 position_inputs AS (
                     SELECT p.user_id,
                            p.symbol,
+                           p.margin_mode,
                            p.instrument_version,
                            i.contract_type,
                            i.settle_asset,
@@ -198,6 +220,7 @@ public class RiskRepository {
                            p.signed_quantity_steps,
                            p.entry_price_ticks,
                            pm.mark_price_ticks,
+                           COALESCE(position_margin.margin_units, 0) AS position_margin_units,
                            CASE
                                WHEN i.contract_type = 'INVERSE_PERPETUAL' THEN
                                    ROUND((abs(p.signed_quantity_steps)::numeric
@@ -219,6 +242,14 @@ public class RiskRepository {
                            ORDER BY event_time DESC
                            LIMIT 1
                       ) pm ON TRUE
+                      LEFT JOIN LATERAL (
+                          SELECT COALESCE(SUM(m.margin_units), 0) AS margin_units
+                            FROM account_position_margins m
+                           WHERE m.user_id = p.user_id
+                             AND m.symbol = p.symbol
+                             AND m.asset = i.settle_asset
+                             AND m.margin_mode = p.margin_mode
+                      ) position_margin ON TRUE
                       CROSS JOIN group_freshness gf
                      WHERE p.signed_quantity_steps <> 0
                        AND p.user_id = ?
@@ -228,6 +259,7 @@ public class RiskRepository {
                 )
                 SELECT pi.user_id,
                        pi.symbol,
+                       pi.margin_mode,
                        pi.instrument_version,
                        pi.contract_type,
                        pi.settle_asset,
@@ -238,7 +270,8 @@ public class RiskRepository {
                        pi.settle_scale_units,
                        pi.signed_quantity_steps,
                        pi.entry_price_ticks,
-                       pi.mark_price_ticks
+                       pi.mark_price_ticks,
+                       pi.position_margin_units
                   FROM position_inputs pi
                   LEFT JOIN LATERAL (
                       SELECT b.maintenance_margin_rate_ppm
@@ -278,15 +311,15 @@ public class RiskRepository {
                                      Instant now) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO risk_position_snapshots (
-                    snapshot_id, user_id, symbol, instrument_version, settle_asset, signed_quantity_steps,
+                    snapshot_id, user_id, symbol, margin_mode, instrument_version, settle_asset, signed_quantity_steps,
                     entry_price_ticks, mark_price_ticks, notional_units, unrealized_pnl_units,
-                    maintenance_margin_units, margin_ratio_ppm, status, event_time, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
-                """, snapshotId, position.userId(), position.symbol(), position.instrumentVersion(),
-                position.settleAsset(),
+                    maintenance_margin_units, position_margin_units, margin_ratio_ppm, status, event_time, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                """, snapshotId, position.userId(), position.symbol(), position.marginMode().name(),
+                position.instrumentVersion(), position.settleAsset(),
                 position.signedQuantitySteps(), position.entryPriceTicks(), position.markPriceTicks(),
                 position.notionalUnits(), position.unrealizedPnlUnits(), position.maintenanceMarginUnits(),
-                marginRatioPpm, status.name(), Timestamp.from(now));
+                position.positionMarginUnits(), marginRatioPpm, status.name(), Timestamp.from(now));
         requireSingleRow(rows, "risk position snapshot insert");
     }
 
@@ -306,11 +339,36 @@ public class RiskRepository {
 
     public long walletBalanceUnits(long userId, String settleAsset) {
         return jdbcTemplate.query("""
-                SELECT COALESCE(b.available_units + b.locked_units - COALESCE(d.deficit_units, 0), 0)
+                WITH isolated_position_locks AS (
+                    SELECT COALESCE(SUM(m.margin_units), 0) AS units
+                      FROM account_position_margins m
+                     WHERE m.user_id = ?
+                       AND m.asset = ?
+                       AND m.margin_mode = 'ISOLATED'
+                ),
+                isolated_order_locks AS (
+                    SELECT COALESCE(SUM(GREATEST(r.reserved_units - r.released_units - r.position_margin_units, 0)), 0)
+                           AS units
+                      FROM account_margin_reservations r
+                     WHERE r.user_id = ?
+                       AND r.asset = ?
+                       AND r.margin_mode = 'ISOLATED'
+                       AND r.status IN ('ACTIVE', 'PARTIALLY_RELEASED', 'PARTIALLY_CONSUMED')
+                )
+                SELECT COALESCE(
+                       b.available_units + b.locked_units
+                       - isolated_position_locks.units
+                       - isolated_order_locks.units
+                       - COALESCE(d.deficit_units, 0), 0)
                   FROM account_balances b
+                  CROSS JOIN isolated_position_locks
+                  CROSS JOIN isolated_order_locks
                   LEFT JOIN account_deficits d USING (user_id, asset)
                  WHERE b.user_id = ? AND b.asset = ?
-                """, (rs, rowNum) -> rs.getLong(1), userId, settleAsset).stream().findFirst().orElse(0L);
+                """, (rs, rowNum) -> rs.getLong(1), userId, settleAsset, userId, settleAsset, userId, settleAsset)
+                .stream()
+                .findFirst()
+                .orElse(0L);
     }
 
     public Optional<RiskAccountSnapshotResponse> latestAccount(long userId, String settleAsset) {
@@ -325,11 +383,33 @@ public class RiskRepository {
 
     public List<RiskPositionSnapshotResponse> latestPositions(long userId) {
         return jdbcTemplate.query("""
-                SELECT DISTINCT ON (symbol) *
+                SELECT DISTINCT ON (symbol, margin_mode) *
                   FROM risk_position_snapshots
                  WHERE user_id = ?
-                 ORDER BY symbol ASC, event_time DESC
+                 ORDER BY symbol ASC, margin_mode ASC, event_time DESC
                 """, (rs, rowNum) -> toPositionSnapshot(rs), userId);
+    }
+
+    public long createLiquidationCandidate(RiskAccountSnapshotResponse account,
+                                           CalculatedPositionRisk position,
+                                           RiskStatus positionStatus,
+                                           long positionMarginRatioPpm,
+                                           long equityUnits,
+                                           long candidateId,
+                                           Instant now) {
+        int rows = jdbcTemplate.update("""
+                INSERT INTO risk_liquidation_candidates (
+                    candidate_id, snapshot_id, user_id, symbol, margin_mode, instrument_version, settle_asset,
+                    signed_quantity_steps, mark_price_ticks, equity_units,
+                    maintenance_margin_units, margin_ratio_ppm, status, event_time, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, now(), now())
+                ON CONFLICT (user_id, symbol, margin_mode) WHERE status IN ('NEW', 'PROCESSING') DO NOTHING
+                """, candidateId, account.snapshotId(), position.userId(), position.symbol(),
+                position.marginMode().name(), position.instrumentVersion(), position.settleAsset(),
+                position.signedQuantitySteps(), position.markPriceTicks(), equityUnits,
+                position.maintenanceMarginUnits(), Math.max(account.marginRatioPpm(), positionMarginRatioPpm),
+                Timestamp.from(now));
+        return rows == 1 ? candidateId : 0L;
     }
 
     public long createLiquidationCandidate(RiskAccountSnapshotResponse account,
@@ -338,19 +418,8 @@ public class RiskRepository {
                                            long positionMarginRatioPpm,
                                            long candidateId,
                                            Instant now) {
-        int rows = jdbcTemplate.update("""
-                INSERT INTO risk_liquidation_candidates (
-                    candidate_id, snapshot_id, user_id, symbol, instrument_version, settle_asset,
-                    signed_quantity_steps, mark_price_ticks, equity_units,
-                    maintenance_margin_units, margin_ratio_ppm, status, event_time, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, now(), now())
-                ON CONFLICT (user_id, symbol) WHERE status IN ('NEW', 'PROCESSING') DO NOTHING
-                """, candidateId, account.snapshotId(), position.userId(), position.symbol(),
-                position.instrumentVersion(), position.settleAsset(),
-                position.signedQuantitySteps(), position.markPriceTicks(), account.equityUnits(),
-                position.maintenanceMarginUnits(), Math.max(account.marginRatioPpm(), positionMarginRatioPpm),
-                Timestamp.from(now));
-        return rows == 1 ? candidateId : 0L;
+        return createLiquidationCandidate(account, position, positionStatus, positionMarginRatioPpm,
+                account.equityUnits(), candidateId, now);
     }
 
     public Optional<LiquidationCandidateResponse> liquidationCandidate(long candidateId) {
@@ -387,6 +456,7 @@ public class RiskRepository {
                 rs.getLong("snapshot_id"),
                 rs.getLong("user_id"),
                 rs.getString("symbol"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 rs.getLong("instrument_version"),
                 rs.getString("settle_asset"),
                 rs.getLong("signed_quantity_steps"),
@@ -395,6 +465,7 @@ public class RiskRepository {
                 rs.getLong("notional_units"),
                 rs.getLong("unrealized_pnl_units"),
                 rs.getLong("maintenance_margin_units"),
+                rs.getLong("position_margin_units"),
                 rs.getLong("margin_ratio_ppm"),
                 RiskStatus.valueOf(rs.getString("status")),
                 rs.getTimestamp("event_time").toInstant());
@@ -406,6 +477,7 @@ public class RiskRepository {
                 rs.getLong("snapshot_id"),
                 rs.getLong("user_id"),
                 rs.getString("symbol"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 rs.getLong("instrument_version"),
                 rs.getString("settle_asset"),
                 rs.getLong("signed_quantity_steps"),
@@ -440,6 +512,7 @@ public class RiskRepository {
             return new CalculatedPositionRisk(
                     rs.getLong("user_id"),
                     rs.getString("symbol"),
+                    MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                     rs.getLong("instrument_version"),
                     rs.getString("settle_asset"),
                     signedQuantitySteps,
@@ -447,7 +520,8 @@ public class RiskRepository {
                     markPriceTicks,
                     notionalUnits,
                     unrealizedPnlUnits,
-                    maintenanceMarginUnits);
+                    maintenanceMarginUnits,
+                    rs.getLong("position_margin_units"));
         };
     }
 

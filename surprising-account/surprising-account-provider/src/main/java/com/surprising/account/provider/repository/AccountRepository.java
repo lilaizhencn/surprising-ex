@@ -259,6 +259,8 @@ public class AccountRepository {
                                   String asset,
                                   long orderId,
                                   long tradeId,
+                                  String symbol,
+                                  MarginMode marginMode,
                                   long realizedPnlDeltaUnits,
                                   Instant now) {
         if (realizedPnlDeltaUnits == 0) {
@@ -274,7 +276,7 @@ public class AccountRepository {
                 """, sequenceRepository.nextSequence("ledger-entry"), userId, asset, realizedPnlDeltaUnits,
                 referenceId, Timestamp.from(now));
         requireSingleRow(ledgerRows, "trade pnl ledger insert");
-        long balanceAfterUnits = applyPnlToBalance(userId, asset, realizedPnlDeltaUnits, now);
+        long balanceAfterUnits = applyAmountToBalance(userId, asset, symbol, marginMode, realizedPnlDeltaUnits, now);
         int ledgerRowsAfter = jdbcTemplate.update("""
                 UPDATE account_ledger_entries
                    SET balance_after_units = ?
@@ -286,6 +288,15 @@ public class AccountRepository {
         requireSingleRow(ledgerRowsAfter, "trade pnl ledger update");
     }
 
+    public void settleRealizedPnl(long userId,
+                                  String asset,
+                                  long orderId,
+                                  long tradeId,
+                                  long realizedPnlDeltaUnits,
+                                  Instant now) {
+        settleRealizedPnl(userId, asset, orderId, tradeId, "", MarginMode.CROSS, realizedPnlDeltaUnits, now);
+    }
+
     public void settleTradeFee(long userId,
                                String asset,
                                long orderId,
@@ -294,6 +305,7 @@ public class AccountRepository {
                                String reason,
                                long feeRatePpm,
                                String symbol,
+                               MarginMode marginMode,
                                Instant now) {
         if (feeDeltaUnits == 0) {
             return;
@@ -308,7 +320,7 @@ public class AccountRepository {
                 """, sequenceRepository.nextSequence("ledger-entry"), userId, asset, feeDeltaUnits, referenceId,
                 reason, tradeId, orderId, symbol, feeRatePpm, Timestamp.from(now));
         requireSingleRow(ledgerRows, "trade fee ledger insert");
-        long balanceAfterUnits = applyPnlToBalance(userId, asset, feeDeltaUnits, now);
+        long balanceAfterUnits = applyAmountToBalance(userId, asset, symbol, marginMode, feeDeltaUnits, now);
         int ledgerRowsAfter = jdbcTemplate.update("""
                 UPDATE account_ledger_entries
                    SET balance_after_units = ?
@@ -318,6 +330,19 @@ public class AccountRepository {
                    AND asset = ?
                 """, balanceAfterUnits, referenceId, userId, asset);
         requireSingleRow(ledgerRowsAfter, "trade fee ledger update");
+    }
+
+    public void settleTradeFee(long userId,
+                               String asset,
+                               long orderId,
+                               long tradeId,
+                               long feeDeltaUnits,
+                               String reason,
+                               long feeRatePpm,
+                               String symbol,
+                               Instant now) {
+        settleTradeFee(userId, asset, orderId, tradeId, feeDeltaUnits, reason, feeRatePpm, symbol, MarginMode.CROSS,
+                now);
     }
 
     public void releaseOrderMargin(long orderId,
@@ -514,7 +539,12 @@ public class AccountRepository {
         }
     }
 
-    private long applyPnlToBalance(long userId, String asset, long pnlUnits, Instant now) {
+    private long applyAmountToBalance(long userId,
+                                      String asset,
+                                      String symbol,
+                                      MarginMode marginMode,
+                                      long amountUnits,
+                                      Instant now) {
         jdbcTemplate.update("""
                 INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
                 VALUES (?, ?, 0, 0, ?)
@@ -525,7 +555,10 @@ public class AccountRepository {
                 VALUES (?, ?, 0, ?)
                 ON CONFLICT (user_id, asset) DO NOTHING
                 """, userId, asset, Timestamp.from(now));
-        List<PositionMargin> lockedMargins = pnlUnits < 0 ? lockPositionMargins(userId, asset) : List.of();
+        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        List<PositionMargin> lockedMargins = amountUnits < 0
+                ? lockPositionMargins(userId, asset, symbol, normalizedMarginMode)
+                : List.of();
         long maxLockedDebitUnits = lockedMargins.stream()
                 .mapToLong(PositionMargin::marginUnits)
                 .reduce(0L, Math::addExact);
@@ -535,12 +568,18 @@ public class AccountRepository {
                   JOIN account_deficits d USING (user_id, asset)
                  WHERE b.user_id = ? AND b.asset = ?
                  FOR UPDATE OF b, d
-                """, (rs, rowNum) -> new BalanceSettlementState(
+        """, (rs, rowNum) -> new BalanceSettlementState(
                 rs.getLong("available_units"),
                 rs.getLong("locked_units"),
                 rs.getLong("deficit_units")), userId, asset);
-        BalanceSettlementState next = PnlSettlementMath.apply(current.availableUnits(), current.lockedUnits(),
-                current.deficitUnits(), pnlUnits, maxLockedDebitUnits);
+        long availableInput = amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED
+                ? 0L
+                : current.availableUnits();
+        BalanceSettlementState next = PnlSettlementMath.apply(availableInput, current.lockedUnits(),
+                current.deficitUnits(), amountUnits, maxLockedDebitUnits);
+        if (amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED) {
+            next = new BalanceSettlementState(current.availableUnits(), next.lockedUnits(), next.deficitUnits());
+        }
         long lockedDebitUnits = Math.subtractExact(current.lockedUnits(), next.lockedUnits());
         reducePositionMargins(userId, asset, lockedDebitUnits, lockedMargins, now);
         int balanceRows = jdbcTemplate.update("""
@@ -561,11 +600,26 @@ public class AccountRepository {
         return PnlSettlementMath.netEquityUnits(next.availableUnits(), next.lockedUnits(), next.deficitUnits());
     }
 
-    private List<PositionMargin> lockPositionMargins(long userId, String asset) {
+    private List<PositionMargin> lockPositionMargins(long userId, String asset, String symbol, MarginMode marginMode) {
+        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        if (normalizedMarginMode == MarginMode.ISOLATED) {
+            return jdbcTemplate.query("""
+                    SELECT symbol, asset, margin_mode, margin_units
+                      FROM account_position_margins
+                     WHERE user_id = ? AND asset = ? AND symbol = ? AND margin_mode = ?
+                       AND margin_units > 0
+                     ORDER BY updated_at ASC, symbol ASC, margin_mode ASC
+                     FOR UPDATE
+                    """, (rs, rowNum) -> new PositionMargin(
+                    rs.getString("symbol"),
+                    rs.getString("asset"),
+                    MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                    rs.getLong("margin_units")), userId, asset, symbol, normalizedMarginMode.name());
+        }
         return jdbcTemplate.query("""
                 SELECT symbol, asset, margin_mode, margin_units
                   FROM account_position_margins
-                 WHERE user_id = ? AND asset = ?
+                 WHERE user_id = ? AND asset = ? AND margin_mode = ?
                    AND margin_units > 0
                  ORDER BY updated_at ASC, symbol ASC, margin_mode ASC
                  FOR UPDATE
@@ -573,7 +627,7 @@ public class AccountRepository {
                 rs.getString("symbol"),
                 rs.getString("asset"),
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                rs.getLong("margin_units")), userId, asset);
+                rs.getLong("margin_units")), userId, asset, normalizedMarginMode.name());
     }
 
     private void reducePositionMargins(long userId,

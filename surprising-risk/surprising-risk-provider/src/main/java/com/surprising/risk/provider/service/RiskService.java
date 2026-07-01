@@ -15,6 +15,7 @@ import com.surprising.risk.provider.model.RiskGroupKey;
 import com.surprising.risk.provider.repository.RiskOutboxRepository;
 import com.surprising.risk.provider.repository.RiskRepository;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
+import com.surprising.trading.api.model.MarginMode;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -84,18 +85,22 @@ public class RiskService {
      * Event-driven fast path used by account position events. The scheduled scanner is still the authoritative
      * fallback, but this method cuts liquidation latency after fills by scanning only the affected user/settle group.
      */
-    public void scanPositionUpdate(long userId, String symbol, long instrumentVersion) {
+    public void scanPositionUpdate(long userId, String symbol, MarginMode marginMode, long instrumentVersion) {
         if (!properties.getCalculation().isEnabled()) {
             return;
         }
         PositionRiskTarget target = riskRepository.riskTargetForPositionEvent(userId, normalizeSymbol(symbol),
-                instrumentVersion).orElse(null);
+                MarginMode.defaultIfNull(marginMode), instrumentVersion).orElse(null);
         if (target == null) {
             log.debug("Position update did not resolve to a risk group userId={} symbol={} version={}",
                     userId, symbol, instrumentVersion);
             return;
         }
         scanRiskGroup(target.riskGroupKey(), target);
+    }
+
+    public void scanPositionUpdate(long userId, String symbol, long instrumentVersion) {
+        scanPositionUpdate(userId, symbol, MarginMode.CROSS, instrumentVersion);
     }
 
     private boolean ownsRiskGroup(RiskGroupKey key) {
@@ -144,8 +149,11 @@ public class RiskService {
                            PositionRiskTarget eventTarget,
                            Instant now) {
         long walletBalance = riskRepository.walletBalanceUnits(key.userId(), key.settleAsset());
-        long unrealizedPnl = sumUnrealizedPnl(positions);
-        long maintenanceMargin = sumMaintenanceMargin(positions);
+        List<CalculatedPositionRisk> crossPositions = positions.stream()
+                .filter(position -> position.marginMode() == MarginMode.CROSS)
+                .toList();
+        long unrealizedPnl = sumUnrealizedPnl(crossPositions);
+        long maintenanceMargin = sumMaintenanceMargin(crossPositions);
         long equity = RiskMath.equity(walletBalance, unrealizedPnl);
         long marginRatio = RiskMath.marginRatioPpm(maintenanceMargin, equity);
         RiskStatus accountStatus = RiskMath.status(marginRatio,
@@ -158,19 +166,24 @@ public class RiskService {
         riskRepository.saveAccountSnapshot(account);
 
         for (CalculatedPositionRisk position : positions) {
-            long positionMarginRatio = RiskMath.marginRatioPpm(position.maintenanceMarginUnits(), Math.max(equity, 0L));
+            long positionEquity = position.marginMode() == MarginMode.ISOLATED
+                    ? RiskMath.equity(position.positionMarginUnits(), position.unrealizedPnlUnits())
+                    : equity;
+            long positionMarginRatio = RiskMath.marginRatioPpm(position.maintenanceMarginUnits(), positionEquity);
             RiskStatus positionStatus = RiskMath.status(positionMarginRatio,
                     properties.getCalculation().getWarningMarginRatioPpm(),
                     properties.getCalculation().getLiquidationMarginRatioPpm());
             riskRepository.savePositionSnapshot(snapshotId, position, positionMarginRatio, positionStatus, now);
-            if (accountStatus == RiskStatus.LIQUIDATION) {
-                createCandidate(account, position, positionMarginRatio, now);
+            if ((position.marginMode() == MarginMode.CROSS && accountStatus == RiskStatus.LIQUIDATION)
+                    || (position.marginMode() == MarginMode.ISOLATED && positionStatus == RiskStatus.LIQUIDATION)) {
+                createCandidate(account, position, positionMarginRatio, positionEquity, now);
             }
         }
-        if (eventTarget != null && positions.stream().noneMatch(position -> position.symbol().equals(eventTarget.symbol()))) {
+        if (eventTarget != null && positions.stream().noneMatch(position -> position.symbol().equals(eventTarget.symbol())
+                && position.marginMode() == eventTarget.marginMode())) {
             CalculatedPositionRisk flatPosition = new CalculatedPositionRisk(eventTarget.userId(),
-                    eventTarget.symbol(), eventTarget.instrumentVersion(), eventTarget.settleAsset(),
-                    0L, 0L, 0L, 0L, 0L, 0L);
+                    eventTarget.symbol(), eventTarget.marginMode(), eventTarget.instrumentVersion(), eventTarget.settleAsset(),
+                    0L, 0L, 0L, 0L, 0L, 0L, 0L);
             riskRepository.savePositionSnapshot(snapshotId, flatPosition, 0L, RiskStatus.NORMAL, now);
         }
     }
@@ -178,10 +191,11 @@ public class RiskService {
     private void createCandidate(RiskAccountSnapshotResponse account,
                                  CalculatedPositionRisk position,
                                  long positionMarginRatio,
+                                 long equityUnits,
                                  Instant now) {
         long candidateId = sequenceRepository.nextSequence("liquidation-candidate");
         long insertedId = riskRepository.createLiquidationCandidate(account, position, RiskStatus.LIQUIDATION,
-                positionMarginRatio, candidateId, now);
+                positionMarginRatio, equityUnits, candidateId, now);
         if (insertedId == 0L) {
             return;
         }
@@ -193,6 +207,7 @@ public class RiskService {
                 candidate.snapshotId(),
                 candidate.userId(),
                 candidate.symbol(),
+                candidate.marginMode(),
                 candidate.instrumentVersion(),
                 candidate.settleAsset(),
                 candidate.signedQuantitySteps(),

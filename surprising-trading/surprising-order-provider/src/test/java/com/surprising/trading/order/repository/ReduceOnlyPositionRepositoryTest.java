@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -25,10 +26,11 @@ class ReduceOnlyPositionRepositoryTest {
     void lockedOpenReduceOnlyStepsFailsOnOverflow() {
         ReduceOnlyPositionRepository repository = new ReduceOnlyPositionRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("FROM trading_orders"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT"), eq(7L), eq("SELL")))
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq(7L), eq("SELL")))
                 .thenReturn(List.of(Long.MAX_VALUE, 1L));
 
-        assertThatThrownBy(() -> repository.lockedOpenReduceOnlySteps(1001L, "BTC-USDT", 7L, OrderSide.SELL))
+        assertThatThrownBy(() -> repository.lockedOpenReduceOnlySteps(1001L, "BTC-USDT",
+                MarginMode.CROSS, 7L, OrderSide.SELL))
                 .isInstanceOf(ArithmeticException.class);
     }
 

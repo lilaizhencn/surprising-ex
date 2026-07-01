@@ -119,12 +119,14 @@ class FundingRepositoryTest {
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_deficits"), any(Object[].class)))
                 .thenReturn(1);
-        when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(), eq(1001L), eq("USDT")))
+        when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
+                eq(1001L), eq("USDT"), eq("CROSS")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getString("symbol")).thenReturn("ETH-USDT");
                     when(rs.getString("asset")).thenReturn("USDT");
+                    when(rs.getString("margin_mode")).thenReturn("CROSS");
                     when(rs.getLong("margin_units")).thenReturn(50L);
                     return List.of(mapper.mapRow(rs, 0));
                 });
@@ -141,7 +143,7 @@ class FundingRepositoryTest {
         repository.applyPaymentToAccount(3001L, payment, now);
 
         verify(jdbcTemplate).update(contains("UPDATE account_position_margins"),
-                eq(50L), any(Timestamp.class), eq(1001L), eq("ETH-USDT"), eq("USDT"), eq(50L));
+                eq(50L), any(Timestamp.class), eq(1001L), eq("ETH-USDT"), eq("USDT"), eq("CROSS"), eq(50L));
         verify(jdbcTemplate).update(contains("UPDATE account_balances"),
                 eq(0L), eq(50L), any(Timestamp.class), eq(1001L), eq("USDT"));
         verify(jdbcTemplate).update(contains("UPDATE account_deficits"),

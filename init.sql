@@ -449,6 +449,7 @@ CREATE TABLE IF NOT EXISTS funding_payments (
     settlement_id           BIGINT NOT NULL,
     user_id                 BIGINT NOT NULL,
     symbol                  TEXT NOT NULL,
+    margin_mode             TEXT NOT NULL DEFAULT 'CROSS',
     asset                   TEXT NOT NULL,
     signed_quantity_steps   BIGINT NOT NULL,
     notional_units          BIGINT NOT NULL,
@@ -459,13 +460,14 @@ CREATE TABLE IF NOT EXISTS funding_payments (
         FOREIGN KEY (settlement_id) REFERENCES funding_settlements(settlement_id),
     CONSTRAINT funding_payments_user_positive CHECK (user_id > 0),
     CONSTRAINT funding_payments_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT funding_payments_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
     CONSTRAINT funding_payments_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT funding_payments_notional_non_negative CHECK (notional_units >= 0),
     CONSTRAINT funding_payments_amount_non_zero CHECK (amount_units <> 0)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS funding_payments_settlement_user_uidx
-    ON funding_payments (settlement_id, user_id);
+    ON funding_payments (settlement_id, user_id, symbol, margin_mode);
 
 CREATE INDEX IF NOT EXISTS funding_payments_user_time_idx
     ON funding_payments (user_id, created_at DESC);
@@ -502,6 +504,8 @@ CREATE TABLE IF NOT EXISTS trading_fee_schedules (
     symbol              TEXT,
     maker_fee_rate_ppm  BIGINT NOT NULL,
     taker_fee_rate_ppm  BIGINT NOT NULL,
+    source_type         TEXT NOT NULL DEFAULT 'USER_OVERRIDE',
+    tier_code           TEXT,
     reason              TEXT NOT NULL,
     status              TEXT NOT NULL,
     effective_time      TIMESTAMPTZ NOT NULL,
@@ -511,6 +515,12 @@ CREATE TABLE IF NOT EXISTS trading_fee_schedules (
     CONSTRAINT trading_fee_schedules_user_positive CHECK (user_id > 0),
     CONSTRAINT trading_fee_schedules_symbol_format CHECK (
         symbol IS NULL OR symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'
+    ),
+    CONSTRAINT trading_fee_schedules_source_type_check CHECK (
+        source_type IN ('USER_OVERRIDE', 'VIP', 'MARKET_MAKER', 'PROMOTION', 'RISK_OVERRIDE')
+    ),
+    CONSTRAINT trading_fee_schedules_tier_code_format CHECK (
+        tier_code IS NULL OR tier_code ~ '^[A-Z0-9][A-Z0-9_-]{0,31}$'
     ),
     CONSTRAINT trading_fee_schedules_status_check CHECK (status IN ('ACTIVE', 'DISABLED')),
     CONSTRAINT trading_fee_schedules_fee_range CHECK (
@@ -1045,6 +1055,7 @@ CREATE TABLE IF NOT EXISTS risk_position_snapshots (
     snapshot_id                 BIGINT NOT NULL,
     user_id                     BIGINT NOT NULL,
     symbol                      TEXT NOT NULL,
+    margin_mode                 TEXT NOT NULL DEFAULT 'CROSS',
     instrument_version          BIGINT NOT NULL,
     settle_asset                TEXT NOT NULL,
     signed_quantity_steps       BIGINT NOT NULL,
@@ -1053,22 +1064,25 @@ CREATE TABLE IF NOT EXISTS risk_position_snapshots (
     notional_units              BIGINT NOT NULL,
     unrealized_pnl_units        BIGINT NOT NULL,
     maintenance_margin_units    BIGINT NOT NULL,
+    position_margin_units       BIGINT NOT NULL DEFAULT 0,
     margin_ratio_ppm            BIGINT NOT NULL,
     status                      TEXT NOT NULL,
     event_time                  TIMESTAMPTZ NOT NULL,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (snapshot_id, user_id, symbol),
+    PRIMARY KEY (snapshot_id, user_id, symbol, margin_mode),
     CONSTRAINT risk_position_snapshots_snapshot_fk
         FOREIGN KEY (snapshot_id) REFERENCES risk_account_snapshots(snapshot_id),
     CONSTRAINT risk_position_snapshots_instrument_fk
         FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT risk_position_snapshots_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT risk_position_snapshots_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
     CONSTRAINT risk_position_snapshots_price_check CHECK (
         (signed_quantity_steps = 0 AND entry_price_ticks = 0 AND mark_price_ticks = 0)
         OR (signed_quantity_steps <> 0 AND entry_price_ticks > 0 AND mark_price_ticks > 0)
     ),
     CONSTRAINT risk_position_snapshots_non_negative CHECK (
-        notional_units >= 0 AND maintenance_margin_units >= 0 AND margin_ratio_ppm >= 0
+        notional_units >= 0 AND maintenance_margin_units >= 0 AND position_margin_units >= 0
+        AND margin_ratio_ppm >= 0
     ),
     CONSTRAINT risk_position_snapshots_status_check CHECK (status IN ('NORMAL', 'WARNING', 'LIQUIDATION'))
 );
@@ -1077,13 +1091,14 @@ CREATE INDEX IF NOT EXISTS risk_position_snapshots_user_idx
     ON risk_position_snapshots (user_id, event_time DESC);
 
 CREATE INDEX IF NOT EXISTS risk_position_snapshots_symbol_idx
-    ON risk_position_snapshots (symbol, event_time DESC);
+    ON risk_position_snapshots (symbol, margin_mode, event_time DESC);
 
 CREATE TABLE IF NOT EXISTS risk_liquidation_candidates (
     candidate_id                BIGINT PRIMARY KEY,
     snapshot_id                 BIGINT NOT NULL,
     user_id                     BIGINT NOT NULL,
     symbol                      TEXT NOT NULL,
+    margin_mode                 TEXT NOT NULL DEFAULT 'CROSS',
     instrument_version          BIGINT NOT NULL,
     settle_asset                TEXT NOT NULL,
     signed_quantity_steps       BIGINT NOT NULL,
@@ -1100,14 +1115,15 @@ CREATE TABLE IF NOT EXISTS risk_liquidation_candidates (
     CONSTRAINT risk_liquidation_candidates_instrument_fk
         FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT risk_liquidation_candidates_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT risk_liquidation_candidates_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
     CONSTRAINT risk_liquidation_candidates_status_check CHECK (status IN ('NEW', 'PROCESSING', 'COMPLETED', 'CANCELED'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS risk_liquidation_candidates_snapshot_uidx
-    ON risk_liquidation_candidates (snapshot_id, user_id, symbol);
+    ON risk_liquidation_candidates (snapshot_id, user_id, symbol, margin_mode);
 
 CREATE UNIQUE INDEX IF NOT EXISTS risk_liquidation_candidates_active_uidx
-    ON risk_liquidation_candidates (user_id, symbol)
+    ON risk_liquidation_candidates (user_id, symbol, margin_mode)
     WHERE status IN ('NEW', 'PROCESSING');
 
 CREATE INDEX IF NOT EXISTS risk_liquidation_candidates_status_idx
@@ -1145,6 +1161,7 @@ CREATE TABLE IF NOT EXISTS liquidation_orders (
     order_id                BIGINT NOT NULL,
     user_id                 BIGINT NOT NULL,
     symbol                  TEXT NOT NULL,
+    margin_mode             TEXT NOT NULL DEFAULT 'CROSS',
     side                    TEXT NOT NULL,
     quantity_steps          BIGINT NOT NULL,
     status                  TEXT NOT NULL,
@@ -1154,6 +1171,7 @@ CREATE TABLE IF NOT EXISTS liquidation_orders (
         FOREIGN KEY (candidate_id) REFERENCES risk_liquidation_candidates(candidate_id),
     CONSTRAINT liquidation_orders_user_positive CHECK (user_id > 0),
     CONSTRAINT liquidation_orders_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT liquidation_orders_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
     CONSTRAINT liquidation_orders_side_check CHECK (side IN ('BUY', 'SELL')),
     CONSTRAINT liquidation_orders_quantity_check CHECK (
         quantity_steps >= 0

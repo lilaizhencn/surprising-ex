@@ -57,7 +57,7 @@ class LiquidationRepositoryTest {
     void lockOpenReduceOnlyStepsFailsOnOverflow() {
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("FROM trading_orders"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT"), eq(7L), eq("SELL")))
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq(7L), eq("SELL")))
                 .thenReturn(List.of(Long.MAX_VALUE, 1L));
 
         assertThatThrownBy(() -> repository.lockOpenReduceOnlySteps(1001L, "BTC-USDT", 7L,
@@ -80,7 +80,7 @@ class LiquidationRepositoryTest {
     void sizingInputCalculatesNotionalWithSharedLongMathAndLongBracketLookup() throws Exception {
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("FROM account_positions p"), anyRowMapper(),
-                eq(2002L), eq("BTC-USDT"), eq(7L))).thenAnswer(invocation -> {
+                eq(2002L), eq("BTC-USDT"), eq("CROSS"), eq(7L))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getString("symbol")).thenReturn("BTC-USDT");
@@ -101,7 +101,7 @@ class LiquidationRepositoryTest {
 
         assertThat(input).isEqualTo(new LiquidationSizingInput(10L, 6L, 20_000L, 2_000L, 10_000L));
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(2002L), eq("BTC-USDT"), eq(7L));
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(2002L), eq("BTC-USDT"), eq("CROSS"), eq(7L));
         assertThat(sql.getValue())
                 .doesNotContain("::NUMERIC")
                 .doesNotContain("abs(");

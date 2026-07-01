@@ -15,7 +15,7 @@ Surprising Exchange 合约基础配置模块。它是交易系统的产品规则
 - 价格/数量规则：tick size、step size、最小/最大下单数量、notional 限制、精度。
 - 下单规则：支持的订单类型、time in force、post-only、reduce-only、market order 开关。
 - 风险规则：最大杠杆、初始保证金率、维持保证金率、风险限额档位。
-- 交易手续费默认配置：maker/taker 费率使用 ppm。正数表示向用户收费，负数表示返佣；用户/VIP/做市覆盖在订单入口解析后写入订单快照。
+- 交易手续费默认配置：maker/taker 费率使用 ppm。正数表示向用户收费，负数表示返佣；用户/VIP/做市/活动覆盖由 order provider 的 `trading_fee_schedules` 解析后写入订单快照。
 - 资金费率配置：funding interval、interest rate、cap/floor、impact notional。
 - 指数价格成分源：外部现货源 REST/WS 配置、权重、USD/USDT 换算规则。
 - 版本管理：每次变更生成新 `version`，通过 `instrument_current_versions` 切换当前版本。
@@ -31,7 +31,7 @@ instrument 配置按 exchange-core 友好的 long 单位保存：
 - `min_notional_units` / `max_notional_units`：long notional 边界。`LINEAR_PERPETUAL` 使用结算资产最小单位；`INVERSE_PERPETUAL` 使用报价币合约面值单位。
 - `notional_multiplier_units`：`LINEAR_PERPETUAL` 表示每个 `priceTick * quantityStep` 对应的结算资产最小单位；`INVERSE_PERPETUAL` 表示每个合约 step 的报价币面值单位。
 - `contract_type` 不只是展示字段，账户、风控、资金费、强平和 ADL 的公式都会按它分支。
-- `maker_fee_rate_ppm` / `taker_fee_rate_ppm`：产品默认手续费。订单入口会叠加 `trading_fee_schedules` 覆盖后写入 `trading_orders` 快照；账户结算按订单快照写入 `TRADE_FEE` ledger。正数扣用户余额，负数给用户返佣。
+- `maker_fee_rate_ppm` / `taker_fee_rate_ppm`：产品默认手续费。订单入口会叠加 `trading_fee_schedules` 覆盖后写入 `trading_orders` 快照；账户结算按订单快照写入 `TRADE_FEE` ledger。正数扣用户余额，负数给用户返佣。默认 BTC/ETH 合约为 maker `200 ppm`、taker `500 ppm`。
 - `*_rate_ppm`、`max_leverage_ppm`、`weight_ppm`：费率、杠杆、权重统一使用 ppm。
 
 `surprising-instrument-api` 同时提供 `PerpetualContractMath`，作为线性/反向合约 notional、未实现 PnL、每 step notional 和维持保证金的共享 long 公式实现。risk、funding、liquidation、ADL 应调用这个共享 math，不要在各自 SQL 里重复实现合约公式。

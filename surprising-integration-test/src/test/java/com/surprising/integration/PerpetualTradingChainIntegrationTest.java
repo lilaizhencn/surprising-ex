@@ -703,22 +703,35 @@ class PerpetualTradingChainIntegrationTest {
             this.state = state;
         }
 
-        @Override
         public Optional<ReduceOnlyPosition> lockedPosition(long userId, String symbol) {
+            return lockedPosition(userId, symbol, MarginMode.CROSS);
+        }
+
+        @Override
+        public Optional<ReduceOnlyPosition> lockedPosition(long userId, String symbol, MarginMode marginMode) {
             PositionState position = state.position(userId);
             return position.signedQuantitySteps() == 0
                     ? Optional.empty()
                     : Optional.of(new ReduceOnlyPosition(position.signedQuantitySteps(), position.instrumentVersion()));
         }
 
+        public long lockedOpenReduceOnlySteps(long userId,
+                                              String symbol,
+                                              long instrumentVersion,
+                                              OrderSide closeSide) {
+            return lockedOpenReduceOnlySteps(userId, symbol, MarginMode.CROSS, instrumentVersion, closeSide);
+        }
+
         @Override
         public long lockedOpenReduceOnlySteps(long userId,
                                               String symbol,
+                                              MarginMode marginMode,
                                               long instrumentVersion,
                                               OrderSide closeSide) {
             return state.orders.values().stream()
                     .filter(order -> order.userId() == userId)
                     .filter(order -> order.symbol().equals(symbol))
+                    .filter(order -> order.marginMode() == MarginMode.defaultIfNull(marginMode))
                     .filter(order -> order.instrumentVersion() == instrumentVersion)
                     .filter(order -> order.reduceOnly() && order.side() == closeSide)
                     .filter(order -> order.status() == OrderStatus.ACCEPTED
@@ -1024,12 +1037,19 @@ class PerpetualTradingChainIntegrationTest {
                                       long tradeId,
                                       long realizedPnlDeltaUnits,
                                       Instant now) {
-            BalanceState current = state.balance(userId);
-            BalanceSettlementState next = PnlSettlementMath.apply(current.availableUnits, current.lockedUnits,
-                    current.deficitUnits, realizedPnlDeltaUnits);
-            current.availableUnits = next.availableUnits();
-            current.lockedUnits = next.lockedUnits();
-            current.deficitUnits = next.deficitUnits();
+            settleRealizedPnl(userId, asset, orderId, tradeId, SYMBOL, MarginMode.CROSS, realizedPnlDeltaUnits, now);
+        }
+
+        @Override
+        public void settleRealizedPnl(long userId,
+                                      String asset,
+                                      long orderId,
+                                      long tradeId,
+                                      String symbol,
+                                      MarginMode marginMode,
+                                      long realizedPnlDeltaUnits,
+                                      Instant now) {
+            applyBalanceSettlement(userId, symbol, marginMode, realizedPnlDeltaUnits);
         }
 
         @Override
@@ -1042,12 +1062,79 @@ class PerpetualTradingChainIntegrationTest {
                                    long feeRatePpm,
                                    String symbol,
                                    Instant now) {
+            settleTradeFee(userId, asset, orderId, tradeId, feeDeltaUnits, reason, feeRatePpm, symbol,
+                    MarginMode.CROSS, now);
+        }
+
+        @Override
+        public void settleTradeFee(long userId,
+                                   String asset,
+                                   long orderId,
+                                   long tradeId,
+                                   long feeDeltaUnits,
+                                   String reason,
+                                   long feeRatePpm,
+                                   String symbol,
+                                   MarginMode marginMode,
+                                   Instant now) {
+            applyBalanceSettlement(userId, symbol, marginMode, feeDeltaUnits);
+        }
+
+        private void applyBalanceSettlement(long userId, String symbol, MarginMode marginMode, long amountUnits) {
             BalanceState current = state.balance(userId);
-            BalanceSettlementState next = PnlSettlementMath.apply(current.availableUnits, current.lockedUnits,
-                    current.deficitUnits, feeDeltaUnits);
+            MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+            long maxLockedDebit = amountUnits < 0
+                    ? matchingPositionMargins(userId, symbol, normalizedMarginMode).stream()
+                    .mapToLong(Map.Entry::getValue)
+                    .reduce(0L, Math::addExact)
+                    : current.lockedUnits;
+            long availableInput = amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED
+                    ? 0L
+                    : current.availableUnits;
+            BalanceSettlementState next = PnlSettlementMath.apply(availableInput, current.lockedUnits,
+                    current.deficitUnits, amountUnits, maxLockedDebit);
+            if (amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED) {
+                next = new BalanceSettlementState(current.availableUnits, next.lockedUnits(), next.deficitUnits());
+            }
+            long lockedDebit = Math.subtractExact(current.lockedUnits, next.lockedUnits());
+            if (lockedDebit > 0) {
+                reducePositionMargins(userId, symbol, normalizedMarginMode, lockedDebit);
+            }
             current.availableUnits = next.availableUnits();
             current.lockedUnits = next.lockedUnits();
             current.deficitUnits = next.deficitUnits();
+        }
+
+        private List<Map.Entry<PositionKey, Long>> matchingPositionMargins(long userId,
+                                                                           String symbol,
+                                                                           MarginMode marginMode) {
+            return state.positionMargins.entrySet().stream()
+                    .filter(entry -> entry.getKey().userId() == userId)
+                    .filter(entry -> entry.getKey().marginMode() == marginMode)
+                    .filter(entry -> marginMode == MarginMode.CROSS || entry.getKey().symbol().equals(symbol))
+                    .filter(entry -> entry.getValue() > 0)
+                    .sorted(Map.Entry.comparingByKey(Comparator
+                            .comparing(PositionKey::symbol)
+                            .thenComparing(PositionKey::marginMode)))
+                    .toList();
+        }
+
+        private void reducePositionMargins(long userId, String symbol, MarginMode marginMode, long amountUnits) {
+            long remaining = amountUnits;
+            for (Map.Entry<PositionKey, Long> entry : matchingPositionMargins(userId, symbol, marginMode)) {
+                if (remaining <= 0) {
+                    break;
+                }
+                long debit = Math.min(entry.getValue(), remaining);
+                long nextMargin = Math.subtractExact(entry.getValue(), debit);
+                if (nextMargin == 0L) {
+                    state.positionMargins.remove(entry.getKey());
+                } else {
+                    state.positionMargins.put(entry.getKey(), nextMargin);
+                }
+                remaining = Math.subtractExact(remaining, debit);
+            }
+            assertThat(remaining).isZero();
         }
 
         @Override
@@ -1161,18 +1248,31 @@ class PerpetualTradingChainIntegrationTest {
                                                long positionMarginRatioPpm,
                                                long candidateId,
                                                Instant now) {
+            return createLiquidationCandidate(account, position, positionStatus, positionMarginRatioPpm,
+                    account.equityUnits(), candidateId, now);
+        }
+
+        @Override
+        public long createLiquidationCandidate(RiskAccountSnapshotResponse account,
+                                               CalculatedPositionRisk position,
+                                               RiskStatus positionStatus,
+                                               long positionMarginRatioPpm,
+                                               long equityUnits,
+                                               long candidateId,
+                                               Instant now) {
             boolean exists = candidates.values().stream()
                     .anyMatch(candidate -> candidate.userId() == position.userId()
                             && candidate.symbol().equals(position.symbol())
+                            && candidate.marginMode() == position.marginMode()
                             && (candidate.status() == LiquidationCandidateStatus.NEW
                             || candidate.status() == LiquidationCandidateStatus.PROCESSING));
             if (exists) {
                 return 0L;
             }
             LiquidationCandidateResponse candidate = new LiquidationCandidateResponse(candidateId,
-                    account.snapshotId(), position.userId(), position.symbol(), position.instrumentVersion(),
-                    position.settleAsset(), position.signedQuantitySteps(), position.markPriceTicks(),
-                    account.equityUnits(), position.maintenanceMarginUnits(),
+                    account.snapshotId(), position.userId(), position.symbol(), position.marginMode(),
+                    position.instrumentVersion(), position.settleAsset(), position.signedQuantitySteps(),
+                    position.markPriceTicks(), equityUnits, position.maintenanceMarginUnits(),
                     Math.max(account.marginRatioPpm(), positionMarginRatioPpm),
                     LiquidationCandidateStatus.NEW, now);
             candidates.put(candidateId, candidate);
@@ -1251,8 +1351,8 @@ class PerpetualTradingChainIntegrationTest {
         public Optional<ClaimedCandidate> claimCandidate(long candidateId) {
             statuses.put(candidateId, "PROCESSING");
             PositionState position = state.position(2202L);
-            return Optional.of(new ClaimedCandidate(candidateId, 1L, 2202L, SYMBOL, VERSION, state.settleAsset,
-                    position.signedQuantitySteps(), state.markPriceTicks, Long.MAX_VALUE));
+            return Optional.of(new ClaimedCandidate(candidateId, 1L, 2202L, SYMBOL, MarginMode.CROSS, VERSION,
+                    state.settleAsset, position.signedQuantitySteps(), state.markPriceTicks, Long.MAX_VALUE));
         }
 
         @Override
@@ -1261,18 +1361,53 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public RiskStatus latestRiskStatus(long userId,
+                                           String symbol,
+                                           MarginMode marginMode,
+                                           long instrumentVersion,
+                                           java.time.Duration maxSnapshotAge) {
+            return RiskStatus.LIQUIDATION;
+        }
+
+        @Override
         public Optional<LiquidationCloseState> lockCloseState(long userId, String symbol, long instrumentVersion) {
+            return lockCloseState(userId, symbol, MarginMode.CROSS, instrumentVersion);
+        }
+
+        @Override
+        public Optional<LiquidationCloseState> lockCloseState(long userId,
+                                                             String symbol,
+                                                             MarginMode marginMode,
+                                                             long instrumentVersion) {
             return Optional.of(new LiquidationCloseState(state.position(userId).signedQuantitySteps()));
         }
 
         @Override
         public long lockOpenReduceOnlySteps(long userId, String symbol, long instrumentVersion, OrderSide closeSide) {
+            return lockOpenReduceOnlySteps(userId, symbol, MarginMode.CROSS, instrumentVersion, closeSide);
+        }
+
+        @Override
+        public long lockOpenReduceOnlySteps(long userId,
+                                            String symbol,
+                                            MarginMode marginMode,
+                                            long instrumentVersion,
+                                            OrderSide closeSide) {
             return 0L;
         }
 
         @Override
         public Optional<LiquidationSizingInput> sizingInput(long userId,
                                                            String symbol,
+                                                           long instrumentVersion,
+                                                           long availableCloseSteps) {
+            return sizingInput(userId, symbol, MarginMode.CROSS, instrumentVersion, availableCloseSteps);
+        }
+
+        @Override
+        public Optional<LiquidationSizingInput> sizingInput(long userId,
+                                                           String symbol,
+                                                           MarginMode marginMode,
                                                            long instrumentVersion,
                                                            long availableCloseSteps) {
             PositionState position = state.position(userId);
@@ -1302,8 +1437,24 @@ class PerpetualTradingChainIntegrationTest {
                                               LiquidationOrderStatus status,
                                               String reason,
                                               Instant now) {
+            return insertLiquidationOrder(liquidationOrderId, candidateId, orderId, userId, symbol, MarginMode.CROSS,
+                    side, quantitySteps, status, reason, now);
+        }
+
+        @Override
+        public boolean insertLiquidationOrder(long liquidationOrderId,
+                                              long candidateId,
+                                              long orderId,
+                                              long userId,
+                                              String symbol,
+                                              MarginMode marginMode,
+                                              OrderSide side,
+                                              long quantitySteps,
+                                              LiquidationOrderStatus status,
+                                              String reason,
+                                              Instant now) {
             orders.add(new LiquidationOrderResponse(liquidationOrderId, candidateId, orderId, userId, symbol,
-                    side, quantitySteps, status, reason, now));
+                    marginMode, side, quantitySteps, status, reason, now));
             return true;
         }
 
@@ -1349,9 +1500,22 @@ class PerpetualTradingChainIntegrationTest {
                                                    OrderSide closeSide,
                                                    Instant now,
                                                    Function<Object, String> serializer) {
+            return cancelOpenReduceOnlyCloseOrders(userId, symbol, MarginMode.CROSS, instrumentVersion, closeSide,
+                    now, serializer);
+        }
+
+        @Override
+        public int cancelOpenReduceOnlyCloseOrders(long userId,
+                                                   String symbol,
+                                                   MarginMode marginMode,
+                                                   long instrumentVersion,
+                                                   OrderSide closeSide,
+                                                   Instant now,
+                                                   Function<Object, String> serializer) {
             List<OrderRecord> openReduceOnlyOrders = state.orders.values().stream()
                     .filter(order -> order.userId() == userId)
                     .filter(order -> symbol.equals(order.symbol()))
+                    .filter(order -> order.marginMode() == MarginMode.defaultIfNull(marginMode))
                     .filter(order -> order.instrumentVersion() == instrumentVersion)
                     .filter(order -> order.side() == closeSide)
                     .filter(OrderRecord::reduceOnly)
@@ -1374,7 +1538,8 @@ class PerpetualTradingChainIntegrationTest {
                 commands.add(new OrderCommandEvent(OrderCommandType.CANCEL, state.next("trading-command"),
                         order.orderId(), order.userId(), order.clientOrderId(), order.symbol(),
                         order.instrumentVersion(), order.side(), order.orderType(), order.timeInForce(),
-                        order.priceTicks(), order.quantitySteps(), order.reduceOnly(), order.postOnly(), now));
+                        order.priceTicks(), order.quantitySteps(), order.marginMode(), order.reduceOnly(),
+                        order.postOnly(), now, null));
             }
             return openReduceOnlyOrders.size();
         }
@@ -1388,16 +1553,30 @@ class PerpetualTradingChainIntegrationTest {
                                                              long quantitySteps,
                                                              Instant now,
                                                              Function<Object, String> serializer) {
+            return createReduceOnlyMarketOrder(candidateId, userId, symbol, MarginMode.CROSS, instrumentVersion, side,
+                    quantitySteps, now, serializer);
+        }
+
+        @Override
+        public OrderCommandEvent createReduceOnlyMarketOrder(long candidateId,
+                                                             long userId,
+                                                             String symbol,
+                                                             MarginMode marginMode,
+                                                             long instrumentVersion,
+                                                             OrderSide side,
+                                                             long quantitySteps,
+                                                             Instant now,
+                                                             Function<Object, String> serializer) {
             long orderId = state.next("trading-order");
             long commandId = state.next("trading-command");
             OrderRecord order = new OrderRecord(orderId, userId, "LIQ-" + candidateId, symbol, instrumentVersion,
                     side, OrderType.MARKET, TimeInForce.IOC, 0L, quantitySteps, 0L, quantitySteps,
-                    MarginMode.CROSS, state.makerFeeRatePpm, state.takerFeeRatePpm,
+                    MarginMode.defaultIfNull(marginMode), state.makerFeeRatePpm, state.takerFeeRatePpm,
                     true, false, OrderStatus.ACCEPTED, null, now, now);
             state.orders.put(orderId, order);
             OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, commandId, orderId, userId,
                     order.clientOrderId(), symbol, instrumentVersion, side, OrderType.MARKET, TimeInForce.IOC,
-                    0L, quantitySteps, true, false, now);
+                    0L, quantitySteps, order.marginMode(), true, false, now, null);
             commands.add(command);
             return command;
         }
