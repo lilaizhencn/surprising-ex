@@ -43,6 +43,12 @@ find . -type d -name target -prune -print
 
 清理成功后，`find` 不应输出任何 `target` 目录。
 
+最近一次本地验证：
+
+- `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q -pl :surprising-integration-test -am test`：通过，覆盖 order -> matching -> account -> risk -> liquidation -> funding -> insurance -> ADL 的 Java 集成链路。
+- `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q test`：通过，覆盖当前全部 Maven 模块测试。
+- `KEEP_TMP=true BUILD_SERVICES=false ./scripts/full-stack-real-config-smoke.sh`：通过，覆盖真实 PostgreSQL/Kafka、多 provider、WebSocket、高频下单、深度盘口、资金费、强平、保险基金和 ADL 链路。
+
 ## 证据矩阵
 
 | 范围 | 当前证据 |

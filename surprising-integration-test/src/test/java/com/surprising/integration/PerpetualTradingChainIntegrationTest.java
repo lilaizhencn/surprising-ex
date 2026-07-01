@@ -331,7 +331,7 @@ class PerpetualTradingChainIntegrationTest {
             assertThat(harness.liquidationRepository.status(candidate.candidateId())).isEqualTo("COMPLETED");
             assertThat(harness.liquidationRepository.orders).singleElement()
                     .extracting(LiquidationOrderResponse::status)
-                    .isEqualTo(LiquidationOrderStatus.SUBMITTED);
+                    .isEqualTo(LiquidationOrderStatus.FILLED);
         }
     }
 
@@ -439,8 +439,13 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         private void processCommand(OrderCommandEvent command) {
+            int resultOffset = matchingResultRepository.results.size();
             int tradeOffset = matchingResultRepository.trades.size();
             matchingService.process(command);
+            for (MatchResultEvent result : matchingResultRepository.results.subList(resultOffset,
+                    matchingResultRepository.results.size())) {
+                liquidationService.processMatchResult(result);
+            }
             for (MatchTradeEvent trade : matchingResultRepository.trades.subList(tradeOffset,
                     matchingResultRepository.trades.size())) {
                 accountService.processTrade(trade);
@@ -1224,6 +1229,27 @@ class PerpetualTradingChainIntegrationTest {
             orders.add(new LiquidationOrderResponse(liquidationOrderId, candidateId, orderId, userId, symbol,
                     side, quantitySteps, status, reason, now));
             return true;
+        }
+
+        @Override
+        public Optional<Long> updateOrderLifecycle(long orderId,
+                                                   LiquidationOrderStatus orderStatus,
+                                                   String candidateStatus) {
+            for (int i = 0; i < orders.size(); i++) {
+                LiquidationOrderResponse order = orders.get(i);
+                if (order.orderId() == orderId
+                        && (order.status() == LiquidationOrderStatus.SUBMITTED
+                        || order.status() == LiquidationOrderStatus.PARTIALLY_FILLED)) {
+                    orders.set(i, new LiquidationOrderResponse(order.liquidationOrderId(), order.candidateId(),
+                            order.orderId(), order.userId(), order.symbol(), order.side(), order.quantitySteps(),
+                            orderStatus, order.reason(), order.createdAt()));
+                    if ("PROCESSING".equals(statuses.get(order.candidateId()))) {
+                        statuses.put(order.candidateId(), candidateStatus);
+                    }
+                    return Optional.of(order.candidateId());
+                }
+            }
+            return Optional.empty();
         }
 
         private String status(long candidateId) {

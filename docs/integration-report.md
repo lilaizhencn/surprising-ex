@@ -44,6 +44,12 @@ find . -type d -name target -prune -print
 
 `find` should print nothing after a successful clean.
 
+Latest local verification:
+
+- `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q -pl :surprising-integration-test -am test`: passed, covering the Java order -> matching -> account -> risk -> liquidation -> funding -> insurance -> ADL integration chain.
+- `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q test`: passed, covering all current Maven module tests.
+- `KEEP_TMP=true BUILD_SERVICES=false ./scripts/full-stack-real-config-smoke.sh`: passed, covering real PostgreSQL/Kafka, multiple providers, WebSocket, high-frequency order flow, deep order book, funding, liquidation, insurance, and ADL.
+
 ## Evidence Matrix
 
 | Area | Current evidence |
