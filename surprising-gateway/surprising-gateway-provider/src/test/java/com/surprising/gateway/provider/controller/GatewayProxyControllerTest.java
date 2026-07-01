@@ -49,6 +49,22 @@ class GatewayProxyControllerTest {
     }
 
     @Test
+    void privateTradingTriggerRouteProxiesToTriggerProvider() {
+        GatewayProperties properties = properties();
+        GatewayProxyController controller = new GatewayProxyController(properties, new RestTemplate());
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET", "/api/v1/gateway/trading-trigger/open");
+        request.setQueryString("userId=42&symbol=BTC-USDT");
+
+        URI target = controller.targetUri("trading-trigger",
+                properties.getRoutes().get("trading-trigger"), request);
+
+        assertThat(target.toString())
+                .isEqualTo("http://trigger:9095/api/v1/trading/trigger-orders/open?userId=42&symbol=BTC-USDT");
+        assertThat(properties.getRoutes().get("trading-trigger").isPrivateRoute()).isTrue();
+    }
+
+    @Test
     void privateRouteRequiresIdentityBeforeProxying() {
         GatewayProxyController controller = new GatewayProxyController(properties(), new RestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
@@ -82,6 +98,8 @@ class GatewayProxyControllerTest {
                 "http://candles:9081", "/api/v1/candlestick", false));
         routes.put("trading-market", new GatewayProperties.BackendRoute(
                 "http://matching:9085", "/api/v1/trading/market", false));
+        routes.put("trading-trigger", new GatewayProperties.BackendRoute(
+                "http://trigger:9095", "/api/v1/trading/trigger-orders", true));
         routes.put("account", new GatewayProperties.BackendRoute(
                 "http://account:9086", "/api/v1/accounts", true));
         properties.setRoutes(routes);

@@ -20,6 +20,7 @@ Examples:
 ```bash
 curl 'http://localhost:9094/api/v1/gateway/candlestick/candles/latest?symbol=BTC-USDT&period=1m'
 curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50'
+curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symbol=BTC-USDT' -H 'X-User-Id: 1001'
 curl 'http://localhost:9094/api/v1/gateway/account/1001/positions' -H 'X-User-Id: 1001'
 ```
 
@@ -34,6 +35,7 @@ curl 'http://localhost:9094/api/v1/gateway/account/1001/positions' -H 'X-User-Id
 | `price-mark` | `http://localhost:9083/api/v1/price/mark` | no |
 | `trading` | `http://localhost:9084/api/v1/trading/orders` | yes |
 | `trading-market` | `http://localhost:9085/api/v1/trading/market` | no |
+| `trading-trigger` | `http://localhost:9095/api/v1/trading/trigger-orders` | yes |
 | `account` | `http://localhost:9086/api/v1/accounts` | yes |
 | `risk` | `http://localhost:9087/api/v1/risk` | yes |
 | `liquidation` | `http://localhost:9088/api/v1/liquidation` | yes |
@@ -81,6 +83,10 @@ surprising:
       account:
         base-url: http://surprising-account:9086
         target-prefix: /api/v1/accounts
+        private-route: true
+      trading-trigger:
+        base-url: http://surprising-trigger:9095
+        target-prefix: /api/v1/trading/trigger-orders
         private-route: true
 ```
 

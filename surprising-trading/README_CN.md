@@ -2,12 +2,13 @@
 
 [English](README.md) | [简体中文](README_CN.md)
 
-Surprising Exchange 合约交易模块。当前已实现 `surprising-order-provider` 和 `surprising-matching-provider`：订单入口、instrument 规则校验、幂等落库、Kafka 撮合命令发布、exchange-core 真实订单簿撮合、撮合结果和成交事件输出。
+Surprising Exchange 合约交易模块。当前已实现 `surprising-order-provider`、`surprising-trigger-provider` 和 `surprising-matching-provider`：订单入口、止盈止损条件单、instrument 规则校验、幂等落库、Kafka 撮合命令发布、exchange-core 真实订单簿撮合、撮合结果和成交事件输出。
 
 ## 模块
 
 - `surprising-trading-api`：订单 RPC 合约、DTO、Kafka command/event 模型。
 - `surprising-order-provider`：订单入口 provider。
+- `surprising-trigger-provider`：止盈止损条件单 provider。
 - `surprising-matching-provider`：基于 `exchange-core` 的撮合 provider。
 
 ## long 定点数模型
@@ -47,6 +48,18 @@ client / internal gateway
   -> surprising.perp.match.results.v1 / surprising.perp.match.trades.v1
 ```
 
+止盈止损走独立链路：
+
+```text
+client / internal gateway
+  -> POST /api/v1/trading/trigger-orders
+  -> surprising-trigger-provider
+  -> PostgreSQL trading_trigger_orders
+  -> consume surprising.perp.mark.price.v1
+  -> 通过 surprising-order-provider 提交 reduceOnly 平仓单
+  -> 正常订单 / 撮合 / 账户 / WebSocket 链路
+```
+
 订单 provider 不直接撮合，也不直接承担 WebSocket 推送。订单状态推送服务应该消费 `surprising.perp.order.events.v1`、`surprising.perp.match.results.v1` 后独立 fanout。
 
 ## 保证金模式
@@ -80,6 +93,49 @@ client / internal gateway
 - 设置杠杆时会先校验不能超过 instrument 当前版本的 `max_leverage_ppm`。
 - 下单冻结保证金时还会按订单名义价值和当前同 `marginMode` 持仓名义价值选择 `instrument_risk_brackets` 档位；如果用户设置杠杆超过该档 `max_leverage_ppm`，订单会拒绝。
 - 有效初始保证金率 = `max(用户杠杆换算出的保证金率, 风险档位 initial_margin_rate_ppm)`。未设置用户杠杆时，按当前风险档位最大杠杆/初始保证金率冻结。
+
+## 止盈止损
+
+大型交易所的 TP/SL 通常是活跃订单簿外的条件单。本模块按这个模型实现：
+
+- 条件单先以 `PENDING` 状态保存在 `trading_trigger_orders`，触发前不进入 exchange-core，也不冻结新增保证金。
+- 当前只支持 `MARK_PRICE` 触发，避免最新成交价被短时冲击操纵，并和风控/强平使用的标记价格保持一致。
+- 触发方向由平仓方向和条件单类型自动推导：多仓止盈是 `SELL + TAKE_PROFIT`，mark price 大于等于触发价时触发；多仓止损是 `SELL + STOP_LOSS`，mark price 小于等于触发价时触发。空仓平仓用 `BUY`，方向相反。
+- trigger provider 消费 `surprising.perp.mark.price.v1`，校验 Kafka key 等于 payload `symbol`，再把已落库的 `price_mark_ticks.mark_price_units` 按当前 instrument tick size 转为 ticks，用 PostgreSQL `FOR UPDATE SKIP LOCKED` 抢占到期条件单。
+- 多个 trigger-provider 节点可以同时运行。每条到期条件单只能被一个节点抢到；如果下游 order-provider 故障，`TRIGGERING` 状态超过 `surprising.trading.trigger.execution.stale-triggering-after` 后会重置，等待后续 mark 事件重试。
+- 触发后通过 order-provider 提交 `reduceOnly=true`、`postOnly=false` 的平仓单，`clientOrderId=trigger-<triggerOrderId>`。order-provider 的幂等键会保护重试不会创建重复平仓单。
+- 触发后的真实订单继续走普通订单、撮合、账户、手续费、PnL、风控、强平和 WebSocket 链路。trigger 服务不直接修改余额或持仓。
+- `MARKET` 触发执行要求 `priceTicks=0` 且 `timeInForce` 为 `IOC` 或 `FOK`。`LIMIT` 触发执行要求 `priceTicks > 0`；触发执行不支持 `GTX`。
+- 成对 OCO 止盈/止损自动互撤暂未建模。在后续增加 OCO group 表前，客户端应在一侧触发后取消另一侧条件单。
+
+REST 接口：
+
+```bash
+curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Trace-Id: trace-tp-1001' \
+  -d '{
+    "userId": 1001,
+    "clientTriggerOrderId": "tp-1001-1",
+    "symbol": "BTC-USDT",
+    "side": "SELL",
+    "triggerType": "TAKE_PROFIT",
+    "triggerPriceType": "MARK_PRICE",
+    "triggerPriceTicks": 700000,
+    "orderType": "MARKET",
+    "timeInForce": "IOC",
+    "priceTicks": 0,
+    "quantitySteps": 10,
+    "marginMode": "CROSS"
+  }'
+
+curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders/cancel' \
+  -H 'Content-Type: application/json' \
+  -d '{"userId":1001,"triggerOrderId":1}'
+
+curl 'http://localhost:9095/api/v1/trading/trigger-orders/open?userId=1001&symbol=BTC-USDT&limit=100'
+curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symbol=BTC-USDT&limit=100' -H 'X-User-Id: 1001'
+```
 
 ## TraceId 链路追踪
 
@@ -151,6 +207,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - 幂等冲突发生在保证金冻结前；重复请求只返回已存在订单，不会创建新的 reservation 或重复锁定余额。
 - `trading_sequences` 使用 PostgreSQL 原子 `INSERT ... ON CONFLICT ... RETURNING` 分配 `orderId`、`eventId`、`commandId`、`outboxId`。
 - `trading_outbox_events` 与订单写入在同一事务提交。
+- `trading_trigger_orders_user_client_uidx` 保证同一用户 `clientTriggerOrderId` 的止盈止损下单幂等。
 - `trading_order_events` 和 `trading_outbox_events` 插入必须影响 1 行，否则事务失败，避免订单状态和消息链路不一致。
 - outbox 发布器用 `FOR UPDATE SKIP LOCKED`，多个 order-provider 节点可以同时运行，不会重复锁同一批待发消息。
 - outbox 失败后按 `next_attempt_at` 指数退避重试，避免 Kafka 故障时热循环。
@@ -164,6 +221,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `surprising.perp.match.results.v1`：撮合结果，key = `symbol`。
 - `surprising.perp.match.trades.v1`：撮合成交，key = `symbol`，价格和数量仍然是 long tick/step。
 - `surprising.perp.orderbook.depth.v1`：L2 盘口深度更新，key = `symbol`。
+- `surprising.perp.mark.price.v1`：trigger-provider 消费的标记价格流，key = `symbol`。
 
 topic partition 继续按 symbol 扩展。同一个 symbol 的 command 必须固定落到同一个 matching shard/order book。
 
@@ -308,6 +366,7 @@ curl 'http://localhost:9084/api/v1/trading/orders/open?userId=1001&symbol=BTC-US
 - `trading_sequences`
 - `trading_orders`
 - `trading_order_events`
+- `trading_trigger_orders`
 - `trading_outbox_events`
 - `account_margin_reservations`
 - `account_position_margins`
@@ -322,6 +381,12 @@ curl 'http://localhost:9084/api/v1/trading/orders/open?userId=1001&symbol=BTC-US
 - `trading_orders_open_query_idx`
 - `trading_orders_stp_open_idx`
 - `trading_orders_recovery_idx`
+- `trading_trigger_orders_user_client_uidx`
+- `trading_trigger_orders_user_status_idx`
+- `trading_trigger_orders_symbol_gte_idx`
+- `trading_trigger_orders_symbol_lte_idx`
+- `trading_trigger_orders_expiry_idx`
+- `trading_trigger_orders_triggering_idx`
 - `trading_order_events_order_idx`
 - `trading_order_events_trace_idx`
 - `trading_outbox_pending_idx`
@@ -341,22 +406,26 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 mvn -pl :surprising-order-provider -am spring-boot:run
 JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED" \
 mvn -pl :surprising-matching-provider -am spring-boot:run
+mvn -pl :surprising-trigger-provider -am spring-boot:run
 ```
 
 端口：
 
 - `9084`：订单入口服务。
 - `9085`：撮合服务。
+- `9095`：止盈止损条件单服务。
 
 ## 生产注意事项
 
 - `surprising-order-provider` 可以多节点水平部署，但必须共享同一个 PostgreSQL 和 Kafka 集群。
+- `surprising-trigger-provider` 也可以多节点水平部署。它按 Kafka partition 和数据库 claim batch 扩展，不要做每个 symbol 一个 worker。
 - matching provider 使用 JDK 21 运行。exchange-core 依赖的 Chronicle/OpenHFT 需要显式 Java module opens/exports；生产 pod 使用本地运行示例里的 `JAVA_TOOL_OPTIONS`。
 - 新 symbol 必须先在 instrument 模块上线，确认 Kafka partition 足够，再开放下单。
 - MARKET 订单在订单入口和撮合阶段都要求 mark price 新鲜。订单入口会用配置的 mark 派生可成交区间校验 min/max notional，再发布撮合命令；线性合约 max-notional 和初始保证金按上边界计算，避免市价 SELL 开空在高买价成交时抵押不足。`surprising.trading.*.market-max-slippage-ppm` 需要按产品流动性配置。
 - 当前已经实现基于 PostgreSQL 的开放订单簿恢复；exchange-core 原生 snapshot/journal 可作为后续超大订单簿更快恢复的增强。
 - Instrument `max_notional_units` 已同时约束限价单和保护价市价单。真实盘口深度、延迟和强平压力测试证明更大额度安全之前，产品 notional 限额应保持保守。
 - 用户主动平仓应使用 `reduceOnly=true`；强平订单由 liquidation provider 复核风险后生成，不走用户订单入口校验。
+- 止盈止损触发后一定通过 order-provider 提交 reduce-only 平仓单。WebSocket 客户端会在普通私有订单/成交/持仓频道收到触发后生成的真实订单和成交。
 - outbox 是至少一次投递；下游撮合和推送必须幂等。
 - matching result 通过 `commandId` 幂等，成交通过 `tradeId` 幂等。
 - 如果 matching 进程处理过命令后又拿到新的 Kafka partition，会主动退出并由编排系统重启，以便从 DB 重建新的 exchange-core 订单簿。这是预期的 failover 行为。
@@ -367,5 +436,6 @@ mvn -pl :surprising-matching-provider -am spring-boot:run
 ```bash
 mvn -pl :surprising-order-provider -am test
 mvn -pl :surprising-matching-provider -am test
+mvn -pl :surprising-trigger-provider -am test
 rg -n "BigDecimal" surprising-trading -g '*.java'
 ```

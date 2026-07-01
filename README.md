@@ -13,7 +13,7 @@ This repository is the root reactor for exchange backend modules. Each business 
 - `surprising-instrument`: perpetual instrument configuration and product-rule center.
 - `surprising-candlestick`: perpetual candlestick service.
 - `surprising-price`: perpetual index price and mark price services.
-- `surprising-trading`: perpetual order entry and exchange-core matching.
+- `surprising-trading`: perpetual order entry, trigger orders, and exchange-core matching.
 - `surprising-account`: account balances, ledger, and perpetual positions.
 - `surprising-risk`: margin ratio, risk snapshots, and liquidation candidate service.
 - `surprising-liquidation`: liquidation candidate executor and reduce-only close order service.
@@ -82,6 +82,7 @@ mvn -pl :surprising-funding-provider -am spring-boot:run
 mvn -pl :surprising-insurance-provider -am spring-boot:run
 mvn -pl :surprising-adl-provider -am spring-boot:run
 mvn -pl :surprising-websocket-provider -am spring-boot:run
+mvn -pl :surprising-trigger-provider -am spring-boot:run
 mvn -pl :surprising-gateway-provider -am spring-boot:run
 ```
 
@@ -101,6 +102,7 @@ Ports:
 - `9091`: ADL service.
 - `9093`: client WebSocket fanout service.
 - `9094`: public REST API gateway.
+- `9095`: take-profit and stop-loss trigger order service.
 
 ## Kafka Topics
 
@@ -132,6 +134,7 @@ curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
 curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
 curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
 curl -X POST 'http://localhost:9084/api/v1/trading/orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientOrderId":"cli-1001-1","symbol":"BTC-USDT","side":"BUY","orderType":"LIMIT","timeInForce":"GTC","priceTicks":650000,"quantitySteps":10,"reduceOnly":false,"postOnly":false}'
+curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientTriggerOrderId":"tp-1001-1","symbol":"BTC-USDT","side":"SELL","triggerType":"TAKE_PROFIT","triggerPriceType":"MARK_PRICE","triggerPriceTicks":700000,"orderType":"MARKET","timeInForce":"IOC","priceTicks":0,"quantitySteps":10,"marginMode":"CROSS"}'
 curl 'http://localhost:9089/api/v1/funding/rates/latest?symbol=BTC-USDT'
 curl 'http://localhost:9090/api/v1/insurance/balances?asset=USDT'
 curl 'http://localhost:9091/api/v1/adl/queue?asset=USDT&limit=100'
@@ -186,6 +189,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Matching also exits on decoded command processing failure, so Kafka replay happens after DB order-book recovery instead of retrying against a possibly mutated in-memory book.
 - Matching requires sufficient `locked_units` when releasing reserved order margin; insufficient locked balance fails fast and triggers recovery instead of silently crediting available balance.
 - Market orders use fresh mark-price execution-band notional checks at order entry, then matching submits the side-specific protected price to exchange-core. Linear contracts reserve market-order initial margin at the upper band for both BUY and SELL so a market SELL can safely execute against higher resting bids. Matching rejects self-trading taker orders.
+- Take-profit and stop-loss are conditional trigger orders. They stay in `trading_trigger_orders` until a mark-price event crosses the trigger price; then `surprising-trigger-provider` submits an idempotent `reduceOnly=true` close order through order-provider with `clientOrderId=trigger-<triggerOrderId>`.
 - Account consumes matching trades, updates long-based net positions idempotently by `tradeId`, migrates filled opening margin into position margin, and settles realized PnL into balances.
 - `CROSS` and `ISOLATED` margin modes are carried from order entry through matching, account, risk, funding, and liquidation. Cross losses may use cross available balance and cross position collateral; isolated losses only use that symbol's isolated position collateral before recording a deficit.
 - User leverage settings are keyed by `userId + symbol + marginMode`; order entry re-checks the configured leverage against the current risk bracket before reserving initial margin.
@@ -203,6 +207,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Candlestick state scales with Kafka Streams partitions and local RocksDB state stores.
 - Index and mark price providers use PostgreSQL symbol leases and database sequences to avoid duplicate multi-node publishing and sequence rollback.
 - Order entry uses PostgreSQL idempotency keys, atomic sequences, and outbox `FOR UPDATE SKIP LOCKED` for multi-node deployment.
+- Trigger-provider uses PostgreSQL `FOR UPDATE SKIP LOCKED` to claim due TP/SL orders, Kafka mark-price replay for trigger detection, and stale `TRIGGERING` reset for retry after downstream order-provider failures. It does not mutate balances or positions directly.
 - Matching is wired to real exchange-core order books and uses long ticks/steps end to end.
 - Matching command topics must be keyed by `symbol`; scale matching with Kafka partitions and controlled instance count, not one thread per symbol.
 - Matching publishes L2 order book depth as `SNAPSHOT` then per-price-level absolute-state `DELTA` events on `surprising.perp.orderbook.depth.v1`. A delta level with `quantitySteps=0` deletes that price level. Clients should load `GET /api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50`, then apply WebSocket deltas whose `previousSequence` matches the local sequence; on gaps or reconnects, discard the local book and reload a fresh snapshot before applying deltas again.

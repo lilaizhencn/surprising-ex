@@ -20,6 +20,7 @@
 ```bash
 curl 'http://localhost:9094/api/v1/gateway/candlestick/candles/latest?symbol=BTC-USDT&period=1m'
 curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50'
+curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symbol=BTC-USDT' -H 'X-User-Id: 1001'
 curl 'http://localhost:9094/api/v1/gateway/account/1001/positions' -H 'X-User-Id: 1001'
 ```
 
@@ -34,6 +35,7 @@ curl 'http://localhost:9094/api/v1/gateway/account/1001/positions' -H 'X-User-Id
 | `price-mark` | `http://localhost:9083/api/v1/price/mark` | 否 |
 | `trading` | `http://localhost:9084/api/v1/trading/orders` | 是 |
 | `trading-market` | `http://localhost:9085/api/v1/trading/market` | 否 |
+| `trading-trigger` | `http://localhost:9095/api/v1/trading/trigger-orders` | 是 |
 | `account` | `http://localhost:9086/api/v1/accounts` | 是 |
 | `risk` | `http://localhost:9087/api/v1/risk` | 是 |
 | `liquidation` | `http://localhost:9088/api/v1/liquidation` | 是 |
@@ -81,6 +83,10 @@ surprising:
       account:
         base-url: http://surprising-account:9086
         target-prefix: /api/v1/accounts
+        private-route: true
+      trading-trigger:
+        base-url: http://surprising-trigger:9095
+        target-prefix: /api/v1/trading/trigger-orders
         private-route: true
 ```
 

@@ -47,6 +47,10 @@ surprising:
         base-url: http://localhost:9085
         target-prefix: /api/v1/trading/market
         private-route: false
+      trading-trigger:
+        base-url: http://localhost:9095
+        target-prefix: /api/v1/trading/trigger-orders
+        private-route: true
       account:
         base-url: http://localhost:9086
         target-prefix: /api/v1/accounts

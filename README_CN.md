@@ -13,7 +13,7 @@ Surprising 交易所后端服务。
 - `surprising-instrument`：合约基础配置和产品规则中心。
 - `surprising-candlestick`：合约 K 线服务。
 - `surprising-price`：合约指数价格和标记价格服务。
-- `surprising-trading`：合约订单入口和 exchange-core 撮合。
+- `surprising-trading`：合约订单入口、止盈止损条件单和 exchange-core 撮合。
 - `surprising-account`：账户余额、余额流水和合约持仓服务。
 - `surprising-risk`：保证金率、风险快照和爆仓候选服务。
 - `surprising-liquidation`：强平候选执行和 reduce-only 平仓订单服务。
@@ -83,6 +83,7 @@ mvn -pl :surprising-funding-provider -am spring-boot:run
 mvn -pl :surprising-insurance-provider -am spring-boot:run
 mvn -pl :surprising-adl-provider -am spring-boot:run
 mvn -pl :surprising-websocket-provider -am spring-boot:run
+mvn -pl :surprising-trigger-provider -am spring-boot:run
 mvn -pl :surprising-gateway-provider -am spring-boot:run
 ```
 
@@ -102,6 +103,7 @@ mvn -pl :surprising-gateway-provider -am spring-boot:run
 - `9091`：ADL 服务。
 - `9093`：前端 WebSocket 推送服务。
 - `9094`：统一 REST API 网关。
+- `9095`：止盈止损条件单服务。
 
 ## Kafka Topics
 
@@ -133,6 +135,7 @@ curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
 curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
 curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
 curl -X POST 'http://localhost:9084/api/v1/trading/orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientOrderId":"cli-1001-1","symbol":"BTC-USDT","side":"BUY","orderType":"LIMIT","timeInForce":"GTC","priceTicks":650000,"quantitySteps":10,"reduceOnly":false,"postOnly":false}'
+curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientTriggerOrderId":"tp-1001-1","symbol":"BTC-USDT","side":"SELL","triggerType":"TAKE_PROFIT","triggerPriceType":"MARK_PRICE","triggerPriceTicks":700000,"orderType":"MARKET","timeInForce":"IOC","priceTicks":0,"quantitySteps":10,"marginMode":"CROSS"}'
 curl 'http://localhost:9089/api/v1/funding/rates/latest?symbol=BTC-USDT'
 curl 'http://localhost:9090/api/v1/insurance/balances?asset=USDT'
 curl 'http://localhost:9091/api/v1/adl/queue?asset=USDT&limit=100'
@@ -187,6 +190,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Matching 在 command 已解析但处理失败时也会退出，让 Kafka 重放发生在 DB 订单簿恢复之后，而不是在可能已被修改的内存订单簿上重试。
 - Matching 释放订单冻结保证金时要求 `locked_units` 足额；不足会失败并触发重启恢复，不能把异常冻结余额静默释放成可用余额。
 - 市价单在订单入口使用新鲜 mark price 的可成交区间校验 notional，matching 再按买卖方向保护价提交 exchange-core；线性合约市价单无论 BUY/SELL 都按上边界冻结初始保证金，保证 SELL 市价单吃到高买价时不会抵押不足。matching 会拒绝会自成交的 taker 订单。
+- 止盈止损是条件单，触发前只保存在 `trading_trigger_orders`，不进入 exchange-core 订单簿；mark price 穿越触发价后，`surprising-trigger-provider` 通过 order-provider 提交幂等的 `reduceOnly=true` 平仓单，`clientOrderId=trigger-<triggerOrderId>`。
 - Account 消费撮合成交，按 `tradeId` 幂等更新 long-based 净持仓，把开仓成交保证金迁移到持仓保证金，并把已实现盈亏结算进余额。
 - `CROSS` 和 `ISOLATED` 保证金模式会从下单一路传到撮合、账户、风控、资金费和强平。全仓亏损可以使用全仓可用余额和全仓持仓保证金；逐仓亏损只使用该 symbol 的逐仓持仓保证金，亏穿后记录 deficit。
 - 用户杠杆配置按 `userId + symbol + marginMode` 生效；订单入口会在冻结初始保证金前按当前风险档位重新校验配置杠杆。
@@ -204,6 +208,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - K 线服务用 Kafka Streams + RocksDB 分区状态，按 Kafka partition 水平扩展。
 - 指数价格和标记价格服务用 PostgreSQL 的 symbol 租约和数据库 sequence 避免多节点重复发布和 sequence 回退。
 - 订单入口用 PostgreSQL 幂等键、原子 sequence 和 outbox `FOR UPDATE SKIP LOCKED` 支持多节点部署。
+- Trigger provider 使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 抢占到期 TP/SL 条件单，通过 Kafka mark price 重放检测触发，并用 stale `TRIGGERING` 重置机制在下游 order-provider 故障后重试。它不直接修改余额或持仓。
 - 当前 matching 已接入真实 exchange-core 订单簿，交易链路端到端使用 long ticks/steps。
 - matching command topic 必须以 `symbol` 作为 key；matching 扩展依赖 Kafka partition 和受控实例数，不做每 symbol 一个线程。
 - Matching 会把 L2 盘口深度发布成 `SNAPSHOT` 加按价格档绝对状态变化的 `DELTA`，topic 是 `surprising.perp.orderbook.depth.v1`。delta 中 `quantitySteps=0` 表示删除该价格档。客户端先拉 `GET /api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50`，再应用 `previousSequence` 等于本地 sequence 的 WebSocket 增量；断号或重连后要丢弃本地盘口，重新拉快照，再继续应用增量。

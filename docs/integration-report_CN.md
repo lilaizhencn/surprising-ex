@@ -45,24 +45,26 @@ find . -type d -name target -prune -print
 
 最近一次本地验证：
 
+- `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q -pl :surprising-trigger-provider,:surprising-gateway-provider,:surprising-order-provider,:surprising-account-provider,:surprising-risk-provider,:surprising-liquidation-provider,:surprising-funding-provider,:surprising-integration-test -am test`：通过，覆盖 TP/SL 条件推导、`clientTriggerOrderId` 幂等、gateway trigger 路由、mark price payload 解析、Kafka consumer 可重放配置、`FOR UPDATE SKIP LOCKED` 抢占触发单、生成 reduce-only 平仓单和核心 Java 交易链路。
 - `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q -pl :surprising-order-provider,:surprising-account-provider,:surprising-risk-provider,:surprising-liquidation-provider,:surprising-funding-provider,:surprising-integration-test -am test`：通过，覆盖用户杠杆配置、按风险档位冻结订单保证金、自动 VIP 手续费档位、手续费 source 优先级、手续费快照、账户结算、风控、强平、资金费和 Java 集成链路。
 - `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q -pl :surprising-liquidation-provider -am test`：通过，覆盖强平候选复核、分阶段 sizing、reduce-only 前置撤单，以及撮合结果后候选生命周期更新的 fail-fast 行为。
 - `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q -pl :surprising-risk-provider -am test`：通过，覆盖风控账户组 keyset 分页扫描、账户持仓事件触发风控扫描、账户组级 mark price 新鲜度和多节点扫描租约行为。
 - `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q -pl :surprising-integration-test -am test`：通过，覆盖 order -> matching -> account -> risk -> liquidation -> funding -> insurance -> ADL 的 Java 集成链路。
 - `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q test`：通过，覆盖当前全部 Maven 模块测试。
-- `KEEP_TMP=true BUILD_SERVICES=false ./scripts/full-stack-real-config-smoke.sh`：通过，覆盖真实 PostgreSQL/Kafka、多 provider、WebSocket、高频下单、深度盘口、资金费、强平、保险基金和 ADL 链路。
+- `KEEP_TMP=true BUILD_SERVICES=false ./scripts/full-stack-real-config-smoke.sh`：在加入 TP/SL 触发场景前曾通过，覆盖真实 PostgreSQL/Kafka、多 provider、WebSocket、高频下单、深度盘口、资金费、强平、保险基金和 ADL 链路。
 
 ## 证据矩阵
 
 | 范围 | 当前证据 |
 | --- | --- |
 | Schema 初始化 | `scripts/integration-smoke.sh` 会启动临时 PostgreSQL 并导入根目录 `init.sql`。 |
-| 真实 Kafka 交易 smoke | `scripts/kafka-trading-smoke.sh` 会启动 Docker Compose PostgreSQL/Kafka，把 `init.sql` 导入隔离的 smoke 数据库，创建 Kafka topics，启动 order/matching/account 三个 provider，通过 REST 给两个用户入金并提交可成交的对手单，等待 exchange-core 撮合和 account Kafka 结算完成，然后把同一条 match-trade payload 重新发布到 Kafka，验证账户持仓和 processed-trade 行数不变化。`scripts/kafka-trading-load-smoke.sh` 会额外启动 WebSocket，订阅 depth/private 频道，并检查全部成交、部分成交后撤单、只撤单、全部撤单、并发 maker/taker 用户、持仓正确性、盘口深度推送和私有订单/撮合/持仓推送接收。`scripts/full-stack-real-config-smoke.sh` 启动 instrument、candlestick、index-price、mark-price、order、matching、account、risk、liquidation、funding、insurance、ADL、websocket、gateway 全部 provider，覆盖资金费、强平、保险基金、ADL、WebSocket 公共/私有推送、故障恢复场景，并在风险快照断言前验证 risk 已消费账户持仓事件。 |
+| 真实 Kafka 交易 smoke | `scripts/kafka-trading-smoke.sh` 会启动 Docker Compose PostgreSQL/Kafka，把 `init.sql` 导入隔离的 smoke 数据库，创建 Kafka topics，启动 order/matching/account 三个 provider，通过 REST 给两个用户入金并提交可成交的对手单，等待 exchange-core 撮合和 account Kafka 结算完成，然后把同一条 match-trade payload 重新发布到 Kafka，验证账户持仓和 processed-trade 行数不变化。`scripts/kafka-trading-load-smoke.sh` 会额外启动 WebSocket，订阅 depth/private 频道，并检查全部成交、部分成交后撤单、只撤单、全部撤单、并发 maker/taker 用户、持仓正确性、盘口深度推送和私有订单/撮合/持仓推送接收。`scripts/full-stack-real-config-smoke.sh` 现在会启动 instrument、candlestick、index-price、mark-price、order、matching、account、risk、liquidation、funding、insurance、ADL、websocket、trigger、gateway 全部 provider，并包含 TP/SL 触发执行场景。这次改动后还需要重新跑一次 full-stack，才能形成 TP/SL 的新进程级证据；上面的最近验证是 Maven 级别。 |
 | long 定点模型 | 订单、撮合、账户、风控、强平、资金费、保险基金、ADL 核心链路使用 ticks、steps、ppm、asset units；`CoreFixedPointArchitectureTest` 会拒绝这些 main Java 路径里的 `BigDecimal`、`double`、`float`，相关数学测试覆盖溢出敏感逻辑，也覆盖会改变容量或风险的 checked 聚合。 |
 | 共享合约公式 | `PerpetualContractMathTest` 验证共享的线性/反向 notional、未实现 PnL、每 step notional、初始保证金、维持保证金和溢出行为；account、risk、funding、liquidation、ADL 共同使用这套公式。 |
 | instrument version 锁定 | `integration-smoke.sh` 把 BTC-USDT 当前版本切到 v2，并验证已有 v1 持仓仍用 v1 规则计算风险和资金费。 |
 | 下单校验 | `TraceContextTest`、`TraceIdFilterTest`、`OrderValidatorTest`、`OrderMarginMathTest`、`LeverageServiceTest`、`ReduceOnlyValidatorTest`、`OrderServiceTest`、`OrderRepositoryTest`、`OrderMarginRepositoryTest`、`OrderMarkPriceRepositoryTest`、`MarketPriceProtectionTest` 覆盖 traceId 清洗、请求作用域清理、订单事件和 command payload 传递、显式 `CROSS` 和 `ISOLATED` 保证金模式传递、用户杠杆配置、instrument 最大杠杆校验、按风险档位在冻结保证金前拒绝超限杠杆、订单边界、币本位 notional、市价可成交区间 notional 上限、新鲜 mark price 校验、long-only 初始保证金公式，包括线性合约市价 SELL 按上边界冻结抵押、按保证金模式隔离且带 checked 待平聚合的 reduce-only 可平量、限定范围的 `clientOrderId` 幂等不重复冻结、以及保证金冻结 guarded update。 |
 | 交易手续费档位和快照 | `TradingFeeServiceTest`、`OrderFeeRepositoryTest`、`FeeTierServiceTest`、`TradeFeeMathTest`、`AccountServiceTest` 验证 instrument 默认 maker/taker 费率、用户全局和单 symbol 覆盖、风控/人工/活动/做市商费率优先于自动 VIP 的 source 优先级、按 30 日成交名义价值和账户资产估值自动刷新 VIP 档位、自动生成用户全局费率的激活/禁用、下单入口不可变手续费快照，以及账户按该快照写手续费扣款/返佣 ledger。 |
+| 止盈止损条件单 | `TriggerOrderServiceTest`、`TriggerOrderRepositoryTest`、`MarkPriceTriggerParserTest`、`TriggerKafkaConfigurationTest` 验证 TP/SL 触发条件推导、限定用户范围的 `clientTriggerOrderId` 幂等、mark price 事件解析、保持 key 语义的 Kafka consumer 配置、`FOR UPDATE SKIP LOCKED` 抢占到期触发单、通过 order-provider 生成 reduce-only 平仓单、生成订单被拒后转为 `TRIGGER_FAILED`，以及 stale `TRIGGERING` 重置重试。 |
 | 跨模块 Java 链路 | `PerpetualTradingChainIntegrationTest` 使用真实 exchange-core 和内存 adapter，验证下单 -> 撮合 -> 账户结算 -> U 本位线性和币本位反向用户 reduce-only 主动平仓、币本位保证金释放和已实现 PnL、市价单风险边界冻结 -> 更优价格成交 -> 差额保证金释放、线性合约市价 SELL 在吃到高于 mark 的买单前已按上边界足额冻结、用户撤单 -> exchange-core cancel -> 预冻结保证金释放、部分成交 -> 撤剩余单 -> 只释放未成交委托保证金且保留已迁移仓位保证金，以及风险候选 -> 强平 reduce-only 市价单 -> 强平成交结算。`PostLiquidationFundingInsuranceAdlIntegrationTest` 验证资金费结算 -> 账户余额/保证金迁移、保险基金亏损覆盖、ADL 剩余亏损转移。 |
 | exchange-core 撮合 | `ExchangeCoreEngineRecoveryTest` 验证 DB 开放订单恢复到 exchange-core，并拒绝交叉订单簿恢复。 |
 | matching fail-fast 恢复 | `MatchingCommandConsumerTest`、`MatchingPartitionAssignmentGuardTest`、`MatchingResultRepositoryTest`、`MatchingOutboxRepositoryTest` 验证已解析 command 处理失败会请求 matcher 重启后再让 Kafka 重放；matcher 处理过命令后遇到 partition reassignment/lost 会重启；撮合结果/成交/outbox 写入冲突会 fail-fast；无法解析的 payload 不会误标记 partition 已处理。 |
@@ -91,6 +93,7 @@ instrument 规则
   -> 下单校验和保证金冻结
   -> exchange-core 撮合
   -> 保护价市价成交和按成交价迁移保证金
+  -> 止盈止损条件单转成 reduce-only 平仓单
   -> 用户撤单和未成交预冻结保证金释放
   -> 部分成交撤单时保留已迁移仓位保证金
   -> 带版本的撮合成交事件
@@ -103,7 +106,7 @@ instrument 规则
   -> ADL 处理剩余亏损
 ```
 
-Java 集成测试现在覆盖 order、matching、account、risk、liquidation、funding、insurance、ADL 服务类之间的事件交接，不需要启动真实 Kafka/PostgreSQL 进程。它补充了 PostgreSQL smoke，后者更侧重 schema 和跨表不变量。Kafka 交易 smoke 补上真实 Kafka/PostgreSQL 进程下 order -> matching -> account 的证据；在 Docker Compose 可用时，load smoke 会进一步覆盖 WebSocket 盘口深度和私有推送断言。
+Java 集成测试现在覆盖 order、matching、account、risk、liquidation、funding、insurance、ADL 服务类之间的事件交接，不需要启动真实 Kafka/PostgreSQL 进程。它补充了 PostgreSQL smoke，后者更侧重 schema 和跨表不变量。Kafka 交易 smoke 补上真实 Kafka/PostgreSQL 进程下 order -> matching -> account 的证据；在 Docker Compose 可用时，load/full-stack smoke 会进一步覆盖 WebSocket 盘口深度和私有推送断言。full-stack 脚本已经补了 TP/SL 触发执行，但这个新的进程级场景还需要重新跑一次 full-stack。
 
 本地 PostgreSQL smoke 还验证了单元测试不容易覆盖的跨表约束：
 

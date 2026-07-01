@@ -724,6 +724,96 @@ CREATE INDEX IF NOT EXISTS trading_orders_recovery_idx
       AND time_in_force IN ('GTC', 'GTX')
       AND remaining_quantity_steps > 0;
 
+CREATE TABLE IF NOT EXISTS trading_trigger_orders (
+    trigger_order_id           BIGINT PRIMARY KEY,
+    user_id                    BIGINT NOT NULL,
+    client_trigger_order_id    TEXT,
+    symbol                     TEXT NOT NULL,
+    side                       TEXT NOT NULL,
+    trigger_type               TEXT NOT NULL,
+    trigger_price_type         TEXT NOT NULL,
+    trigger_condition          TEXT NOT NULL,
+    trigger_price_ticks        BIGINT NOT NULL,
+    order_type                 TEXT NOT NULL,
+    time_in_force              TEXT NOT NULL,
+    price_ticks                BIGINT NOT NULL,
+    quantity_steps             BIGINT NOT NULL,
+    margin_mode                TEXT NOT NULL DEFAULT 'CROSS',
+    status                     TEXT NOT NULL,
+    placed_order_id            BIGINT,
+    trigger_sequence           BIGINT,
+    triggered_price_ticks      BIGINT,
+    reject_reason              TEXT,
+    trace_id                   TEXT,
+    expires_at                 TIMESTAMPTZ,
+    triggered_at               TIMESTAMPTZ,
+    created_at                 TIMESTAMPTZ NOT NULL,
+    updated_at                 TIMESTAMPTZ NOT NULL,
+    CONSTRAINT trading_trigger_orders_user_positive CHECK (user_id > 0),
+    CONSTRAINT trading_trigger_orders_client_id_length CHECK (
+        client_trigger_order_id IS NULL OR length(client_trigger_order_id) <= 64
+    ),
+    CONSTRAINT trading_trigger_orders_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT trading_trigger_orders_symbol_fk
+        FOREIGN KEY (symbol) REFERENCES instrument_current_versions(symbol),
+    CONSTRAINT trading_trigger_orders_placed_order_fk
+        FOREIGN KEY (placed_order_id) REFERENCES trading_orders(order_id),
+    CONSTRAINT trading_trigger_orders_side_check CHECK (side IN ('BUY', 'SELL')),
+    CONSTRAINT trading_trigger_orders_type_check CHECK (trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')),
+    CONSTRAINT trading_trigger_orders_price_type_check CHECK (trigger_price_type IN ('MARK_PRICE')),
+    CONSTRAINT trading_trigger_orders_condition_check CHECK (
+        trigger_condition IN ('GREATER_OR_EQUAL', 'LESS_OR_EQUAL')
+    ),
+    CONSTRAINT trading_trigger_orders_order_type_check CHECK (order_type IN ('LIMIT', 'MARKET')),
+    CONSTRAINT trading_trigger_orders_tif_check CHECK (time_in_force IN ('GTC', 'IOC', 'FOK')),
+    CONSTRAINT trading_trigger_orders_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
+    CONSTRAINT trading_trigger_orders_status_check CHECK (
+        status IN ('PENDING', 'TRIGGERING', 'TRIGGERED', 'TRIGGER_FAILED', 'CANCELED', 'EXPIRED')
+    ),
+    CONSTRAINT trading_trigger_orders_long_values CHECK (
+        trigger_price_ticks > 0
+        AND price_ticks >= 0
+        AND quantity_steps > 0
+        AND (trigger_sequence IS NULL OR trigger_sequence > 0)
+        AND (triggered_price_ticks IS NULL OR triggered_price_ticks > 0)
+    ),
+    CONSTRAINT trading_trigger_orders_market_price_zero CHECK (
+        order_type <> 'MARKET' OR price_ticks = 0
+    ),
+    CONSTRAINT trading_trigger_orders_triggered_state_check CHECK (
+        (status IN ('TRIGGERED', 'TRIGGER_FAILED') AND placed_order_id IS NOT NULL)
+        OR (status NOT IN ('TRIGGERED', 'TRIGGER_FAILED'))
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS trading_trigger_orders_user_client_uidx
+    ON trading_trigger_orders (user_id, client_trigger_order_id)
+    WHERE client_trigger_order_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS trading_trigger_orders_user_status_idx
+    ON trading_trigger_orders (user_id, status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS trading_trigger_orders_symbol_gte_idx
+    ON trading_trigger_orders (symbol, trigger_price_ticks, trigger_order_id)
+    WHERE status = 'PENDING'
+      AND trigger_price_type = 'MARK_PRICE'
+      AND trigger_condition = 'GREATER_OR_EQUAL';
+
+CREATE INDEX IF NOT EXISTS trading_trigger_orders_symbol_lte_idx
+    ON trading_trigger_orders (symbol, trigger_price_ticks DESC, trigger_order_id)
+    WHERE status = 'PENDING'
+      AND trigger_price_type = 'MARK_PRICE'
+      AND trigger_condition = 'LESS_OR_EQUAL';
+
+CREATE INDEX IF NOT EXISTS trading_trigger_orders_expiry_idx
+    ON trading_trigger_orders (expires_at, trigger_order_id)
+    WHERE status = 'PENDING'
+      AND expires_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS trading_trigger_orders_triggering_idx
+    ON trading_trigger_orders (updated_at, trigger_order_id)
+    WHERE status = 'TRIGGERING';
+
 CREATE TABLE IF NOT EXISTS trading_order_events (
     event_id            BIGINT PRIMARY KEY,
     order_id            BIGINT NOT NULL,

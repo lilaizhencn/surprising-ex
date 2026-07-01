@@ -2,12 +2,13 @@
 
 [English](README.md) | [简体中文](README_CN.md)
 
-Surprising Exchange perpetual trading module. The current implementation contains `surprising-order-provider` and `surprising-matching-provider`: order entry, instrument-rule validation, idempotent persistence, Kafka matching-command publishing, real exchange-core order-book matching, matching results, and trade events.
+Surprising Exchange perpetual trading module. The current implementation contains `surprising-order-provider`, `surprising-trigger-provider`, and `surprising-matching-provider`: order entry, take-profit/stop-loss trigger orders, instrument-rule validation, idempotent persistence, Kafka matching-command publishing, real exchange-core order-book matching, matching results, and trade events.
 
 ## Modules
 
 - `surprising-trading-api`: order RPC contracts, DTOs, and Kafka command/event models.
 - `surprising-order-provider`: order entry provider.
+- `surprising-trigger-provider`: take-profit and stop-loss conditional order provider.
 - `surprising-matching-provider`: `exchange-core` based matching provider.
 
 ## Long Fixed-Point Model
@@ -48,6 +49,18 @@ client / internal gateway
   -> surprising.perp.match.results.v1 / surprising.perp.match.trades.v1
 ```
 
+Trigger orders use a separate path:
+
+```text
+client / internal gateway
+  -> POST /api/v1/trading/trigger-orders
+  -> surprising-trigger-provider
+  -> PostgreSQL trading_trigger_orders
+  -> consume surprising.perp.mark.price.v1
+  -> submit reduceOnly order through surprising-order-provider
+  -> normal order / matching / account / WebSocket flow
+```
+
 The order provider does not match orders and does not own WebSocket fanout. Order-state push should be a separate service consuming `surprising.perp.order.events.v1` and `surprising.perp.match.results.v1`.
 
 ## Margin Mode
@@ -81,6 +94,49 @@ yet, so clients should present one-way net positions.
 - Setting leverage first validates it against the current instrument version's `max_leverage_ppm`.
 - Order margin reservation then selects the matching `instrument_risk_brackets` row from the order notional plus the current same-`marginMode` position notional. If the user setting exceeds that bracket's `max_leverage_ppm`, the order is rejected.
 - Effective initial-margin rate = `max(leverage-derived margin rate, risk-bracket initial_margin_rate_ppm)`. When no user setting exists, order entry uses the current risk bracket's max leverage / initial margin rate.
+
+## Take-Profit And Stop-Loss
+
+Large exchanges implement TP/SL as conditional orders outside the live order book. This module follows that model:
+
+- A trigger order is stored in `trading_trigger_orders` with `PENDING` status. It does not enter exchange-core and does not reserve new margin.
+- Only `MARK_PRICE` triggers are supported. This avoids last-trade manipulation and keeps liquidation/risk trigger semantics aligned with the mark-price stream.
+- Direction is derived from close side and trigger type: long TP is `SELL + TAKE_PROFIT` and triggers when mark is greater than or equal to the trigger; long SL is `SELL + STOP_LOSS` and triggers when mark is less than or equal to the trigger. Short closes use the inverse conditions with `BUY`.
+- The trigger provider consumes `surprising.perp.mark.price.v1`, validates Kafka key = payload `symbol`, converts the persisted `price_mark_ticks.mark_price_units` to current instrument ticks, and claims due rows with PostgreSQL `FOR UPDATE SKIP LOCKED`.
+- Multiple trigger-provider nodes can run at the same time. Only one node can claim a due trigger row, and stale `TRIGGERING` rows are reset after `surprising.trading.trigger.execution.stale-triggering-after` so downstream failures retry on later mark events.
+- When triggered, it calls order-provider with `reduceOnly=true`, `postOnly=false`, and `clientOrderId=trigger-<triggerOrderId>`. The order-provider idempotency key protects retries from creating duplicate close orders.
+- Triggered orders go through the same order, matching, account, fee, PnL, risk, liquidation, and WebSocket flow as user-submitted close orders. The trigger service never mutates balances or positions directly.
+- `MARKET` trigger execution requires `priceTicks=0` and `IOC` or `FOK`. `LIMIT` trigger execution requires a positive `priceTicks`; `GTX` is rejected for trigger execution.
+- Paired OCO TP/SL cancellation is not modeled yet. Until an OCO group table is added, clients should cancel the sibling trigger after one side triggers.
+
+REST endpoints:
+
+```bash
+curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Trace-Id: trace-tp-1001' \
+  -d '{
+    "userId": 1001,
+    "clientTriggerOrderId": "tp-1001-1",
+    "symbol": "BTC-USDT",
+    "side": "SELL",
+    "triggerType": "TAKE_PROFIT",
+    "triggerPriceType": "MARK_PRICE",
+    "triggerPriceTicks": 700000,
+    "orderType": "MARKET",
+    "timeInForce": "IOC",
+    "priceTicks": 0,
+    "quantitySteps": 10,
+    "marginMode": "CROSS"
+  }'
+
+curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders/cancel' \
+  -H 'Content-Type: application/json' \
+  -d '{"userId":1001,"triggerOrderId":1}'
+
+curl 'http://localhost:9095/api/v1/trading/trigger-orders/open?userId=1001&symbol=BTC-USDT&limit=100'
+curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symbol=BTC-USDT&limit=100' -H 'X-User-Id: 1001'
+```
 
 ## Trace Id
 
@@ -152,6 +208,7 @@ The trading Java module remains long-only.
 - Idempotency conflicts happen before margin reservation. Replayed requests return the existing order and never create a new reservation or lock balance twice.
 - `trading_sequences` atomically allocates `orderId`, `eventId`, `commandId`, and `outboxId` with PostgreSQL `INSERT ... ON CONFLICT ... RETURNING`.
 - `trading_outbox_events` is committed in the same transaction as the order.
+- `trading_trigger_orders_user_client_uidx` makes `(userId, clientTriggerOrderId)` idempotent for TP/SL placement.
 - `trading_order_events` and `trading_outbox_events` inserts must affect exactly one row; otherwise the transaction fails to avoid order/message divergence.
 - The outbox publisher uses `FOR UPDATE SKIP LOCKED`, so multiple order-provider nodes can publish concurrently without locking the same rows.
 - Failed outbox rows retry with exponential backoff through `next_attempt_at`, avoiding hot loops during Kafka incidents.
@@ -165,6 +222,7 @@ The trading Java module remains long-only.
 - `surprising.perp.match.results.v1`: matching results, key = `symbol`.
 - `surprising.perp.match.trades.v1`: matching trades, key = `symbol`, with prices and quantities still represented as long ticks/steps.
 - `surprising.perp.orderbook.depth.v1`: L2 order book depth updates, key = `symbol`.
+- `surprising.perp.mark.price.v1`: mark-price stream consumed by trigger-provider, key = `symbol`.
 
 Partitions should continue to scale by symbol. All commands for the same symbol must route to the same matching shard/order book.
 
@@ -309,6 +367,7 @@ Root [init.sql](../init.sql) creates:
 - `trading_sequences`
 - `trading_orders`
 - `trading_order_events`
+- `trading_trigger_orders`
 - `trading_outbox_events`
 - `account_margin_reservations`
 - `account_position_margins`
@@ -323,6 +382,12 @@ Core indexes:
 - `trading_orders_open_query_idx`
 - `trading_orders_stp_open_idx`
 - `trading_orders_recovery_idx`
+- `trading_trigger_orders_user_client_uidx`
+- `trading_trigger_orders_user_status_idx`
+- `trading_trigger_orders_symbol_gte_idx`
+- `trading_trigger_orders_symbol_lte_idx`
+- `trading_trigger_orders_expiry_idx`
+- `trading_trigger_orders_triggering_idx`
 - `trading_order_events_order_idx`
 - `trading_order_events_trace_idx`
 - `trading_outbox_pending_idx`
@@ -342,22 +407,26 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 mvn -pl :surprising-order-provider -am spring-boot:run
 JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED" \
 mvn -pl :surprising-matching-provider -am spring-boot:run
+mvn -pl :surprising-trigger-provider -am spring-boot:run
 ```
 
 Port:
 
 - `9084`: order entry service.
 - `9085`: matching service.
+- `9095`: take-profit and stop-loss trigger service.
 
 ## Production Notes
 
 - `surprising-order-provider` can run multiple instances, sharing the same PostgreSQL and Kafka clusters.
+- `surprising-trigger-provider` can also run multiple instances. Scale it by Kafka partitions and database claim batches; do not create one worker per symbol.
 - Run the matching provider on JDK 21. Chronicle/OpenHFT dependencies used by exchange-core require explicit Java module opens/exports; set the same `JAVA_TOOL_OPTIONS` shown in local run for production pods.
 - A new symbol must first be enabled in instrument, Kafka partitions must be checked, and only then should order entry be opened.
 - MARKET orders require fresh mark price at order entry and matching. Order entry enforces min/max notional with the configured mark-derived execution band before publishing a matching command; linear max-notional and initial-margin checks use the upper bound to avoid under-collateralized market SELL opens. Tune `surprising.trading.*.market-max-slippage-ppm` per product liquidity.
 - Matching open-order recovery is implemented from PostgreSQL; native exchange-core journal/snapshot persistence is still optional future hardening for faster very-large-book recovery.
 - Instrument `max_notional_units` is enforced for both limit orders and protected-price market orders. Keep product notional limits conservative until real venue depth, latency, and liquidation stress tests prove larger limits safe.
 - User-initiated close orders should use `reduceOnly=true`; liquidation orders are generated by the liquidation provider and bypass user order-entry validation after a risk re-check.
+- TP/SL trigger execution always submits reduce-only close orders through order-provider. WebSocket clients will see the generated order id and fills through the normal private order/match/position channels after trigger execution.
 - Outbox delivery is at least once; downstream matching and push consumers must be idempotent.
 - Matching results are idempotent by `commandId`; trades are idempotent by `tradeId`.
 - A matching process that gets a new Kafka partition after processing commands will exit and restart to rebuild a fresh exchange-core book from DB. Treat this as expected failover behavior.
@@ -368,5 +437,6 @@ Port:
 ```bash
 mvn -pl :surprising-order-provider -am test
 mvn -pl :surprising-matching-provider -am test
+mvn -pl :surprising-trigger-provider -am test
 rg -n "BigDecimal" surprising-trading -g '*.java'
 ```

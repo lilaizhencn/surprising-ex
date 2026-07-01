@@ -378,6 +378,45 @@ CREATE INDEX adl_events_asset_symbol_time_idx
 - `trading_orders_stp_open_idx` supports self-trade prevention checks by user, symbol, side, and price.
 - `trading_orders_recovery_idx` supports startup order-book recovery by scanning open `LIMIT` + `GTC/GTX` orders in maker-priority order.
 
+`trading_trigger_orders` stores take-profit and stop-loss conditional orders before they enter the live
+order path:
+
+- `client_trigger_order_id` is scoped by `user_id` for idempotent placement.
+- `trigger_price_type` is currently `MARK_PRICE`, and `trigger_condition` is derived from close side and
+  TP/SL type.
+- `trigger_price_ticks`, `price_ticks`, and `quantity_steps` stay in the same long tick/step model as
+  regular orders.
+- `status` moves through `PENDING -> TRIGGERING -> TRIGGERED` or `TRIGGER_FAILED`; user cancellation moves
+  only `PENDING` rows to `CANCELED`, and expiry moves due rows to `EXPIRED`.
+- `placed_order_id` links the generated reduce-only close order in `trading_orders`.
+- `trigger_sequence` and `triggered_price_ticks` record which mark-price event triggered the row.
+- `trace_id` is forwarded to the generated order request so private WebSocket order/match/position pushes can
+  be traced back to the original TP/SL placement.
+
+Core trigger indexes:
+
+```sql
+CREATE UNIQUE INDEX trading_trigger_orders_user_client_uidx
+    ON trading_trigger_orders (user_id, client_trigger_order_id)
+    WHERE client_trigger_order_id IS NOT NULL;
+
+CREATE INDEX trading_trigger_orders_symbol_gte_idx
+    ON trading_trigger_orders (symbol, trigger_price_ticks, trigger_order_id)
+    WHERE status = 'PENDING'
+      AND trigger_price_type = 'MARK_PRICE'
+      AND trigger_condition = 'GREATER_OR_EQUAL';
+
+CREATE INDEX trading_trigger_orders_symbol_lte_idx
+    ON trading_trigger_orders (symbol, trigger_price_ticks DESC, trigger_order_id)
+    WHERE status = 'PENDING'
+      AND trigger_price_type = 'MARK_PRICE'
+      AND trigger_condition = 'LESS_OR_EQUAL';
+```
+
+The trigger provider claims due rows with `FOR UPDATE SKIP LOCKED`, so active-active nodes can consume the
+same mark-price stream without executing the same trigger twice. The expiry and `TRIGGERING` indexes support
+scheduled expiry and stale execution retry.
+
 `trading_fee_schedules` stores user-level fee overrides:
 
 - `symbol IS NULL` is a user-global fee tier; a concrete `symbol` is a per-symbol override.

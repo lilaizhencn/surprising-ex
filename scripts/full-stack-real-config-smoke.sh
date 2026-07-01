@@ -43,6 +43,7 @@ PARTIAL_MAKER_USER=$((7200000000 + RUN_SEQ))
 PARTIAL_TAKER_USER=$((7300000000 + RUN_SEQ))
 CANCEL_USER=$((7400000000 + RUN_SEQ))
 CLOSE_MAKER_USER=$((7450000000 + RUN_SEQ))
+TRIGGER_MAKER_USER=$((7460000000 + RUN_SEQ))
 ALL_CANCEL_USER_START=$((7500000000 + RUN_SEQ * 10))
 LOAD_MAKER_START=$((9000000000 + RUN_SEQ * 1000))
 LOAD_TAKER_START=$((9500000000 + RUN_SEQ * 1000))
@@ -81,6 +82,7 @@ PARTIAL_TAKER_QTY=$((QUANTITY_STEPS - 3))
 LOAD_QTY="${QUANTITY_STEPS}"
 LOAD_TOTAL_QTY=$((PAIR_COUNT * LOAD_QTY))
 CLOSE_QTY=4
+TRIGGER_CLOSE_QTY=$((QUANTITY_STEPS - CLOSE_QTY))
 TOPUP_QTY=10
 LIQ_QTY=10
 LIQ_MARK_PRICE_TICKS=160000
@@ -380,7 +382,8 @@ package_services() {
     mvn -q -pl :surprising-instrument-provider,:surprising-candlestick-provider,:surprising-index-price-provider,\
 :surprising-mark-price-provider,:surprising-order-provider,:surprising-matching-provider,:surprising-account-provider,\
 :surprising-risk-provider,:surprising-liquidation-provider,:surprising-funding-provider,:surprising-insurance-provider,\
-:surprising-adl-provider,:surprising-websocket-provider,:surprising-gateway-provider -am -DskipTests package
+:surprising-adl-provider,:surprising-websocket-provider,:surprising-gateway-provider,:surprising-trigger-provider \
+-am -DskipTests package
 }
 
 boot_jar() {
@@ -412,6 +415,7 @@ provider_port() {
     adl) echo 9091 ;;
     websocket) echo 9093 ;;
     gateway) echo 9094 ;;
+    trigger) echo 9095 ;;
     *) echo "unknown provider: ${name}" >&2; exit 1 ;;
   esac
 }
@@ -425,6 +429,7 @@ provider_module() {
     mark-price) echo "surprising-price/surprising-mark-price-provider" ;;
     order) echo "surprising-trading/surprising-order-provider" ;;
     matching) echo "surprising-trading/surprising-matching-provider" ;;
+    trigger) echo "surprising-trading/surprising-trigger-provider" ;;
     account) echo "surprising-account/surprising-account-provider" ;;
     risk) echo "surprising-risk/surprising-risk-provider" ;;
     liquidation) echo "surprising-liquidation/surprising-liquidation-provider" ;;
@@ -446,6 +451,7 @@ provider_artifact() {
     mark-price) echo "surprising-mark-price-provider" ;;
     order) echo "surprising-order-provider" ;;
     matching) echo "surprising-matching-provider" ;;
+    trigger) echo "surprising-trigger-provider" ;;
     account) echo "surprising-account-provider" ;;
     risk) echo "surprising-risk-provider" ;;
     liquidation) echo "surprising-liquidation-provider" ;;
@@ -737,6 +743,34 @@ cancel_order() {
     "{\"userId\": ${user_id}, \"orderId\": ${order_id}}" >/dev/null
 }
 
+place_trigger_order() {
+  local user_id="$1"
+  local client_trigger_order_id="$2"
+  local side="$3"
+  local trigger_type="$4"
+  local trigger_price_ticks="$5"
+  local order_type="$6"
+  local tif="$7"
+  local price_ticks="$8"
+  local quantity_steps="$9"
+  local response
+  response="$(gateway_post "trading-trigger" "${user_id}" "real-config-${RUN_ID}-${client_trigger_order_id}" "{
+      \"userId\": ${user_id},
+      \"clientTriggerOrderId\": \"${client_trigger_order_id}\",
+      \"symbol\": \"${BTC_SYMBOL}\",
+      \"side\": \"${side}\",
+      \"triggerType\": \"${trigger_type}\",
+      \"triggerPriceType\": \"MARK_PRICE\",
+      \"triggerPriceTicks\": ${trigger_price_ticks},
+      \"orderType\": \"${order_type}\",
+      \"timeInForce\": \"${tif}\",
+      \"priceTicks\": ${price_ticks},
+      \"quantitySteps\": ${quantity_steps},
+      \"marginMode\": \"CROSS\"
+    }")"
+  printf '%s\n' "${response}" | json_field triggerOrderId
+}
+
 adjust_balance() {
   local user_id="$1"
   local amount_units="$2"
@@ -777,6 +811,14 @@ wait_order_result() {
   wait_sql_equals "matching result ${result_code} for order ${order_id}" \
     "SELECT COALESCE((SELECT result_code FROM trading_match_results WHERE order_id = ${order_id} AND command_type = 'PLACE' ORDER BY event_time DESC LIMIT 1), '')" \
     "${result_code}"
+}
+
+wait_trigger_state() {
+  local trigger_order_id="$1"
+  local status="$2"
+  wait_sql_equals "trigger order ${trigger_order_id} ${status}" \
+    "SELECT status FROM trading_trigger_orders WHERE trigger_order_id = ${trigger_order_id}" \
+    "${status}"
 }
 
 wait_position_symbol() {
@@ -1073,7 +1115,7 @@ publish_price_inputs_until_mark_event() {
 fund_users() {
   local default_deposit=100000000000
   for user in "${FULL_MAKER_USER}" "${FULL_TAKER_USER}" "${PARTIAL_MAKER_USER}" "${PARTIAL_TAKER_USER}" \
-    "${CANCEL_USER}" "${CLOSE_MAKER_USER}" "${FAULT_MAKER_USER}" "${FAULT_TAKER_USER}" \
+    "${CANCEL_USER}" "${CLOSE_MAKER_USER}" "${TRIGGER_MAKER_USER}" "${FAULT_MAKER_USER}" "${FAULT_TAKER_USER}" \
     "${ACCOUNT_FAULT_MAKER_USER}" "${ACCOUNT_FAULT_TAKER_USER}" "${SELF_TRADE_USER}" \
     "${POST_ONLY_MAKER_USER}" "${POST_ONLY_TAKER_USER}" "${DEPTH_USER}" \
     "${TOPUP_MAKER_USER}" "${LIQ_OPEN_MAKER_USER}" "${LIQ_CLOSE_MAKER_USER}" "${ADL_OPEN_MAKER_USER}" \
@@ -1132,6 +1174,7 @@ register_provider "insurance" 9090 "surprising-insurance/surprising-insurance-pr
 register_provider "adl" 9091 "surprising-adl/surprising-adl-provider" "surprising-adl-provider"
 register_provider "websocket" 9093 "surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider"
 register_provider "gateway" 9094 "surprising-gateway/surprising-gateway-provider" "surprising-gateway-provider"
+register_provider "trigger" 9095 "surprising-trading/surprising-trigger-provider" "surprising-trigger-provider"
 
 require_command curl
 require_command python3
@@ -1172,12 +1215,12 @@ fi
 if [[ "${START_PROVIDERS}" == "true" ]]; then
   package_services
 
-  for provider in instrument candlestick index-price mark-price matching account risk liquidation funding insurance adl websocket order gateway; do
+  for provider in instrument candlestick index-price mark-price matching account risk liquidation funding insurance adl websocket order trigger gateway; do
     start_provider "${provider}"
   done
 else
   echo "Reusing already running providers"
-  for provider in instrument candlestick index-price mark-price matching account risk liquidation funding insurance adl websocket order gateway; do
+  for provider in instrument candlestick index-price mark-price matching account risk liquidation funding insurance adl websocket order trigger gateway; do
     wait_http "${provider}" "$(provider_port "${provider}")"
   done
 fi
@@ -1298,6 +1341,24 @@ close_order="$(place_order "${FULL_TAKER_USER}" "real-active-close-${RUN_ID}" "S
 wait_order_state "${close_order}" "FILLED" "${CLOSE_QTY}" "0"
 wait_position "${FULL_TAKER_USER}" "$((QUANTITY_STEPS - CLOSE_QTY))" "${FULL_PRICE_TICKS}"
 wait_position "${CLOSE_MAKER_USER}" "${CLOSE_QTY}" "${FULL_PRICE_TICKS}"
+
+echo "Scenario: take-profit trigger order"
+if (( TRIGGER_CLOSE_QTY <= 0 )); then
+  echo "TRIGGER_CLOSE_QTY must be positive; increase QUANTITY_STEPS or lower CLOSE_QTY" >&2
+  exit 1
+fi
+trigger_maker_order="$(place_order "${TRIGGER_MAKER_USER}" "real-trigger-maker-${RUN_ID}" "BUY" "LIMIT" "GTC" "${FULL_PRICE_TICKS}" "${TRIGGER_CLOSE_QTY}" false false)"
+wait_order_result "${trigger_maker_order}" "SUCCESS"
+trigger_order_id="$(place_trigger_order "${FULL_TAKER_USER}" "real-tp-${RUN_ID}" "SELL" "TAKE_PROFIT" \
+  "$((FULL_PRICE_TICKS + 500))" "MARKET" "IOC" 0 "${TRIGGER_CLOSE_QTY}")"
+wait_trigger_state "${trigger_order_id}" "PENDING"
+publish_price_inputs "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" 3101 "$((FULL_PRICE_TICKS + 1000))"
+wait_consumer_group_lag_zero "surprising-trigger-v1" "surprising.perp.mark.price.v1"
+wait_trigger_state "${trigger_order_id}" "TRIGGERED"
+trigger_placed_order_id="$(query_value "SELECT placed_order_id FROM trading_trigger_orders WHERE trigger_order_id = ${trigger_order_id}")"
+wait_order_state "${trigger_placed_order_id}" "FILLED" "${TRIGGER_CLOSE_QTY}" "0"
+wait_position "${FULL_TAKER_USER}" "0" "0"
+wait_position "${TRIGGER_MAKER_USER}" "${TRIGGER_CLOSE_QTY}" "${FULL_PRICE_TICKS}"
 
 echo "Scenario: risk controls"
 no_funds_order="$(place_order "${NO_FUNDS_USER}" "real-no-funds-${RUN_ID}" "BUY" "LIMIT" "GTC" "${BTC_PRICE_TICKS}" "${QUANTITY_STEPS}" false false)"
@@ -1499,7 +1560,7 @@ echo "Asserting websocket and accounting invariants"
 wait_consumer_group_lag_zero "surprising-account-v1" "surprising.perp.match.trades.v1"
 sleep 5
 assert_ws_depth "${WS_DEPTH_LOG}"
-assert_ws_private "${WS_FULL_TAKER_LOG}" "${FULL_TAKER_USER}" "$((QUANTITY_STEPS - CLOSE_QTY))"
+assert_ws_private "${WS_FULL_TAKER_LOG}" "${FULL_TAKER_USER}" "0"
 assert_ws_private "${WS_PARTIAL_MAKER_LOG}" "${PARTIAL_MAKER_USER}" "-${PARTIAL_TAKER_QTY}"
 assert_ws_private "${WS_CANCEL_LOG}" "${CANCEL_USER}" "0"
 assert_ws_public_channel "${WS_MARK_LOG}" "mark" "${BTC_SYMBOL}"
