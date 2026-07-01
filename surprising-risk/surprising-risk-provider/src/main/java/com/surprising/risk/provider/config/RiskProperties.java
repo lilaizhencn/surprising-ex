@@ -70,6 +70,7 @@ public class RiskProperties {
         private long warningMarginRatioPpm = 800_000L;
         private long liquidationMarginRatioPpm = 1_000_000L;
         private Duration maxMarkAge = Duration.ofSeconds(10);
+        private int scanBatchSize = 500;
 
         public boolean isEnabled() {
             return enabled;
@@ -109,6 +110,14 @@ public class RiskProperties {
 
         public void setMaxMarkAge(Duration maxMarkAge) {
             this.maxMarkAge = maxMarkAge;
+        }
+
+        public int getScanBatchSize() {
+            return scanBatchSize;
+        }
+
+        public void setScanBatchSize(int scanBatchSize) {
+            this.scanBatchSize = scanBatchSize;
         }
     }
 

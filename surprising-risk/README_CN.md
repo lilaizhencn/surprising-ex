@@ -52,9 +52,10 @@ account_positions + account_balances + account_deficits
   -> surprising.perp.liquidation.candidates.v1
 ```
 
-`risk-provider` 会按 `userId + settleAsset` 对计算出的持仓分组。每个账户资产组单独使用一个 Spring
-事务：账户快照、持仓快照、爆仓候选插入和 outbox 插入要么一起提交，要么一起回滚。某个组失败后只记录日志，
-等待下一轮扫描重试；同一轮扫描里的其他账户组继续处理。
+`risk-provider` 按 keyset 分页扫描账户资产组：`userId ASC, settleAsset ASC`，每次数据库读取
+`surprising.risk.calculation.scan-batch-size` 个 `userId + settleAsset` 组。只有这个账户资产组里的所有开放持仓
+都有新鲜 mark price 时，该组才会进入风险计算。每个账户资产组再单独使用一个 Spring 事务：账户快照、持仓快照、
+爆仓候选插入和 outbox 插入要么一起提交，要么一起回滚。某个组失败后只记录日志，等待下一轮扫描重试；同一轮扫描里的其他账户组继续处理。
 
 ## Kafka
 
@@ -99,6 +100,7 @@ curl 'http://localhost:9087/api/v1/risk/liquidation-candidates?status=NEW&limit=
 
 - `risk_account_snapshots_query_idx`
 - `risk_position_snapshots_user_idx`
+- `account_positions_open_scan_idx`
 - `risk_scan_leases_expiry_idx`
 - `risk_liquidation_candidates_status_idx`
 - `risk_liquidation_candidates_active_uidx`
@@ -117,6 +119,7 @@ provider 支持 active-active 多节点部署，使用 PostgreSQL 按 `userId + 
 | `surprising.risk.coordination.enabled` | `true` | 开启扫描租约。多节点部署保持开启。 |
 | `surprising.risk.coordination.node-id` | `${HOSTNAME:}` | 稳定 owner id。为空时进程会生成本地随机 id。 |
 | `surprising.risk.coordination.lease-duration` | `15s` | 停止扫描节点的故障转移等待时间，应长于扫描间隔。 |
+| `surprising.risk.calculation.scan-batch-size` | `500` | 每次 keyset 分页读取的 `userId + settleAsset` 组数。调大可减少 DB 往返，调小可降低大账户场景的扫描尖峰延迟。 |
 
 ## 本地运行
 
@@ -139,7 +142,9 @@ mvn -pl :surprising-risk-provider -am spring-boot:run
 - 爆仓候选是强平输入，不是强平执行结果。
 - 强平执行必须再次校验最新 mark/equity，避免候选生成后行情恢复仍继续强平。
 - 风险扫描和强平执行都必须幂等。
-- risk-provider 可以多节点部署保证可用性。`risk_scan_leases` 会按 `userId + settleAsset` 协调写入者，保证同一账户资产组只有一个存活 owner 写风险快照和爆仓候选；owner 挂掉后租约过期，其他节点接管。当前扫描器仍会先计算全局持仓集合，再逐个账户资产组抢租约；如果账户规模很大，应在此基础上增加 keyset 分页或上游扫描分片，降低抢租约前的读取成本。
+- risk-provider 可以多节点部署保证可用性。`risk_scan_leases` 会按 `userId + settleAsset` 协调写入者，保证同一账户资产组只有一个存活 owner 写风险快照和爆仓候选；owner 挂掉后租约过期，其他节点接管。
+- 扫描器使用 `userId + settleAsset` keyset 分页，并依赖 `account_positions_open_scan_idx` 部分索引避免在抢租约前加载全量持仓。不要改成 offset 分页；offset 在持仓变化时会越来越慢，也可能跳过或重复账户组。
+- 如果某个 `userId + settleAsset` 组里任何开放持仓没有新鲜 mark price，本轮会跳过整个组。风险聚合不允许只计算部分持仓，否则会低估维持保证金。
 - 数据库保证同一个 `userId + symbol` 同时最多只有一个 `NEW/PROCESSING` 爆仓候选；上一个候选进入 `COMPLETED` 或 `CANCELED` 后，后续扫描才能生成新的候选。
 - 风险快照和 outbox 写入必须影响 1 行；如果 insert/update 被冲突或异常状态跳过，risk-provider 会 fail-fast 并回滚当前事务。
 - 爆仓候选 insert 返回 0 只表示部分唯一索引里已经有 `NEW/PROCESSING` 活跃候选。candidate-id 或 snapshot 唯一键冲突不能被当成幂等，必须失败暴露出来；只要候选成功插入，就必须读回候选并写入 outbox，否则扫描失败，避免 DB 有候选但 Kafka 事件丢失。

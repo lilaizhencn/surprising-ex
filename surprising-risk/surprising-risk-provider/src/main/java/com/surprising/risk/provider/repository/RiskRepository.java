@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -24,6 +25,40 @@ public class RiskRepository {
 
     public RiskRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
+    }
+
+    public List<RiskGroupKey> riskGroups(Duration maxMarkAge, RiskGroupKey after, int limit) {
+        long afterUserId = after == null ? 0L : after.userId();
+        String afterSettleAsset = after == null ? "" : after.settleAsset();
+        int cappedLimit = Math.max(1, limit);
+        String sql = """
+                WITH open_groups AS (
+                    SELECT p.user_id,
+                           i.settle_asset,
+                           bool_and(pm.event_time IS NOT NULL
+                               AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')) AS all_marks_fresh
+                      FROM account_positions p
+                      JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
+                      LEFT JOIN LATERAL (
+                          SELECT event_time
+                            FROM price_mark_ticks m
+                           WHERE m.symbol = p.symbol
+                           ORDER BY event_time DESC
+                           LIMIT 1
+                      ) pm ON TRUE
+                     WHERE p.signed_quantity_steps <> 0
+                       AND (? = 0 OR p.user_id > ? OR (p.user_id = ? AND i.settle_asset > ?))
+                     GROUP BY p.user_id, i.settle_asset
+                )
+                SELECT user_id, settle_asset
+                  FROM open_groups
+                 WHERE all_marks_fresh
+                 ORDER BY user_id ASC, settle_asset ASC
+                 LIMIT ?
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new RiskGroupKey(rs.getLong("user_id"),
+                rs.getString("settle_asset")), maxMarkAge.toMillis(), afterUserId, afterUserId,
+                afterUserId, afterSettleAsset, cappedLimit);
     }
 
     public List<CalculatedPositionRisk> calculatePositions(Duration maxMarkAge) {
@@ -89,33 +124,94 @@ public class RiskRepository {
                        LIMIT 1
                   ) br ON TRUE
                 """;
-        return jdbcTemplate.query(sql, (rs, rowNum) -> {
-            ContractType contractType = ContractType.valueOf(rs.getString("contract_type"));
-            long signedQuantitySteps = rs.getLong("signed_quantity_steps");
-            long entryPriceTicks = rs.getLong("entry_price_ticks");
-            long markPriceTicks = rs.getLong("mark_price_ticks");
-            long notionalMultiplierUnits = rs.getLong("notional_multiplier_units");
-            long priceTickUnits = rs.getLong("price_tick_units");
-            long settleScaleUnits = rs.getLong("settle_scale_units");
-            long notionalUnits = RiskMath.notionalUnits(contractType, signedQuantitySteps, markPriceTicks,
-                    notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
-            long unrealizedPnlUnits = RiskMath.unrealizedPnlUnits(contractType, signedQuantitySteps,
-                    entryPriceTicks, markPriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
-            long maintenanceMarginUnits = RiskMath.maintenanceMarginUnits(contractType, signedQuantitySteps,
-                    markPriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits,
-                    rs.getLong("maintenance_margin_rate_ppm"));
-            return new CalculatedPositionRisk(
-                    rs.getLong("user_id"),
-                    rs.getString("symbol"),
-                    rs.getLong("instrument_version"),
-                    rs.getString("settle_asset"),
-                    signedQuantitySteps,
-                    entryPriceTicks,
-                    markPriceTicks,
-                    notionalUnits,
-                    unrealizedPnlUnits,
-                    maintenanceMarginUnits);
-        }, maxMarkAge.toMillis());
+        return queryCalculatedPositions(sql, maxMarkAge.toMillis());
+    }
+
+    public List<CalculatedPositionRisk> calculatePositions(RiskGroupKey key, Duration maxMarkAge) {
+        String sql = """
+                WITH group_freshness AS (
+                    SELECT COALESCE(bool_and(pm.event_time IS NOT NULL
+                               AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')), false) AS all_marks_fresh
+                      FROM account_positions p
+                      JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
+                      LEFT JOIN LATERAL (
+                          SELECT event_time
+                            FROM price_mark_ticks m
+                           WHERE m.symbol = p.symbol
+                           ORDER BY event_time DESC
+                           LIMIT 1
+                      ) pm ON TRUE
+                     WHERE p.signed_quantity_steps <> 0
+                       AND p.user_id = ?
+                       AND i.settle_asset = ?
+                ),
+                position_inputs AS (
+                    SELECT p.user_id,
+                           p.symbol,
+                           p.instrument_version,
+                           i.contract_type,
+                           i.settle_asset,
+                           i.notional_multiplier_units,
+                           i.price_tick_units,
+                           i.maintenance_margin_rate_ppm AS base_maintenance_margin_rate_ppm,
+                           ss.scale_units AS settle_scale_units,
+                           p.signed_quantity_steps,
+                           p.entry_price_ticks,
+                           pm.mark_price_ticks,
+                           CASE
+                               WHEN i.contract_type = 'INVERSE_PERPETUAL' THEN
+                                   ROUND((abs(p.signed_quantity_steps)::numeric
+                                      * i.notional_multiplier_units::numeric
+                                      * ss.scale_units::numeric)
+                                     / (pm.mark_price_ticks::numeric * i.price_tick_units::numeric))
+                               ELSE abs(p.signed_quantity_steps)::numeric
+                                      * pm.mark_price_ticks::numeric
+                                      * i.notional_multiplier_units::numeric
+                           END AS bracket_notional_units
+                      FROM account_positions p
+                      JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
+                      JOIN account_asset_scales ss ON ss.asset = i.settle_asset
+                      JOIN LATERAL (
+                          SELECT ((m.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_price_ticks,
+                                 event_time
+                            FROM price_mark_ticks m
+                           WHERE m.symbol = p.symbol
+                           ORDER BY event_time DESC
+                           LIMIT 1
+                      ) pm ON TRUE
+                      CROSS JOIN group_freshness gf
+                     WHERE p.signed_quantity_steps <> 0
+                       AND p.user_id = ?
+                       AND i.settle_asset = ?
+                       AND gf.all_marks_fresh
+                       AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
+                )
+                SELECT pi.user_id,
+                       pi.symbol,
+                       pi.instrument_version,
+                       pi.contract_type,
+                       pi.settle_asset,
+                       pi.notional_multiplier_units,
+                       pi.price_tick_units,
+                       COALESCE(br.maintenance_margin_rate_ppm,
+                                pi.base_maintenance_margin_rate_ppm) AS maintenance_margin_rate_ppm,
+                       pi.settle_scale_units,
+                       pi.signed_quantity_steps,
+                       pi.entry_price_ticks,
+                       pi.mark_price_ticks
+                  FROM position_inputs pi
+                  LEFT JOIN LATERAL (
+                      SELECT b.maintenance_margin_rate_ppm
+                        FROM instrument_risk_brackets b
+                       WHERE b.symbol = pi.symbol
+                         AND b.version = pi.instrument_version
+                         AND b.notional_floor_units <= pi.bracket_notional_units
+                       ORDER BY b.notional_floor_units DESC
+                       LIMIT 1
+                  ) br ON TRUE
+                """;
+        return queryCalculatedPositions(sql, maxMarkAge.toMillis(), key.userId(), key.settleAsset(),
+                key.userId(), key.settleAsset(), maxMarkAge.toMillis());
     }
 
     public boolean acquireScanLease(RiskGroupKey key, String ownerId, Duration leaseDuration) {
@@ -279,6 +375,40 @@ public class RiskRepository {
                 rs.getLong("margin_ratio_ppm"),
                 LiquidationCandidateStatus.valueOf(rs.getString("status")),
                 rs.getTimestamp("event_time").toInstant());
+    }
+
+    private List<CalculatedPositionRisk> queryCalculatedPositions(String sql, Object... args) {
+        return jdbcTemplate.query(sql, calculatedPositionMapper(), args);
+    }
+
+    private RowMapper<CalculatedPositionRisk> calculatedPositionMapper() {
+        return (rs, rowNum) -> {
+            ContractType contractType = ContractType.valueOf(rs.getString("contract_type"));
+            long signedQuantitySteps = rs.getLong("signed_quantity_steps");
+            long entryPriceTicks = rs.getLong("entry_price_ticks");
+            long markPriceTicks = rs.getLong("mark_price_ticks");
+            long notionalMultiplierUnits = rs.getLong("notional_multiplier_units");
+            long priceTickUnits = rs.getLong("price_tick_units");
+            long settleScaleUnits = rs.getLong("settle_scale_units");
+            long notionalUnits = RiskMath.notionalUnits(contractType, signedQuantitySteps, markPriceTicks,
+                    notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
+            long unrealizedPnlUnits = RiskMath.unrealizedPnlUnits(contractType, signedQuantitySteps,
+                    entryPriceTicks, markPriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
+            long maintenanceMarginUnits = RiskMath.maintenanceMarginUnits(contractType, signedQuantitySteps,
+                    markPriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits,
+                    rs.getLong("maintenance_margin_rate_ppm"));
+            return new CalculatedPositionRisk(
+                    rs.getLong("user_id"),
+                    rs.getString("symbol"),
+                    rs.getLong("instrument_version"),
+                    rs.getString("settle_asset"),
+                    signedQuantitySteps,
+                    entryPriceTicks,
+                    markPriceTicks,
+                    notionalUnits,
+                    unrealizedPnlUnits,
+                    maintenanceMarginUnits);
+        };
     }
 
     private void requireSingleRow(int rows, String operation) {

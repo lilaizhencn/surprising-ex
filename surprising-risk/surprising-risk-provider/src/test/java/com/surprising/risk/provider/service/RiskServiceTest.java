@@ -11,6 +11,8 @@ import com.surprising.risk.provider.model.CalculatedPositionRisk;
 import com.surprising.risk.provider.repository.RiskOutboxRepository;
 import com.surprising.risk.provider.repository.RiskRepository;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
+import com.surprising.risk.provider.model.RiskGroupKey;
+import java.util.Comparator;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -57,6 +59,7 @@ class RiskServiceTest {
 
         service.scan();
 
+        assertThat(riskRepository.riskGroupCalls).isZero();
         assertThat(riskRepository.calculateCalls).isZero();
         assertThat(riskRepository.savedAccounts).isZero();
         assertThat(riskRepository.savedPositions).isZero();
@@ -97,7 +100,8 @@ class RiskServiceTest {
 
         service.scan();
 
-        assertThat(riskRepository.calculateCalls).isEqualTo(1);
+        assertThat(riskRepository.riskGroupCalls).isEqualTo(2);
+        assertThat(riskRepository.calculateCalls).isZero();
         assertThat(riskRepository.scanLeaseAttempts).isEqualTo(1);
         assertThat(riskRepository.lastOwnerId).isEqualTo("risk-node-a");
         assertThat(riskRepository.savedAccounts).isZero();
@@ -172,6 +176,33 @@ class RiskServiceTest {
         assertThat(transactionManager.rollbacks).isEqualTo(1);
     }
 
+    @Test
+    void scanPaginatesRiskGroupsByConfiguredBatchSize() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        riskRepository.positions = List.of(
+                new CalculatedPositionRisk(1001L, "BTC-USDT", 7L, "USDT",
+                        10L, 65_000L, 60_000L, 600_000L, -100L, 100L),
+                new CalculatedPositionRisk(2002L, "ETH-USDT", 7L, "USDT",
+                        10L, 3_500L, 3_000L, 30_000L, -100L, 100L));
+        riskRepository.returnInsertedCandidate = true;
+        RiskProperties properties = new RiskProperties();
+        properties.getCalculation().setScanBatchSize(1);
+        properties.getCoordination().setEnabled(false);
+        FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
+        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+
+        service.scan();
+
+        assertThat(riskRepository.riskGroupCalls).isEqualTo(3);
+        assertThat(riskRepository.calculateCalls).isEqualTo(2);
+        assertThat(riskRepository.riskGroupLimits).containsExactly(1, 1, 1);
+        assertThat(riskRepository.savedAccounts).isEqualTo(2);
+        assertThat(riskRepository.savedPositions).isEqualTo(2);
+        assertThat(transactionManager.commits).isEqualTo(2);
+    }
+
     private static final class FakeRiskRepository extends RiskRepository {
         private List<CalculatedPositionRisk> positions = List.of(new CalculatedPositionRisk(1001L,
                 "BTC-USDT", 7L, "USDT", 10L, 65_000L, 60_000L, 600_000L, -100L, 100L));
@@ -181,6 +212,8 @@ class RiskServiceTest {
         private int savedPositions;
         private boolean returnInsertedCandidate;
         private int calculateCalls;
+        private int riskGroupCalls;
+        private final List<Integer> riskGroupLimits = new ArrayList<>();
         private boolean scanLeaseAcquired = true;
         private int scanLeaseAttempts;
         private String lastOwnerId;
@@ -190,9 +223,27 @@ class RiskServiceTest {
         }
 
         @Override
-        public List<CalculatedPositionRisk> calculatePositions(Duration maxMarkAge) {
+        public List<RiskGroupKey> riskGroups(Duration maxMarkAge, RiskGroupKey after, int limit) {
+            riskGroupCalls++;
+            riskGroupLimits.add(limit);
+            return positions.stream()
+                    .map(position -> new RiskGroupKey(position.userId(), position.settleAsset()))
+                    .distinct()
+                    .sorted(Comparator.comparingLong(RiskGroupKey::userId).thenComparing(RiskGroupKey::settleAsset))
+                    .filter(key -> after == null || key.userId() > after.userId()
+                            || (key.userId() == after.userId()
+                            && key.settleAsset().compareTo(after.settleAsset()) > 0))
+                    .limit(limit)
+                    .toList();
+        }
+
+        @Override
+        public List<CalculatedPositionRisk> calculatePositions(RiskGroupKey key, Duration maxMarkAge) {
             calculateCalls++;
-            return positions;
+            return positions.stream()
+                    .filter(position -> position.userId() == key.userId()
+                            && position.settleAsset().equals(key.settleAsset()))
+                    .toList();
         }
 
         @Override

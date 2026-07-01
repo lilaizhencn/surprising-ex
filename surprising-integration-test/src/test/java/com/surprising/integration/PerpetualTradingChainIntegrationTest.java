@@ -1055,6 +1055,27 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public List<RiskGroupKey> riskGroups(Duration maxMarkAge, RiskGroupKey after, int limit) {
+            return calculatePositions(maxMarkAge).stream()
+                    .map(position -> new RiskGroupKey(position.userId(), position.settleAsset()))
+                    .distinct()
+                    .sorted(Comparator.comparingLong(RiskGroupKey::userId).thenComparing(RiskGroupKey::settleAsset))
+                    .filter(key -> after == null || key.userId() > after.userId()
+                            || (key.userId() == after.userId()
+                            && key.settleAsset().compareTo(after.settleAsset()) > 0))
+                    .limit(limit)
+                    .toList();
+        }
+
+        @Override
+        public List<CalculatedPositionRisk> calculatePositions(RiskGroupKey key, Duration maxMarkAge) {
+            return calculatePositions(maxMarkAge).stream()
+                    .filter(position -> position.userId() == key.userId()
+                            && position.settleAsset().equals(key.settleAsset()))
+                    .toList();
+        }
+
+        @Override
         public boolean acquireScanLease(RiskGroupKey key, String ownerId, Duration leaseDuration) {
             return true;
         }

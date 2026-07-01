@@ -883,6 +883,10 @@ CREATE INDEX IF NOT EXISTS account_positions_user_idx
 CREATE INDEX IF NOT EXISTS account_positions_symbol_idx
     ON account_positions (symbol);
 
+CREATE INDEX IF NOT EXISTS account_positions_open_scan_idx
+    ON account_positions (user_id, symbol)
+    WHERE signed_quantity_steps <> 0;
+
 CREATE TABLE IF NOT EXISTS account_processed_trades (
     trade_id            BIGINT NOT NULL,
     symbol              TEXT NOT NULL,

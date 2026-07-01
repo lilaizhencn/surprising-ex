@@ -16,9 +16,7 @@ import com.surprising.risk.provider.repository.RiskRepository;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -61,20 +59,31 @@ public class RiskService {
         if (!properties.getCalculation().isEnabled()) {
             return;
         }
-        List<CalculatedPositionRisk> positions = riskRepository.calculatePositions(
-                properties.getCalculation().getMaxMarkAge());
-        Map<RiskGroupKey, List<CalculatedPositionRisk>> groups = positions.stream()
-                .collect(Collectors.groupingBy(position -> new RiskGroupKey(position.userId(), position.settleAsset())));
-        for (var entry : groups.entrySet()) {
-            if (!ownsRiskGroup(entry.getKey())) {
-                continue;
+        int batchSize = Math.max(1, properties.getCalculation().getScanBatchSize());
+        RiskGroupKey after = null;
+        while (true) {
+            List<RiskGroupKey> groups = riskRepository.riskGroups(properties.getCalculation().getMaxMarkAge(),
+                    after, batchSize);
+            if (groups.isEmpty()) {
+                return;
             }
-            try {
-                transactionTemplate.executeWithoutResult(status -> scanGroup(entry.getKey(), entry.getValue(),
-                        Instant.now()));
-            } catch (Exception ex) {
-                log.error("Failed to scan risk group userId={} settleAsset={}: {}",
-                        entry.getKey().userId(), entry.getKey().settleAsset(), ex.getMessage(), ex);
+            for (RiskGroupKey key : groups) {
+                after = key;
+                if (!ownsRiskGroup(key)) {
+                    continue;
+                }
+                try {
+                    transactionTemplate.executeWithoutResult(status -> {
+                        List<CalculatedPositionRisk> positions = riskRepository.calculatePositions(key,
+                                properties.getCalculation().getMaxMarkAge());
+                        if (!positions.isEmpty()) {
+                            scanGroup(key, positions, Instant.now());
+                        }
+                    });
+                } catch (Exception ex) {
+                    log.error("Failed to scan risk group userId={} settleAsset={}: {}",
+                            key.userId(), key.settleAsset(), ex.getMessage(), ex);
+                }
             }
         }
     }

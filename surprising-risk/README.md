@@ -52,10 +52,12 @@ account_positions + account_balances + account_deficits
   -> surprising.perp.liquidation.candidates.v1
 ```
 
-`risk-provider` scans calculated positions by `userId + settleAsset`. Each account asset group is processed in its
-own Spring transaction: account snapshot, position snapshots, candidate insert, and outbox insert either commit
-together or roll back together. A failure in one group is logged and retried by the next scan; other groups in the same
-scan continue.
+`risk-provider` scans account asset groups by keyset pagination: `(userId ASC, settleAsset ASC)` with
+`surprising.risk.calculation.scan-batch-size` groups per database read. A group is eligible only when every open
+position in that `userId + settleAsset` group has a fresh mark price. Each account asset group is then recalculated and
+processed in its own Spring transaction: account snapshot, position snapshots, candidate insert, and outbox insert
+either commit together or roll back together. A failure in one group is logged and retried by the next scan; other
+groups in the same scan continue.
 
 ## Kafka
 
@@ -100,6 +102,7 @@ Core indexes:
 
 - `risk_account_snapshots_query_idx`
 - `risk_position_snapshots_user_idx`
+- `account_positions_open_scan_idx`
 - `risk_scan_leases_expiry_idx`
 - `risk_liquidation_candidates_status_idx`
 - `risk_liquidation_candidates_active_uidx`
@@ -118,6 +121,7 @@ Configuration:
 | `surprising.risk.coordination.enabled` | `true` | Enables the scan lease. Keep this on for multi-node deployments. |
 | `surprising.risk.coordination.node-id` | `${HOSTNAME:}` | Stable owner id. If empty, the process generates a local random id. |
 | `surprising.risk.coordination.lease-duration` | `15s` | Failover delay for a stopped scanner. Keep it longer than the scan interval. |
+| `surprising.risk.calculation.scan-batch-size` | `500` | Number of `userId + settleAsset` groups fetched per keyset page. Raise it for fewer DB round trips; lower it to reduce scan latency spikes on large accounts. |
 
 ## Local Run
 
@@ -143,9 +147,12 @@ Port:
 - Risk scanning and liquidation execution must both be idempotent.
 - Multiple risk-provider nodes can run for availability. The `risk_scan_leases` table coordinates writers per
   `userId + settleAsset`, so only one live owner writes snapshots and candidates for that group. Lease expiry lets
-  another node take over after a failure. The current scanner still calculates the global position set before claiming
-  each group; for very large account counts, add keyset pagination or upstream scan sharding to reduce pre-lease read
-  cost.
+  another node take over after a failure.
+- The scanner uses keyset pagination over `userId + settleAsset` groups and the partial
+  `account_positions_open_scan_idx` index to avoid loading the whole position set before claiming leases. Do not replace
+  this with offset pagination; offset scans get slower and can skip or repeat rows while positions are changing.
+- If any open position in a `userId + settleAsset` group has no fresh mark price, the whole group is skipped for that
+  pass. Partial account-risk aggregation is not allowed because it can understate maintenance margin.
 - The database keeps at most one active `NEW/PROCESSING` liquidation candidate per `userId + symbol`; a later scan can create a new candidate only after the previous one is `COMPLETED` or `CANCELED`.
 - Risk snapshot and outbox writes must affect exactly one row; skipped inserts or updates fail fast and roll back the current transaction.
 - A liquidation candidate insert returning 0 only means the partial active-candidate index already has a `NEW/PROCESSING` row. Candidate-id or snapshot uniqueness conflicts are not treated as idempotent and must fail. Once a candidate is inserted, the provider must read it back and enqueue the outbox event; otherwise the scan fails to avoid a DB candidate without a Kafka event.

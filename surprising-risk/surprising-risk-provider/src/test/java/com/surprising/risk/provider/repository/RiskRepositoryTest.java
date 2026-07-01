@@ -117,6 +117,26 @@ class RiskRepositoryTest {
     }
 
     @Test
+    void riskGroupsUsesFreshMarkKeysetPagination() {
+        RiskRepository repository = new RiskRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(10_000L),
+                eq(1001L), eq(1001L), eq(1001L), eq("USDT"), eq(200))).thenReturn(List.of());
+
+        repository.riskGroups(Duration.ofSeconds(10), new RiskGroupKey(1001L, "USDT"), 200);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(10_000L),
+                eq(1001L), eq(1001L), eq(1001L), eq("USDT"), eq(200));
+        assertThat(sql.getValue())
+                .contains("bool_and(pm.event_time IS NOT NULL")
+                .contains("GROUP BY p.user_id, i.settle_asset")
+                .contains("WHERE all_marks_fresh")
+                .contains("p.user_id > ? OR (p.user_id = ? AND i.settle_asset > ?)")
+                .contains("ORDER BY user_id ASC, settle_asset ASC")
+                .contains("LIMIT ?");
+    }
+
+    @Test
     void calculatePositionsUsesRiskBracketMaintenanceMarginRate() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(10_000L))).thenReturn(List.of());
@@ -131,6 +151,27 @@ class RiskRepositoryTest {
                 .contains("ORDER BY b.notional_floor_units DESC")
                 .contains("COALESCE(br.maintenance_margin_rate_ppm")
                 .contains("pi.base_maintenance_margin_rate_ppm");
+    }
+
+    @Test
+    void calculatePositionsForGroupRequiresWholeGroupFreshness() {
+        RiskRepository repository = new RiskRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(10_000L),
+                eq(1001L), eq("USDT"), eq(1001L), eq("USDT"), eq(10_000L))).thenReturn(List.of());
+
+        repository.calculatePositions(new RiskGroupKey(1001L, "USDT"), Duration.ofSeconds(10));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(10_000L),
+                eq(1001L), eq("USDT"), eq(1001L), eq("USDT"), eq(10_000L));
+        assertThat(sql.getValue())
+                .contains("WITH group_freshness AS")
+                .contains("COALESCE(bool_and(pm.event_time IS NOT NULL")
+                .contains("AND p.user_id = ?")
+                .contains("AND i.settle_asset = ?")
+                .contains("CROSS JOIN group_freshness gf")
+                .contains("AND gf.all_marks_fresh")
+                .contains("instrument_risk_brackets");
     }
 
     @SuppressWarnings("unchecked")
