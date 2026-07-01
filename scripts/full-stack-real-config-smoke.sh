@@ -1234,6 +1234,10 @@ wait_order_state "${full_maker_order}" "FILLED" "${QUANTITY_STEPS}" "0"
 wait_order_state "${full_taker_order}" "FILLED" "${QUANTITY_STEPS}" "0"
 wait_position "${FULL_MAKER_USER}" "-${QUANTITY_STEPS}" "${FULL_PRICE_TICKS}"
 wait_position "${FULL_TAKER_USER}" "${QUANTITY_STEPS}" "${FULL_PRICE_TICKS}"
+wait_consumer_group_lag_zero "surprising-risk-v1" "surprising.account.position.events.v1"
+wait_sql_equals "risk snapshots after account position events" \
+  "SELECT count(DISTINCT user_id) FROM risk_account_snapshots WHERE user_id IN (${FULL_MAKER_USER}, ${FULL_TAKER_USER}) AND settle_asset = 'USDT'" \
+  "2"
 
 before_positions="$(query_value "SELECT COALESCE(string_agg(user_id || ':' || signed_quantity_steps || ':' || entry_price_ticks, ',' ORDER BY user_id), '') FROM account_positions WHERE symbol = '${BTC_SYMBOL}' AND user_id IN (${FULL_MAKER_USER}, ${FULL_TAKER_USER})")"
 before_processed="$(query_value "SELECT count(*) FROM account_processed_trades WHERE symbol = '${BTC_SYMBOL}'")"
