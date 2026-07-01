@@ -52,14 +52,14 @@ Latest local verification:
 - `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q -pl :surprising-risk-provider -am test`: passed, covering keyset-paginated risk group scanning, account-position-event risk triggers, group-level mark freshness, and multi-node scan lease behavior.
 - `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q -pl :surprising-integration-test -am test`: passed, covering the Java order -> matching -> account -> risk -> liquidation -> funding -> insurance -> ADL integration chain.
 - `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q test`: passed, covering all current Maven module tests.
-- `KEEP_TMP=true BUILD_SERVICES=false ./scripts/full-stack-real-config-smoke.sh`: previously passed before the TP/SL trigger scenario was added, covering real PostgreSQL/Kafka, multiple providers, WebSocket, high-frequency order flow, deep order book, funding, liquidation, insurance, and ADL.
+- `KEEP_TMP=true ./scripts/full-stack-real-config-smoke.sh`: passed on 2026-07-01 with logs kept at `/tmp/surprising-full-stack-real-config.dCIKAs`, covering real PostgreSQL/Kafka, instrument, candlestick, index-price, mark-price, order, matching, account, risk, liquidation, funding, insurance, ADL, websocket, trigger, and gateway providers, plus TP/SL OCO trigger execution, high-frequency order flow, 50 symbols, 60 depth levels, WebSocket depth/private assertions, funding, liquidation, insurance, and ADL.
 
 ## Evidence Matrix
 
 | Area | Current evidence |
 | --- | --- |
 | Schema bootstrap | `scripts/integration-smoke.sh` starts a temporary PostgreSQL instance and applies root `init.sql`. |
-| Real Kafka trading smoke | `scripts/kafka-trading-smoke.sh` starts Docker Compose PostgreSQL/Kafka, applies `init.sql` to an isolated smoke database, creates topics, starts order/matching/account providers, funds two users through REST, places crossing orders through REST, waits for exchange-core matching and account Kafka settlement, then republishes the same match-trade payload and verifies account positions and processed-trade rows are unchanged. `scripts/kafka-trading-load-smoke.sh` additionally starts WebSocket, subscribes depth/private channels, and checks full fill, partial fill plus cancel, cancel-only, cancel-all, concurrent maker/taker users, position correctness, order-book depth push, and private order/match/position push reception. `scripts/full-stack-real-config-smoke.sh` now starts instrument, candlestick, index-price, mark-price, order, matching, account, risk, liquidation, funding, insurance, ADL, websocket, trigger, and gateway providers and includes a TP/SL trigger execution scenario. Re-run it after this change to create fresh process-level evidence for TP/SL; the latest local verification above is Maven-level. |
+| Real Kafka trading smoke | `scripts/kafka-trading-smoke.sh` starts Docker Compose PostgreSQL/Kafka, applies `init.sql` to an isolated smoke database, creates topics, starts order/matching/account providers, funds two users through REST, places crossing orders through REST, waits for exchange-core matching and account Kafka settlement, then republishes the same match-trade payload and verifies account positions and processed-trade rows are unchanged. `scripts/kafka-trading-load-smoke.sh` additionally starts WebSocket, subscribes depth/private channels, and checks full fill, partial fill plus cancel, cancel-only, cancel-all, concurrent maker/taker users, position correctness, order-book depth push, and private order/match/position push reception. `scripts/full-stack-real-config-smoke.sh` starts instrument, candlestick, index-price, mark-price, order, matching, account, risk, liquidation, funding, insurance, ADL, websocket, trigger, and gateway providers. The latest clean run passed with real provider processes and covers TP/SL OCO trigger execution, deterministic mark-price trigger events, mark freshness refresh, high-frequency order flow, deep order book fanout, funding, liquidation, insurance, ADL, and WebSocket/accounting invariants. |
 | Long fixed-point model | Core trading/account/risk/liquidation/funding/insurance/ADL Java paths use ticks, steps, ppm, and asset units; `CoreFixedPointArchitectureTest` rejects `BigDecimal`, `double`, and `float` in those main Java paths, and unit tests cover overflow-sensitive math and checked aggregation where wrapping would change capacity or risk. |
 | Shared contract math | `PerpetualContractMathTest` verifies shared linear/inverse notional, unrealized PnL, notional-per-step, initial margin, maintenance margin, and overflow behavior used by account, risk, funding, liquidation, and ADL. |
 | Instrument version pinning | `integration-smoke.sh` changes current BTC-USDT to version 2 and verifies existing version 1 positions still calculate risk and funding with version 1 rules. |
@@ -107,7 +107,7 @@ instrument rules
   -> ADL residual deficit transfer
 ```
 
-The Java integration tests now cover the live event handoff across order, matching, account, risk, liquidation, funding, insurance, and ADL service classes without Kafka/PostgreSQL process startup. They complement the PostgreSQL smoke test, which focuses on schema and cross-table invariants. The Kafka trading smoke adds process-level evidence for order -> matching -> account with real Kafka and PostgreSQL, and the load/full-stack smokes extend that path to WebSocket depth/private push assertions when Docker Compose is available. The full-stack script has been extended with TP/SL trigger execution, but that new process-level scenario still needs a fresh full-stack run.
+The Java integration tests now cover the live event handoff across order, matching, account, risk, liquidation, funding, insurance, and ADL service classes without Kafka/PostgreSQL process startup. They complement the PostgreSQL smoke test, which focuses on schema and cross-table invariants. The Kafka trading smoke adds process-level evidence for order -> matching -> account with real Kafka and PostgreSQL, and the load/full-stack smokes extend that path to WebSocket depth/private push assertions when Docker Compose is available. The full-stack script now has fresh process-level evidence for TP/SL OCO trigger execution through trigger-provider, gateway, order-provider, matching, account, and WebSocket fanout.
 
 The local PostgreSQL smoke also verifies the cross-table invariants that are hard to see from unit tests:
 
@@ -122,7 +122,7 @@ The local PostgreSQL smoke also verifies the cross-table invariants that are har
 The current gates are strong development checks, but they are not a replacement for production rollout validation.
 Before production, run and document:
 
-- expanded multi-process Kafka end-to-end tests with real order, matching, account, risk, liquidation, insurance, and ADL services running together;
+- expanded multi-node and multi-broker Kafka end-to-end tests with longer duration, broker rebalance, and provider restart windows;
 - rebalance/failover tests for matching partitions, Kafka outbox replay, and PostgreSQL lock contention;
 - load tests for peak order rate, trade rate, mark-price update rate, and risk scan cadence;
 - chaos tests for PostgreSQL restart, Kafka broker loss, stale mark price, and external venue disconnects;
@@ -131,4 +131,4 @@ Before production, run and document:
 ## Current Conclusion
 
 The codebase has a coherent long-based perpetual trading chain with exchange-core as the matcher and PostgreSQL-backed idempotency/locking around state transitions.
-The verified local gates prove the important accounting formulas and cross-table invariants. Full production readiness still requires real multi-service Kafka tests and load/chaos evidence.
+The verified local gates prove the important accounting formulas, cross-table invariants, and a clean real-process Kafka/PostgreSQL/WebSocket chain. Full production readiness still requires sustained load, multi-node failover, and chaos evidence.

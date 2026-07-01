@@ -9,7 +9,10 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-funding-provider", path = FundingApiPaths.API_V1)
+@FeignClient(
+        name = "surprising-funding-provider",
+        path = FundingApiPaths.API_V1,
+        url = "${surprising.clients.funding.base-url:http://localhost:9089}")
 public interface FundingRpcApi {
 
     @GetMapping("/rates/latest")

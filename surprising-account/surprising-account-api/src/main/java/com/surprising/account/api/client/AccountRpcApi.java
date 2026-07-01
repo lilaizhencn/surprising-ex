@@ -9,11 +9,13 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-account-provider", contextId = "accountRpcApi")
-@RequestMapping(AccountApiPaths.ACCOUNT_BASE_PATH)
+@FeignClient(
+        name = "surprising-account-provider",
+        contextId = "accountRpcApi",
+        path = AccountApiPaths.ACCOUNT_BASE_PATH,
+        url = "${surprising.clients.account.base-url:http://localhost:9086}")
 public interface AccountRpcApi {
 
     @GetMapping("/balance")

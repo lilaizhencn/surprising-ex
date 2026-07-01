@@ -7,7 +7,10 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-adl-provider", path = AdlApiPaths.API_V1)
+@FeignClient(
+        name = "surprising-adl-provider",
+        path = AdlApiPaths.API_V1,
+        url = "${surprising.clients.adl.base-url:http://localhost:9091}")
 public interface AdlRpcApi {
 
     @GetMapping("/queue")

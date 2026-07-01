@@ -11,11 +11,13 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-order-provider", contextId = "leverageRpcApi")
-@RequestMapping(TradingApiPaths.LEVERAGE_BASE_PATH)
+@FeignClient(
+        name = "surprising-order-provider",
+        contextId = "leverageRpcApi",
+        path = TradingApiPaths.LEVERAGE_BASE_PATH,
+        url = "${surprising.clients.order.base-url:http://localhost:9084}")
 public interface LeverageRpcApi {
 
     @PostMapping("/settings")

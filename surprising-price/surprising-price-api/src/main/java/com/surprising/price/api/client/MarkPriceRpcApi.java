@@ -11,11 +11,13 @@ import java.time.Instant;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-mark-price-provider", contextId = "markPriceRpcApi")
-@RequestMapping(PriceApiPaths.MARK_BASE_PATH)
+@FeignClient(
+        name = "surprising-mark-price-provider",
+        contextId = "markPriceRpcApi",
+        path = PriceApiPaths.MARK_BASE_PATH,
+        url = "${surprising.clients.mark-price.base-url:http://localhost:9083}")
 public interface MarkPriceRpcApi {
 
     @GetMapping("/latest")

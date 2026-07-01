@@ -19,11 +19,13 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-order-provider", contextId = "tradingFeeAdminRpcApi")
-@RequestMapping(TradingApiPaths.ADMIN_FEE_BASE_PATH)
+@FeignClient(
+        name = "surprising-order-provider",
+        contextId = "tradingFeeAdminRpcApi",
+        path = TradingApiPaths.ADMIN_FEE_BASE_PATH,
+        url = "${surprising.clients.order.base-url:http://localhost:9084}")
 public interface TradingFeeAdminRpcApi {
 
     @PostMapping("/schedules")

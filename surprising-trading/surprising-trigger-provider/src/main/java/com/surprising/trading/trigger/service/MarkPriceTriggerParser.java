@@ -1,7 +1,9 @@
 package com.surprising.trading.trigger.service;
 
 import com.surprising.trading.trigger.model.MarkTrigger;
+import java.math.BigInteger;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -29,11 +31,62 @@ public class MarkPriceTriggerParser {
             if (sequence <= 0) {
                 throw new IllegalArgumentException("mark sequence must be positive");
             }
-            String eventTime = text(root, "eventTime");
-            return new MarkTrigger(normalizeSymbol(symbol), sequence, Instant.parse(eventTime));
+            return new MarkTrigger(normalizeSymbol(symbol), sequence, parseEventTime(root));
         } catch (Exception ex) {
             throw new IllegalArgumentException("invalid mark price payload", ex);
         }
+    }
+
+    private Instant parseEventTime(JsonNode root) {
+        String raw = text(root, "eventTime").trim();
+        try {
+            return Instant.parse(raw);
+        } catch (DateTimeParseException ignored) {
+            return parseEpochSeconds(raw);
+        }
+    }
+
+    private Instant parseEpochSeconds(String raw) {
+        ParsedNumber number = parseNumber(raw);
+        if (number.scale() > 18 || number.scale() < -18) {
+            throw new IllegalArgumentException("eventTime scale is out of range");
+        }
+        if (number.value().signum() <= 0) {
+            throw new IllegalArgumentException("eventTime must be positive");
+        }
+        if (number.scale() <= 0) {
+            BigInteger seconds = number.value().multiply(BigInteger.TEN.pow(-number.scale()));
+            return Instant.ofEpochSecond(seconds.longValueExact());
+        }
+
+        BigInteger divisor = BigInteger.TEN.pow(number.scale());
+        BigInteger[] parts = number.value().divideAndRemainder(divisor);
+        BigInteger nanos = parts[1].multiply(BigInteger.valueOf(1_000_000_000L)).divide(divisor);
+        return Instant.ofEpochSecond(parts[0].longValueExact(), nanos.intValueExact());
+    }
+
+    private ParsedNumber parseNumber(String raw) {
+        String upper = raw.trim().toUpperCase();
+        int exponentSeparator = upper.indexOf('E');
+        String coefficient = exponentSeparator >= 0 ? upper.substring(0, exponentSeparator) : upper;
+        int exponent = exponentSeparator >= 0 ? Integer.parseInt(upper.substring(exponentSeparator + 1)) : 0;
+        int dot = coefficient.indexOf('.');
+        String whole = dot >= 0 ? coefficient.substring(0, dot) : coefficient;
+        String fraction = dot >= 0 ? coefficient.substring(dot + 1) : "";
+        if (whole.startsWith("+")) {
+            whole = whole.substring(1);
+        }
+        if (whole.isBlank()) {
+            whole = "0";
+        }
+        String digits = whole + fraction;
+        if (digits.isBlank() || !digits.chars().allMatch(Character::isDigit)) {
+            throw new IllegalArgumentException("eventTime numeric value is invalid");
+        }
+        return new ParsedNumber(new BigInteger(digits), fraction.length() - exponent);
+    }
+
+    private record ParsedNumber(BigInteger value, int scale) {
     }
 
     private String text(JsonNode root, String field) {

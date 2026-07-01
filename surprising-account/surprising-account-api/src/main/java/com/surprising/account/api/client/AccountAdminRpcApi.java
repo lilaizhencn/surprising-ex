@@ -7,10 +7,12 @@ import jakarta.validation.Valid;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 
-@FeignClient(name = "surprising-account-provider", contextId = "accountAdminRpcApi")
-@RequestMapping(AccountApiPaths.ACCOUNT_ADMIN_BASE_PATH)
+@FeignClient(
+        name = "surprising-account-provider",
+        contextId = "accountAdminRpcApi",
+        path = AccountApiPaths.ACCOUNT_ADMIN_BASE_PATH,
+        url = "${surprising.clients.account.base-url:http://localhost:9086}")
 public interface AccountAdminRpcApi {
 
     @PostMapping("/balance-adjustments")

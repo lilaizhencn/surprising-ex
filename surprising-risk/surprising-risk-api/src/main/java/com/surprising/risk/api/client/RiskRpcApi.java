@@ -10,11 +10,13 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-risk-provider", contextId = "riskRpcApi")
-@RequestMapping(RiskApiPaths.RISK_BASE_PATH)
+@FeignClient(
+        name = "surprising-risk-provider",
+        contextId = "riskRpcApi",
+        path = RiskApiPaths.RISK_BASE_PATH,
+        url = "${surprising.clients.risk.base-url:http://localhost:9087}")
 public interface RiskRpcApi {
 
     @GetMapping("/account/latest")

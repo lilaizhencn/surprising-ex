@@ -644,6 +644,22 @@ refresh_mark_price() {
     "SELECT count(*) FROM price_mark_ticks WHERE symbol = '${symbol}' AND event_time >= now() - interval '5 seconds'"
 }
 
+publish_mark_price_event() {
+  local symbol="$1"
+  local tick_units="$2"
+  local price_ticks="$3"
+  local price
+  local event_time
+  NEXT_MARK_SEQUENCE=$((NEXT_MARK_SEQUENCE + 1))
+  insert_mark_price "${symbol}" "${tick_units}" "${NEXT_MARK_SEQUENCE}" "${price_ticks}"
+  price="$(decimal_price "${price_ticks}" "${tick_units}")"
+  event_time="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  produce_json "surprising.perp.mark.price.v1" "${symbol}" \
+    "{\"symbol\":\"${symbol}\",\"markPrice\":${price},\"sequence\":${NEXT_MARK_SEQUENCE},\"eventTime\":\"${event_time}\"}"
+  wait_sql_nonzero "persisted mark price event ${symbol}" \
+    "SELECT count(*) FROM price_mark_ticks WHERE symbol = '${symbol}' AND sequence = ${NEXT_MARK_SEQUENCE}"
+}
+
 expire_mark_price() {
   local symbol="$1"
   psql_exec <<SQL >/dev/null
@@ -1274,6 +1290,7 @@ echo "Scenario: full fill"
 full_maker_order="$(place_order "${FULL_MAKER_USER}" "real-full-maker-${RUN_ID}" "SELL" "LIMIT" "GTC" "${FULL_PRICE_TICKS}" "${QUANTITY_STEPS}" false false)"
 wait_order_result "${full_maker_order}" "SUCCESS"
 assert_order_book_ask "full maker REST book" "${FULL_PRICE_TICKS}" "${QUANTITY_STEPS}"
+refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
 full_taker_order="$(place_order "${FULL_TAKER_USER}" "real-full-taker-${RUN_ID}" "BUY" "LIMIT" "IOC" "${FULL_PRICE_TICKS}" "${QUANTITY_STEPS}" false false)"
 wait_order_state "${full_maker_order}" "FILLED" "${QUANTITY_STEPS}" "0"
 wait_order_state "${full_taker_order}" "FILLED" "${QUANTITY_STEPS}" "0"
@@ -1357,7 +1374,7 @@ stop_trigger_order_id="$(place_trigger_order "${FULL_TAKER_USER}" "real-sl-${RUN
   "$((FULL_PRICE_TICKS - 500))" "MARKET" "IOC" 0 "${TRIGGER_CLOSE_QTY}" "real-oco-${RUN_ID}")"
 wait_trigger_state "${trigger_order_id}" "PENDING"
 wait_trigger_state "${stop_trigger_order_id}" "PENDING"
-publish_price_inputs "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" 3101 "$((FULL_PRICE_TICKS + 1000))"
+publish_mark_price_event "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "$((FULL_PRICE_TICKS + 1000))"
 wait_consumer_group_lag_zero "surprising-trigger-v1" "surprising.perp.mark.price.v1"
 wait_trigger_state "${trigger_order_id}" "TRIGGERED"
 wait_trigger_state "${stop_trigger_order_id}" "CANCELED"
@@ -1454,7 +1471,7 @@ wait_sql_equals "deep book open orders" \
 assert_order_book_depth_levels "${BOOK_DEPTH_LEVELS}"
 
 echo "Scenario: funding rate publish and settlement"
-publish_price_inputs "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" 3001 "${BTC_PRICE_TICKS}"
+publish_price_inputs "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" 920001 "${BTC_PRICE_TICKS}"
 wait_sql_nonzero "funding predicted rate" \
   "SELECT count(*) FROM funding_rate_ticks WHERE symbol = '${BTC_SYMBOL}'"
 psql_exec <<SQL >/dev/null
@@ -1507,7 +1524,7 @@ wait_order_state "${liq_open_order}" "FILLED" "${LIQ_QTY}" "0"
 wait_position_symbol "${ETH_SYMBOL}" "${LIQ_USER}" "${LIQ_QTY}" "${ETH_PRICE_TICKS}"
 liq_close_maker_order="$(place_order_symbol "${ETH_SYMBOL}" "${LIQ_CLOSE_MAKER_USER}" "real-liq-close-maker-${RUN_ID}" "BUY" "LIMIT" "GTC" "${LIQ_MARK_PRICE_TICKS}" "${LIQ_QTY}" false false)"
 wait_order_result "${liq_close_maker_order}" "SUCCESS"
-publish_price_inputs "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" 5002 "${LIQ_MARK_PRICE_TICKS}"
+publish_price_inputs "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" 930001 "${LIQ_MARK_PRICE_TICKS}"
 refresh_mark_price "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" "${LIQ_MARK_PRICE_TICKS}"
 wait_sql_nonzero "liquidation candidate created" \
   "SELECT count(*) FROM risk_liquidation_candidates WHERE user_id = ${LIQ_USER} AND symbol = '${ETH_SYMBOL}'"

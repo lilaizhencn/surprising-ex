@@ -6,11 +6,13 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-order-provider", contextId = "tradingFeeRpcApi")
-@RequestMapping(TradingApiPaths.FEE_BASE_PATH)
+@FeignClient(
+        name = "surprising-order-provider",
+        contextId = "tradingFeeRpcApi",
+        path = TradingApiPaths.FEE_BASE_PATH,
+        url = "${surprising.clients.order.base-url:http://localhost:9084}")
 public interface TradingFeeRpcApi {
 
     @GetMapping("/effective")

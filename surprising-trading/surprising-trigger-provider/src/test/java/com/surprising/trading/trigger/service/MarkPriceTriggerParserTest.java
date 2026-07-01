@@ -24,6 +24,19 @@ class MarkPriceTriggerParserTest {
     }
 
     @Test
+    void parsesEpochSecondsEventTimeFromPriceEvent() {
+        MarkPriceTriggerParser parser = new MarkPriceTriggerParser(new ObjectMapper());
+
+        MarkTrigger trigger = parser.parse("""
+                {"symbol":"BTC-USDT","sequence":43,"eventTime":1.782915952572367E9}
+                """);
+
+        assertThat(trigger.symbol()).isEqualTo("BTC-USDT");
+        assertThat(trigger.sequence()).isEqualTo(43L);
+        assertThat(trigger.eventTime()).isEqualTo(Instant.ofEpochSecond(1_782_915_952L, 572_367_000L));
+    }
+
+    @Test
     void rejectsMissingSequence() {
         MarkPriceTriggerParser parser = new MarkPriceTriggerParser(new ObjectMapper());
 

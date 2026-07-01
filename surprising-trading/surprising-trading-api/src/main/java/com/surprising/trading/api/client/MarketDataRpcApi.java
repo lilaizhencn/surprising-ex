@@ -7,11 +7,13 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-matching-provider", contextId = "marketDataRpcApi")
-@RequestMapping(TradingApiPaths.MARKET_BASE_PATH)
+@FeignClient(
+        name = "surprising-matching-provider",
+        contextId = "marketDataRpcApi",
+        path = TradingApiPaths.MARKET_BASE_PATH,
+        url = "${surprising.clients.matching.base-url:http://localhost:9085}")
 public interface MarketDataRpcApi {
 
     @GetMapping("/orderbook")

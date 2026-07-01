@@ -11,11 +11,13 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-instrument-provider", contextId = "instrumentAdminRpcApi")
-@RequestMapping(InstrumentApiPaths.ADMIN_BASE_PATH)
+@FeignClient(
+        name = "surprising-instrument-provider",
+        contextId = "instrumentAdminRpcApi",
+        path = InstrumentApiPaths.ADMIN_BASE_PATH,
+        url = "${surprising.clients.instrument.base-url:http://localhost:9080}")
 public interface InstrumentAdminRpcApi {
 
     @PostMapping("/upsert")

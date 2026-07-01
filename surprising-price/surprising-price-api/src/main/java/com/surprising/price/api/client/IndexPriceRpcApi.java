@@ -11,11 +11,13 @@ import java.time.Instant;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-index-price-provider", contextId = "indexPriceRpcApi")
-@RequestMapping(PriceApiPaths.INDEX_BASE_PATH)
+@FeignClient(
+        name = "surprising-index-price-provider",
+        contextId = "indexPriceRpcApi",
+        path = PriceApiPaths.INDEX_BASE_PATH,
+        url = "${surprising.clients.index-price.base-url:http://localhost:9082}")
 public interface IndexPriceRpcApi {
 
     @GetMapping("/latest")

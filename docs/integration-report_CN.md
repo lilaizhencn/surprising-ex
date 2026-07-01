@@ -51,14 +51,14 @@ find . -type d -name target -prune -print
 - `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q -pl :surprising-risk-provider -am test`：通过，覆盖风控账户组 keyset 分页扫描、账户持仓事件触发风控扫描、账户组级 mark price 新鲜度和多节点扫描租约行为。
 - `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q -pl :surprising-integration-test -am test`：通过，覆盖 order -> matching -> account -> risk -> liquidation -> funding -> insurance -> ADL 的 Java 集成链路。
 - `JAVA_HOME="$(/usr/libexec/java_home -v 21)" mvn -q test`：通过，覆盖当前全部 Maven 模块测试。
-- `KEEP_TMP=true BUILD_SERVICES=false ./scripts/full-stack-real-config-smoke.sh`：在加入 TP/SL 触发场景前曾通过，覆盖真实 PostgreSQL/Kafka、多 provider、WebSocket、高频下单、深度盘口、资金费、强平、保险基金和 ADL 链路。
+- `KEEP_TMP=true ./scripts/full-stack-real-config-smoke.sh`：2026-07-01 通过，日志保留在 `/tmp/surprising-full-stack-real-config.dCIKAs`，覆盖真实 PostgreSQL/Kafka、instrument、candlestick、index-price、mark-price、order、matching、account、risk、liquidation、funding、insurance、ADL、websocket、trigger、gateway provider，以及 TP/SL OCO 触发执行、高频下单、50 个 symbol、60 档深度、WebSocket 盘口/私有推送断言、资金费、强平、保险基金和 ADL 链路。
 
 ## 证据矩阵
 
 | 范围 | 当前证据 |
 | --- | --- |
 | Schema 初始化 | `scripts/integration-smoke.sh` 会启动临时 PostgreSQL 并导入根目录 `init.sql`。 |
-| 真实 Kafka 交易 smoke | `scripts/kafka-trading-smoke.sh` 会启动 Docker Compose PostgreSQL/Kafka，把 `init.sql` 导入隔离的 smoke 数据库，创建 Kafka topics，启动 order/matching/account 三个 provider，通过 REST 给两个用户入金并提交可成交的对手单，等待 exchange-core 撮合和 account Kafka 结算完成，然后把同一条 match-trade payload 重新发布到 Kafka，验证账户持仓和 processed-trade 行数不变化。`scripts/kafka-trading-load-smoke.sh` 会额外启动 WebSocket，订阅 depth/private 频道，并检查全部成交、部分成交后撤单、只撤单、全部撤单、并发 maker/taker 用户、持仓正确性、盘口深度推送和私有订单/撮合/持仓推送接收。`scripts/full-stack-real-config-smoke.sh` 现在会启动 instrument、candlestick、index-price、mark-price、order、matching、account、risk、liquidation、funding、insurance、ADL、websocket、trigger、gateway 全部 provider，并包含 TP/SL 触发执行场景。这次改动后还需要重新跑一次 full-stack，才能形成 TP/SL 的新进程级证据；上面的最近验证是 Maven 级别。 |
+| 真实 Kafka 交易 smoke | `scripts/kafka-trading-smoke.sh` 会启动 Docker Compose PostgreSQL/Kafka，把 `init.sql` 导入隔离的 smoke 数据库，创建 Kafka topics，启动 order/matching/account 三个 provider，通过 REST 给两个用户入金并提交可成交的对手单，等待 exchange-core 撮合和 account Kafka 结算完成，然后把同一条 match-trade payload 重新发布到 Kafka，验证账户持仓和 processed-trade 行数不变化。`scripts/kafka-trading-load-smoke.sh` 会额外启动 WebSocket，订阅 depth/private 频道，并检查全部成交、部分成交后撤单、只撤单、全部撤单、并发 maker/taker 用户、持仓正确性、盘口深度推送和私有订单/撮合/持仓推送接收。`scripts/full-stack-real-config-smoke.sh` 会启动 instrument、candlestick、index-price、mark-price、order、matching、account、risk、liquidation、funding、insurance、ADL、websocket、trigger、gateway 全部 provider。最近一次干净状态运行已经通过，覆盖真实 provider 进程、TP/SL OCO 触发执行、确定性的 mark price 触发事件、mark 新鲜度刷新、高频下单、深度盘口 fanout、资金费、强平、保险基金、ADL，以及 WebSocket/账户一致性断言。 |
 | long 定点模型 | 订单、撮合、账户、风控、强平、资金费、保险基金、ADL 核心链路使用 ticks、steps、ppm、asset units；`CoreFixedPointArchitectureTest` 会拒绝这些 main Java 路径里的 `BigDecimal`、`double`、`float`，相关数学测试覆盖溢出敏感逻辑，也覆盖会改变容量或风险的 checked 聚合。 |
 | 共享合约公式 | `PerpetualContractMathTest` 验证共享的线性/反向 notional、未实现 PnL、每 step notional、初始保证金、维持保证金和溢出行为；account、risk、funding、liquidation、ADL 共同使用这套公式。 |
 | instrument version 锁定 | `integration-smoke.sh` 把 BTC-USDT 当前版本切到 v2，并验证已有 v1 持仓仍用 v1 规则计算风险和资金费。 |
@@ -106,7 +106,7 @@ instrument 规则
   -> ADL 处理剩余亏损
 ```
 
-Java 集成测试现在覆盖 order、matching、account、risk、liquidation、funding、insurance、ADL 服务类之间的事件交接，不需要启动真实 Kafka/PostgreSQL 进程。它补充了 PostgreSQL smoke，后者更侧重 schema 和跨表不变量。Kafka 交易 smoke 补上真实 Kafka/PostgreSQL 进程下 order -> matching -> account 的证据；在 Docker Compose 可用时，load/full-stack smoke 会进一步覆盖 WebSocket 盘口深度和私有推送断言。full-stack 脚本已经补了 TP/SL 触发执行，但这个新的进程级场景还需要重新跑一次 full-stack。
+Java 集成测试现在覆盖 order、matching、account、risk、liquidation、funding、insurance、ADL 服务类之间的事件交接，不需要启动真实 Kafka/PostgreSQL 进程。它补充了 PostgreSQL smoke，后者更侧重 schema 和跨表不变量。Kafka 交易 smoke 补上真实 Kafka/PostgreSQL 进程下 order -> matching -> account 的证据；在 Docker Compose 可用时，load/full-stack smoke 会进一步覆盖 WebSocket 盘口深度和私有推送断言。full-stack 脚本现在已经有新的进程级证据，证明 TP/SL OCO 可以经过 trigger-provider、gateway、order-provider、matching、account 和 WebSocket fanout 完整执行。
 
 本地 PostgreSQL smoke 还验证了单元测试不容易覆盖的跨表约束：
 
@@ -121,7 +121,7 @@ Java 集成测试现在覆盖 order、matching、account、risk、liquidation、
 当前门禁适合作为开发验证，但还不能替代生产上线验证。
 生产前还需要补充并记录：
 
-- 扩展真实多进程 Kafka 端到端测试，订单、撮合、账户、风控、强平、保险基金、ADL 服务同时运行；
+- 扩展多节点、多 broker Kafka 端到端测试，覆盖更长运行时间、broker rebalance 和 provider 重启窗口；
 - matching partition rebalance/failover、Kafka outbox 重放、PostgreSQL 锁竞争测试；
 - 订单峰值、成交峰值、mark price 更新频率、风控扫描频率的压测；
 - PostgreSQL 重启、Kafka broker 故障、mark price 过期、外部交易所断线的故障演练；
@@ -130,4 +130,4 @@ Java 集成测试现在覆盖 order、matching、account、risk、liquidation、
 ## 当前结论
 
 当前代码已经形成一条使用 long 定点数、以 exchange-core 为撮合核心、用 PostgreSQL 幂等和锁控制状态迁移的永续合约交易链路。
-本地验证门禁已经证明关键会计公式和跨表不变量。完整生产级就绪仍需要真实多服务 Kafka 集成测试和压测/故障演练证据。
+本地验证门禁已经证明关键会计公式、跨表不变量，以及一条干净状态下的真实 Kafka/PostgreSQL/WebSocket 进程链路。完整生产级就绪仍需要持续压测、多节点故障转移和故障演练证据。

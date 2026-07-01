@@ -14,11 +14,13 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-trigger-provider", contextId = "triggerOrderRpcApi")
-@RequestMapping(TradingApiPaths.TRIGGER_ORDER_BASE_PATH)
+@FeignClient(
+        name = "surprising-trigger-provider",
+        contextId = "triggerOrderRpcApi",
+        path = TradingApiPaths.TRIGGER_ORDER_BASE_PATH,
+        url = "${surprising.clients.trigger.base-url:http://localhost:9095}")
 public interface TriggerOrderRpcApi {
 
     @PostMapping

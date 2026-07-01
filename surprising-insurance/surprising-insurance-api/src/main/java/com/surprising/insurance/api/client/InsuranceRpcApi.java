@@ -13,7 +13,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-insurance-provider", path = InsuranceApiPaths.API_V1)
+@FeignClient(
+        name = "surprising-insurance-provider",
+        path = InsuranceApiPaths.API_V1,
+        url = "${surprising.clients.insurance.base-url:http://localhost:9090}")
 public interface InsuranceRpcApi {
 
     @PostMapping("/admin/fund-adjustments")

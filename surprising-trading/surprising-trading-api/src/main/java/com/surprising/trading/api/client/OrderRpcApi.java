@@ -15,11 +15,13 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-order-provider", contextId = "orderRpcApi")
-@RequestMapping(TradingApiPaths.ORDER_BASE_PATH)
+@FeignClient(
+        name = "surprising-order-provider",
+        contextId = "orderRpcApi",
+        path = TradingApiPaths.ORDER_BASE_PATH,
+        url = "${surprising.clients.order.base-url:http://localhost:9084}")
 public interface OrderRpcApi {
 
     @PostMapping
