@@ -14,7 +14,8 @@ Surprising Exchange account and perpetual position module. The current implement
 - Balances use `availableUnits`, `lockedUnits`, and `equityUnits`, all long values in the asset's smallest unit.
 - Positions use `signedQuantitySteps`: positive is net long, negative is net short.
 - Positions store `instrumentVersion`, pinning contract math to the version that opened the current exposure.
-- Positions and position collateral store `marginMode`; current executable order flow is `CROSS` only.
+- Positions and position collateral store `marginMode`; both `CROSS` and `ISOLATED` are executable in the
+  one-way net-position flow.
 - Entry price uses `entryPriceTicks`.
 - Position collateral is stored in `account_position_margins.margin_units`.
 - Realized PnL is accumulated as `realizedPnlUnits` in the instrument settlement asset. Linear contracts use tick-step notional; inverse contracts use the contract face value and reciprocal entry/exit price formula.

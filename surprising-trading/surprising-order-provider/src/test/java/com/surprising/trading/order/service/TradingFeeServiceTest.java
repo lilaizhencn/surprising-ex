@@ -71,6 +71,6 @@ class TradingFeeServiceTest {
     private InstrumentRule rule(long version) {
         return new InstrumentRule("BTC-USDT", version, "TRADING", ContractType.LINEAR_PERPETUAL,
                 Set.of("LIMIT", "MARKET"), Set.of("GTC", "IOC"), true, true, true,
-                1L, 100_000L, 1L, 1_000_000_000L, 10_000L);
+                1L, 100_000L, 1L, 1_000_000_000L, 10_000L, 100_000_000L, 10_000L);
     }
 }

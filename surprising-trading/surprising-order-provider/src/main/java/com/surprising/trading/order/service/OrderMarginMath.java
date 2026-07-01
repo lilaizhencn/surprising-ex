@@ -13,6 +13,7 @@ import java.math.BigInteger;
 public final class OrderMarginMath {
 
     private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);
+    private static final BigInteger PPM_SQUARED = PPM.multiply(PPM);
     private static final long MAX_MARKET_SLIPPAGE_PPM = 999_999L;
 
     private OrderMarginMath() {
@@ -44,12 +45,44 @@ public final class OrderMarginMath {
         return margin.longValueExact();
     }
 
-    static long collateralPriceTicks(OrderSide side,
-                                     OrderType orderType,
-                                     long priceTicks,
-                                     Long markPriceTicks,
-                                     long marketMaxSlippagePpm,
-                                     ContractType contractType) {
+    public static long notionalUnits(ContractType contractType,
+                                     long quantitySteps,
+                                     long effectivePriceTicks,
+                                     long notionalMultiplierUnits,
+                                     long priceTickUnits,
+                                     long settleScaleUnits) {
+        requirePositive(quantitySteps, "quantitySteps");
+        requirePositive(effectivePriceTicks, "effectivePriceTicks");
+        requirePositive(notionalMultiplierUnits, "notionalMultiplierUnits");
+        requirePositive(priceTickUnits, "priceTickUnits");
+        requirePositive(settleScaleUnits, "settleScaleUnits");
+        if (contractType == ContractType.INVERSE_PERPETUAL) {
+            BigInteger numerator = big(quantitySteps)
+                    .multiply(big(notionalMultiplierUnits))
+                    .multiply(big(settleScaleUnits));
+            BigInteger denominator = big(effectivePriceTicks).multiply(big(priceTickUnits));
+            return divideCeilingToLong(numerator, denominator);
+        }
+        return big(quantitySteps)
+                .multiply(big(effectivePriceTicks))
+                .multiply(big(notionalMultiplierUnits))
+                .longValueExact();
+    }
+
+    public static long initialMarginRateFromLeveragePpm(long leveragePpm) {
+        requirePositive(leveragePpm, "leveragePpm");
+        if (leveragePpm < 1_000_000L) {
+            throw new IllegalArgumentException("leveragePpm must be at least 1x");
+        }
+        return divideCeilingToLong(PPM_SQUARED, big(leveragePpm));
+    }
+
+    public static long collateralPriceTicks(OrderSide side,
+                                            OrderType orderType,
+                                            long priceTicks,
+                                            Long markPriceTicks,
+                                            long marketMaxSlippagePpm,
+                                            ContractType contractType) {
         if (orderType != OrderType.MARKET) {
             requirePositive(priceTicks, "priceTicks");
             return priceTicks;

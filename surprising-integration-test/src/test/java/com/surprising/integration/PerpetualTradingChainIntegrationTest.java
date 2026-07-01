@@ -384,7 +384,8 @@ class PerpetualTradingChainIntegrationTest {
                     Set.of(OrderType.LIMIT.name(), OrderType.MARKET.name()),
                     Set.of(TimeInForce.GTC.name(), TimeInForce.IOC.name(), TimeInForce.FOK.name(),
                             TimeInForce.GTX.name()),
-                    true, true, true, 1L, 1_000_000L, 1L, Long.MAX_VALUE / 4, state.notionalMultiplierUnits);
+                    true, true, true, 1L, 1_000_000L, 1L, Long.MAX_VALUE / 4, state.notionalMultiplierUnits,
+                    100_000_000L, 10_000L);
             TradingOrderProperties orderProperties = new TradingOrderProperties();
             orderProperties.getRisk().setMarketMaxSlippagePpm(marketMaxSlippagePpm);
             OrderValidator orderValidator = new OrderValidator(symbol -> SYMBOL.equals(symbol)
@@ -627,6 +628,8 @@ class PerpetualTradingChainIntegrationTest {
         @Override
         public Optional<MarginRequirement> requirement(String symbol,
                                                        long instrumentVersion,
+                                                       long userId,
+                                                       MarginMode marginMode,
                                                        OrderSide side,
                                                        OrderType orderType,
                                                        long priceTicks,
@@ -635,6 +638,7 @@ class PerpetualTradingChainIntegrationTest {
                                                        long marketMaxMarkAgeMs) {
             assertThat(symbol).isEqualTo(SYMBOL);
             assertThat(instrumentVersion).isEqualTo(VERSION);
+            assertThat(userId).isPositive();
             lastQuantitySteps = quantitySteps;
             long marginUnits = OrderMarginMath.initialMarginUnits(state.contractType, side, orderType,
                     priceTicks, quantitySteps, state.markPriceTicks, marketMaxSlippagePpm, state.notionalMultiplierUnits,

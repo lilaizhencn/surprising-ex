@@ -153,11 +153,15 @@ public class OrderService {
                                                   long instrumentVersion,
                                                   Instant now) {
         var requirement = orderMarginRepository.requirement(
-                request.symbol(), instrumentVersion, request.side(), request.orderType(), request.priceTicks(),
-                request.quantitySteps(), properties.getRisk().getMarketMaxSlippagePpm(),
+                request.symbol(), instrumentVersion, request.userId(), request.marginMode(), request.side(),
+                request.orderType(), request.priceTicks(), request.quantitySteps(),
+                properties.getRisk().getMarketMaxSlippagePpm(),
                 properties.getRisk().getMarketMaxMarkAgeMs());
         if (requirement.isEmpty()) {
             return ValidationResult.reject("margin requirement unavailable", instrumentVersion);
+        }
+        if (!requirement.get().accepted()) {
+            return ValidationResult.reject(requirement.get().rejectReason(), instrumentVersion);
         }
         if (requirement.get().initialMarginUnits() <= 0) {
             return ValidationResult.reject("invalid margin requirement", instrumentVersion);

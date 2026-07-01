@@ -17,5 +17,7 @@ public record InstrumentRule(
         long maxQuantitySteps,
         long minNotionalUnits,
         long maxNotionalUnits,
-        long notionalMultiplierUnits) {
+        long notionalMultiplierUnits,
+        long maxLeveragePpm,
+        long initialMarginRatePpm) {
 }

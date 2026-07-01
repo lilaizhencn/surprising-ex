@@ -122,7 +122,7 @@ class OrderServiceTest {
         var response = service.place(request("dup-1"));
 
         assertThat(response.orderId()).isEqualTo(9001L);
-        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), any(), any(),
+        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
                 anyLong(), anyLong(), anyLong(), anyLong());
         verify(orderMarginRepository, never()).reserve(anyLong(), anyString(), anyLong(), anyString(), any(),
                 anyLong(), any());
@@ -140,8 +140,8 @@ class OrderServiceTest {
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
         when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(OrderSide.BUY), eq(OrderType.LIMIT),
-                eq(65_000L), eq(10L), anyLong(), anyLong()))
+        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
+                eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(), anyLong()))
                 .thenReturn(Optional.of(new MarginRequirement("USDT", 100L)));
         when(orderMarginRepository.reserve(eq(1001L), eq("USDT"), eq(9002L), eq("BTC-USDT"),
                 eq(MarginMode.CROSS), eq(100L), any())).thenReturn(false);
@@ -171,8 +171,32 @@ class OrderServiceTest {
 
         assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
         assertThat(response.rejectReason()).isEqualTo("fee schedule unavailable");
-        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), any(), any(),
+        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
                 anyLong(), anyLong(), anyLong(), anyLong());
+        verify(orderRepository, never()).nextSequence("command");
+    }
+
+    @Test
+    void leverageRiskLimitRejectsInsertedOrderWithoutPublishingCommand() {
+        OrderService service = service();
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
+        when(orderRepository.nextSequence("order")).thenReturn(9002L);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L);
+        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
+                eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(), anyLong()))
+                .thenReturn(Optional.of(new MarginRequirement("USDT", 0L, "leverage exceeds risk limit",
+                        100_000_000L, 50_000_000L, 20_000L)));
+
+        var response = service.place(request("bad-leverage"));
+
+        assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
+        assertThat(response.rejectReason()).isEqualTo("leverage exceeds risk limit");
+        verify(orderRepository).reject(eq(9002L), eq("leverage exceeds risk limit"), any());
+        verify(orderMarginRepository, never()).reserve(anyLong(), anyString(), anyLong(), anyString(), any(),
+                anyLong(), any());
         verify(orderRepository, never()).nextSequence("command");
     }
 
@@ -186,8 +210,8 @@ class OrderServiceTest {
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
         when(orderRepository.nextSequence("command")).thenReturn(9200L);
         when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(OrderSide.BUY), eq(OrderType.LIMIT),
-                eq(65_000L), eq(10L), anyLong(), anyLong()))
+        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.ISOLATED),
+                eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(), anyLong()))
                 .thenReturn(Optional.of(new MarginRequirement("USDT", 100L)));
         when(orderMarginRepository.reserve(eq(1001L), eq("USDT"), eq(9002L), eq("BTC-USDT"),
                 eq(MarginMode.ISOLATED), eq(100L), any())).thenReturn(true);

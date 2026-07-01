@@ -14,7 +14,7 @@ Surprising Exchange 账户和合约持仓模块。当前实现 long-based 余额
 - 余额使用 `availableUnits`、`lockedUnits`、`equityUnits`，全部是资产最小单位的 long。
 - 持仓使用 `signedQuantitySteps`，正数为净多，负数为净空。
 - 持仓保存 `instrumentVersion`，当前敞口的合约数学固定到开仓时的版本。
-- 持仓和持仓保证金都会保存 `marginMode`；当前可执行下单链路只开放 `CROSS`。
+- 持仓和持仓保证金都会保存 `marginMode`；单向净持仓链路下 `CROSS` 和 `ISOLATED` 都可执行。
 - 开仓均价使用 `entryPriceTicks`。
 - 持仓保证金记录在 `account_position_margins.margin_units`。
 - 已实现盈亏按 `realizedPnlUnits` 累计，单位是 instrument 的结算资产最小单位。U 本位线性合约使用 tick-step notional；币本位反向合约使用合约面值和入场/出场价格倒数公式。

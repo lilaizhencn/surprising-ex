@@ -36,7 +36,9 @@ public class InstrumentRuleRepository implements InstrumentRuleLookup {
                        i.max_quantity_steps,
                        i.min_notional_units,
                        i.max_notional_units,
-                       i.notional_multiplier_units
+                       i.notional_multiplier_units,
+                       i.max_leverage_ppm,
+                       i.initial_margin_rate_ppm
                   FROM instruments i
                   JOIN instrument_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
@@ -56,7 +58,9 @@ public class InstrumentRuleRepository implements InstrumentRuleLookup {
                 rs.getLong("max_quantity_steps"),
                 rs.getLong("min_notional_units"),
                 rs.getLong("max_notional_units"),
-                rs.getLong("notional_multiplier_units")), symbol).stream().findFirst();
+                rs.getLong("notional_multiplier_units"),
+                rs.getLong("max_leverage_ppm"),
+                rs.getLong("initial_margin_rate_ppm")), symbol).stream().findFirst();
     }
 
     private Set<String> csv(String value) {

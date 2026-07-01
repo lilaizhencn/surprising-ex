@@ -539,6 +539,28 @@ CREATE INDEX IF NOT EXISTS trading_fee_schedules_user_global_idx
     ON trading_fee_schedules (user_id, status, effective_time DESC, fee_schedule_id DESC)
     WHERE symbol IS NULL;
 
+CREATE TABLE IF NOT EXISTS trading_leverage_settings (
+    user_id             BIGINT NOT NULL,
+    symbol              TEXT NOT NULL,
+    margin_mode         TEXT NOT NULL DEFAULT 'CROSS',
+    leverage_ppm        BIGINT NOT NULL,
+    reason              TEXT,
+    created_at          TIMESTAMPTZ NOT NULL,
+    updated_at          TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (user_id, symbol, margin_mode),
+    CONSTRAINT trading_leverage_settings_user_positive CHECK (user_id > 0),
+    CONSTRAINT trading_leverage_settings_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT trading_leverage_settings_symbol_fk
+        FOREIGN KEY (symbol) REFERENCES instrument_current_versions(symbol),
+    CONSTRAINT trading_leverage_settings_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
+    CONSTRAINT trading_leverage_settings_leverage_range CHECK (
+        leverage_ppm BETWEEN 1000000 AND 1000000000
+    )
+);
+
+CREATE INDEX IF NOT EXISTS trading_leverage_settings_symbol_idx
+    ON trading_leverage_settings (symbol, margin_mode, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS trading_orders (
     order_id                    BIGINT PRIMARY KEY,
     user_id                     BIGINT NOT NULL,

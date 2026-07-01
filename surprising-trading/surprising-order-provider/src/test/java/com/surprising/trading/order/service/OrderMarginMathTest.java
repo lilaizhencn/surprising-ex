@@ -58,6 +58,18 @@ class OrderMarginMathTest {
     }
 
     @Test
+    void convertsLeveragePpmToInitialMarginRatePpm() {
+        assertThat(OrderMarginMath.initialMarginRateFromLeveragePpm(10_000_000L)).isEqualTo(100_000L);
+        assertThat(OrderMarginMath.initialMarginRateFromLeveragePpm(100_000_000L)).isEqualTo(10_000L);
+    }
+
+    @Test
+    void calculatesLinearOrderNotionalUnits() {
+        assertThat(OrderMarginMath.notionalUnits(ContractType.LINEAR_PERPETUAL, 6L, 100L,
+                100L, 1L, 100_000_000L)).isEqualTo(60_000L);
+    }
+
+    @Test
     void rejectsMarketMarginWithoutFreshMarkTicks() {
         assertThatThrownBy(() -> OrderMarginMath.initialMarginUnits(ContractType.LINEAR_PERPETUAL,
                 OrderSide.BUY, OrderType.MARKET, 0L, 1L, null, 0L,

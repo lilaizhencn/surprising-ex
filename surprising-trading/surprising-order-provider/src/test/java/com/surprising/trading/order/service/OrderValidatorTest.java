@@ -98,7 +98,9 @@ class OrderValidatorTest {
                 100_000L,
                 1L,
                 1_000L,
-                1L);
+                1L,
+                100_000_000L,
+                10_000L);
         OrderValidator validator = validator(rule, OptionalLong.of(100L), 10_000L);
 
         var result = validator.validate(market(10L));
@@ -123,7 +125,9 @@ class OrderValidatorTest {
                 100_000L,
                 1L,
                 1_000L,
-                1L);
+                1L,
+                100_000_000L,
+                10_000L);
         OrderValidator validator = validator(rule, OptionalLong.of(100L), 10_000L);
 
         var result = validator.validate(market(OrderSide.SELL, 10L));
@@ -148,7 +152,9 @@ class OrderValidatorTest {
                 100_000L,
                 100L,
                 1_000_000L,
-                1L);
+                1L,
+                100_000_000L,
+                10_000L);
         OrderValidator validator = validator(rule, OptionalLong.of(100L), 10_000L);
 
         var result = validator.validate(market(OrderSide.BUY, 1L));
@@ -172,7 +178,7 @@ class OrderValidatorTest {
         OrderValidator validator = new OrderValidator(lookup(new InstrumentRule(
                 "BTC-USDT", 1L, "HALT", ContractType.LINEAR_PERPETUAL, Set.of("LIMIT", "MARKET"),
                 Set.of("GTC", "IOC", "FOK", "GTX"), true, true, true,
-                1L, 100_000L, 50_000L, 100_000_000_000L, 1L)));
+                1L, 100_000L, 50_000L, 100_000_000_000L, 1L, 100_000_000L, 10_000L)));
 
         var result = validator.validate(limit(300_000L, 2L));
 
@@ -209,7 +215,9 @@ class OrderValidatorTest {
                 100_000L,
                 50_000L,
                 100_000_000_000L,
-                1L);
+                1L,
+                100_000_000L,
+                10_000L);
     }
 
     private InstrumentRule inverseRule() {
@@ -227,7 +235,9 @@ class OrderValidatorTest {
                 100_000L,
                 1_000L,
                 10_000L,
-                100L);
+                100L,
+                100_000_000L,
+                10_000L);
     }
 
     private InstrumentRuleLookup lookup(InstrumentRule rule) {

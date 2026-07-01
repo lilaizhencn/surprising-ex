@@ -68,6 +68,15 @@ client / internal gateway
 - 订单接受时会把最终 `maker_fee_rate_ppm`、`taker_fee_rate_ppm` 写入 `trading_orders`。后续用户 VIP 等级或活动费率变化，不会重解释已接受挂单。
 - account provider 结算成交时按订单快照写 `TRADE_FEE`，并在 ledger 保存 `trade_id`、`order_id`、`symbol`、`fee_rate_ppm`。
 
+## 杠杆设置
+
+- 用户杠杆配置保存在 `trading_leverage_settings`，唯一键是 `user_id + symbol + margin_mode`。
+- `leveragePpm` 使用 ppm 表示杠杆：`10_000_000 = 10x`，`100_000_000 = 100x`。
+- 用户接口：`POST /api/v1/trading/leverage/settings` 设置杠杆，`GET /api/v1/trading/leverage/settings?userId=...&symbol=...&marginMode=...` 查询当前设置。
+- 设置杠杆时会先校验不能超过 instrument 当前版本的 `max_leverage_ppm`。
+- 下单冻结保证金时还会按订单名义价值和当前同 `marginMode` 持仓名义价值选择 `instrument_risk_brackets` 档位；如果用户设置杠杆超过该档 `max_leverage_ppm`，订单会拒绝。
+- 有效初始保证金率 = `max(用户杠杆换算出的保证金率, 风险档位 initial_margin_rate_ppm)`。未设置用户杠杆时，按当前风险档位最大杠杆/初始保证金率冻结。
+
 ## TraceId 链路追踪
 
 - 前端或 BFF 可以传 `X-Trace-Id`；未传时 gateway/order 入口会自动生成。
@@ -117,6 +126,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `min_notional_units`、`max_notional_units`、`notional_multiplier_units` 保持 long 原始单位，并按 `contract_type` 校验。
 - `LINEAR_PERPETUAL` 订单 notional = `priceTicks * quantitySteps * notional_multiplier_units`。
 - `INVERSE_PERPETUAL` 订单面值 = `quantitySteps * notional_multiplier_units`。
+- `max_leverage_ppm` 和 `instrument_risk_brackets` 会参与下单保证金冻结；风险档位越高，允许杠杆越低，最低初始保证金率越高。
 - `maker_fee_rate_ppm` 和 `taker_fee_rate_ppm` 不传给 exchange-core。instrument 提供默认费率，`trading_fee_schedules` 可提供用户全局或单 symbol 覆盖，订单接受时会把最终费率固化到 `trading_orders`。
 
 所以交易模块 Java 代码仍然保持 long-only。

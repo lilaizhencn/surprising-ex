@@ -387,6 +387,16 @@ CREATE INDEX adl_events_asset_symbol_time_idx
 - `effective_time` / `expire_time`, `status`, and descending indexes allow deterministic historical
   activation. The resolved ppm is copied into `trading_orders` before a command is published.
 
+`trading_leverage_settings` stores the user's target leverage by `user_id + symbol + margin_mode`:
+
+- `leverage_ppm`: leverage in ppm, so `10_000_000` means `10x` and `100_000_000` means `100x`.
+- Order entry validates the setting against `instruments.max_leverage_ppm` when it is saved, then re-checks
+  it against the matching `instrument_risk_brackets.max_leverage_ppm` for the current order/position notional
+  before reserving margin.
+- If no user setting exists, order entry uses the selected risk bracket's maximum leverage, which is equivalent
+  to reserving at that bracket's `initial_margin_rate_ppm`.
+- The effective initial-margin rate is `max(leverage-derived rate, risk-bracket initial margin rate)`.
+
 `trading_match_results` stores one idempotent result per matching command:
 
 - `command_id` is the idempotency key.

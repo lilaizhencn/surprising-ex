@@ -69,6 +69,15 @@ yet, so clients should present one-way net positions.
 - Order admission writes the final `maker_fee_rate_ppm` and `taker_fee_rate_ppm` to `trading_orders`. Later VIP or promotion changes do not reinterpret already accepted resting orders.
 - The account provider settles fills from the order snapshot and writes `TRADE_FEE` ledger rows with `trade_id`, `order_id`, `symbol`, and `fee_rate_ppm`.
 
+## Leverage Settings
+
+- User leverage settings are stored in `trading_leverage_settings`, keyed by `user_id + symbol + margin_mode`.
+- `leveragePpm` uses ppm: `10_000_000 = 10x`, `100_000_000 = 100x`.
+- User APIs: `POST /api/v1/trading/leverage/settings` sets leverage, and `GET /api/v1/trading/leverage/settings?userId=...&symbol=...&marginMode=...` returns the current setting.
+- Setting leverage first validates it against the current instrument version's `max_leverage_ppm`.
+- Order margin reservation then selects the matching `instrument_risk_brackets` row from the order notional plus the current same-`marginMode` position notional. If the user setting exceeds that bracket's `max_leverage_ppm`, the order is rejected.
+- Effective initial-margin rate = `max(leverage-derived margin rate, risk-bracket initial_margin_rate_ppm)`. When no user setting exists, order entry uses the current risk bracket's max leverage / initial margin rate.
+
 ## Trace Id
 
 - Public clients may send `X-Trace-Id`; otherwise gateway/order entry generates one.
@@ -118,6 +127,7 @@ Instrument already stores exchange-core-aligned long rule boundaries:
 - `min_notional_units`, `max_notional_units`, and `notional_multiplier_units` are kept as long units and evaluated by `contract_type`.
 - `LINEAR_PERPETUAL` order notional = `priceTicks * quantitySteps * notional_multiplier_units`.
 - `INVERSE_PERPETUAL` order face value = `quantitySteps * notional_multiplier_units`.
+- `max_leverage_ppm` and `instrument_risk_brackets` participate in order margin reservation; higher risk brackets lower max leverage and raise the minimum initial-margin rate.
 - `maker_fee_rate_ppm` and `taker_fee_rate_ppm` are not passed into exchange-core. Instrument provides the default, `trading_fee_schedules` can override by user globally or by symbol, and order admission freezes the final rates on `trading_orders`.
 
 The trading Java module remains long-only.
