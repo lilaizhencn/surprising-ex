@@ -14,6 +14,7 @@ public record TriggerOrderRecord(
         long triggerOrderId,
         long userId,
         String clientTriggerOrderId,
+        String ocoGroupId,
         String symbol,
         OrderSide side,
         TriggerOrderType triggerType,

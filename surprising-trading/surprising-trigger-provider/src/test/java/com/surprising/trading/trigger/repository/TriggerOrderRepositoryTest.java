@@ -45,7 +45,7 @@ class TriggerOrderRepositoryTest {
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("FOR UPDATE SKIP LOCKED"), any(RowMapper.class),
                 eq("BTC-USDT"), any(), eq(70_000L), eq(70_000L), eq(100),
-                eq(9L), eq(70_000L), any(), any())).thenReturn(List.of());
+                eq(9L), eq(70_000L), any(), any(), any())).thenReturn(List.of());
 
         var rows = repository.claimTriggered("BTC-USDT", 70_000L, 9L,
                 Instant.parse("2026-07-01T00:00:00Z"), 100, Instant.parse("2026-07-01T00:00:01Z"));
@@ -53,6 +53,12 @@ class TriggerOrderRepositoryTest {
         assertThat(rows).isEmpty();
         verify(jdbcTemplate).query(contains("trigger_condition = 'GREATER_OR_EQUAL'"), any(RowMapper.class),
                 eq("BTC-USDT"), any(), eq(70_000L), eq(70_000L), eq(100),
-                eq(9L), eq(70_000L), any(), any());
+                eq(9L), eq(70_000L), any(), any(), any());
+        verify(jdbcTemplate).query(contains("canceled_oco"), any(RowMapper.class),
+                eq("BTC-USDT"), any(), eq(70_000L), eq(70_000L), eq(100),
+                eq(9L), eq(70_000L), any(), any(), any());
+        verify(jdbcTemplate).query(contains("PARTITION BY claim_group_key"), any(RowMapper.class),
+                eq("BTC-USDT"), any(), eq(70_000L), eq(70_000L), eq(100),
+                eq(9L), eq(70_000L), any(), any(), any());
     }
 }

@@ -753,10 +753,12 @@ place_trigger_order() {
   local tif="$7"
   local price_ticks="$8"
   local quantity_steps="$9"
+  local oco_group_id="${10:-}"
   local response
   response="$(gateway_post "trading-trigger" "${user_id}" "real-config-${RUN_ID}-${client_trigger_order_id}" "{
       \"userId\": ${user_id},
       \"clientTriggerOrderId\": \"${client_trigger_order_id}\",
+      \"ocoGroupId\": \"${oco_group_id}\",
       \"symbol\": \"${BTC_SYMBOL}\",
       \"side\": \"${side}\",
       \"triggerType\": \"${trigger_type}\",
@@ -1350,11 +1352,15 @@ fi
 trigger_maker_order="$(place_order "${TRIGGER_MAKER_USER}" "real-trigger-maker-${RUN_ID}" "BUY" "LIMIT" "GTC" "${FULL_PRICE_TICKS}" "${TRIGGER_CLOSE_QTY}" false false)"
 wait_order_result "${trigger_maker_order}" "SUCCESS"
 trigger_order_id="$(place_trigger_order "${FULL_TAKER_USER}" "real-tp-${RUN_ID}" "SELL" "TAKE_PROFIT" \
-  "$((FULL_PRICE_TICKS + 500))" "MARKET" "IOC" 0 "${TRIGGER_CLOSE_QTY}")"
+  "$((FULL_PRICE_TICKS + 500))" "MARKET" "IOC" 0 "${TRIGGER_CLOSE_QTY}" "real-oco-${RUN_ID}")"
+stop_trigger_order_id="$(place_trigger_order "${FULL_TAKER_USER}" "real-sl-${RUN_ID}" "SELL" "STOP_LOSS" \
+  "$((FULL_PRICE_TICKS - 500))" "MARKET" "IOC" 0 "${TRIGGER_CLOSE_QTY}" "real-oco-${RUN_ID}")"
 wait_trigger_state "${trigger_order_id}" "PENDING"
+wait_trigger_state "${stop_trigger_order_id}" "PENDING"
 publish_price_inputs "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" 3101 "$((FULL_PRICE_TICKS + 1000))"
 wait_consumer_group_lag_zero "surprising-trigger-v1" "surprising.perp.mark.price.v1"
 wait_trigger_state "${trigger_order_id}" "TRIGGERED"
+wait_trigger_state "${stop_trigger_order_id}" "CANCELED"
 trigger_placed_order_id="$(query_value "SELECT placed_order_id FROM trading_trigger_orders WHERE trigger_order_id = ${trigger_order_id}")"
 wait_order_state "${trigger_placed_order_id}" "FILLED" "${TRIGGER_CLOSE_QTY}" "0"
 wait_position "${FULL_TAKER_USER}" "0" "0"

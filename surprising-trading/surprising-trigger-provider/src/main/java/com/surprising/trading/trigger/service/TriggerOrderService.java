@@ -76,6 +76,7 @@ public class TriggerOrderService {
                 triggerOrderId,
                 normalized.userId(),
                 emptyToNull(normalized.clientTriggerOrderId()),
+                emptyToNull(normalized.ocoGroupId()),
                 normalized.symbol(),
                 normalized.side(),
                 normalized.triggerType(),
@@ -225,9 +226,14 @@ public class TriggerOrderService {
         if (clientTriggerOrderId != null && clientTriggerOrderId.length() > 64) {
             throw new IllegalArgumentException("clientTriggerOrderId length must be <= 64");
         }
+        String ocoGroupId = emptyToNull(request.ocoGroupId());
+        if (ocoGroupId != null && ocoGroupId.length() > 64) {
+            throw new IllegalArgumentException("ocoGroupId length must be <= 64");
+        }
         return new PlaceTriggerOrderRequest(
                 request.userId(),
                 clientTriggerOrderId,
+                ocoGroupId,
                 normalizeSymbol(request.symbol()),
                 request.side(),
                 request.triggerType(),
@@ -275,6 +281,7 @@ public class TriggerOrderService {
                 order.triggerOrderId(),
                 order.userId(),
                 order.clientTriggerOrderId(),
+                order.ocoGroupId(),
                 order.symbol(),
                 order.side(),
                 order.triggerType(),

@@ -728,6 +728,7 @@ CREATE TABLE IF NOT EXISTS trading_trigger_orders (
     trigger_order_id           BIGINT PRIMARY KEY,
     user_id                    BIGINT NOT NULL,
     client_trigger_order_id    TEXT,
+    oco_group_id               TEXT,
     symbol                     TEXT NOT NULL,
     side                       TEXT NOT NULL,
     trigger_type               TEXT NOT NULL,
@@ -752,6 +753,9 @@ CREATE TABLE IF NOT EXISTS trading_trigger_orders (
     CONSTRAINT trading_trigger_orders_user_positive CHECK (user_id > 0),
     CONSTRAINT trading_trigger_orders_client_id_length CHECK (
         client_trigger_order_id IS NULL OR length(client_trigger_order_id) <= 64
+    ),
+    CONSTRAINT trading_trigger_orders_oco_group_length CHECK (
+        oco_group_id IS NULL OR length(oco_group_id) <= 64
     ),
     CONSTRAINT trading_trigger_orders_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT trading_trigger_orders_symbol_fk
@@ -792,6 +796,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS trading_trigger_orders_user_client_uidx
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_user_status_idx
     ON trading_trigger_orders (user_id, status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS trading_trigger_orders_user_oco_idx
+    ON trading_trigger_orders (user_id, symbol, margin_mode, oco_group_id, status, updated_at DESC)
+    WHERE oco_group_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_symbol_gte_idx
     ON trading_trigger_orders (symbol, trigger_price_ticks, trigger_order_id)

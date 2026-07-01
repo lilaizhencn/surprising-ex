@@ -47,7 +47,7 @@ class TriggerOrderServiceTest {
         TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
-        PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-1", "btc-usdt",
+        PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-1", "oco-1", "btc-usdt",
                 OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, TriggerPriceType.MARK_PRICE, 70_000L,
                 OrderType.LIMIT, TimeInForce.GTC, 69_950L, 10L, MarginMode.CROSS, null);
         when(repository.nextSequence("trigger-order")).thenReturn(501L);
@@ -60,6 +60,7 @@ class TriggerOrderServiceTest {
         verify(repository).insert(orderCaptor.capture());
         TriggerOrderRecord saved = orderCaptor.getValue();
         assertThat(saved.symbol()).isEqualTo("BTC-USDT");
+        assertThat(saved.ocoGroupId()).isEqualTo("oco-1");
         assertThat(saved.triggerCondition()).isEqualTo(TriggerCondition.GREATER_OR_EQUAL);
         assertThat(saved.status()).isEqualTo(TriggerOrderStatus.PENDING);
         assertThat(saved.traceId()).isNotBlank();
@@ -73,7 +74,7 @@ class TriggerOrderServiceTest {
         TriggerOrderRecord existing = record(501L, TriggerOrderStatus.PENDING);
         when(repository.findByClientTriggerOrderId(1001L, "sl-1")).thenReturn(Optional.of(existing));
 
-        TriggerOrderResponse response = service.place(new PlaceTriggerOrderRequest(1001L, "sl-1", "BTC-USDT",
+        TriggerOrderResponse response = service.place(new PlaceTriggerOrderRequest(1001L, "sl-1", null, "BTC-USDT",
                 OrderSide.SELL, TriggerOrderType.STOP_LOSS, TriggerPriceType.MARK_PRICE, 60_000L,
                 OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS, null));
 
@@ -122,7 +123,7 @@ class TriggerOrderServiceTest {
 
     private TriggerOrderRecord record(long triggerOrderId, TriggerOrderStatus status) {
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
-        return new TriggerOrderRecord(triggerOrderId, 1001L, "tp-1", "BTC-USDT", OrderSide.SELL,
+        return new TriggerOrderRecord(triggerOrderId, 1001L, "tp-1", "oco-1", "BTC-USDT", OrderSide.SELL,
                 TriggerOrderType.TAKE_PROFIT, TriggerPriceType.MARK_PRICE, TriggerCondition.GREATER_OR_EQUAL,
                 70_000L, OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS, status, null,
                 null, null, null, "trace-501", null, null, now, now);

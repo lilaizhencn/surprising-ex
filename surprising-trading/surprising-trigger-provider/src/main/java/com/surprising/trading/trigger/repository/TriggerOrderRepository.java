@@ -52,13 +52,14 @@ public class TriggerOrderRepository {
     public boolean insert(TriggerOrderRecord order) {
         return jdbcTemplate.update("""
                 INSERT INTO trading_trigger_orders (
-                    trigger_order_id, user_id, client_trigger_order_id, symbol, side, trigger_type,
+                    trigger_order_id, user_id, client_trigger_order_id, oco_group_id, symbol, side, trigger_type,
                     trigger_price_type, trigger_condition, trigger_price_ticks, order_type, time_in_force,
                     price_ticks, quantity_steps, margin_mode, status, placed_order_id, trigger_sequence,
                     triggered_price_ticks, reject_reason, trace_id, expires_at, triggered_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT DO NOTHING
-                """, order.triggerOrderId(), order.userId(), order.clientTriggerOrderId(), order.symbol(),
+                """, order.triggerOrderId(), order.userId(), order.clientTriggerOrderId(), order.ocoGroupId(),
+                order.symbol(),
                 order.side().name(), order.triggerType().name(), order.triggerPriceType().name(),
                 order.triggerCondition().name(), order.triggerPriceTicks(), order.orderType().name(),
                 order.timeInForce().name(), order.priceTicks(), order.quantitySteps(), order.marginMode().name(),
@@ -136,8 +137,12 @@ public class TriggerOrderRepository {
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         return jdbcTemplate.query("""
                 -- Claim first, then update, so concurrent trigger nodes skip rows already owned by peers.
-                WITH candidates AS (
-                    SELECT trigger_order_id
+                WITH due AS (
+                    SELECT trigger_order_id,
+                           CASE
+                               WHEN oco_group_id IS NULL THEN 'order:' || trigger_order_id::text
+                               ELSE 'oco:' || user_id::text || ':' || symbol || ':' || margin_mode || ':' || oco_group_id
+                           END AS claim_group_key
                       FROM trading_trigger_orders
                      WHERE symbol = ?
                        AND status = 'PENDING'
@@ -150,19 +155,48 @@ public class TriggerOrderRepository {
                      ORDER BY trigger_order_id ASC
                      LIMIT ?
                      FOR UPDATE SKIP LOCKED
+                ),
+                candidates AS (
+                    SELECT trigger_order_id
+                      FROM (
+                          SELECT trigger_order_id,
+                                 row_number() OVER (
+                                     PARTITION BY claim_group_key
+                                     ORDER BY trigger_order_id ASC
+                                 ) AS group_rank
+                            FROM due
+                      ) ranked
+                     WHERE group_rank = 1
+                ),
+                claimed AS (
+                    UPDATE trading_trigger_orders o
+                       SET status = 'TRIGGERING',
+                           trigger_sequence = ?,
+                           triggered_price_ticks = ?,
+                           triggered_at = ?,
+                           updated_at = ?
+                      FROM candidates c
+                     WHERE o.trigger_order_id = c.trigger_order_id
+                 RETURNING o.*
+                ),
+                canceled_oco AS (
+                    UPDATE trading_trigger_orders sibling
+                       SET status = 'CANCELED',
+                           updated_at = ?
+                      FROM claimed c
+                     WHERE c.oco_group_id IS NOT NULL
+                       AND sibling.user_id = c.user_id
+                       AND sibling.symbol = c.symbol
+                       AND sibling.margin_mode = c.margin_mode
+                       AND sibling.oco_group_id = c.oco_group_id
+                       AND sibling.trigger_order_id <> c.trigger_order_id
+                       AND sibling.status = 'PENDING'
+                 RETURNING sibling.trigger_order_id
                 )
-                UPDATE trading_trigger_orders o
-                   SET status = 'TRIGGERING',
-                       trigger_sequence = ?,
-                       triggered_price_ticks = ?,
-                       triggered_at = ?,
-                       updated_at = ?
-                  FROM candidates c
-                 WHERE o.trigger_order_id = c.trigger_order_id
-             RETURNING o.*
+                SELECT * FROM claimed
                 """, (rs, rowNum) -> toRecord(rs), symbol, Timestamp.from(now), markPriceTicks,
                 markPriceTicks, normalizedLimit, triggerSequence, markPriceTicks, Timestamp.from(triggeredAt),
-                Timestamp.from(now));
+                Timestamp.from(now), Timestamp.from(now));
     }
 
     public void markTriggered(long triggerOrderId, long placedOrderId, Instant now) {
@@ -238,6 +272,7 @@ public class TriggerOrderRepository {
                 rs.getLong("trigger_order_id"),
                 rs.getLong("user_id"),
                 stringOrNull(rs, "client_trigger_order_id"),
+                stringOrNull(rs, "oco_group_id"),
                 rs.getString("symbol"),
                 OrderSide.valueOf(rs.getString("side")),
                 TriggerOrderType.valueOf(rs.getString("trigger_type")),

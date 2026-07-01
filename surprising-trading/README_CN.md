@@ -106,7 +106,8 @@ client / internal gateway
 - 触发后通过 order-provider 提交 `reduceOnly=true`、`postOnly=false` 的平仓单，`clientOrderId=trigger-<triggerOrderId>`。order-provider 的幂等键会保护重试不会创建重复平仓单。
 - 触发后的真实订单继续走普通订单、撮合、账户、手续费、PnL、风控、强平和 WebSocket 链路。trigger 服务不直接修改余额或持仓。
 - `MARKET` 触发执行要求 `priceTicks=0` 且 `timeInForce` 为 `IOC` 或 `FOK`。`LIMIT` 触发执行要求 `priceTicks > 0`；触发执行不支持 `GTX`。
-- 成对 OCO 止盈/止损自动互撤暂未建模。在后续增加 OCO group 表前，客户端应在一侧触发后取消另一侧条件单。
+- 可选 `ocoGroupId` 支持成对 TP/SL 互撤。同一个 `userId + symbol + marginMode + ocoGroupId` 组里任意一条 pending 条件单被 mark price 抢占触发时，同一条数据库 claim 语句会先把其它 pending sibling 置为 `CANCELED`，再提交生成的 reduce-only 平仓单。
+- OCO sibling 在 claim 阶段就会取消；如果后续 order-provider 执行失败，该 OCO 组也已经被消费。这个取舍可以避免多节点 trigger-provider 并发下重复平仓，执行失败后客户端可以重新挂一组 TP/SL。
 
 REST 接口：
 
@@ -117,6 +118,7 @@ curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders' \
   -d '{
     "userId": 1001,
     "clientTriggerOrderId": "tp-1001-1",
+    "ocoGroupId": "bracket-1001-1",
     "symbol": "BTC-USDT",
     "side": "SELL",
     "triggerType": "TAKE_PROFIT",
@@ -208,6 +210,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `trading_sequences` 使用 PostgreSQL 原子 `INSERT ... ON CONFLICT ... RETURNING` 分配 `orderId`、`eventId`、`commandId`、`outboxId`。
 - `trading_outbox_events` 与订单写入在同一事务提交。
 - `trading_trigger_orders_user_client_uidx` 保证同一用户 `clientTriggerOrderId` 的止盈止损下单幂等。
+- `ocoGroupId` 用于把成对 TP/SL 条件单组成 one-cancels-other 互撤组；它是可选、按 `userId + symbol + marginMode` 隔离的字段，不替代 `clientTriggerOrderId`。
 - `trading_order_events` 和 `trading_outbox_events` 插入必须影响 1 行，否则事务失败，避免订单状态和消息链路不一致。
 - outbox 发布器用 `FOR UPDATE SKIP LOCKED`，多个 order-provider 节点可以同时运行，不会重复锁同一批待发消息。
 - outbox 失败后按 `next_attempt_at` 指数退避重试，避免 Kafka 故障时热循环。
@@ -382,6 +385,7 @@ curl 'http://localhost:9084/api/v1/trading/orders/open?userId=1001&symbol=BTC-US
 - `trading_orders_stp_open_idx`
 - `trading_orders_recovery_idx`
 - `trading_trigger_orders_user_client_uidx`
+- `trading_trigger_orders_user_oco_idx`
 - `trading_trigger_orders_user_status_idx`
 - `trading_trigger_orders_symbol_gte_idx`
 - `trading_trigger_orders_symbol_lte_idx`

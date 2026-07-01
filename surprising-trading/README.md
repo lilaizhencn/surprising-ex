@@ -107,7 +107,8 @@ Large exchanges implement TP/SL as conditional orders outside the live order boo
 - When triggered, it calls order-provider with `reduceOnly=true`, `postOnly=false`, and `clientOrderId=trigger-<triggerOrderId>`. The order-provider idempotency key protects retries from creating duplicate close orders.
 - Triggered orders go through the same order, matching, account, fee, PnL, risk, liquidation, and WebSocket flow as user-submitted close orders. The trigger service never mutates balances or positions directly.
 - `MARKET` trigger execution requires `priceTicks=0` and `IOC` or `FOK`. `LIMIT` trigger execution requires a positive `priceTicks`; `GTX` is rejected for trigger execution.
-- Paired OCO TP/SL cancellation is not modeled yet. Until an OCO group table is added, clients should cancel the sibling trigger after one side triggers.
+- Optional `ocoGroupId` supports paired TP/SL. When any pending order in the same `userId + symbol + marginMode + ocoGroupId` group is claimed by a mark-price event, the database claim statement also moves the other pending siblings to `CANCELED` before the generated reduce-only order is submitted.
+- Because OCO siblings are canceled at claim time, a later downstream execution failure leaves the group consumed. This avoids duplicate close attempts under multi-node trigger-provider concurrency; clients can place a fresh TP/SL pair if execution fails.
 
 REST endpoints:
 
@@ -118,6 +119,7 @@ curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders' \
   -d '{
     "userId": 1001,
     "clientTriggerOrderId": "tp-1001-1",
+    "ocoGroupId": "bracket-1001-1",
     "symbol": "BTC-USDT",
     "side": "SELL",
     "triggerType": "TAKE_PROFIT",
@@ -209,6 +211,7 @@ The trading Java module remains long-only.
 - `trading_sequences` atomically allocates `orderId`, `eventId`, `commandId`, and `outboxId` with PostgreSQL `INSERT ... ON CONFLICT ... RETURNING`.
 - `trading_outbox_events` is committed in the same transaction as the order.
 - `trading_trigger_orders_user_client_uidx` makes `(userId, clientTriggerOrderId)` idempotent for TP/SL placement.
+- `ocoGroupId` groups paired TP/SL rows for one-cancels-other behavior; it is optional, scoped by `userId + symbol + marginMode`, and does not replace `clientTriggerOrderId`.
 - `trading_order_events` and `trading_outbox_events` inserts must affect exactly one row; otherwise the transaction fails to avoid order/message divergence.
 - The outbox publisher uses `FOR UPDATE SKIP LOCKED`, so multiple order-provider nodes can publish concurrently without locking the same rows.
 - Failed outbox rows retry with exponential backoff through `next_attempt_at`, avoiding hot loops during Kafka incidents.
@@ -383,6 +386,7 @@ Core indexes:
 - `trading_orders_stp_open_idx`
 - `trading_orders_recovery_idx`
 - `trading_trigger_orders_user_client_uidx`
+- `trading_trigger_orders_user_oco_idx`
 - `trading_trigger_orders_user_status_idx`
 - `trading_trigger_orders_symbol_gte_idx`
 - `trading_trigger_orders_symbol_lte_idx`

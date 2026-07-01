@@ -382,6 +382,8 @@ CREATE INDEX adl_events_asset_symbol_time_idx
 order path:
 
 - `client_trigger_order_id` is scoped by `user_id` for idempotent placement.
+- `oco_group_id` is optional and scoped by `user_id + symbol + margin_mode`. Pending siblings in the same
+  OCO group are canceled when one row is claimed for execution.
 - `trigger_price_type` is currently `MARK_PRICE`, and `trigger_condition` is derived from close side and
   TP/SL type.
 - `trigger_price_ticks`, `price_ticks`, and `quantity_steps` stay in the same long tick/step model as
@@ -400,6 +402,10 @@ CREATE UNIQUE INDEX trading_trigger_orders_user_client_uidx
     ON trading_trigger_orders (user_id, client_trigger_order_id)
     WHERE client_trigger_order_id IS NOT NULL;
 
+CREATE INDEX trading_trigger_orders_user_oco_idx
+    ON trading_trigger_orders (user_id, symbol, margin_mode, oco_group_id, status, updated_at DESC)
+    WHERE oco_group_id IS NOT NULL;
+
 CREATE INDEX trading_trigger_orders_symbol_gte_idx
     ON trading_trigger_orders (symbol, trigger_price_ticks, trigger_order_id)
     WHERE status = 'PENDING'
@@ -414,8 +420,9 @@ CREATE INDEX trading_trigger_orders_symbol_lte_idx
 ```
 
 The trigger provider claims due rows with `FOR UPDATE SKIP LOCKED`, so active-active nodes can consume the
-same mark-price stream without executing the same trigger twice. The expiry and `TRIGGERING` indexes support
-scheduled expiry and stale execution retry.
+same mark-price stream without executing the same trigger twice. The claim statement partitions candidates by
+OCO group, selects one pending row per group, sets that row to `TRIGGERING`, and cancels pending siblings in
+the same statement. The expiry and `TRIGGERING` indexes support scheduled expiry and stale execution retry.
 
 `trading_fee_schedules` stores user-level fee overrides:
 

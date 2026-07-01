@@ -10,6 +10,7 @@ import java.time.Instant;
 public record PlaceTriggerOrderRequest(
         @Positive long userId,
         @Size(max = 64) String clientTriggerOrderId,
+        @Size(max = 64) String ocoGroupId,
         @NotBlank @Size(max = 64) String symbol,
         @NotNull OrderSide side,
         @NotNull TriggerOrderType triggerType,
