@@ -15,10 +15,15 @@ public record OrderCommandEvent(
         TimeInForce timeInForce,
         long priceTicks,
         long quantitySteps,
+        MarginMode marginMode,
         boolean reduceOnly,
         boolean postOnly,
         Instant commandTime,
         String traceId) {
+
+    public OrderCommandEvent {
+        marginMode = MarginMode.defaultIfNull(marginMode);
+    }
 
     public OrderCommandEvent(OrderCommandType commandType,
                              long commandId,
@@ -36,6 +41,26 @@ public record OrderCommandEvent(
                              boolean postOnly,
                              Instant commandTime) {
         this(commandType, commandId, orderId, userId, clientOrderId, symbol, instrumentVersion, side, orderType,
-                timeInForce, priceTicks, quantitySteps, reduceOnly, postOnly, commandTime, null);
+                timeInForce, priceTicks, quantitySteps, MarginMode.CROSS, reduceOnly, postOnly, commandTime, null);
+    }
+
+    public OrderCommandEvent(OrderCommandType commandType,
+                             long commandId,
+                             long orderId,
+                             long userId,
+                             String clientOrderId,
+                             String symbol,
+                             long instrumentVersion,
+                             OrderSide side,
+                             OrderType orderType,
+                             TimeInForce timeInForce,
+                             long priceTicks,
+                             long quantitySteps,
+                             boolean reduceOnly,
+                             boolean postOnly,
+                             Instant commandTime,
+                             String traceId) {
+        this(commandType, commandId, orderId, userId, clientOrderId, symbol, instrumentVersion, side, orderType,
+                timeInForce, priceTicks, quantitySteps, MarginMode.CROSS, reduceOnly, postOnly, commandTime, traceId);
     }
 }

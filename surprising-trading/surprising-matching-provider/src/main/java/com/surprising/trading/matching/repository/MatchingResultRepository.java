@@ -2,6 +2,7 @@ package com.surprising.trading.matching.repository;
 
 import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MatchTradeEvent;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderStatus;
 import java.sql.Timestamp;
@@ -39,6 +40,18 @@ public class MatchingResultRepository {
         return version;
     }
 
+    public MarginMode orderMarginMode(long orderId) {
+        String marginMode = jdbcTemplate.query("""
+                SELECT margin_mode
+                  FROM trading_orders
+                 WHERE order_id = ?
+                """, (rs, rowNum) -> rs.getString("margin_mode"), orderId).stream().findFirst().orElse(null);
+        if (marginMode == null) {
+            throw new IllegalStateException("margin mode not found for order " + orderId);
+        }
+        return MarginMode.fromNullableDbValue(marginMode);
+    }
+
     public boolean saveResult(MatchResultEvent event) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO trading_match_results (
@@ -56,14 +69,15 @@ public class MatchingResultRepository {
         int rows = jdbcTemplate.update("""
                 INSERT INTO trading_match_trades (
                     trade_id, command_id, symbol, taker_order_id, taker_instrument_version,
-                    taker_user_id, taker_side, maker_order_id, maker_instrument_version,
-                    maker_user_id, price_ticks, quantity_steps,
+                    taker_user_id, taker_side, taker_margin_mode, maker_order_id, maker_instrument_version,
+                    maker_user_id, maker_margin_mode, price_ticks, quantity_steps,
                     taker_order_completed, maker_order_completed, trace_id, event_time, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
                 ON CONFLICT (symbol, trade_id) DO NOTHING
                 """, trade.tradeId(), trade.commandId(), trade.symbol(), trade.takerOrderId(),
                 trade.takerInstrumentVersion(), trade.takerUserId(), trade.takerSide().name(),
-                trade.makerOrderId(), trade.makerInstrumentVersion(), trade.makerUserId(), trade.priceTicks(),
+                trade.takerMarginMode().name(), trade.makerOrderId(), trade.makerInstrumentVersion(),
+                trade.makerUserId(), trade.makerMarginMode().name(), trade.priceTicks(),
                 trade.quantitySteps(), trade.takerOrderCompleted(), trade.makerOrderCompleted(),
                 trade.traceId(), Timestamp.from(trade.eventTime()));
         return rows == 1;

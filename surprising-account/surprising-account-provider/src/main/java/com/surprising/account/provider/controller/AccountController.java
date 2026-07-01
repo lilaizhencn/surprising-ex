@@ -50,9 +50,10 @@ public class AccountController {
 
     @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position")
     public PositionResponse position(@RequestParam("userId") long userId,
-                                     @RequestParam("symbol") String symbol) {
+                                     @RequestParam("symbol") String symbol,
+                                     @RequestParam(value = "marginMode", required = false) String marginMode) {
         try {
-            return accountService.position(userId, symbol);
+            return accountService.position(userId, symbol, marginMode);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

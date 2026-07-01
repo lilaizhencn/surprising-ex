@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.trading.api.TraceContext;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderCommandEvent;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderEvent;
@@ -20,8 +21,10 @@ import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.MarginRequirement;
+import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.ValidationResult;
+import com.surprising.trading.order.repository.OrderFeeRepository;
 import com.surprising.trading.order.repository.OrderMarginRepository;
 import com.surprising.trading.order.repository.OrderRepository;
 import com.surprising.trading.order.repository.OutboxRepository;
@@ -51,6 +54,9 @@ class OrderServiceTest {
     private OrderRepository orderRepository;
 
     @Mock
+    private OrderFeeRepository orderFeeRepository;
+
+    @Mock
     private OrderMarginRepository orderMarginRepository;
 
     @Mock
@@ -71,12 +77,16 @@ class OrderServiceTest {
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
         when(orderRepository.nextSequence("command")).thenReturn(9200L);
         when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         PlaceOrderRequest request = new PlaceOrderRequest(1001L, null, "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, true, false);
 
         var response = service.place(request);
 
         assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
+        assertThat(response.makerFeeRatePpm()).isEqualTo(200L);
+        assertThat(response.takerFeeRatePpm()).isEqualTo(500L);
         ArgumentCaptor<OrderEvent> eventCaptor = ArgumentCaptor.forClass(OrderEvent.class);
         verify(orderRepository).insertEvent(eventCaptor.capture());
         assertThat(eventCaptor.getValue().traceId()).isEqualTo("trace-order-1");
@@ -87,8 +97,14 @@ class OrderServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         assertThat(objectMapper.readValue(payloadCaptor.getAllValues().get(0), OrderEvent.class).traceId())
                 .isEqualTo("trace-order-1");
-        assertThat(objectMapper.readValue(payloadCaptor.getAllValues().get(1), OrderCommandEvent.class).traceId())
-                .isEqualTo("trace-order-1");
+        OrderCommandEvent command = objectMapper.readValue(payloadCaptor.getAllValues().get(1),
+                OrderCommandEvent.class);
+        assertThat(command.traceId()).isEqualTo("trace-order-1");
+        assertThat(command.marginMode()).isEqualTo(MarginMode.CROSS);
+        ArgumentCaptor<OrderRecord> orderCaptor = ArgumentCaptor.forClass(OrderRecord.class);
+        verify(orderRepository).insert(orderCaptor.capture());
+        assertThat(orderCaptor.getValue().makerFeeRatePpm()).isEqualTo(200L);
+        assertThat(orderCaptor.getValue().takerFeeRatePpm()).isEqualTo(500L);
     }
 
     @Test
@@ -98,6 +114,8 @@ class OrderServiceTest {
         when(orderRepository.findByClientOrderId(1001L, "dup-1"))
                 .thenReturn(Optional.empty(), Optional.of(existing));
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.insert(any(OrderRecord.class))).thenReturn(false);
 
@@ -106,7 +124,8 @@ class OrderServiceTest {
         assertThat(response.orderId()).isEqualTo(9001L);
         verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), any(), any(),
                 anyLong(), anyLong(), anyLong(), anyLong());
-        verify(orderMarginRepository, never()).reserve(anyLong(), anyString(), anyLong(), anyString(), anyLong(), any());
+        verify(orderMarginRepository, never()).reserve(anyLong(), anyString(), anyLong(), anyString(), any(),
+                anyLong(), any());
         verify(outboxRepository, never()).enqueue(anyString(), anyLong(), anyString(), anyString(), anyString(),
                 anyString(), any());
     }
@@ -116,6 +135,8 @@ class OrderServiceTest {
         OrderService service = service();
         when(orderRepository.findByClientOrderId(1001L, "no-margin")).thenReturn(Optional.empty());
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
         when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
@@ -123,7 +144,7 @@ class OrderServiceTest {
                 eq(65_000L), eq(10L), anyLong(), anyLong()))
                 .thenReturn(Optional.of(new MarginRequirement("USDT", 100L)));
         when(orderMarginRepository.reserve(eq(1001L), eq("USDT"), eq(9002L), eq("BTC-USDT"),
-                eq(100L), any())).thenReturn(false);
+                eq(MarginMode.CROSS), eq(100L), any())).thenReturn(false);
 
         var response = service.place(request("no-margin"));
 
@@ -136,9 +157,50 @@ class OrderServiceTest {
         verify(orderRepository, never()).nextSequence("command");
     }
 
+    @Test
+    void missingFeeScheduleRejectsOrderBeforeMarginReservation() {
+        OrderService service = service();
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.empty());
+        when(orderRepository.nextSequence("order")).thenReturn(9002L);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L);
+        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+
+        var response = service.place(request("fee-missing"));
+
+        assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
+        assertThat(response.rejectReason()).isEqualTo("fee schedule unavailable");
+        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), any(), any(),
+                anyLong(), anyLong(), anyLong(), anyLong());
+        verify(orderRepository, never()).nextSequence("command");
+    }
+
+    @Test
+    void isolatedMarginOrdersAreRejectedUntilIsolatedRiskIsEnabled() {
+        OrderService service = service();
+        when(orderRepository.nextSequence("order")).thenReturn(9002L);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L);
+        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+
+        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "iso-1", "BTC-USDT", OrderSide.BUY,
+                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, MarginMode.ISOLATED, false, false);
+
+        var response = service.place(request);
+
+        assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
+        assertThat(response.marginMode()).isEqualTo(MarginMode.ISOLATED);
+        assertThat(response.rejectReason()).isEqualTo("isolated margin mode is not enabled");
+        verify(orderValidator, never()).validate(any());
+        verify(orderFeeRepository, never()).snapshot(anyLong(), anyString(), anyLong(), any());
+        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), any(), any(),
+                anyLong(), anyLong(), anyLong(), anyLong());
+        verify(orderRepository, never()).nextSequence("command");
+    }
+
     private OrderService service() {
         return new OrderService(new ObjectMapper(), new TradingOrderProperties(), orderValidator,
-                reduceOnlyValidator, orderRepository, orderMarginRepository, outboxRepository);
+                reduceOnlyValidator, orderRepository, orderFeeRepository, orderMarginRepository, outboxRepository);
     }
 
     private PlaceOrderRequest request(String clientOrderId) {
@@ -151,6 +213,6 @@ class OrderServiceTest {
         long remaining = status == OrderStatus.REJECTED ? 0L : 10L;
         return new OrderRecord(orderId, 1001L, clientOrderId, "BTC-USDT", 7L, OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, 0L, remaining,
-                false, false, status, rejectReason, now, now);
+                200L, 500L, false, false, status, rejectReason, now, now);
     }
 }

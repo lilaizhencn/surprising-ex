@@ -68,6 +68,7 @@ class LiquidationOrderRepositoryTest {
     @Test
     void failsWhenTradingOrderInsertReturnsNoRowAndDoesNotSuppressConflicts() {
         LiquidationOrderRepository repository = repository();
+        givenFeeSnapshot();
         when(sequenceRepository.nextTradingSequence("order")).thenReturn(7001L);
         when(sequenceRepository.nextTradingSequence("event")).thenReturn(7002L);
         when(sequenceRepository.nextTradingSequence("command")).thenReturn(7003L);
@@ -88,6 +89,7 @@ class LiquidationOrderRepositoryTest {
     @Test
     void failsWhenOrderEventInsertIsSkippedByConflict() {
         LiquidationOrderRepository repository = repository();
+        givenFeeSnapshot();
         when(sequenceRepository.nextTradingSequence("order")).thenReturn(7001L);
         when(sequenceRepository.nextTradingSequence("event")).thenReturn(7002L);
         when(sequenceRepository.nextTradingSequence("command")).thenReturn(7003L);
@@ -105,6 +107,7 @@ class LiquidationOrderRepositoryTest {
     @Test
     void failsWhenOutboxInsertIsSkipped() {
         LiquidationOrderRepository repository = repository();
+        givenFeeSnapshot();
         when(sequenceRepository.nextTradingSequence("order")).thenReturn(7001L);
         when(sequenceRepository.nextTradingSequence("event")).thenReturn(7002L);
         when(sequenceRepository.nextTradingSequence("command")).thenReturn(7003L);
@@ -144,6 +147,19 @@ class LiquidationOrderRepositoryTest {
 
     private LiquidationOrderRepository repository() {
         return new LiquidationOrderRepository(jdbcTemplate, sequenceRepository, new LiquidationProperties());
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void givenFeeSnapshot() {
+        when(jdbcTemplate.query(contains("WITH instrument_fee"), any(RowMapper.class),
+                eq("BTC-USDT"), eq(8L), eq("BTC-USDT"), eq(2002L), eq("BTC-USDT"), any(), any()))
+                .thenAnswer(invocation -> {
+                    RowMapper mapper = invocation.getArgument(1);
+                    ResultSet rs = org.mockito.Mockito.mock(ResultSet.class);
+                    when(rs.getLong("maker_fee_rate_ppm")).thenReturn(200L);
+                    when(rs.getLong("taker_fee_rate_ppm")).thenReturn(500L);
+                    return java.util.List.of(mapper.mapRow(rs, 0));
+                });
     }
 
     private ResultSet orderRow(long orderId, String clientOrderId, String status) throws Exception {

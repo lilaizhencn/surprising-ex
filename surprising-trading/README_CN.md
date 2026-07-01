@@ -20,7 +20,7 @@ Surprising Exchange 合约交易模块。当前已实现 `surprising-order-provi
 - `MARKET` 订单只允许 `IOC` 或 `FOK`。
 - notional 校验按 `contract_type` 分支。U 本位线性合约校验 `priceTicks * quantitySteps * notional_multiplier_units`；币本位反向合约校验 `quantitySteps * notional_multiplier_units`，因为 multiplier 表示每个合约 step 的报价币面值。两条路径都用 `Math.multiplyExact` 防止 long 溢出。
 - 市价单用 `markPriceTicks +/- marketMaxSlippagePpm` 做提交 exchange-core 前的价格保护。订单入口使用同一个 mark 派生的可成交区间做风控：U 本位线性合约无论 BUY/SELL 都按上边界冻结初始保证金，币本位反向合约按下边界冻结，因为价格越低所需抵押越高。
-- 交易手续费以 maker/taker ppm 费率保存在 instrument version 上，成交后由 account provider 结算。
+- instrument version 保存产品默认 maker/taker ppm 费率；订单入口会叠加用户/VIP/做市覆盖后，把本订单实际费率快照写入 `trading_orders`，成交后由 account provider 按快照结算。
 
 例子：`BTC-USDT` 的 `price_tick_units = 10000000`、`quantity_step_units = 100000`，USDT scale 为 `100000000`，BTC scale 为 `100000000`。
 
@@ -48,6 +48,20 @@ client / internal gateway
 ```
 
 订单 provider 不直接撮合，也不直接承担 WebSocket 推送。订单状态推送服务应该消费 `surprising.perp.order.events.v1`、`surprising.perp.match.results.v1` 后独立 fanout。
+
+## 保证金模式
+
+订单、撮合 command、成交事件、账户 reservation 和账户持仓现在都会携带 `marginMode`。
+默认值是 `CROSS`，这也是当前生产链路唯一可执行的模式。`ISOLATED` 已经进入 API 和数据库合约，
+但订单入口会拒绝逐仓订单，直到逐仓风险组、逐仓资金费扣款、逐仓强平、追加/减少逐仓保证金流程全部完成。
+这样可以避免订单被标记成逐仓，但实际仍按全仓风控清算的危险状态。
+
+## 手续费
+
+- `init.sql` 默认 `BTC-USDT`、`ETH-USDT` 使用 maker `200 ppm`、taker `500 ppm`，即 `0.02% / 0.05%`。
+- `trading_fee_schedules` 可配置用户全局或单 symbol 覆盖，单 symbol 优先于用户全局，最后回退 instrument 默认费率。
+- 订单接受时会把最终 `maker_fee_rate_ppm`、`taker_fee_rate_ppm` 写入 `trading_orders`。后续用户 VIP 等级或活动费率变化，不会重解释已接受挂单。
+- account provider 结算成交时按订单快照写 `TRADE_FEE`，并在 ledger 保存 `trade_id`、`order_id`、`symbol`、`fee_rate_ppm`。
 
 ## TraceId 链路追踪
 
@@ -98,7 +112,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `min_notional_units`、`max_notional_units`、`notional_multiplier_units` 保持 long 原始单位，并按 `contract_type` 校验。
 - `LINEAR_PERPETUAL` 订单 notional = `priceTicks * quantitySteps * notional_multiplier_units`。
 - `INVERSE_PERPETUAL` 订单面值 = `quantitySteps * notional_multiplier_units`。
-- `maker_fee_rate_ppm` 和 `taker_fee_rate_ppm` 不传给 exchange-core。它们通过双方各自的 instrument version 保留下来，由账户结算应用。
+- `maker_fee_rate_ppm` 和 `taker_fee_rate_ppm` 不传给 exchange-core。instrument 提供默认费率，`trading_fee_schedules` 可提供用户全局或单 symbol 覆盖，订单接受时会把最终费率固化到 `trading_orders`。
 
 所以交易模块 Java 代码仍然保持 long-only。
 
@@ -156,7 +170,7 @@ symbol 在 exchange-core 内注册为 `CURRENCY_EXCHANGE_PAIR`。这是有意设
 - `trading_match_results` 和 `trading_match_trades` 是撮合结果重放幂等门。结果或成交行已存在时，服务会跳过该行后续副作用，不能重复更新订单成交、释放保证金或写 outbox。
 - guarded 订单成交/状态更新、保证金释放和 matching outbox 写入仍然必须影响 1 行。若 overfill guard、数量不变量不一致、目标订单缺失或 outbox 写入导致行数异常，matcher 会失败并走重启恢复，不能在已变更的 exchange-core 内存簿上继续处理。
 
-当前 matching-provider 使用 exchange-core 的真实订单簿和成交事件链，但关闭 exchange-core 内置风险处理和内置手续费。订单入口已接入下单前初始保证金冻结；账户 provider 已接入成交后的开仓保证金迁移，并按 instrument 手续费 ppm 写入 maker/taker `TRADE_FEE` ledger。资金费率、保险基金和 ADL 由独立结算模块处理。
+当前 matching-provider 使用 exchange-core 的真实订单簿和成交事件链，但关闭 exchange-core 内置风险处理和内置手续费。订单入口已接入下单前初始保证金冻结；账户 provider 已接入成交后的开仓保证金迁移，并按订单费率快照写入 maker/taker `TRADE_FEE` ledger。资金费率、保险基金和 ADL 由独立结算模块处理。
 
 ### 盘口深度
 

@@ -6,6 +6,7 @@ import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.provider.model.BalanceSettlementState;
 import com.surprising.account.provider.model.ContractSpec;
+import com.surprising.account.provider.model.OrderFeeSnapshot;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.account.provider.service.AccountService;
@@ -40,6 +41,7 @@ import com.surprising.risk.provider.repository.RiskOutboxRepository;
 import com.surprising.risk.provider.repository.RiskRepository;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
 import com.surprising.risk.provider.service.RiskService;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.CancelOrderRequest;
@@ -72,6 +74,7 @@ import com.surprising.trading.order.model.MarginRequirement;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.OutboxRecord;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
+import com.surprising.trading.order.repository.OrderFeeRepository;
 import com.surprising.trading.order.repository.OrderMarginRepository;
 import com.surprising.trading.order.repository.OrderRepository;
 import com.surprising.trading.order.repository.OutboxRepository;
@@ -339,6 +342,7 @@ class PerpetualTradingChainIntegrationTest {
         private final SharedState state;
         private final ObjectMapper objectMapper = new ObjectMapper();
         private final FakeOrderRepository orderRepository;
+        private final FakeOrderFeeRepository orderFeeRepository;
         private final FakeOrderOutboxRepository orderOutbox;
         private final FakeMatchingResultRepository matchingResultRepository;
         private final FakeRiskOutboxRepository riskOutbox;
@@ -369,6 +373,7 @@ class PerpetualTradingChainIntegrationTest {
         private Harness(long marketMaxSlippagePpm, SharedState state) {
             this.state = state;
             orderRepository = new FakeOrderRepository(state);
+            orderFeeRepository = new FakeOrderFeeRepository(state);
             orderOutbox = new FakeOrderOutboxRepository(state);
             matchingResultRepository = new FakeMatchingResultRepository(state);
             riskOutbox = new FakeRiskOutboxRepository(objectMapper);
@@ -389,7 +394,7 @@ class PerpetualTradingChainIntegrationTest {
             ReduceOnlyValidator reduceOnlyValidator = new ReduceOnlyValidator(new FakeReduceOnlyLookup(state));
             FakeOrderMarginRepository marginRepository = new FakeOrderMarginRepository(state);
             orderService = new OrderService(objectMapper, orderProperties, orderValidator,
-                    reduceOnlyValidator, orderRepository, marginRepository, orderOutbox);
+                    reduceOnlyValidator, orderRepository, orderFeeRepository, marginRepository, orderOutbox);
 
             MatchingProperties matchingProperties = new MatchingProperties();
             matchingProperties.getEngine().setExchangeId("integration-" + System.nanoTime());
@@ -466,6 +471,8 @@ class PerpetualTradingChainIntegrationTest {
         private final long settleScaleUnits;
         private final long initialMarginRatePpm;
         private final long maintenanceMarginRatePpm;
+        private final long makerFeeRatePpm = 0L;
+        private final long takerFeeRatePpm = 0L;
         private final Map<String, Long> sequences = new HashMap<>();
         private final Map<Long, OrderRecord> orders = new LinkedHashMap<>();
         private final Map<UserAssetKey, BalanceState> balances = new HashMap<>();
@@ -506,15 +513,16 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         private PositionState position(long userId) {
-            return positions.getOrDefault(new PositionKey(userId, SYMBOL), new PositionState(0L, 0L, 0L, 0L));
+            return positions.getOrDefault(new PositionKey(userId, SYMBOL, MarginMode.CROSS),
+                    new PositionState(0L, 0L, 0L, 0L));
         }
 
         private void putPosition(long userId, PositionState state) {
-            positions.put(new PositionKey(userId, SYMBOL), state);
+            positions.put(new PositionKey(userId, SYMBOL, MarginMode.CROSS), state);
         }
 
         private long positionMargin(long userId) {
-            return positionMargins.getOrDefault(new PositionKey(userId, SYMBOL), 0L);
+            return positionMargins.getOrDefault(new PositionKey(userId, SYMBOL, MarginMode.CROSS), 0L);
         }
     }
 
@@ -569,7 +577,8 @@ class PerpetualTradingChainIntegrationTest {
             state.orders.put(orderId, new OrderRecord(order.orderId(), order.userId(), order.clientOrderId(),
                     order.symbol(), order.instrumentVersion(), order.side(), order.orderType(), order.timeInForce(),
                     order.priceTicks(), order.quantitySteps(), order.executedQuantitySteps(),
-                    order.remainingQuantitySteps(), order.reduceOnly(), order.postOnly(),
+                    order.remainingQuantitySteps(), order.marginMode(), order.makerFeeRatePpm(),
+                    order.takerFeeRatePpm(), order.reduceOnly(), order.postOnly(),
                     OrderStatus.CANCEL_REQUESTED, order.rejectReason(), order.createdAt(), now));
             return true;
         }
@@ -585,6 +594,24 @@ class PerpetualTradingChainIntegrationTest {
                     .sorted(Comparator.comparing(OrderRecord::createdAt).reversed())
                     .limit(limit)
                     .toList();
+        }
+    }
+
+    private static final class FakeOrderFeeRepository extends OrderFeeRepository {
+        private final SharedState state;
+
+        private FakeOrderFeeRepository(SharedState state) {
+            super(null);
+            this.state = state;
+        }
+
+        @Override
+        public Optional<com.surprising.trading.order.model.OrderFeeSnapshot> snapshot(long userId,
+                                                                                      String symbol,
+                                                                                      long instrumentVersion,
+                                                                                      Instant now) {
+            return Optional.of(new com.surprising.trading.order.model.OrderFeeSnapshot(
+                    state.makerFeeRatePpm, state.takerFeeRatePpm, "INSTRUMENT"));
         }
     }
 
@@ -620,6 +647,7 @@ class PerpetualTradingChainIntegrationTest {
                                String asset,
                                long orderId,
                                String symbol,
+                               MarginMode marginMode,
                                long amountUnits,
                                Instant now) {
             BalanceState balance = state.balance(userId);
@@ -629,7 +657,7 @@ class PerpetualTradingChainIntegrationTest {
             balance.availableUnits -= amountUnits;
             balance.lockedUnits += amountUnits;
             state.reservations.put(orderId, new MarginReservationState(userId, asset, orderId, symbol,
-                    amountUnits, 0L, 0L, lastQuantitySteps, false));
+                    MarginMode.defaultIfNull(marginMode), amountUnits, 0L, 0L, lastQuantitySteps, false));
             return true;
         }
     }
@@ -806,6 +834,13 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public MarginMode orderMarginMode(long orderId) {
+            return Optional.ofNullable(state.orders.get(orderId))
+                    .map(OrderRecord::marginMode)
+                    .orElseThrow(() -> new IllegalStateException("missing order " + orderId));
+        }
+
+        @Override
         public boolean saveResult(MatchResultEvent event) {
             results.add(event);
             return true;
@@ -832,7 +867,8 @@ class PerpetualTradingChainIntegrationTest {
             state.orders.put(order.orderId(), new OrderRecord(order.orderId(), order.userId(),
                     order.clientOrderId(), order.symbol(), order.instrumentVersion(), order.side(),
                     order.orderType(), order.timeInForce(), order.priceTicks(), order.quantitySteps(), executed,
-                    remaining, order.reduceOnly(), order.postOnly(), result.orderStatus(), order.rejectReason(),
+                    remaining, order.marginMode(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
+                    order.reduceOnly(), order.postOnly(), result.orderStatus(), order.rejectReason(),
                     order.createdAt(), result.eventTime()));
             if (result.commandType() == OrderCommandType.CANCEL && result.orderStatus() == OrderStatus.CANCELED) {
                 releaseUnusedOrderMargin(order.orderId());
@@ -848,7 +884,8 @@ class PerpetualTradingChainIntegrationTest {
             state.orders.put(order.orderId(), new OrderRecord(order.orderId(), order.userId(),
                     order.clientOrderId(), order.symbol(), order.instrumentVersion(), order.side(),
                     order.orderType(), order.timeInForce(), order.priceTicks(), order.quantitySteps(), executed,
-                    remaining, order.reduceOnly(), order.postOnly(), status, order.rejectReason(),
+                    remaining, order.marginMode(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
+                    order.reduceOnly(), order.postOnly(), status, order.rejectReason(),
                     order.createdAt(), trade.eventTime()));
         }
 
@@ -901,12 +938,21 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public OrderFeeSnapshot orderFeeSnapshot(long orderId, long userId, String symbol) {
+            OrderRecord order = state.orders.get(orderId);
+            if (order == null || order.userId() != userId || !symbol.equals(order.symbol())) {
+                throw new IllegalStateException("missing order fee snapshot " + orderId);
+            }
+            return new OrderFeeSnapshot(order.makerFeeRatePpm(), order.takerFeeRatePpm());
+        }
+
+        @Override
         public boolean markTradeProcessing(long tradeId, String symbol) {
             return state.processedTrades.add(tradeId);
         }
 
         @Override
-        public PositionState lockPosition(long userId, String symbol) {
+        public PositionState lockPosition(long userId, String symbol, MarginMode marginMode) {
             return state.position(userId);
         }
 
@@ -914,6 +960,7 @@ class PerpetualTradingChainIntegrationTest {
         public void consumeOrderMargin(long orderId,
                                        long userId,
                                        String symbol,
+                                       MarginMode marginMode,
                                        long openSteps,
                                        long actualMarginUnits,
                                        boolean sweepRemainder,
@@ -927,7 +974,8 @@ class PerpetualTradingChainIntegrationTest {
                     openSteps, sweepRemainder);
             long excess = MarginTransferMath.excessOrderMarginUnits(allocated, actualMarginUnits);
             reservation.positionMarginUnits += actualMarginUnits;
-            state.positionMargins.merge(new PositionKey(userId, symbol), actualMarginUnits, Long::sum);
+            state.positionMargins.merge(new PositionKey(userId, symbol, MarginMode.defaultIfNull(marginMode)),
+                    actualMarginUnits, Long::sum);
             if (excess > 0) {
                 reservation.releasedUnits += excess;
                 releaseBalanceLock(userId, excess);
@@ -955,10 +1003,11 @@ class PerpetualTradingChainIntegrationTest {
         @Override
         public void releasePositionMargin(long userId,
                                           String symbol,
+                                          MarginMode marginMode,
                                           long closeSteps,
                                           long positionAbsSteps,
                                           Instant now) {
-            PositionKey key = new PositionKey(userId, symbol);
+            PositionKey key = new PositionKey(userId, symbol, MarginMode.defaultIfNull(marginMode));
             long currentMargin = state.positionMargins.getOrDefault(key, 0L);
             long amount = MarginTransferMath.positionMarginReleaseAmount(currentMargin, closeSteps, positionAbsSteps);
             if (amount <= 0) {
@@ -990,6 +1039,8 @@ class PerpetualTradingChainIntegrationTest {
                                    long tradeId,
                                    long feeDeltaUnits,
                                    String reason,
+                                   long feeRatePpm,
+                                   String symbol,
                                    Instant now) {
             BalanceState current = state.balance(userId);
             BalanceSettlementState next = PnlSettlementMath.apply(current.availableUnits, current.lockedUnits,
@@ -1000,10 +1051,14 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
-        public PositionResponse updatePosition(long userId, String symbol, PositionState next, Instant now) {
+        public PositionResponse updatePosition(long userId,
+                                               String symbol,
+                                               MarginMode marginMode,
+                                               PositionState next,
+                                               Instant now) {
             state.putPosition(userId, next);
-            return new PositionResponse(userId, symbol, next.instrumentVersion(), next.signedQuantitySteps(),
-                    next.entryPriceTicks(), next.realizedPnlUnits(), now);
+            return new PositionResponse(userId, symbol, next.instrumentVersion(), MarginMode.defaultIfNull(marginMode),
+                    next.signedQuantitySteps(), next.entryPriceTicks(), next.realizedPnlUnits(), now);
         }
 
         @Override
@@ -1311,9 +1366,10 @@ class PerpetualTradingChainIntegrationTest {
                     state.orders.put(order.orderId(), new OrderRecord(order.orderId(), order.userId(),
                             order.clientOrderId(), order.symbol(), order.instrumentVersion(), order.side(),
                             order.orderType(), order.timeInForce(), order.priceTicks(), order.quantitySteps(),
-                            order.executedQuantitySteps(), order.remainingQuantitySteps(), order.reduceOnly(),
-                            order.postOnly(), OrderStatus.CANCEL_REQUESTED, "LIQUIDATION_PREEMPTED_REDUCE_ONLY",
-                            order.createdAt(), now));
+                            order.executedQuantitySteps(), order.remainingQuantitySteps(), order.marginMode(),
+                            order.makerFeeRatePpm(), order.takerFeeRatePpm(), order.reduceOnly(), order.postOnly(),
+                            OrderStatus.CANCEL_REQUESTED,
+                            "LIQUIDATION_PREEMPTED_REDUCE_ONLY", order.createdAt(), now));
                 }
                 commands.add(new OrderCommandEvent(OrderCommandType.CANCEL, state.next("trading-command"),
                         order.orderId(), order.userId(), order.clientOrderId(), order.symbol(),
@@ -1336,6 +1392,7 @@ class PerpetualTradingChainIntegrationTest {
             long commandId = state.next("trading-command");
             OrderRecord order = new OrderRecord(orderId, userId, "LIQ-" + candidateId, symbol, instrumentVersion,
                     side, OrderType.MARKET, TimeInForce.IOC, 0L, quantitySteps, 0L, quantitySteps,
+                    MarginMode.CROSS, state.makerFeeRatePpm, state.takerFeeRatePpm,
                     true, false, OrderStatus.ACCEPTED, null, now, now);
             state.orders.put(orderId, order);
             OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, commandId, orderId, userId,
@@ -1363,7 +1420,7 @@ class PerpetualTradingChainIntegrationTest {
     private record UserAssetKey(long userId, String asset) {
     }
 
-    private record PositionKey(long userId, String symbol) {
+    private record PositionKey(long userId, String symbol, MarginMode marginMode) {
     }
 
     private record OutboxEnvelope(long id,
@@ -1391,6 +1448,7 @@ class PerpetualTradingChainIntegrationTest {
         private final String asset;
         private final long orderId;
         private final String symbol;
+        private final MarginMode marginMode;
         private final long reservedUnits;
         private long releasedUnits;
         private long positionMarginUnits;
@@ -1401,6 +1459,7 @@ class PerpetualTradingChainIntegrationTest {
                                        String asset,
                                        long orderId,
                                        String symbol,
+                                       MarginMode marginMode,
                                        long reservedUnits,
                                        long releasedUnits,
                                        long positionMarginUnits,
@@ -1410,6 +1469,7 @@ class PerpetualTradingChainIntegrationTest {
             this.asset = asset;
             this.orderId = orderId;
             this.symbol = symbol;
+            this.marginMode = MarginMode.defaultIfNull(marginMode);
             this.reservedUnits = reservedUnits;
             this.releasedUnits = releasedUnits;
             this.positionMarginUnits = positionMarginUnits;

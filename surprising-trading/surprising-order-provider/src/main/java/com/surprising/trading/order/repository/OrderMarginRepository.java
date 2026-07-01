@@ -1,6 +1,7 @@
 package com.surprising.trading.order.repository;
 
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.order.model.MarginRequirement;
@@ -78,6 +79,7 @@ public class OrderMarginRepository {
                            String asset,
                            long orderId,
                            String symbol,
+                           MarginMode marginMode,
                            long amountUnits,
                            Instant now) {
         if (amountUnits <= 0) {
@@ -102,10 +104,11 @@ public class OrderMarginRepository {
         int rows = jdbcTemplate.update("""
                 INSERT INTO account_margin_reservations (
                     reservation_id, user_id, asset, order_id, symbol,
-                    reserved_units, released_units, status, reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
+                    margin_mode, reserved_units, released_units, status, reason, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
                 ON CONFLICT (order_id) DO NOTHING
-                """, reservationId, userId, asset, orderId, symbol, amountUnits,
+                """, reservationId, userId, asset, orderId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                amountUnits,
                 Timestamp.from(now), Timestamp.from(now));
         if (rows != 1) {
             throw new IllegalStateException("failed to insert margin reservation for order " + orderId);

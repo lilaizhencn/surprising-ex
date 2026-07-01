@@ -6,13 +6,16 @@ import com.surprising.trading.api.model.OrderCommandEvent;
 import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderEvent;
 import com.surprising.trading.api.model.OrderEventType;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.order.config.TradingOrderProperties;
+import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.ValidationResult;
+import com.surprising.trading.order.repository.OrderFeeRepository;
 import com.surprising.trading.order.repository.OrderMarginRepository;
 import com.surprising.trading.order.repository.OrderRepository;
 import com.surprising.trading.order.repository.OutboxRepository;
@@ -37,6 +40,7 @@ public class OrderService {
     private final OrderValidator orderValidator;
     private final ReduceOnlyValidator reduceOnlyValidator;
     private final OrderRepository orderRepository;
+    private final OrderFeeRepository orderFeeRepository;
     private final OrderMarginRepository orderMarginRepository;
     private final OutboxRepository outboxRepository;
 
@@ -45,6 +49,7 @@ public class OrderService {
                         OrderValidator orderValidator,
                         ReduceOnlyValidator reduceOnlyValidator,
                         OrderRepository orderRepository,
+                        OrderFeeRepository orderFeeRepository,
                         OrderMarginRepository orderMarginRepository,
                         OutboxRepository outboxRepository) {
         this.objectMapper = objectMapper;
@@ -52,6 +57,7 @@ public class OrderService {
         this.orderValidator = orderValidator;
         this.reduceOnlyValidator = reduceOnlyValidator;
         this.orderRepository = orderRepository;
+        this.orderFeeRepository = orderFeeRepository;
         this.orderMarginRepository = orderMarginRepository;
         this.outboxRepository = outboxRepository;
     }
@@ -69,13 +75,26 @@ public class OrderService {
         }
 
         Instant now = Instant.now();
-        ValidationResult validation = orderValidator.validate(normalized);
+        ValidationResult validation = validateMarginMode(normalized.marginMode());
+        if (validation.accepted()) {
+            validation = orderValidator.validate(normalized);
+        }
         if (validation.accepted() && normalized.reduceOnly()) {
             ValidationResult reduceOnlyValidation = reduceOnlyValidator.validate(normalized);
             if (!reduceOnlyValidation.accepted()) {
                 validation = ValidationResult.reject(reduceOnlyValidation.rejectReason(), validation.instrumentVersion());
             } else {
                 validation = ValidationResult.ok(reduceOnlyValidation.instrumentVersion());
+            }
+        }
+        OrderFeeSnapshot feeSnapshot = rejectedFeeSnapshot();
+        if (validation.accepted()) {
+            var resolvedFeeSnapshot = orderFeeRepository.snapshot(normalized.userId(), normalized.symbol(),
+                    validation.instrumentVersion(), now);
+            if (resolvedFeeSnapshot.isEmpty()) {
+                validation = ValidationResult.reject("fee schedule unavailable", validation.instrumentVersion());
+            } else {
+                feeSnapshot = resolvedFeeSnapshot.get();
             }
         }
         long orderId = orderRepository.nextSequence("order");
@@ -93,6 +112,9 @@ public class OrderService {
                 normalized.quantitySteps(),
                 0L,
                 validation.accepted() ? normalized.quantitySteps() : 0L,
+                normalized.marginMode(),
+                feeSnapshot.makerFeeRatePpm(),
+                feeSnapshot.takerFeeRatePpm(),
                 normalized.reduceOnly(),
                 normalized.postOnly(),
                 status,
@@ -141,9 +163,20 @@ public class OrderService {
             return ValidationResult.reject("invalid margin requirement", instrumentVersion);
         }
         boolean reserved = orderMarginRepository.reserve(request.userId(), requirement.get().asset(), orderId,
-                request.symbol(), requirement.get().initialMarginUnits(), now);
+                request.symbol(), request.marginMode(), requirement.get().initialMarginUnits(), now);
         return reserved ? ValidationResult.ok(instrumentVersion)
                 : ValidationResult.reject("insufficient available margin", instrumentVersion);
+    }
+
+    private ValidationResult validateMarginMode(MarginMode marginMode) {
+        if (marginMode == MarginMode.ISOLATED) {
+            return ValidationResult.reject("isolated margin mode is not enabled", 0L);
+        }
+        return ValidationResult.ok(0L);
+    }
+
+    private OrderFeeSnapshot rejectedFeeSnapshot() {
+        return new OrderFeeSnapshot(0L, 0L, "REJECTED");
     }
 
     @Transactional
@@ -219,6 +252,7 @@ public class OrderService {
                 order.timeInForce(),
                 order.priceTicks(),
                 order.quantitySteps(),
+                order.marginMode(),
                 order.reduceOnly(),
                 order.postOnly(),
                 now,
@@ -241,6 +275,9 @@ public class OrderService {
                 order.quantitySteps(),
                 order.executedQuantitySteps(),
                 0L,
+                order.marginMode(),
+                order.makerFeeRatePpm(),
+                order.takerFeeRatePpm(),
                 order.reduceOnly(),
                 order.postOnly(),
                 OrderStatus.REJECTED,
@@ -288,6 +325,7 @@ public class OrderService {
                 request.timeInForce(),
                 request.priceTicks(),
                 request.quantitySteps(),
+                MarginMode.defaultIfNull(request.marginMode()),
                 request.reduceOnly(),
                 request.postOnly());
     }
@@ -336,6 +374,9 @@ public class OrderService {
                 order.quantitySteps(),
                 order.executedQuantitySteps(),
                 order.remainingQuantitySteps(),
+                order.marginMode(),
+                order.makerFeeRatePpm(),
+                order.takerFeeRatePpm(),
                 order.reduceOnly(),
                 order.postOnly(),
                 order.status(),

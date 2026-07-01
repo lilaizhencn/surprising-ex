@@ -14,10 +14,11 @@ Surprising Exchange 账户和合约持仓模块。当前实现 long-based 余额
 - 余额使用 `availableUnits`、`lockedUnits`、`equityUnits`，全部是资产最小单位的 long。
 - 持仓使用 `signedQuantitySteps`，正数为净多，负数为净空。
 - 持仓保存 `instrumentVersion`，当前敞口的合约数学固定到开仓时的版本。
+- 持仓和持仓保证金都会保存 `marginMode`；当前可执行下单链路只开放 `CROSS`。
 - 开仓均价使用 `entryPriceTicks`。
 - 持仓保证金记录在 `account_position_margins.margin_units`。
 - 已实现盈亏按 `realizedPnlUnits` 累计，单位是 instrument 的结算资产最小单位。U 本位线性合约使用 tick-step notional；币本位反向合约使用合约面值和入场/出场价格倒数公式。
-- 交易手续费使用成交双方各自 instrument version 上的 `makerFeeRatePpm` / `takerFeeRatePpm`。正费率扣用户余额，负费率给用户返佣。
+- 交易手续费使用成交双方各自订单上的 `maker_fee_rate_ppm` / `taker_fee_rate_ppm` 快照。正费率扣用户余额，负费率给用户返佣；instrument version 只提供默认费率。
 - 当亏损超过 `availableUnits + lockedUnits` 时，超额亏损写入 `account_deficits`，不让余额列变成负数。
 
 ## 成交处理
@@ -35,7 +36,7 @@ surprising.perp.match.trades.v1
 - 成交中的开仓数量只会把按实际成交价计算出的初始保证金迁移到 `account_position_margins`；委托价改善或市价保护价多冻结的部分会释放回 `availableUnits`。
 - 成交中的平仓数量会按比例把旧持仓保证金从 `lockedUnits` 释放回 `availableUnits`。
 - 平仓产生的已实现盈亏会写入 `account_ledger_entries`，`reference_type = TRADE_PNL`。
-- 每笔成交的 maker/taker 手续费会写入 `account_ledger_entries`，`reference_type = TRADE_FEE`。
+- 每笔成交的 maker/taker 手续费会写入 `account_ledger_entries`，`reference_type = TRADE_FEE`，并保存 `trade_id`、`order_id`、`symbol`、`fee_rate_ppm` 方便对账。
 - 翻仓成交先平旧仓，再把剩余成交数量作为新仓处理。
 - 如果成交导致翻仓，已实现盈亏使用旧持仓版本计算，翻仓后剩余新仓使用成交的 `instrumentVersion`。
 - 开仓成交必须找到对应的 `account_margin_reservations` 并成功迁移订单保证金；缺失 reservation、reduce-only 订单出现开仓数量、或迁移写入返回 0 都会失败并回滚整笔成交处理。
@@ -58,6 +59,7 @@ curl 'http://localhost:9086/api/v1/accounts/balances?userId=1001'
 
 ```bash
 curl 'http://localhost:9086/api/v1/accounts/position?userId=1001&symbol=BTC-USDT'
+curl 'http://localhost:9086/api/v1/accounts/position?userId=1001&symbol=BTC-USDT&marginMode=CROSS'
 curl 'http://localhost:9086/api/v1/accounts/positions?userId=1001'
 ```
 
@@ -111,13 +113,14 @@ mvn -pl :surprising-account-provider -am spring-boot:run
 - 余额调整必须携带全局唯一 `referenceId`，防止充值/冲正重复入账。同一 reference 的重放只有在 `amountUnits` 和 `reason` 与原流水一致时才会幂等返回；payload 不一致会在改余额前失败。
 - 账户 provider 消费撮合成交时必须按 `(symbol, trade_id)` 幂等，不能只按裸 `tradeId` 去重。
 - 订单入口会在发布撮合命令前冻结初始保证金。账户 provider 消费成交后，按实际成交价计算开仓保证金并迁移为持仓保证金，委托价或市价保护价多冻结的部分释放回可用余额。
+- `account_positions`、`account_position_margins`、`account_margin_reservations` 都会持久化 `margin_mode`。不要从事件或查询里丢掉这个字段；后续逐仓风控依赖它。
 - 平仓成交按平仓数量比例释放持仓保证金。这条链路必须保持 long-only，并与 exchange-core 的 ticks/steps 一致。
 - reduce-only 剪枝不是撮合层功能；它依赖 account-provider 在持仓更新事务里锁定相关订单并发布 cancel command。多节点部署时必须保证所有 account-provider 使用同一 PostgreSQL 和按 symbol 分区的 order command topic。
 - reduce-only 剪枝遇到 `Long.MIN_VALUE` 这类不可能的 signed quantity 必须 fail-fast，不能让容量数学回绕后基于负绝对值错误撤单或保留挂单。
 - 如果出现 `missing order margin reservation for opening fill`，要检查 order-provider 是否跳过冻结、matching 是否处理了不应存在的订单、或数据库中 reservation 是否被人工改动。
 - 如果出现 `missing order margin reservation for closing fill`，要检查是否有非 reduce-only 的平仓/翻仓订单在没有 order-provider reservation 事务的情况下被接受。
 - 已实现亏损可以扣 `availableUnits` 和由持仓保证金支撑的 `lockedUnits`，但不能扣未成交订单冻结。只要扣了持仓保证金支撑的 locked，就必须在同一事务内同步减少 `account_position_margins`。
-- 手续费扣款复用已实现亏损的余额/deficit 安全路径。手续费返佣先清理 deficit，再增加 available balance。
+- 手续费扣款复用已实现亏损的余额/deficit 安全路径。手续费返佣先清理 deficit，再增加 available balance。结算时必须读取 `trading_orders` 上的费率快照，不能读取当前用户等级或当前 instrument 费率重算历史订单。
 - `contract_type` 决定已实现盈亏公式：`LINEAR_PERPETUAL` 使用 `signedQty * (exitTicks - entryTicks) * notional_multiplier_units`；`INVERSE_PERPETUAL` 使用 `signedQty * faceValueUnits * settleScaleUnits * (exitTicks - entryTicks) / (entryTicks * exitTicks * price_tick_units)`。
 - 维持保证金和未实现盈亏由 risk 模块计算。资金费率、保险基金和自动减仓由独立结算模块处理，不放在本 provider 内。
 

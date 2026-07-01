@@ -45,13 +45,17 @@ public class LiquidationOrderRepository {
         long eventId = sequenceRepository.nextTradingSequence("event");
         long commandId = sequenceRepository.nextTradingSequence("command");
         String clientOrderId = "LIQ-" + candidateId;
+        FeeSnapshot feeSnapshot = feeSnapshot(userId, symbol, instrumentVersion, now);
         int orderRows = jdbcTemplate.update("""
                 INSERT INTO trading_orders (
                     order_id, user_id, client_order_id, symbol, instrument_version, side, order_type, time_in_force,
                     price_ticks, quantity_steps, executed_quantity_steps, remaining_quantity_steps,
+                    margin_mode, maker_fee_rate_ppm, taker_fee_rate_ppm,
                     reduce_only, post_only, status, reject_reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'MARKET', 'IOC', 0, ?, 0, ?, TRUE, FALSE, 'ACCEPTED', NULL, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, 'MARKET', 'IOC', 0, ?, 0, ?, 'CROSS', ?, ?,
+                    TRUE, FALSE, 'ACCEPTED', NULL, ?, ?)
                 """, orderId, userId, clientOrderId, symbol, instrumentVersion, side.name(), quantitySteps, quantitySteps,
+                feeSnapshot.makerFeeRatePpm(), feeSnapshot.takerFeeRatePpm(),
                 Timestamp.from(now), Timestamp.from(now));
         if (orderRows != 1) {
             throw new IllegalStateException("failed to create liquidation trading order");
@@ -76,6 +80,40 @@ public class LiquidationOrderRepository {
         enqueue("LIQUIDATION_ORDER", orderId, properties.getKafka().getOrderCommandsTopic(), symbol,
                 OrderCommandType.PLACE.name(), serializer.apply(command), now);
         return command;
+    }
+
+    private FeeSnapshot feeSnapshot(long userId, String symbol, long instrumentVersion, Instant now) {
+        return jdbcTemplate.query("""
+                WITH instrument_fee AS (
+                    SELECT maker_fee_rate_ppm, taker_fee_rate_ppm
+                      FROM instruments
+                     WHERE symbol = ?
+                       AND version = ?
+                ),
+                active_user_fee AS (
+                    SELECT maker_fee_rate_ppm,
+                           taker_fee_rate_ppm,
+                           CASE WHEN symbol = ? THEN 0 ELSE 1 END AS priority,
+                           effective_time,
+                           fee_schedule_id
+                      FROM trading_fee_schedules
+                     WHERE user_id = ?
+                       AND status = 'ACTIVE'
+                       AND (symbol = ? OR symbol IS NULL)
+                       AND effective_time <= ?
+                       AND (expire_time IS NULL OR expire_time > ?)
+                     ORDER BY priority ASC, effective_time DESC, fee_schedule_id DESC
+                     LIMIT 1
+                )
+                SELECT COALESCE(u.maker_fee_rate_ppm, i.maker_fee_rate_ppm) AS maker_fee_rate_ppm,
+                       COALESCE(u.taker_fee_rate_ppm, i.taker_fee_rate_ppm) AS taker_fee_rate_ppm
+                  FROM instrument_fee i
+             LEFT JOIN active_user_fee u ON TRUE
+                """, (rs, rowNum) -> new FeeSnapshot(
+                rs.getLong("maker_fee_rate_ppm"),
+                rs.getLong("taker_fee_rate_ppm")), symbol, instrumentVersion, symbol, userId, symbol,
+                Timestamp.from(now), Timestamp.from(now)).stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("fee schedule unavailable for liquidation order"));
     }
 
     public int cancelOpenReduceOnlyCloseOrders(long userId,
@@ -235,6 +273,9 @@ public class LiquidationOrderRepository {
             long quantitySteps,
             OrderStatus status,
             boolean postOnly) {
+    }
+
+    private record FeeSnapshot(long makerFeeRatePpm, long takerFeeRatePpm) {
     }
 
     private String truncate(String value) {

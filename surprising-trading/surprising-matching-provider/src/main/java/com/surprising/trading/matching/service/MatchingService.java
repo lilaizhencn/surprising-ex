@@ -2,6 +2,7 @@ package com.surprising.trading.matching.service;
 
 import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MatchTradeEvent;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.MarketPriceProtection;
 import com.surprising.trading.api.model.OrderBookDepthEvent;
 import com.surprising.trading.api.model.OrderBookDepthUpdateType;
@@ -164,11 +165,12 @@ public class MatchingService {
     private List<MatchTradeEvent> trades(OrderCommandEvent command, OrderCommand response, Instant now) {
         List<MatchTradeEvent> trades = new ArrayList<>();
         Map<Long, Long> makerVersions = new HashMap<>();
+        Map<Long, MarginMode> makerMarginModes = new HashMap<>();
         response.processMatcherEvents(event -> {
             if (event.eventType != MatcherEventType.TRADE) {
                 return;
             }
-            trades.add(toTrade(command, event, now, makerVersions));
+            trades.add(toTrade(command, event, now, makerVersions, makerMarginModes));
         });
         return trades;
     }
@@ -176,9 +178,12 @@ public class MatchingService {
     private MatchTradeEvent toTrade(OrderCommandEvent command,
                                     MatcherTradeEvent event,
                                     Instant now,
-                                    Map<Long, Long> makerVersions) {
+                                    Map<Long, Long> makerVersions,
+                                    Map<Long, MarginMode> makerMarginModes) {
         long makerInstrumentVersion = makerVersions.computeIfAbsent(event.matchedOrderId,
                 resultRepository::orderInstrumentVersion);
+        MarginMode makerMarginMode = makerMarginModes.computeIfAbsent(event.matchedOrderId,
+                resultRepository::orderMarginMode);
         return new MatchTradeEvent(
                 sequenceRepository.nextSequence("match-trade"),
                 command.commandId(),
@@ -187,9 +192,11 @@ public class MatchingService {
                 command.instrumentVersion(),
                 command.userId(),
                 command.side(),
+                command.marginMode(),
                 event.matchedOrderId,
                 makerInstrumentVersion,
                 event.matchedOrderUid,
+                makerMarginMode,
                 event.price,
                 event.size,
                 event.activeOrderCompleted,

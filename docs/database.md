@@ -370,10 +370,20 @@ CREATE INDEX adl_events_asset_symbol_time_idx
 - `instrument_version`: instrument snapshot used by the accepted order. Rejected unknown-symbol orders may have no version.
 - `price_ticks`: exchange-core price ticks.
 - `quantity_steps`, `executed_quantity_steps`, `remaining_quantity_steps`: exchange-core size steps.
+- `maker_fee_rate_ppm` and `taker_fee_rate_ppm`: the order-admission fee snapshot. Account settlement
+  uses these order fields instead of the current instrument or user tier so old resting orders are not
+  reinterpreted after a VIP, rebate, or promotion change.
 - `reduce_only` and `post_only`: execution flags.
 - `(user_id, client_order_id)` is unique when `client_order_id` is present.
 - `trading_orders_stp_open_idx` supports self-trade prevention checks by user, symbol, side, and price.
 - `trading_orders_recovery_idx` supports startup order-book recovery by scanning open `LIMIT` + `GTC/GTX` orders in maker-priority order.
+
+`trading_fee_schedules` stores user-level fee overrides:
+
+- `symbol IS NULL` is a user-global fee tier; a concrete `symbol` is a per-symbol override.
+- Resolution order is per-symbol user fee, then user-global fee, then the instrument default.
+- `effective_time` / `expire_time`, `status`, and descending indexes allow deterministic historical
+  activation. The resolved ppm is copied into `trading_orders` before a command is published.
 
 `trading_match_results` stores one idempotent result per matching command:
 
@@ -393,11 +403,13 @@ the relevant ids (`order_id`, `command_id`, `trade_id`) when tracing a user requ
 chain.
 The `trading_order_events_trace_idx`, `trading_match_results_trace_idx`, and
 `trading_match_trades_trace_idx` partial indexes support incident-time lookups for non-null trace ids.
-The same side-specific versions are used for maker/taker fee ppm, so changing the current fee schedule
-does not reinterpret older resting orders.
+The same side-specific versions are used for contract math, while maker/taker fee ppm comes from each
+side's `trading_orders` fee snapshot.
 
 `account_margin_reservations` tracks initial margin reserved by order entry:
 
+- `margin_mode`: order margin mode. Current executable flow is `CROSS`; `ISOLATED` is stored for the
+  future isolated-margin workflow but isolated orders are rejected by order entry until the full risk path is ready.
 - `reserved_units`: total order margin moved from `available_units` to `locked_units`.
 - `released_units`: order margin returned to `available_units` after rejection, cancel, terminal immediate order, or close-only fill.
 - `position_margin_units`: order margin already moved into position collateral after an opening fill.
@@ -405,7 +417,7 @@ does not reinterpret older resting orders.
 - `order_id` references `trading_orders(order_id)`, so a reservation cannot exist without an order row.
 - Order entry inserts the order before reserving margin; a duplicate `clientOrderId` therefore returns the existing order without locking funds again. The insert conflict target is only the partial `(user_id, client_order_id)` index, so `order_id` or unrelated uniqueness conflicts fail.
 
-`account_position_margins` tracks current position collateral by `user_id + symbol + asset`.
+`account_position_margins` tracks current position collateral by `user_id + symbol + asset + margin_mode`.
 Opening fills increase this table by consuming order reservation. Closing fills release it
 proportionally back to `account_balances.available_units`.
 Opening fills are required to consume an existing non-reduce-only order reservation. Missing
@@ -421,12 +433,15 @@ rows are reduced under `FOR UPDATE` so later position-margin releases cannot ove
 
 `account_positions` stores net perpetual exposure:
 
+- `margin_mode`: `CROSS` or `ISOLATED`. Current production execution only creates `CROSS` positions.
 - `instrument_version`: contract version for the current non-zero exposure. It is `NULL` when the position is flat.
 - `signed_quantity_steps`: positive for long, negative for short.
 - `entry_price_ticks`: average entry in exchange-core ticks.
 - `realized_pnl_units`: realized PnL accumulator in the instrument settlement asset. Closing fills are
   written to `account_ledger_entries` as `TRADE_PNL`.
 - Maker/taker fee debits or rebates are written to `account_ledger_entries` as `TRADE_FEE`.
+  `trade_id`, `order_id`, `symbol`, and `fee_rate_ppm` are stored with the ledger row for audit and
+  reconciliation.
 
 The account provider deduplicates `trading_match_trades` with `account_processed_trades(symbol, trade_id)`.
 All balance and margin transitions run inside one PostgreSQL transaction and lock the affected

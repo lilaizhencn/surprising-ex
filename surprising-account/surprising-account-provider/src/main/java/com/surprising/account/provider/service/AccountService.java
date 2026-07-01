@@ -7,11 +7,13 @@ import com.surprising.account.api.model.PositionQueryResponse;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.ContractSpec;
+import com.surprising.account.provider.model.OrderFeeSnapshot;
 import com.surprising.account.provider.model.PositionChange;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.trading.api.model.MatchTradeEvent;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import java.time.Instant;
 import java.util.List;
@@ -65,9 +67,15 @@ public class AccountService {
     }
 
     public PositionResponse position(long userId, String symbol) {
+        return position(userId, symbol, null);
+    }
+
+    public PositionResponse position(long userId, String symbol, String marginMode) {
         String normalizedSymbol = normalizeSymbol(symbol);
-        return accountRepository.position(userId, normalizedSymbol)
-                .orElse(new PositionResponse(userId, normalizedSymbol, 0L, 0L, 0L, 0L, Instant.EPOCH));
+        MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
+        return accountRepository.position(userId, normalizedSymbol, normalizedMarginMode)
+                .orElse(new PositionResponse(userId, normalizedSymbol, 0L, normalizedMarginMode,
+                        0L, 0L, 0L, Instant.EPOCH));
     }
 
     public PositionQueryResponse positions(long userId) {
@@ -82,10 +90,10 @@ public class AccountService {
         }
         String traceId = trade.traceId();
         applyTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
-                trade.takerInstrumentVersion(), trade.takerSide(), trade.priceTicks(), trade.quantitySteps(),
+                trade.takerInstrumentVersion(), trade.takerSide(), trade.takerMarginMode(), trade.priceTicks(), trade.quantitySteps(),
                 trade.takerOrderCompleted(), true, trade.eventTime(), traceId);
         applyTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
-                trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.priceTicks(), trade.quantitySteps(),
+                trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.makerMarginMode(), trade.priceTicks(), trade.quantitySteps(),
                 trade.makerOrderCompleted(), false, trade.eventTime(), traceId);
     }
 
@@ -95,14 +103,16 @@ public class AccountService {
                                             String symbol,
                                             long fillInstrumentVersion,
                                             OrderSide side,
+                                            MarginMode marginMode,
                                             long priceTicks,
                                             long quantitySteps,
                                             boolean orderCompleted,
                                             boolean taker,
                                             Instant eventTime,
                                             String traceId) {
+        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         ContractSpec fillSpec = accountRepository.contractSpec(symbol, fillInstrumentVersion);
-        PositionState current = accountRepository.lockPosition(userId, symbol);
+        PositionState current = accountRepository.lockPosition(userId, symbol, normalizedMarginMode);
         ContractSpec positionSpec = current.signedQuantitySteps() == 0
                 ? fillSpec
                 : accountRepository.contractSpec(symbol, current.instrumentVersion());
@@ -110,7 +120,7 @@ public class AccountService {
         long openSteps = Math.subtractExact(quantitySteps, closeSteps);
         // Close first: old position margin can be returned before any flipped remainder becomes new exposure.
         if (closeSteps > 0) {
-            accountRepository.releasePositionMargin(userId, symbol, closeSteps,
+            accountRepository.releasePositionMargin(userId, symbol, normalizedMarginMode, closeSteps,
                     Math.absExact(current.signedQuantitySteps()), eventTime);
             accountRepository.releaseOrderMargin(orderId, userId, symbol, closeSteps,
                     orderCompleted && openSteps == 0, eventTime);
@@ -118,17 +128,20 @@ public class AccountService {
         // Open second: filled opening quantity moves order-reserved margin into position margin accounting.
         if (openSteps > 0) {
             long actualMarginUnits = MarginTransferMath.openingInitialMarginUnits(fillSpec, priceTicks, openSteps);
-            accountRepository.consumeOrderMargin(orderId, userId, symbol, openSteps, actualMarginUnits,
+            accountRepository.consumeOrderMargin(orderId, userId, symbol, normalizedMarginMode, openSteps, actualMarginUnits,
                     orderCompleted, eventTime);
         }
         PositionChange change = positionCalculator.apply(current, side, priceTicks, quantitySteps,
                 positionSpec, fillSpec);
         accountRepository.settleRealizedPnl(userId, positionSpec.settleAsset(), orderId, tradeId,
                 change.realizedPnlDeltaUnits(), eventTime);
-        long feeDeltaUnits = TradeFeeMath.feeDeltaUnits(fillSpec, priceTicks, quantitySteps, taker);
+        OrderFeeSnapshot feeSnapshot = accountRepository.orderFeeSnapshot(orderId, userId, symbol);
+        long feeRatePpm = taker ? feeSnapshot.takerFeeRatePpm() : feeSnapshot.makerFeeRatePpm();
+        long feeDeltaUnits = TradeFeeMath.feeDeltaUnits(fillSpec, priceTicks, quantitySteps, feeRatePpm);
         accountRepository.settleTradeFee(userId, fillSpec.settleAsset(), orderId, tradeId, feeDeltaUnits,
-                taker ? "TAKER_FEE" : "MAKER_FEE", eventTime);
-        PositionResponse updated = accountRepository.updatePosition(userId, symbol, change.next(), eventTime);
+                taker ? "TAKER_FEE" : "MAKER_FEE", feeRatePpm, symbol, eventTime);
+        PositionResponse updated = accountRepository.updatePosition(userId, symbol, normalizedMarginMode,
+                change.next(), eventTime);
         if (reduceOnlyOrderPruner != null) {
             reduceOnlyOrderPruner.prune(userId, symbol, change.next(), eventTime, traceId);
         }
@@ -163,6 +176,17 @@ public class AccountService {
             throw new IllegalArgumentException("invalid symbol: " + symbol);
         }
         return normalized;
+    }
+
+    private MarginMode normalizeMarginMode(String marginMode) {
+        if (marginMode == null || marginMode.isBlank()) {
+            return MarginMode.CROSS;
+        }
+        try {
+            return MarginMode.valueOf(marginMode.trim().toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("invalid marginMode: " + marginMode, ex);
+        }
     }
 
     private String normalizeReferenceId(String referenceId) {

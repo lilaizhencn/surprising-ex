@@ -5,11 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.trading.api.model.MarginMode;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -127,6 +129,7 @@ class AccountRepositoryTest {
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getString("symbol")).thenReturn("ETH-USDT");
                     when(rs.getString("asset")).thenReturn("USDT");
+                    when(rs.getString("margin_mode")).thenReturn("CROSS");
                     when(rs.getLong("margin_units")).thenReturn(50L);
                     return List.of(mapper.mapRow(rs, 0));
                 });
@@ -143,7 +146,7 @@ class AccountRepositoryTest {
         repository.settleRealizedPnl(1001L, "USDT", 5001L, 9001L, -90L, now);
 
         verify(jdbcTemplate).update(contains("UPDATE account_position_margins"),
-                eq(50L), any(Timestamp.class), eq(1001L), eq("ETH-USDT"), eq("USDT"), eq(50L));
+                eq(50L), any(Timestamp.class), eq(1001L), eq("ETH-USDT"), eq("USDT"), eq("CROSS"), eq(50L));
         verify(jdbcTemplate).update(contains("UPDATE account_balances"),
                 eq(0L), eq(50L), any(Timestamp.class), eq(1001L), eq("USDT"));
         verify(jdbcTemplate).update(contains("UPDATE account_deficits"),
@@ -176,11 +179,67 @@ class AccountRepositoryTest {
                 .thenReturn(0);
 
         assertThatThrownBy(() -> repository.settleTradeFee(1001L, "USDT", 5001L, 9001L, -25L,
-                "TAKER_FEE", now))
+                "TAKER_FEE", 500L, "BTC-USDT", now))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("trade fee ledger insert");
         verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
         verify(jdbcTemplate, never()).update(contains("UPDATE account_deficits"), any(Object[].class));
+    }
+
+    @Test
+    void orderFeeSnapshotIsReadFromAcceptedOrder() throws Exception {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.query(contains("FROM trading_orders"), anyRowMapper(),
+                eq(5001L), eq(1001L), eq("BTC-USDT"))).thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("maker_fee_rate_ppm")).thenReturn(-100L);
+                    when(rs.getLong("taker_fee_rate_ppm")).thenReturn(400L);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+
+        var snapshot = repository.orderFeeSnapshot(5001L, 1001L, "BTC-USDT");
+
+        assertThat(snapshot.makerFeeRatePpm()).isEqualTo(-100L);
+        assertThat(snapshot.takerFeeRatePpm()).isEqualTo(400L);
+    }
+
+    @Test
+    void tradeFeeLedgerStoresFeeAuditSnapshot() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+
+        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(1L);
+        when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_balances"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_deficits"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(), eq(1001L), eq("USDT")))
+                .thenReturn(List.of());
+        when(jdbcTemplate.queryForObject(contains("SELECT b.available_units"), anyRowMapper(),
+                eq(1001L), eq("USDT"))).thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("available_units")).thenReturn(100L);
+                    when(rs.getLong("locked_units")).thenReturn(0L);
+                    when(rs.getLong("deficit_units")).thenReturn(0L);
+                    return mapper.mapRow(rs, 0);
+                });
+
+        repository.settleTradeFee(1001L, "USDT", 5001L, 9001L, -25L,
+                "TAKER_FEE", 500L, "BTC-USDT", now);
+
+        verify(jdbcTemplate).update(contains("INSERT INTO account_ledger_entries"),
+                eq(1L), eq(1001L), eq("USDT"), eq(-25L), eq("9001:5001"), eq("TAKER_FEE"),
+                eq(9001L), eq(5001L), eq("BTC-USDT"), eq(500L), any(Timestamp.class));
+        verify(jdbcTemplate).update(contains("UPDATE account_ledger_entries"),
+                eq(75L), eq("9001:5001"), eq(1001L), eq("USDT"));
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO account_position_margins"),
+                any(Object[].class));
     }
 
     @Test
@@ -190,7 +249,7 @@ class AccountRepositoryTest {
                 eq(9001L), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
 
         assertThatThrownBy(() -> repository.consumeOrderMargin(9001L, 1001L, "BTC-USDT",
-                3L, 30L, false, Instant.parse("2026-07-01T00:00:00Z")))
+                MarginMode.CROSS, 3L, 30L, false, Instant.parse("2026-07-01T00:00:00Z")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("missing order margin reservation");
     }
@@ -207,6 +266,7 @@ class AccountRepositoryTest {
                     when(rs.getLong("reserved_units")).thenReturn(100L);
                     when(rs.getLong("released_units")).thenReturn(0L);
                     when(rs.getLong("position_margin_units")).thenReturn(0L);
+                    when(rs.getString("margin_mode")).thenReturn("CROSS");
                     when(rs.getLong("quantity_steps")).thenReturn(10L);
                     when(rs.getBoolean("reduce_only")).thenReturn(false);
                     return List.of(mapper.mapRow(rs, 0));
@@ -215,7 +275,7 @@ class AccountRepositoryTest {
                 .thenReturn(0);
 
         assertThatThrownBy(() -> repository.consumeOrderMargin(9001L, 1001L, "BTC-USDT",
-                3L, 30L, false, Instant.parse("2026-07-01T00:00:00Z")))
+                MarginMode.CROSS, 3L, 30L, false, Instant.parse("2026-07-01T00:00:00Z")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("order margin consumption");
     }
@@ -233,6 +293,7 @@ class AccountRepositoryTest {
                     when(rs.getLong("reserved_units")).thenReturn(660L);
                     when(rs.getLong("released_units")).thenReturn(0L);
                     when(rs.getLong("position_margin_units")).thenReturn(0L);
+                    when(rs.getString("margin_mode")).thenReturn("CROSS");
                     when(rs.getLong("quantity_steps")).thenReturn(6L);
                     when(rs.getBoolean("reduce_only")).thenReturn(false);
                     return List.of(mapper.mapRow(rs, 0));
@@ -244,10 +305,10 @@ class AccountRepositoryTest {
         when(jdbcTemplate.update(contains("UPDATE account_balances"), any(Object[].class)))
                 .thenReturn(1);
 
-        repository.consumeOrderMargin(9001L, 1001L, "BTC-USDT", 6L, 600L, true, now);
+        repository.consumeOrderMargin(9001L, 1001L, "BTC-USDT", MarginMode.CROSS, 6L, 600L, true, now);
 
         verify(jdbcTemplate).update(contains("INSERT INTO account_position_margins"),
-                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq(600L), any(Timestamp.class));
+                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq(600L), any(Timestamp.class));
         verify(jdbcTemplate).update(contains("UPDATE account_balances"),
                 eq(60L), eq(60L), any(Timestamp.class), eq(1001L), eq("USDT"), eq(60L));
         verify(jdbcTemplate).update(contains("UPDATE account_margin_reservations"),

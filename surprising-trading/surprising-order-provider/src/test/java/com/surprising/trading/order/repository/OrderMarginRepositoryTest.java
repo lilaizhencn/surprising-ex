@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.surprising.trading.api.model.MarginMode;
 import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.List;
@@ -47,7 +48,7 @@ class OrderMarginRepositoryTest {
                 .thenReturn(0);
 
         assertThatThrownBy(() -> repository.reserve(1001L, "USDT", 9002L, "BTC-USDT",
-                500L, Instant.parse("2026-07-01T00:00:00Z")))
+                MarginMode.CROSS, 500L, Instant.parse("2026-07-01T00:00:00Z")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("reserve order margin");
     }

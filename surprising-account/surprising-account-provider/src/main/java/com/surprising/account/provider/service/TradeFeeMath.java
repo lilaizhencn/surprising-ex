@@ -20,6 +20,13 @@ public final class TradeFeeMath {
                                      long quantitySteps,
                                      boolean taker) {
         long feeRatePpm = taker ? spec.takerFeeRatePpm() : spec.makerFeeRatePpm();
+        return feeDeltaUnits(spec, priceTicks, quantitySteps, feeRatePpm);
+    }
+
+    public static long feeDeltaUnits(ContractSpec spec,
+                                     long priceTicks,
+                                     long quantitySteps,
+                                     long feeRatePpm) {
         if (feeRatePpm == 0L) {
             return 0L;
         }

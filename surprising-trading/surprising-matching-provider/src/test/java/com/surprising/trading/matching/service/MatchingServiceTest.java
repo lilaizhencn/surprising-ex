@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MatchTradeEvent;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderBookDepthEvent;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import com.surprising.trading.api.model.OrderCommandEvent;
@@ -81,9 +82,11 @@ class MatchingServiceTest {
             assertThat(trade.takerInstrumentVersion()).isEqualTo(7L);
             assertThat(trade.takerUserId()).isEqualTo(2002L);
             assertThat(trade.takerSide()).isEqualTo(OrderSide.BUY);
+            assertThat(trade.takerMarginMode()).isEqualTo(MarginMode.CROSS);
             assertThat(trade.makerOrderId()).isEqualTo(101L);
             assertThat(trade.makerInstrumentVersion()).isEqualTo(5L);
             assertThat(trade.makerUserId()).isEqualTo(1001L);
+            assertThat(trade.makerMarginMode()).isEqualTo(MarginMode.CROSS);
             assertThat(trade.priceTicks()).isEqualTo(100L);
             assertThat(trade.quantitySteps()).isEqualTo(3L);
             assertThat(trade.traceId()).isEqualTo("trace-taker-502");
@@ -310,6 +313,7 @@ class MatchingServiceTest {
         private final List<MatchResultEvent> results = new ArrayList<>();
         private final List<MatchTradeEvent> trades = new ArrayList<>();
         private final Map<Long, Long> orderVersions = new HashMap<>();
+        private final Map<Long, MarginMode> orderMarginModes = new HashMap<>();
         private boolean rejectNextSaveResult;
         private boolean rejectNextSaveTrade;
         private int activeStatusUpdates;
@@ -334,6 +338,11 @@ class MatchingServiceTest {
         }
 
         @Override
+        public MarginMode orderMarginMode(long orderId) {
+            return orderMarginModes.getOrDefault(orderId, MarginMode.CROSS);
+        }
+
+        @Override
         public boolean saveResult(MatchResultEvent event) {
             if (rejectNextSaveResult) {
                 rejectNextSaveResult = false;
@@ -341,6 +350,7 @@ class MatchingServiceTest {
             }
             results.add(event);
             orderVersions.put(event.orderId(), event.instrumentVersion());
+            orderMarginModes.put(event.orderId(), MarginMode.CROSS);
             return true;
         }
 

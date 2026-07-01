@@ -20,7 +20,7 @@ Order entry does not use `BigDecimal`. API, database, and Kafka commands use lon
 - `MARKET` orders only allow `IOC` or `FOK`.
 - Notional validation uses `contract_type`. Linear contracts check `priceTicks * quantitySteps * notional_multiplier_units`; inverse contracts check `quantitySteps * notional_multiplier_units` because the multiplier is the quote face value per contract step. Both paths use `Math.multiplyExact` to reject long overflow.
 - Market orders are protected by `markPriceTicks +/- marketMaxSlippagePpm` before exchange-core IOC/FOK submission. Order entry uses the same mark-derived execution band for risk checks: linear contracts reserve initial margin at the upper bound for both BUY and SELL, while inverse contracts reserve at the lower bound because collateral requirement increases as price falls.
-- Trading fees are stored as maker/taker ppm rates on instrument versions and settled by the account provider after fills.
+- Instrument versions store default maker/taker ppm fees. Order entry resolves user/VIP/market-maker overrides, snapshots the final rates on `trading_orders`, and account settlement charges fills from that snapshot.
 
 Example for `BTC-USDT` with `price_tick_units = 10000000`, `quantity_step_units = 100000`,
 USDT scale `100000000`, and BTC scale `100000000`:
@@ -49,6 +49,21 @@ client / internal gateway
 ```
 
 The order provider does not match orders and does not own WebSocket fanout. Order-state push should be a separate service consuming `surprising.perp.order.events.v1` and `surprising.perp.match.results.v1`.
+
+## Margin Mode
+
+Orders, matching commands, match trades, account reservations, and account positions now carry `marginMode`.
+The default is `CROSS`, which is the only executable mode in the current production path. `ISOLATED` is present in
+the API and database contract, but order entry rejects isolated-margin orders until isolated risk groups,
+isolated funding debits, isolated liquidation, and margin add/remove workflows are completed. This prevents an order
+from being labeled isolated while still being liquidated by the cross-margin risk model.
+
+## Trading Fees
+
+- `init.sql` defaults `BTC-USDT` and `ETH-USDT` to maker `200 ppm` and taker `500 ppm`, or `0.02% / 0.05%`.
+- `trading_fee_schedules` can configure user-global or per-symbol overrides. Per-symbol user fees win over user-global fees, then the instrument default is used.
+- Order admission writes the final `maker_fee_rate_ppm` and `taker_fee_rate_ppm` to `trading_orders`. Later VIP or promotion changes do not reinterpret already accepted resting orders.
+- The account provider settles fills from the order snapshot and writes `TRADE_FEE` ledger rows with `trade_id`, `order_id`, `symbol`, and `fee_rate_ppm`.
 
 ## Trace Id
 
@@ -99,7 +114,7 @@ Instrument already stores exchange-core-aligned long rule boundaries:
 - `min_notional_units`, `max_notional_units`, and `notional_multiplier_units` are kept as long units and evaluated by `contract_type`.
 - `LINEAR_PERPETUAL` order notional = `priceTicks * quantitySteps * notional_multiplier_units`.
 - `INVERSE_PERPETUAL` order face value = `quantitySteps * notional_multiplier_units`.
-- `maker_fee_rate_ppm` and `taker_fee_rate_ppm` are not passed into exchange-core. They are carried through the side-specific instrument versions and applied by account settlement.
+- `maker_fee_rate_ppm` and `taker_fee_rate_ppm` are not passed into exchange-core. Instrument provides the default, `trading_fee_schedules` can override by user globally or by symbol, and order admission freezes the final rates on `trading_orders`.
 
 The trading Java module remains long-only.
 
@@ -157,7 +172,7 @@ For each `OrderCommandEvent`:
 - `trading_match_results` and `trading_match_trades` are idempotent replay gates. If a result or trade row already exists, the service skips the downstream side effects for that row instead of reapplying order fills, margin release, or outbox writes.
 - Guarded order fill/status updates, margin release, and matching outbox writes must still affect exactly one row. If an overfill guard, inconsistent quantity invariant, missing target row, or outbox write skips a row, the matcher fails and restarts instead of continuing with a mutated in-memory exchange-core book.
 
-The provider uses the real exchange-core order book and matcher event chain, but exchange-core risk processing and built-in fees are disabled. Order entry reserves initial margin before command publication; account-provider migrates filled opening margin into position margin and writes maker/taker `TRADE_FEE` ledger entries from instrument fee ppm. Funding, insurance, and ADL are handled by separate settlement modules.
+The provider uses the real exchange-core order book and matcher event chain, but exchange-core risk processing and built-in fees are disabled. Order entry reserves initial margin before command publication; account-provider migrates filled opening margin into position margin and writes maker/taker `TRADE_FEE` ledger entries from the order fee snapshot. Funding, insurance, and ADL are handled by separate settlement modules.
 
 ### Order Book Depth
 

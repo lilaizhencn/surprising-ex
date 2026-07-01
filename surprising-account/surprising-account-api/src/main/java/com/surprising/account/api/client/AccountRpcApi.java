@@ -25,7 +25,8 @@ public interface AccountRpcApi {
 
     @GetMapping("/position")
     PositionResponse position(@RequestParam("userId") @Positive long userId,
-                              @RequestParam("symbol") @NotBlank String symbol);
+                              @RequestParam("symbol") @NotBlank String symbol,
+                              @RequestParam(value = "marginMode", required = false) String marginMode);
 
     @GetMapping("/positions")
     PositionQueryResponse positions(@RequestParam("userId") @Positive long userId);

@@ -496,6 +496,39 @@ CREATE TABLE IF NOT EXISTS trading_sequences (
     CONSTRAINT trading_sequences_positive CHECK (sequence_value > 0)
 );
 
+CREATE TABLE IF NOT EXISTS trading_fee_schedules (
+    fee_schedule_id     BIGINT PRIMARY KEY,
+    user_id             BIGINT NOT NULL,
+    symbol              TEXT,
+    maker_fee_rate_ppm  BIGINT NOT NULL,
+    taker_fee_rate_ppm  BIGINT NOT NULL,
+    reason              TEXT NOT NULL,
+    status              TEXT NOT NULL,
+    effective_time      TIMESTAMPTZ NOT NULL,
+    expire_time         TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL,
+    updated_at          TIMESTAMPTZ NOT NULL,
+    CONSTRAINT trading_fee_schedules_user_positive CHECK (user_id > 0),
+    CONSTRAINT trading_fee_schedules_symbol_format CHECK (
+        symbol IS NULL OR symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'
+    ),
+    CONSTRAINT trading_fee_schedules_status_check CHECK (status IN ('ACTIVE', 'DISABLED')),
+    CONSTRAINT trading_fee_schedules_fee_range CHECK (
+        maker_fee_rate_ppm BETWEEN -1000000 AND 1000000
+        AND taker_fee_rate_ppm BETWEEN -1000000 AND 1000000
+    ),
+    CONSTRAINT trading_fee_schedules_time_check CHECK (
+        expire_time IS NULL OR expire_time > effective_time
+    )
+);
+
+CREATE INDEX IF NOT EXISTS trading_fee_schedules_user_symbol_idx
+    ON trading_fee_schedules (user_id, symbol, status, effective_time DESC, fee_schedule_id DESC);
+
+CREATE INDEX IF NOT EXISTS trading_fee_schedules_user_global_idx
+    ON trading_fee_schedules (user_id, status, effective_time DESC, fee_schedule_id DESC)
+    WHERE symbol IS NULL;
+
 CREATE TABLE IF NOT EXISTS trading_orders (
     order_id                    BIGINT PRIMARY KEY,
     user_id                     BIGINT NOT NULL,
@@ -509,6 +542,9 @@ CREATE TABLE IF NOT EXISTS trading_orders (
     quantity_steps              BIGINT NOT NULL,
     executed_quantity_steps     BIGINT NOT NULL DEFAULT 0,
     remaining_quantity_steps    BIGINT NOT NULL,
+    margin_mode                 TEXT NOT NULL DEFAULT 'CROSS',
+    maker_fee_rate_ppm          BIGINT NOT NULL DEFAULT 0,
+    taker_fee_rate_ppm          BIGINT NOT NULL DEFAULT 0,
     reduce_only                 BOOLEAN NOT NULL DEFAULT FALSE,
     post_only                   BOOLEAN NOT NULL DEFAULT FALSE,
     status                      TEXT NOT NULL,
@@ -521,6 +557,11 @@ CREATE TABLE IF NOT EXISTS trading_orders (
     CONSTRAINT trading_orders_instrument_fk
         FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT trading_orders_side_check CHECK (side IN ('BUY', 'SELL')),
+    CONSTRAINT trading_orders_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
+    CONSTRAINT trading_orders_fee_rate_check CHECK (
+        maker_fee_rate_ppm BETWEEN -1000000 AND 1000000
+        AND taker_fee_rate_ppm BETWEEN -1000000 AND 1000000
+    ),
     CONSTRAINT trading_orders_type_check CHECK (order_type IN ('LIMIT', 'MARKET')),
     CONSTRAINT trading_orders_tif_check CHECK (time_in_force IN ('GTC', 'IOC', 'FOK', 'GTX')),
     CONSTRAINT trading_orders_status_check CHECK (
@@ -699,9 +740,11 @@ CREATE TABLE IF NOT EXISTS trading_match_trades (
     taker_instrument_version BIGINT NOT NULL,
     taker_user_id           BIGINT NOT NULL,
     taker_side              TEXT NOT NULL,
+    taker_margin_mode       TEXT NOT NULL DEFAULT 'CROSS',
     maker_order_id          BIGINT NOT NULL,
     maker_instrument_version BIGINT NOT NULL,
     maker_user_id           BIGINT NOT NULL,
+    maker_margin_mode       TEXT NOT NULL DEFAULT 'CROSS',
     price_ticks             BIGINT NOT NULL,
     quantity_steps          BIGINT NOT NULL,
     taker_order_completed   BOOLEAN NOT NULL,
@@ -717,6 +760,9 @@ CREATE TABLE IF NOT EXISTS trading_match_trades (
     CONSTRAINT trading_match_trades_maker_instrument_fk
         FOREIGN KEY (symbol, maker_instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT trading_match_trades_side_check CHECK (taker_side IN ('BUY', 'SELL')),
+    CONSTRAINT trading_match_trades_margin_mode_check CHECK (
+        taker_margin_mode IN ('CROSS', 'ISOLATED') AND maker_margin_mode IN ('CROSS', 'ISOLATED')
+    ),
     CONSTRAINT trading_match_trades_positive_values CHECK (price_ticks > 0 AND quantity_steps > 0)
 );
 
@@ -795,10 +841,24 @@ CREATE TABLE IF NOT EXISTS account_ledger_entries (
     reference_type      TEXT NOT NULL,
     reference_id        TEXT NOT NULL,
     reason              TEXT,
+    trade_id            BIGINT,
+    order_id            BIGINT,
+    symbol              TEXT,
+    fee_rate_ppm        BIGINT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT account_ledger_user_positive CHECK (user_id > 0),
     CONSTRAINT account_ledger_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
-    CONSTRAINT account_ledger_amount_non_zero CHECK (amount_units <> 0)
+    CONSTRAINT account_ledger_amount_non_zero CHECK (amount_units <> 0),
+    CONSTRAINT account_ledger_trade_fee_metadata_check CHECK (
+        reference_type <> 'TRADE_FEE'
+        OR (trade_id IS NOT NULL AND order_id IS NOT NULL AND symbol IS NOT NULL AND fee_rate_ppm IS NOT NULL)
+    ),
+    CONSTRAINT account_ledger_fee_rate_range CHECK (
+        fee_rate_ppm IS NULL OR fee_rate_ppm BETWEEN -1000000 AND 1000000
+    ),
+    CONSTRAINT account_ledger_symbol_format CHECK (
+        symbol IS NULL OR symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'
+    )
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS account_ledger_reference_uidx
@@ -807,12 +867,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS account_ledger_reference_uidx
 CREATE INDEX IF NOT EXISTS account_ledger_user_time_idx
     ON account_ledger_entries (user_id, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS account_ledger_trade_fee_order_idx
+    ON account_ledger_entries (order_id, trade_id)
+    WHERE reference_type = 'TRADE_FEE';
+
 CREATE TABLE IF NOT EXISTS account_margin_reservations (
     reservation_id      BIGINT PRIMARY KEY,
     user_id             BIGINT NOT NULL,
     asset               TEXT NOT NULL,
     order_id            BIGINT NOT NULL UNIQUE,
     symbol              TEXT NOT NULL,
+    margin_mode         TEXT NOT NULL DEFAULT 'CROSS',
     reserved_units      BIGINT NOT NULL,
     released_units      BIGINT NOT NULL DEFAULT 0,
     position_margin_units BIGINT NOT NULL DEFAULT 0,
@@ -823,6 +888,7 @@ CREATE TABLE IF NOT EXISTS account_margin_reservations (
     CONSTRAINT account_margin_reservations_user_positive CHECK (user_id > 0),
     CONSTRAINT account_margin_reservations_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT account_margin_reservations_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT account_margin_reservations_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
     CONSTRAINT account_margin_reservations_non_negative CHECK (
         reserved_units >= 0
         AND released_units >= 0
@@ -846,29 +912,33 @@ CREATE TABLE IF NOT EXISTS account_position_margins (
     user_id             BIGINT NOT NULL,
     symbol              TEXT NOT NULL,
     asset               TEXT NOT NULL,
+    margin_mode         TEXT NOT NULL DEFAULT 'CROSS',
     margin_units        BIGINT NOT NULL,
     updated_at          TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (user_id, symbol, asset),
+    PRIMARY KEY (user_id, symbol, asset, margin_mode),
     CONSTRAINT account_position_margins_user_positive CHECK (user_id > 0),
     CONSTRAINT account_position_margins_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT account_position_margins_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
+    CONSTRAINT account_position_margins_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
     CONSTRAINT account_position_margins_non_negative CHECK (margin_units >= 0)
 );
 
 CREATE INDEX IF NOT EXISTS account_position_margins_user_idx
-    ON account_position_margins (user_id, symbol);
+    ON account_position_margins (user_id, symbol, margin_mode);
 
 CREATE TABLE IF NOT EXISTS account_positions (
     user_id                 BIGINT NOT NULL,
     symbol                  TEXT NOT NULL,
+    margin_mode             TEXT NOT NULL DEFAULT 'CROSS',
     instrument_version      BIGINT,
     signed_quantity_steps   BIGINT NOT NULL,
     entry_price_ticks       BIGINT NOT NULL,
     realized_pnl_units      BIGINT NOT NULL,
     updated_at              TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (user_id, symbol),
+    PRIMARY KEY (user_id, symbol, margin_mode),
     CONSTRAINT account_positions_user_positive CHECK (user_id > 0),
     CONSTRAINT account_positions_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT account_positions_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
     CONSTRAINT account_positions_instrument_fk
         FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT account_positions_entry_price_check CHECK (
@@ -881,10 +951,10 @@ CREATE INDEX IF NOT EXISTS account_positions_user_idx
     ON account_positions (user_id);
 
 CREATE INDEX IF NOT EXISTS account_positions_symbol_idx
-    ON account_positions (symbol);
+    ON account_positions (symbol, margin_mode);
 
 CREATE INDEX IF NOT EXISTS account_positions_open_scan_idx
-    ON account_positions (user_id, symbol)
+    ON account_positions (user_id, symbol, margin_mode)
     WHERE signed_quantity_steps <> 0;
 
 CREATE TABLE IF NOT EXISTS account_processed_trades (

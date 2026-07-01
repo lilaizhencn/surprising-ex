@@ -1,6 +1,7 @@
 package com.surprising.trading.order.repository;
 
 import com.surprising.trading.api.model.OrderEvent;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
@@ -20,8 +21,9 @@ public class OrderRepository {
             INSERT INTO trading_orders (
                 order_id, user_id, client_order_id, symbol, instrument_version, side, order_type, time_in_force,
                 price_ticks, quantity_steps, executed_quantity_steps, remaining_quantity_steps,
+                margin_mode, maker_fee_rate_ppm, taker_fee_rate_ppm,
                 reduce_only, post_only, status, reject_reason, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (user_id, client_order_id) WHERE client_order_id IS NOT NULL DO NOTHING
             """;
 
@@ -53,6 +55,7 @@ public class OrderRepository {
                 nullableVersion(order.instrumentVersion()), order.side().name(), order.orderType().name(),
                 order.timeInForce().name(),
                 order.priceTicks(), order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
+                order.marginMode().name(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
                 order.reduceOnly(), order.postOnly(), order.status().name(), order.rejectReason(),
                 Timestamp.from(order.createdAt()), Timestamp.from(order.updatedAt()));
         return rows == 1;
@@ -141,6 +144,9 @@ public class OrderRepository {
                 rs.getLong("quantity_steps"),
                 rs.getLong("executed_quantity_steps"),
                 rs.getLong("remaining_quantity_steps"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                rs.getLong("maker_fee_rate_ppm"),
+                rs.getLong("taker_fee_rate_ppm"),
                 rs.getBoolean("reduce_only"),
                 rs.getBoolean("post_only"),
                 OrderStatus.valueOf(rs.getString("status")),

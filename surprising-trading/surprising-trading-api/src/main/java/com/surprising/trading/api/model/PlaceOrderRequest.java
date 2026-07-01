@@ -15,6 +15,25 @@ public record PlaceOrderRequest(
         @NotNull TimeInForce timeInForce,
         @Min(0) long priceTicks,
         @Positive long quantitySteps,
+        MarginMode marginMode,
         boolean reduceOnly,
         boolean postOnly) {
+
+    public PlaceOrderRequest {
+        marginMode = MarginMode.defaultIfNull(marginMode);
+    }
+
+    public PlaceOrderRequest(long userId,
+                             String clientOrderId,
+                             String symbol,
+                             OrderSide side,
+                             OrderType orderType,
+                             TimeInForce timeInForce,
+                             long priceTicks,
+                             long quantitySteps,
+                             boolean reduceOnly,
+                             boolean postOnly) {
+        this(userId, clientOrderId, symbol, side, orderType, timeInForce, priceTicks, quantitySteps,
+                MarginMode.CROSS, reduceOnly, postOnly);
+    }
 }

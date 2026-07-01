@@ -7,11 +7,13 @@ import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.ContractSpec;
+import com.surprising.account.provider.model.OrderFeeSnapshot;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.trading.api.model.MatchTradeEvent;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -30,6 +32,8 @@ class AccountServiceTest {
     @Test
     void processesBothSidesAndSkipsDuplicateTrade() {
         FakeAccountRepository repository = new FakeAccountRepository();
+        repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 5L));
+        repository.feeSnapshots.put(9001L, new OrderFeeSnapshot(2L, 5L));
         AccountService service = new AccountService(repository, new PositionCalculator());
 
         MatchTradeEvent trade = new MatchTradeEvent(
@@ -65,8 +69,41 @@ class AccountServiceTest {
     }
 
     @Test
+    void tradeFeesUseOrderSnapshotRatesInsteadOfInstrumentDefaults() {
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 1_000L));
+        repository.feeSnapshots.put(9001L, new OrderFeeSnapshot(-100L, 5L));
+        AccountService service = new AccountService(repository, new PositionCalculator());
+
+        MatchTradeEvent trade = new MatchTradeEvent(
+                9204L,
+                9104L,
+                "BTC-USDT",
+                9002L,
+                1L,
+                2002L,
+                OrderSide.BUY,
+                9001L,
+                1L,
+                1001L,
+                600_000L,
+                3L,
+                true,
+                false,
+                EVENT_TIME);
+
+        service.processTrade(trade);
+
+        assertThat(repository.feeByUser).containsEntry(2002L, -1_800L).containsEntry(1001L, 180L);
+    }
+
+    @Test
     void sameTradeIdFromDifferentSymbolsIsProcessedIndependently() {
         FakeAccountRepository repository = new FakeAccountRepository();
+        repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 5L));
+        repository.feeSnapshots.put(9001L, new OrderFeeSnapshot(2L, 5L));
+        repository.feeSnapshots.put(9003L, new OrderFeeSnapshot(2L, 5L));
+        repository.feeSnapshots.put(9004L, new OrderFeeSnapshot(2L, 5L));
         AccountService service = new AccountService(repository, new PositionCalculator());
 
         MatchTradeEvent btcTrade = new MatchTradeEvent(
@@ -120,6 +157,8 @@ class AccountServiceTest {
     @Test
     void enqueuesPositionUpdateEventsAfterBothSidesAreSettled() {
         FakeAccountRepository repository = new FakeAccountRepository();
+        repository.feeSnapshots.put(9007L, new OrderFeeSnapshot(2L, 5L));
+        repository.feeSnapshots.put(9008L, new OrderFeeSnapshot(2L, 5L));
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setPositionEventsTopic("surprising.account.position.events.v1");
@@ -165,8 +204,12 @@ class AccountServiceTest {
     @Test
     void closingTradeReleasesPositionMarginAndSettlesRealizedPnlForBothSides() {
         FakeAccountRepository repository = new FakeAccountRepository();
-        repository.positions.put(new PositionKey(2002L, "BTC-USDT"), new PositionState(3L, 1L, 600_000L, 0L));
-        repository.positions.put(new PositionKey(1001L, "BTC-USDT"), new PositionState(-3L, 1L, 600_000L, 0L));
+        repository.feeSnapshots.put(9003L, new OrderFeeSnapshot(2L, 5L));
+        repository.feeSnapshots.put(9004L, new OrderFeeSnapshot(2L, 5L));
+        repository.positions.put(new PositionKey(2002L, "BTC-USDT", MarginMode.CROSS),
+                new PositionState(3L, 1L, 600_000L, 0L));
+        repository.positions.put(new PositionKey(1001L, "BTC-USDT", MarginMode.CROSS),
+                new PositionState(-3L, 1L, 600_000L, 0L));
         AccountService service = new AccountService(repository, new PositionCalculator());
 
         MatchTradeEvent close = new MatchTradeEvent(
@@ -192,8 +235,9 @@ class AccountServiceTest {
                 .isEqualTo(new PositionState(1L, 1L, 600_000L, 20_000L));
         assertThat(repository.positionState(1001L, "BTC-USDT"))
                 .isEqualTo(new PositionState(-1L, 1L, 600_000L, -20_000L));
-        assertThat(repository.releasedPositionMargin).containsEntry(new PositionKey(2002L, "BTC-USDT"), 2L)
-                .containsEntry(new PositionKey(1001L, "BTC-USDT"), 2L);
+        assertThat(repository.releasedPositionMargin)
+                .containsEntry(new PositionKey(2002L, "BTC-USDT", MarginMode.CROSS), 2L)
+                .containsEntry(new PositionKey(1001L, "BTC-USDT", MarginMode.CROSS), 2L);
         assertThat(repository.releasedOrderMargin).containsEntry(9003L, 2L).containsEntry(9004L, 2L);
         assertThat(repository.pnlByUser).containsEntry(2002L, 20_000L).containsEntry(1001L, -20_000L);
         assertThat(repository.feeByUser).containsEntry(2002L, -7L).containsEntry(1001L, -3L);
@@ -203,7 +247,10 @@ class AccountServiceTest {
     @Test
     void flippingTradeClosesOldExposureBeforeConsumingNewOpeningMargin() {
         FakeAccountRepository repository = new FakeAccountRepository();
-        repository.positions.put(new PositionKey(2002L, "BTC-USDT"), new PositionState(5L, 1L, 100L, 0L));
+        repository.feeSnapshots.put(9005L, new OrderFeeSnapshot(2L, 5L));
+        repository.feeSnapshots.put(9006L, new OrderFeeSnapshot(2L, 5L));
+        repository.positions.put(new PositionKey(2002L, "BTC-USDT", MarginMode.CROSS),
+                new PositionState(5L, 1L, 100L, 0L));
         AccountService service = new AccountService(repository, new PositionCalculator());
 
         MatchTradeEvent flip = new MatchTradeEvent(
@@ -229,7 +276,8 @@ class AccountServiceTest {
                 .isEqualTo(new PositionState(-3L, 2L, 90L, -50L));
         assertThat(repository.positionState(1001L, "BTC-USDT"))
                 .isEqualTo(new PositionState(8L, 2L, 90L, 0L));
-        assertThat(repository.releasedPositionMargin).containsEntry(new PositionKey(2002L, "BTC-USDT"), 5L);
+        assertThat(repository.releasedPositionMargin)
+                .containsEntry(new PositionKey(2002L, "BTC-USDT", MarginMode.CROSS), 5L);
         assertThat(repository.releasedOrderMargin).containsEntry(9005L, 5L);
         assertThat(repository.consumedOrderMargin).containsEntry(9005L, 3L).containsEntry(9006L, 8L);
         assertThat(repository.consumedOrderMarginUnits).containsEntry(9005L, 3L)
@@ -243,6 +291,7 @@ class AccountServiceTest {
     private static final class FakeAccountRepository extends AccountRepository {
 
         private final Map<PositionKey, PositionState> positions = new HashMap<>();
+        private final Map<Long, OrderFeeSnapshot> feeSnapshots = new HashMap<>();
         private final Map<Long, Long> consumedOrderMargin = new HashMap<>();
         private final Map<Long, Long> consumedOrderMarginUnits = new HashMap<>();
         private final Map<Long, Long> releasedOrderMargin = new HashMap<>();
@@ -267,20 +316,28 @@ class AccountServiceTest {
         }
 
         @Override
+        public OrderFeeSnapshot orderFeeSnapshot(long orderId, long userId, String symbol) {
+            return Optional.ofNullable(feeSnapshots.get(orderId))
+                    .orElseThrow(() -> new IllegalStateException("missing fee snapshot " + orderId));
+        }
+
+        @Override
         public boolean markTradeProcessing(long tradeId, String symbol) {
             tradeProcessingAttempts++;
             return processedTradeIds.add(new ProcessedTradeKey(symbol, tradeId));
         }
 
         @Override
-        public PositionState lockPosition(long userId, String symbol) {
-            return positions.getOrDefault(new PositionKey(userId, symbol), new PositionState(0L, 0L, 0L, 0L));
+        public PositionState lockPosition(long userId, String symbol, MarginMode marginMode) {
+            return positions.getOrDefault(new PositionKey(userId, symbol, marginMode),
+                    new PositionState(0L, 0L, 0L, 0L));
         }
 
         @Override
         public void consumeOrderMargin(long orderId,
                                        long userId,
                                        String symbol,
+                                       MarginMode marginMode,
                                        long openSteps,
                                        long actualMarginUnits,
                                        boolean sweepRemainder,
@@ -304,10 +361,11 @@ class AccountServiceTest {
         @Override
         public void releasePositionMargin(long userId,
                                           String symbol,
+                                          MarginMode marginMode,
                                           long closeSteps,
                                           long positionAbsSteps,
                                           Instant now) {
-            releasedPositionMargin.merge(new PositionKey(userId, symbol), closeSteps, Long::sum);
+            releasedPositionMargin.merge(new PositionKey(userId, symbol, marginMode), closeSteps, Long::sum);
             assertThat(closeSteps).isLessThanOrEqualTo(positionAbsSteps);
         }
 
@@ -329,8 +387,15 @@ class AccountServiceTest {
                                    long tradeId,
                                    long feeDeltaUnits,
                                    String reason,
+                                   long feeRatePpm,
+                                   String symbol,
                                    Instant now) {
             assertThat(asset).isEqualTo("USDT");
+            assertThat(symbol).isIn("BTC-USDT", "ETH-USDT");
+            OrderFeeSnapshot snapshot = feeSnapshots.get(orderId);
+            assertThat(feeRatePpm).isEqualTo("TAKER_FEE".equals(reason)
+                    ? snapshot.takerFeeRatePpm()
+                    : snapshot.makerFeeRatePpm());
             feeByUser.merge(userId, feeDeltaUnits, Long::sum);
             if (orderId == 9002L || orderId == 9003L || orderId == 9005L || orderId == 9007L) {
                 assertThat(reason).isEqualTo("TAKER_FEE");
@@ -340,11 +405,15 @@ class AccountServiceTest {
         }
 
         @Override
-        public PositionResponse updatePosition(long userId, String symbol, PositionState state, Instant now) {
+        public PositionResponse updatePosition(long userId,
+                                               String symbol,
+                                               MarginMode marginMode,
+                                               PositionState state,
+                                               Instant now) {
             positionUpdates++;
-            positions.put(new PositionKey(userId, symbol), state);
-            return new PositionResponse(userId, symbol, state.instrumentVersion(), state.signedQuantitySteps(),
-                    state.entryPriceTicks(), state.realizedPnlUnits(), now);
+            positions.put(new PositionKey(userId, symbol, marginMode), state);
+            return new PositionResponse(userId, symbol, state.instrumentVersion(), marginMode,
+                    state.signedQuantitySteps(), state.entryPriceTicks(), state.realizedPnlUnits(), now);
         }
 
         @Override
@@ -353,7 +422,7 @@ class AccountServiceTest {
         }
 
         private PositionState positionState(long userId, String symbol) {
-            return positions.get(new PositionKey(userId, symbol));
+            return positions.get(new PositionKey(userId, symbol, MarginMode.CROSS));
         }
     }
 
@@ -373,8 +442,8 @@ class AccountServiceTest {
                                                            String traceId) {
             calls.add(new PositionUpdatedCall(topic, tradeId, position, now, traceId));
             return new PositionUpdatedEvent(calls.size(), tradeId, position.userId(), position.symbol(),
-                    position.instrumentVersion(), position.signedQuantitySteps(), position.entryPriceTicks(),
-                    position.realizedPnlUnits(), now, traceId);
+                    position.instrumentVersion(), position.marginMode(), position.signedQuantitySteps(),
+                    position.entryPriceTicks(), position.realizedPnlUnits(), now, traceId);
         }
     }
 
@@ -385,7 +454,7 @@ class AccountServiceTest {
                                        String traceId) {
     }
 
-    private record PositionKey(long userId, String symbol) {
+    private record PositionKey(long userId, String symbol, MarginMode marginMode) {
     }
 
     private record ProcessedTradeKey(String symbol, long tradeId) {

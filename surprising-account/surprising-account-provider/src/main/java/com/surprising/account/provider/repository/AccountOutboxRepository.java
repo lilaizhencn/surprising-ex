@@ -39,8 +39,8 @@ public class AccountOutboxRepository {
                                                        String traceId) {
         long eventId = sequenceRepository.nextSequence("position-event");
         PositionUpdatedEvent event = new PositionUpdatedEvent(eventId, tradeId, position.userId(), position.symbol(),
-                position.instrumentVersion(), position.signedQuantitySteps(), position.entryPriceTicks(),
-                position.realizedPnlUnits(), now, traceId);
+                position.instrumentVersion(), position.marginMode(), position.signedQuantitySteps(),
+                position.entryPriceTicks(), position.realizedPnlUnits(), now, traceId);
         long outboxId = sequenceRepository.nextSequence("account-outbox");
         int rows = jdbcTemplate.update("""
                 INSERT INTO account_outbox_events (

@@ -36,6 +36,8 @@ class OrderRepositoryTest {
                 10L,
                 0L,
                 10L,
+                200L,
+                500L,
                 false,
                 false,
                 OrderStatus.ACCEPTED,
