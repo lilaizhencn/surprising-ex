@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.liquidation.provider.model.LiquidationSizingInput;
+import com.surprising.liquidation.api.model.LiquidationOrderStatus;
 import com.surprising.risk.api.model.RiskStatus;
 import java.sql.ResultSet;
 import java.time.Duration;
@@ -104,6 +105,20 @@ class LiquidationRepositoryTest {
         assertThat(sql.getValue())
                 .doesNotContain("::NUMERIC")
                 .doesNotContain("abs(");
+    }
+
+    @Test
+    void updateOrderLifecycleFailsWhenCandidateStatusIsNotProcessing() {
+        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
+        when(jdbcTemplate.query(contains("UPDATE liquidation_orders"), anyRowMapper(),
+                eq("FILLED"), eq(7001L))).thenReturn(List.of(9401L));
+        when(jdbcTemplate.update(contains("UPDATE risk_liquidation_candidates"),
+                eq("COMPLETED"), eq(9401L))).thenReturn(0);
+
+        assertThatThrownBy(() -> repository.updateOrderLifecycle(7001L, LiquidationOrderStatus.FILLED,
+                "COMPLETED"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("liquidation candidate lifecycle update");
     }
 
     @SuppressWarnings("unchecked")

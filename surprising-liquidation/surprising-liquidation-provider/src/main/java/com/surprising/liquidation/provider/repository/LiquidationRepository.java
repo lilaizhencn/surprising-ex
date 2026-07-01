@@ -181,13 +181,14 @@ public class LiquidationRepository {
             return Optional.empty();
         }
         long candidateId = candidateIds.get(0);
-        jdbcTemplate.update("""
+        int rows = jdbcTemplate.update("""
                 UPDATE risk_liquidation_candidates
                    SET status = ?,
                        updated_at = now()
                  WHERE candidate_id = ?
                    AND status = 'PROCESSING'
                 """, candidateStatus, candidateId);
+        requireSingleRow(rows, "liquidation candidate lifecycle update");
         return Optional.of(candidateId);
     }
 

@@ -98,6 +98,7 @@ mvn -pl :surprising-liquidation-provider -am spring-boot:run
 - 待平数量聚合溢出必须 fail-fast。异常订单集合不能让强平 sizing 或用户可平量发生 long 回绕。
 - 强平、前置撤单和后续成交都按 symbol 作为 Kafka key；同一 symbol 内 outbox 顺序必须保持，不能把 cancel 和 liquidation place 拆到不同分区。
 - 强平订单创建走 fail-fast。`trading_orders` 不吞唯一键冲突；`trading_order_events`、outbox 行和 `liquidation_orders` 审计行也必须在同一事务内成功写入。任意写入失败都会回滚候选事务。
+- 撮合结果生命周期更新会先把本地 `liquidation_orders` 审计行从 `SUBMITTED`/`PARTIALLY_FILLED` 推进到终态；只要这一步成功，对应的 `risk_liquidation_candidates` 也必须在同一事务里从 `PROCESSING` 推进到 `COMPLETED`/`CANCELED`。如果候选不存在或已经是终态，说明状态不一致，必须 fail-fast。
 - 候选状态从 `PROCESSING` 更新到 `COMPLETED`/`CANCELED` 必须命中 1 行；outbox 发布后的 `published_at` 标记和失败重试标记也必须命中对应行。
 - 强平成交后的仓位和已实现盈亏仍由 account-provider 消费 match trades 更新。
 

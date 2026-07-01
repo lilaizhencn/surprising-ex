@@ -98,6 +98,7 @@ Port:
 - Pending close aggregation is fail-fast on overflow. A broken order set must not allow liquidation sizing or user close capacity to wrap around.
 - Liquidation pre-cancel commands, liquidation place commands, and later match events use symbol as Kafka key. Preserve outbox order within the same symbol partition; do not route cancel and liquidation place to different partitions.
 - Liquidation order creation is fail-fast. `trading_orders` does not suppress unique-key conflicts; `trading_order_events`, outbox rows, and `liquidation_orders` audit rows must also be inserted in the same transaction. A write failure rolls the candidate transaction back.
+- Match-result lifecycle updates first move the local `liquidation_orders` audit row out of `SUBMITTED`/`PARTIALLY_FILLED`; when that succeeds, the matching `risk_liquidation_candidates` row must also move from `PROCESSING` to `COMPLETED`/`CANCELED` in the same transaction. A missing or already-terminal candidate is treated as inconsistent state and fails fast.
 - Candidate status updates from `PROCESSING` to `COMPLETED`/`CANCELED` must touch exactly one row. Outbox `published_at` and retry-failure markers must also update the expected row.
 - Post-liquidation positions and realized PnL are still updated by account-provider from match trades.
 
