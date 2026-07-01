@@ -62,11 +62,15 @@ client / internal gateway
 - `init.sql` 默认 `BTC-USDT`、`ETH-USDT` 使用 maker `200 ppm`、taker `500 ppm`，即 `0.02% / 0.05%`。
 - `trading_fee_schedules` 可配置用户全局或单 symbol 覆盖，`source_type` 支持 `USER_OVERRIDE`、`VIP`、`MARKET_MAKER`、`PROMOTION`、`RISK_OVERRIDE`。
   单 symbol 优先于用户全局，最后回退 instrument 默认费率。
+- 多个用户全局费率同时 active 时，source 优先级是 `RISK_OVERRIDE`、`USER_OVERRIDE`、`PROMOTION`、`MARKET_MAKER`、`VIP`，防止自动 VIP 刷新覆盖风控、人工、活动或做市商费率。
 - 管理接口：`POST /api/v1/admin/trading/fees/schedules` 新增/更新费率，`POST /api/v1/admin/trading/fees/schedules/{feeScheduleId}/disable` 禁用费率，
   `GET /api/v1/admin/trading/fees/schedules` 查询配置。
+- VIP 档位接口：`POST /api/v1/admin/trading/fees/tiers` 新增/更新档位规则，`GET /api/v1/admin/trading/fees/tiers` 查询规则，`POST /api/v1/admin/trading/fees/tiers/refresh?userId=...` 重算单个用户，`POST /api/v1/admin/trading/fees/tiers/refresh-active` 重算活跃用户，`GET /api/v1/admin/trading/fees/tiers/users/{userId}` 查询当前档位。
+- 定时 VIP 刷新会计算用户 30 日 maker+taker 成交名义价值和账户资产估值，单位统一为 USD/USDT 最小单位，然后把命中的档位写回 `trading_fee_schedules`，作为用户全局 `VIP` 费率。稳定币余额按 1:1 计算；非稳定币余额用活跃 `baseAsset-USDT/USD` 合约的最新 mark price 估值，没有 mark price 时不计入。
 - 业务查询：`GET /api/v1/trading/fees/effective?userId=...&symbol=...` 返回当前最终 maker/taker ppm 和来源，例如 `INSTRUMENT`、`VIP_SYMBOL`。
 - 订单接受时会把最终 `maker_fee_rate_ppm`、`taker_fee_rate_ppm` 写入 `trading_orders`。后续用户 VIP 等级或活动费率变化，不会重解释已接受挂单。
 - account provider 结算成交时按订单快照写 `TRADE_FEE`，并在 ledger 保存 `trade_id`、`order_id`、`symbol`、`fee_rate_ppm`。
+- 做市商返佣仍应由做市商计划或后台流程根据挂单质量确认后配置；默认自动档位只分配 `VIP` 费率。
 
 ## 杠杆设置
 

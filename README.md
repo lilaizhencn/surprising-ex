@@ -189,6 +189,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Account consumes matching trades, updates long-based net positions idempotently by `tradeId`, migrates filled opening margin into position margin, and settles realized PnL into balances.
 - `CROSS` and `ISOLATED` margin modes are carried from order entry through matching, account, risk, funding, and liquidation. Cross losses may use cross available balance and cross position collateral; isolated losses only use that symbol's isolated position collateral before recording a deficit.
 - User leverage settings are keyed by `userId + symbol + marginMode`; order entry re-checks the configured leverage against the current risk bracket before reserving initial margin.
+- Automatic VIP fee tiers are calculated in order-provider from 30-day filled notional plus account asset value and written back as user-global `VIP` schedules. Manual risk/user/promotion/market-maker schedules keep higher source priority.
 - Account and funding loss settlement only debit position-margin-backed locked collateral; open-order reservation locks are not consumed by PnL or funding charges.
 - Risk uses mark price, instrument risk parameters, and account positions/balances to produce cross account snapshots, isolated position snapshots, and liquidation candidates.
 - Risk providers coordinate scans with PostgreSQL `risk_scan_leases` per `userId + settleAsset`, so multi-node deployments do not duplicate snapshot/candidate writes for the same risk group.

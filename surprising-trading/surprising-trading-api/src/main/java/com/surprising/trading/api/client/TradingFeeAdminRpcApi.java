@@ -1,6 +1,11 @@
 package com.surprising.trading.api.client;
 
 import com.surprising.trading.api.TradingApiPaths;
+import com.surprising.trading.api.model.FeeTierAssignmentResponse;
+import com.surprising.trading.api.model.FeeTierQueryResponse;
+import com.surprising.trading.api.model.FeeTierRefreshResponse;
+import com.surprising.trading.api.model.FeeTierResponse;
+import com.surprising.trading.api.model.FeeTierUpsertRequest;
 import com.surprising.trading.api.model.FeeScheduleQueryResponse;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleStatus;
@@ -33,4 +38,22 @@ public interface TradingFeeAdminRpcApi {
                                    @RequestParam(value = "status", required = false) FeeScheduleStatus status,
                                    @RequestParam(value = "limit", defaultValue = "100")
                                    @Min(1) @Max(500) int limit);
+
+    @PostMapping("/tiers")
+    FeeTierResponse upsertTier(@Valid @RequestBody FeeTierUpsertRequest request);
+
+    @GetMapping("/tiers")
+    FeeTierQueryResponse queryTiers(@RequestParam(value = "status", required = false) FeeScheduleStatus status,
+                                    @RequestParam(value = "limit", defaultValue = "100")
+                                    @Min(1) @Max(500) int limit);
+
+    @PostMapping("/tiers/refresh")
+    FeeTierAssignmentResponse refreshUserTier(@RequestParam("userId") @Positive long userId);
+
+    @PostMapping("/tiers/refresh-active")
+    FeeTierRefreshResponse refreshActiveUserTiers(@RequestParam(value = "limit", defaultValue = "1000")
+                                                  @Min(1) @Max(10000) int limit);
+
+    @GetMapping("/tiers/users/{userId}")
+    FeeTierAssignmentResponse currentUserTier(@PathVariable("userId") @Positive long userId);
 }

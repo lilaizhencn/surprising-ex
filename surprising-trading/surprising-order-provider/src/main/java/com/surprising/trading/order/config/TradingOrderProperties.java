@@ -9,6 +9,7 @@ public class TradingOrderProperties {
     private Kafka kafka = new Kafka();
     private Outbox outbox = new Outbox();
     private Risk risk = new Risk();
+    private FeeTier feeTier = new FeeTier();
 
     public Kafka getKafka() {
         return kafka;
@@ -32,6 +33,14 @@ public class TradingOrderProperties {
 
     public void setRisk(Risk risk) {
         this.risk = risk;
+    }
+
+    public FeeTier getFeeTier() {
+        return feeTier;
+    }
+
+    public void setFeeTier(FeeTier feeTier) {
+        this.feeTier = feeTier;
     }
 
     public static class Kafka {
@@ -112,6 +121,54 @@ public class TradingOrderProperties {
 
         public void setMarketMaxMarkAgeMs(long marketMaxMarkAgeMs) {
             this.marketMaxMarkAgeMs = marketMaxMarkAgeMs;
+        }
+    }
+
+    public static class FeeTier {
+        private boolean enabled = true;
+        private long refreshInitialDelayMs = 60_000L;
+        private long refreshDelayMs = 3_600_000L;
+        private int batchSize = 1_000;
+        private long lookbackDays = 30L;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public long getRefreshInitialDelayMs() {
+            return refreshInitialDelayMs;
+        }
+
+        public void setRefreshInitialDelayMs(long refreshInitialDelayMs) {
+            this.refreshInitialDelayMs = refreshInitialDelayMs;
+        }
+
+        public long getRefreshDelayMs() {
+            return refreshDelayMs;
+        }
+
+        public void setRefreshDelayMs(long refreshDelayMs) {
+            this.refreshDelayMs = refreshDelayMs;
+        }
+
+        public int getBatchSize() {
+            return batchSize;
+        }
+
+        public void setBatchSize(int batchSize) {
+            this.batchSize = batchSize;
+        }
+
+        public long getLookbackDays() {
+            return lookbackDays;
+        }
+
+        public void setLookbackDays(long lookbackDays) {
+            this.lookbackDays = lookbackDays;
         }
     }
 }

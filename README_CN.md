@@ -190,6 +190,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Account 消费撮合成交，按 `tradeId` 幂等更新 long-based 净持仓，把开仓成交保证金迁移到持仓保证金，并把已实现盈亏结算进余额。
 - `CROSS` 和 `ISOLATED` 保证金模式会从下单一路传到撮合、账户、风控、资金费和强平。全仓亏损可以使用全仓可用余额和全仓持仓保证金；逐仓亏损只使用该 symbol 的逐仓持仓保证金，亏穿后记录 deficit。
 - 用户杠杆配置按 `userId + symbol + marginMode` 生效；订单入口会在冻结初始保证金前按当前风险档位重新校验配置杠杆。
+- 自动 VIP 手续费档位由 order-provider 根据 30 日成交名义价值和账户资产估值计算，再写回用户全局 `VIP` 费率。风控、人工、活动和做市商费率拥有更高 source 优先级。
 - Account 和 Funding 的亏损结算只会扣持仓保证金支撑的 locked collateral；未成交订单冻结不会被 PnL 或资金费扣款消耗。
 - Risk 使用 mark price、instrument 风险参数和 account 持仓/余额生成保证金快照和爆仓候选。
 - Risk provider 使用 PostgreSQL `risk_scan_leases` 按 `userId + settleAsset` 协调扫描，多节点部署时不会对同一个风险组重复写快照或候选。

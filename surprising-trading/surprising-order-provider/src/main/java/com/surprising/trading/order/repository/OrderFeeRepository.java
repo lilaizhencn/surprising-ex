@@ -43,6 +43,14 @@ public class OrderFeeRepository {
                                WHEN symbol IS NULL THEN source_type || '_GLOBAL'
                                ELSE source_type || '_SYMBOL'
                            END AS source,
+                           CASE source_type
+                               WHEN 'RISK_OVERRIDE' THEN 0
+                               WHEN 'USER_OVERRIDE' THEN 1
+                               WHEN 'PROMOTION' THEN 2
+                               WHEN 'MARKET_MAKER' THEN 3
+                               WHEN 'VIP' THEN 4
+                               ELSE 5
+                           END AS source_priority,
                            effective_time,
                            fee_schedule_id
                       FROM trading_fee_schedules
@@ -51,7 +59,7 @@ public class OrderFeeRepository {
                        AND (symbol = ? OR symbol IS NULL)
                        AND effective_time <= ?
                        AND (expire_time IS NULL OR expire_time > ?)
-                     ORDER BY priority ASC, effective_time DESC, fee_schedule_id DESC
+                     ORDER BY priority ASC, source_priority ASC, effective_time DESC, fee_schedule_id DESC
                      LIMIT 1
                 )
                 SELECT COALESCE(u.maker_fee_rate_ppm, i.maker_fee_rate_ppm) AS maker_fee_rate_ppm,

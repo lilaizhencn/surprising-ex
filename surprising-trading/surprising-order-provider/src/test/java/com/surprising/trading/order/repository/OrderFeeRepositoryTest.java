@@ -62,6 +62,25 @@ class OrderFeeRepositoryTest {
     }
 
     @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void sourcePriorityWinsBeforeEffectiveTimeForUserSchedules() throws Exception {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        OrderFeeRepository repository = new OrderFeeRepository(jdbcTemplate);
+        when(jdbcTemplate.query(contains("source_priority ASC"), any(RowMapper.class),
+                eq("BTC-USDT"), eq(1L), eq("BTC-USDT"), eq(1001L),
+                eq("BTC-USDT"), any(), any())).thenAnswer(invocation -> {
+                    RowMapper mapper = invocation.getArgument(1);
+                    return List.of(mapper.mapRow(row(0L, 0L, "RISK_OVERRIDE_GLOBAL"), 0));
+                });
+
+        var snapshot = repository.snapshot(1001L, "BTC-USDT", 1L,
+                Instant.parse("2026-07-01T00:00:00Z"));
+
+        assertThat(snapshot).isPresent();
+        assertThat(snapshot.orElseThrow().source()).isEqualTo("RISK_OVERRIDE_GLOBAL");
+    }
+
+    @Test
     void missingInstrumentReturnsEmptySnapshot() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         OrderFeeRepository repository = new OrderFeeRepository(jdbcTemplate);

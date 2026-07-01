@@ -64,10 +64,14 @@ yet, so clients should present one-way net positions.
 
 - `init.sql` defaults `BTC-USDT` and `ETH-USDT` to maker `200 ppm` and taker `500 ppm`, or `0.02% / 0.05%`.
 - `trading_fee_schedules` can configure user-global or per-symbol overrides. `source_type` supports `USER_OVERRIDE`, `VIP`, `MARKET_MAKER`, `PROMOTION`, and `RISK_OVERRIDE`. Per-symbol user fees win over user-global fees, then the instrument default is used.
+- When multiple user-global schedules are active, source priority is `RISK_OVERRIDE`, `USER_OVERRIDE`, `PROMOTION`, `MARKET_MAKER`, then `VIP`; this prevents the automatic VIP job from overriding manual risk, user, campaign, or market-maker terms.
 - Admin APIs: `POST /api/v1/admin/trading/fees/schedules` creates or updates schedules, `POST /api/v1/admin/trading/fees/schedules/{feeScheduleId}/disable` disables a schedule, and `GET /api/v1/admin/trading/fees/schedules` lists schedules.
+- VIP tier APIs: `POST /api/v1/admin/trading/fees/tiers` upserts tier rules, `GET /api/v1/admin/trading/fees/tiers` lists rules, `POST /api/v1/admin/trading/fees/tiers/refresh?userId=...` recalculates one user, `POST /api/v1/admin/trading/fees/tiers/refresh-active` recalculates active users, and `GET /api/v1/admin/trading/fees/tiers/users/{userId}` returns the current assignment.
+- The scheduled VIP refresher computes each user's 30-day maker+taker filled notional and total account asset value in USD/USDT units, then writes the selected tier back to `trading_fee_schedules` as a user-global `VIP` schedule. Stable balances count 1:1; non-stable balances use the latest mark price for an active `baseAsset-USDT/USD` instrument and are ignored if no mark is available.
 - Runtime query: `GET /api/v1/trading/fees/effective?userId=...&symbol=...` returns the current maker/taker ppm and source, such as `INSTRUMENT` or `VIP_SYMBOL`.
 - Order admission writes the final `maker_fee_rate_ppm` and `taker_fee_rate_ppm` to `trading_orders`. Later VIP or promotion changes do not reinterpret already accepted resting orders.
 - The account provider settles fills from the order snapshot and writes `TRADE_FEE` ledger rows with `trade_id`, `order_id`, `symbol`, and `fee_rate_ppm`.
+- Market-maker rebates should still be configured by a market-maker program or admin workflow that verifies quote quality; the default automatic tiers only assign `VIP` fees.
 
 ## Leverage Settings
 

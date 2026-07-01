@@ -32,3 +32,9 @@ surprising:
       risk:
         market-max-slippage-ppm: 10000
         market-max-mark-age-ms: 5000
+      fee-tier:
+        enabled: true
+        refresh-initial-delay-ms: 60000
+        refresh-delay-ms: 3600000
+        batch-size: 1000
+        lookback-days: 30

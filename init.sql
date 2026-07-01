@@ -539,6 +539,90 @@ CREATE INDEX IF NOT EXISTS trading_fee_schedules_user_global_idx
     ON trading_fee_schedules (user_id, status, effective_time DESC, fee_schedule_id DESC)
     WHERE symbol IS NULL;
 
+CREATE TABLE IF NOT EXISTS trading_fee_tiers (
+    tier_code               TEXT PRIMARY KEY,
+    source_type             TEXT NOT NULL DEFAULT 'VIP',
+    qualification_mode      TEXT NOT NULL DEFAULT 'VOLUME_OR_BALANCE',
+    min_30d_volume_units    BIGINT NOT NULL DEFAULT 0,
+    min_asset_balance_units BIGINT NOT NULL DEFAULT 0,
+    maker_fee_rate_ppm      BIGINT NOT NULL,
+    taker_fee_rate_ppm      BIGINT NOT NULL,
+    priority                INTEGER NOT NULL,
+    status                  TEXT NOT NULL,
+    created_at              TIMESTAMPTZ NOT NULL,
+    updated_at              TIMESTAMPTZ NOT NULL,
+    CONSTRAINT trading_fee_tiers_source_type_check CHECK (source_type IN ('VIP', 'MARKET_MAKER')),
+    CONSTRAINT trading_fee_tiers_qualification_mode_check CHECK (
+        qualification_mode IN ('VOLUME_ONLY', 'BALANCE_ONLY', 'VOLUME_OR_BALANCE', 'VOLUME_AND_BALANCE')
+    ),
+    CONSTRAINT trading_fee_tiers_non_negative_thresholds CHECK (
+        min_30d_volume_units >= 0 AND min_asset_balance_units >= 0 AND priority >= 0
+    ),
+    CONSTRAINT trading_fee_tiers_status_check CHECK (status IN ('ACTIVE', 'DISABLED')),
+    CONSTRAINT trading_fee_tiers_fee_range CHECK (
+        maker_fee_rate_ppm BETWEEN -1000000 AND 1000000
+        AND taker_fee_rate_ppm BETWEEN -1000000 AND 1000000
+        AND maker_fee_rate_ppm <= taker_fee_rate_ppm
+    )
+);
+
+CREATE INDEX IF NOT EXISTS trading_fee_tiers_active_idx
+    ON trading_fee_tiers (status, priority DESC, min_30d_volume_units DESC, min_asset_balance_units DESC);
+
+INSERT INTO trading_fee_tiers (
+    tier_code, source_type, qualification_mode, min_30d_volume_units, min_asset_balance_units,
+    maker_fee_rate_ppm, taker_fee_rate_ppm, priority, status, created_at, updated_at
+) VALUES
+('VIP1', 'VIP', 'VOLUME_OR_BALANCE', 1000000000000000, 10000000000000, 180, 450, 10, 'ACTIVE', now(), now()),
+('VIP2', 'VIP', 'VOLUME_OR_BALANCE', 5000000000000000, 25000000000000, 160, 400, 20, 'ACTIVE', now(), now()),
+('VIP3', 'VIP', 'VOLUME_OR_BALANCE', 10000000000000000, 50000000000000, 140, 350, 30, 'ACTIVE', now(), now()),
+('VIP4', 'VIP', 'VOLUME_OR_BALANCE', 25000000000000000, 100000000000000, 100, 300, 40, 'ACTIVE', now(), now()),
+('VIP5', 'VIP', 'VOLUME_OR_BALANCE', 50000000000000000, 200000000000000, 0, 250, 50, 'ACTIVE', now(), now())
+ON CONFLICT (tier_code) DO UPDATE SET
+    source_type = EXCLUDED.source_type,
+    qualification_mode = EXCLUDED.qualification_mode,
+    min_30d_volume_units = EXCLUDED.min_30d_volume_units,
+    min_asset_balance_units = EXCLUDED.min_asset_balance_units,
+    maker_fee_rate_ppm = EXCLUDED.maker_fee_rate_ppm,
+    taker_fee_rate_ppm = EXCLUDED.taker_fee_rate_ppm,
+    priority = EXCLUDED.priority,
+    status = EXCLUDED.status,
+    updated_at = EXCLUDED.updated_at;
+
+CREATE TABLE IF NOT EXISTS trading_user_fee_tiers (
+    user_id                   BIGINT PRIMARY KEY,
+    tier_code                 TEXT,
+    source_type               TEXT,
+    fee_schedule_id           BIGINT NOT NULL UNIQUE,
+    maker_fee_rate_ppm        BIGINT NOT NULL DEFAULT 0,
+    taker_fee_rate_ppm        BIGINT NOT NULL DEFAULT 0,
+    trailing_30d_volume_units BIGINT NOT NULL DEFAULT 0,
+    total_asset_balance_units BIGINT NOT NULL DEFAULT 0,
+    status                    TEXT NOT NULL,
+    effective_time            TIMESTAMPTZ NOT NULL,
+    calculated_at             TIMESTAMPTZ NOT NULL,
+    created_at                TIMESTAMPTZ NOT NULL,
+    updated_at                TIMESTAMPTZ NOT NULL,
+    CONSTRAINT trading_user_fee_tiers_user_positive CHECK (user_id > 0),
+    CONSTRAINT trading_user_fee_tiers_tier_fk
+        FOREIGN KEY (tier_code) REFERENCES trading_fee_tiers(tier_code),
+    CONSTRAINT trading_user_fee_tiers_source_type_check CHECK (
+        source_type IS NULL OR source_type IN ('VIP', 'MARKET_MAKER')
+    ),
+    CONSTRAINT trading_user_fee_tiers_status_check CHECK (status IN ('ACTIVE', 'DISABLED')),
+    CONSTRAINT trading_user_fee_tiers_non_negative_values CHECK (
+        fee_schedule_id > 0
+        AND maker_fee_rate_ppm BETWEEN -1000000 AND 1000000
+        AND taker_fee_rate_ppm BETWEEN -1000000 AND 1000000
+        AND maker_fee_rate_ppm <= taker_fee_rate_ppm
+        AND trailing_30d_volume_units >= 0
+        AND total_asset_balance_units >= 0
+    )
+);
+
+CREATE INDEX IF NOT EXISTS trading_user_fee_tiers_status_idx
+    ON trading_user_fee_tiers (status, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS trading_leverage_settings (
     user_id             BIGINT NOT NULL,
     symbol              TEXT NOT NULL,
