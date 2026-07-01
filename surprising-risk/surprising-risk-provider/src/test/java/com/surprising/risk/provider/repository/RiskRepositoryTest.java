@@ -16,6 +16,7 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -134,6 +135,24 @@ class RiskRepositoryTest {
                 .contains("p.user_id > ? OR (p.user_id = ? AND i.settle_asset > ?)")
                 .contains("ORDER BY user_id ASC, settle_asset ASC")
                 .contains("LIMIT ?");
+    }
+
+    @Test
+    void riskGroupForPositionEventUsesEventVersionOrCurrentVersionFallback() {
+        RiskRepository repository = new RiskRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("BTC-USDT"),
+                eq(7L), eq(7L), eq("BTC-USDT"))).thenReturn(List.of(new RiskGroupKey(1001L, "USDT")));
+
+        Optional<RiskGroupKey> key = repository.riskGroupForPositionEvent(1001L, "BTC-USDT", 7L);
+
+        assertThat(key).contains(new RiskGroupKey(1001L, "USDT"));
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("BTC-USDT"),
+                eq(7L), eq(7L), eq("BTC-USDT"));
+        assertThat(sql.getValue())
+                .contains("WHEN ? > 0 THEN ?")
+                .contains("instrument_current_versions")
+                .contains("WHERE cv.symbol = ?");
     }
 
     @Test

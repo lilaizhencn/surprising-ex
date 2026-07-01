@@ -61,6 +61,28 @@ public class RiskRepository {
                 afterUserId, afterSettleAsset, cappedLimit);
     }
 
+    public Optional<RiskGroupKey> riskGroupForPositionEvent(long userId, String symbol, long instrumentVersion) {
+        String sql = """
+                SELECT CAST(? AS bigint) AS user_id,
+                       i.settle_asset
+                  FROM instruments i
+                 WHERE i.symbol = ?
+                   AND i.version = CASE
+                         WHEN ? > 0 THEN ?
+                         ELSE COALESCE((
+                             SELECT cv.version
+                               FROM instrument_current_versions cv
+                              WHERE cv.symbol = ?
+                         ), 0)
+                       END
+                 LIMIT 1
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new RiskGroupKey(rs.getLong("user_id"),
+                rs.getString("settle_asset")), userId, symbol, instrumentVersion, instrumentVersion, symbol)
+                .stream()
+                .findFirst();
+    }
+
     public List<CalculatedPositionRisk> calculatePositions(Duration maxMarkAge) {
         String sql = """
                 WITH position_inputs AS (

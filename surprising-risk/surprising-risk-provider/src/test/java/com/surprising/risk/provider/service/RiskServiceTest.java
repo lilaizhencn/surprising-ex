@@ -69,6 +69,81 @@ class RiskServiceTest {
     }
 
     @Test
+    void positionUpdateScansResolvedRiskGroupImmediately() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        riskRepository.positions = List.of(
+                new CalculatedPositionRisk(1001L, "BTC-USDT", 7L, "USDT",
+                        10L, 65_000L, 65_000L, 650_000L, 0L, 100L),
+                new CalculatedPositionRisk(2002L, "ETH-USDT", 7L, "USDT",
+                        10L, 3_500L, 3_500L, 35_000L, 0L, 100L));
+        riskRepository.positionEventGroup = Optional.of(new RiskGroupKey(2002L, "USDT"));
+        riskRepository.walletBalanceUnits = 1_000_000L;
+        RiskProperties properties = new RiskProperties();
+        properties.getCoordination().setEnabled(false);
+        FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
+        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+
+        service.scanPositionUpdate(2002L, "eth-usdt", 7L);
+
+        assertThat(riskRepository.positionEventResolveCalls).isEqualTo(1);
+        assertThat(riskRepository.lastPositionEventUserId).isEqualTo(2002L);
+        assertThat(riskRepository.lastPositionEventSymbol).isEqualTo("ETH-USDT");
+        assertThat(riskRepository.lastPositionEventVersion).isEqualTo(7L);
+        assertThat(riskRepository.riskGroupCalls).isZero();
+        assertThat(riskRepository.calculateCalls).isEqualTo(1);
+        assertThat(riskRepository.savedAccounts).isEqualTo(1);
+        assertThat(riskRepository.savedPositions).isEqualTo(1);
+        assertThat(outboxRepository.enqueued).isZero();
+        assertThat(transactionManager.commits).isEqualTo(1);
+        assertThat(transactionManager.rollbacks).isZero();
+    }
+
+    @Test
+    void positionUpdateDoesNothingWhenCalculationIsDisabled() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        riskRepository.positionEventGroup = Optional.of(new RiskGroupKey(1001L, "USDT"));
+        RiskProperties properties = new RiskProperties();
+        properties.getCalculation().setEnabled(false);
+        FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
+        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+
+        service.scanPositionUpdate(1001L, "BTC-USDT", 7L);
+
+        assertThat(riskRepository.positionEventResolveCalls).isZero();
+        assertThat(riskRepository.calculateCalls).isZero();
+        assertThat(riskRepository.savedAccounts).isZero();
+        assertThat(outboxRepository.enqueued).isZero();
+        assertThat(transactionManager.commits).isZero();
+    }
+
+    @Test
+    void positionUpdateRespectsRiskGroupLease() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        riskRepository.positionEventGroup = Optional.of(new RiskGroupKey(1001L, "USDT"));
+        riskRepository.scanLeaseAcquired = false;
+        RiskProperties properties = new RiskProperties();
+        properties.getCoordination().setNodeId("risk-node-b");
+        FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
+        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+
+        service.scanPositionUpdate(1001L, "BTC-USDT", 7L);
+
+        assertThat(riskRepository.positionEventResolveCalls).isEqualTo(1);
+        assertThat(riskRepository.scanLeaseAttempts).isEqualTo(1);
+        assertThat(riskRepository.lastOwnerId).isEqualTo("risk-node-b");
+        assertThat(riskRepository.calculateCalls).isZero();
+        assertThat(riskRepository.savedAccounts).isZero();
+        assertThat(outboxRepository.enqueued).isZero();
+        assertThat(transactionManager.commits).isZero();
+    }
+
+    @Test
     void scanPublishesOutboxEventWhenCandidateIsInsertedAndReadable() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
         riskRepository.returnInsertedCandidate = true;
@@ -214,6 +289,12 @@ class RiskServiceTest {
         private int calculateCalls;
         private int riskGroupCalls;
         private final List<Integer> riskGroupLimits = new ArrayList<>();
+        private Optional<RiskGroupKey> positionEventGroup = Optional.empty();
+        private int positionEventResolveCalls;
+        private long lastPositionEventUserId;
+        private String lastPositionEventSymbol;
+        private long lastPositionEventVersion;
+        private long walletBalanceUnits;
         private boolean scanLeaseAcquired = true;
         private int scanLeaseAttempts;
         private String lastOwnerId;
@@ -238,6 +319,15 @@ class RiskServiceTest {
         }
 
         @Override
+        public Optional<RiskGroupKey> riskGroupForPositionEvent(long userId, String symbol, long instrumentVersion) {
+            positionEventResolveCalls++;
+            lastPositionEventUserId = userId;
+            lastPositionEventSymbol = symbol;
+            lastPositionEventVersion = instrumentVersion;
+            return positionEventGroup;
+        }
+
+        @Override
         public List<CalculatedPositionRisk> calculatePositions(RiskGroupKey key, Duration maxMarkAge) {
             calculateCalls++;
             return positions.stream()
@@ -257,7 +347,7 @@ class RiskServiceTest {
 
         @Override
         public long walletBalanceUnits(long userId, String settleAsset) {
-            return 0L;
+            return walletBalanceUnits;
         }
 
         @Override

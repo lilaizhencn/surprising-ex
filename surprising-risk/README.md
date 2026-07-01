@@ -46,6 +46,7 @@ account_positions + account_balances + account_deficits
   + price_mark_ticks
   + instruments / instrument_current_versions
   + account_asset_scales
+  + optional trigger: surprising.account.position.events.v1
   -> risk_account_snapshots
   -> risk_position_snapshots
   -> risk_liquidation_candidates
@@ -59,8 +60,16 @@ processed in its own Spring transaction: account snapshot, position snapshots, c
 either commit together or roll back together. A failure in one group is logged and retried by the next scan; other
 groups in the same scan continue.
 
+The provider also consumes `surprising.account.position.events.v1`. A settled position update triggers an immediate scan
+for the affected `userId + settleAsset` group, using the event `symbol` and pinned `instrumentVersion` to resolve the
+risk group. If the event version is `0`, the provider falls back to `instrument_current_versions` so a flat-position
+event can still resolve the settlement asset. This event-driven path reduces liquidation latency; the keyset scheduled
+scanner remains the safety net for missed Kafka events, stale marks, replays, and operator pauses.
+
 ## Kafka
 
+- `surprising.account.position.events.v1`: account-settled position updates, key = `symbol`; consumed by risk-provider
+  as the low-latency scan trigger.
 - `surprising.perp.liquidation.candidates.v1`: liquidation candidate events, key = `symbol`.
 
 `surprising-liquidation-provider` consumes this topic, claims candidates, and submits reduce-only liquidation orders.
@@ -118,6 +127,9 @@ Configuration:
 
 | Property | Default | Purpose |
 | --- | --- | --- |
+| `surprising.risk.kafka.group-id` | `surprising-risk-v1` | Shared consumer group for risk-provider nodes consuming account position events. |
+| `surprising.risk.kafka.position-events-topic` | `surprising.account.position.events.v1` | Account-settled position event topic used as the event-driven scan trigger. |
+| `surprising.risk.kafka.concurrency` | `2` | Kafka listener concurrency. Keep it no higher than useful partition parallelism per node. |
 | `surprising.risk.coordination.enabled` | `true` | Enables the scan lease. Keep this on for multi-node deployments. |
 | `surprising.risk.coordination.node-id` | `${HOSTNAME:}` | Stable owner id. If empty, the process generates a local random id. |
 | `surprising.risk.coordination.lease-duration` | `15s` | Failover delay for a stopped scanner. Keep it longer than the scan interval. |
@@ -151,6 +163,11 @@ Port:
 - The scanner uses keyset pagination over `userId + settleAsset` groups and the partial
   `account_positions_open_scan_idx` index to avoid loading the whole position set before claiming leases. Do not replace
   this with offset pagination; offset scans get slower and can skip or repeat rows while positions are changing.
+- Position-event scanning and scheduled scanning both go through the same `risk_scan_leases` ownership guard and the
+  same group transaction. Kafka consumer-group assignment limits duplicate event processing, while the PostgreSQL lease
+  prevents duplicate writers if events are replayed or two nodes race on the same `userId + settleAsset` group.
+- The position-event consumer rejects records whose Kafka key does not match payload `symbol`. This keeps symbol
+  ordering and partitioning invariants aligned with matching, account, and liquidation modules.
 - If any open position in a `userId + settleAsset` group has no fresh mark price, the whole group is skipped for that
   pass. Partial account-risk aggregation is not allowed because it can understate maintenance margin.
 - The database keeps at most one active `NEW/PROCESSING` liquidation candidate per `userId + symbol`; a later scan can create a new candidate only after the previous one is `COMPLETED` or `CANCELED`.

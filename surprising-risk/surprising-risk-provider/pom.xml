@@ -24,6 +24,14 @@
             <artifactId>surprising-instrument-api</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-account-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-trading-api</artifactId>
+        </dependency>
+        <dependency>
             <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>

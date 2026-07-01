@@ -46,6 +46,7 @@ account_positions + account_balances + account_deficits
   + price_mark_ticks
   + instruments / instrument_current_versions
   + account_asset_scales
+  + 可选触发: surprising.account.position.events.v1
   -> risk_account_snapshots
   -> risk_position_snapshots
   -> risk_liquidation_candidates
@@ -57,8 +58,13 @@ account_positions + account_balances + account_deficits
 都有新鲜 mark price 时，该组才会进入风险计算。每个账户资产组再单独使用一个 Spring 事务：账户快照、持仓快照、
 爆仓候选插入和 outbox 插入要么一起提交，要么一起回滚。某个组失败后只记录日志，等待下一轮扫描重试；同一轮扫描里的其他账户组继续处理。
 
+provider 还会消费 `surprising.account.position.events.v1`。账户完成成交结算并更新持仓后，会触发对应
+`userId + settleAsset` 组立即扫描；risk 会用事件里的 `symbol` 和持仓锁定的 `instrumentVersion` 定位风险组。
+如果事件版本是 `0`，会回退查 `instrument_current_versions`，这样完全平仓后的事件仍能定位结算资产。这个事件驱动链路用于降低爆仓发现延迟；keyset 定时扫描仍是兜底，用来覆盖 Kafka 漏处理、mark 过期、重放和人工暂停后的恢复。
+
 ## Kafka
 
+- `surprising.account.position.events.v1`：账户结算后的持仓更新事件，key = `symbol`；risk-provider 消费用作低延迟扫描触发器。
 - `surprising.perp.liquidation.candidates.v1`：爆仓候选事件，key = `symbol`。
 
 `surprising-liquidation-provider` 消费这个 topic，抢占候选并提交 reduce-only 强平订单。
@@ -116,6 +122,9 @@ provider 支持 active-active 多节点部署，使用 PostgreSQL 按 `userId + 
 
 | 配置项 | 默认值 | 作用 |
 | --- | --- | --- |
+| `surprising.risk.kafka.group-id` | `surprising-risk-v1` | 多个 risk-provider 节点消费账户持仓事件时共享的 consumer group。 |
+| `surprising.risk.kafka.position-events-topic` | `surprising.account.position.events.v1` | 账户结算持仓事件 topic，用作事件驱动扫描触发器。 |
+| `surprising.risk.kafka.concurrency` | `2` | Kafka listener 并发数。单节点不要超过实际可用 partition 并行度。 |
 | `surprising.risk.coordination.enabled` | `true` | 开启扫描租约。多节点部署保持开启。 |
 | `surprising.risk.coordination.node-id` | `${HOSTNAME:}` | 稳定 owner id。为空时进程会生成本地随机 id。 |
 | `surprising.risk.coordination.lease-duration` | `15s` | 停止扫描节点的故障转移等待时间，应长于扫描间隔。 |
@@ -144,6 +153,8 @@ mvn -pl :surprising-risk-provider -am spring-boot:run
 - 风险扫描和强平执行都必须幂等。
 - risk-provider 可以多节点部署保证可用性。`risk_scan_leases` 会按 `userId + settleAsset` 协调写入者，保证同一账户资产组只有一个存活 owner 写风险快照和爆仓候选；owner 挂掉后租约过期，其他节点接管。
 - 扫描器使用 `userId + settleAsset` keyset 分页，并依赖 `account_positions_open_scan_idx` 部分索引避免在抢租约前加载全量持仓。不要改成 offset 分页；offset 在持仓变化时会越来越慢，也可能跳过或重复账户组。
+- 持仓事件扫描和定时扫描都会走同一个 `risk_scan_leases` ownership guard 和同一个账户组事务。Kafka consumer group 先减少重复事件处理，PostgreSQL 租约再防止事件重放或多节点竞争时出现重复写快照/候选。
+- 持仓事件消费者会拒绝 Kafka key 和 payload `symbol` 不一致的记录，保证 symbol 分区和顺序语义与撮合、账户、强平模块一致。
 - 如果某个 `userId + settleAsset` 组里任何开放持仓没有新鲜 mark price，本轮会跳过整个组。风险聚合不允许只计算部分持仓，否则会低估维持保证金。
 - 数据库保证同一个 `userId + symbol` 同时最多只有一个 `NEW/PROCESSING` 爆仓候选；上一个候选进入 `COMPLETED` 或 `CANCELED` 后，后续扫描才能生成新的候选。
 - 风险快照和 outbox 写入必须影响 1 行；如果 insert/update 被冲突或异常状态跳过，risk-provider 会 fail-fast 并回滚当前事务。

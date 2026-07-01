@@ -69,17 +69,8 @@ public class RiskService {
             }
             for (RiskGroupKey key : groups) {
                 after = key;
-                if (!ownsRiskGroup(key)) {
-                    continue;
-                }
                 try {
-                    transactionTemplate.executeWithoutResult(status -> {
-                        List<CalculatedPositionRisk> positions = riskRepository.calculatePositions(key,
-                                properties.getCalculation().getMaxMarkAge());
-                        if (!positions.isEmpty()) {
-                            scanGroup(key, positions, Instant.now());
-                        }
-                    });
+                    scanRiskGroup(key);
                 } catch (Exception ex) {
                     log.error("Failed to scan risk group userId={} settleAsset={}: {}",
                             key.userId(), key.settleAsset(), ex.getMessage(), ex);
@@ -88,11 +79,42 @@ public class RiskService {
         }
     }
 
+    /**
+     * Event-driven fast path used by account position events. The scheduled scanner is still the authoritative
+     * fallback, but this method cuts liquidation latency after fills by scanning only the affected user/settle group.
+     */
+    public void scanPositionUpdate(long userId, String symbol, long instrumentVersion) {
+        if (!properties.getCalculation().isEnabled()) {
+            return;
+        }
+        RiskGroupKey key = riskRepository.riskGroupForPositionEvent(userId, normalizeSymbol(symbol),
+                instrumentVersion).orElse(null);
+        if (key == null) {
+            log.debug("Position update did not resolve to a risk group userId={} symbol={} version={}",
+                    userId, symbol, instrumentVersion);
+            return;
+        }
+        scanRiskGroup(key);
+    }
+
     private boolean ownsRiskGroup(RiskGroupKey key) {
         if (!properties.getCoordination().isEnabled()) {
             return true;
         }
         return riskRepository.acquireScanLease(key, nodeId, properties.getCoordination().getLeaseDuration());
+    }
+
+    private void scanRiskGroup(RiskGroupKey key) {
+        if (!ownsRiskGroup(key)) {
+            return;
+        }
+        transactionTemplate.executeWithoutResult(status -> {
+            List<CalculatedPositionRisk> positions = riskRepository.calculatePositions(key,
+                    properties.getCalculation().getMaxMarkAge());
+            if (!positions.isEmpty()) {
+                scanGroup(key, positions, Instant.now());
+            }
+        });
     }
 
     public RiskAccountSnapshotResponse latestAccount(long userId, String settleAsset) {
@@ -191,6 +213,17 @@ public class RiskService {
         String normalized = asset.trim().toUpperCase();
         if (!normalized.matches("[A-Z0-9]{2,20}")) {
             throw new IllegalArgumentException("invalid asset: " + asset);
+        }
+        return normalized;
+    }
+
+    private String normalizeSymbol(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("symbol is required");
+        }
+        String normalized = symbol.trim().toUpperCase();
+        if (!normalized.matches("[A-Z0-9-]{3,64}")) {
+            throw new IllegalArgumentException("invalid symbol: " + symbol);
         }
         return normalized;
     }

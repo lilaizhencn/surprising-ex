@@ -25,7 +25,7 @@ kafka-topics.sh --bootstrap-server localhost:9092 \
 ```
 
 For local Docker Compose, use replication factor `1`.
-The repository script `scripts/create-topics.sh` creates the full topic set, including `surprising.account.position.events.v1` for private position pushes.
+The repository script `scripts/create-topics.sh` creates the full topic set, including `surprising.account.position.events.v1` for private position pushes and risk scan triggers.
 
 ## Java Runtime
 
@@ -45,11 +45,11 @@ Keep the matching provider on JDK 21 unless exchange-core and Chronicle are reva
 - Scale by increasing service instances and Kafka partitions, not by creating per-symbol consumers.
 - Kafka Streams restores RocksDB state from changelog topics during rebalance or restart.
 - Matching command records must use `symbol` as the Kafka key, so all commands for one symbol stay ordered in one partition.
-- Matching command, account match-trade, and liquidation-candidate consumers reject records whose Kafka key does not match the payload `symbol`.
+- Matching command, account match-trade, risk position-event, and liquidation-candidate consumers reject records whose Kafka key does not match the payload `symbol`.
 - Matching provider nodes share the same `surprising.trading.matching.kafka.group-id`; Kafka assigns each partition to one live matcher.
 - Matching restores open order books from PostgreSQL on startup. If a running matcher receives a new partition after processing commands, it closes the Spring context and should be restarted by Kubernetes/systemd.
 - Order, matching, risk, liquidation, and funding Kafka producers use `acks=all`, `enable.idempotence=true`, `compression.type=zstd`, and `max.in.flight.requests.per.connection=5`.
-- Matching, account, and liquidation Kafka consumers use `enable.auto.commit=false`, `auto.offset.reset=earliest`, cooperative-sticky assignment, and Spring Kafka `AckMode.RECORD`.
+- Matching, account, risk, and liquidation Kafka consumers use `enable.auto.commit=false`, `auto.offset.reset=earliest`, cooperative-sticky assignment, and Spring Kafka `AckMode.RECORD`.
 - Keep `surprising.trading.matching.kafka.restart-on-partition-reassignment=true` in production. Disable it only for local debugging.
 - Keep `surprising.trading.matching.kafka.partition-assignment-startup-grace-ms` large enough for concurrent listener containers to finish initial assignment; default is `30000`.
 - Avoid high-frequency autoscaling of matching providers. Partition movement causes restart-and-recover by design.
@@ -154,7 +154,8 @@ Recommended production settings:
 - Keep `surprising.risk.coordination.enabled=true` when more than one risk-provider instance is running.
 - Set `surprising.risk.coordination.node-id` to a stable pod name, hostname, or instance id. The default config uses `HOSTNAME`; if it is empty, the process generates a local random id.
 - Keep `surprising.risk.coordination.lease-duration` longer than the scan interval and shorter than your tolerated failover delay. The default is `15s` with a `1s` scan delay.
-- Risk currently calculates the candidate position set before claiming each `userId + settleAsset` group. The PostgreSQL lease prevents duplicate snapshot/candidate writes and redundant transaction work; if the account count becomes very large, add upstream scan sharding or keyset pagination on top of this lease.
+- Risk consumes `surprising.account.position.events.v1` as a low-latency trigger and also runs keyset-paginated scheduled scans as the fallback. Both paths claim `risk_scan_leases` before calculating and writing each `userId + settleAsset` group.
+- Keep `surprising.risk.kafka.group-id` identical across risk-provider nodes. Scale by increasing Kafka partitions and provider nodes; do not create per-symbol consumers.
 - Do not let risk-provider write snapshots when PostgreSQL is unavailable. Lease, snapshot id, candidate uniqueness, and outbox guarantees all depend on PostgreSQL.
 
 ## Deployment Order
@@ -298,10 +299,11 @@ Do not point this script at a shared development database. Matching restores ope
 - Account maker/taker fees are settled from the side-specific instrument version and written as `TRADE_FEE`. Positive ppm rates debit the user; negative ppm rates rebate. Fee ledger insert/backfill writes are fail-fast for the same reason as `TRADE_PNL`.
 - PnL and funding losses may reduce `locked_units` only through locked collateral backed by `account_position_margins`; open-order reservation locks must remain intact. If `account_position_margins` exceeds the releasable locked collateral, treat it as an accounting invariant issue.
 - Account position event outbox rows are written after `account_positions` is updated. Kafka publishing is at-least-once, so clients and downstream consumers should tolerate duplicate position events by `eventId` or `tradeId`.
+- Risk consumes account position events only as scan triggers. It does not trust the event as accounting state; it re-reads positions, balances, deficits, instruments, and mark prices inside the risk transaction before writing snapshots or candidates.
 - Funding settlement account ledger, balance, deficit, and settlement completion updates are fail-fast after a `funding_payments` row is inserted.
 - Risk snapshot writes, liquidation-candidate outbox enqueue, and outbox publish/failure markers are fail-fast. Only the partial active-candidate `NEW/PROCESSING user_id + symbol` uniqueness conflict may skip a candidate write; candidate-id or snapshot uniqueness conflicts must fail. A successfully inserted candidate must always be readable and enqueued before the transaction commits.
 - Risk scan leases are best-effort ownership, not accounting state. A node may take over only when the prior row is owned by itself or `lease_until <= updated_at`; clock synchronization matters for predictable failover.
-- Risk scans can be paused with `surprising.risk.calculation.enabled=false`; the scanner returns before reading positions or opening a transaction.
+- Risk scans can be paused with `surprising.risk.calculation.enabled=false`; both the scheduled scanner and position-event trigger return before reading positions or opening a transaction.
 - Insurance providers split `account_deficits` rows with `FOR UPDATE SKIP LOCKED` and lock the fund balance row before every deduction.
 - Insurance coverage can be paused with `surprising.insurance.coverage.enabled=false`; deficits remain explicit and unchanged.
 - If the insurance fund is empty, deficits remain in `account_deficits` and will be retried after the fund is topped up.

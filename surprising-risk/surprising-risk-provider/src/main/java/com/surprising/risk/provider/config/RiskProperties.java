@@ -45,7 +45,10 @@ public class RiskProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
+        private String groupId = "surprising-risk-v1";
+        private String positionEventsTopic = "surprising.account.position.events.v1";
         private String liquidationCandidatesTopic = "surprising.perp.liquidation.candidates.v1";
+        private int concurrency = 2;
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -55,12 +58,36 @@ public class RiskProperties {
             this.bootstrapServers = bootstrapServers;
         }
 
+        public String getGroupId() {
+            return groupId;
+        }
+
+        public void setGroupId(String groupId) {
+            this.groupId = groupId;
+        }
+
+        public String getPositionEventsTopic() {
+            return positionEventsTopic;
+        }
+
+        public void setPositionEventsTopic(String positionEventsTopic) {
+            this.positionEventsTopic = positionEventsTopic;
+        }
+
         public String getLiquidationCandidatesTopic() {
             return liquidationCandidatesTopic;
         }
 
         public void setLiquidationCandidatesTopic(String liquidationCandidatesTopic) {
             this.liquidationCandidatesTopic = liquidationCandidatesTopic;
+        }
+
+        public int getConcurrency() {
+            return concurrency;
+        }
+
+        public void setConcurrency(int concurrency) {
+            this.concurrency = concurrency;
         }
     }
 
