@@ -329,9 +329,9 @@ public class MarketMakerService {
         if (side == null) {
             return;
         }
-        long priceTicks = tradePriceTicks(side, orderBook, trade.getSlippageTicks());
-        long availableQuantity = bestAvailableQuantity(side, orderBook);
-        long quantitySteps = tradeQuantity(instrument, trade, availableQuantity);
+        TradeTarget target = tradeTarget(side, orderBook, trade.getSlippageTicks(), trade.getMaxSweepLevels());
+        long priceTicks = target.priceTicks();
+        long quantitySteps = tradeQuantity(instrument, trade, target.availableQuantitySteps());
         if (priceTicks <= 0 || quantitySteps <= 0) {
             return;
         }
@@ -403,14 +403,43 @@ public class MarketMakerService {
         return canBuy ? OrderSide.BUY : OrderSide.SELL;
     }
 
-    private long tradePriceTicks(OrderSide side, OrderBookSnapshotResponse orderBook, long slippageTicks) {
+    private TradeTarget tradeTarget(OrderSide side,
+                                    OrderBookSnapshotResponse orderBook,
+                                    long slippageTicks,
+                                    int maxSweepLevels) {
+        List<OrderBookLevel> levels = side == OrderSide.BUY
+                ? orderBook == null ? List.of() : orderBook.asks()
+                : orderBook == null ? List.of() : orderBook.bids();
+        if (levels == null || levels.isEmpty()) {
+            return new TradeTarget(0L, 0L);
+        }
+        int targetDistinctLevels = ThreadLocalRandom.current().nextInt(Math.max(1, maxSweepLevels)) + 1;
+        long cumulativeQuantity = 0L;
+        long targetPriceTicks = 0L;
+        long previousPriceTicks = 0L;
+        int distinctLevels = 0;
+        for (OrderBookLevel level : levels) {
+            if (level == null || level.priceTicks() <= 0 || level.quantitySteps() <= 0) {
+                continue;
+            }
+            if (level.priceTicks() != previousPriceTicks) {
+                distinctLevels++;
+                previousPriceTicks = level.priceTicks();
+            }
+            if (distinctLevels > targetDistinctLevels) {
+                break;
+            }
+            cumulativeQuantity = Math.addExact(cumulativeQuantity, level.quantitySteps());
+            targetPriceTicks = level.priceTicks();
+        }
+        if (targetPriceTicks <= 0 || cumulativeQuantity <= 0) {
+            return new TradeTarget(0L, 0L);
+        }
         long slippage = Math.max(0L, slippageTicks);
         if (side == OrderSide.BUY) {
-            long bestAsk = bestAsk(orderBook);
-            return bestAsk <= 0 ? 0L : Math.addExact(bestAsk, slippage);
+            return new TradeTarget(Math.addExact(targetPriceTicks, slippage), cumulativeQuantity);
         }
-        long bestBid = bestBid(orderBook);
-        return bestBid <= 0 ? 0L : Math.max(1L, bestBid - slippage);
+        return new TradeTarget(Math.max(1L, targetPriceTicks - slippage), cumulativeQuantity);
     }
 
     private long bestAvailableQuantity(OrderSide side, OrderBookSnapshotResponse orderBook) {
@@ -428,10 +457,7 @@ public class MarketMakerService {
         if (upperBound < minQuantity) {
             return 0L;
         }
-        if (upperBound == minQuantity) {
-            return minQuantity;
-        }
-        return ThreadLocalRandom.current().nextLong(minQuantity, upperBound + 1L);
+        return upperBound;
     }
 
     private long markPriceTicks(InstrumentResponse instrument, MarkPriceResponse markPrice) {
@@ -591,5 +617,8 @@ public class MarketMakerService {
     }
 
     private record ReconcileResult(long submitted, long canceled, long rejected) {
+    }
+
+    private record TradeTarget(long priceTicks, long availableQuantitySteps) {
     }
 }

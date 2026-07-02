@@ -258,6 +258,9 @@ public class MarketMakerProperties {
         private long maxQuantitySteps = 10L;
         @PositiveOrZero
         private long slippageTicks = 5L;
+        @Min(1)
+        @Max(20)
+        private int maxSweepLevels = 1;
         @PositiveOrZero
         private long inventoryThresholdSteps = 5_000L;
 
@@ -307,6 +310,14 @@ public class MarketMakerProperties {
 
         public void setSlippageTicks(long slippageTicks) {
             this.slippageTicks = slippageTicks;
+        }
+
+        public int getMaxSweepLevels() {
+            return maxSweepLevels;
+        }
+
+        public void setMaxSweepLevels(int maxSweepLevels) {
+            this.maxSweepLevels = maxSweepLevels;
         }
 
         public long getInventoryThresholdSteps() {

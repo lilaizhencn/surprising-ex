@@ -117,10 +117,16 @@ public class MarkPriceService {
 
     private boolean publishSymbol(String symbol, Instant now) {
         IndexPriceEvent index = indexPrices.get(symbol);
-        PerpBookTickerEvent book = bookTickers.get(symbol);
-        PerpTradeEvent trade = trades.get(symbol);
-        if (!fresh(index, now) || !fresh(book, now) || !fresh(trade, now)) {
+        if (!fresh(index, now)) {
             return false;
+        }
+        PerpBookTickerEvent book = bookTickers.get(symbol);
+        if (!fresh(book, now)) {
+            book = syntheticBookTicker(index, now);
+        }
+        PerpTradeEvent trade = trades.get(symbol);
+        if (!fresh(trade, now)) {
+            trade = syntheticTrade(index, now);
         }
         if (!ownsSymbol(symbol)) {
             return false;
@@ -138,6 +144,15 @@ public class MarkPriceService {
         kafkaTemplate.send(properties.getTopics().getMarkPriceTopic(), symbol, event);
         kafkaTemplate.send(properties.getTopics().getMarkPriceAuditTopic(), symbol, event);
         return true;
+    }
+
+    private PerpBookTickerEvent syntheticBookTicker(IndexPriceEvent index, Instant now) {
+        return new PerpBookTickerEvent(index.symbol(), index.indexPrice(), index.indexPrice(), index.sequence(), now);
+    }
+
+    private PerpTradeEvent syntheticTrade(IndexPriceEvent index, Instant now) {
+        return new PerpTradeEvent(index.symbol(), "index-bootstrap-" + index.sequence(), index.sequence(), now,
+                index.indexPrice(), BigDecimal.ONE, "BUY");
     }
 
     private Set<String> symbols() {

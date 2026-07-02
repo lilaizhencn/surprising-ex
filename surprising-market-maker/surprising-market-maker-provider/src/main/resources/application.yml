@@ -53,10 +53,11 @@ surprising:
     trade:
       enabled: true
       account-ids: [900001, 900002, 910001]
-      min-interval-ms: 100
+      min-interval-ms: 80
       min-quantity-steps: 1
-      max-quantity-steps: 20
+      max-quantity-steps: 1000
       slippage-ticks: 20
+      max-sweep-levels: 5
       inventory-threshold-steps: 5000
     strategies:
       - strategy-id: btc-usdt-mm-a
