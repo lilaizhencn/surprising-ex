@@ -21,6 +21,7 @@ Surprising Exchange 合约交易模块。当前已实现 `surprising-order-provi
 - `MARKET` 订单只允许 `IOC` 或 `FOK`。
 - notional 校验按 `contract_type` 分支。U 本位线性合约校验 `priceTicks * quantitySteps * notional_multiplier_units`；币本位反向合约校验 `quantitySteps * notional_multiplier_units`，因为 multiplier 表示每个合约 step 的报价币面值。两条路径都用 `Math.multiplyExact` 防止 long 溢出。
 - 市价单用 `markPriceTicks +/- marketMaxSlippagePpm` 做提交 exchange-core 前的价格保护。订单入口使用同一个 mark 派生的可成交区间做风控：U 本位线性合约无论 BUY/SELL 都按上边界冻结初始保证金，币本位反向合约按下边界冻结，因为价格越低所需抵押越高。
+- 当 `surprising.trading.order.risk.limit-price-protection-enabled=true` 时，限价单也要求新鲜 mark price。BUY 限价不能高于 `markPriceTicks * (1 + limitPriceBandPpm / 1_000_000)`，SELL 限价不能低于 `markPriceTicks * (1 - limitPriceBandPpm / 1_000_000)`。被动低价买单和高价卖单仍然允许。
 - instrument version 保存产品默认 maker/taker ppm 费率；订单入口会叠加用户/VIP/做市覆盖后，把本订单实际费率快照写入 `trading_orders`，成交后由 account provider 按快照结算。
 
 例子：`BTC-USDT` 的 `price_tick_units = 10000000`、`quantity_step_units = 100000`，USDT scale 为 `100000000`，BTC scale 为 `100000000`。
@@ -67,8 +68,12 @@ client / internal gateway
 订单、撮合 command、成交事件、账户 reservation 和账户持仓现在都会携带 `marginMode`。
 默认值是 `CROSS`。`ISOLATED` 已经进入订单入口、撮合事件、账户保证金、持仓、风控快照、资金费和强平链路。
 全仓亏损、手续费和资金费可以使用全仓可用余额以及全仓持仓保证金兜底；逐仓只消耗同一 `userId + symbol + asset + marginMode`
-下的逐仓持仓保证金，不会动用其他 symbol 或全仓余额。当前仍未实现用户手动追加/减少逐仓保证金、持仓模式切换约束和 hedge
-`positionSide`，因此前端应按单向净持仓展示。
+下的逐仓持仓保证金，不会动用其他 symbol 或全仓余额。用户手动追加/减少逐仓保证金由
+`surprising-account-provider` 的 `POST /api/v1/accounts/position-margin-adjustments` 处理。在单向净持仓模型下，同一用户同一 symbol
+要在 `CROSS` 和 `ISOLATED` 之间切换，必须先关闭该 symbol 已有持仓并取消普通开放订单和待触发条件单；order-provider 和
+trigger-provider 会用 `userId + symbol` 的 PostgreSQL transaction advisory lock 串行化这条检查。订单和条件单 API
+现在会识别 `positionSide`，但当前引擎只支持 `NET`；`LONG` 和 `SHORT` 会在入口被拒绝，避免客户端把 hedge-mode
+订单静默送入单向净持仓账户模型。订单和条件单响应也会返回 `positionSide = NET`，前端应按单向净仓展示。
 
 ## 手续费
 
@@ -207,12 +212,12 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `trading_orders_user_client_order_uidx` 保证同一用户 `clientOrderId` 幂等。
 - 下单插入只允许这个部分 `(userId, clientOrderId)` 唯一键冲突被幂等跳过。`orderId` 或其他唯一键冲突必须失败，不能被当成请求重放。
 - 幂等冲突发生在保证金冻结前；重复请求只返回已存在订单，不会创建新的 reservation 或重复锁定余额。
-- `trading_sequences` 使用 PostgreSQL 原子 `INSERT ... ON CONFLICT ... RETURNING` 分配 `orderId`、`eventId`、`commandId`、`outboxId`。
+- `orderId`、`eventId`、`commandId`、`outboxId` 等交易链路 ID 使用 PostgreSQL native sequence（例如 `trading_order_seq`、`trading_event_seq`、`trading_command_seq`、`trading_outbox_seq`）。不再用表计数器热点行分配高频 ID，避免并发下单和撮合时形成行锁瓶颈。
 - `trading_outbox_events` 与订单写入在同一事务提交。
 - `trading_trigger_orders_user_client_uidx` 保证同一用户 `clientTriggerOrderId` 的止盈止损下单幂等。
 - `ocoGroupId` 用于把成对 TP/SL 条件单组成 one-cancels-other 互撤组；它是可选、按 `userId + symbol + marginMode` 隔离的字段，不替代 `clientTriggerOrderId`。
 - `trading_order_events` 和 `trading_outbox_events` 插入必须影响 1 行，否则事务失败，避免订单状态和消息链路不一致。
-- outbox 发布器用 `FOR UPDATE SKIP LOCKED`，多个 order-provider 节点可以同时运行，不会重复锁同一批待发消息。
+- outbox 发布器先用 `FOR UPDATE SKIP LOCKED` claim 到期待发消息，并把 `next_attempt_at` 推进为短租约；随后在数据库事务外发送 Kafka，避免 Kafka 网络等待占住 PostgreSQL 行锁和连接。
 - outbox 失败后按 `next_attempt_at` 指数退避重试，避免 Kafka 故障时热循环。
 - Kafka producer 开启 `acks=all` 和 `enable.idempotence=true`。
 - 下游消费者需要按 `commandId/orderId` 幂等处理 command，按 `eventId` 幂等处理 event。
@@ -227,6 +232,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `surprising.perp.mark.price.v1`：trigger-provider 消费的标记价格流，key = `symbol`。
 
 topic partition 继续按 symbol 扩展。同一个 symbol 的 command 必须固定落到同一个 matching shard/order book。
+`surprising.trading.matching.kafka.max-poll-records` 默认 `500`；生产调优时应结合 Kafka lag 和 command 处理延迟调整，不需要改代码。
 
 ## exchange-core 撮合
 
@@ -310,6 +316,7 @@ matching consumer 使用 cooperative sticky assignment 和 `MatchingPartitionAss
 - 生产环境保持 `surprising.trading.matching.kafka.restart-on-partition-reassignment=true`。
 - `surprising.trading.matching.kafka.partition-assignment-startup-grace-ms` 默认 `30000`，用于让并发 listener 容器完成初始 assignment，然后再把新 partition 视为不安全的运行期迁移。
 - command 失败后的重启是无条件保护；partition-reassignment 开关只控制 partition 迁移场景的重启行为。
+- `surprising.trading.matching.kafka.client-id` 要给每个 matching pod 配成稳定且唯一的值。这样 Kafka consumer group 输出才能把某个 `symbol` partition 映射到真正持有本地 exchange-core 订单簿的节点。
 
 扩容规则：谨慎增加 topic partition 和 matching 实例。不要对 matching pod 做高频自动扩缩容，因为 partition 迁移可能触发重启并重建订单簿。
 把 matching 在命令处理期间退出视为必须通过 DB 恢复重启的场景，不要在同一进程内强行重试。
@@ -366,7 +373,8 @@ curl 'http://localhost:9084/api/v1/trading/orders/open?userId=1001&symbol=BTC-US
 
 根目录 [init.sql](../init.sql) 创建：
 
-- `trading_sequences`
+- `trading_sequences`（兼容低频 legacy 计数器；高频交易链路 ID 使用 native sequence）
+- `trading_order_seq`、`trading_event_seq`、`trading_command_seq`、`trading_outbox_seq`
 - `trading_orders`
 - `trading_order_events`
 - `trading_trigger_orders`
@@ -426,8 +434,11 @@ mvn -pl :surprising-trigger-provider -am spring-boot:run
 - matching provider 使用 JDK 21 运行。exchange-core 依赖的 Chronicle/OpenHFT 需要显式 Java module opens/exports；生产 pod 使用本地运行示例里的 `JAVA_TOOL_OPTIONS`。
 - 新 symbol 必须先在 instrument 模块上线，确认 Kafka partition 足够，再开放下单。
 - MARKET 订单在订单入口和撮合阶段都要求 mark price 新鲜。订单入口会用配置的 mark 派生可成交区间校验 min/max notional，再发布撮合命令；线性合约 max-notional 和初始保证金按上边界计算，避免市价 SELL 开空在高买价成交时抵押不足。`surprising.trading.*.market-max-slippage-ppm` 需要按产品流动性配置。
+- 默认 application 配置已开启 LIMIT 订单价格带保护，`limit-price-band-ppm: 50000` 表示 5%。正式开放高频用户或做市商报价前，需要按具体产品流动性调整。
 - 当前已经实现基于 PostgreSQL 的开放订单簿恢复；exchange-core 原生 snapshot/journal 可作为后续超大订单簿更快恢复的增强。
 - Instrument `max_notional_units` 已同时约束限价单和保护价市价单。真实盘口深度、延迟和强平压力测试证明更大额度安全之前，产品 notional 限额应保持保守。
+- 下单冻结保证金时还会校验投影后的持仓敞口：当前持仓 + 同方向未完成非 reduce-only 委托 + 本次委托，用这个投影值检查 `max_position_notional_units`、动态平台 OI 限额和命中的 `instrument_risk_brackets.notional_cap_units`；纯减仓单按减仓后的投影校验，不会简单用当前敞口加本单 notional 误拒。
+- 动态单用户持仓量限额已实现：account 结算在 `trading_symbol_open_interest` 维护 long/short/open 数量，`open_quantity_steps=max(long_quantity_steps, short_quantity_steps)`；order 入口按当前价格折算平台 OI notional，并使用 `min(max_position_notional_units, max(openInterestNotional * user_open_interest_limit_rate_ppm / 1_000_000, user_open_interest_limit_floor_units))` 作为每个用户的有效持仓上限。默认 BTC/ETH 为 30% 平台 OI，固定下限 250,000 USDT。生产需要定期用 `account_positions` 对该表做重建校验，尤其在人工修数或灾备恢复之后。
 - 用户主动平仓应使用 `reduceOnly=true`；强平订单由 liquidation provider 复核风险后生成，不走用户订单入口校验。
 - 止盈止损触发后一定通过 order-provider 提交 reduce-only 平仓单。WebSocket 客户端会在普通私有订单/成交/持仓频道收到触发后生成的真实订单和成交。
 - outbox 是至少一次投递；下游撮合和推送必须幂等。

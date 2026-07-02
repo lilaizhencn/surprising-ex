@@ -50,6 +50,7 @@ public class WebSocketProperties {
         private String bootstrapServers = "localhost:9092";
         private String groupId = "surprising-websocket-local";
         private int concurrency = 2;
+        private int maxPollRecords = 1000;
         private String candleTopic = "surprising.perp.candle.events.v1";
         private String tradeTopic = "surprising.perp.trade.events.v1";
         private String orderBookDepthTopic = "surprising.perp.orderbook.depth.v1";
@@ -60,6 +61,8 @@ public class WebSocketProperties {
         private String matchResultsTopic = "surprising.perp.match.results.v1";
         private String matchTradesTopic = "surprising.perp.match.trades.v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
+        private String accountRiskEventsTopic = "surprising.risk.account.events.v1";
+        private String positionRiskEventsTopic = "surprising.risk.position.events.v1";
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -83,6 +86,14 @@ public class WebSocketProperties {
 
         public void setConcurrency(int concurrency) {
             this.concurrency = concurrency;
+        }
+
+        public int getMaxPollRecords() {
+            return maxPollRecords;
+        }
+
+        public void setMaxPollRecords(int maxPollRecords) {
+            this.maxPollRecords = maxPollRecords;
         }
 
         public String getCandleTopic() {
@@ -163,6 +174,22 @@ public class WebSocketProperties {
 
         public void setPositionEventsTopic(String positionEventsTopic) {
             this.positionEventsTopic = positionEventsTopic;
+        }
+
+        public String getAccountRiskEventsTopic() {
+            return accountRiskEventsTopic;
+        }
+
+        public void setAccountRiskEventsTopic(String accountRiskEventsTopic) {
+            this.accountRiskEventsTopic = accountRiskEventsTopic;
+        }
+
+        public String getPositionRiskEventsTopic() {
+            return positionRiskEventsTopic;
+        }
+
+        public void setPositionRiskEventsTopic(String positionRiskEventsTopic) {
+            this.positionRiskEventsTopic = positionRiskEventsTopic;
         }
     }
 

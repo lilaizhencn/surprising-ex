@@ -32,6 +32,7 @@ Instrument configuration is stored in exchange-core-friendly long units:
 - `notional_multiplier_units`: for `LINEAR_PERPETUAL`, settlement units per `priceTick * quantityStep`; for `INVERSE_PERPETUAL`, quote face-value units per contract step.
 - `contract_type` is not descriptive metadata only. Account, risk, funding, liquidation, and ADL formulas branch on it.
 - `maker_fee_rate_ppm` / `taker_fee_rate_ppm`: product default fees. Order entry applies `trading_fee_schedules` overrides and writes the final rates to `trading_orders`; account settlement writes `TRADE_FEE` ledger entries from that order snapshot. Positive values debit the user, and negative values credit a rebate. Default BTC/ETH contracts use maker `200 ppm` and taker `500 ppm`.
+- `user_open_interest_limit_rate_ppm` / `user_open_interest_limit_floor_units`: dynamic per-user position cap settings. Order provider uses `max(platform OI notional * rate, floor)`, additionally bounded by `max_position_notional_units`. BTC/ETH default to `300000 ppm` and `25000000000000`, equal to a 250,000 USDT floor.
 - `*_rate_ppm`, `max_leverage_ppm`, `weight_ppm`: rates, leverage, and weights use ppm.
 
 `surprising-instrument-api` also owns `PerpetualContractMath`, the shared long-unit formula implementation for linear/inverse notional, unrealized PnL, notional-per-step, and maintenance margin. Risk, funding, liquidation, and ADL should call this shared math instead of reimplementing contract formulas in SQL.
@@ -95,6 +96,7 @@ surprising.instrument.events.v1
 ```
 
 The event key is `symbol`. Each event carries the full new `InstrumentResponse` snapshot so downstream services can replace their local cache directly.
+The producer uses `acks=all`, idempotence, `zstd`, and `max.in.flight.requests.per.connection=5` so version-change events have the same durable Kafka baseline as the trading and price pipelines.
 
 ## Database
 
@@ -108,8 +110,16 @@ Root [init.sql](../init.sql) creates:
 
 Default markets:
 
-- `BTC-USDT`
-- `ETH-USDT`
+- `BTC-USDT`: linear USDT perpetual, `contract_multiplier_ppm=1000000`, `contract_value_asset=USDT`,
+  `price_tick_units=10000000` (0.1 USDT), `quantity_step_units=100000` (0.001 BTC),
+  `quantity_precision=3`, `min_quantity_steps=1`, `max_quantity_steps=100000`,
+  `notional_multiplier_units=10000`, `user_open_interest_limit_rate_ppm=300000`,
+  `user_open_interest_limit_floor_units=25000000000000`.
+- `ETH-USDT`: linear USDT perpetual, `contract_multiplier_ppm=1000000`, `contract_value_asset=USDT`,
+  `price_tick_units=1000000` (0.01 USDT), `quantity_step_units=10000000000000000` (0.01 ETH),
+  `quantity_precision=2`, `min_quantity_steps=1`, `max_quantity_steps=500000`,
+  `notional_multiplier_units=10000`, `user_open_interest_limit_rate_ppm=300000`,
+  `user_open_interest_limit_floor_units=25000000000000`.
 
 ## Local Run
 

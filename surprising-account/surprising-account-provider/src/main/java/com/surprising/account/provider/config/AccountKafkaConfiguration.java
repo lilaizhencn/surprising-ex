@@ -44,11 +44,12 @@ public class AccountKafkaConfiguration {
         Map<String, Object> config = new HashMap<>();
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
         config.put(ConsumerConfig.GROUP_ID_CONFIG, properties.getKafka().getGroupId());
+        config.put(ConsumerConfig.CLIENT_ID_CONFIG, properties.getKafka().getClientId());
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
-        config.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 500);
+        config.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, properties.getKafka().getMaxPollRecords());
         config.put(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG, CooperativeStickyAssignor.class.getName());
         return new DefaultKafkaConsumerFactory<>(config);
     }
@@ -60,7 +61,8 @@ public class AccountKafkaConfiguration {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(accountConsumerFactory);
         factory.setConcurrency(properties.getKafka().getConcurrency());
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.setBatchListener(true);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
         return factory;
     }
 }

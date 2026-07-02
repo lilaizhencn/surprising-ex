@@ -3,20 +3,29 @@ package com.surprising.account.provider.service;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
+import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
+import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
+import com.surprising.account.api.model.PositionMarginResponse;
 import com.surprising.account.api.model.PositionQueryResponse;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.ContractSpec;
+import com.surprising.account.provider.model.LiquidationFeeContext;
+import com.surprising.account.provider.model.LiquidationFeeSettlement;
 import com.surprising.account.provider.model.OrderFeeSnapshot;
 import com.surprising.account.provider.model.PositionChange;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRepository;
+import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
+import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +38,8 @@ public class AccountService {
     private final ReduceOnlyOrderPruner reduceOnlyOrderPruner;
     private final AccountProperties properties;
     private final AccountOutboxRepository outboxRepository;
+    private final BoundedLocalCache<ContractSpecKey, ContractSpec> contractSpecCache;
+    private final BoundedLocalCache<OrderFeeSnapshotKey, OrderFeeSnapshot> orderFeeSnapshotCache;
 
     public AccountService(AccountRepository accountRepository, PositionCalculator positionCalculator) {
         this(accountRepository, positionCalculator, null, new AccountProperties(), null);
@@ -45,6 +56,11 @@ public class AccountService {
         this.reduceOnlyOrderPruner = reduceOnlyOrderPruner;
         this.properties = properties;
         this.outboxRepository = outboxRepository;
+        AccountProperties.Cache cacheProperties = properties.getCache() == null
+                ? new AccountProperties.Cache()
+                : properties.getCache();
+        this.contractSpecCache = new BoundedLocalCache<>(cacheProperties.getContractSpecMaxEntries());
+        this.orderFeeSnapshotCache = new BoundedLocalCache<>(cacheProperties.getOrderFeeSnapshotMaxEntries());
     }
 
     @Transactional
@@ -67,26 +83,74 @@ public class AccountService {
     }
 
     public PositionResponse position(long userId, String symbol) {
-        return position(userId, symbol, null);
+        return position(userId, symbol, null, null);
     }
 
     public PositionResponse position(long userId, String symbol, String marginMode) {
+        return position(userId, symbol, marginMode, null);
+    }
+
+    public PositionResponse position(long userId, String symbol, String marginMode, String positionSide) {
         String normalizedSymbol = normalizeSymbol(symbol);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
+        normalizePositionSide(positionSide);
         return accountRepository.position(userId, normalizedSymbol, normalizedMarginMode)
                 .orElse(new PositionResponse(userId, normalizedSymbol, 0L, normalizedMarginMode,
                         0L, 0L, 0L, Instant.EPOCH));
     }
 
+    public PositionMarginResponse positionMargin(long userId, String symbol, String marginMode) {
+        String normalizedSymbol = normalizeSymbol(symbol);
+        MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
+        return accountRepository.positionMargin(userId, normalizedSymbol, normalizedMarginMode)
+                .orElse(new PositionMarginResponse(userId, normalizedSymbol, "", normalizedMarginMode,
+                        0L, Instant.EPOCH));
+    }
+
     public PositionQueryResponse positions(long userId) {
+        return positions(userId, null);
+    }
+
+    public PositionQueryResponse positions(long userId, String positionSide) {
+        normalizePositionSide(positionSide);
         List<PositionResponse> rows = accountRepository.positions(userId);
         return new PositionQueryResponse(rows.size(), rows);
     }
 
     @Transactional
+    public PositionMarginAdjustmentResponse adjustPositionMargin(PositionMarginAdjustmentRequest request) {
+        if (request.amountUnits() == 0) {
+            throw new IllegalArgumentException("amountUnits must not be zero");
+        }
+        String symbol = normalizeSymbol(request.symbol());
+        MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
+        if (marginMode != MarginMode.ISOLATED) {
+            throw new IllegalArgumentException("position margin adjustment only supports ISOLATED margin mode");
+        }
+        PositionMarginAdjustmentResponse response = accountRepository.adjustIsolatedPositionMargin(
+                request.userId(), symbol, request.amountUnits(),
+                normalizeReferenceId(request.referenceId()), normalizeReason(request.reason(), request.amountUnits()),
+                properties.getPositionMargin().getMaxRiskSnapshotAge(),
+                properties.getPositionMargin().getRemovalBufferPpm());
+        if (outboxRepository != null) {
+            PositionResponse current = accountRepository.position(request.userId(), symbol, MarginMode.ISOLATED)
+                    .orElseThrow(() -> new IllegalStateException("isolated position missing after margin adjustment"));
+            // Manual margin changes do not have a trade id; tradeId=0 tells downstream consumers this is a state trigger.
+            outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
+                    0L, current, Instant.now(), TraceContext.currentOrCreate());
+        }
+        return response;
+    }
+
+    @Transactional
     public void processTrade(MatchTradeEvent trade) {
+        processTradeIfNew(trade);
+    }
+
+    @Transactional
+    public boolean processTradeIfNew(MatchTradeEvent trade) {
         if (!accountRepository.markTradeProcessing(trade.tradeId(), trade.symbol())) {
-            return;
+            return false;
         }
         String traceId = trade.traceId();
         applyTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
@@ -95,6 +159,7 @@ public class AccountService {
         applyTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
                 trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.makerMarginMode(), trade.priceTicks(), trade.quantitySteps(),
                 trade.makerOrderCompleted(), false, trade.eventTime(), traceId);
+        return true;
     }
 
     private PositionResponse applyTradeSide(long tradeId,
@@ -111,11 +176,11 @@ public class AccountService {
                                             Instant eventTime,
                                             String traceId) {
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
-        ContractSpec fillSpec = accountRepository.contractSpec(symbol, fillInstrumentVersion);
+        ContractSpec fillSpec = contractSpec(symbol, fillInstrumentVersion);
         PositionState current = accountRepository.lockPosition(userId, symbol, normalizedMarginMode);
         ContractSpec positionSpec = current.signedQuantitySteps() == 0
                 ? fillSpec
-                : accountRepository.contractSpec(symbol, current.instrumentVersion());
+                : contractSpec(symbol, current.instrumentVersion());
         long closeSteps = MarginTransferMath.closeSteps(current.signedQuantitySteps(), side, quantitySteps);
         long openSteps = Math.subtractExact(quantitySteps, closeSteps);
         PositionChange change = positionCalculator.apply(current, side, priceTicks, quantitySteps,
@@ -129,11 +194,15 @@ public class AccountService {
             accountRepository.consumeOrderMargin(orderId, userId, symbol, normalizedMarginMode, openSteps, actualMarginUnits,
                     orderCompleted, eventTime);
         }
-        OrderFeeSnapshot feeSnapshot = accountRepository.orderFeeSnapshot(orderId, userId, symbol);
+        OrderFeeSnapshot feeSnapshot = orderFeeSnapshot(orderId, userId, symbol);
         long feeRatePpm = taker ? feeSnapshot.takerFeeRatePpm() : feeSnapshot.makerFeeRatePpm();
         long feeDeltaUnits = TradeFeeMath.feeDeltaUnits(fillSpec, priceTicks, quantitySteps, feeRatePpm);
         accountRepository.settleTradeFee(userId, fillSpec.settleAsset(), orderId, tradeId, feeDeltaUnits,
                 taker ? "TAKER_FEE" : "MAKER_FEE", feeRatePpm, symbol, normalizedMarginMode, eventTime);
+        if (closeSteps > 0) {
+            settleLiquidationFeeIfNeeded(tradeId, orderId, userId, symbol, normalizedMarginMode, fillSpec,
+                    priceTicks, quantitySteps, eventTime, traceId);
+        }
         if (closeSteps > 0) {
             accountRepository.releasePositionMargin(userId, symbol, normalizedMarginMode, closeSteps,
                     Math.absExact(current.signedQuantitySteps()), eventTime);
@@ -141,7 +210,7 @@ public class AccountService {
                     orderCompleted && openSteps == 0, eventTime);
         }
         PositionResponse updated = accountRepository.updatePosition(userId, symbol, normalizedMarginMode,
-                change.next(), eventTime);
+                change.next(), current.signedQuantitySteps(), eventTime);
         if (reduceOnlyOrderPruner != null) {
             reduceOnlyOrderPruner.prune(userId, symbol, change.next(), eventTime, traceId);
         }
@@ -150,6 +219,63 @@ public class AccountService {
                     tradeId, updated, eventTime, traceId);
         }
         return updated;
+    }
+
+    private void settleLiquidationFeeIfNeeded(long tradeId,
+                                              long orderId,
+                                              long userId,
+                                              String symbol,
+                                              MarginMode marginMode,
+                                              ContractSpec fillSpec,
+                                              long priceTicks,
+                                              long quantitySteps,
+                                              Instant eventTime,
+                                              String traceId) {
+        accountRepository.liquidationFeeContext(orderId, userId, symbol).ifPresent(context -> {
+            long requestedFeeUnits = liquidationFeeUnits(fillSpec, priceTicks, quantitySteps, context);
+            accountRepository.settleLiquidationFee(userId, fillSpec.settleAsset(), orderId, tradeId, symbol,
+                    marginMode, requestedFeeUnits, context, eventTime)
+                    .ifPresent(settlement -> enqueueLiquidationFeeEvent(tradeId, orderId, userId, symbol,
+                            marginMode, fillSpec.settleAsset(), settlement, eventTime, traceId));
+        });
+    }
+
+    private long liquidationFeeUnits(ContractSpec fillSpec,
+                                     long priceTicks,
+                                     long quantitySteps,
+                                     LiquidationFeeContext context) {
+        if (context.feeRatePpm() <= 0) {
+            return 0L;
+        }
+        long feeDeltaUnits = TradeFeeMath.feeDeltaUnits(fillSpec, priceTicks, quantitySteps, context.feeRatePpm());
+        return feeDeltaUnits < 0 ? Math.absExact(feeDeltaUnits) : 0L;
+    }
+
+    private void enqueueLiquidationFeeEvent(long tradeId,
+                                            long orderId,
+                                            long userId,
+                                            String symbol,
+                                            MarginMode marginMode,
+                                            String asset,
+                                            LiquidationFeeSettlement settlement,
+                                            Instant eventTime,
+                                            String traceId) {
+        if (outboxRepository == null || settlement.collectedFeeUnits() <= 0) {
+            return;
+        }
+        outboxRepository.enqueueLiquidationFeeSettled(properties.getKafka().getLiquidationFeeEventsTopic(),
+                tradeId, orderId, settlement.liquidationOrderId(), settlement.candidateId(), userId, symbol,
+                marginMode, asset, settlement.collectedFeeUnits(), settlement.feeRatePpm(), eventTime, traceId);
+    }
+
+    private ContractSpec contractSpec(String symbol, long instrumentVersion) {
+        return contractSpecCache.get(new ContractSpecKey(symbol, instrumentVersion),
+                key -> accountRepository.contractSpec(key.symbol(), key.instrumentVersion()));
+    }
+
+    private OrderFeeSnapshot orderFeeSnapshot(long orderId, long userId, String symbol) {
+        return orderFeeSnapshotCache.get(new OrderFeeSnapshotKey(orderId, userId, symbol),
+                key -> accountRepository.orderFeeSnapshot(key.orderId(), key.userId(), key.symbol()));
     }
 
     private OrderSide opposite(OrderSide side) {
@@ -189,6 +315,22 @@ public class AccountService {
         }
     }
 
+    private PositionSide normalizePositionSide(String positionSide) {
+        if (positionSide == null || positionSide.isBlank()) {
+            return PositionSide.NET;
+        }
+        PositionSide normalized;
+        try {
+            normalized = PositionSide.valueOf(positionSide.trim().toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("invalid positionSide: " + positionSide, ex);
+        }
+        if (normalized.isHedgeSide()) {
+            throw new IllegalArgumentException("hedge-mode positionSide is not supported; use NET");
+        }
+        return normalized;
+    }
+
     private String normalizeReferenceId(String referenceId) {
         if (referenceId == null || referenceId.isBlank()) {
             throw new IllegalArgumentException("referenceId is required");
@@ -198,5 +340,48 @@ public class AccountService {
             throw new IllegalArgumentException("referenceId length must be <= 128");
         }
         return normalized;
+    }
+
+    private String normalizeReason(String reason, long amountUnits) {
+        if (reason == null || reason.isBlank()) {
+            return amountUnits > 0 ? "ADD_POSITION_MARGIN" : "REMOVE_POSITION_MARGIN";
+        }
+        String normalized = reason.trim();
+        if (normalized.length() > 128) {
+            throw new IllegalArgumentException("reason length must be <= 128");
+        }
+        return normalized;
+    }
+
+    private record ContractSpecKey(String symbol, long instrumentVersion) {
+    }
+
+    private record OrderFeeSnapshotKey(long orderId, long userId, String symbol) {
+    }
+
+    private static final class BoundedLocalCache<K, V> {
+
+        private final int maxEntries;
+        private final ConcurrentHashMap<K, V> values = new ConcurrentHashMap<>();
+
+        private BoundedLocalCache(int maxEntries) {
+            this.maxEntries = Math.max(0, maxEntries);
+        }
+
+        private V get(K key, Function<K, V> loader) {
+            if (maxEntries == 0) {
+                return loader.apply(key);
+            }
+            V cached = values.get(key);
+            if (cached != null) {
+                return cached;
+            }
+            V loaded = loader.apply(key);
+            V existing = values.putIfAbsent(key, loaded);
+            if (values.size() > maxEntries) {
+                values.clear();
+            }
+            return existing == null ? loaded : existing;
+        }
     }
 }

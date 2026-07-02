@@ -19,7 +19,7 @@ class PositionRiskTriggerConsumerTest {
 
         consumer.onPositionUpdated(record("BTC-USDT", positionPayload("BTC-USDT")));
 
-        verify(riskService).scanPositionUpdate(1001L, "BTC-USDT", MarginMode.CROSS, 7L);
+        verify(riskService).scanPositionUpdate(1001L, "BTC-USDT", MarginMode.CROSS, 7L, "trace-1");
     }
 
     @Test

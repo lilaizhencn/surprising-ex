@@ -174,6 +174,50 @@ class OrderValidatorTest {
     }
 
     @Test
+    void rejectsLimitBuyAboveMarkPriceBand() {
+        OrderValidator validator = limitPriceBandValidator(tradingRule(), OptionalLong.of(100_000L),
+                50_000L);
+
+        var result = validator.validate(limit(OrderSide.BUY, 106_000L, 1L));
+
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.rejectReason()).isEqualTo("limit buy price exceeds mark price band");
+    }
+
+    @Test
+    void rejectsLimitSellBelowMarkPriceBand() {
+        OrderValidator validator = limitPriceBandValidator(tradingRule(), OptionalLong.of(100_000L),
+                50_000L);
+
+        var result = validator.validate(limit(OrderSide.SELL, 94_999L, 1L));
+
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.rejectReason()).isEqualTo("limit sell price exceeds mark price band");
+    }
+
+    @Test
+    void acceptsLimitPassivePricesInsideAndOutsideOppositeSideBand() {
+        OrderValidator validator = limitPriceBandValidator(tradingRule(), OptionalLong.of(100_000L),
+                50_000L);
+
+        var lowBid = validator.validate(limit(OrderSide.BUY, 80_000L, 1L));
+        var highAsk = validator.validate(limit(OrderSide.SELL, 130_000L, 1L));
+
+        assertThat(lowBid.accepted()).isTrue();
+        assertThat(highAsk.accepted()).isTrue();
+    }
+
+    @Test
+    void rejectsLimitOrderWithoutFreshMarkWhenPriceBandEnabled() {
+        OrderValidator validator = limitPriceBandValidator(tradingRule(), OptionalLong.empty(), 50_000L);
+
+        var result = validator.validate(limit(100_000L, 1L));
+
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.rejectReason()).isEqualTo("mark price unavailable");
+    }
+
+    @Test
     void rejectsHaltedInstrument() {
         OrderValidator validator = new OrderValidator(lookup(new InstrumentRule(
                 "BTC-USDT", 1L, "HALT", ContractType.LINEAR_PERPETUAL, Set.of("LIMIT", "MARKET"),
@@ -187,7 +231,11 @@ class OrderValidatorTest {
     }
 
     private PlaceOrderRequest limit(long priceTicks, long quantitySteps) {
-        return new PlaceOrderRequest(1001L, "c1", "BTC-USDT", OrderSide.BUY,
+        return limit(OrderSide.BUY, priceTicks, quantitySteps);
+    }
+
+    private PlaceOrderRequest limit(OrderSide side, long priceTicks, long quantitySteps) {
+        return new PlaceOrderRequest(1001L, "c1", "BTC-USDT", side,
                 OrderType.LIMIT, TimeInForce.GTC, priceTicks, quantitySteps, false, false);
     }
 
@@ -247,6 +295,16 @@ class OrderValidatorTest {
     private OrderValidator validator(InstrumentRule rule, OptionalLong markPriceTicks, long maxSlippagePpm) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getRisk().setMarketMaxSlippagePpm(maxSlippagePpm);
+        return new OrderValidator(lookup(rule), properties,
+                (symbol, instrumentVersion, maxAgeMs) -> markPriceTicks);
+    }
+
+    private OrderValidator limitPriceBandValidator(InstrumentRule rule,
+                                                   OptionalLong markPriceTicks,
+                                                   long limitPriceBandPpm) {
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getRisk().setLimitPriceProtectionEnabled(true);
+        properties.getRisk().setLimitPriceBandPpm(limitPriceBandPpm);
         return new OrderValidator(lookup(rule), properties,
                 (symbol, instrumentVersion, maxAgeMs) -> markPriceTicks);
     }

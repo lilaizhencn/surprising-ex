@@ -4,6 +4,9 @@ import com.surprising.account.api.AccountApiPaths;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
+import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
+import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
+import com.surprising.account.api.model.PositionMarginResponse;
 import com.surprising.account.api.model.PositionQueryResponse;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.provider.service.AccountService;
@@ -51,16 +54,45 @@ public class AccountController {
     @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position")
     public PositionResponse position(@RequestParam("userId") long userId,
                                      @RequestParam("symbol") String symbol,
-                                     @RequestParam(value = "marginMode", required = false) String marginMode) {
+                                     @RequestParam(value = "marginMode", required = false) String marginMode,
+                                     @RequestParam(value = "positionSide", required = false) String positionSide) {
         try {
-            return accountService.position(userId, symbol, marginMode);
+            return accountService.position(userId, symbol, marginMode, positionSide);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
     }
 
+    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-margin")
+    public PositionMarginResponse positionMargin(@RequestParam("userId") long userId,
+                                                 @RequestParam("symbol") String symbol,
+                                                 @RequestParam(value = "marginMode", required = false) String marginMode) {
+        try {
+            return accountService.positionMargin(userId, symbol, marginMode);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
+    @PostMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-margin-adjustments")
+    public PositionMarginAdjustmentResponse adjustPositionMargin(
+            @RequestBody PositionMarginAdjustmentRequest request) {
+        try {
+            return accountService.adjustPositionMargin(request);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        }
+    }
+
     @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/positions")
-    public PositionQueryResponse positions(@RequestParam("userId") long userId) {
-        return accountService.positions(userId);
+    public PositionQueryResponse positions(@RequestParam("userId") long userId,
+                                           @RequestParam(value = "positionSide", required = false) String positionSide) {
+        try {
+            return accountService.positions(userId, positionSide);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
     }
 }

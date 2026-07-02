@@ -33,7 +33,16 @@ surprising.perp.liquidation.candidates.v1
 - `postOnly = false`
 - `quantitySteps` 按实时仓位 `abs(livePosition)` 做上限，不会被用户已有 reduce-only 挂单挤掉。
 
-生成订单前会重新读取最新且未过期的账户风险状态。如果账户已经恢复到非 `LIQUIDATION`，或最新风险快照超过 `surprising.liquidation.risk.max-snapshot-age`，候选会被标记为 `CANCELED`，不会提交订单。
+生成订单前会重新读取最新且未过期的风险状态：全仓候选复核 `userId + settleAsset` 的账户级状态，逐仓候选复核 `userId + symbol + marginMode` 的仓位级状态。如果风险已经恢复到非 `LIQUIDATION`，或最新风险快照超过 `surprising.liquidation.risk.max-snapshot-age`，候选会被标记为 `CANCELED`，不会提交订单。
+
+提交强平单前还会读取最新 `risk_position_snapshots` 和同一 `snapshot_id` 的账户快照来计算审计价格：
+
+- `bankruptcy_price_ticks`：按当前 mark 和权益推算的破产价，表示权益归零的价格边界。
+- `takeover_price_ticks`：按当前 mark 和权益推算的接管价，表示扣除配置的强平费用缓冲后权益接近归零的价格边界。
+- `liquidation_fee_rate_ppm`：从 `surprising.liquidation.execution.liquidation-fee-rate-ppm` 冻结下来的强平费率。
+- `liquidation_fee_units`：按 `surprising.liquidation.execution.liquidation-fee-rate-ppm` 和 mark notional 计算的预估强平费，默认 `3000 ppm` 即 `0.3%`。
+
+价格计算使用 `PerpetualContractMath` 和 long/BigInteger，不使用浮点数；线性和反向合约都走同一套边界搜索。若最新风险快照里的仓位数量和锁定的实时 `account_positions` 不一致，本次候选会以 `RISK_POSITION_CHANGED` 取消，等待下一次风控扫描重新生成候选，避免用旧快照执行强平。
 
 ## 分阶段强平
 
@@ -90,9 +99,12 @@ mvn -pl :surprising-liquidation-provider -am spring-boot:run
 ## 生产注意事项
 
 - liquidation-provider 必须多节点部署；候选抢占通过 PostgreSQL 条件更新保证同一候选只被一个节点执行。
+- Kafka 候选和撮合结果 consumer 的单次拉取数量由 `surprising.liquidation.kafka.max-poll-records` 控制，默认 `500`。
 - 强平候选不是执行命令，执行前必须复核最新风险状态。
 - 风险复核要求风险快照未过期。默认 `surprising.liquidation.risk.max-snapshot-age` 是 `5s`；快照过期或缺失都按非强平处理。
 - 强平订单走统一 order/matching 链路，不直接修改持仓。
+- `liquidation_orders` 会固化破产价、接管价、费率和预估强平费，供后台审计、客服争议处理、保险基金/ADL 对账使用。本模块不划转预估强平费。强平订单真实成交后，由 account-provider 按实际成交价和成交数量收取强平费，并按可扣 collateral 封顶，再发布 `surprising.account.liquidation-fee.events.v1`；insurance-provider 只入账实际已收金额。
+- 真实强平亏损仍由 account-provider 写 `account_deficits`，随后由 insurance-provider 和 ADL 模块处理亏损瀑布。
 - 强平 sizing 已支持分阶段和风险档位降仓；只有严重保证金率场景才全量关闭。
 - 提交新的强平订单前会先撤同方向未完成 reduce-only 平仓单。`CANCEL_REQUESTED` 订单仍可能在 exchange-core 内有效，所以会补发 cancel command；matching provider 的 post-only 检查只适用于 `PLACE`，不会拦截撤单。
 - 待平数量聚合溢出必须 fail-fast。异常订单集合不能让强平 sizing 或用户可平量发生 long 回绕。

@@ -32,6 +32,9 @@ surprising:
       risk:
         market-max-slippage-ppm: 10000
         market-max-mark-age-ms: 5000
+        limit-price-protection-enabled: true
+        limit-price-band-ppm: 50000
+        limit-price-max-mark-age-ms: 15000
       fee-tier:
         enabled: true
         refresh-initial-delay-ms: 60000

@@ -107,6 +107,24 @@ kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
 
 kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
+  --topic surprising.account.liquidation-fee.events.v1 \
+  --partitions "${PARTITIONS}" \
+  --replication-factor "${REPLICATION_FACTOR}"
+
+kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+  --create --if-not-exists \
+  --topic surprising.risk.account.events.v1 \
+  --partitions "${PARTITIONS}" \
+  --replication-factor "${REPLICATION_FACTOR}"
+
+kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+  --create --if-not-exists \
+  --topic surprising.risk.position.events.v1 \
+  --partitions "${PARTITIONS}" \
+  --replication-factor "${REPLICATION_FACTOR}"
+
+kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+  --create --if-not-exists \
   --topic surprising.perp.liquidation.candidates.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"

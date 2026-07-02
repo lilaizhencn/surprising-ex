@@ -47,6 +47,8 @@ public class MarkPriceProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private String groupId = "surprising-mark-price-v1";
+        private int concurrency = 2;
+        private int maxPollRecords = 500;
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -62,6 +64,22 @@ public class MarkPriceProperties {
 
         public void setGroupId(String groupId) {
             this.groupId = groupId;
+        }
+
+        public int getConcurrency() {
+            return concurrency;
+        }
+
+        public void setConcurrency(int concurrency) {
+            this.concurrency = concurrency;
+        }
+
+        public int getMaxPollRecords() {
+            return maxPollRecords;
+        }
+
+        public void setMaxPollRecords(int maxPollRecords) {
+            this.maxPollRecords = maxPollRecords;
         }
     }
 

@@ -20,6 +20,7 @@ class LiquidationKafkaConfigurationTest {
         LiquidationProperties properties = new LiquidationProperties();
         properties.getKafka().setBootstrapServers("kafka-e:9092");
         properties.getKafka().setGroupId("liquidation-test-group");
+        properties.getKafka().setMaxPollRecords(333);
 
         LiquidationKafkaConfiguration configuration = new LiquidationKafkaConfiguration();
         var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
@@ -33,7 +34,7 @@ class LiquidationKafkaConfigurationTest {
         assertThat(config).containsEntry(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         assertThat(config).containsEntry(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         assertThat(config).containsEntry(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
-        assertThat(config).containsEntry(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 500);
+        assertThat(config).containsEntry(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 333);
         assertThat(config).containsEntry(
                 ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
                 CooperativeStickyAssignor.class.getName());

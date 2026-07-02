@@ -1,5 +1,6 @@
 package com.surprising.insurance.provider.repository;
 
+import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.insurance.api.model.InsuranceCoverageResponse;
 import com.surprising.insurance.api.model.InsuranceFundBalanceResponse;
 import com.surprising.insurance.api.model.InsuranceFundLedgerResponse;
@@ -176,6 +177,61 @@ public class InsuranceRepository {
                  ORDER BY created_at DESC
                  LIMIT ?
                 """, (rs, rowNum) -> toCoverage(rs), userId, userId, normalizedAsset, normalizedAsset, limit);
+    }
+
+    public boolean collectLiquidationFee(LiquidationFeeSettledEvent event) {
+        if (event.amountUnits() <= 0) {
+            throw new IllegalArgumentException("liquidation fee amountUnits must be positive");
+        }
+        Instant now = event.eventTime() == null ? Instant.now() : event.eventTime();
+        String referenceId = event.tradeId() + ":" + event.orderId();
+        ensureFundBalance(event.asset(), now);
+        Long current = jdbcTemplate.queryForObject("""
+                SELECT balance_units
+                  FROM insurance_fund_balances
+                 WHERE asset = ?
+                 FOR UPDATE
+                """, Long.class, event.asset());
+        long currentBalance = current == null ? 0L : current;
+        long nextBalance = Math.addExact(currentBalance, event.amountUnits());
+        int ledgerRows = jdbcTemplate.update("""
+                INSERT INTO insurance_fund_ledger (
+                    entry_id, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, created_at
+                ) VALUES (?, ?, ?, ?, 'LIQUIDATION_FEE', ?, 'COLLECT_LIQUIDATION_FEE', ?)
+                ON CONFLICT (reference_type, reference_id, asset) DO NOTHING
+                """, nextInsuranceSequence("insurance-ledger"), event.asset(), event.amountUnits(), nextBalance,
+                referenceId, Timestamp.from(now));
+        if (ledgerRows == 0) {
+            requireDuplicateLiquidationFeeMatches(event.asset(), event.amountUnits(), referenceId);
+            return false;
+        }
+        int balanceRows = jdbcTemplate.update("""
+                UPDATE insurance_fund_balances
+                   SET balance_units = ?,
+                       updated_at = ?
+                 WHERE asset = ?
+                """, nextBalance, Timestamp.from(now), event.asset());
+        requireSingleRow(balanceRows, "insurance fund liquidation fee collection");
+        return true;
+    }
+
+    private void requireDuplicateLiquidationFeeMatches(String asset, long amountUnits, String referenceId) {
+        FundAdjustmentReference existing = jdbcTemplate.query("""
+                SELECT amount_units, reason
+                  FROM insurance_fund_ledger
+                 WHERE reference_type = 'LIQUIDATION_FEE'
+                   AND reference_id = ?
+                   AND asset = ?
+                 FOR UPDATE
+                """, (rs, rowNum) -> new FundAdjustmentReference(
+                rs.getLong("amount_units"),
+                rs.getString("reason")), referenceId, asset).stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("duplicate liquidation fee but ledger missing"));
+        if (existing.amountUnits() != amountUnits
+                || !Objects.equals(existing.reason(), "COLLECT_LIQUIDATION_FEE")) {
+            throw new IllegalStateException("conflicting duplicate liquidation fee reference " + referenceId);
+        }
     }
 
     private boolean coverDeficit(DeficitRow deficit) {

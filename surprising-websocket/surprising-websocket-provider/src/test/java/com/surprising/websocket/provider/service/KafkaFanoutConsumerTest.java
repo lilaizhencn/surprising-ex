@@ -1,8 +1,10 @@
 package com.surprising.websocket.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.surprising.trading.api.model.OrderEvent;
 import com.surprising.trading.api.model.OrderEventType;
@@ -11,6 +13,10 @@ import com.surprising.trading.api.model.OrderBookDepthEvent;
 import com.surprising.trading.api.model.OrderBookDepthUpdateType;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.price.api.model.PerpFundingRateEvent;
+import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
+import com.surprising.risk.api.model.RiskPositionUpdatedEvent;
+import com.surprising.risk.api.model.RiskStatus;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import java.math.BigDecimal;
@@ -90,6 +96,63 @@ class KafkaFanoutConsumerTest {
         verify(registry).publish(topic.capture(), payload.capture(), eq(eventTime));
         assertThat(topic.getValue().channel()).isEqualTo(WsChannel.ORDERS);
         assertThat(topic.getValue().symbol()).isEqualTo(SubscriptionTopic.WILDCARD);
+        assertThat(topic.getValue().userId()).isEqualTo(1001L);
+        assertThat(payload.getValue()).isEqualTo(event);
+    }
+
+    @Test
+    void fansOutPrivateAccountRiskToWildcardTopic() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        RiskAccountUpdatedEvent event = new RiskAccountUpdatedEvent(1L, 10L, 1001L, "USDT",
+                1_000_000L, 25_000L, 1_025_000L, 100_000L, 97_560L, RiskStatus.NORMAL, eventTime);
+
+        consumer.onAccountRisk(new ConsumerRecord<>("surprising.risk.account.events.v1", 0, 0L,
+                "1001:USDT", objectMapper.writeValueAsString(event)));
+
+        ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
+        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+        verify(registry).publish(topic.capture(), payload.capture(), eq(eventTime));
+        assertThat(topic.getValue().channel()).isEqualTo(WsChannel.ACCOUNT_RISK);
+        assertThat(topic.getValue().symbol()).isEqualTo(SubscriptionTopic.WILDCARD);
+        assertThat(topic.getValue().userId()).isEqualTo(1001L);
+        assertThat(payload.getValue()).isEqualTo(event);
+    }
+
+    @Test
+    void rejectsAccountRiskWhenKafkaKeyDoesNotMatchUserAndAsset() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        RiskAccountUpdatedEvent event = new RiskAccountUpdatedEvent(1L, 10L, 1001L, "USDT",
+                1_000_000L, 25_000L, 1_025_000L, 100_000L, 97_560L, RiskStatus.NORMAL, eventTime,
+                "trace-risk-1");
+
+        assertThatThrownBy(() -> consumer.onAccountRisk(new ConsumerRecord<>("surprising.risk.account.events.v1",
+                0, 0L, "1002:USDT", objectMapper.writeValueAsString(event))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("failed to fanout account risk update");
+        verifyNoInteractions(registry);
+    }
+
+    @Test
+    void fansOutPrivatePositionRiskBySymbol() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        RiskPositionUpdatedEvent event = new RiskPositionUpdatedEvent(2L, 10L, 1001L, "BTC-USDT",
+                MarginMode.CROSS, 7L, "USDT", 10L, 65_000L, 67_000L, 670_000L,
+                20_000L, 100_000L, 0L, 95_238L, RiskStatus.NORMAL, eventTime);
+
+        consumer.onPositionRisk(new ConsumerRecord<>("surprising.risk.position.events.v1", 0, 0L,
+                "BTC-USDT", objectMapper.writeValueAsString(event)));
+
+        ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
+        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+        verify(registry).publish(topic.capture(), payload.capture(), eq(eventTime));
+        assertThat(topic.getValue().channel()).isEqualTo(WsChannel.POSITION_RISK);
+        assertThat(topic.getValue().symbol()).isEqualTo("BTC-USDT");
         assertThat(topic.getValue().userId()).isEqualTo(1001L);
         assertThat(payload.getValue()).isEqualTo(event);
     }

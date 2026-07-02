@@ -22,6 +22,7 @@ curl 'http://localhost:9094/api/v1/gateway/candlestick/candles/latest?symbol=BTC
 curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50'
 curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symbol=BTC-USDT' -H 'X-User-Id: 1001'
 curl 'http://localhost:9094/api/v1/gateway/account/1001/positions' -H 'X-User-Id: 1001'
+curl 'http://localhost:9094/api/v1/gateway/market-maker/strategies' -H 'X-User-Id: ops'
 ```
 
 ## 路由
@@ -38,10 +39,11 @@ curl 'http://localhost:9094/api/v1/gateway/account/1001/positions' -H 'X-User-Id
 | `trading-trigger` | `http://localhost:9095/api/v1/trading/trigger-orders` | 是 |
 | `account` | `http://localhost:9086/api/v1/accounts` | 是 |
 | `risk` | `http://localhost:9087/api/v1/risk` | 是 |
-| `liquidation` | `http://localhost:9088/api/v1/liquidation` | 是 |
+| `liquidation` | `http://localhost:9088/api/v1/liquidations` | 是 |
 | `funding` | `http://localhost:9089/api/v1/funding` | 否 |
 | `insurance` | `http://localhost:9090/api/v1/insurance` | 是 |
 | `adl` | `http://localhost:9091/api/v1/adl` | 是 |
+| `market-maker` | `http://localhost:9096/api/v1/market-maker` | 是 |
 
 Gateway 会拒绝未知 service 名称。它不会把用户输入拼成任意后端主机名，也不会处理任何动态表名。
 
@@ -74,7 +76,7 @@ surprising:
       require-identity-for-private-routes: true
     http-client:
       connect-timeout: 1s
-      read-timeout: 5s
+      read-timeout: 30s
     routes:
       candlestick:
         base-url: http://surprising-candlestick:9081

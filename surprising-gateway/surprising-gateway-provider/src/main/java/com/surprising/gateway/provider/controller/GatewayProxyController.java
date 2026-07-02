@@ -2,10 +2,13 @@ package com.surprising.gateway.provider.controller;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.config.GatewayTraceFilter;
+import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.util.List;
 import java.util.Locale;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -15,6 +18,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -38,22 +43,28 @@ public class GatewayProxyController {
 
     private final GatewayProperties properties;
     private final RestTemplate restTemplate;
+    private final AuthService authService;
 
     public GatewayProxyController(GatewayProperties properties, RestTemplate restTemplate) {
+        this(properties, restTemplate, null);
+    }
+
+    @Autowired
+    public GatewayProxyController(GatewayProperties properties, RestTemplate restTemplate, AuthService authService) {
         this.properties = properties;
         this.restTemplate = restTemplate;
+        this.authService = authService;
     }
 
     @RequestMapping(path = {GATEWAY_PREFIX + "/{service}", GATEWAY_PREFIX + "/{service}/**"})
     public ResponseEntity<byte[]> proxy(@PathVariable String service,
                                         HttpMethod method,
-                                        HttpServletRequest request,
-                                        @RequestBody(required = false) byte[] body) {
+        HttpServletRequest request,
+        @RequestBody(required = false) byte[] body) {
         GatewayProperties.BackendRoute route = route(service);
-        enforceIdentity(route, request);
+        String authenticatedUserId = enforceIdentity(route, request);
         URI target = targetUri(service, route, request);
-        ResponseEntity<byte[]> response = restTemplate.exchange(target, method,
-                new HttpEntity<>(body, headers(request)), byte[].class);
+        ResponseEntity<byte[]> response = exchange(target, method, body, request, authenticatedUserId);
         HttpHeaders responseHeaders = new HttpHeaders();
         if (response.getHeaders().getContentType() != null) {
             responseHeaders.setContentType(response.getHeaders().getContentType());
@@ -61,6 +72,21 @@ public class GatewayProxyController {
         return ResponseEntity.status(response.getStatusCode())
                 .headers(responseHeaders)
                 .body(response.getBody());
+    }
+
+    private ResponseEntity<byte[]> exchange(URI target,
+                                            HttpMethod method,
+                                            byte[] body,
+                                            HttpServletRequest request,
+                                            String authenticatedUserId) {
+        try {
+            return restTemplate.exchange(target, method, new HttpEntity<>(body, headers(request, authenticatedUserId)),
+                    byte[].class);
+        } catch (ResourceAccessException ex) {
+            throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT, "backend request timed out", ex);
+        } catch (RestClientException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "backend request failed", ex);
+        }
     }
 
     URI targetUri(String service, GatewayProperties.BackendRoute route, HttpServletRequest request) {
@@ -87,28 +113,58 @@ public class GatewayProxyController {
         return route;
     }
 
-    private void enforceIdentity(GatewayProperties.BackendRoute route, HttpServletRequest request) {
+    private String enforceIdentity(GatewayProperties.BackendRoute route, HttpServletRequest request) {
         if (!route.isPrivateRoute() || !properties.getSecurity().isRequireIdentityForPrivateRoutes()) {
-            return;
+            return null;
         }
         String userHeader = request.getHeader(properties.getSecurity().getUserIdHeader());
         String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if ((userHeader == null || userHeader.isBlank()) && (authorization == null || authorization.isBlank())) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "private gateway route requires identity");
+        if (authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            if (authService == null) {
+                return normalizeUserHeader(userHeader);
+            }
+            try {
+                JwtPrincipal principal = authService.authenticateBearer(authorization);
+                return Long.toString(principal.userId());
+            } catch (IllegalArgumentException ex) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
+            } catch (IllegalStateException ex) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
+            }
         }
+        if (properties.getSecurity().isAllowUserIdHeaderFallback()) {
+            String normalized = normalizeUserHeader(userHeader);
+            if (normalized != null) {
+                return normalized;
+            }
+            if (authorization != null && !authorization.isBlank() && authService == null) {
+                return null;
+            }
+        }
+        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "private gateway route requires bearer token");
     }
 
-    private HttpHeaders headers(HttpServletRequest request) {
+    private HttpHeaders headers(HttpServletRequest request, String authenticatedUserId) {
         HttpHeaders headers = new HttpHeaders();
         for (String name : FORWARDED_HEADERS) {
             String value = GatewayTraceFilter.TRACE_ID_HEADER.equals(name)
                     ? traceId(request)
                     : request.getHeader(name);
+            if (properties.getSecurity().getUserIdHeader().equalsIgnoreCase(name) && authenticatedUserId != null) {
+                value = authenticatedUserId;
+            }
             if (value != null && !value.isBlank()) {
                 headers.add(name, value);
             }
         }
         return headers;
+    }
+
+    private String normalizeUserHeader(String userHeader) {
+        if (userHeader == null || userHeader.isBlank()) {
+            return null;
+        }
+        return userHeader.trim();
     }
 
     private String traceId(HttpServletRequest request) {

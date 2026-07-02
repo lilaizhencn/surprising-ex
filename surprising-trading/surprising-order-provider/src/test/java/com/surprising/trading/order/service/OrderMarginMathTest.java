@@ -20,6 +20,14 @@ class OrderMarginMathTest {
     }
 
     @Test
+    void linearSellLimitMarginUsesProtectedMarkWhenLimitCanFillAtBetterHigherPrice() {
+        long effectivePrice = OrderMarginMath.collateralPriceTicks(OrderSide.SELL, OrderType.LIMIT,
+                99L, 100L, 10_000L, ContractType.LINEAR_PERPETUAL);
+
+        assertThat(effectivePrice).isEqualTo(101L);
+    }
+
+    @Test
     void linearMarketMarginUsesUpperBoundForBothSides() {
         long buyMargin = OrderMarginMath.initialMarginUnits(ContractType.LINEAR_PERPETUAL, OrderSide.BUY,
                 OrderType.MARKET, 0L, 6L, 100L, 10_000L,
@@ -45,6 +53,14 @@ class OrderMarginMathTest {
     void inverseMarketUsesLowerEffectivePriceForCollateralProtection() {
         long effectivePrice = OrderMarginMath.collateralPriceTicks(OrderSide.BUY, OrderType.MARKET,
                 0L, 100L, 10_000L, ContractType.INVERSE_PERPETUAL);
+
+        assertThat(effectivePrice).isEqualTo(99L);
+    }
+
+    @Test
+    void inverseBuyLimitMarginUsesProtectedMarkWhenLimitCanFillAtBetterLowerPrice() {
+        long effectivePrice = OrderMarginMath.collateralPriceTicks(OrderSide.BUY, OrderType.LIMIT,
+                101L, 100L, 10_000L, ContractType.INVERSE_PERPETUAL);
 
         assertThat(effectivePrice).isEqualTo(99L);
     }

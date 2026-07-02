@@ -35,14 +35,8 @@ public class TriggerOrderRepository {
     }
 
     public long nextSequence(String sequenceName) {
-        Number value = jdbcTemplate.queryForObject("""
-                INSERT INTO trading_sequences (sequence_name, sequence_value)
-                VALUES (?, 1)
-                ON CONFLICT (sequence_name) DO UPDATE
-                    SET sequence_value = trading_sequences.sequence_value + 1,
-                        updated_at = now()
-                RETURNING sequence_value
-                """, Number.class, sequenceName);
+        Number value = jdbcTemplate.queryForObject("SELECT nextval(CAST(? AS regclass))", Number.class,
+                tradingSequenceIdentifier(sequenceName));
         if (value == null || value.longValue() <= 0) {
             throw new IllegalStateException("failed to allocate trigger sequence " + sequenceName);
         }
@@ -67,6 +61,43 @@ public class TriggerOrderRepository {
                 order.rejectReason(), order.traceId(), timestampOrNull(order.expiresAt()),
                 timestampOrNull(order.triggeredAt()), Timestamp.from(order.createdAt()),
                 Timestamp.from(order.updatedAt())) == 1;
+    }
+
+    public void lockUserSymbolMarginScope(long userId, String symbol) {
+        jdbcTemplate.query("""
+                SELECT pg_advisory_xact_lock(hashtext('trading-margin-mode'), hashtext(?))
+                """, rs -> null, userId + ":" + symbol);
+    }
+
+    public boolean hasActiveMarginModeConflict(long userId, String symbol, MarginMode marginMode) {
+        String normalizedMode = MarginMode.defaultIfNull(marginMode).name();
+        Boolean conflict = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM account_positions p
+                     WHERE p.user_id = ?
+                       AND p.symbol = ?
+                       AND p.margin_mode <> ?
+                       AND p.signed_quantity_steps <> 0
+                    UNION ALL
+                    SELECT 1
+                      FROM trading_orders o
+                     WHERE o.user_id = ?
+                       AND o.symbol = ?
+                       AND o.margin_mode <> ?
+                       AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                       AND o.remaining_quantity_steps > 0
+                    UNION ALL
+                    SELECT 1
+                      FROM trading_trigger_orders t
+                     WHERE t.user_id = ?
+                       AND t.symbol = ?
+                       AND t.margin_mode <> ?
+                       AND t.status IN ('PENDING', 'TRIGGERING')
+                )
+                """, Boolean.class, userId, symbol, normalizedMode, userId, symbol, normalizedMode,
+                userId, symbol, normalizedMode);
+        return Boolean.TRUE.equals(conflict);
     }
 
     public Optional<TriggerOrderRecord> findById(long triggerOrderId) {
@@ -326,5 +357,12 @@ public class TriggerOrderRepository {
             return value;
         }
         return value.substring(0, limit);
+    }
+
+    private String tradingSequenceIdentifier(String sequenceName) {
+        if (sequenceName == null || !sequenceName.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")) {
+            throw new IllegalArgumentException("invalid trading sequence name: " + sequenceName);
+        }
+        return "public.trading_" + sequenceName.toLowerCase().replace('-', '_') + "_seq";
     }
 }

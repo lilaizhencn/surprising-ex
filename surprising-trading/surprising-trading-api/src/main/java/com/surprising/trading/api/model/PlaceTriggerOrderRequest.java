@@ -21,10 +21,31 @@ public record PlaceTriggerOrderRequest(
         @Min(0) long priceTicks,
         @Positive long quantitySteps,
         MarginMode marginMode,
+        PositionSide positionSide,
         Instant expiresAt) {
 
     public PlaceTriggerOrderRequest {
         triggerPriceType = triggerPriceType == null ? TriggerPriceType.MARK_PRICE : triggerPriceType;
         marginMode = MarginMode.defaultIfNull(marginMode);
+        positionSide = PositionSide.defaultIfNull(positionSide);
+    }
+
+    public PlaceTriggerOrderRequest(long userId,
+                                    String clientTriggerOrderId,
+                                    String ocoGroupId,
+                                    String symbol,
+                                    OrderSide side,
+                                    TriggerOrderType triggerType,
+                                    TriggerPriceType triggerPriceType,
+                                    long triggerPriceTicks,
+                                    OrderType orderType,
+                                    TimeInForce timeInForce,
+                                    long priceTicks,
+                                    long quantitySteps,
+                                    MarginMode marginMode,
+                                    Instant expiresAt) {
+        this(userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType, triggerPriceType,
+                triggerPriceTicks, orderType, timeInForce, priceTicks, quantitySteps, marginMode, PositionSide.NET,
+                expiresAt);
     }
 }

@@ -34,6 +34,13 @@ Example private position subscription:
 {"op":"subscribe","id":"p1","channel":"positions","symbol":"BTC-USDT"}
 ```
 
+Example private risk subscriptions:
+
+```json
+{"op":"subscribe","id":"r1","channel":"positionRisk","symbol":"BTC-USDT"}
+{"op":"subscribe","id":"r2","channel":"accountRisk"}
+```
+
 Private channels require an authenticated user id. In production the ingress/auth layer should inject `X-User-Id`; direct local debugging may pass the same value as a query parameter, but that is not a production security model.
 
 ## Channels
@@ -49,6 +56,8 @@ Private channels require an authenticated user id. In production the ingress/aut
 | `orders` | no | optional `symbol` | `surprising.perp.order.events.v1` |
 | `matches` | no | optional `symbol` | `surprising.perp.match.results.v1`, `surprising.perp.match.trades.v1` |
 | `positions` | no | optional `symbol` | `surprising.account.position.events.v1` |
+| `positionRisk` | no | optional `symbol` | `surprising.risk.position.events.v1` |
+| `accountRisk` | no | optional `symbol` ignored as wildcard | `surprising.risk.account.events.v1` |
 
 Private subscriptions without `symbol` use wildcard symbol `*` and receive all events for the authenticated user.
 
@@ -92,6 +101,14 @@ This prevents the frontend from seeing a position derived from raw matching outp
 The account outbox is at-least-once. Clients should treat `eventId` and `tradeId` as dedupe/version hints when updating local state.
 Private position messages also carry the original trading `traceId` when available, so support and operations can correlate a WebSocket push with the order, matching trade, and account settlement rows.
 
+`positions` is an account-state channel, not a realtime PnL calculator. It carries signed quantity, entry price, realized PnL, and margin mode after account settlement. For backend-authoritative unrealized PnL, equity, maintenance margin, and margin ratio, subscribe to:
+
+- `positionRisk`: per-position risk snapshot including `markPriceTicks`, `notionalUnits`, `unrealizedPnlUnits`, `maintenanceMarginUnits`, `positionMarginUnits`, `marginRatioPpm`, and `status`.
+- `accountRisk`: per `userId + settleAsset` account risk snapshot including wallet balance, total unrealized PnL, equity, maintenance margin, margin ratio, and status.
+
+Frontend clients may locally combine `positions` and public `mark` updates for high-frequency visual interpolation, but risk-provider `positionRisk`/`accountRisk` events are the values that match liquidation decisions.
+Risk events triggered by account position updates carry the original trading `traceId` when available; fallback scheduled scans may not have one.
+
 ## User State And Node Selection
 
 WebSocket user state is local and transient:
@@ -117,6 +134,7 @@ If the same user is connected on two devices through two different nodes, both n
 - Deploy at least two WebSocket nodes.
 - Every WebSocket node must use a unique Kafka consumer group id, for example the default `surprising-websocket-${HOSTNAME:${random.uuid}}`.
 - Do not share one group id across all WebSocket pods. A shared group would deliver each Kafka record to only one pod, and clients connected to other pods would miss public market updates.
+- Prefer an explicit stable pod/node value such as `surprising-websocket-${POD_NAME}` in production. A pure random group id on every restart leaves stale consumer groups in Kafka and makes lag dashboards noisy.
 - No cross-node session state is required. Each node keeps only local WebSocket sessions and local subscription maps.
 - A load balancer can distribute new connections across nodes. Existing WebSocket TCP connections are naturally tied to one node; on reconnect the client must resubscribe.
 - Public market events are consumed by every node and filtered by local subscriptions.
@@ -133,8 +151,11 @@ surprising:
       bootstrap-servers: localhost:9092
       group-id: surprising-websocket-${HOSTNAME:${random.uuid}}
       concurrency: 2
+      max-poll-records: 1000
       order-book-depth-topic: surprising.perp.orderbook.depth.v1
       position-events-topic: surprising.account.position.events.v1
+      account-risk-events-topic: surprising.risk.account.events.v1
+      position-risk-events-topic: surprising.risk.position.events.v1
     session:
       max-subscriptions: 200
       outbound-queue-capacity: 1000
@@ -155,6 +176,7 @@ For very large public fanout, add an internal pub/sub layer such as Redis, NATS,
 ## Operations
 
 - Monitor WebSocket connection count, outbound queue pressure, Kafka consumer lag, and send timeout closes.
+- Alert on lag for active WebSocket node groups only. Old random groups from retired nodes should be deleted or filtered out of dashboards.
 - Keep Kafka topics partitioned by `symbol`.
 - Frontend clients should call REST first for a snapshot, then subscribe to WebSocket deltas.
 - Clients should send periodic `ping` messages and reconnect with exponential backoff.

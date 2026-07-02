@@ -43,7 +43,7 @@ class ReduceOnlyOrderPrunerTest {
         when(jdbcTemplate.update(contains("UPDATE trading_orders"), any(Object[].class))).thenReturn(1);
         when(jdbcTemplate.update(contains("INSERT INTO trading_order_events"), any(Object[].class))).thenReturn(1);
         when(jdbcTemplate.update(contains("INSERT INTO trading_outbox_events"), any(Object[].class))).thenReturn(1);
-        when(jdbcTemplate.queryForObject(contains("INSERT INTO trading_sequences"), eq(Long.class), any()))
+        when(jdbcTemplate.queryForObject(contains("nextval"), eq(Long.class), any()))
                 .thenReturn(501L, 601L, 701L, 602L);
 
         pruner().prune(1001L, "BTC-USDT", new PositionState(4L, 1L, 100L, 0L), NOW);
@@ -69,7 +69,7 @@ class ReduceOnlyOrderPrunerTest {
         when(jdbcTemplate.update(contains("UPDATE trading_orders"), any(Object[].class))).thenReturn(1);
         when(jdbcTemplate.update(contains("INSERT INTO trading_order_events"), any(Object[].class))).thenReturn(1);
         when(jdbcTemplate.update(contains("INSERT INTO trading_outbox_events"), any(Object[].class))).thenReturn(1);
-        when(jdbcTemplate.queryForObject(contains("INSERT INTO trading_sequences"), eq(Long.class), any()))
+        when(jdbcTemplate.queryForObject(contains("nextval"), eq(Long.class), any()))
                 .thenReturn(501L, 601L, 701L, 602L, 502L, 603L, 702L, 604L);
 
         pruner().prune(1001L, "BTC-USDT", new PositionState(0L, 0L, 0L, 0L), NOW);

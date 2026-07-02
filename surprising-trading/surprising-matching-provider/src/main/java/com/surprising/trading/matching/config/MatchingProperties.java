@@ -55,11 +55,13 @@ public class MatchingProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private String groupId = "surprising-matching-v1";
+        private String clientId = "surprising-matching";
         private String orderCommandsTopic = "surprising.perp.order.commands.v1";
         private String matchResultsTopic = "surprising.perp.match.results.v1";
         private String matchTradesTopic = "surprising.perp.match.trades.v1";
         private String orderBookDepthTopic = "surprising.perp.orderbook.depth.v1";
         private int concurrency = 2;
+        private int maxPollRecords = 500;
         private boolean restartOnPartitionReassignment = true;
         private long partitionAssignmentStartupGraceMs = 30000L;
 
@@ -77,6 +79,14 @@ public class MatchingProperties {
 
         public void setGroupId(String groupId) {
             this.groupId = groupId;
+        }
+
+        public String getClientId() {
+            return clientId;
+        }
+
+        public void setClientId(String clientId) {
+            this.clientId = clientId;
         }
 
         public String getOrderCommandsTopic() {
@@ -117,6 +127,14 @@ public class MatchingProperties {
 
         public void setConcurrency(int concurrency) {
             this.concurrency = concurrency;
+        }
+
+        public int getMaxPollRecords() {
+            return maxPollRecords;
+        }
+
+        public void setMaxPollRecords(int maxPollRecords) {
+            this.maxPollRecords = maxPollRecords;
         }
 
         public boolean isRestartOnPartitionReassignment() {

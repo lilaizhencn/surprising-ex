@@ -24,6 +24,8 @@ surprising:
       kafka:
         bootstrap-servers: localhost:9092
         group-id: surprising-mark-price-v1
+        concurrency: 2
+        max-poll-records: 500
       topics:
         index-price-topic: surprising.perp.index.price.v1
         book-ticker-topic: surprising.perp.book.ticker.v1
@@ -34,7 +36,7 @@ surprising:
       calculation:
         publish-delay-ms: 1000
         basis-window: 60s
-        max-input-age: 5s
+        max-input-age: 15s
         clamp-ratio: 0.03
         default-funding-interval-hours: 8
         scale: 18

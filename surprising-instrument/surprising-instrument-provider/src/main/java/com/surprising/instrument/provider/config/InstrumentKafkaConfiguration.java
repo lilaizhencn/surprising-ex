@@ -22,6 +22,8 @@ public class InstrumentKafkaConfiguration {
         config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
         config.put(ProducerConfig.ACKS_CONFIG, "all");
         config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+        config.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
+        config.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
         config.put(JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
         return new DefaultKafkaProducerFactory<>(config);
     }

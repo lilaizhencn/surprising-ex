@@ -1,6 +1,8 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.trading.api.model.MarketPriceProtection;
+import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.TimeInForce;
@@ -114,7 +116,36 @@ public class OrderValidator {
         if (request.priceTicks() <= 0) {
             return ValidationResult.reject("limit order priceTicks must be positive");
         }
+        ValidationResult priceBand = validateLimitPriceBand(request, rule);
+        if (!priceBand.accepted()) {
+            return priceBand;
+        }
         return validateNotionalRange(request, rule, request.priceTicks(), request.priceTicks());
+    }
+
+    private ValidationResult validateLimitPriceBand(PlaceOrderRequest request, InstrumentRule rule) {
+        if (!properties.getRisk().isLimitPriceProtectionEnabled()) {
+            return ValidationResult.ok(rule.version());
+        }
+        OptionalLong markPriceTicks = markPriceLookup.latestMarkPriceTicks(request.symbol(), rule.version(),
+                properties.getRisk().getLimitPriceMaxMarkAgeMs());
+        if (markPriceTicks.isEmpty()) {
+            return ValidationResult.reject("mark price unavailable");
+        }
+        long boundaryTicks;
+        try {
+            boundaryTicks = MarketPriceProtection.protectedPriceTicks(request.side(), markPriceTicks.getAsLong(),
+                    properties.getRisk().getLimitPriceBandPpm());
+        } catch (ArithmeticException ex) {
+            return ValidationResult.reject("price protection overflow");
+        }
+        if (request.side() == OrderSide.BUY && request.priceTicks() > boundaryTicks) {
+            return ValidationResult.reject("limit buy price exceeds mark price band");
+        }
+        if (request.side() == OrderSide.SELL && request.priceTicks() < boundaryTicks) {
+            return ValidationResult.reject("limit sell price exceeds mark price band");
+        }
+        return ValidationResult.ok(rule.version());
     }
 
     private ValidationResult validateNotionalRange(PlaceOrderRequest request,

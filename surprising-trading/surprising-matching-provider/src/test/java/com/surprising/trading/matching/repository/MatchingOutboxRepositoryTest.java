@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -66,6 +67,26 @@ class MatchingOutboxRepositoryTest {
                 .contains("aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH')")
                 .contains("next_attempt_at <= now()")
                 .contains("pg_try_advisory_xact_lock")
+                .contains("FOR UPDATE OF e SKIP LOCKED");
+    }
+
+    @Test
+    void claimPendingLeasesUnpublishedDueRowsForPublishOutsideTransaction() {
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Timestamp.class), eq(100),
+                any(Timestamp.class), any(Timestamp.class))).thenReturn(List.of());
+
+        repository.claimPending(100, Instant.parse("2026-07-01T00:00:30Z"),
+                Instant.parse("2026-07-01T00:00:00Z"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), any(Timestamp.class), eq(100),
+                any(Timestamp.class), any(Timestamp.class));
+        assertThat(sql.getValue())
+                .contains("DISTINCT ON (topic, event_key)")
+                .contains("UPDATE trading_outbox_events")
+                .contains("SET next_attempt_at = ?")
+                .contains("RETURNING e.id")
                 .contains("FOR UPDATE OF e SKIP LOCKED");
     }
 

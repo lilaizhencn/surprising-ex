@@ -28,6 +28,12 @@ class MarginTransferMathTest {
     }
 
     @Test
+    void roundsOpeningReservationAllocationUpForPartialFills() {
+        assertThat(MarginTransferMath.orderMarginConsumeAmount(101L, 0L, 0L, 10L, 1L, false))
+                .isEqualTo(11L);
+    }
+
+    @Test
     void sweepsRoundingRemainderOnTerminalOpenFill() {
         assertThat(MarginTransferMath.orderMarginConsumeAmount(100L, 0L, 66L, 3L, 1L, true))
                 .isEqualTo(34L);

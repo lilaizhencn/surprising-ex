@@ -2,9 +2,12 @@ package com.surprising.trading.order.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
@@ -13,6 +16,7 @@ import com.surprising.trading.order.model.OrderRecord;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 class OrderRepositoryTest {
@@ -51,5 +55,36 @@ class OrderRepositoryTest {
         assertThat(sql.getValue())
                 .contains("ON CONFLICT (user_id, client_order_id) WHERE client_order_id IS NOT NULL DO NOTHING")
                 .doesNotContain("ON CONFLICT DO NOTHING");
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void lockUserSymbolMarginScopeUsesSharedAdvisoryLockKey() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OrderRepository repository = new OrderRepository(jdbcTemplate);
+
+        repository.lockUserSymbolMarginScope(1001L, "BTC-USDT");
+
+        verify(jdbcTemplate).query(contains("pg_advisory_xact_lock"),
+                any(ResultSetExtractor.class), eq("1001:BTC-USDT"));
+    }
+
+    @Test
+    void activeMarginModeConflictChecksPositionsOrdersAndTriggers() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OrderRepository repository = new OrderRepository(jdbcTemplate);
+        when(jdbcTemplate.queryForObject(contains("account_positions"), eq(Boolean.class),
+                eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
+                eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
+                eq(1001L), eq("BTC-USDT"), eq("ISOLATED")))
+                .thenReturn(true);
+
+        boolean conflict = repository.hasActiveMarginModeConflict(1001L, "BTC-USDT", MarginMode.ISOLATED);
+
+        assertThat(conflict).isTrue();
+        verify(jdbcTemplate).queryForObject(contains("trading_trigger_orders"), eq(Boolean.class),
+                eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
+                eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
+                eq(1001L), eq("BTC-USDT"), eq("ISOLATED"));
     }
 }

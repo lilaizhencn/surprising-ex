@@ -14,6 +14,7 @@ import org.rocksdb.Filter;
 import org.rocksdb.LRUCache;
 import org.rocksdb.Options;
 import org.rocksdb.RocksObject;
+import org.rocksdb.TableFormatConfig;
 import org.rocksdb.WriteBufferManager;
 
 /**
@@ -49,8 +50,8 @@ public class CandlestickRocksDbConfig implements RocksDBConfigSetter {
         List<RocksObject> resources = new ArrayList<>();
         Cache cache = sharedBlockCache(configs);
 
-        BlockBasedTableConfig tableConfig = new BlockBasedTableConfig()
-                .setBlockCache(cache)
+        BlockBasedTableConfig tableConfig = blockBasedTableConfig(options);
+        tableConfig.setBlockCache(cache)
                 .setBlockSize(getLong(configs, BLOCK_SIZE_BYTES_CONFIG, 16 * 1024L))
                 .setCacheIndexAndFilterBlocks(true)
                 .setCacheIndexAndFilterBlocksWithHighPriority(true)
@@ -74,6 +75,14 @@ public class CandlestickRocksDbConfig implements RocksDBConfigSetter {
                 .setLevelCompactionDynamicLevelBytes(true);
 
         storeResources.put(storeName, resources);
+    }
+
+    private BlockBasedTableConfig blockBasedTableConfig(Options options) {
+        TableFormatConfig existing = options.tableFormatConfig();
+        if (existing instanceof BlockBasedTableConfig blockBasedTableConfig) {
+            return blockBasedTableConfig;
+        }
+        return new BlockBasedTableConfig();
     }
 
     @Override

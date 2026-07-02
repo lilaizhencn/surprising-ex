@@ -22,6 +22,7 @@ One row stores one version of one tradable product:
 - `notional_multiplier_units`: for `LINEAR_PERPETUAL`, settlement units per `priceTick * quantityStep`; for `INVERSE_PERPETUAL`, quote face-value units per contract step.
 - `supported_order_types` / `supported_time_in_force`: order-entry constraints.
 - `max_leverage_ppm`, margin-rate ppm fields, `maker_fee_rate_ppm`, `taker_fee_rate_ppm`, funding ppm fields, and `impact_notional_units`: risk, trading-fee, and funding inputs.
+- `user_open_interest_limit_rate_ppm` / `user_open_interest_limit_floor_units`: dynamic per-user position cap inputs. Order entry computes `max(platformOpenInterestNotional * rate / 1_000_000, floor)` and also applies `max_position_notional_units`.
 - `status`: `PRE_TRADING`, `TRADING`, `HALT`, `SETTLING`, or `CLOSED`.
 
 Primary key:
@@ -315,6 +316,8 @@ Amounts are long asset units and are never negative.
 `insurance_fund_ledger` stores immutable fund balance changes:
 
 - Positive `amount_units`: fund deposit or operational top-up.
+- Positive `amount_units` with `reference_type = LIQUIDATION_FEE`: actual liquidation-fee income
+  collected by account-provider and replay-protected by `reference_id = tradeId:orderId`.
 - Negative `amount_units`: fund withdrawal or account deficit coverage.
 - `(reference_type, reference_id, asset)` is unique for idempotency.
 
@@ -441,6 +444,14 @@ the same statement. The expiry and `TRIGGERING` indexes support scheduled expiry
 - The default seed tiers assign only `VIP` rates. Market-maker rebates should be configured only when a separate
   market-maker program measures quote uptime, spread, and depth quality.
 
+`market_maker_strategy_leases` coordinates active-active market-maker providers:
+
+- Primary key is `(strategy_id, symbol)`, so one strategy may quote different symbols on different nodes.
+- `owner_id` should be the provider's stable node id in production.
+- `lease_until` lets another node take over after a failed owner stops refreshing the row.
+- The table does not store strategy config or balances. The provider still reads instruments, order book, mark price,
+  account positions, and open orders each cycle before placing normal post-only orders through order-provider.
+
 `trading_user_fee_tiers` stores the current calculated fee tier per user:
 
 - The refresher calculates 30-day maker+taker notional from `trading_match_trades`, valuing linear contracts by
@@ -459,6 +470,14 @@ the same statement. The expiry and `TRIGGERING` indexes support scheduled expiry
 - If no user setting exists, order entry uses the selected risk bracket's maximum leverage, which is equivalent
   to reserving at that bracket's `initial_margin_rate_ppm`.
 - The effective initial-margin rate is `max(leverage-derived rate, risk-bracket initial margin rate)`.
+
+`trading_symbol_open_interest` stores the current platform open interest state per symbol:
+
+- Account settlement updates this table in the same transaction as `account_positions` after a new trade changes a position.
+- `long_quantity_steps` and `short_quantity_steps` track the absolute live long and short quantities. Direction flips apply both a negative delta on the old side and a positive delta on the new side.
+- `open_quantity_steps` is constrained to `GREATEST(long_quantity_steps, short_quantity_steps)`, which avoids double-counting both sides when order entry applies platform-OI-based user caps.
+- Order entry reads `open_quantity_steps`, converts it to notional with the current admission price and instrument formula, then applies the instrument's `user_open_interest_limit_*` settings.
+- Because this is derived state, production operations should periodically rebuild-check it from `account_positions`, especially after manual repairs, emergency imports, or disaster recovery.
 
 `trading_match_results` stores one idempotent result per matching command:
 
@@ -496,6 +515,10 @@ side's `trading_orders` fee snapshot.
 `account_position_margins` tracks current position collateral by `user_id + symbol + asset + margin_mode`.
 Opening fills increase this table by consuming order reservation. Closing fills release the remaining
 collateral proportionally back to `account_balances.available_units`.
+User-initiated isolated-margin adjustments also mutate this table: positive adjustments move
+`account_balances.available_units` into locked position collateral, while negative adjustments release
+position collateral back to available balance only after the latest `risk_position_snapshots` row proves
+the position remains above maintenance margin plus the configured removal buffer.
 Opening fills are required to consume an existing non-reduce-only order reservation. Missing
 reservation rows or skipped margin migration updates fail the account trade transaction instead
 of creating an uncollateralized position.
@@ -513,8 +536,10 @@ so later position-margin releases cannot over-credit available balance.
 `account_positions` stores net perpetual exposure:
 
 - `margin_mode`: `CROSS` or `ISOLATED`. Positions are netted by user, symbol, and margin mode. The
-  current project does not yet add hedge-mode `positionSide`; long and short exposure still collapse
-  into one net position per margin bucket.
+  current project does not yet persist hedge-mode `positionSide`; long and short exposure still
+  collapse into one net position per margin bucket. Order and trigger-order APIs accept the
+  `positionSide` field only as `NET`; `LONG` and `SHORT` are rejected before persistence. Order,
+  trigger-order, and position-query responses return `positionSide = NET`.
 - `instrument_version`: contract version for the current non-zero exposure. It is `NULL` when the position is flat.
 - `signed_quantity_steps`: positive for long, negative for short.
 - `entry_price_ticks`: average entry in exchange-core ticks.
@@ -523,6 +548,10 @@ so later position-margin releases cannot over-credit available balance.
 - Maker/taker fee debits or rebates are written to `account_ledger_entries` as `TRADE_FEE`.
   `trade_id`, `order_id`, `symbol`, and `fee_rate_ppm` are stored with the ledger row for audit and
   reconciliation.
+- Actual liquidation fees are written to `account_ledger_entries` as `LIQUIDATION_FEE` with the same
+  trade/order/symbol/fee-rate audit fields. The amount is capped by collectible collateral and never
+  creates a new `account_deficits` row. Insurance fund income is driven only by these collected
+  amounts, not by liquidation estimates.
 
 The account provider deduplicates `trading_match_trades` with `account_processed_trades(symbol, trade_id)`.
 All balance and margin transitions run inside one PostgreSQL transaction and lock the affected
@@ -530,19 +559,28 @@ position/margin rows with `FOR UPDATE`. Position, balance, deficit, ledger, rese
 position-margin writes are fail-fast when an expected row is not written.
 For `TRADE_PNL` and `TRADE_FEE`, both the ledger insert and the balance-after backfill must touch one row; trade
 deduplication is handled by `account_processed_trades(symbol, trade_id)`, not by skipping trade ledger
-conflicts.
+conflicts. `LIQUIDATION_FEE` uses `tradeId:orderId` as the reference id and is emitted to the
+insurance fund only after the balance debit succeeds.
+Manual isolated-margin transfers write `account_ledger_entries.reference_type = POSITION_MARGIN_ADJUSTMENT`
+with signed `amount_units`: positive means collateral added to the position, negative means collateral
+released from the position. The unique `account_ledger_reference_uidx` makes these requests idempotent
+by `reference_id + user_id + asset`.
 
 `account_outbox_events` stores account-side Kafka events written inside the same transaction as the
-account state change. It currently carries `POSITION_UPDATED` events for WebSocket private position
-pushes:
+account state change. It carries `POSITION_UPDATED` events for WebSocket private position pushes and
+`LIQUIDATION_FEE_SETTLED` events for insurance-fund credits:
 
 - `id`: database-allocated outbox id.
-- `topic`: Kafka destination, for example `surprising.account.position.events.v1`.
-- `event_key`: Kafka key, currently the normalized symbol.
+- `topic`: Kafka destination, for example `surprising.account.position.events.v1` or
+  `surprising.account.liquidation-fee.events.v1`.
+- `event_key`: Kafka key. Position updates use the normalized symbol; liquidation-fee events use the
+  settlement asset so insurance fund updates can be serialized by asset.
 - `payload`: JSONB event body.
 - `attempts`, `next_attempt_at`, `published_at`, and `last_error`: retry and publish state.
 - `POSITION_UPDATED` payloads carry the original match-trade `traceId`, so WebSocket/private-account
   pushes can be correlated with the order and matching rows.
+- `LIQUIDATION_FEE_SETTLED` payloads carry `tradeId`, `orderId`, `liquidationOrderId`, `candidateId`,
+  `asset`, collected `amountUnits`, `feeRatePpm`, and `traceId`.
 
 Indexes:
 
@@ -557,7 +595,8 @@ CREATE INDEX account_outbox_aggregate_idx
 
 The publisher claims pending rows with `FOR UPDATE SKIP LOCKED`, so multiple account-provider nodes
 can drain the outbox safely. Publishing is at-least-once; consumers should deduplicate by event id,
-trade id, or their own latest-position version rules.
+trade id, or their own latest-position version rules. Insurance uses
+`insurance_fund_ledger(reference_type, reference_id, asset)` with `reference_id = tradeId:orderId`.
 
 ## Liquidation Tables
 
@@ -565,7 +604,11 @@ trade id, or their own latest-position version rules.
 
 - `SUBMITTED` rows must have positive `quantity_steps`.
 - `CANCELED` rows may have `quantity_steps = 0` when the account has recovered or the position is gone.
+- `bankruptcy_price_ticks`, `takeover_price_ticks`, `liquidation_fee_rate_ppm`, and
+  `liquidation_fee_units` are fixed at submission time for audit and insurance/ADL reconciliation.
+  Canceled rows keep these fields at zero.
 - The provider locks live `account_positions`, locks existing same-side reduce-only `trading_orders`, writes cancel-request events/commands for them, and then sizes the staged liquidation order from `abs(livePosition)`.
 - Existing user reduce-only orders must not reduce liquidation capacity; otherwise a far-away GTC close order could block forced liquidation.
 - Strong liquidation order creation does not use broad conflict suppression on `trading_orders`; uniqueness violations roll the transaction back.
 - Sizing first attempts risk-bracket reduction, then configured partial close ratios, and only fully closes when the margin ratio is above the full-close threshold.
+- Before submitting, the provider reads the latest fresh risk position/account snapshots and cancels with `RISK_POSITION_CHANGED` if the snapshot quantity no longer matches the locked live position.

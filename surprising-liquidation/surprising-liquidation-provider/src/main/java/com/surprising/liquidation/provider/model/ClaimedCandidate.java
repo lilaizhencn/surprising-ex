@@ -12,6 +12,8 @@ public record ClaimedCandidate(
         String settleAsset,
         long signedQuantitySteps,
         long markPriceTicks,
+        long equityUnits,
+        long maintenanceMarginUnits,
         long marginRatioPpm) {
 
     public ClaimedCandidate {
@@ -28,6 +30,21 @@ public record ClaimedCandidate(
                             long markPriceTicks,
                             long marginRatioPpm) {
         this(candidateId, snapshotId, userId, symbol, MarginMode.CROSS, instrumentVersion, settleAsset,
-                signedQuantitySteps, markPriceTicks, marginRatioPpm);
+                signedQuantitySteps, markPriceTicks, 0L, 0L, marginRatioPpm);
+    }
+
+    public ClaimedCandidate(long candidateId,
+                            long snapshotId,
+                            long userId,
+                            String symbol,
+                            long instrumentVersion,
+                            String settleAsset,
+                            long signedQuantitySteps,
+                            long markPriceTicks,
+                            long equityUnits,
+                            long maintenanceMarginUnits,
+                            long marginRatioPpm) {
+        this(candidateId, snapshotId, userId, symbol, MarginMode.CROSS, instrumentVersion, settleAsset,
+                signedQuantitySteps, markPriceTicks, equityUnits, maintenanceMarginUnits, marginRatioPpm);
     }
 }

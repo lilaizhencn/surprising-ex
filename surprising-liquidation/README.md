@@ -33,7 +33,16 @@ surprising.perp.liquidation.candidates.v1
 - `postOnly = false`
 - `quantitySteps` is capped by `abs(livePosition)` and is not reduced by existing user reduce-only orders.
 
-Before submitting the order, the service reads the latest fresh account risk state again. If the account is no longer in `LIQUIDATION`, or the latest risk snapshot is older than `surprising.liquidation.risk.max-snapshot-age`, the candidate is marked `CANCELED` and no order is submitted.
+Before submitting the order, the service reads the latest fresh risk state again: cross-margin candidates re-check the account-level `userId + settleAsset` state, and isolated candidates re-check the position-level `userId + symbol + marginMode` state. If risk is no longer in `LIQUIDATION`, or the latest risk snapshot is older than `surprising.liquidation.risk.max-snapshot-age`, the candidate is marked `CANCELED` and no order is submitted.
+
+Before submitting a liquidation order, the provider also reads the latest `risk_position_snapshots` row and the account snapshot with the same `snapshot_id` to calculate audit prices:
+
+- `bankruptcy_price_ticks`: the adverse price where current equity reaches zero.
+- `takeover_price_ticks`: the adverse price where current equity equals the configured liquidation-fee buffer.
+- `liquidation_fee_rate_ppm`: fee rate frozen from `surprising.liquidation.execution.liquidation-fee-rate-ppm`.
+- `liquidation_fee_units`: estimated liquidation fee from mark notional and `surprising.liquidation.execution.liquidation-fee-rate-ppm`; the default is `3000 ppm` or `0.3%`.
+
+The calculation uses `PerpetualContractMath` plus long/BigInteger arithmetic, not floating point. Linear and inverse contracts use the same boundary-search logic. If the fresh risk snapshot quantity differs from the locked live `account_positions` quantity, the candidate is canceled with `RISK_POSITION_CHANGED` and the next risk scan must create a fresh candidate.
 
 ## Staged Liquidation
 
@@ -90,9 +99,12 @@ Port:
 ## Production Notes
 
 - Run multiple liquidation-provider nodes; candidate claiming is protected by PostgreSQL conditional updates.
+- Kafka candidate/match-result consumer fetch size is controlled by `surprising.liquidation.kafka.max-poll-records` and defaults to `500`.
 - A liquidation candidate is not an execution command; latest risk must be re-checked before order submission.
 - The re-check requires a fresh risk snapshot. Default `surprising.liquidation.risk.max-snapshot-age` is `5s`; stale or missing snapshots are treated as non-liquidatable.
 - Liquidation orders go through the unified order/matching path and do not modify positions directly.
+- `liquidation_orders` freezes bankruptcy price, takeover price, fee rate, and estimated liquidation fee for audit, dispute handling, and insurance/ADL reconciliation. This module does not transfer the estimated fee. After the liquidation order actually fills, account-provider charges the actual fill-based liquidation fee capped by collectible collateral and publishes `surprising.account.liquidation-fee.events.v1`; insurance-provider credits only that collected amount.
+- Realized liquidation losses are still recorded by account-provider as `account_deficits`, then processed by insurance-provider and ADL.
 - Liquidation sizing is staged and risk-bracket aware. Full close is reserved for severe margin-ratio cases.
 - Existing same-side reduce-only close orders are preemptively canceled before submitting liquidation. `CANCEL_REQUESTED` orders may still be live in exchange-core, so liquidation re-enqueues cancel commands; matching-provider post-only checks apply only to `PLACE` and must never block cancel.
 - Pending close aggregation is fail-fast on overflow. A broken order set must not allow liquidation sizing or user close capacity to wrap around.

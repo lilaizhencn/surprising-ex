@@ -41,6 +41,8 @@ class MatchingKafkaConfigurationTest {
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setBootstrapServers("kafka-c:9092");
         properties.getKafka().setGroupId("matching-test-group");
+        properties.getKafka().setClientId("matching-node-a");
+        properties.getKafka().setMaxPollRecords(321);
 
         MatchingKafkaConfiguration configuration = new MatchingKafkaConfiguration();
         var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
@@ -53,11 +55,12 @@ class MatchingKafkaConfigurationTest {
         Map<String, Object> config = consumerFactory.getConfigurationProperties();
         assertThat(config).containsEntry(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka-c:9092");
         assertThat(config).containsEntry(ConsumerConfig.GROUP_ID_CONFIG, "matching-test-group");
+        assertThat(config).containsEntry(ConsumerConfig.CLIENT_ID_CONFIG, "matching-node-a");
         assertThat(config).containsEntry(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         assertThat(config).containsEntry(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         assertThat(config).containsEntry(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         assertThat(config).containsEntry(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
-        assertThat(config).containsEntry(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 500);
+        assertThat(config).containsEntry(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 321);
         assertThat(config).containsEntry(
                 ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
                 CooperativeStickyAssignor.class.getName());

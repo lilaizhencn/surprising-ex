@@ -46,6 +46,23 @@ class SubscriptionTopicTest {
     }
 
     @Test
+    void privateRiskChannelsUseAuthenticatedUser() {
+        SubscriptionTopic accountRisk = SubscriptionTopic.fromCommand(
+                new WsClientCommand("subscribe", "req-risk-1", "accountRisk", null, null, null),
+                42L);
+        SubscriptionTopic positionRisk = SubscriptionTopic.fromCommand(
+                new WsClientCommand("subscribe", "req-risk-2", "positionRisk", "btc-usdt", null, null),
+                42L);
+
+        assertThat(accountRisk.channel()).isEqualTo(WsChannel.ACCOUNT_RISK);
+        assertThat(accountRisk.symbol()).isEqualTo(SubscriptionTopic.WILDCARD);
+        assertThat(accountRisk.userId()).isEqualTo(42L);
+        assertThat(positionRisk.channel()).isEqualTo(WsChannel.POSITION_RISK);
+        assertThat(positionRisk.symbol()).isEqualTo("BTC-USDT");
+        assertThat(positionRisk.userId()).isEqualTo(42L);
+    }
+
+    @Test
     void privateChannelRejectsMissingAuthentication() {
         WsClientCommand command = new WsClientCommand("subscribe", "req-3", "orders", "BTC-USDT", null, null);
 

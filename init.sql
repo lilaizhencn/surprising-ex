@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS instruments (
     maker_fee_rate_ppm          BIGINT NOT NULL DEFAULT 0,
     taker_fee_rate_ppm          BIGINT NOT NULL DEFAULT 0,
     max_position_notional_units BIGINT NOT NULL,
+    user_open_interest_limit_rate_ppm BIGINT NOT NULL DEFAULT 300000,
+    user_open_interest_limit_floor_units BIGINT NOT NULL DEFAULT 25000000000000,
     funding_interval_hours      INTEGER NOT NULL,
     interest_rate_ppm           BIGINT NOT NULL,
     funding_rate_cap_ppm        BIGINT NOT NULL,
@@ -61,6 +63,8 @@ CREATE TABLE IF NOT EXISTS instruments (
         AND maker_fee_rate_ppm BETWEEN -1000000 AND 1000000
         AND taker_fee_rate_ppm BETWEEN -1000000 AND 1000000
         AND max_position_notional_units > 0
+        AND user_open_interest_limit_rate_ppm >= 0
+        AND user_open_interest_limit_floor_units > 0
         AND funding_interval_hours > 0
         AND funding_rate_cap_ppm >= funding_rate_floor_ppm
         AND impact_notional_units > 0
@@ -153,18 +157,19 @@ INSERT INTO instruments (
     post_only_enabled, reduce_only_enabled, market_order_enabled,
     max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm,
     maker_fee_rate_ppm, taker_fee_rate_ppm, max_position_notional_units,
+    user_open_interest_limit_rate_ppm, user_open_interest_limit_floor_units,
     funding_interval_hours, interest_rate_ppm, funding_rate_cap_ppm, funding_rate_floor_ppm,
     impact_notional_units, min_valid_index_sources, status, effective_time, created_at, updated_at
 ) VALUES
 ('BTC-USDT', 1, 'PERPETUAL', 'LINEAR_PERPETUAL', 'BTC', 'USDT', 'USDT',
  1000000, 'USDT', 10000000, 100000, 1, 100000, 500000000, 1000000000000000, 10000, 1, 3,
  'LIMIT,MARKET', 'GTC,IOC,FOK,GTX', TRUE, TRUE, TRUE,
- 100000000, 10000, 5000, 200, 500, 500000000000000, 8, 100, 3000, -3000,
+ 100000000, 10000, 5000, 200, 500, 500000000000000, 300000, 25000000000000, 8, 100, 3000, -3000,
  1000000000000, 3, 'TRADING', now(), now(), now()),
 ('ETH-USDT', 1, 'PERPETUAL', 'LINEAR_PERPETUAL', 'ETH', 'USDT', 'USDT',
  1000000, 'USDT', 1000000, 10000000000000000, 1, 500000, 500000000, 1000000000000000, 10000, 2, 2,
  'LIMIT,MARKET', 'GTC,IOC,FOK,GTX', TRUE, TRUE, TRUE,
- 100000000, 10000, 5000, 200, 500, 500000000000000, 8, 100, 3000, -3000,
+ 100000000, 10000, 5000, 200, 500, 500000000000000, 300000, 25000000000000, 8, 100, 3000, -3000,
  1000000000000, 3, 'TRADING', now(), now(), now())
 ON CONFLICT (symbol, version) DO NOTHING;
 
@@ -498,6 +503,18 @@ CREATE TABLE IF NOT EXISTS trading_sequences (
     CONSTRAINT trading_sequences_positive CHECK (sequence_value > 0)
 );
 
+CREATE SEQUENCE IF NOT EXISTS trading_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+CREATE SEQUENCE IF NOT EXISTS trading_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+CREATE SEQUENCE IF NOT EXISTS trading_command_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+CREATE SEQUENCE IF NOT EXISTS trading_outbox_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+CREATE SEQUENCE IF NOT EXISTS trading_margin_reservation_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+CREATE SEQUENCE IF NOT EXISTS trading_fee_schedule_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
+CREATE SEQUENCE IF NOT EXISTS trading_match_trade_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+CREATE SEQUENCE IF NOT EXISTS trading_orderbook_depth_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+CREATE SEQUENCE IF NOT EXISTS trading_matching_symbol_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
+CREATE SEQUENCE IF NOT EXISTS trading_matching_asset_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
+CREATE SEQUENCE IF NOT EXISTS trading_trigger_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
+
 CREATE TABLE IF NOT EXISTS trading_fee_schedules (
     fee_schedule_id     BIGINT PRIMARY KEY,
     user_id             BIGINT NOT NULL,
@@ -723,6 +740,22 @@ CREATE INDEX IF NOT EXISTS trading_orders_recovery_idx
       AND order_type = 'LIMIT'
       AND time_in_force IN ('GTC', 'GTX')
       AND remaining_quantity_steps > 0;
+
+CREATE TABLE IF NOT EXISTS trading_symbol_open_interest (
+    symbol                  TEXT PRIMARY KEY,
+    long_quantity_steps     BIGINT NOT NULL DEFAULT 0,
+    short_quantity_steps    BIGINT NOT NULL DEFAULT 0,
+    open_quantity_steps     BIGINT NOT NULL DEFAULT 0,
+    updated_at              TIMESTAMPTZ NOT NULL,
+    CONSTRAINT trading_symbol_open_interest_symbol_fk
+        FOREIGN KEY (symbol) REFERENCES instrument_current_versions(symbol),
+    CONSTRAINT trading_symbol_open_interest_non_negative CHECK (
+        long_quantity_steps >= 0
+        AND short_quantity_steps >= 0
+        AND open_quantity_steps >= 0
+        AND open_quantity_steps = GREATEST(long_quantity_steps, short_quantity_steps)
+    )
+);
 
 CREATE TABLE IF NOT EXISTS trading_trigger_orders (
     trigger_order_id           BIGINT PRIMARY KEY,
@@ -1064,7 +1097,7 @@ CREATE TABLE IF NOT EXISTS account_ledger_entries (
     CONSTRAINT account_ledger_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT account_ledger_amount_non_zero CHECK (amount_units <> 0),
     CONSTRAINT account_ledger_trade_fee_metadata_check CHECK (
-        reference_type <> 'TRADE_FEE'
+        reference_type NOT IN ('TRADE_FEE', 'LIQUIDATION_FEE')
         OR (trade_id IS NOT NULL AND order_id IS NOT NULL AND symbol IS NOT NULL AND fee_rate_ppm IS NOT NULL)
     ),
     CONSTRAINT account_ledger_fee_rate_range CHECK (
@@ -1084,6 +1117,10 @@ CREATE INDEX IF NOT EXISTS account_ledger_user_time_idx
 CREATE INDEX IF NOT EXISTS account_ledger_trade_fee_order_idx
     ON account_ledger_entries (order_id, trade_id)
     WHERE reference_type = 'TRADE_FEE';
+
+CREATE INDEX IF NOT EXISTS account_ledger_liquidation_fee_order_idx
+    ON account_ledger_entries (order_id, trade_id)
+    WHERE reference_type = 'LIQUIDATION_FEE';
 
 CREATE TABLE IF NOT EXISTS account_margin_reservations (
     reservation_id      BIGINT PRIMARY KEY,
@@ -1370,6 +1407,10 @@ CREATE TABLE IF NOT EXISTS liquidation_orders (
     quantity_steps          BIGINT NOT NULL,
     status                  TEXT NOT NULL,
     reason                  TEXT,
+    bankruptcy_price_ticks  BIGINT NOT NULL DEFAULT 0,
+    takeover_price_ticks    BIGINT NOT NULL DEFAULT 0,
+    liquidation_fee_rate_ppm BIGINT NOT NULL DEFAULT 0,
+    liquidation_fee_units   BIGINT NOT NULL DEFAULT 0,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT liquidation_orders_candidate_fk
         FOREIGN KEY (candidate_id) REFERENCES risk_liquidation_candidates(candidate_id),
@@ -1383,6 +1424,12 @@ CREATE TABLE IF NOT EXISTS liquidation_orders (
     ),
     CONSTRAINT liquidation_orders_status_check CHECK (
         status IN ('SUBMITTED', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED', 'REJECTED', 'FAILED')
+    ),
+    CONSTRAINT liquidation_orders_audit_non_negative CHECK (
+        bankruptcy_price_ticks >= 0
+        AND takeover_price_ticks >= 0
+        AND liquidation_fee_rate_ppm >= 0
+        AND liquidation_fee_units >= 0
     )
 );
 
@@ -1507,3 +1554,101 @@ CREATE INDEX IF NOT EXISTS adl_events_target_user_time_idx
 
 CREATE INDEX IF NOT EXISTS adl_events_asset_symbol_time_idx
     ON adl_events (asset, symbol, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS market_maker_strategy_leases (
+    strategy_id                 TEXT NOT NULL,
+    symbol                      TEXT NOT NULL,
+    owner_id                    TEXT NOT NULL,
+    lease_until                 TIMESTAMPTZ NOT NULL,
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (strategy_id, symbol),
+    CONSTRAINT market_maker_leases_strategy_format CHECK (strategy_id ~ '^[A-Za-z0-9_.:-]{1,64}$'),
+    CONSTRAINT market_maker_leases_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT market_maker_leases_owner_present CHECK (length(owner_id) > 0)
+);
+
+CREATE INDEX IF NOT EXISTS market_maker_strategy_leases_until_idx
+    ON market_maker_strategy_leases (lease_until ASC);
+
+CREATE TABLE IF NOT EXISTS gateway_users (
+    user_id             BIGSERIAL PRIMARY KEY,
+    username            TEXT NOT NULL,
+    email               TEXT,
+    password_hash       TEXT NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'NORMAL',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_users_username_format CHECK (username ~ '^[a-z0-9_]{3,32}$'),
+    CONSTRAINT gateway_users_email_length CHECK (email IS NULL OR length(email) <= 254),
+    CONSTRAINT gateway_users_status_check CHECK (
+        status IN ('NORMAL', 'FROZEN', 'TRADE_DISABLED', 'WITHDRAW_DISABLED')
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_users_username_uidx
+    ON gateway_users (lower(username));
+
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_users_email_uidx
+    ON gateway_users (lower(email))
+    WHERE email IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS gateway_roles (
+    role_id             BIGSERIAL PRIMARY KEY,
+    role_code           TEXT NOT NULL,
+    role_name           TEXT NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_roles_code_format CHECK (role_code ~ '^[A-Z0-9_]{2,64}$')
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_roles_code_uidx
+    ON gateway_roles (role_code);
+
+CREATE TABLE IF NOT EXISTS gateway_user_roles (
+    user_id             BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    role_id             BIGINT NOT NULL REFERENCES gateway_roles(role_id),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, role_id)
+);
+
+CREATE INDEX IF NOT EXISTS gateway_user_roles_role_idx
+    ON gateway_user_roles (role_id);
+
+CREATE TABLE IF NOT EXISTS gateway_refresh_sessions (
+    session_id          BIGSERIAL PRIMARY KEY,
+    user_id             BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    token_hash          TEXT NOT NULL,
+    expires_at          TIMESTAMPTZ NOT NULL,
+    revoked_at          TIMESTAMPTZ,
+    user_agent          TEXT,
+    ip_address          TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_refresh_sessions_hash_present CHECK (length(token_hash) > 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_refresh_sessions_hash_uidx
+    ON gateway_refresh_sessions (token_hash);
+
+CREATE INDEX IF NOT EXISTS gateway_refresh_sessions_user_time_idx
+    ON gateway_refresh_sessions (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_refresh_sessions_expiry_idx
+    ON gateway_refresh_sessions (expires_at ASC)
+    WHERE revoked_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS gateway_login_logs (
+    login_id            BIGSERIAL PRIMARY KEY,
+    user_id             BIGINT REFERENCES gateway_users(user_id),
+    result              TEXT NOT NULL,
+    reason              TEXT,
+    user_agent          TEXT,
+    ip_address          TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_login_logs_result_check CHECK (result IN ('SUCCESS', 'FAILED'))
+);
+
+CREATE INDEX IF NOT EXISTS gateway_login_logs_user_time_idx
+    ON gateway_login_logs (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_login_logs_time_idx
+    ON gateway_login_logs (created_at DESC);

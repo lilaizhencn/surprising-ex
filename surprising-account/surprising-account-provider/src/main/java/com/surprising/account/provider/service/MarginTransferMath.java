@@ -60,7 +60,7 @@ public final class MarginTransferMath {
         if (sweepRemainder) {
             return availableForPosition;
         }
-        long proportional = proportional(reservedUnits, openSteps, orderQuantitySteps);
+        long proportional = proportionalCeiling(reservedUnits, openSteps, orderQuantitySteps);
         return Math.min(availableForPosition, proportional);
     }
 
@@ -102,5 +102,13 @@ public final class MarginTransferMath {
             return 0L;
         }
         return Math.multiplyExact(totalUnits, partSteps) / totalSteps;
+    }
+
+    private static long proportionalCeiling(long totalUnits, long partSteps, long totalSteps) {
+        if (totalUnits <= 0 || partSteps <= 0 || totalSteps <= 0) {
+            return 0L;
+        }
+        return Math.addExact(Math.multiplyExact(totalUnits, partSteps), Math.subtractExact(totalSteps, 1L))
+                / totalSteps;
     }
 }

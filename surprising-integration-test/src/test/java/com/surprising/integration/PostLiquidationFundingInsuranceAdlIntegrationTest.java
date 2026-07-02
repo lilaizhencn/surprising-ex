@@ -10,6 +10,7 @@ import com.surprising.adl.provider.model.DeficitRow;
 import com.surprising.adl.provider.repository.AdlRepository;
 import com.surprising.adl.provider.service.AdlMath;
 import com.surprising.adl.provider.service.AdlService;
+import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.funding.api.model.FundingPaymentResponse;
 import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.api.model.FundingSettlementResponse;
@@ -27,6 +28,7 @@ import com.surprising.insurance.provider.config.InsuranceProperties;
 import com.surprising.insurance.provider.repository.InsuranceRepository;
 import com.surprising.insurance.provider.service.InsuranceMath;
 import com.surprising.insurance.provider.service.InsuranceService;
+import com.surprising.trading.api.model.MarginMode;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -118,6 +120,30 @@ class PostLiquidationFundingInsuranceAdlIntegrationTest {
                     assertThat(event.realizedProfitUnits()).isEqualTo(500L);
                     assertThat(event.coveredUnits()).isEqualTo(500L);
                     assertThat(event.remainingDeficitUnits()).isZero();
+                });
+    }
+
+    @Test
+    void liquidationFeeSettledEventCreditsInsuranceFundOnceAcrossReplay() {
+        SharedState state = new SharedState();
+        InsuranceService insuranceService = new InsuranceService(new InsuranceProperties(),
+                new FakeInsuranceRepository(state));
+        LiquidationFeeSettledEvent event = new LiquidationFeeSettledEvent(1L, 9001L, 5001L,
+                6001L, 9401L, 2202L, SYMBOL, MarginMode.CROSS, ASSET, 179L, 3_000L,
+                FUNDING_TIME, "trace-liq-fee-1");
+
+        insuranceService.collectLiquidationFee(event);
+        insuranceService.collectLiquidationFee(event);
+
+        assertThat(state.insuranceFunds.get(ASSET)).isEqualTo(179L);
+        assertThat(state.insuranceLedger).singleElement()
+                .satisfies(entry -> {
+                    assertThat(entry.asset()).isEqualTo(ASSET);
+                    assertThat(entry.amountUnits()).isEqualTo(179L);
+                    assertThat(entry.balanceAfterUnits()).isEqualTo(179L);
+                    assertThat(entry.referenceType()).isEqualTo("LIQUIDATION_FEE");
+                    assertThat(entry.referenceId()).isEqualTo("9001:5001");
+                    assertThat(entry.reason()).isEqualTo("COLLECT_LIQUIDATION_FEE");
                 });
     }
 
@@ -261,6 +287,27 @@ class PostLiquidationFundingInsuranceAdlIntegrationTest {
                     .limit(limit)
                     .toList();
         }
+
+        @Override
+        public boolean collectLiquidationFee(LiquidationFeeSettledEvent event) {
+            String referenceId = event.tradeId() + ":" + event.orderId();
+            LiquidationFeeReference existing = state.liquidationFeeReferences.get(referenceId);
+            if (existing != null) {
+                if (existing.amountUnits() != event.amountUnits() || !existing.asset().equals(event.asset())) {
+                    throw new IllegalStateException("conflicting liquidation fee replay");
+                }
+                return false;
+            }
+            long current = state.insuranceFunds.getOrDefault(event.asset(), 0L);
+            long next = Math.addExact(current, event.amountUnits());
+            state.insuranceFunds.put(event.asset(), next);
+            state.liquidationFeeReferences.put(referenceId,
+                    new LiquidationFeeReference(event.asset(), event.amountUnits()));
+            state.insuranceLedger.add(new InsuranceFundLedgerResponse(state.next("insurance-ledger"),
+                    event.asset(), event.amountUnits(), next, "LIQUIDATION_FEE", referenceId,
+                    "COLLECT_LIQUIDATION_FEE", event.eventTime()));
+            return true;
+        }
     }
 
     private static final class FakeAdlRepository extends AdlRepository {
@@ -371,6 +418,7 @@ class PostLiquidationFundingInsuranceAdlIntegrationTest {
         private final Map<Long, BalanceState> balances = new LinkedHashMap<>();
         private final Map<Long, PositionState> positions = new LinkedHashMap<>();
         private final Map<String, Long> insuranceFunds = new HashMap<>();
+        private final Map<String, LiquidationFeeReference> liquidationFeeReferences = new HashMap<>();
         private final List<InsuranceCoverageResponse> coverages = new ArrayList<>();
         private final List<InsuranceFundLedgerResponse> insuranceLedger = new ArrayList<>();
         private final List<AdlEventResponse> adlEvents = new ArrayList<>();
@@ -407,6 +455,9 @@ class PostLiquidationFundingInsuranceAdlIntegrationTest {
     }
 
     private record BalanceState(long availableUnits, long lockedUnits, long deficitUnits) {
+    }
+
+    private record LiquidationFeeReference(String asset, long amountUnits) {
     }
 
     private static final class PositionState {

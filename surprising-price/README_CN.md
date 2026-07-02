@@ -187,6 +187,8 @@ markPrice = clamp(rawMark, indexPrice * (1 - clampRatio), indexPrice * (1 + clam
 | `surprising.price.index.coordination.lease-duration` | `15s` | 指数价格 symbol 租约时长。 |
 | `surprising.price.index.fiat.refresh-delay-ms` | `3600000` | 法币汇率刷新周期。 |
 | `surprising.price.index.fiat.stable-coin.refresh-delay-ms` | `10000` | USDT/USD 稳定币桥接刷新周期。 |
+| `surprising.price.mark.kafka.concurrency` | `2` | 每个节点的标记价格输入 Kafka listener 并发数。 |
+| `surprising.price.mark.kafka.max-poll-records` | `500` | 标记价格输入 consumer 每次 poll 拉取的 Kafka 记录数。 |
 | `surprising.price.mark.calculation.publish-delay-ms` | `1000` | 标记价格发布周期。 |
 | `surprising.price.mark.calculation.basis-window` | `60s` | basis 移动平均窗口。 |
 | `surprising.price.mark.calculation.max-input-age` | `5s` | 标记价格输入最大可接受年龄。 |
@@ -224,6 +226,8 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
 - 优先使用一个共享 topic + 足够多 partition，不要按每个 symbol 建 topic。
 - 风控和强平服务必须消费 `surprising.perp.mark.price.v1`，不要各节点自己计算标记价格。
 - 保留 `surprising.perp.mark.price.audit.v1`，用于事故复盘和强平争议审计。
+- 指数价格和标记价格 producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.connection=5`。
+- 标记价格输入 consumer 有意使用 `auto.offset.reset=latest`，因为新启动的 live mark calculator 不应该把旧输入快照重新计算成当前标记价格；但它仍然关闭 auto commit，使用 record ack 和 cooperative-sticky rebalance。
 - 外部源不足时，指数服务会记录失败快照，但不会发布可用指数价格。
 - USD 源必须声明 `quote-currency`、`target-quote-currency`、稳定币换算源和换算方向。
 - App 法币展示必须走本地 `price_exchange_rates` 缓存，不能每个用户请求实时打第三方 FX API。

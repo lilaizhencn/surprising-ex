@@ -22,6 +22,7 @@ This repository is the root reactor for exchange backend modules. Each business 
 - `surprising-adl`: auto-deleveraging service for residual deficits after insurance is depleted.
 - `surprising-websocket`: horizontally scalable client WebSocket fanout for market data, orders, matches, and positions.
 - `surprising-gateway`: allowlisted public REST gateway for frontend/BFF traffic.
+- `surprising-market-maker`: internal market-maker quoting and exchange-chain stress strategy service.
 - `surprising-integration-test`: cross-module verification for order, matching, account, risk, liquidation, funding, insurance, and ADL flows.
 
 ## Module Documentation
@@ -38,6 +39,7 @@ This repository is the root reactor for exchange backend modules. Each business 
 - [surprising-adl](surprising-adl/README.md)
 - [surprising-websocket](surprising-websocket/README.md)
 - [surprising-gateway](surprising-gateway/README.md)
+- [surprising-market-maker](surprising-market-maker/README.md)
 
 ## Build
 
@@ -84,6 +86,7 @@ mvn -pl :surprising-adl-provider -am spring-boot:run
 mvn -pl :surprising-websocket-provider -am spring-boot:run
 mvn -pl :surprising-trigger-provider -am spring-boot:run
 mvn -pl :surprising-gateway-provider -am spring-boot:run
+mvn -pl :surprising-market-maker-provider -am spring-boot:run
 ```
 
 Ports:
@@ -103,6 +106,7 @@ Ports:
 - `9093`: client WebSocket fanout service.
 - `9094`: public REST API gateway.
 - `9095`: take-profit and stop-loss trigger order service.
+- `9096`: internal market-maker service.
 
 ## Kafka Topics
 
@@ -193,6 +197,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Paired TP/SL can share `ocoGroupId`; when one pending trigger in the same user/symbol/margin group is claimed, pending siblings are canceled in the same database statement before the generated close order is submitted.
 - Account consumes matching trades, updates long-based net positions idempotently by `tradeId`, migrates filled opening margin into position margin, and settles realized PnL into balances.
 - `CROSS` and `ISOLATED` margin modes are carried from order entry through matching, account, risk, funding, and liquidation. Cross losses may use cross available balance and cross position collateral; isolated losses only use that symbol's isolated position collateral before recording a deficit.
+- Isolated position margin can be manually added or removed through account-provider. Additions move available balance into position collateral; removals require a fresh risk snapshot and must leave equity above maintenance margin plus the configured buffer.
 - User leverage settings are keyed by `userId + symbol + marginMode`; order entry re-checks the configured leverage against the current risk bracket before reserving initial margin.
 - Automatic VIP fee tiers are calculated in order-provider from 30-day filled notional plus account asset value and written back as user-global `VIP` schedules. Manual risk/user/promotion/market-maker schedules keep higher source priority.
 - Account and funding loss settlement only debit position-margin-backed locked collateral; open-order reservation locks are not consumed by PnL or funding charges.

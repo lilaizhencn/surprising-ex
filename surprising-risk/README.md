@@ -49,6 +49,7 @@ account_positions + account_balances + account_deficits
   + optional trigger: surprising.account.position.events.v1
   -> risk_account_snapshots
   -> risk_position_snapshots
+  -> surprising.risk.account.events.v1 / surprising.risk.position.events.v1
   -> risk_liquidation_candidates
   -> surprising.perp.liquidation.candidates.v1
 ```
@@ -69,10 +70,26 @@ If the event closes the last open position in that account asset group, risk-pro
 with zero unrealized PnL, zero maintenance margin, and `NORMAL` status. It also writes a zero-quantity position snapshot
 for the event symbol so latest position-risk queries do not return stale nonzero exposure.
 
+Every committed risk scan also writes transactional outbox events for private frontend display:
+
+- `RISK_ACCOUNT_UPDATED` includes wallet balance, unrealized PnL, equity, maintenance margin, margin ratio, and status
+  for the `userId + settleAsset` group.
+- `RISK_POSITION_UPDATED` includes mark price, notional, unrealized PnL, maintenance margin, position margin, margin
+  ratio, and status for each affected position.
+
+These events are the authoritative backend-calculated values for WebSocket display. A frontend may locally combine
+`positions` and `mark` events for high-frequency visual interpolation, but liquidation and account risk decisions must
+use risk-provider snapshots/events. When a risk scan is triggered by an account position event, the resulting risk
+events preserve that event's `traceId`; scheduled fallback scans may emit events without a trace id.
+
 ## Kafka
 
 - `surprising.account.position.events.v1`: account-settled position updates, key = `symbol`; consumed by risk-provider
   as the low-latency scan trigger.
+- `surprising.risk.account.events.v1`: account risk snapshot updates, key = `userId:settleAsset`; consumed by
+  websocket-provider for private `accountRisk` pushes.
+- `surprising.risk.position.events.v1`: position risk snapshot updates, key = `symbol`; consumed by websocket-provider
+  for private `positionRisk` pushes.
 - `surprising.perp.liquidation.candidates.v1`: liquidation candidate events, key = `symbol`.
 
 `surprising-liquidation-provider` consumes this topic, claims candidates, and submits reduce-only liquidation orders.
@@ -132,7 +149,10 @@ Configuration:
 | --- | --- | --- |
 | `surprising.risk.kafka.group-id` | `surprising-risk-v1` | Shared consumer group for risk-provider nodes consuming account position events. |
 | `surprising.risk.kafka.position-events-topic` | `surprising.account.position.events.v1` | Account-settled position event topic used as the event-driven scan trigger. |
+| `surprising.risk.kafka.account-risk-events-topic` | `surprising.risk.account.events.v1` | Outbox topic for account risk WebSocket events. |
+| `surprising.risk.kafka.position-risk-events-topic` | `surprising.risk.position.events.v1` | Outbox topic for position risk WebSocket events. |
 | `surprising.risk.kafka.concurrency` | `2` | Kafka listener concurrency. Keep it no higher than useful partition parallelism per node. |
+| `surprising.risk.kafka.max-poll-records` | `500` | Kafka records fetched per poll. Tune with position-event lag and scan transaction latency. |
 | `surprising.risk.coordination.enabled` | `true` | Enables the scan lease. Keep this on for multi-node deployments. |
 | `surprising.risk.coordination.node-id` | `${HOSTNAME:}` | Stable owner id. If empty, the process generates a local random id. |
 | `surprising.risk.coordination.lease-duration` | `15s` | Failover delay for a stopped scanner. Keep it longer than the scan interval. |

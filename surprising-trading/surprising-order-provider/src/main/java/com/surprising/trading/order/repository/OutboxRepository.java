@@ -39,8 +39,46 @@ public class OutboxRepository {
         return outboxId;
     }
 
+    public List<OutboxRecord> claimPending(int limit, Instant leaseUntil, Instant now) {
+        // The earliest unpublished row still blocks later rows for the same topic+key, preserving stream order.
+        String sql = """
+                WITH earliest AS (
+                    SELECT DISTINCT ON (topic, event_key)
+                           id
+                      FROM trading_outbox_events
+                     WHERE published_at IS NULL
+                       AND aggregate_type = 'ORDER'
+                     ORDER BY topic, event_key, id
+                ),
+                candidates AS (
+                    SELECT e.id
+                      FROM trading_outbox_events e
+                      JOIN earliest c ON c.id = e.id
+                     WHERE e.published_at IS NULL
+                       AND e.aggregate_type = 'ORDER'
+                       AND e.next_attempt_at <= ?
+                       AND pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))
+                     ORDER BY e.topic, e.event_key, e.id
+                     LIMIT ?
+                     FOR UPDATE OF e SKIP LOCKED
+                )
+                UPDATE trading_outbox_events e
+                   SET next_attempt_at = ?,
+                       updated_at = ?
+                  FROM candidates c
+                 WHERE e.id = c.id
+             RETURNING e.id, e.topic, e.event_key, e.payload::text AS payload, e.next_attempt_at
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new OutboxRecord(
+                rs.getLong("id"),
+                rs.getString("topic"),
+                rs.getString("event_key"),
+                rs.getString("payload"),
+                rs.getTimestamp("next_attempt_at").toInstant()),
+                Timestamp.from(now), Math.max(1, limit), Timestamp.from(leaseUntil), Timestamp.from(now));
+    }
+
     public List<OutboxRecord> lockPending(int limit) {
-        // Advisory locks keep every topic+symbol stream ordered when several provider nodes drain the table.
         String sql = """
                 WITH earliest AS (
                     SELECT DISTINCT ON (topic, event_key)

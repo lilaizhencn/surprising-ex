@@ -1,6 +1,7 @@
 package com.surprising.trading.order.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -18,6 +19,7 @@ import com.surprising.trading.api.model.OrderEvent;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
+import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.MarginRequirement;
@@ -85,6 +87,7 @@ class OrderServiceTest {
         var response = service.place(request);
 
         assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
+        assertThat(response.positionSide()).isEqualTo(PositionSide.NET);
         assertThat(response.makerFeeRatePpm()).isEqualTo(200L);
         assertThat(response.takerFeeRatePpm()).isEqualTo(500L);
         ArgumentCaptor<OrderEvent> eventCaptor = ArgumentCaptor.forClass(OrderEvent.class);
@@ -223,6 +226,7 @@ class OrderServiceTest {
 
         assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
         assertThat(response.marginMode()).isEqualTo(MarginMode.ISOLATED);
+        assertThat(response.positionSide()).isEqualTo(PositionSide.NET);
         assertThat(response.rejectReason()).isNull();
         ArgumentCaptor<OrderRecord> orderCaptor = ArgumentCaptor.forClass(OrderRecord.class);
         verify(orderRepository).insert(orderCaptor.capture());
@@ -232,6 +236,73 @@ class OrderServiceTest {
         verify(orderRepository).nextSequence("command");
         verify(outboxRepository, times(2)).enqueue(eq("ORDER"), eq(9002L), anyString(), eq("BTC-USDT"),
                 anyString(), anyString(), any());
+    }
+
+    @Test
+    void openingOrderRejectsMarginModeSwitchWhileOtherModeIsActive() {
+        OrderService service = service();
+        when(orderRepository.hasActiveMarginModeConflict(1001L, "BTC-USDT", MarginMode.ISOLATED))
+                .thenReturn(true);
+        when(orderRepository.nextSequence("order")).thenReturn(9002L);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L);
+        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+
+        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "iso-switch", "BTC-USDT", OrderSide.BUY,
+                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, MarginMode.ISOLATED, false, false);
+
+        var response = service.place(request);
+
+        assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
+        assertThat(response.rejectReason())
+                .isEqualTo("margin mode switch requires closing positions and open orders first");
+        assertThat(response.marginMode()).isEqualTo(MarginMode.ISOLATED);
+        verify(orderRepository).lockUserSymbolMarginScope(1001L, "BTC-USDT");
+        verify(orderValidator, never()).validate(any());
+        verify(orderFeeRepository, never()).snapshot(anyLong(), anyString(), anyLong(), any());
+        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
+                anyLong(), anyLong(), anyLong(), anyLong());
+        verify(orderRepository, never()).nextSequence("command");
+    }
+
+    @Test
+    void hedgePositionSideIsRejectedBeforePersistence() {
+        OrderService service = service();
+        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "hedge-long", "BTC-USDT", OrderSide.BUY,
+                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, MarginMode.CROSS, PositionSide.LONG,
+                false, false);
+
+        assertThatThrownBy(() -> service.place(request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("hedge-mode positionSide is not supported; use NET");
+
+        verify(orderRepository, never()).lockUserSymbolMarginScope(anyLong(), anyString());
+        verify(orderRepository, never()).insert(any());
+        verify(outboxRepository, never()).enqueue(anyString(), anyLong(), anyString(), anyString(), anyString(),
+                anyString(), any());
+    }
+
+    @Test
+    void reduceOnlyOrderBypassesMarginModeSwitchConflictForRiskReduction() {
+        OrderService service = service();
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
+        when(orderRepository.nextSequence("order")).thenReturn(9002L);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L);
+        when(orderRepository.nextSequence("command")).thenReturn(9200L);
+        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+
+        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "reduce-conflict", "BTC-USDT", OrderSide.SELL,
+                OrderType.LIMIT, TimeInForce.IOC, 65_000L, 10L, MarginMode.CROSS, true, false);
+
+        var response = service.place(request);
+
+        assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
+        assertThat(response.reduceOnly()).isTrue();
+        verify(orderRepository).lockUserSymbolMarginScope(1001L, "BTC-USDT");
+        verify(orderRepository, never()).hasActiveMarginModeConflict(anyLong(), anyString(), any());
+        verify(orderRepository).nextSequence("command");
     }
 
     private OrderService service() {

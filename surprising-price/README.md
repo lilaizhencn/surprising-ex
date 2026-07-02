@@ -204,6 +204,8 @@ Production recommendations:
 | `surprising.price.index.coordination.lease-duration` | `15s` | Index symbol lease duration. |
 | `surprising.price.index.fiat.refresh-delay-ms` | `3600000` | Fiat FX refresh interval. |
 | `surprising.price.index.fiat.stable-coin.refresh-delay-ms` | `10000` | USDT/USD stable bridge refresh interval. |
+| `surprising.price.mark.kafka.concurrency` | `2` | Mark input Kafka listener concurrency per node. |
+| `surprising.price.mark.kafka.max-poll-records` | `500` | Kafka records fetched per poll for mark-price inputs. |
 | `surprising.price.mark.calculation.publish-delay-ms` | `1000` | Mark price publish interval. |
 | `surprising.price.mark.calculation.basis-window` | `60s` | Moving-average basis window. |
 | `surprising.price.mark.calculation.max-input-age` | `5s` | Maximum acceptable mark input age. |
@@ -241,6 +243,8 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
 - Strongly prefer one shared topic with enough partitions over one topic per symbol.
 - Risk and liquidation services must consume `surprising.perp.mark.price.v1`; they should not calculate mark price independently.
 - Keep `surprising.perp.mark.price.audit.v1` for incident review and liquidation dispute resolution.
+- Index and mark price producers use `acks=all`, idempotence, `zstd`, and `max.in.flight.requests.per.connection=5`.
+- Mark-price input consumers intentionally use `auto.offset.reset=latest` because stale input snapshots should not be replayed into a live mark calculator after a fresh start. They still use disabled auto-commit, record acknowledgements, and cooperative-sticky rebalance.
 - If external sources are insufficient, index provider records the failed snapshot but does not publish a usable index price.
 - USD sources must declare `quote-currency`, `target-quote-currency`, stable conversion source, and conversion direction.
 - App fiat display must use the local `price_exchange_rates` cache, not third-party FX API calls per user request.

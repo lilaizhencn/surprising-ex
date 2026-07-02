@@ -1,5 +1,6 @@
 package com.surprising.insurance.provider.service;
 
+import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.insurance.api.model.InsuranceCoverageQueryResponse;
 import com.surprising.insurance.api.model.InsuranceFundAdjustmentRequest;
 import com.surprising.insurance.api.model.InsuranceFundBalanceQueryResponse;
@@ -42,6 +43,14 @@ public class InsuranceService {
         }
         return insuranceRepository.adjustFund(normalizeAsset(request.asset()), request.amountUnits(),
                 normalizeReferenceId(request.referenceId()), request.reason());
+    }
+
+    @Transactional
+    public void collectLiquidationFee(LiquidationFeeSettledEvent event) {
+        if (event.amountUnits() <= 0) {
+            throw new IllegalArgumentException("liquidation fee amountUnits must be positive");
+        }
+        insuranceRepository.collectLiquidationFee(event);
     }
 
     public InsuranceFundBalanceQueryResponse balances(String asset) {

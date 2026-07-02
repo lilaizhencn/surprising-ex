@@ -22,6 +22,7 @@ Surprising 交易所后端服务。
 - `surprising-adl`：保险基金耗尽后的自动减仓亏损分摊服务。
 - `surprising-websocket`：面向前端的水平扩展 WebSocket 推送服务，负责行情、订单、成交和持仓实时推送。
 - `surprising-gateway`：面向前端/BFF 的统一 REST API 网关。
+- `surprising-market-maker`：内网做市商报价和交易链路压测策略服务。
 - `surprising-integration-test`：订单、撮合、账户、风控、强平、资金费、保险基金和 ADL 链路的跨模块验证。
 
 ## 模块文档
@@ -39,6 +40,7 @@ Surprising 交易所后端服务。
 - [surprising-adl](surprising-adl/README_CN.md)
 - [surprising-websocket](surprising-websocket/README_CN.md)
 - [surprising-gateway](surprising-gateway/README_CN.md)
+- [surprising-market-maker](surprising-market-maker/README_CN.md)
 
 ## 构建
 
@@ -85,6 +87,7 @@ mvn -pl :surprising-adl-provider -am spring-boot:run
 mvn -pl :surprising-websocket-provider -am spring-boot:run
 mvn -pl :surprising-trigger-provider -am spring-boot:run
 mvn -pl :surprising-gateway-provider -am spring-boot:run
+mvn -pl :surprising-market-maker-provider -am spring-boot:run
 ```
 
 端口：
@@ -104,6 +107,7 @@ mvn -pl :surprising-gateway-provider -am spring-boot:run
 - `9093`：前端 WebSocket 推送服务。
 - `9094`：统一 REST API 网关。
 - `9095`：止盈止损条件单服务。
+- `9096`：内网做市商服务。
 
 ## Kafka Topics
 
@@ -194,6 +198,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - 成对 TP/SL 可以使用同一个 `ocoGroupId`；同一用户、symbol、保证金模式组里任意一条 pending 触发单被抢占后，其它 pending sibling 会在同一条数据库语句里先置为 `CANCELED`，然后再提交生成的平仓单。
 - Account 消费撮合成交，按 `tradeId` 幂等更新 long-based 净持仓，把开仓成交保证金迁移到持仓保证金，并把已实现盈亏结算进余额。
 - `CROSS` 和 `ISOLATED` 保证金模式会从下单一路传到撮合、账户、风控、资金费和强平。全仓亏损可以使用全仓可用余额和全仓持仓保证金；逐仓亏损只使用该 symbol 的逐仓持仓保证金，亏穿后记录 deficit。
+- 逐仓持仓保证金可以通过 account-provider 手动追加或减少。追加会把可用余额转入持仓保证金；减少必须依赖最新风险快照，并保证减少后权益仍高于维持保证金加配置缓冲。
 - 用户杠杆配置按 `userId + symbol + marginMode` 生效；订单入口会在冻结初始保证金前按当前风险档位重新校验配置杠杆。
 - 自动 VIP 手续费档位由 order-provider 根据 30 日成交名义价值和账户资产估值计算，再写回用户全局 `VIP` 费率。风控、人工、活动和做市商费率拥有更高 source 优先级。
 - Account 和 Funding 的亏损结算只会扣持仓保证金支撑的 locked collateral；未成交订单冻结不会被 PnL 或资金费扣款消耗。

@@ -33,6 +33,8 @@ public record InstrumentResponse(
         long makerFeeRatePpm,
         long takerFeeRatePpm,
         long maxPositionNotionalUnits,
+        long userOpenInterestLimitRatePpm,
+        long userOpenInterestLimitFloorUnits,
         int fundingIntervalHours,
         long interestRatePpm,
         long fundingRateCapPpm,

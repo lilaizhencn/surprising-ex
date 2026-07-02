@@ -8,11 +8,13 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.trading.api.model.MarginMode;
 import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.List;
 import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
@@ -60,5 +62,36 @@ class TriggerOrderRepositoryTest {
         verify(jdbcTemplate).query(contains("PARTITION BY claim_group_key"), any(RowMapper.class),
                 eq("BTC-USDT"), any(), eq(70_000L), eq(70_000L), eq(100),
                 eq(9L), eq(70_000L), any(), any(), any());
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void lockUserSymbolMarginScopeUsesSharedAdvisoryLockKey() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+
+        repository.lockUserSymbolMarginScope(1001L, "BTC-USDT");
+
+        verify(jdbcTemplate).query(contains("pg_advisory_xact_lock"),
+                any(ResultSetExtractor.class), eq("1001:BTC-USDT"));
+    }
+
+    @Test
+    void activeMarginModeConflictChecksPositionsOrdersAndTriggers() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        when(jdbcTemplate.queryForObject(contains("account_positions"), eq(Boolean.class),
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"),
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"),
+                eq(1001L), eq("BTC-USDT"), eq("CROSS")))
+                .thenReturn(true);
+
+        boolean conflict = repository.hasActiveMarginModeConflict(1001L, "BTC-USDT", MarginMode.CROSS);
+
+        assertThat(conflict).isTrue();
+        verify(jdbcTemplate).queryForObject(contains("trading_trigger_orders"), eq(Boolean.class),
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"),
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"),
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"));
     }
 }

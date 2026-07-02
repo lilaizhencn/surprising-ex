@@ -1,0 +1,59 @@
+server:
+  port: 9096
+
+spring:
+  application:
+    name: surprising-market-maker-provider
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  clients:
+    account:
+      base-url: http://localhost:9086
+    instrument:
+      base-url: http://localhost:9080
+    mark-price:
+      base-url: http://localhost:9083
+    matching:
+      base-url: http://localhost:9085
+    order:
+      base-url: http://localhost:9084
+  market-maker:
+    engine:
+      enabled: false
+      cycle-delay-ms: 250
+      node-id:
+    coordination:
+      enabled: true
+      lease-duration: 5s
+    quoting:
+      order-book-depth: 20
+      order-levels: 3
+      min-spread-ticks: 10
+      level-spacing-ticks: 10
+      refresh-threshold-ticks: 2
+      max-open-orders-per-account-symbol: 30
+      stale-order-max-age: 30s
+      max-price-deviation-ppm: 5000
+    risk:
+      max-inventory-steps: 10000
+      max-inventory-skew-ppm: 800000
+    strategies:
+      - strategy-id: btc-usdt-mm-a
+        enabled: true
+        account-ids: [900001, 900002]
+        symbols: [BTC-USDT]
+        base-quantity-steps: 10
+        margin-mode: CROSS

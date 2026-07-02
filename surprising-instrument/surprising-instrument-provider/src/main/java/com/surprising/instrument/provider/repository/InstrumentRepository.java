@@ -30,9 +30,10 @@ public class InstrumentRepository {
                 post_only_enabled, reduce_only_enabled, market_order_enabled,
                 max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm,
                 maker_fee_rate_ppm, taker_fee_rate_ppm, max_position_notional_units,
+                user_open_interest_limit_rate_ppm, user_open_interest_limit_floor_units,
                 funding_interval_hours, interest_rate_ppm, funding_rate_cap_ppm, funding_rate_floor_ppm,
                 impact_notional_units, min_valid_index_sources, status, effective_time, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     private static final String INSERT_BRACKET_SQL = """
@@ -85,6 +86,7 @@ public class InstrumentRepository {
                 request.postOnlyEnabled(), request.reduceOnlyEnabled(), request.marketOrderEnabled(),
                 request.maxLeveragePpm(), request.initialMarginRatePpm(), request.maintenanceMarginRatePpm(),
                 request.makerFeeRatePpm(), request.takerFeeRatePpm(), request.maxPositionNotionalUnits(),
+                request.userOpenInterestLimitRatePpm(), request.userOpenInterestLimitFloorUnits(),
                 request.fundingIntervalHours(), request.interestRatePpm(), request.fundingRateCapPpm(),
                 request.fundingRateFloorPpm(), request.impactNotionalUnits(), request.minValidIndexSources(),
                 request.status().name(), Timestamp.from(effectiveTime), Timestamp.from(now), Timestamp.from(now));
@@ -229,6 +231,8 @@ public class InstrumentRepository {
                 rs.getLong("maker_fee_rate_ppm"),
                 rs.getLong("taker_fee_rate_ppm"),
                 rs.getLong("max_position_notional_units"),
+                rs.getLong("user_open_interest_limit_rate_ppm"),
+                rs.getLong("user_open_interest_limit_floor_units"),
                 rs.getInt("funding_interval_hours"),
                 rs.getLong("interest_rate_ppm"),
                 rs.getLong("funding_rate_cap_ppm"),

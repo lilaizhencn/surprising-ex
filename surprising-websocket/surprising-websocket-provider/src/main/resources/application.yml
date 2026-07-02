@@ -15,10 +15,12 @@ surprising:
     kafka:
       bootstrap-servers: localhost:9092
       # Horizontal fanout requires each WebSocket node to receive public market data locally.
-      # Keep this unique per pod/instance; using the same group across all nodes would deliver
-      # each Kafka record to only one node.
-      group-id: surprising-websocket-${random.uuid}
+      # Keep this stable and unique per pod/instance; using the same group across all nodes would
+      # deliver each Kafka record to only one node, while using a fresh random group on every restart
+      # leaves stale consumer groups in Kafka and makes lag dashboards noisy.
+      group-id: surprising-websocket-${HOSTNAME:${random.uuid}}
       concurrency: 2
+      max-poll-records: 1000
       candle-topic: surprising.perp.candle.events.v1
       trade-topic: surprising.perp.trade.events.v1
       order-book-depth-topic: surprising.perp.orderbook.depth.v1
@@ -29,6 +31,8 @@ surprising:
       match-results-topic: surprising.perp.match.results.v1
       match-trades-topic: surprising.perp.match.trades.v1
       position-events-topic: surprising.account.position.events.v1
+      account-risk-events-topic: surprising.risk.account.events.v1
+      position-risk-events-topic: surprising.risk.position.events.v1
     session:
       max-subscriptions: 200
       outbound-queue-capacity: 1000

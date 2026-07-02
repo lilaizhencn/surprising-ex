@@ -52,12 +52,18 @@ public class GatewayProperties {
         routes.put("funding", new BackendRoute("http://localhost:9089", "/api/v1/funding", false));
         routes.put("insurance", new BackendRoute("http://localhost:9090", "/api/v1/insurance", true));
         routes.put("adl", new BackendRoute("http://localhost:9091", "/api/v1/adl", true));
+        routes.put("market-maker", new BackendRoute("http://localhost:9096", "/api/v1/market-maker", true));
         return routes;
     }
 
     public static class Security {
         private String userIdHeader = "X-User-Id";
         private boolean requireIdentityForPrivateRoutes = true;
+        private boolean allowUserIdHeaderFallback = true;
+        private String issuer = "surprising-ex-gateway";
+        private String jwtSecret = "local-dev-change-me-surprising-ex-gateway-secret-2026";
+        private Duration accessTokenTtl = Duration.ofMinutes(30);
+        private Duration refreshTokenTtl = Duration.ofDays(30);
 
         public String getUserIdHeader() {
             return userIdHeader;
@@ -73,6 +79,46 @@ public class GatewayProperties {
 
         public void setRequireIdentityForPrivateRoutes(boolean requireIdentityForPrivateRoutes) {
             this.requireIdentityForPrivateRoutes = requireIdentityForPrivateRoutes;
+        }
+
+        public boolean isAllowUserIdHeaderFallback() {
+            return allowUserIdHeaderFallback;
+        }
+
+        public void setAllowUserIdHeaderFallback(boolean allowUserIdHeaderFallback) {
+            this.allowUserIdHeaderFallback = allowUserIdHeaderFallback;
+        }
+
+        public String getIssuer() {
+            return issuer;
+        }
+
+        public void setIssuer(String issuer) {
+            this.issuer = issuer;
+        }
+
+        public String getJwtSecret() {
+            return jwtSecret;
+        }
+
+        public void setJwtSecret(String jwtSecret) {
+            this.jwtSecret = jwtSecret;
+        }
+
+        public Duration getAccessTokenTtl() {
+            return accessTokenTtl;
+        }
+
+        public void setAccessTokenTtl(Duration accessTokenTtl) {
+            this.accessTokenTtl = accessTokenTtl;
+        }
+
+        public Duration getRefreshTokenTtl() {
+            return refreshTokenTtl;
+        }
+
+        public void setRefreshTokenTtl(Duration refreshTokenTtl) {
+            this.refreshTokenTtl = refreshTokenTtl;
         }
     }
 

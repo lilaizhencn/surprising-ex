@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.surprising</groupId>
+        <artifactId>surprising-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../surprising-parent/pom.xml</relativePath>
+    </parent>
+
+    <artifactId>surprising-market-maker</artifactId>
+    <packaging>pom</packaging>
+    <name>surprising-market-maker</name>
+    <description>Internal market-maker quoting and stress strategy services</description>
+
+    <modules>
+        <module>surprising-market-maker-api</module>
+        <module>surprising-market-maker-provider</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-market-maker-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-trading-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-instrument-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-account-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-price-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>

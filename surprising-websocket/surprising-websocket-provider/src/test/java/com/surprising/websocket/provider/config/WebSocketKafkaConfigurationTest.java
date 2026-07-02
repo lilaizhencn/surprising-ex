@@ -18,6 +18,7 @@ class WebSocketKafkaConfigurationTest {
         properties.getKafka().setBootstrapServers("kafka-a:9092");
         properties.getKafka().setGroupId("surprising-websocket-node-a");
         properties.getKafka().setConcurrency(4);
+        properties.getKafka().setMaxPollRecords(250);
 
         WebSocketKafkaConfiguration configuration = new WebSocketKafkaConfiguration();
         var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
@@ -31,6 +32,7 @@ class WebSocketKafkaConfigurationTest {
         assertThat(config).containsEntry(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         assertThat(config).containsEntry(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
         assertThat(config).containsEntry(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        assertThat(config).containsEntry(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 250);
         assertThat(config).containsEntry(
                 ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
                 CooperativeStickyAssignor.class.getName());

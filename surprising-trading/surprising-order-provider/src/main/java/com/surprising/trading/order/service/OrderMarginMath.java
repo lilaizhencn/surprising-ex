@@ -83,14 +83,25 @@ public final class OrderMarginMath {
                                             Long markPriceTicks,
                                             long marketMaxSlippagePpm,
                                             ContractType contractType) {
-        if (orderType != OrderType.MARKET) {
-            requirePositive(priceTicks, "priceTicks");
+        if (orderType == OrderType.MARKET) {
+            if (contractType == ContractType.INVERSE_PERPETUAL) {
+                return lowerBoundPriceTicks(orderType, priceTicks, markPriceTicks, marketMaxSlippagePpm);
+            }
+            return upperBoundPriceTicks(orderType, priceTicks, markPriceTicks, marketMaxSlippagePpm);
+        }
+        requirePositive(priceTicks, "priceTicks");
+        if (markPriceTicks == null || markPriceTicks <= 0) {
             return priceTicks;
         }
-        if (contractType == ContractType.INVERSE_PERPETUAL) {
-            return lowerBoundPriceTicks(orderType, priceTicks, markPriceTicks, marketMaxSlippagePpm);
+        if (contractType == ContractType.INVERSE_PERPETUAL && side == OrderSide.BUY) {
+            return Math.min(priceTicks, lowerBoundPriceTicks(OrderType.MARKET, 0L, markPriceTicks,
+                    marketMaxSlippagePpm));
         }
-        return upperBoundPriceTicks(orderType, priceTicks, markPriceTicks, marketMaxSlippagePpm);
+        if (contractType != ContractType.INVERSE_PERPETUAL && side == OrderSide.SELL) {
+            return Math.max(priceTicks, upperBoundPriceTicks(OrderType.MARKET, 0L, markPriceTicks,
+                    marketMaxSlippagePpm));
+        }
+        return priceTicks;
     }
 
     static long lowerBoundPriceTicks(OrderType orderType,

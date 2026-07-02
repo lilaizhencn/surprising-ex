@@ -3,11 +3,20 @@ package com.surprising.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.account.api.model.BalanceResponse;
+import com.surprising.account.api.model.LiquidationFeeSettledEvent;
+import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
+import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
+import com.surprising.account.api.model.PositionMarginResponse;
 import com.surprising.account.api.model.PositionResponse;
+import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.BalanceSettlementState;
 import com.surprising.account.provider.model.ContractSpec;
+import com.surprising.account.provider.model.LiquidationFeeContext;
+import com.surprising.account.provider.model.LiquidationFeeSettlement;
 import com.surprising.account.provider.model.OrderFeeSnapshot;
 import com.surprising.account.provider.model.PositionState;
+import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.account.provider.service.AccountService;
 import com.surprising.account.provider.service.MarginTransferMath;
@@ -20,11 +29,14 @@ import com.surprising.liquidation.api.model.LiquidationOrderStatus;
 import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.liquidation.provider.model.ClaimedCandidate;
 import com.surprising.liquidation.provider.model.LiquidationCloseState;
+import com.surprising.liquidation.provider.model.LiquidationPricingDecision;
+import com.surprising.liquidation.provider.model.LiquidationPricingInput;
 import com.surprising.liquidation.provider.model.LiquidationSizingInput;
 import com.surprising.liquidation.provider.repository.LiquidationOrderRepository;
 import com.surprising.liquidation.provider.repository.LiquidationRepository;
 import com.surprising.liquidation.provider.repository.LiquidationSequenceRepository;
 import com.surprising.liquidation.provider.service.LiquidationService;
+import com.surprising.liquidation.provider.service.LiquidationPriceCalculator;
 import com.surprising.liquidation.provider.service.LiquidationSizingPolicy;
 import com.surprising.risk.api.model.LiquidationCandidateEvent;
 import com.surprising.risk.api.model.LiquidationCandidateQueryResponse;
@@ -292,6 +304,51 @@ class PerpetualTradingChainIntegrationTest {
     }
 
     @Test
+    void isolatedMarginOpenAndManualMarginAdjustmentStayScopedToIsolatedPosition() {
+        try (Harness harness = new Harness()) {
+            harness.state.setBalance(1101L, 100_000L);
+            harness.state.setBalance(2202L, 100_000L);
+
+            harness.place(1101L, "iso-maker-sell", OrderSide.SELL, OrderType.LIMIT,
+                    TimeInForce.GTC, 100L, 10L, MarginMode.CROSS, false);
+            harness.place(2202L, "iso-user-open-long", OrderSide.BUY, OrderType.LIMIT,
+                    TimeInForce.IOC, 100L, 10L, MarginMode.ISOLATED, false);
+            harness.processNewOrderCommands();
+
+            assertThat(harness.state.position(2202L, MarginMode.CROSS))
+                    .isEqualTo(new PositionState(0L, 0L, 0L, 0L));
+            assertThat(harness.state.position(2202L, MarginMode.ISOLATED))
+                    .isEqualTo(new PositionState(10L, VERSION, 100L, 0L));
+            assertThat(harness.state.positionMargin(2202L, MarginMode.ISOLATED)).isEqualTo(1_000L);
+            assertThat(harness.accountService.positionMargin(2202L, SYMBOL, "ISOLATED").marginUnits())
+                    .isEqualTo(1_000L);
+            assertThat(harness.state.balance(2202L).availableUnits).isEqualTo(99_000L);
+            assertThat(harness.state.balance(2202L).lockedUnits).isEqualTo(1_000L);
+
+            PositionMarginAdjustmentResponse added = harness.accountService.adjustPositionMargin(
+                    new PositionMarginAdjustmentRequest(2202L, SYMBOL, MarginMode.ISOLATED,
+                            500L, "iso-margin-add-1", "ADD_POSITION_MARGIN"));
+            assertThat(added.positionMarginUnits()).isEqualTo(1_500L);
+            assertThat(harness.state.balance(2202L).availableUnits).isEqualTo(98_500L);
+            assertThat(harness.state.balance(2202L).lockedUnits).isEqualTo(1_500L);
+
+            PositionMarginAdjustmentResponse removed = harness.accountService.adjustPositionMargin(
+                    new PositionMarginAdjustmentRequest(2202L, SYMBOL, MarginMode.ISOLATED,
+                            -200L, "iso-margin-remove-1", "REMOVE_POSITION_MARGIN"));
+            assertThat(removed.positionMarginUnits()).isEqualTo(1_300L);
+            assertThat(harness.state.positionMargin(2202L, MarginMode.ISOLATED)).isEqualTo(1_300L);
+            assertThat(harness.state.balance(2202L).availableUnits).isEqualTo(98_700L);
+            assertThat(harness.state.balance(2202L).lockedUnits).isEqualTo(1_300L);
+            assertThat(harness.accountOutbox.positionEvents)
+                    .anySatisfy(event -> {
+                        assertThat(event.userId()).isEqualTo(2202L);
+                        assertThat(event.marginMode()).isEqualTo(MarginMode.ISOLATED);
+                        assertThat(event.tradeId()).isZero();
+                    });
+        }
+    }
+
+    @Test
     void riskLiquidationFlowCreatesReduceOnlyOrderAndSettlesMatchedClose() {
         try (Harness harness = new Harness()) {
             harness.state.setBalance(1101L, 1_000L);
@@ -305,9 +362,9 @@ class PerpetualTradingChainIntegrationTest {
             harness.processNewOrderCommands();
             assertThat(harness.state.position(2202L)).isEqualTo(new PositionState(6L, VERSION, 100L, 0L));
 
-            harness.state.markPriceTicks = 50L;
+            harness.state.markPriceTicks = 99L;
             harness.place(3303L, "liquidation-bid", OrderSide.BUY, OrderType.LIMIT,
-                    TimeInForce.GTC, 50L, 6L, false);
+                    TimeInForce.GTC, 99L, 6L, false);
             harness.processNewOrderCommands();
 
             harness.riskService.scan();
@@ -315,7 +372,7 @@ class PerpetualTradingChainIntegrationTest {
             assertThat(candidate.userId()).isEqualTo(2202L);
             assertThat(candidate.instrumentVersion()).isEqualTo(VERSION);
             assertThat(candidate.signedQuantitySteps()).isEqualTo(6L);
-            assertThat(candidate.markPriceTicks()).isEqualTo(50L);
+            assertThat(candidate.markPriceTicks()).isEqualTo(99L);
 
             harness.liquidationService.processCandidate(candidate);
             OrderCommandEvent liquidationOrder = harness.liquidationOrderRepository.commands.get(0);
@@ -327,14 +384,24 @@ class PerpetualTradingChainIntegrationTest {
 
             harness.processCommand(liquidationOrder);
 
-            assertThat(harness.state.position(2202L)).isEqualTo(new PositionState(0L, 0L, 0L, -30_000L));
-            assertThat(harness.state.balance(2202L).availableUnits).isZero();
+            assertThat(harness.state.position(2202L)).isEqualTo(new PositionState(0L, 0L, 0L, -600L));
+            assertThat(harness.state.balance(2202L).availableUnits).isEqualTo(221L);
             assertThat(harness.state.balance(2202L).lockedUnits).isZero();
-            assertThat(harness.state.balance(2202L).deficitUnits).isEqualTo(29_000L);
+            assertThat(harness.state.balance(2202L).deficitUnits).isZero();
+            assertThat(harness.accountOutbox.liquidationFeeEvents).singleElement()
+                    .satisfies(event -> {
+                        assertThat(event.userId()).isEqualTo(2202L);
+                        assertThat(event.asset()).isEqualTo(SETTLE);
+                        assertThat(event.amountUnits()).isEqualTo(179L);
+                        assertThat(event.feeRatePpm()).isEqualTo(3_000L);
+                        assertThat(event.marginMode()).isEqualTo(MarginMode.CROSS);
+                    });
             assertThat(harness.liquidationRepository.status(candidate.candidateId())).isEqualTo("COMPLETED");
             assertThat(harness.liquidationRepository.orders).singleElement()
-                    .extracting(LiquidationOrderResponse::status)
-                    .isEqualTo(LiquidationOrderStatus.FILLED);
+                    .satisfies(order -> {
+                        assertThat(order.status()).isEqualTo(LiquidationOrderStatus.FILLED);
+                        assertThat(order.liquidationFeeRatePpm()).isEqualTo(3_000L);
+                    });
         }
     }
 
@@ -345,6 +412,7 @@ class PerpetualTradingChainIntegrationTest {
         private final FakeOrderFeeRepository orderFeeRepository;
         private final FakeOrderOutboxRepository orderOutbox;
         private final FakeMatchingResultRepository matchingResultRepository;
+        private final FakeAccountOutboxRepository accountOutbox;
         private final FakeRiskOutboxRepository riskOutbox;
         private final FakeLiquidationRepository liquidationRepository;
         private final FakeLiquidationOrderRepository liquidationOrderRepository;
@@ -366,8 +434,10 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         private static Harness inversePerpetual() {
-            return new Harness(0L, new SharedState(ContractType.INVERSE_PERPETUAL, "BTC",
-                    10_000_000_000L, 100_000_000L, 100_000_000L, 100_000L));
+            SharedState state = new SharedState(ContractType.INVERSE_PERPETUAL, "BTC",
+                    10_000_000_000L, 100_000_000L, 100_000_000L, 100_000L);
+            state.markPriceTicks = 50_000L;
+            return new Harness(0L, state);
         }
 
         private Harness(long marketMaxSlippagePpm, SharedState state) {
@@ -376,6 +446,7 @@ class PerpetualTradingChainIntegrationTest {
             orderFeeRepository = new FakeOrderFeeRepository(state);
             orderOutbox = new FakeOrderOutboxRepository(state);
             matchingResultRepository = new FakeMatchingResultRepository(state);
+            accountOutbox = new FakeAccountOutboxRepository(state);
             riskOutbox = new FakeRiskOutboxRepository(objectMapper);
             liquidationRepository = new FakeLiquidationRepository(state);
             liquidationOrderRepository = new FakeLiquidationOrderRepository(state);
@@ -409,12 +480,13 @@ class PerpetualTradingChainIntegrationTest {
                     matchingResultRepository, new FakeMatchingOutboxRepository(state));
             engine.start();
 
-            accountService = new AccountService(new FakeAccountRepository(state), new PositionCalculator());
+            accountService = new AccountService(new FakeAccountRepository(state), new PositionCalculator(),
+                    null, new AccountProperties(), accountOutbox);
             riskService = new RiskService(objectMapper, new RiskProperties(), new FakeRiskRepository(state),
                     new FakeRiskSequenceRepository(state), riskOutbox, transactionManager());
             liquidationService = new LiquidationService(objectMapper, new LiquidationProperties(),
                     liquidationRepository, liquidationOrderRepository, new FakeLiquidationSequenceRepository(state),
-                    new LiquidationSizingPolicy());
+                    new LiquidationSizingPolicy(), new LiquidationPriceCalculator());
         }
 
         private OrderResponse place(long userId,
@@ -425,8 +497,21 @@ class PerpetualTradingChainIntegrationTest {
                                     long priceTicks,
                                     long quantitySteps,
                                     boolean reduceOnly) {
+            return place(userId, clientOrderId, side, orderType, timeInForce, priceTicks, quantitySteps,
+                    MarginMode.CROSS, reduceOnly);
+        }
+
+        private OrderResponse place(long userId,
+                                    String clientOrderId,
+                                    OrderSide side,
+                                    OrderType orderType,
+                                    TimeInForce timeInForce,
+                                    long priceTicks,
+                                    long quantitySteps,
+                                    MarginMode marginMode,
+                                    boolean reduceOnly) {
             return orderService.place(new PlaceOrderRequest(userId, clientOrderId, SYMBOL, side, orderType,
-                    timeInForce, priceTicks, quantitySteps, reduceOnly, false));
+                    timeInForce, priceTicks, quantitySteps, marginMode, reduceOnly, false));
         }
 
         private OrderResponse cancel(long userId, long orderId) {
@@ -480,6 +565,9 @@ class PerpetualTradingChainIntegrationTest {
         private final Map<PositionKey, PositionState> positions = new HashMap<>();
         private final Map<PositionKey, Long> positionMargins = new HashMap<>();
         private final Map<Long, MarginReservationState> reservations = new HashMap<>();
+        private final Map<Long, LiquidationOrderResponse> liquidationOrders = new LinkedHashMap<>();
+        private final Map<String, PositionMarginAdjustmentResponse> positionMarginAdjustmentReferences = new HashMap<>();
+        private final Set<String> liquidationFeeReferences = new HashSet<>();
         private final Set<Long> processedTrades = new HashSet<>();
         private long markPriceTicks = 100L;
 
@@ -514,16 +602,29 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         private PositionState position(long userId) {
-            return positions.getOrDefault(new PositionKey(userId, SYMBOL, MarginMode.CROSS),
+            return position(userId, MarginMode.CROSS);
+        }
+
+        private PositionState position(long userId, MarginMode marginMode) {
+            return positions.getOrDefault(new PositionKey(userId, SYMBOL, MarginMode.defaultIfNull(marginMode)),
                     new PositionState(0L, 0L, 0L, 0L));
         }
 
         private void putPosition(long userId, PositionState state) {
-            positions.put(new PositionKey(userId, SYMBOL, MarginMode.CROSS), state);
+            putPosition(userId, MarginMode.CROSS, state);
+        }
+
+        private void putPosition(long userId, MarginMode marginMode, PositionState state) {
+            positions.put(new PositionKey(userId, SYMBOL, MarginMode.defaultIfNull(marginMode)), state);
         }
 
         private long positionMargin(long userId) {
-            return positionMargins.getOrDefault(new PositionKey(userId, SYMBOL, MarginMode.CROSS), 0L);
+            return positionMargin(userId, MarginMode.CROSS);
+        }
+
+        private long positionMargin(long userId, MarginMode marginMode) {
+            return positionMargins.getOrDefault(new PositionKey(userId, SYMBOL, MarginMode.defaultIfNull(marginMode)),
+                    0L);
         }
     }
 
@@ -553,7 +654,45 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public void lockUserSymbolMarginScope(long userId, String symbol) {
+        }
+
+        @Override
+        public boolean hasActiveMarginModeConflict(long userId, String symbol, MarginMode marginMode) {
+            MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+            boolean conflictingPosition = state.positions.entrySet().stream()
+                    .anyMatch(entry -> entry.getKey().userId() == userId
+                            && entry.getKey().symbol().equals(symbol)
+                            && entry.getKey().marginMode() != normalizedMarginMode
+                            && entry.getValue().signedQuantitySteps() != 0L);
+            if (conflictingPosition) {
+                return true;
+            }
+            return state.orders.values().stream()
+                    .filter(order -> order.userId() == userId)
+                    .filter(order -> order.symbol().equals(symbol))
+                    .filter(order -> order.marginMode() != normalizedMarginMode)
+                    .filter(order -> order.status() == OrderStatus.ACCEPTED
+                            || order.status() == OrderStatus.PARTIALLY_FILLED
+                            || order.status() == OrderStatus.CANCEL_REQUESTED)
+                    .anyMatch(order -> order.remainingQuantitySteps() > 0L);
+        }
+
+        @Override
         public void insertEvent(OrderEvent event) {
+        }
+
+        @Override
+        public void reject(long orderId, String rejectReason, Instant now) {
+            OrderRecord order = state.orders.get(orderId);
+            if (order == null || order.status() != OrderStatus.ACCEPTED || order.executedQuantitySteps() != 0L) {
+                throw new IllegalStateException("failed to reject order " + orderId);
+            }
+            state.orders.put(orderId, new OrderRecord(order.orderId(), order.userId(), order.clientOrderId(),
+                    order.symbol(), order.instrumentVersion(), order.side(), order.orderType(), order.timeInForce(),
+                    order.priceTicks(), order.quantitySteps(), order.executedQuantitySteps(), 0L,
+                    order.marginMode(), order.makerFeeRatePpm(), order.takerFeeRatePpm(), order.reduceOnly(),
+                    order.postOnly(), OrderStatus.REJECTED, rejectReason, order.createdAt(), now));
         }
 
         @Override
@@ -713,7 +852,7 @@ class PerpetualTradingChainIntegrationTest {
 
         @Override
         public Optional<ReduceOnlyPosition> lockedPosition(long userId, String symbol, MarginMode marginMode) {
-            PositionState position = state.position(userId);
+            PositionState position = state.position(userId, marginMode);
             return position.signedQuantitySteps() == 0
                     ? Optional.empty()
                     : Optional.of(new ReduceOnlyPosition(position.signedQuantitySteps(), position.instrumentVersion()));
@@ -964,13 +1103,91 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public Optional<LiquidationFeeContext> liquidationFeeContext(long orderId, long userId, String symbol) {
+            LiquidationOrderResponse order = state.liquidationOrders.get(orderId);
+            if (order == null || order.userId() != userId || !symbol.equals(order.symbol())) {
+                return Optional.empty();
+            }
+            if (order.status() != LiquidationOrderStatus.SUBMITTED
+                    && order.status() != LiquidationOrderStatus.PARTIALLY_FILLED
+                    && order.status() != LiquidationOrderStatus.FILLED) {
+                return Optional.empty();
+            }
+            return Optional.of(new LiquidationFeeContext(order.liquidationOrderId(), order.candidateId(),
+                    order.liquidationFeeRatePpm()));
+        }
+
+        @Override
         public boolean markTradeProcessing(long tradeId, String symbol) {
             return state.processedTrades.add(tradeId);
         }
 
         @Override
         public PositionState lockPosition(long userId, String symbol, MarginMode marginMode) {
-            return state.position(userId);
+            return state.position(userId, marginMode);
+        }
+
+        @Override
+        public Optional<PositionResponse> position(long userId, String symbol, MarginMode marginMode) {
+            MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+            PositionState position = state.position(userId, normalizedMarginMode);
+            return position.signedQuantitySteps() == 0
+                    ? Optional.empty()
+                    : Optional.of(new PositionResponse(userId, symbol, position.instrumentVersion(),
+                    normalizedMarginMode, position.signedQuantitySteps(), position.entryPriceTicks(),
+                    position.realizedPnlUnits(), Instant.now()));
+        }
+
+        @Override
+        public Optional<PositionMarginResponse> positionMargin(long userId, String symbol, MarginMode marginMode) {
+            MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+            return Optional.of(new PositionMarginResponse(userId, symbol, state.settleAsset, normalizedMarginMode,
+                    state.positionMargin(userId, normalizedMarginMode), Instant.now()));
+        }
+
+        @Override
+        public PositionMarginAdjustmentResponse adjustIsolatedPositionMargin(long userId,
+                                                                             String symbol,
+                                                                             long amountUnits,
+                                                                             String referenceId,
+                                                                             String reason,
+                                                                             Duration maxRiskSnapshotAge,
+                                                                             long removalBufferPpm) {
+            String key = userId + ":" + symbol + ":" + referenceId;
+            PositionMarginAdjustmentResponse existing = state.positionMarginAdjustmentReferences.get(key);
+            if (existing != null) {
+                return existing;
+            }
+            PositionState position = state.position(userId, MarginMode.ISOLATED);
+            if (position.signedQuantitySteps() == 0) {
+                throw new IllegalStateException("open isolated position not found");
+            }
+            PositionKey positionKey = new PositionKey(userId, symbol, MarginMode.ISOLATED);
+            BalanceState balance = state.balance(userId);
+            long currentMargin = state.positionMargins.getOrDefault(positionKey, 0L);
+            if (amountUnits > 0) {
+                assertThat(balance.availableUnits).isGreaterThanOrEqualTo(amountUnits);
+                balance.availableUnits = Math.subtractExact(balance.availableUnits, amountUnits);
+                balance.lockedUnits = Math.addExact(balance.lockedUnits, amountUnits);
+                currentMargin = Math.addExact(currentMargin, amountUnits);
+            } else {
+                long removeUnits = Math.absExact(amountUnits);
+                assertThat(currentMargin).isGreaterThanOrEqualTo(removeUnits);
+                currentMargin = Math.subtractExact(currentMargin, removeUnits);
+                balance.availableUnits = Math.addExact(balance.availableUnits, removeUnits);
+                balance.lockedUnits = Math.subtractExact(balance.lockedUnits, removeUnits);
+            }
+            if (currentMargin == 0L) {
+                state.positionMargins.remove(positionKey);
+            } else {
+                state.positionMargins.put(positionKey, currentMargin);
+            }
+            PositionMarginAdjustmentResponse response = new PositionMarginAdjustmentResponse(userId, symbol,
+                    state.settleAsset, MarginMode.ISOLATED, amountUnits, currentMargin,
+                    balance.availableUnits, balance.lockedUnits,
+                    balance.availableUnits + balance.lockedUnits - balance.deficitUnits, referenceId, Instant.now());
+            state.positionMarginAdjustmentReferences.put(key, response);
+            return response;
         }
 
         @Override
@@ -1084,6 +1301,51 @@ class PerpetualTradingChainIntegrationTest {
             applyBalanceSettlement(userId, symbol, marginMode, feeDeltaUnits);
         }
 
+        @Override
+        public Optional<LiquidationFeeSettlement> settleLiquidationFee(long userId,
+                                                                      String asset,
+                                                                      long orderId,
+                                                                      long tradeId,
+                                                                      String symbol,
+                                                                      MarginMode marginMode,
+                                                                      long requestedFeeUnits,
+                                                                      LiquidationFeeContext context,
+                                                                      Instant now) {
+            if (requestedFeeUnits <= 0 || context == null || context.feeRatePpm() <= 0) {
+                return Optional.empty();
+            }
+            String referenceId = tradeId + ":" + orderId;
+            if (state.liquidationFeeReferences.contains(referenceId)) {
+                return Optional.empty();
+            }
+            BalanceState current = state.balance(userId);
+            MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+            long maxLockedDebit = matchingPositionMargins(userId, symbol, normalizedMarginMode).stream()
+                    .mapToLong(Map.Entry::getValue)
+                    .reduce(0L, Math::addExact);
+            long availableInput = normalizedMarginMode == MarginMode.ISOLATED ? 0L : current.availableUnits;
+            long collectibleUnits = Math.min(requestedFeeUnits, Math.addExact(availableInput, maxLockedDebit));
+            if (collectibleUnits <= 0) {
+                return Optional.empty();
+            }
+            BalanceSettlementState next = PnlSettlementMath.apply(availableInput, current.lockedUnits,
+                    current.deficitUnits, Math.negateExact(collectibleUnits), maxLockedDebit);
+            if (normalizedMarginMode == MarginMode.ISOLATED) {
+                next = new BalanceSettlementState(current.availableUnits, next.lockedUnits(), next.deficitUnits());
+            }
+            assertThat(next.deficitUnits()).isEqualTo(current.deficitUnits);
+            long lockedDebit = Math.subtractExact(current.lockedUnits, next.lockedUnits());
+            if (lockedDebit > 0) {
+                reducePositionMargins(userId, symbol, normalizedMarginMode, lockedDebit);
+            }
+            current.availableUnits = next.availableUnits();
+            current.lockedUnits = next.lockedUnits();
+            current.deficitUnits = next.deficitUnits();
+            state.liquidationFeeReferences.add(referenceId);
+            return Optional.of(new LiquidationFeeSettlement(context.liquidationOrderId(), context.candidateId(),
+                    collectibleUnits, context.feeRatePpm()));
+        }
+
         private void applyBalanceSettlement(long userId, String symbol, MarginMode marginMode, long amountUnits) {
             BalanceState current = state.balance(userId);
             MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
@@ -1147,9 +1409,19 @@ class PerpetualTradingChainIntegrationTest {
                                                MarginMode marginMode,
                                                PositionState next,
                                                Instant now) {
-            state.putPosition(userId, next);
+            state.putPosition(userId, marginMode, next);
             return new PositionResponse(userId, symbol, next.instrumentVersion(), MarginMode.defaultIfNull(marginMode),
                     next.signedQuantitySteps(), next.entryPriceTicks(), next.realizedPnlUnits(), now);
+        }
+
+        @Override
+        public PositionResponse updatePosition(long userId,
+                                               String symbol,
+                                               MarginMode marginMode,
+                                               PositionState next,
+                                               long previousSignedQuantitySteps,
+                                               Instant now) {
+            return updatePosition(userId, symbol, marginMode, next, now);
         }
 
         @Override
@@ -1164,6 +1436,52 @@ class PerpetualTradingChainIntegrationTest {
             assertThat(balance.lockedUnits).isGreaterThanOrEqualTo(amount);
             balance.lockedUnits -= amount;
             balance.availableUnits += amount;
+        }
+    }
+
+    private static final class FakeAccountOutboxRepository extends AccountOutboxRepository {
+        private final SharedState state;
+        private final List<PositionUpdatedEvent> positionEvents = new ArrayList<>();
+        private final List<LiquidationFeeSettledEvent> liquidationFeeEvents = new ArrayList<>();
+
+        private FakeAccountOutboxRepository(SharedState state) {
+            super(null, null, null);
+            this.state = state;
+        }
+
+        @Override
+        public PositionUpdatedEvent enqueuePositionUpdated(String topic,
+                                                           long tradeId,
+                                                           PositionResponse position,
+                                                           Instant now,
+                                                           String traceId) {
+            PositionUpdatedEvent event = new PositionUpdatedEvent(state.next("account-position-event"), tradeId,
+                    position.userId(), position.symbol(), position.instrumentVersion(), position.marginMode(),
+                    position.signedQuantitySteps(), position.entryPriceTicks(), position.realizedPnlUnits(),
+                    now, traceId);
+            positionEvents.add(event);
+            return event;
+        }
+
+        @Override
+        public LiquidationFeeSettledEvent enqueueLiquidationFeeSettled(String topic,
+                                                                       long tradeId,
+                                                                       long orderId,
+                                                                       long liquidationOrderId,
+                                                                       long candidateId,
+                                                                       long userId,
+                                                                       String symbol,
+                                                                       MarginMode marginMode,
+                                                                       String asset,
+                                                                       long amountUnits,
+                                                                       long feeRatePpm,
+                                                                       Instant now,
+                                                                       String traceId) {
+            LiquidationFeeSettledEvent event = new LiquidationFeeSettledEvent(
+                    state.next("account-liquidation-fee-event"), tradeId, orderId, liquidationOrderId, candidateId,
+                    userId, symbol, marginMode, asset, amountUnits, feeRatePpm, now, traceId);
+            liquidationFeeEvents.add(event);
+            return event;
         }
     }
 
@@ -1355,8 +1673,11 @@ class PerpetualTradingChainIntegrationTest {
         public Optional<ClaimedCandidate> claimCandidate(long candidateId) {
             statuses.put(candidateId, "PROCESSING");
             PositionState position = state.position(2202L);
+            long equity = equity(2202L, position);
+            long maintenance = maintenance(position);
             return Optional.of(new ClaimedCandidate(candidateId, 1L, 2202L, SYMBOL, MarginMode.CROSS, VERSION,
-                    state.settleAsset, position.signedQuantitySteps(), state.markPriceTicks, Long.MAX_VALUE));
+                    state.settleAsset, position.signedQuantitySteps(), state.markPriceTicks, equity, maintenance,
+                    Long.MAX_VALUE));
         }
 
         @Override
@@ -1426,6 +1747,41 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public Optional<LiquidationPricingInput> latestPricingInput(long userId,
+                                                                    String symbol,
+                                                                    MarginMode marginMode,
+                                                                    long instrumentVersion,
+                                                                    java.time.Duration maxSnapshotAge) {
+            PositionState position = state.position(userId);
+            if (position.signedQuantitySteps() == 0) {
+                return Optional.empty();
+            }
+            return Optional.of(new LiquidationPricingInput(state.contractType, position.signedQuantitySteps(),
+                    state.markPriceTicks, equity(userId, position), maintenance(position),
+                    state.notionalMultiplierUnits, state.priceTickUnits, state.settleScaleUnits));
+        }
+
+        private long equity(long userId, PositionState position) {
+            BalanceState balance = state.balance(userId);
+            long wallet = balance.availableUnits + balance.lockedUnits - balance.deficitUnits;
+            long unrealized = position.signedQuantitySteps() == 0
+                    ? 0L
+                    : PerpetualContractMath.unrealizedPnlUnits(state.contractType, position.signedQuantitySteps(),
+                    position.entryPriceTicks(), state.markPriceTicks, state.notionalMultiplierUnits,
+                    state.priceTickUnits, state.settleScaleUnits);
+            return wallet + unrealized;
+        }
+
+        private long maintenance(PositionState position) {
+            if (position.signedQuantitySteps() == 0) {
+                return 0L;
+            }
+            return PerpetualContractMath.maintenanceMarginUnits(state.contractType, position.signedQuantitySteps(),
+                    state.markPriceTicks, state.notionalMultiplierUnits, state.priceTickUnits,
+                    state.settleScaleUnits, state.maintenanceMarginRatePpm);
+        }
+
+        @Override
         public void markCandidate(long candidateId, String status) {
             statuses.put(candidateId, status);
         }
@@ -1456,9 +1812,15 @@ class PerpetualTradingChainIntegrationTest {
                                               long quantitySteps,
                                               LiquidationOrderStatus status,
                                               String reason,
+                                              LiquidationPricingDecision pricing,
                                               Instant now) {
-            orders.add(new LiquidationOrderResponse(liquidationOrderId, candidateId, orderId, userId, symbol,
-                    marginMode, side, quantitySteps, status, reason, now));
+            LiquidationPricingDecision auditPricing = pricing == null ? LiquidationPricingDecision.empty() : pricing;
+            LiquidationOrderResponse order = new LiquidationOrderResponse(liquidationOrderId, candidateId,
+                    orderId, userId, symbol, marginMode, side, quantitySteps,
+                    auditPricing.bankruptcyPriceTicks(), auditPricing.takeoverPriceTicks(),
+                    auditPricing.liquidationFeeRatePpm(), auditPricing.liquidationFeeUnits(), status, reason, now);
+            orders.add(order);
+            state.liquidationOrders.put(orderId, order);
             return true;
         }
 
@@ -1471,9 +1833,14 @@ class PerpetualTradingChainIntegrationTest {
                 if (order.orderId() == orderId
                         && (order.status() == LiquidationOrderStatus.SUBMITTED
                         || order.status() == LiquidationOrderStatus.PARTIALLY_FILLED)) {
-                    orders.set(i, new LiquidationOrderResponse(order.liquidationOrderId(), order.candidateId(),
-                            order.orderId(), order.userId(), order.symbol(), order.side(), order.quantitySteps(),
-                            orderStatus, order.reason(), order.createdAt()));
+                    LiquidationOrderResponse updated = new LiquidationOrderResponse(
+                            order.liquidationOrderId(), order.candidateId(),
+                            order.orderId(), order.userId(), order.symbol(), order.marginMode(), order.side(),
+                            order.quantitySteps(), order.bankruptcyPriceTicks(), order.takeoverPriceTicks(),
+                            order.liquidationFeeRatePpm(), order.liquidationFeeUnits(), orderStatus,
+                            order.reason(), order.createdAt());
+                    orders.set(i, updated);
+                    state.liquidationOrders.put(order.orderId(), updated);
                     if ("PROCESSING".equals(statuses.get(order.candidateId()))) {
                         statuses.put(order.candidateId(), candidateStatus);
                     }

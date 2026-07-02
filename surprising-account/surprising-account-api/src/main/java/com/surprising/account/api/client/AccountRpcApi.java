@@ -3,12 +3,18 @@ package com.surprising.account.api.client;
 import com.surprising.account.api.AccountApiPaths;
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
+import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
+import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
+import com.surprising.account.api.model.PositionMarginResponse;
 import com.surprising.account.api.model.PositionQueryResponse;
 import com.surprising.account.api.model.PositionResponse;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
@@ -28,8 +34,27 @@ public interface AccountRpcApi {
     @GetMapping("/position")
     PositionResponse position(@RequestParam("userId") @Positive long userId,
                               @RequestParam("symbol") @NotBlank String symbol,
-                              @RequestParam(value = "marginMode", required = false) String marginMode);
+                              @RequestParam(value = "marginMode", required = false) String marginMode,
+                              @RequestParam(value = "positionSide", required = false) String positionSide);
+
+    default PositionResponse position(long userId, String symbol, String marginMode) {
+        return position(userId, symbol, marginMode, null);
+    }
+
+    @GetMapping("/position-margin")
+    PositionMarginResponse positionMargin(@RequestParam("userId") @Positive long userId,
+                                          @RequestParam("symbol") @NotBlank String symbol,
+                                          @RequestParam(value = "marginMode", required = false) String marginMode);
+
+    @PostMapping("/position-margin-adjustments")
+    PositionMarginAdjustmentResponse adjustPositionMargin(
+            @Valid @RequestBody PositionMarginAdjustmentRequest request);
 
     @GetMapping("/positions")
-    PositionQueryResponse positions(@RequestParam("userId") @Positive long userId);
+    PositionQueryResponse positions(@RequestParam("userId") @Positive long userId,
+                                    @RequestParam(value = "positionSide", required = false) String positionSide);
+
+    default PositionQueryResponse positions(long userId) {
+        return positions(userId, null);
+    }
 }

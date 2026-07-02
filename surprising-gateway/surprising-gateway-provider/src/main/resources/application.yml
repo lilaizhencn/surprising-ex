@@ -4,6 +4,14 @@ server:
 spring:
   application:
     name: surprising-gateway-provider
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
 management:
   endpoints:
     web:
@@ -15,9 +23,14 @@ surprising:
     security:
       user-id-header: X-User-Id
       require-identity-for-private-routes: true
+      allow-user-id-header-fallback: true
+      issuer: surprising-ex-gateway
+      jwt-secret: local-dev-change-me-surprising-ex-gateway-secret-2026
+      access-token-ttl: 30m
+      refresh-token-ttl: 30d
     http-client:
       connect-timeout: 1s
-      read-timeout: 5s
+      read-timeout: 30s
     routes:
       instrument:
         base-url: http://localhost:9080
@@ -74,4 +87,8 @@ surprising:
       adl:
         base-url: http://localhost:9091
         target-prefix: /api/v1/adl
+        private-route: true
+      market-maker:
+        base-url: http://localhost:9096
+        target-prefix: /api/v1/market-maker
         private-route: true

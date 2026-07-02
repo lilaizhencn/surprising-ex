@@ -13,6 +13,10 @@ public record LiquidationOrderResponse(
         MarginMode marginMode,
         OrderSide side,
         long quantitySteps,
+        long bankruptcyPriceTicks,
+        long takeoverPriceTicks,
+        long liquidationFeeRatePpm,
+        long liquidationFeeUnits,
         LiquidationOrderStatus status,
         String reason,
         Instant createdAt) {
@@ -32,6 +36,39 @@ public record LiquidationOrderResponse(
                                     String reason,
                                     Instant createdAt) {
         this(liquidationOrderId, candidateId, orderId, userId, symbol, MarginMode.CROSS, side, quantitySteps,
-                status, reason, createdAt);
+                0L, 0L, 0L, 0L, status, reason, createdAt);
+    }
+
+    public LiquidationOrderResponse(long liquidationOrderId,
+                                    long candidateId,
+                                    long orderId,
+                                    long userId,
+                                    String symbol,
+                                    MarginMode marginMode,
+                                    OrderSide side,
+                                    long quantitySteps,
+                                    LiquidationOrderStatus status,
+                                    String reason,
+                                    Instant createdAt) {
+        this(liquidationOrderId, candidateId, orderId, userId, symbol, marginMode, side, quantitySteps,
+                0L, 0L, 0L, 0L, status, reason, createdAt);
+    }
+
+    public LiquidationOrderResponse(long liquidationOrderId,
+                                    long candidateId,
+                                    long orderId,
+                                    long userId,
+                                    String symbol,
+                                    MarginMode marginMode,
+                                    OrderSide side,
+                                    long quantitySteps,
+                                    long bankruptcyPriceTicks,
+                                    long takeoverPriceTicks,
+                                    long liquidationFeeUnits,
+                                    LiquidationOrderStatus status,
+                                    String reason,
+                                    Instant createdAt) {
+        this(liquidationOrderId, candidateId, orderId, userId, symbol, marginMode, side, quantitySteps,
+                bankruptcyPriceTicks, takeoverPriceTicks, 0L, liquidationFeeUnits, status, reason, createdAt);
     }
 }

@@ -78,7 +78,9 @@ public class InstrumentService {
                 current.supportedOrderTypes(), current.supportedTimeInForce(), current.postOnlyEnabled(),
                 current.reduceOnlyEnabled(), current.marketOrderEnabled(), current.maxLeveragePpm(),
                 current.initialMarginRatePpm(), current.maintenanceMarginRatePpm(), current.makerFeeRatePpm(),
-                current.takerFeeRatePpm(), current.maxPositionNotionalUnits(), current.fundingIntervalHours(),
+                current.takerFeeRatePpm(), current.maxPositionNotionalUnits(),
+                current.userOpenInterestLimitRatePpm(), current.userOpenInterestLimitFloorUnits(),
+                current.fundingIntervalHours(),
                 current.interestRatePpm(), current.fundingRateCapPpm(), current.fundingRateFloorPpm(),
                 current.impactNotionalUnits(), current.minValidIndexSources(), status, Instant.now(),
                 current.riskLimitBrackets(), current.indexSources());

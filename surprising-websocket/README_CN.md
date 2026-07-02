@@ -34,6 +34,13 @@
 {"op":"subscribe","id":"p1","channel":"positions","symbol":"BTC-USDT"}
 ```
 
+私有风险订阅示例：
+
+```json
+{"op":"subscribe","id":"r1","channel":"positionRisk","symbol":"BTC-USDT"}
+{"op":"subscribe","id":"r2","channel":"accountRisk"}
+```
+
 私有频道必须有已认证用户 id。生产环境应由 ingress/auth 层注入 `X-User-Id`；本地调试可以用 query 参数传同样的值，但这不是生产安全模型。
 
 ## 频道
@@ -49,6 +56,8 @@
 | `orders` | 否 | 可选 `symbol` | `surprising.perp.order.events.v1` |
 | `matches` | 否 | 可选 `symbol` | `surprising.perp.match.results.v1`, `surprising.perp.match.trades.v1` |
 | `positions` | 否 | 可选 `symbol` | `surprising.account.position.events.v1` |
+| `positionRisk` | 否 | 可选 `symbol` | `surprising.risk.position.events.v1` |
+| `accountRisk` | 否 | 可选 `symbol` 会按通配符处理 | `surprising.risk.account.events.v1` |
 
 私有订阅不传 `symbol` 时使用通配符 `*`，表示接收该认证用户的所有相关事件。
 
@@ -92,6 +101,14 @@ matching trade
 account outbox 是至少一次投递。客户端更新本地状态时应把 `eventId` 和 `tradeId` 当成去重/版本提示。
 私有持仓消息在可用时也会携带原始交易链路的 `traceId`，方便客服和运维把 WebSocket 推送关联到订单、撮合成交和账户结算行。
 
+`positions` 是账户持仓状态频道，不是实时 PnL 计算器。它在账户结算后推送签名数量、开仓均价、已实现盈亏和保证金模式。后端权威的未实现盈亏、权益、维持保证金和保证金率要订阅：
+
+- `positionRisk`：单持仓风险快照，包含 `markPriceTicks`、`notionalUnits`、`unrealizedPnlUnits`、`maintenanceMarginUnits`、`positionMarginUnits`、`marginRatioPpm` 和 `status`。
+- `accountRisk`：`userId + settleAsset` 维度账户风险快照，包含钱包余额、总未实现盈亏、权益、维持保证金、保证金率和状态。
+
+前端可以把 `positions` 和公共 `mark` 更新组合起来做更高频的视觉插值，但和爆仓系统一致的权威值来自 risk-provider 的 `positionRisk` / `accountRisk` 事件。
+由账户持仓更新触发的风险事件会尽量携带原交易 `traceId`；定时兜底扫描产生的风险事件可能没有 traceId。
+
 ## 用户状态和节点选择
 
 WebSocket 用户状态是本地、临时状态：
@@ -117,6 +134,7 @@ position event on Kafka
 - WebSocket 节点至少部署 2 个。
 - 每个 WebSocket 节点必须使用唯一 Kafka consumer group，例如默认值 `surprising-websocket-${HOSTNAME:${random.uuid}}`。
 - 不要让所有 WebSocket pod 共用一个 group。共用 group 会导致每条 Kafka 记录只被一个 pod 收到，连接在其他 pod 上的客户端会漏掉公共行情。
+- 生产环境建议显式配置稳定的 pod/node 值，例如 `surprising-websocket-${POD_NAME}`。每次重启都使用纯随机 group 会在 Kafka 里留下过期 group，让 consumer lag 看板变得很吵。
 - 不需要跨节点 session 状态。每个节点只维护本机 WebSocket session 和订阅表。
 - 负载均衡器可以把新连接分散到不同节点。已经建立的 WebSocket TCP 连接自然固定在一个节点；断线重连后客户端必须重新订阅。
 - 公共行情事件会被每个节点消费，然后按本地订阅过滤。
@@ -133,8 +151,11 @@ surprising:
       bootstrap-servers: localhost:9092
       group-id: surprising-websocket-${HOSTNAME:${random.uuid}}
       concurrency: 2
+      max-poll-records: 1000
       order-book-depth-topic: surprising.perp.orderbook.depth.v1
       position-events-topic: surprising.account.position.events.v1
+      account-risk-events-topic: surprising.risk.account.events.v1
+      position-risk-events-topic: surprising.risk.position.events.v1
     session:
       max-subscriptions: 200
       outbound-queue-capacity: 1000
@@ -155,6 +176,7 @@ surprising:
 ## 运维注意事项
 
 - 监控 WebSocket 连接数、发送队列压力、Kafka consumer lag 和 send timeout 关闭次数。
+- consumer lag 告警应只看活跃 WebSocket 节点 group。历史随机 group 应删除，或在看板里过滤。
 - Kafka topic 继续按 `symbol` 分区。
 - 前端应先用 REST 获取快照，再用 WebSocket 订阅增量。
 - 客户端要发送周期性 `ping`，断线后用指数退避重连。

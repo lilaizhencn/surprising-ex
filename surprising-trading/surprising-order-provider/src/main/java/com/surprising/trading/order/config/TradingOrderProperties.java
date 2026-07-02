@@ -106,6 +106,9 @@ public class TradingOrderProperties {
     public static class Risk {
         private long marketMaxSlippagePpm = 10_000L;
         private long marketMaxMarkAgeMs = 5_000L;
+        private boolean limitPriceProtectionEnabled;
+        private long limitPriceBandPpm = 50_000L;
+        private long limitPriceMaxMarkAgeMs = 5_000L;
 
         public long getMarketMaxSlippagePpm() {
             return marketMaxSlippagePpm;
@@ -121,6 +124,30 @@ public class TradingOrderProperties {
 
         public void setMarketMaxMarkAgeMs(long marketMaxMarkAgeMs) {
             this.marketMaxMarkAgeMs = marketMaxMarkAgeMs;
+        }
+
+        public boolean isLimitPriceProtectionEnabled() {
+            return limitPriceProtectionEnabled;
+        }
+
+        public void setLimitPriceProtectionEnabled(boolean limitPriceProtectionEnabled) {
+            this.limitPriceProtectionEnabled = limitPriceProtectionEnabled;
+        }
+
+        public long getLimitPriceBandPpm() {
+            return limitPriceBandPpm;
+        }
+
+        public void setLimitPriceBandPpm(long limitPriceBandPpm) {
+            this.limitPriceBandPpm = limitPriceBandPpm;
+        }
+
+        public long getLimitPriceMaxMarkAgeMs() {
+            return limitPriceMaxMarkAgeMs;
+        }
+
+        public void setLimitPriceMaxMarkAgeMs(long limitPriceMaxMarkAgeMs) {
+            this.limitPriceMaxMarkAgeMs = limitPriceMaxMarkAgeMs;
         }
     }
 

@@ -1,7 +1,9 @@
 package com.surprising.account.provider.repository;
 
+import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.account.provider.model.AccountOutboxRecord;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -50,6 +52,35 @@ public class AccountOutboxRepository {
                 """, outboxId, eventId, topic, position.symbol(), objectMapper.writeValueAsString(event),
                 Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
         requireSingleRow(rows, "account position outbox enqueue");
+        return event;
+    }
+
+    public LiquidationFeeSettledEvent enqueueLiquidationFeeSettled(String topic,
+                                                                   long tradeId,
+                                                                   long orderId,
+                                                                   long liquidationOrderId,
+                                                                   long candidateId,
+                                                                   long userId,
+                                                                   String symbol,
+                                                                   MarginMode marginMode,
+                                                                   String asset,
+                                                                   long amountUnits,
+                                                                   long feeRatePpm,
+                                                                   Instant now,
+                                                                   String traceId) {
+        long eventId = sequenceRepository.nextSequence("liquidation-fee-event");
+        LiquidationFeeSettledEvent event = new LiquidationFeeSettledEvent(eventId, tradeId, orderId,
+                liquidationOrderId, candidateId, userId, symbol, marginMode, asset, amountUnits, feeRatePpm,
+                now, traceId);
+        long outboxId = sequenceRepository.nextSequence("account-outbox");
+        int rows = jdbcTemplate.update("""
+                INSERT INTO account_outbox_events (
+                    id, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
+                    next_attempt_at, created_at, updated_at
+                ) VALUES (?, 'LIQUIDATION_FEE', ?, ?, ?, 'LIQUIDATION_FEE_SETTLED', ?::jsonb, ?, ?, ?)
+                """, outboxId, eventId, topic, asset, objectMapper.writeValueAsString(event),
+                Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
+        requireSingleRow(rows, "account liquidation fee outbox enqueue");
         return event;
     }
 

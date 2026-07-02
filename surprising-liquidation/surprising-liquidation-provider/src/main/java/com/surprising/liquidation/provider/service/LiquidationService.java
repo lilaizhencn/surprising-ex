@@ -4,6 +4,7 @@ import com.surprising.liquidation.api.model.LiquidationOrderQueryResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderStatus;
 import com.surprising.liquidation.provider.config.LiquidationProperties;
+import com.surprising.liquidation.provider.model.LiquidationPricingDecision;
 import com.surprising.liquidation.provider.model.LiquidationSizingInput;
 import com.surprising.liquidation.provider.repository.LiquidationOrderRepository;
 import com.surprising.liquidation.provider.repository.LiquidationRepository;
@@ -30,19 +31,22 @@ public class LiquidationService {
     private final LiquidationOrderRepository orderRepository;
     private final LiquidationSequenceRepository sequenceRepository;
     private final LiquidationSizingPolicy sizingPolicy;
+    private final LiquidationPriceCalculator priceCalculator;
 
     public LiquidationService(ObjectMapper objectMapper,
                               LiquidationProperties properties,
                               LiquidationRepository liquidationRepository,
                               LiquidationOrderRepository orderRepository,
                               LiquidationSequenceRepository sequenceRepository,
-                              LiquidationSizingPolicy sizingPolicy) {
+                              LiquidationSizingPolicy sizingPolicy,
+                              LiquidationPriceCalculator priceCalculator) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.liquidationRepository = liquidationRepository;
         this.orderRepository = orderRepository;
         this.sequenceRepository = sequenceRepository;
         this.sizingPolicy = sizingPolicy;
+        this.priceCalculator = priceCalculator;
     }
 
     @Transactional
@@ -55,8 +59,7 @@ public class LiquidationService {
             return;
         }
         var candidate = claimed.get();
-        RiskStatus latestStatus = liquidationRepository.latestRiskStatus(candidate.userId(), candidate.symbol(),
-                candidate.marginMode(), candidate.instrumentVersion(), properties.getRisk().getMaxSnapshotAge());
+        RiskStatus latestStatus = latestRiskStatus(candidate);
         if (latestStatus != RiskStatus.LIQUIDATION) {
             liquidationRepository.markCandidate(candidate.candidateId(), "CANCELED");
             insertAudit(candidate.candidateId(), 0L, candidate.userId(), candidate.symbol(),
@@ -75,6 +78,17 @@ public class LiquidationService {
                     candidate.marginMode(), LiquidationSideResolver.closeSide(candidate.signedQuantitySteps()),
                     LiquidationSideResolver.closeQuantity(candidate.signedQuantitySteps()),
                     LiquidationOrderStatus.CANCELED, "NO_OPEN_POSITION");
+            return;
+        }
+        var pricingInput = liquidationRepository.latestPricingInput(candidate.userId(), candidate.symbol(),
+                candidate.marginMode(), candidate.instrumentVersion(), properties.getRisk().getMaxSnapshotAge())
+                .orElseThrow(() -> new IllegalStateException("fresh liquidation pricing input not found"));
+        if (pricingInput.signedQuantitySteps() != closeState.get().signedQuantitySteps()) {
+            liquidationRepository.markCandidate(candidate.candidateId(), "CANCELED");
+            insertAudit(candidate.candidateId(), 0L, candidate.userId(), candidate.symbol(),
+                    candidate.marginMode(), LiquidationSideResolver.closeSide(closeState.get().signedQuantitySteps()),
+                    LiquidationSideResolver.closeQuantity(closeState.get().signedQuantitySteps()),
+                    LiquidationOrderStatus.CANCELED, "RISK_POSITION_CHANGED");
             return;
         }
 
@@ -97,8 +111,11 @@ public class LiquidationService {
         var command = orderRepository.createReduceOnlyMarketOrder(candidate.candidateId(), candidate.userId(),
                 candidate.symbol(), candidate.marginMode(), candidate.instrumentVersion(), side, quantitySteps,
                 Instant.now(), this::payload);
+        LiquidationPricingDecision pricing = priceCalculator.decide(pricingInput,
+                properties.getExecution().getLiquidationFeeRatePpm());
         insertAudit(candidate.candidateId(), command.orderId(), candidate.userId(), candidate.symbol(),
-                candidate.marginMode(), side, quantitySteps, LiquidationOrderStatus.SUBMITTED, decision.reason());
+                candidate.marginMode(), side, quantitySteps, LiquidationOrderStatus.SUBMITTED, decision.reason(),
+                pricing);
     }
 
     @Transactional
@@ -129,9 +146,24 @@ public class LiquidationService {
                              long quantitySteps,
                              LiquidationOrderStatus status,
                              String reason) {
+        insertAudit(candidateId, orderId, userId, symbol, marginMode, side, quantitySteps, status, reason,
+                LiquidationPricingDecision.empty());
+    }
+
+    private void insertAudit(long candidateId,
+                             long orderId,
+                             long userId,
+                             String symbol,
+                             MarginMode marginMode,
+                             OrderSide side,
+                             long quantitySteps,
+                             LiquidationOrderStatus status,
+                             String reason,
+                             LiquidationPricingDecision pricing) {
         boolean inserted = liquidationRepository.insertLiquidationOrder(
                 sequenceRepository.nextLiquidationSequence("liquidation-order"),
-                candidateId, orderId, userId, symbol, marginMode, side, quantitySteps, status, reason, Instant.now());
+                candidateId, orderId, userId, symbol, marginMode, side, quantitySteps, status, reason, pricing,
+                Instant.now());
         if (!inserted) {
             throw new IllegalStateException("failed to insert liquidation order audit");
         }
@@ -143,6 +175,15 @@ public class LiquidationService {
         } catch (JacksonException ex) {
             throw new IllegalStateException("failed to serialize liquidation payload", ex);
         }
+    }
+
+    private RiskStatus latestRiskStatus(com.surprising.liquidation.provider.model.ClaimedCandidate candidate) {
+        if (candidate.marginMode() == MarginMode.CROSS) {
+            return liquidationRepository.latestRiskStatus(candidate.userId(), candidate.settleAsset(),
+                    properties.getRisk().getMaxSnapshotAge());
+        }
+        return liquidationRepository.latestRiskStatus(candidate.userId(), candidate.symbol(),
+                candidate.marginMode(), candidate.instrumentVersion(), properties.getRisk().getMaxSnapshotAge());
     }
 
     private LifecycleUpdate lifecycleUpdate(MatchResultEvent event) {

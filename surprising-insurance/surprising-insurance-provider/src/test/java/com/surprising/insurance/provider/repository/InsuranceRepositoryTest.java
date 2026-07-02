@@ -10,6 +10,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.account.api.model.LiquidationFeeSettledEvent;
+import com.surprising.trading.api.model.MarginMode;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.sql.ResultSet;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -199,8 +203,63 @@ class InsuranceRepositoryTest {
         verify(jdbcTemplate, never()).update(contains("INSERT INTO account_ledger_entries"), any(Object[].class));
     }
 
+    @Test
+    void collectLiquidationFeeCreditsFundAndWritesIdempotentLedger() {
+        InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
+        LiquidationFeeSettledEvent event = liquidationFeeEvent(9201L, 7001L, 70L);
+
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class), eq("USDT")))
+                .thenReturn(1_000L);
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
+                eq("insurance-ledger"))).thenReturn(9901L);
+        when(jdbcTemplate.update(contains("INSERT INTO insurance_fund_ledger"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE insurance_fund_balances"), any(Object[].class)))
+                .thenReturn(1);
+
+        boolean collected = repository.collectLiquidationFee(event);
+
+        assertThat(collected).isTrue();
+        verify(jdbcTemplate).update(contains("INSERT INTO insurance_fund_ledger"),
+                eq(9901L), eq("USDT"), eq(70L), eq(1_070L), eq("9201:7001"), any(Timestamp.class));
+        verify(jdbcTemplate).update(contains("UPDATE insurance_fund_balances"),
+                eq(1_070L), any(Timestamp.class), eq("USDT"));
+    }
+
+    @Test
+    void duplicateLiquidationFeeEventDoesNotCreditFundAgain() throws Exception {
+        InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
+        LiquidationFeeSettledEvent event = liquidationFeeEvent(9201L, 7001L, 70L);
+
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class), eq("USDT")))
+                .thenReturn(1_000L);
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
+                eq("insurance-ledger"))).thenReturn(9901L);
+        when(jdbcTemplate.update(contains("INSERT INTO insurance_fund_ledger"), any(Object[].class)))
+                .thenReturn(0);
+        when(jdbcTemplate.query(contains("reference_type = 'LIQUIDATION_FEE'"), anyRowMapper(),
+                eq("9201:7001"), eq("USDT"))).thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("amount_units")).thenReturn(70L);
+                    when(rs.getString("reason")).thenReturn("COLLECT_LIQUIDATION_FEE");
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+
+        boolean collected = repository.collectLiquidationFee(event);
+
+        assertThat(collected).isFalse();
+        verify(jdbcTemplate, never()).update(contains("UPDATE insurance_fund_balances"), any(Object[].class));
+    }
+
     @SuppressWarnings("unchecked")
     private RowMapper<Object> anyRowMapper() {
         return any(RowMapper.class);
+    }
+
+    private LiquidationFeeSettledEvent liquidationFeeEvent(long tradeId, long orderId, long amountUnits) {
+        return new LiquidationFeeSettledEvent(8801L, tradeId, orderId, 6001L, 9401L, 2002L,
+                "BTC-USDT", MarginMode.CROSS, "USDT", amountUnits, 3_000L,
+                Instant.parse("2026-07-01T00:00:00Z"), "trace-1");
     }
 }

@@ -40,6 +40,8 @@ public class MarkPriceService {
     private final ConcurrentHashMap<String, PerpTradeEvent> trades = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, PerpFundingRateEvent> fundingRates = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, BasisWindow> basisWindows = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Object> symbolLocks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Instant> lastPublishedAt = new ConcurrentHashMap<>();
 
     public MarkPriceService(ObjectMapper objectMapper,
                             MarkPriceProperties properties,
@@ -56,17 +58,26 @@ public class MarkPriceService {
 
     @KafkaListener(topics = "${surprising.price.mark.topics.index-price-topic}", groupId = "${surprising.price.mark.kafka.group-id}")
     public void onIndexPrice(String payload) {
-        parse(payload, IndexPriceEvent.class, "index price", event -> indexPrices.put(event.symbol(), event));
+        parse(payload, IndexPriceEvent.class, "index price", event -> {
+            indexPrices.put(event.symbol(), event);
+            publishIfReady(event.symbol());
+        });
     }
 
     @KafkaListener(topics = "${surprising.price.mark.topics.book-ticker-topic}", groupId = "${surprising.price.mark.kafka.group-id}")
     public void onBookTicker(String payload) {
-        parse(payload, PerpBookTickerEvent.class, "book ticker", event -> bookTickers.put(event.symbol(), event));
+        parse(payload, PerpBookTickerEvent.class, "book ticker", event -> {
+            bookTickers.put(event.symbol(), event);
+            publishIfReady(event.symbol());
+        });
     }
 
     @KafkaListener(topics = "${surprising.price.mark.topics.trade-topic}", groupId = "${surprising.price.mark.kafka.group-id}")
     public void onTrade(String payload) {
-        parse(payload, PerpTradeEvent.class, "trade", event -> trades.put(event.symbol(), event));
+        parse(payload, PerpTradeEvent.class, "trade", event -> {
+            trades.put(event.symbol(), event);
+            publishIfReady(event.symbol());
+        });
     }
 
     @KafkaListener(topics = "${surprising.price.mark.topics.funding-rate-topic}", groupId = "${surprising.price.mark.kafka.group-id}")
@@ -78,23 +89,41 @@ public class MarkPriceService {
     public void publishMarkPrices() {
         Instant now = Instant.now();
         for (String symbol : symbols()) {
+            publishIfReady(symbol, now);
+        }
+    }
+
+    private void publishIfReady(String symbol) {
+        publishIfReady(symbol, Instant.now());
+    }
+
+    private void publishIfReady(String symbol, Instant now) {
+        Object lock = symbolLocks.computeIfAbsent(symbol, ignored -> new Object());
+        synchronized (lock) {
             try {
-                publishSymbol(symbol, now);
+                Instant last = lastPublishedAt.get(symbol);
+                Duration publishDelay = Duration.ofMillis(properties.getCalculation().getPublishDelayMs());
+                if (last != null && Duration.between(last, now).compareTo(publishDelay) < 0) {
+                    return;
+                }
+                if (publishSymbol(symbol, now)) {
+                    lastPublishedAt.put(symbol, now);
+                }
             } catch (Exception ex) {
                 log.error("Failed to publish mark price for symbol={}", symbol, ex);
             }
         }
     }
 
-    private void publishSymbol(String symbol, Instant now) {
+    private boolean publishSymbol(String symbol, Instant now) {
         IndexPriceEvent index = indexPrices.get(symbol);
         PerpBookTickerEvent book = bookTickers.get(symbol);
         PerpTradeEvent trade = trades.get(symbol);
         if (!fresh(index, now) || !fresh(book, now) || !fresh(trade, now)) {
-            return;
+            return false;
         }
         if (!ownsSymbol(symbol)) {
-            return;
+            return false;
         }
 
         BasisWindow window = basisWindows.computeIfAbsent(symbol, ignored -> new BasisWindow());
@@ -108,6 +137,7 @@ public class MarkPriceService {
         markPriceRepository.save(event);
         kafkaTemplate.send(properties.getTopics().getMarkPriceTopic(), symbol, event);
         kafkaTemplate.send(properties.getTopics().getMarkPriceAuditTopic(), symbol, event);
+        return true;
     }
 
     private Set<String> symbols() {

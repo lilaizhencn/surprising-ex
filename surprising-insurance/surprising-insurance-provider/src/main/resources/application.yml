@@ -20,6 +20,12 @@ management:
 
 surprising:
   insurance:
+    kafka:
+      bootstrap-servers: localhost:9092
+      group-id: surprising-insurance-v1
+      liquidation-fee-events-topic: surprising.account.liquidation-fee.events.v1
+      concurrency: 2
+      max-poll-records: 500
     coverage:
       scan-delay-ms: 1000
       batch-size: 100

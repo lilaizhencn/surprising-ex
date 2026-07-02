@@ -21,6 +21,7 @@ class RiskKafkaConfigurationTest {
         properties.getKafka().setBootstrapServers("kafka-g:9092");
         properties.getKafka().setGroupId("risk-test-group");
         properties.getKafka().setConcurrency(3);
+        properties.getKafka().setMaxPollRecords(222);
 
         RiskKafkaConfiguration configuration = new RiskKafkaConfiguration();
         var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
@@ -34,7 +35,7 @@ class RiskKafkaConfigurationTest {
         assertThat(config).containsEntry(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         assertThat(config).containsEntry(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         assertThat(config).containsEntry(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
-        assertThat(config).containsEntry(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 500);
+        assertThat(config).containsEntry(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 222);
         assertThat(config).containsEntry(
                 ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
                 CooperativeStickyAssignor.class.getName());

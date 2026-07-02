@@ -32,6 +32,7 @@ instrument 配置按 exchange-core 友好的 long 单位保存：
 - `notional_multiplier_units`：`LINEAR_PERPETUAL` 表示每个 `priceTick * quantityStep` 对应的结算资产最小单位；`INVERSE_PERPETUAL` 表示每个合约 step 的报价币面值单位。
 - `contract_type` 不只是展示字段，账户、风控、资金费、强平和 ADL 的公式都会按它分支。
 - `maker_fee_rate_ppm` / `taker_fee_rate_ppm`：产品默认手续费。订单入口会叠加 `trading_fee_schedules` 覆盖后写入 `trading_orders` 快照；账户结算按订单快照写入 `TRADE_FEE` ledger。正数扣用户余额，负数给用户返佣。默认 BTC/ETH 合约为 maker `200 ppm`、taker `500 ppm`。
+- `user_open_interest_limit_rate_ppm` / `user_open_interest_limit_floor_units`：单用户动态持仓量上限配置。order provider 使用 `max(平台 OI notional * rate, floor)` 并再受 `max_position_notional_units` 限制。默认 BTC/ETH 为 `300000 ppm`，固定下限 `25000000000000`，即 250,000 USDT。
 - `*_rate_ppm`、`max_leverage_ppm`、`weight_ppm`：费率、杠杆、权重统一使用 ppm。
 
 `surprising-instrument-api` 同时提供 `PerpetualContractMath`，作为线性/反向合约 notional、未实现 PnL、每 step notional 和维持保证金的共享 long 公式实现。risk、funding、liquidation、ADL 应调用这个共享 math，不要在各自 SQL 里重复实现合约公式。
@@ -95,6 +96,7 @@ surprising.instrument.events.v1
 ```
 
 事件 key 使用 `symbol`。事件内容包含新版本的完整 `InstrumentResponse` 快照，下游可以直接替换本地缓存。
+producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.connection=5`，让合约版本变更事件和交易、价格链路保持一致的可靠 Kafka 基线。
 
 ## 数据库
 
@@ -108,8 +110,16 @@ surprising.instrument.events.v1
 
 默认已写入：
 
-- `BTC-USDT`
-- `ETH-USDT`
+- `BTC-USDT`：U 本位线性永续，`contract_multiplier_ppm=1000000`，`contract_value_asset=USDT`，
+  `price_tick_units=10000000`（0.1 USDT），`quantity_step_units=100000`（0.001 BTC），
+  `quantity_precision=3`，`min_quantity_steps=1`，`max_quantity_steps=100000`，
+  `notional_multiplier_units=10000`，`user_open_interest_limit_rate_ppm=300000`，
+  `user_open_interest_limit_floor_units=25000000000000`。
+- `ETH-USDT`：U 本位线性永续，`contract_multiplier_ppm=1000000`，`contract_value_asset=USDT`，
+  `price_tick_units=1000000`（0.01 USDT），`quantity_step_units=10000000000000000`（0.01 ETH），
+  `quantity_precision=2`，`min_quantity_steps=1`，`max_quantity_steps=500000`，
+  `notional_multiplier_units=10000`，`user_open_interest_limit_rate_ppm=300000`，
+  `user_open_interest_limit_floor_units=25000000000000`。
 
 ## 本地运行
 

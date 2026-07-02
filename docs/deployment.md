@@ -25,14 +25,14 @@ kafka-topics.sh --bootstrap-server localhost:9092 \
 ```
 
 For local Docker Compose, use replication factor `1`.
-The repository script `scripts/create-topics.sh` creates the full topic set, including `surprising.account.position.events.v1` for private position pushes and risk scan triggers.
+The repository script `scripts/create-topics.sh` creates the full topic set, including `surprising.account.position.events.v1` for private position pushes and risk scan triggers, `surprising.risk.account.events.v1` / `surprising.risk.position.events.v1` for backend-calculated private risk/PnL pushes, and `surprising.account.liquidation-fee.events.v1` for actual liquidation-fee credits to the insurance fund.
 
 ## Java Runtime
 
 Use JDK 21 for all services. `surprising-matching-provider` uses exchange-core/OpenHFT Chronicle and should run with these Java module flags:
 
 ```bash
-export JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
+export JAVA_TOOL_OPTIONS="--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED --add-opens=jdk.compiler/com.sun.tools.javac=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
 ```
 
 Keep the matching provider on JDK 21 unless exchange-core and Chronicle are revalidated on a newer runtime.
@@ -48,16 +48,26 @@ Keep the matching provider on JDK 21 unless exchange-core and Chronicle are reva
 - Matching command, account match-trade, risk position-event, and liquidation-candidate consumers reject records whose Kafka key does not match the payload `symbol`.
 - Matching provider nodes share the same `surprising.trading.matching.kafka.group-id`; Kafka assigns each partition to one live matcher.
 - Matching restores open order books from PostgreSQL on startup. If a running matcher receives a new partition after processing commands, it closes the Spring context and should be restarted by Kubernetes/systemd.
-- Order, matching, risk, liquidation, and funding Kafka producers use `acks=all`, `enable.idempotence=true`, `compression.type=zstd`, and `max.in.flight.requests.per.connection=5`.
-- Matching, account, risk, and liquidation Kafka consumers use `enable.auto.commit=false`, `auto.offset.reset=earliest`, cooperative-sticky assignment, and Spring Kafka `AckMode.RECORD`.
+- Instrument, order, matching, price, risk, liquidation, and funding Kafka producers use `acks=all`, `enable.idempotence=true`, `compression.type=zstd`, and `max.in.flight.requests.per.connection=5`.
+- Matching, account, risk, liquidation, and insurance Kafka consumers use `enable.auto.commit=false`, `auto.offset.reset=earliest`, cooperative-sticky assignment, and Spring Kafka `AckMode.RECORD`.
+- Tune `surprising.*.kafka.max-poll-records` with consumer lag, processing latency, and database transaction time. Defaults are intentionally conservative for local development.
 - Keep `surprising.trading.matching.kafka.restart-on-partition-reassignment=true` in production. Disable it only for local debugging.
 - Keep `surprising.trading.matching.kafka.partition-assignment-startup-grace-ms` large enough for concurrent listener containers to finish initial assignment; default is `30000`.
 - Avoid high-frequency autoscaling of matching providers. Partition movement causes restart-and-recover by design.
 - Account position pushes use `account_outbox_events` and `surprising.account.position.events.v1`; account nodes publish with `acks=all` and idempotent producers, and WebSocket consumers must handle at-least-once delivery.
+- Actual liquidation-fee collection also uses `account_outbox_events`; events are published to `surprising.account.liquidation-fee.events.v1` keyed by settlement asset. Insurance-provider consumers must be in one shared group and rely on `insurance_fund_ledger(reference_type, reference_id, asset)` for idempotency.
 - Every WebSocket provider node must use a unique `surprising.websocket.kafka.group-id`. Public market data must be consumed by every WebSocket node for local fanout.
 - Do not put all WebSocket providers in one shared consumer group. That would split Kafka records across nodes and make clients connected to other nodes miss updates.
 - WebSocket nodes keep session/subscription state in process only. Clients must resubscribe after reconnect.
 - Gateway providers are stateless. Scale them behind a load balancer and point route `base-url` values at Kubernetes Services or your service-discovery layer.
+- Market-maker providers coordinate by `market_maker_strategy_leases(strategy_id, symbol)`. Multiple nodes may run the same config, but only the lease owner quotes a strategy-symbol pair. Keep the provider on an internal network and keep `surprising.market-maker.engine.enabled=false` unless liquidity accounts are funded and risk caps are reviewed.
+
+## Observability
+
+- Scrape every provider's `/actuator/prometheus` endpoint.
+- For account settlement latency, monitor `surprising.account.match_trade.processing` and `surprising.account.match_trade.event_lag` with `outcome=processed|duplicate|failed`.
+- Monitor `surprising.account.match_trade.events{outcome=duplicate}` separately. A rising duplicate rate usually means Kafka replay, rebalance, or a downstream failure caused at-least-once redelivery; it should not change balances because `(symbol, trade_id)` is the idempotency key.
+- Correlate account settlement metrics with Kafka consumer lag on `surprising.perp.match.trades.v1`, PostgreSQL query latency, Hikari pool usage, and `account_outbox_events` publish lag. Increasing `surprising.account.kafka.concurrency` only helps when the topic has enough partitions and load is spread across symbols; one hot symbol remains ordered on one partition.
 
 ## PostgreSQL
 
@@ -93,7 +103,7 @@ The root `init.sql` creates:
 - `trading_match_results` and `trading_match_trades`: idempotent matching output; trades are keyed by `(symbol, trade_id)`.
 - `account_margin_reservations`: initial margin reserved by order entry.
 - `account_position_margins`: margin migrated into live positions after fills.
-- `account_outbox_events`: account-side Kafka outbox rows, currently used for position update events.
+- `account_outbox_events`: account-side Kafka outbox rows, used for position update events and actual liquidation-fee settlement events.
 - `risk_sequences`: database-allocated risk snapshot and candidate ids.
 - `risk_scan_leases`: active risk scanner ownership keyed by `(user_id, settle_asset)`.
 - `risk_account_snapshots`: account-level margin snapshots keyed by `snapshot_id`.
@@ -125,6 +135,8 @@ Recommended production settings:
 - Keep `surprising.price.*.coordination.enabled=true` for multi-node deployments.
 - Set `surprising.price.*.coordination.node-id` to a stable pod name, hostname, or instance id.
 - Keep `coordination.lease-duration` several times longer than the publish interval. Default is `15s`.
+- Index and mark price producers use `acks=all`, idempotence, `zstd`, and bounded in-flight requests.
+- Mark-price input consumers use live-feed `latest` startup semantics, plus disabled auto-commit, record ack, cooperative-sticky rebalance, and configurable `surprising.price.mark.kafka.concurrency` / `max-poll-records`.
 - Do not publish index or mark prices when PostgreSQL is unavailable; lease and sequence guarantees depend on PostgreSQL.
 
 ## Gateway And WebSocket
@@ -138,11 +150,12 @@ Recommended production settings:
 - Realtime clients should connect to `surprising-websocket` on `/ws/v1`.
 - Use REST first for snapshots, then WebSocket for deltas. L2 book snapshots are exposed through `GET /api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50`.
 - WebSocket public channels: `candles`, `trades`, `depth`, `index`, `mark`, `funding`.
-- WebSocket private channels: `orders`, `matches`, `positions`.
+- WebSocket private channels: `orders`, `matches`, `positions`, `positionRisk`, `accountRisk`.
 - Order book depth uses `SNAPSHOT` and per-price-level `DELTA` events. A delta with `quantitySteps=0` removes the level; clients must reload a snapshot when `previousSequence` is not continuous.
 - WebSocket connection state is local memory only: socket, authenticated user id, subscriptions, and outbound queue.
 - User-related events are consumed by every WebSocket node, then locally filtered by `userId + channel + symbol`; the node that hosts the matching connection pushes, and other nodes drop the event.
 - Position push is downstream of account settlement: account DB transaction -> account outbox -> Kafka `surprising.account.position.events.v1` -> WebSocket fanout.
+- Backend-authoritative unrealized PnL, equity, maintenance margin, and margin ratio are pushed through risk-provider outbox events: risk scan transaction -> `risk_outbox_events` -> Kafka `surprising.risk.position.events.v1` / `surprising.risk.account.events.v1` -> WebSocket fanout.
 - Open candle updates are coalesced by `surprising.websocket.fanout.candle-partial-coalesce-window`; closed candles are pushed immediately.
 - Slow WebSocket clients are closed when their bounded outbound queue is full or sends time out.
 - Clients must implement ping, exponential reconnect, and full resubscribe after reconnect.
@@ -157,6 +170,12 @@ Recommended production settings:
 - Risk consumes `surprising.account.position.events.v1` as a low-latency trigger and also runs keyset-paginated scheduled scans as the fallback. Both paths claim `risk_scan_leases` before calculating and writing each `userId + settleAsset` group.
 - Keep `surprising.risk.kafka.group-id` identical across risk-provider nodes. Scale by increasing Kafka partitions and provider nodes; do not create per-symbol consumers.
 - Do not let risk-provider write snapshots when PostgreSQL is unavailable. Lease, snapshot id, candidate uniqueness, and outbox guarantees all depend on PostgreSQL.
+
+## Kafka Client Identity
+
+- Set a stable, unique Kafka `client.id` per provider instance for stateful or settlement consumers, especially `surprising.trading.matching.kafka.client-id` and `surprising.account.kafka.client-id`.
+- Keep the `group-id` identical across replicas of the same service, but keep `client-id` unique per pod or process. This makes `kafka-consumer-groups --describe` usable for mapping `symbol` partitions to the exact matching/account node during incident response.
+- For matching, compute the keyed partition for a symbol and verify its current `client-id` owner before intentionally killing or draining a node. A process that receives new matching partitions after it has already processed commands may exit by design and must be restarted so it can restore open orders from PostgreSQL.
 
 ## Deployment Order
 
@@ -173,6 +192,7 @@ Recommended production settings:
 11. Start ADL providers after account, liquidation, and insurance providers.
 12. Start WebSocket/fanout services that consume candle, index, mark, order, match, funding, and position topics.
 13. Start gateway providers after the internal REST services they expose are reachable.
+14. Start market-maker providers last. They should see healthy order, matching, account, mark, and gateway services before `surprising.market-maker.engine.enabled=true` is rolled out.
 
 ## Operational Kill Switches
 
@@ -279,6 +299,7 @@ Do not point this script at a shared development database. Matching restores ope
 - Index and mark providers use `price_symbol_sequences` so a failover cannot reset sequence numbers.
 - Funding providers also use `price_symbol_leases` and `price_symbol_sequences`; settlement is additionally guarded by `funding_settlements(symbol, funding_time)`.
 - Risk providers use `risk_scan_leases` so only one live node writes snapshots and candidates for a given `userId + settleAsset`; lease expiry allows another node to take over after the owner dies.
+- Market-maker providers use `market_maker_strategy_leases` so only one live node quotes a given `strategyId + symbol`. If the owner dies, lease expiry allows another node to continue. The module places normal `LIMIT + GTX + postOnly` orders through order-provider and never writes matching state directly.
 - Funding-rate publication is a rate-row plus outbox transaction. If the funding rate insert or outbox enqueue/mark update is skipped, the provider fails instead of committing a one-sided state change.
 - Funding-rate publication and settlement can be paused independently with `surprising.funding.calculation.enabled=false` and `surprising.funding.settlement.enabled=false`.
 - Trading, matching, risk, and funding outbox publishers are at-least-once. A Kafka send failure increments `attempts`, records `last_error`, and moves `next_attempt_at` forward with capped exponential backoff; the row remains unpublished and is retried by later scans.
@@ -333,10 +354,12 @@ Do not point this script at a shared development database. Matching restores ope
 - Kafka consumer lag: increase topic partitions, provider instances, or stream threads. Do not create one topic per symbol.
 - WebSocket clients miss public market data on some pods: verify each WebSocket pod has a unique `surprising.websocket.kafka.group-id`.
 - WebSocket private positions not updating: check account outbox lag in `account_outbox_events`, Kafka topic `surprising.account.position.events.v1`, and the client's private `positions` subscription/authenticated user id.
+- WebSocket risk/PnL not updating: check risk scan freshness, `risk_outbox_events` pending rows, Kafka topics `surprising.risk.position.events.v1` and `surprising.risk.account.events.v1`, then the client's `positionRisk` / `accountRisk` subscriptions.
 - Gateway private routes return 401: verify the auth layer forwards `X-User-Id` or `Authorization`.
 - Gateway routes return 404: verify the `{service}` segment is configured under `surprising.gateway.routes`.
 - RocksDB restore is slow: check changelog topic retention, local state directory persistence, disk throughput, and container file descriptor limits.
 - Market orders rejected with `MARK_PRICE_UNAVAILABLE`: check mark-price freshness and `surprising.trading.*.market-max-mark-age-ms`.
+- Limit orders rejected with `mark price unavailable`: check mark-price freshness and `surprising.trading.order.risk.limit-price-max-mark-age-ms`; this protects price-band validation and should not be used to hide a broken mark-price pipeline in production.
 - Orders rejected with `SELF_TRADE_PREVENTED`: cancel or wait for the user's marketable opposite-side resting order.
 - Matching provider exits after a rebalance: expected when it receives a new partition after processing commands. Check pod restart policy and DB recovery time.
 - Matching provider exits while processing a command: expected fail-fast behavior after a decoded command failure. Inspect DB/outbox/Kafka errors, then let orchestration restart and replay from the last committed offset.

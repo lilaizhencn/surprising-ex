@@ -14,6 +14,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -65,6 +66,21 @@ class GatewayProxyControllerTest {
     }
 
     @Test
+    void privateMarketMakerRouteProxiesToInternalProvider() {
+        GatewayProperties properties = properties();
+        GatewayProxyController controller = new GatewayProxyController(properties, new RestTemplate());
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET", "/api/v1/gateway/market-maker/strategies");
+
+        URI target = controller.targetUri("market-maker",
+                properties.getRoutes().get("market-maker"), request);
+
+        assertThat(target.toString())
+                .isEqualTo("http://market-maker:9096/api/v1/market-maker/strategies");
+        assertThat(properties.getRoutes().get("market-maker").isPrivateRoute()).isTrue();
+    }
+
+    @Test
     void privateRouteRequiresIdentityBeforeProxying() {
         GatewayProxyController controller = new GatewayProxyController(properties(), new RestTemplate());
         MockHttpServletRequest request = new MockHttpServletRequest(
@@ -91,6 +107,18 @@ class GatewayProxyControllerTest {
                 .isEqualTo("trace-gateway-1");
     }
 
+    @Test
+    void mapsBackendReadTimeoutToGatewayTimeout() {
+        GatewayProxyController controller = new GatewayProxyController(properties(), new TimeoutRestTemplate());
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET", "/api/v1/gateway/candlestick/BTC-USDT/1m");
+
+        assertThatThrownBy(() -> controller.proxy("candlestick", HttpMethod.GET, request, null))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
+                        .isEqualTo(HttpStatus.GATEWAY_TIMEOUT));
+    }
+
     private GatewayProperties properties() {
         GatewayProperties properties = new GatewayProperties();
         Map<String, GatewayProperties.BackendRoute> routes = new LinkedHashMap<>();
@@ -102,6 +130,8 @@ class GatewayProxyControllerTest {
                 "http://trigger:9095", "/api/v1/trading/trigger-orders", true));
         routes.put("account", new GatewayProperties.BackendRoute(
                 "http://account:9086", "/api/v1/accounts", true));
+        routes.put("market-maker", new GatewayProperties.BackendRoute(
+                "http://market-maker:9096", "/api/v1/market-maker", true));
         properties.setRoutes(routes);
         return properties;
     }
@@ -116,6 +146,16 @@ class GatewayProxyControllerTest {
                                               Class<T> responseType) {
             this.requestEntity = requestEntity;
             return ResponseEntity.ok(responseType.cast(new byte[0]));
+        }
+    }
+
+    private static final class TimeoutRestTemplate extends RestTemplate {
+        @Override
+        public <T> ResponseEntity<T> exchange(URI url,
+                                              HttpMethod method,
+                                              HttpEntity<?> requestEntity,
+                                              Class<T> responseType) {
+            throw new ResourceAccessException("Read timed out");
         }
     }
 }

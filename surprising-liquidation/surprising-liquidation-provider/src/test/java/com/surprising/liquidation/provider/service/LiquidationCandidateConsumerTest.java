@@ -61,7 +61,7 @@ class LiquidationCandidateConsumerTest {
         private LiquidationCandidateEvent processed;
 
         private RecordingLiquidationService() {
-            super(null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null);
         }
 
         @Override

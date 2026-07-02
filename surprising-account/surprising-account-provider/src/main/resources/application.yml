@@ -23,12 +23,21 @@ surprising:
     kafka:
       bootstrap-servers: localhost:9092
       group-id: surprising-account-v1
+      client-id: surprising-account-${HOSTNAME:${random.uuid}}
       match-trades-topic: surprising.perp.match.trades.v1
       order-commands-topic: surprising.perp.order.commands.v1
       order-events-topic: surprising.perp.order.events.v1
       position-events-topic: surprising.account.position.events.v1
+      liquidation-fee-events-topic: surprising.account.liquidation-fee.events.v1
       concurrency: 2
+      max-poll-records: 500
     outbox:
       batch-size: 200
       publish-delay-ms: 200
       send-timeout: 3s
+    cache:
+      contract-spec-max-entries: 4096
+      order-fee-snapshot-max-entries: 200000
+    position-margin:
+      max-risk-snapshot-age: 10s
+      removal-buffer-ppm: 50000

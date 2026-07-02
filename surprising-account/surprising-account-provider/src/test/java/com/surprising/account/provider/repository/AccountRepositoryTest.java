@@ -11,9 +11,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.account.provider.model.PositionState;
+import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.trading.api.model.MarginMode;
+import java.lang.reflect.Method;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -25,6 +29,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.transaction.annotation.Transactional;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -104,6 +109,131 @@ class AccountRepositoryTest {
                 "deposit-1001-1", "INITIAL_DEPOSIT"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("conflicting duplicate balance adjustment reference");
+        verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
+    }
+
+    @Test
+    void addIsolatedPositionMarginMovesAvailableToLockedAndPositionMargin() throws Exception {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(10L);
+        when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
+                eq("iso-add-1"), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
+        when(jdbcTemplate.query(contains("FROM account_positions p"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT"))).thenAnswer(positionTarget("USDT", 7L, 10L));
+        when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.query(contains("SELECT margin_units"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("ISOLATED")))
+                .thenAnswer(marginUnits(600L))
+                .thenAnswer(marginUnits(700L));
+        when(jdbcTemplate.update(contains("available_units = available_units -"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("INSERT INTO account_position_margins"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.query(contains("SELECT b.user_id"), anyRowMapper(),
+                eq(1001L), eq("USDT"))).thenAnswer(balance(900L, 700L, 1_600L));
+        when(jdbcTemplate.update(contains("UPDATE account_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+
+        var response = repository.adjustIsolatedPositionMargin(1001L, "BTC-USDT", 100L,
+                "iso-add-1", "ADD_POSITION_MARGIN", Duration.ofSeconds(10), 50_000L);
+
+        assertThat(response.positionMarginUnits()).isEqualTo(700L);
+        assertThat(response.availableUnits()).isEqualTo(900L);
+        assertThat(response.lockedUnits()).isEqualTo(700L);
+        verify(jdbcTemplate).update(contains("available_units = available_units -"),
+                eq(100L), eq(100L), any(Timestamp.class), eq(1001L), eq("USDT"), eq(100L));
+        verify(jdbcTemplate).update(contains("INSERT INTO account_position_margins"),
+                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq(100L), any(Timestamp.class));
+        verify(jdbcTemplate).update(contains("UPDATE account_ledger_entries"),
+                eq(1_600L), eq("iso-add-1"), eq(1001L), eq("USDT"));
+    }
+
+    @Test
+    void removeIsolatedPositionMarginRequiresFreshRiskBuffer() throws Exception {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(11L);
+        when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
+                eq("iso-remove-1"), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
+        when(jdbcTemplate.query(contains("FROM account_positions p"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT"))).thenAnswer(positionTarget("USDT", 7L, 10L));
+        when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.query(contains("SELECT margin_units"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("ISOLATED")))
+                .thenAnswer(marginUnits(1_000L))
+                .thenAnswer(marginUnits(800L));
+        when(jdbcTemplate.query(contains("FROM risk_position_snapshots"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT"), eq(10_000L))).thenAnswer(riskSnapshot(7L, 10L, 100L,
+                500L, "NORMAL"));
+        when(jdbcTemplate.update(contains("SET margin_units = margin_units -"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("available_units = available_units +"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.query(contains("SELECT b.user_id"), anyRowMapper(),
+                eq(1001L), eq("USDT"))).thenAnswer(balance(1_200L, 800L, 2_000L));
+        when(jdbcTemplate.update(contains("UPDATE account_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+
+        var response = repository.adjustIsolatedPositionMargin(1001L, "BTC-USDT", -200L,
+                "iso-remove-1", "REMOVE_POSITION_MARGIN", Duration.ofSeconds(10), 50_000L);
+
+        assertThat(response.positionMarginUnits()).isEqualTo(800L);
+        verify(jdbcTemplate).update(contains("SET margin_units = margin_units -"),
+                eq(200L), any(Timestamp.class), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq(200L));
+        verify(jdbcTemplate).update(contains("available_units = available_units +"),
+                eq(200L), eq(200L), any(Timestamp.class), eq(1001L), eq("USDT"), eq(200L));
+    }
+
+    @Test
+    void removeIsolatedPositionMarginRejectsUnsafeRiskAfterRemoval() throws Exception {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(12L);
+        when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
+                eq("iso-remove-risky"), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
+        when(jdbcTemplate.query(contains("FROM account_positions p"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT"))).thenAnswer(positionTarget("USDT", 7L, 10L));
+        when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.query(contains("SELECT margin_units"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("ISOLATED")))
+                .thenAnswer(marginUnits(1_000L));
+        when(jdbcTemplate.query(contains("FROM risk_position_snapshots"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT"), eq(10_000L))).thenAnswer(riskSnapshot(7L, 10L, -100L,
+                500L, "NORMAL"));
+
+        assertThatThrownBy(() -> repository.adjustIsolatedPositionMargin(1001L, "BTC-USDT", -600L,
+                "iso-remove-risky", "REMOVE_POSITION_MARGIN", Duration.ofSeconds(10), 50_000L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("maintenance margin buffer");
+        verify(jdbcTemplate, never()).update(contains("SET margin_units = margin_units -"), any(Object[].class));
+        verify(jdbcTemplate, never()).update(contains("available_units = available_units +"), any(Object[].class));
+    }
+
+    @Test
+    void duplicatePositionMarginAdjustmentReturnsCurrentStateWithoutMutating() throws Exception {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
+                eq("iso-add-dup"), eq(1001L), eq("BTC-USDT"))).thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getString("asset")).thenReturn("USDT");
+                    when(rs.getLong("amount_units")).thenReturn(100L);
+                    when(rs.getString("reason")).thenReturn("ADD_POSITION_MARGIN");
+                    when(rs.getString("symbol")).thenReturn("BTC-USDT");
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+        when(jdbcTemplate.query(contains("SELECT margin_units"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("ISOLATED")))
+                .thenAnswer(marginUnits(700L));
+        when(jdbcTemplate.query(contains("SELECT b.user_id"), anyRowMapper(),
+                eq(1001L), eq("USDT"))).thenAnswer(balance(900L, 700L, 1_600L));
+
+        var response = repository.adjustIsolatedPositionMargin(1001L, "BTC-USDT", 100L,
+                "iso-add-dup", "ADD_POSITION_MARGIN", Duration.ofSeconds(10), 50_000L);
+
+        assertThat(response.positionMarginUnits()).isEqualTo(700L);
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO account_ledger_entries"), any(Object[].class));
         verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
     }
 
@@ -208,6 +338,151 @@ class AccountRepositoryTest {
     }
 
     @Test
+    void liquidationFeeContextReadsFrozenAuditRate() throws Exception {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.query(contains("FROM liquidation_orders"), anyRowMapper(),
+                eq(5001L), eq(1001L), eq("BTC-USDT"))).thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("liquidation_order_id")).thenReturn(6001L);
+                    when(rs.getLong("candidate_id")).thenReturn(9401L);
+                    when(rs.getLong("liquidation_fee_rate_ppm")).thenReturn(3_000L);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+
+        var context = repository.liquidationFeeContext(5001L, 1001L, "BTC-USDT").orElseThrow();
+
+        assertThat(context.liquidationOrderId()).isEqualTo(6001L);
+        assertThat(context.candidateId()).isEqualTo(9401L);
+        assertThat(context.feeRatePpm()).isEqualTo(3_000L);
+    }
+
+    @Test
+    void liquidationFeeCollectionIsCappedAtAvailableCollateralAndAudited() throws Exception {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        LiquidationFeeContext context = new LiquidationFeeContext(6001L, 9401L, 3_000L);
+
+        when(jdbcTemplate.query(contains("reference_type = 'LIQUIDATION_FEE'"), anyRowMapper(),
+                eq("9001:5001"), eq(1001L), eq("USDT"))).thenReturn(List.of());
+        when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
+                eq(1001L), eq("USDT"), eq("CROSS"))).thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getString("symbol")).thenReturn("BTC-USDT");
+                    when(rs.getString("asset")).thenReturn("USDT");
+                    when(rs.getString("margin_mode")).thenReturn("CROSS");
+                    when(rs.getLong("margin_units")).thenReturn(50L);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+        when(jdbcTemplate.queryForObject(contains("SELECT b.available_units"), anyRowMapper(),
+                eq(1001L), eq("USDT"))).thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("available_units")).thenReturn(20L);
+                    when(rs.getLong("locked_units")).thenReturn(50L);
+                    when(rs.getLong("deficit_units")).thenReturn(0L);
+                    return mapper.mapRow(rs, 0);
+                });
+        when(jdbcTemplate.update(contains("UPDATE account_position_margins"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_balances"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_deficits"), any(Object[].class)))
+                .thenReturn(1);
+        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(7001L);
+        when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+
+        var settlement = repository.settleLiquidationFee(1001L, "USDT", 5001L, 9001L, "BTC-USDT",
+                MarginMode.CROSS, 100L, context, now).orElseThrow();
+
+        assertThat(settlement.collectedFeeUnits()).isEqualTo(70L);
+        verify(jdbcTemplate).update(contains("UPDATE account_position_margins"),
+                eq(50L), any(Timestamp.class), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq(50L));
+        verify(jdbcTemplate).update(contains("UPDATE account_balances"),
+                eq(0L), eq(0L), any(Timestamp.class), eq(1001L), eq("USDT"));
+        verify(jdbcTemplate, never()).update(contains("UPDATE account_deficits"), any(Object[].class));
+        verify(jdbcTemplate).update(contains("INSERT INTO account_ledger_entries"),
+                eq(7001L), eq(1001L), eq("USDT"), eq(-70L), eq(0L), eq("9001:5001"),
+                eq(9001L), eq(5001L), eq("BTC-USDT"), eq(3_000L), any(Timestamp.class));
+    }
+
+    @Test
+    void liquidationFeeSettlementDeclaresTransactionBoundary() throws Exception {
+        Method method = AccountRepository.class.getMethod("settleLiquidationFee", long.class, String.class,
+                long.class, long.class, String.class, MarginMode.class, long.class,
+                LiquidationFeeContext.class, Instant.class);
+
+        assertThat(method.getAnnotation(Transactional.class)).isNotNull();
+    }
+
+    @Test
+    void updatePositionMaintainsSymbolOpenInterestBySide() throws Exception {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        when(jdbcTemplate.query(contains("SELECT signed_quantity_steps"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"))).thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("signed_quantity_steps")).thenReturn(10L);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+        when(jdbcTemplate.update(contains("UPDATE account_positions"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("INSERT INTO trading_symbol_open_interest"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE trading_symbol_open_interest"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.query(contains("SELECT user_id, symbol, margin_mode"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"))).thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("user_id")).thenReturn(1001L);
+                    when(rs.getString("symbol")).thenReturn("BTC-USDT");
+                    when(rs.getLong("instrument_version")).thenReturn(1L);
+                    when(rs.wasNull()).thenReturn(false);
+                    when(rs.getString("margin_mode")).thenReturn("CROSS");
+                    when(rs.getLong("signed_quantity_steps")).thenReturn(-4L);
+                    when(rs.getLong("entry_price_ticks")).thenReturn(600_000L);
+                    when(rs.getLong("realized_pnl_units")).thenReturn(25L);
+                    when(rs.getTimestamp("updated_at")).thenReturn(Timestamp.from(now));
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+
+        var response = repository.updatePosition(1001L, "BTC-USDT", MarginMode.CROSS,
+                new PositionState(-4L, 1L, 600_000L, 25L), now);
+
+        assertThat(response.signedQuantitySteps()).isEqualTo(-4L);
+        verify(jdbcTemplate).update(contains("UPDATE trading_symbol_open_interest"),
+                eq(-10L), eq(4L), eq(-10L), eq(4L), any(Timestamp.class), eq("BTC-USDT"),
+                eq(-10L), eq(4L));
+    }
+
+    @Test
+    void updatePositionWithKnownPreviousQuantitySkipsSecondPositionLock() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        when(jdbcTemplate.update(contains("UPDATE account_positions"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("INSERT INTO trading_symbol_open_interest"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE trading_symbol_open_interest"), any(Object[].class)))
+                .thenReturn(1);
+
+        var response = repository.updatePosition(1001L, "BTC-USDT", MarginMode.CROSS,
+                new PositionState(6L, 1L, 600_000L, 25L), -4L, now);
+
+        assertThat(response.signedQuantitySteps()).isEqualTo(6L);
+        assertThat(response.updatedAt()).isEqualTo(now);
+        verify(jdbcTemplate, never()).query(contains("SELECT signed_quantity_steps"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"));
+        verify(jdbcTemplate).update(contains("UPDATE trading_symbol_open_interest"),
+                eq(6L), eq(-4L), eq(6L), eq(-4L), any(Timestamp.class), eq("BTC-USDT"),
+                eq(6L), eq(-4L));
+    }
+
+    @Test
     void tradeFeeLedgerStoresFeeAuditSnapshot() {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
@@ -242,6 +517,7 @@ class AccountRepositoryTest {
                 eq(9001L), eq(5001L), eq("BTC-USDT"), eq(500L), any(Timestamp.class));
         verify(jdbcTemplate).update(contains("UPDATE account_ledger_entries"),
                 eq(75L), eq("9001:5001"), eq(1001L), eq("USDT"));
+        verify(jdbcTemplate, never()).update(contains("UPDATE account_deficits"), any(Object[].class));
         verify(jdbcTemplate, never()).update(contains("INSERT INTO account_position_margins"),
                 any(Object[].class));
     }
@@ -378,5 +654,61 @@ class AccountRepositoryTest {
     @SuppressWarnings("unchecked")
     private RowMapper<Object> anyRowMapper() {
         return any(RowMapper.class);
+    }
+
+    private org.mockito.stubbing.Answer<List<Object>> positionTarget(String asset,
+                                                                     long instrumentVersion,
+                                                                     long signedQuantitySteps) {
+        return invocation -> {
+            RowMapper<?> mapper = invocation.getArgument(1);
+            ResultSet rs = mock(ResultSet.class);
+            when(rs.getString("asset")).thenReturn(asset);
+            when(rs.getLong("instrument_version")).thenReturn(instrumentVersion);
+            when(rs.getLong("signed_quantity_steps")).thenReturn(signedQuantitySteps);
+            return List.of(mapper.mapRow(rs, 0));
+        };
+    }
+
+    private org.mockito.stubbing.Answer<List<Object>> marginUnits(long marginUnits) {
+        return invocation -> {
+            RowMapper<?> mapper = invocation.getArgument(1);
+            ResultSet rs = mock(ResultSet.class);
+            when(rs.getLong("margin_units")).thenReturn(marginUnits);
+            return List.of(mapper.mapRow(rs, 0));
+        };
+    }
+
+    private org.mockito.stubbing.Answer<List<Object>> riskSnapshot(long instrumentVersion,
+                                                                   long signedQuantitySteps,
+                                                                   long unrealizedPnlUnits,
+                                                                   long maintenanceMarginUnits,
+                                                                   String status) {
+        return invocation -> {
+            RowMapper<?> mapper = invocation.getArgument(1);
+            ResultSet rs = mock(ResultSet.class);
+            when(rs.getLong("instrument_version")).thenReturn(instrumentVersion);
+            when(rs.getLong("signed_quantity_steps")).thenReturn(signedQuantitySteps);
+            when(rs.getLong("unrealized_pnl_units")).thenReturn(unrealizedPnlUnits);
+            when(rs.getLong("maintenance_margin_units")).thenReturn(maintenanceMarginUnits);
+            when(rs.getString("status")).thenReturn(status);
+            when(rs.getTimestamp("event_time")).thenReturn(Timestamp.from(Instant.parse("2026-07-01T00:00:00Z")));
+            return List.of(mapper.mapRow(rs, 0));
+        };
+    }
+
+    private org.mockito.stubbing.Answer<List<Object>> balance(long availableUnits,
+                                                              long lockedUnits,
+                                                              long equityUnits) {
+        return invocation -> {
+            RowMapper<?> mapper = invocation.getArgument(1);
+            ResultSet rs = mock(ResultSet.class);
+            when(rs.getLong("user_id")).thenReturn(1001L);
+            when(rs.getString("asset")).thenReturn("USDT");
+            when(rs.getLong("available_units")).thenReturn(availableUnits);
+            when(rs.getLong("locked_units")).thenReturn(lockedUnits);
+            when(rs.getLong("equity_units")).thenReturn(equityUnits);
+            when(rs.getTimestamp("updated_at")).thenReturn(Timestamp.from(Instant.parse("2026-07-01T00:00:00Z")));
+            return List.of(mapper.mapRow(rs, 0));
+        };
     }
 }

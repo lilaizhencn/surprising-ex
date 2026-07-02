@@ -6,6 +6,8 @@ import com.surprising.liquidation.api.model.LiquidationOrderResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderStatus;
 import com.surprising.liquidation.provider.model.ClaimedCandidate;
 import com.surprising.liquidation.provider.model.LiquidationCloseState;
+import com.surprising.liquidation.provider.model.LiquidationPricingDecision;
+import com.surprising.liquidation.provider.model.LiquidationPricingInput;
 import com.surprising.liquidation.provider.model.LiquidationSizingInput;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.trading.api.model.MarginMode;
@@ -35,7 +37,8 @@ public class LiquidationRepository {
                  WHERE candidate_id = ?
                    AND status = 'NEW'
                 RETURNING candidate_id, snapshot_id, user_id, symbol, margin_mode, settle_asset,
-                          instrument_version, signed_quantity_steps, mark_price_ticks, margin_ratio_ppm
+                          instrument_version, signed_quantity_steps, mark_price_ticks,
+                          equity_units, maintenance_margin_units, margin_ratio_ppm
                 """, (rs, rowNum) -> new ClaimedCandidate(
                 rs.getLong("candidate_id"),
                 rs.getLong("snapshot_id"),
@@ -46,6 +49,8 @@ public class LiquidationRepository {
                 rs.getString("settle_asset"),
                 rs.getLong("signed_quantity_steps"),
                 rs.getLong("mark_price_ticks"),
+                rs.getLong("equity_units"),
+                rs.getLong("maintenance_margin_units"),
                 rs.getLong("margin_ratio_ppm")), candidateId).stream().findFirst();
     }
 
@@ -189,6 +194,55 @@ public class LiquidationRepository {
                         bracketFloorNotionalUnits(row.symbol(), row.version(), row.notionalUnits())));
     }
 
+    public Optional<LiquidationPricingInput> latestPricingInput(long userId,
+                                                                String symbol,
+                                                                MarginMode marginMode,
+                                                                long instrumentVersion,
+                                                                Duration maxSnapshotAge) {
+        return jdbcTemplate.query("""
+                SELECT ps.signed_quantity_steps,
+                       ps.mark_price_ticks,
+                       CASE
+                           WHEN ps.margin_mode = 'ISOLATED'
+                               THEN ps.position_margin_units + ps.unrealized_pnl_units
+                           ELSE acc.equity_units
+                       END AS equity_units,
+                       ps.maintenance_margin_units,
+                       i.contract_type,
+                       i.notional_multiplier_units,
+                       i.price_tick_units,
+                       ss.scale_units AS settle_scale_units
+                  FROM risk_position_snapshots ps
+                  JOIN risk_account_snapshots acc
+                    ON acc.snapshot_id = ps.snapshot_id
+                   AND acc.user_id = ps.user_id
+                   AND acc.settle_asset = ps.settle_asset
+                  JOIN instruments i
+                    ON i.symbol = ps.symbol
+                   AND i.version = ps.instrument_version
+                  JOIN account_asset_scales ss
+                    ON ss.asset = i.settle_asset
+                 WHERE ps.user_id = ?
+                   AND ps.symbol = ?
+                   AND ps.margin_mode = ?
+                   AND ps.instrument_version = ?
+                   AND ps.event_time >= now() - (? * INTERVAL '1 millisecond')
+                   AND ps.signed_quantity_steps <> 0
+                 ORDER BY ps.event_time DESC
+                 LIMIT 1
+                """, (rs, rowNum) -> new LiquidationPricingInput(
+                ContractType.valueOf(rs.getString("contract_type")),
+                rs.getLong("signed_quantity_steps"),
+                rs.getLong("mark_price_ticks"),
+                rs.getLong("equity_units"),
+                rs.getLong("maintenance_margin_units"),
+                rs.getLong("notional_multiplier_units"),
+                rs.getLong("price_tick_units"),
+                rs.getLong("settle_scale_units")), userId, symbol,
+                MarginMode.defaultIfNull(marginMode).name(), instrumentVersion,
+                Math.max(1L, maxSnapshotAge.toMillis())).stream().findFirst();
+    }
+
     public Optional<LiquidationSizingInput> sizingInput(long userId,
                                                         String symbol,
                                                         long instrumentVersion,
@@ -252,17 +306,38 @@ public class LiquidationRepository {
                                           long quantitySteps,
                                           LiquidationOrderStatus status,
                                           String reason,
+                                          LiquidationPricingDecision pricing,
                                           Instant now) {
+        LiquidationPricingDecision auditPricing = pricing == null ? LiquidationPricingDecision.empty() : pricing;
         int rows = jdbcTemplate.update("""
                 INSERT INTO liquidation_orders (
                     liquidation_order_id, candidate_id, order_id, user_id, symbol,
-                    margin_mode, side, quantity_steps, status, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    margin_mode, side, quantity_steps, status, reason,
+                    bankruptcy_price_ticks, takeover_price_ticks, liquidation_fee_rate_ppm,
+                    liquidation_fee_units, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (candidate_id) DO NOTHING
                 """, liquidationOrderId, candidateId, orderId, userId, symbol,
                 MarginMode.defaultIfNull(marginMode).name(), side.name(),
-                quantitySteps, status.name(), reason, Timestamp.from(now));
+                quantitySteps, status.name(), reason, auditPricing.bankruptcyPriceTicks(),
+                auditPricing.takeoverPriceTicks(), auditPricing.liquidationFeeRatePpm(),
+                auditPricing.liquidationFeeUnits(), Timestamp.from(now));
         return rows == 1;
+    }
+
+    public boolean insertLiquidationOrder(long liquidationOrderId,
+                                          long candidateId,
+                                          long orderId,
+                                          long userId,
+                                          String symbol,
+                                          MarginMode marginMode,
+                                          OrderSide side,
+                                          long quantitySteps,
+                                          LiquidationOrderStatus status,
+                                          String reason,
+                                          Instant now) {
+        return insertLiquidationOrder(liquidationOrderId, candidateId, orderId, userId, symbol, marginMode, side,
+                quantitySteps, status, reason, LiquidationPricingDecision.empty(), now);
     }
 
     public boolean insertLiquidationOrder(long liquidationOrderId,
@@ -276,7 +351,7 @@ public class LiquidationRepository {
                                           String reason,
                                           Instant now) {
         return insertLiquidationOrder(liquidationOrderId, candidateId, orderId, userId, symbol, MarginMode.CROSS,
-                side, quantitySteps, status, reason, now);
+                side, quantitySteps, status, reason, LiquidationPricingDecision.empty(), now);
     }
 
     public List<LiquidationOrderResponse> orders(Long userId, int limit) {
@@ -308,6 +383,10 @@ public class LiquidationRepository {
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 OrderSide.valueOf(rs.getString("side")),
                 rs.getLong("quantity_steps"),
+                rs.getLong("bankruptcy_price_ticks"),
+                rs.getLong("takeover_price_ticks"),
+                rs.getLong("liquidation_fee_rate_ppm"),
+                rs.getLong("liquidation_fee_units"),
                 LiquidationOrderStatus.valueOf(rs.getString("status")),
                 rs.getString("reason"),
                 rs.getTimestamp("created_at").toInstant());

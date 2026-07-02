@@ -13,14 +13,8 @@ public class MatchingSequenceRepository {
     }
 
     public long nextSequence(String sequenceName) {
-        Long value = jdbcTemplate.queryForObject("""
-                INSERT INTO trading_sequences (sequence_name, sequence_value, updated_at)
-                VALUES (?, 1, now())
-                ON CONFLICT (sequence_name) DO UPDATE SET
-                    sequence_value = trading_sequences.sequence_value + 1,
-                    updated_at = now()
-                RETURNING sequence_value
-                """, Long.class, sequenceName);
+        Long value = jdbcTemplate.queryForObject("SELECT nextval(CAST(? AS regclass))", Long.class,
+                tradingSequenceIdentifier(sequenceName));
         if (value == null) {
             throw new IllegalStateException("Failed to allocate sequence " + sequenceName);
         }
@@ -33,5 +27,12 @@ public class MatchingSequenceRepository {
             throw new IllegalStateException("sequence overflow for " + sequenceName);
         }
         return (int) value;
+    }
+
+    private String tradingSequenceIdentifier(String sequenceName) {
+        if (sequenceName == null || !sequenceName.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")) {
+            throw new IllegalArgumentException("invalid trading sequence name: " + sequenceName);
+        }
+        return "public.trading_" + sequenceName.toLowerCase().replace('-', '_') + "_seq";
     }
 }

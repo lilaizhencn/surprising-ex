@@ -11,6 +11,7 @@ import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.PlaceOrderRequest;
+import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.OrderRecord;
@@ -74,8 +75,9 @@ public class OrderService {
             }
         }
 
+        orderRepository.lockUserSymbolMarginScope(normalized.userId(), normalized.symbol());
         Instant now = Instant.now();
-        ValidationResult validation = validateMarginMode(normalized.marginMode());
+        ValidationResult validation = validateMarginMode(normalized);
         if (validation.accepted()) {
             validation = orderValidator.validate(normalized);
         }
@@ -172,7 +174,12 @@ public class OrderService {
                 : ValidationResult.reject("insufficient available margin", instrumentVersion);
     }
 
-    private ValidationResult validateMarginMode(MarginMode marginMode) {
+    private ValidationResult validateMarginMode(PlaceOrderRequest request) {
+        MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
+        if (!request.reduceOnly()
+                && orderRepository.hasActiveMarginModeConflict(request.userId(), request.symbol(), marginMode)) {
+            return ValidationResult.reject("margin mode switch requires closing positions and open orders first");
+        }
         return ValidationResult.ok(0L);
     }
 
@@ -317,6 +324,10 @@ public class OrderService {
     }
 
     private PlaceOrderRequest normalize(PlaceOrderRequest request) {
+        PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
+        if (positionSide.isHedgeSide()) {
+            throw new IllegalArgumentException("hedge-mode positionSide is not supported; use NET");
+        }
         return new PlaceOrderRequest(
                 request.userId(),
                 emptyToNull(request.clientOrderId()),
@@ -327,6 +338,7 @@ public class OrderService {
                 request.priceTicks(),
                 request.quantitySteps(),
                 MarginMode.defaultIfNull(request.marginMode()),
+                positionSide,
                 request.reduceOnly(),
                 request.postOnly());
     }

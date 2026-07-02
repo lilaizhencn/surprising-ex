@@ -10,6 +10,7 @@ import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PlaceTriggerOrderRequest;
+import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.TriggerCondition;
 import com.surprising.trading.api.model.TriggerOrderQueryResponse;
@@ -70,6 +71,11 @@ public class TriggerOrderService {
         Instant now = Instant.now();
         if (normalized.expiresAt() != null && !normalized.expiresAt().isAfter(now)) {
             throw new IllegalArgumentException("expiresAt must be in the future");
+        }
+        triggerOrderRepository.lockUserSymbolMarginScope(normalized.userId(), normalized.symbol());
+        if (triggerOrderRepository.hasActiveMarginModeConflict(
+                normalized.userId(), normalized.symbol(), normalized.marginMode())) {
+            throw new IllegalArgumentException("margin mode switch requires closing positions and open orders first");
         }
         long triggerOrderId = triggerOrderRepository.nextSequence(TRIGGER_ORDER_SEQUENCE);
         TriggerOrderRecord order = new TriggerOrderRecord(
@@ -208,6 +214,10 @@ public class TriggerOrderService {
         if (request == null) {
             throw new IllegalArgumentException("trigger order request is required");
         }
+        PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
+        if (positionSide.isHedgeSide()) {
+            throw new IllegalArgumentException("hedge-mode positionSide is not supported; use NET");
+        }
         if (request.userId() <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
@@ -244,6 +254,7 @@ public class TriggerOrderService {
                 request.priceTicks(),
                 request.quantitySteps(),
                 MarginMode.defaultIfNull(request.marginMode()),
+                positionSide,
                 request.expiresAt());
     }
 

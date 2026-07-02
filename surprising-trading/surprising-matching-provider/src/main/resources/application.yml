@@ -24,11 +24,13 @@ surprising:
       kafka:
         bootstrap-servers: localhost:9092
         group-id: surprising-matching-v1
+        client-id: surprising-matching-${HOSTNAME:${random.uuid}}
         order-commands-topic: surprising.perp.order.commands.v1
         match-results-topic: surprising.perp.match.results.v1
         match-trades-topic: surprising.perp.match.trades.v1
         order-book-depth-topic: surprising.perp.orderbook.depth.v1
         concurrency: 2
+        max-poll-records: 500
         restart-on-partition-reassignment: true
         partition-assignment-startup-grace-ms: 30000
       engine:

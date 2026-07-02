@@ -47,8 +47,11 @@ public class RiskProperties {
         private String bootstrapServers = "localhost:9092";
         private String groupId = "surprising-risk-v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
+        private String accountRiskEventsTopic = "surprising.risk.account.events.v1";
+        private String positionRiskEventsTopic = "surprising.risk.position.events.v1";
         private String liquidationCandidatesTopic = "surprising.perp.liquidation.candidates.v1";
         private int concurrency = 2;
+        private int maxPollRecords = 500;
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -74,6 +77,22 @@ public class RiskProperties {
             this.positionEventsTopic = positionEventsTopic;
         }
 
+        public String getAccountRiskEventsTopic() {
+            return accountRiskEventsTopic;
+        }
+
+        public void setAccountRiskEventsTopic(String accountRiskEventsTopic) {
+            this.accountRiskEventsTopic = accountRiskEventsTopic;
+        }
+
+        public String getPositionRiskEventsTopic() {
+            return positionRiskEventsTopic;
+        }
+
+        public void setPositionRiskEventsTopic(String positionRiskEventsTopic) {
+            this.positionRiskEventsTopic = positionRiskEventsTopic;
+        }
+
         public String getLiquidationCandidatesTopic() {
             return liquidationCandidatesTopic;
         }
@@ -88,6 +107,14 @@ public class RiskProperties {
 
         public void setConcurrency(int concurrency) {
             this.concurrency = concurrency;
+        }
+
+        public int getMaxPollRecords() {
+            return maxPollRecords;
+        }
+
+        public void setMaxPollRecords(int maxPollRecords) {
+            this.maxPollRecords = maxPollRecords;
         }
     }
 

@@ -60,6 +60,7 @@ public class LiquidationProperties {
         private String orderCommandsTopic = "surprising.perp.order.commands.v1";
         private String orderEventsTopic = "surprising.perp.order.events.v1";
         private int concurrency = 2;
+        private int maxPollRecords = 500;
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -115,6 +116,14 @@ public class LiquidationProperties {
 
         public void setConcurrency(int concurrency) {
             this.concurrency = concurrency;
+        }
+
+        public int getMaxPollRecords() {
+            return maxPollRecords;
+        }
+
+        public void setMaxPollRecords(int maxPollRecords) {
+            this.maxPollRecords = maxPollRecords;
         }
     }
 
@@ -210,6 +219,7 @@ public class LiquidationProperties {
 
     public static class Execution {
         private boolean enabled = true;
+        private long liquidationFeeRatePpm = 3_000L;
 
         public boolean isEnabled() {
             return enabled;
@@ -217,6 +227,14 @@ public class LiquidationProperties {
 
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
+        }
+
+        public long getLiquidationFeeRatePpm() {
+            return liquidationFeeRatePpm;
+        }
+
+        public void setLiquidationFeeRatePpm(long liquidationFeeRatePpm) {
+            this.liquidationFeeRatePpm = liquidationFeeRatePpm;
         }
     }
 }

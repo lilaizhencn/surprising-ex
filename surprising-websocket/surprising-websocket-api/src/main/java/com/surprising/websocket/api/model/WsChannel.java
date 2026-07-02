@@ -11,7 +11,9 @@ public enum WsChannel {
     FUNDING_RATE("funding", true),
     ORDERS("orders", false),
     MATCHES("matches", false),
-    POSITIONS("positions", false);
+    POSITIONS("positions", false),
+    ACCOUNT_RISK("accountRisk", false),
+    POSITION_RISK("positionRisk", false);
 
     private final String code;
     private final boolean publicChannel;
@@ -30,9 +32,13 @@ public enum WsChannel {
     }
 
     public static WsChannel fromCode(String value) {
-        String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        String trimmed = value == null ? "" : value.trim();
+        String normalized = trimmed.toLowerCase(Locale.ROOT);
         for (WsChannel channel : values()) {
-            if (channel.code.equals(normalized) || channel.name().equalsIgnoreCase(normalized)) {
+            String compactName = channel.name().replace("_", "");
+            if (channel.code.equalsIgnoreCase(trimmed)
+                    || channel.name().equalsIgnoreCase(trimmed)
+                    || compactName.equalsIgnoreCase(normalized)) {
                 return channel;
             }
         }

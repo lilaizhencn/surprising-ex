@@ -6,6 +6,7 @@ import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.order.model.MarginRequirement;
 import com.surprising.trading.order.service.OrderMarginMath;
+import java.math.BigInteger;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Optional;
@@ -14,6 +15,8 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public class OrderMarginRepository {
+
+    private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);
 
     private final JdbcTemplate jdbcTemplate;
     private final OrderRepository orderRepository;
@@ -40,15 +43,22 @@ public class OrderMarginRepository {
                        i.price_tick_units,
                        i.initial_margin_rate_ppm,
                        i.max_leverage_ppm,
+                       i.max_position_notional_units,
+                       i.user_open_interest_limit_rate_ppm,
+                       i.user_open_interest_limit_floor_units,
                        ss.scale_units AS settle_scale_units,
                        ls.leverage_ppm,
                        COALESCE(p.signed_quantity_steps, 0) AS current_signed_quantity_steps,
+                       COALESCE(o.pending_same_side_steps, 0) AS pending_same_side_steps,
+                       COALESCE(oi.open_quantity_steps, 0) AS symbol_open_quantity_steps,
                        pm.mark_ticks
                   FROM instruments i
                   JOIN instrument_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
                   JOIN account_asset_scales ss
                     ON ss.asset = i.settle_asset
+             LEFT JOIN trading_symbol_open_interest oi
+                    ON oi.symbol = i.symbol
              LEFT JOIN trading_leverage_settings ls
                     ON ls.user_id = ?
                    AND ls.symbol = i.symbol
@@ -57,6 +67,16 @@ public class OrderMarginRepository {
                     ON p.user_id = ?
                    AND p.symbol = i.symbol
                    AND p.margin_mode = ?
+                  LEFT JOIN LATERAL (
+                      SELECT COALESCE(SUM(o.remaining_quantity_steps), 0) AS pending_same_side_steps
+                        FROM trading_orders o
+                       WHERE o.user_id = ?
+                         AND o.symbol = i.symbol
+                         AND o.margin_mode = ?
+                         AND o.side = ?
+                         AND o.reduce_only = FALSE
+                         AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                  ) o ON TRUE
                   LEFT JOIN LATERAL (
                       SELECT ((m.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_ticks
                         FROM price_mark_ticks m
@@ -78,19 +98,40 @@ public class OrderMarginRepository {
             long settleScaleUnits = rs.getLong("settle_scale_units");
             long instrumentInitialMarginRatePpm = rs.getLong("initial_margin_rate_ppm");
             long instrumentMaxLeveragePpm = rs.getLong("max_leverage_ppm");
+            long maxPositionNotionalUnits = rs.getLong("max_position_notional_units");
+            long openInterestLimitRatePpm = rs.getLong("user_open_interest_limit_rate_ppm");
+            long openInterestLimitFloorUnits = rs.getLong("user_open_interest_limit_floor_units");
             Long configuredLeveragePpm = nullableLong(rs, "leverage_ppm");
             long effectivePriceTicks = OrderMarginMath.collateralPriceTicks(side, orderType, priceTicks,
                     nullableMarkTicks, marketMaxSlippagePpm, contractType);
-            long orderNotionalUnits = OrderMarginMath.notionalUnits(contractType, quantitySteps, effectivePriceTicks,
-                    notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
             long currentSignedQuantitySteps = rs.getLong("current_signed_quantity_steps");
-            long currentNotionalUnits = currentSignedQuantitySteps == 0 ? 0L : OrderMarginMath.notionalUnits(
-                    contractType, Math.absExact(currentSignedQuantitySteps), effectivePriceTicks,
-                    notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
-            long bracketNotionalUnits = Math.addExact(currentNotionalUnits, orderNotionalUnits);
+            long pendingSameSideSteps = rs.getLong("pending_same_side_steps");
+            long projectedPositionNotionalUnits = projectedPositionNotionalUnits(contractType,
+                    currentSignedQuantitySteps, side, Math.addExact(pendingSameSideSteps, quantitySteps),
+                    effectivePriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
+            long dynamicPositionLimitUnits = dynamicPositionLimitUnits(contractType,
+                    rs.getLong("symbol_open_quantity_steps"), effectivePriceTicks, notionalMultiplierUnits,
+                    priceTickUnits, settleScaleUnits, openInterestLimitRatePpm, openInterestLimitFloorUnits,
+                    maxPositionNotionalUnits);
+            if (projectedPositionNotionalUnits > maxPositionNotionalUnits) {
+                return new MarginRequirement(rs.getString("asset"), 0L,
+                        "position notional exceeds instrument limit", configuredLeveragePpm == null ? 0L : configuredLeveragePpm,
+                        instrumentMaxLeveragePpm, instrumentInitialMarginRatePpm);
+            }
+            if (projectedPositionNotionalUnits > dynamicPositionLimitUnits) {
+                return new MarginRequirement(rs.getString("asset"), 0L,
+                        "position notional exceeds open interest limit", configuredLeveragePpm == null ? 0L : configuredLeveragePpm,
+                        instrumentMaxLeveragePpm, instrumentInitialMarginRatePpm);
+            }
             // User leverage can be saved at instrument level, but each order must still respect the active risk tier.
-            RiskBracket bracket = riskBracket(symbol, instrumentVersion, bracketNotionalUnits)
-                    .orElse(new RiskBracket(instrumentMaxLeveragePpm, instrumentInitialMarginRatePpm));
+            RiskBracket bracket = riskBracket(symbol, instrumentVersion, projectedPositionNotionalUnits)
+                    .orElse(new RiskBracket(instrumentMaxLeveragePpm, instrumentInitialMarginRatePpm,
+                            maxPositionNotionalUnits));
+            if (projectedPositionNotionalUnits > bracket.notionalCapUnits()) {
+                return new MarginRequirement(rs.getString("asset"), 0L,
+                        "position notional exceeds risk bracket", configuredLeveragePpm == null ? 0L : configuredLeveragePpm,
+                        bracket.maxLeveragePpm(), bracket.initialMarginRatePpm());
+            }
             if (configuredLeveragePpm != null && configuredLeveragePpm > bracket.maxLeveragePpm()) {
                 return new MarginRequirement(rs.getString("asset"), 0L,
                         "leverage exceeds risk limit", configuredLeveragePpm, bracket.maxLeveragePpm(),
@@ -116,6 +157,7 @@ public class OrderMarginRepository {
             return new MarginRequirement(rs.getString("asset"), initialMarginUnits, null,
                     selectedLeveragePpm, bracket.maxLeveragePpm(), effectiveInitialMarginRatePpm);
         }, userId, MarginMode.defaultIfNull(marginMode).name(), userId, MarginMode.defaultIfNull(marginMode).name(),
+                userId, MarginMode.defaultIfNull(marginMode).name(), side.name(),
                 marketMaxMarkAgeMs, symbol, instrumentVersion, orderType.name()).stream().findFirst();
     }
 
@@ -129,6 +171,47 @@ public class OrderMarginRepository {
                                                    long marketMaxMarkAgeMs) {
         return requirement(symbol, instrumentVersion, 0L, MarginMode.CROSS, side, orderType, priceTicks,
                 quantitySteps, marketMaxSlippagePpm, marketMaxMarkAgeMs);
+    }
+
+    private long projectedPositionNotionalUnits(ContractType contractType,
+                                                long currentSignedQuantitySteps,
+                                                OrderSide side,
+                                                long orderQuantitySteps,
+                                                long effectivePriceTicks,
+                                                long notionalMultiplierUnits,
+                                                long priceTickUnits,
+                                                long settleScaleUnits) {
+        long signedOrderSteps = side == OrderSide.BUY ? orderQuantitySteps : Math.negateExact(orderQuantitySteps);
+        long projectedSignedSteps = Math.addExact(currentSignedQuantitySteps, signedOrderSteps);
+        long projectedAbsSteps = Math.absExact(projectedSignedSteps);
+        if (projectedAbsSteps == 0L) {
+            return 0L;
+        }
+        return OrderMarginMath.notionalUnits(contractType, projectedAbsSteps, effectivePriceTicks,
+                notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
+    }
+
+    private long dynamicPositionLimitUnits(ContractType contractType,
+                                           long symbolOpenQuantitySteps,
+                                           long effectivePriceTicks,
+                                           long notionalMultiplierUnits,
+                                           long priceTickUnits,
+                                           long settleScaleUnits,
+                                           long openInterestLimitRatePpm,
+                                           long openInterestLimitFloorUnits,
+                                           long maxPositionNotionalUnits) {
+        if (openInterestLimitRatePpm < 0 || openInterestLimitFloorUnits <= 0) {
+            throw new IllegalArgumentException("invalid open interest limit configuration");
+        }
+        long openInterestNotionalUnits = symbolOpenQuantitySteps <= 0 ? 0L : OrderMarginMath.notionalUnits(
+                contractType, symbolOpenQuantitySteps, effectivePriceTicks, notionalMultiplierUnits,
+                priceTickUnits, settleScaleUnits);
+        BigInteger scaledOpenInterest = BigInteger.valueOf(openInterestNotionalUnits)
+                .multiply(BigInteger.valueOf(openInterestLimitRatePpm))
+                .divide(PPM);
+        long dynamicLimit = scaledOpenInterest.max(BigInteger.valueOf(openInterestLimitFloorUnits))
+                .longValueExact();
+        return Math.min(dynamicLimit, maxPositionNotionalUnits);
     }
 
     public boolean reserve(long userId,
@@ -185,7 +268,7 @@ public class OrderMarginRepository {
 
     private Optional<RiskBracket> riskBracket(String symbol, long instrumentVersion, long notionalUnits) {
         return jdbcTemplate.query("""
-                SELECT max_leverage_ppm, initial_margin_rate_ppm
+                SELECT max_leverage_ppm, initial_margin_rate_ppm, notional_cap_units
                   FROM instrument_risk_brackets
                  WHERE symbol = ?
                    AND version = ?
@@ -194,7 +277,8 @@ public class OrderMarginRepository {
                  LIMIT 1
                 """, (rs, rowNum) -> new RiskBracket(
                 rs.getLong("max_leverage_ppm"),
-                rs.getLong("initial_margin_rate_ppm")), symbol, instrumentVersion, notionalUnits)
+                rs.getLong("initial_margin_rate_ppm"),
+                rs.getLong("notional_cap_units")), symbol, instrumentVersion, notionalUnits)
                 .stream().findFirst();
     }
 
@@ -204,6 +288,6 @@ public class OrderMarginRepository {
         return rs.wasNull() ? null : value;
     }
 
-    private record RiskBracket(long maxLeveragePpm, long initialMarginRatePpm) {
+    private record RiskBracket(long maxLeveragePpm, long initialMarginRatePpm, long notionalCapUnits) {
     }
 }

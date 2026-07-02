@@ -27,6 +27,7 @@
         <module>surprising-adl</module>
         <module>surprising-websocket</module>
         <module>surprising-gateway</module>
+        <module>surprising-market-maker</module>
         <module>surprising-integration-test</module>
     </modules>
 </project>

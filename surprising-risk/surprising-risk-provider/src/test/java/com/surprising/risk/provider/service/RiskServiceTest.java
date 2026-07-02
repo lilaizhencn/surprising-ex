@@ -44,7 +44,7 @@ class RiskServiceTest {
 
         assertThat(riskRepository.savedAccounts).isEqualTo(1);
         assertThat(riskRepository.savedPositions).isEqualTo(1);
-        assertThat(outboxRepository.enqueued).isZero();
+        assertThat(outboxRepository.eventTypes).containsExactly("RISK_ACCOUNT_UPDATED", "RISK_POSITION_UPDATED");
         assertThat(transactionManager.commits).isZero();
         assertThat(transactionManager.rollbacks).isEqualTo(1);
     }
@@ -87,7 +87,7 @@ class RiskServiceTest {
         RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
                 new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
 
-        service.scanPositionUpdate(2002L, "eth-usdt", 7L);
+        service.scanPositionUpdate(2002L, "eth-usdt", MarginMode.CROSS, 7L, "trace-risk-1");
 
         assertThat(riskRepository.positionEventResolveCalls).isEqualTo(1);
         assertThat(riskRepository.lastPositionEventUserId).isEqualTo(2002L);
@@ -97,7 +97,9 @@ class RiskServiceTest {
         assertThat(riskRepository.calculateCalls).isEqualTo(1);
         assertThat(riskRepository.savedAccounts).isEqualTo(1);
         assertThat(riskRepository.savedPositions).isEqualTo(1);
-        assertThat(outboxRepository.enqueued).isZero();
+        assertThat(outboxRepository.eventTypes).containsExactly("RISK_ACCOUNT_UPDATED", "RISK_POSITION_UPDATED");
+        assertThat(outboxRepository.payloads)
+                .allSatisfy(payload -> assertThat(payload).contains("\"traceId\":\"trace-risk-1\""));
         assertThat(transactionManager.commits).isEqualTo(1);
         assertThat(transactionManager.rollbacks).isZero();
     }
@@ -179,7 +181,7 @@ class RiskServiceTest {
             assertThat(position.unrealizedPnlUnits()).isZero();
             assertThat(position.maintenanceMarginUnits()).isZero();
         });
-        assertThat(outboxRepository.enqueued).isZero();
+        assertThat(outboxRepository.eventTypes).containsExactly("RISK_ACCOUNT_UPDATED", "RISK_POSITION_UPDATED");
         assertThat(transactionManager.commits).isEqualTo(1);
         assertThat(transactionManager.rollbacks).isZero();
     }
@@ -219,7 +221,9 @@ class RiskServiceTest {
 
         service.scan();
 
-        assertThat(outboxRepository.enqueued).isEqualTo(1);
+        assertThat(outboxRepository.enqueued).isEqualTo(3);
+        assertThat(outboxRepository.eventTypes)
+                .containsExactly("RISK_ACCOUNT_UPDATED", "RISK_POSITION_UPDATED", "LIQUIDATION_CANDIDATE");
         assertThat(outboxRepository.topic).isEqualTo("surprising.perp.liquidation.candidates.v1");
         assertThat(outboxRepository.eventKey).isEqualTo("BTC-USDT");
         assertThat(outboxRepository.eventType).isEqualTo("LIQUIDATION_CANDIDATE");
@@ -267,7 +271,7 @@ class RiskServiceTest {
         assertThat(riskRepository.scanLeaseAttempts).isZero();
         assertThat(riskRepository.savedAccounts).isEqualTo(1);
         assertThat(riskRepository.savedPositions).isEqualTo(1);
-        assertThat(outboxRepository.enqueued).isEqualTo(1);
+        assertThat(outboxRepository.enqueued).isEqualTo(3);
     }
 
     @Test
@@ -289,7 +293,7 @@ class RiskServiceTest {
 
         assertThat(riskRepository.savedAccounts).isEqualTo(2);
         assertThat(riskRepository.savedPositions).isEqualTo(2);
-        assertThat(outboxRepository.eventKeys).containsExactly("ETH-USDT");
+        assertThat(outboxRepository.candidateEventKeys()).containsExactly("ETH-USDT");
         assertThat(transactionManager.commits).isEqualTo(1);
         assertThat(transactionManager.rollbacks).isEqualTo(1);
     }
@@ -496,6 +500,7 @@ class RiskServiceTest {
     private static final class FakeRiskSequenceRepository extends RiskSequenceRepository {
         private long snapshot = 100L;
         private long candidate = 200L;
+        private long riskEvent = 300L;
 
         private FakeRiskSequenceRepository() {
             super(null);
@@ -506,6 +511,7 @@ class RiskServiceTest {
             return switch (sequenceName) {
                 case "risk-snapshot" -> ++snapshot;
                 case "liquidation-candidate" -> ++candidate;
+                case "risk-event" -> ++riskEvent;
                 default -> throw new IllegalArgumentException(sequenceName);
             };
         }
@@ -517,6 +523,8 @@ class RiskServiceTest {
         private String eventKey;
         private String eventType;
         private final List<String> eventKeys = new ArrayList<>();
+        private final List<String> eventTypes = new ArrayList<>();
+        private final List<String> payloads = new ArrayList<>();
 
         private FakeRiskOutboxRepository() {
             super(null, null);
@@ -529,6 +537,18 @@ class RiskServiceTest {
             this.eventKey = eventKey;
             this.eventType = eventType;
             this.eventKeys.add(eventKey);
+            this.eventTypes.add(eventType);
+            this.payloads.add(payload);
+        }
+
+        private List<String> candidateEventKeys() {
+            List<String> keys = new ArrayList<>();
+            for (int i = 0; i < eventTypes.size(); i++) {
+                if ("LIQUIDATION_CANDIDATE".equals(eventTypes.get(i))) {
+                    keys.add(eventKeys.get(i));
+                }
+            }
+            return keys;
         }
     }
 

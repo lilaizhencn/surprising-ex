@@ -14,6 +14,9 @@ BTC_TICK_UNITS=10000000
 ETH_TICK_UNITS=1000000
 BTC_PRICE_TICKS=600000
 ETH_PRICE_TICKS=300000
+MM_PROVIDER_STRATEGY_ID="btc-usdt-mm-a"
+MM_PROVIDER_USER_A=900001
+MM_PROVIDER_USER_B=900002
 MARK_SEQUENCE_BASE=$((100000 + RUN_SEQ * 100))
 NEXT_MARK_SEQUENCE="${MARK_SEQUENCE_BASE}"
 QUANTITY_STEPS="${QUANTITY_STEPS:-10}"
@@ -29,6 +32,7 @@ STOP_PROVIDERS="${STOP_PROVIDERS:-true}"
 RUN_FAILURE_SCENARIOS="${RUN_FAILURE_SCENARIOS:-true}"
 KEEP_TMP="${KEEP_TMP:-false}"
 WS_TIMEOUT="${WS_TIMEOUT:-360}"
+FULL_STACK_EXTERNAL_INDEX_WS_ENABLED="${FULL_STACK_EXTERNAL_INDEX_WS_ENABLED:-false}"
 TMP_DIR="$(mktemp -d /tmp/surprising-full-stack-real-config.XXXXXX)"
 WS_STOP_FILE="${TMP_DIR}/ws.stop"
 COMPOSE_BIN=""
@@ -44,6 +48,8 @@ PARTIAL_TAKER_USER=$((7300000000 + RUN_SEQ))
 CANCEL_USER=$((7400000000 + RUN_SEQ))
 CLOSE_MAKER_USER=$((7450000000 + RUN_SEQ))
 TRIGGER_MAKER_USER=$((7460000000 + RUN_SEQ))
+ISOLATED_USER=$((7470000000 + RUN_SEQ))
+ISOLATED_MAKER_USER=$((7471000000 + RUN_SEQ))
 ALL_CANCEL_USER_START=$((7500000000 + RUN_SEQ * 10))
 LOAD_MAKER_START=$((9000000000 + RUN_SEQ * 1000))
 LOAD_TAKER_START=$((9500000000 + RUN_SEQ * 1000))
@@ -72,17 +78,18 @@ CANCEL_PRICE_TICKS=$((BTC_PRICE_TICKS + 10000))
 ALL_CANCEL_BID_PRICE=$((BTC_PRICE_TICKS - 10000))
 ALL_CANCEL_ASK_PRICE=$((BTC_PRICE_TICKS + 11000))
 LOAD_PRICE_TICKS=$((BTC_PRICE_TICKS + 20000))
-FAULT_PRICE_TICKS=$((BTC_PRICE_TICKS + 30000))
-ACCOUNT_FAULT_PRICE_TICKS=$((BTC_PRICE_TICKS + 40000))
-SELF_TRADE_PRICE_TICKS=$((BTC_PRICE_TICKS + 50000))
-POST_ONLY_PRICE_TICKS=$((BTC_PRICE_TICKS + 60000))
-DEPTH_START_PRICE_TICKS=$((BTC_PRICE_TICKS + 100000))
+FAULT_PRICE_TICKS=$((BTC_PRICE_TICKS + 21000))
+ACCOUNT_FAULT_PRICE_TICKS=$((BTC_PRICE_TICKS + 22000))
+SELF_TRADE_PRICE_TICKS=$((BTC_PRICE_TICKS + 23000))
+POST_ONLY_PRICE_TICKS=$((BTC_PRICE_TICKS + 24000))
+DEPTH_START_PRICE_TICKS=$((BTC_PRICE_TICKS + 25000))
 PARTIAL_MAKER_QTY=$((QUANTITY_STEPS * 2))
 PARTIAL_TAKER_QTY=$((QUANTITY_STEPS - 3))
 LOAD_QTY="${QUANTITY_STEPS}"
 LOAD_TOTAL_QTY=$((PAIR_COUNT * LOAD_QTY))
 CLOSE_QTY=4
 TRIGGER_CLOSE_QTY=$((QUANTITY_STEPS - CLOSE_QTY))
+ISOLATED_QTY=10
 TOPUP_QTY=10
 LIQ_QTY=10
 LIQ_MARK_PRICE_TICKS=160000
@@ -382,7 +389,8 @@ package_services() {
     mvn -q -pl :surprising-instrument-provider,:surprising-candlestick-provider,:surprising-index-price-provider,\
 :surprising-mark-price-provider,:surprising-order-provider,:surprising-matching-provider,:surprising-account-provider,\
 :surprising-risk-provider,:surprising-liquidation-provider,:surprising-funding-provider,:surprising-insurance-provider,\
-:surprising-adl-provider,:surprising-websocket-provider,:surprising-gateway-provider,:surprising-trigger-provider \
+:surprising-adl-provider,:surprising-websocket-provider,:surprising-gateway-provider,:surprising-trigger-provider,\
+:surprising-market-maker-provider \
 -am -DskipTests package
 }
 
@@ -416,6 +424,7 @@ provider_port() {
     websocket) echo 9093 ;;
     gateway) echo 9094 ;;
     trigger) echo 9095 ;;
+    market-maker) echo 9096 ;;
     *) echo "unknown provider: ${name}" >&2; exit 1 ;;
   esac
 }
@@ -438,6 +447,7 @@ provider_module() {
     adl) echo "surprising-adl/surprising-adl-provider" ;;
     websocket) echo "surprising-websocket/surprising-websocket-provider" ;;
     gateway) echo "surprising-gateway/surprising-gateway-provider" ;;
+    market-maker) echo "surprising-market-maker/surprising-market-maker-provider" ;;
     *) echo "unknown provider: ${name}" >&2; exit 1 ;;
   esac
 }
@@ -460,6 +470,7 @@ provider_artifact() {
     adl) echo "surprising-adl-provider" ;;
     websocket) echo "surprising-websocket-provider" ;;
     gateway) echo "surprising-gateway-provider" ;;
+    market-maker) echo "surprising-market-maker-provider" ;;
     *) echo "unknown provider: ${name}" >&2; exit 1 ;;
   esac
 }
@@ -520,23 +531,37 @@ start_provider() {
   jar="$(boot_jar "${module_path}" "${artifact}")"
   local log_file="${TMP_DIR}/${name}.log"
   local java_args=()
+  local app_args=()
   if [[ "${name}" == "matching" ]]; then
     java_args+=(
-      "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
-      "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
       "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
+      "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
+      "--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED"
+      "--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED"
+      "--add-opens=jdk.compiler/com.sun.tools.javac=ALL-UNNAMED"
+      "--add-opens=java.base/java.lang=ALL-UNNAMED"
+      "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED"
+      "--add-opens=java.base/java.io=ALL-UNNAMED"
+      "--add-opens=java.base/java.util=ALL-UNNAMED"
       "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED"
-      "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
+      "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
     )
+  fi
+  if [[ "${name}" == "index-price" && "${FULL_STACK_EXTERNAL_INDEX_WS_ENABLED}" != "true" ]]; then
+    app_args+=("--surprising.price.index.web-socket.enabled=false")
   fi
   echo "Starting ${name} provider on port ${port}"
   (
     cd "${ROOT_DIR}"
+    local command=(java)
     if (( ${#java_args[@]} > 0 )); then
-      exec java "${java_args[@]}" -jar "${jar}"
-    else
-      exec java -jar "${jar}"
+      command+=("${java_args[@]}")
     fi
+    command+=("-jar" "${jar}")
+    if (( ${#app_args[@]} > 0 )); then
+      command+=("${app_args[@]}")
+    fi
+    exec "${command[@]}"
   ) >"${log_file}" 2>&1 &
   local pid="$!"
   set_provider_pid "${name}" "${pid}"
@@ -649,13 +674,24 @@ publish_mark_price_event() {
   local tick_units="$2"
   local price_ticks="$3"
   local price
+  local bid
+  local ask
   local event_time
+  local next_funding_time
   NEXT_MARK_SEQUENCE=$((NEXT_MARK_SEQUENCE + 1))
   insert_mark_price "${symbol}" "${tick_units}" "${NEXT_MARK_SEQUENCE}" "${price_ticks}"
   price="$(decimal_price "${price_ticks}" "${tick_units}")"
+  bid="$(decimal_price "$((price_ticks - 1))" "${tick_units}")"
+  ask="$(decimal_price "$((price_ticks + 1))" "${tick_units}")"
   event_time="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  next_funding_time="$(python3 - <<'PY'
+from datetime import datetime, timedelta, timezone
+
+print((datetime.now(timezone.utc) + timedelta(hours=8)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+PY
+)"
   produce_json "surprising.perp.mark.price.v1" "${symbol}" \
-    "{\"symbol\":\"${symbol}\",\"markPrice\":${price},\"sequence\":${NEXT_MARK_SEQUENCE},\"eventTime\":\"${event_time}\"}"
+    "{\"symbol\":\"${symbol}\",\"markPrice\":${price},\"indexPrice\":${price},\"price1\":${price},\"price2\":${price},\"lastTradePrice\":${price},\"bestBidPrice\":${bid},\"bestAskPrice\":${ask},\"fundingRate\":0.000000000000000000,\"nextFundingTime\":\"${next_funding_time}\",\"timeUntilFundingSeconds\":28800,\"basisAverage\":0.000000000000000000,\"basisWindowSeconds\":60,\"clampLow\":${price},\"clampHigh\":${price},\"sequence\":${NEXT_MARK_SEQUENCE},\"status\":\"HEALTHY\",\"eventTime\":\"${event_time}\"}"
   wait_sql_nonzero "persisted mark price event ${symbol}" \
     "SELECT count(*) FROM price_mark_ticks WHERE symbol = '${symbol}' AND sequence = ${NEXT_MARK_SEQUENCE}"
 }
@@ -732,6 +768,7 @@ place_order_symbol() {
   local quantity_steps="$8"
   local reduce_only="$9"
   local post_only="${10}"
+  local margin_mode="${11:-CROSS}"
   local response
   response="$(gateway_post "trading" "${user_id}" "real-config-${RUN_ID}-${client_order_id}" "{
       \"userId\": ${user_id},
@@ -742,6 +779,7 @@ place_order_symbol() {
       \"timeInForce\": \"${tif}\",
       \"priceTicks\": ${price_ticks},
       \"quantitySteps\": ${quantity_steps},
+      \"marginMode\": \"${margin_mode}\",
       \"reduceOnly\": ${reduce_only},
       \"postOnly\": ${post_only}
     }")"
@@ -802,6 +840,49 @@ adjust_balance() {
     }" >/dev/null
 }
 
+adjust_position_margin() {
+  local user_id="$1"
+  local symbol="$2"
+  local amount_units="$3"
+  local reference_id="$4"
+  gateway_post "account/position-margin-adjustments" "${user_id}" "real-config-${RUN_ID}-${reference_id}" "{
+      \"userId\": ${user_id},
+      \"symbol\": \"${symbol}\",
+      \"marginMode\": \"ISOLATED\",
+      \"amountUnits\": ${amount_units},
+      \"referenceId\": \"${reference_id}\",
+      \"reason\": \"FULL_STACK_REAL_CONFIG_TEST\"
+    }"
+}
+
+expect_position_margin_adjustment_rejected() {
+  local user_id="$1"
+  local symbol="$2"
+  local amount_units="$3"
+  local reference_id="$4"
+  local expected_code="$5"
+  local response_file="${TMP_DIR}/position-margin-reject-${reference_id}.json"
+  local code
+  code="$(curl -sS -o "${response_file}" -w '%{http_code}' \
+    -X POST "http://localhost:9094/api/v1/gateway/account/position-margin-adjustments" \
+    -H "Content-Type: application/json" \
+    -H "X-User-Id: ${user_id}" \
+    -H "X-Trace-Id: real-config-${RUN_ID}-${reference_id}" \
+    -d "{
+      \"userId\": ${user_id},
+      \"symbol\": \"${symbol}\",
+      \"marginMode\": \"ISOLATED\",
+      \"amountUnits\": ${amount_units},
+      \"referenceId\": \"${reference_id}\",
+      \"reason\": \"FULL_STACK_REAL_CONFIG_TEST\"
+    }")"
+  if [[ "${code}" != "${expected_code}" ]]; then
+    echo "Expected position-margin adjustment ${reference_id} to return HTTP ${expected_code}, got ${code}" >&2
+    cat "${response_file}" >&2 || true
+    exit 1
+  fi
+}
+
 adjust_insurance_fund() {
   local amount_units="$1"
   local reference_id="$2"
@@ -811,6 +892,28 @@ adjust_insurance_fund() {
       \"referenceId\": \"${reference_id}\",
       \"reason\": \"FULL_STACK_REAL_CONFIG_TEST\"
     }" >/dev/null
+}
+
+run_market_maker_provider_smoke() {
+  local trace_id="real-config-${RUN_ID}-mm-provider"
+  if [[ "${RESET_STATE}" != "true" ]]; then
+    echo "Skipping market-maker provider run-once smoke because RESET_STATE=false"
+    return
+  fi
+  echo "Scenario: market-maker provider run-once places post-only quotes"
+  gateway_post "market-maker/run-once" 1 "${trace_id}" "{
+      \"strategyId\": \"${MM_PROVIDER_STRATEGY_ID}\",
+      \"symbol\": \"${BTC_SYMBOL}\"
+    }" >"${TMP_DIR}/market-maker-run-once.json"
+  wait_sql_equals "market-maker provider post-only quotes accepted" \
+    "SELECT count(DISTINCT o.order_id) FROM trading_orders o JOIN trading_order_events e ON e.order_id = o.order_id WHERE e.trace_id = '${trace_id}' AND o.user_id IN (${MM_PROVIDER_USER_A}, ${MM_PROVIDER_USER_B}) AND o.symbol = '${BTC_SYMBOL}' AND o.client_order_id LIKE 'mm-%' AND o.time_in_force = 'GTX' AND o.post_only = true AND o.status = 'ACCEPTED'" \
+    "12"
+  wait_sql_equals "market-maker provider trace propagated to order events" \
+    "SELECT count(DISTINCT order_id) FROM trading_order_events WHERE trace_id = '${trace_id}' AND order_id IN (SELECT order_id FROM trading_orders WHERE user_id IN (${MM_PROVIDER_USER_A}, ${MM_PROVIDER_USER_B}) AND symbol = '${BTC_SYMBOL}' AND client_order_id LIKE 'mm-%')" \
+    "12"
+  wait_sql_equals "market-maker provider matching accepted trace" \
+    "SELECT count(DISTINCT order_id) FROM trading_match_results WHERE trace_id = '${trace_id}' AND result_code = 'SUCCESS' AND order_id IN (SELECT order_id FROM trading_orders WHERE user_id IN (${MM_PROVIDER_USER_A}, ${MM_PROVIDER_USER_B}) AND symbol = '${BTC_SYMBOL}' AND client_order_id LIKE 'mm-%')" \
+    "12"
 }
 
 wait_order_state() {
@@ -851,6 +954,35 @@ wait_position_symbol() {
 
 wait_position() {
   wait_position_symbol "${BTC_SYMBOL}" "$@"
+}
+
+wait_position_symbol_margin() {
+  local symbol="$1"
+  local user_id="$2"
+  local margin_mode="$3"
+  local signed_quantity="$4"
+  local entry_price="$5"
+  wait_sql_equals "position ${symbol} user=${user_id} mode=${margin_mode} quantity=${signed_quantity}" \
+    "SELECT COALESCE((SELECT signed_quantity_steps || ':' || entry_price_ticks FROM account_positions WHERE user_id = ${user_id} AND symbol = '${symbol}' AND margin_mode = '${margin_mode}'), '0:0')" \
+    "${signed_quantity}:${entry_price}"
+}
+
+wait_position_margin_units() {
+  local symbol="$1"
+  local user_id="$2"
+  local expected="$3"
+  wait_sql_equals "position margin ${symbol} user=${user_id} expected=${expected}" \
+    "SELECT COALESCE((SELECT margin_units FROM account_position_margins WHERE user_id = ${user_id} AND symbol = '${symbol}' AND margin_mode = 'ISOLATED'), 0)" \
+    "${expected}"
+}
+
+wait_latest_isolated_risk_position_margin() {
+  local symbol="$1"
+  local user_id="$2"
+  local expected="$3"
+  wait_sql_equals "latest isolated risk position margin ${symbol} user=${user_id}" \
+    "SELECT COALESCE((SELECT position_margin_units FROM risk_position_snapshots WHERE user_id = ${user_id} AND symbol = '${symbol}' AND margin_mode = 'ISOLATED' ORDER BY event_time DESC, snapshot_id DESC LIMIT 1), -1)" \
+    "${expected}"
 }
 
 wait_consumer_group_lag_zero() {
@@ -1029,13 +1161,15 @@ assert_ws_private() {
   local file="$1"
   local user_id="$2"
   local expected_position="$3"
-  python3 - "${file}" "${user_id}" "${expected_position}" <<'PY'
+  local expected_risk_position="${4:-skip}"
+  python3 - "${file}" "${user_id}" "${expected_position}" "${expected_risk_position}" <<'PY'
 import json
 import pathlib
 import sys
 path = pathlib.Path(sys.argv[1])
 user_id = int(sys.argv[2])
 expected_position = int(sys.argv[3])
+expected_risk_position = sys.argv[4]
 messages = []
 if path.exists():
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -1051,13 +1185,34 @@ positions = [
     and m.get("channel") == "positions"
     and (m.get("data") or {}).get("userId") == user_id
 ]
+position_risks = [
+    m for m in messages
+    if m.get("op") == "event"
+    and m.get("channel") == "positionRisk"
+    and (m.get("data") or {}).get("userId") == user_id
+]
+account_risks = [
+    m for m in messages
+    if m.get("op") == "event"
+    and m.get("channel") == "accountRisk"
+    and (m.get("data") or {}).get("userId") == user_id
+]
 if not orders:
     raise SystemExit(f"no websocket order events for user {user_id}")
 if expected_position != 0 and not matches:
     raise SystemExit(f"no websocket match events for user {user_id}")
 if expected_position != 0 and not any((m.get("data") or {}).get("signedQuantitySteps") == expected_position for m in positions):
     raise SystemExit(f"missing websocket position {expected_position} for user {user_id}")
-print(f"user={user_id} orders={len(orders)} matches={len(matches)} positions={len(positions)}")
+if expected_risk_position != "skip":
+    risk_position = int(expected_risk_position)
+    if not account_risks:
+        raise SystemExit(f"no websocket accountRisk events for user {user_id}")
+    if not any((m.get("data") or {}).get("signedQuantitySteps") == risk_position for m in position_risks):
+        raise SystemExit(f"missing websocket positionRisk {risk_position} for user {user_id}")
+print(
+    f"user={user_id} orders={len(orders)} matches={len(matches)} positions={len(positions)} "
+    f"positionRisk={len(position_risks)} accountRisk={len(account_risks)}"
+)
 PY
 }
 
@@ -1117,6 +1272,7 @@ publish_price_inputs_until_mark_event() {
   while true; do
     publish_price_inputs "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${sequence}" "${BTC_PRICE_TICKS}"
     publish_price_inputs "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" "$((sequence + 1))" "${ETH_PRICE_TICKS}"
+    publish_mark_price_event "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
     if (( $(ws_public_channel_count "${WS_MARK_LOG}" "mark" "${BTC_SYMBOL}") > 0 )); then
       return
     fi
@@ -1136,8 +1292,9 @@ fund_users() {
     "${CANCEL_USER}" "${CLOSE_MAKER_USER}" "${TRIGGER_MAKER_USER}" "${FAULT_MAKER_USER}" "${FAULT_TAKER_USER}" \
     "${ACCOUNT_FAULT_MAKER_USER}" "${ACCOUNT_FAULT_TAKER_USER}" "${SELF_TRADE_USER}" \
     "${POST_ONLY_MAKER_USER}" "${POST_ONLY_TAKER_USER}" "${DEPTH_USER}" \
+    "${ISOLATED_USER}" "${ISOLATED_MAKER_USER}" \
     "${TOPUP_MAKER_USER}" "${LIQ_OPEN_MAKER_USER}" "${LIQ_CLOSE_MAKER_USER}" "${ADL_OPEN_MAKER_USER}" \
-    "${ADL_TARGET_USER}"; do
+    "${ADL_TARGET_USER}" "${MM_PROVIDER_USER_A}" "${MM_PROVIDER_USER_B}"; do
     adjust_balance "${user}" "${default_deposit}" "real-config-deposit-${RUN_ID}-${user}"
   done
   adjust_balance "${TOPUP_USER}" 1350000000 "real-config-topup-initial-${RUN_ID}"
@@ -1193,6 +1350,7 @@ register_provider "adl" 9091 "surprising-adl/surprising-adl-provider" "surprisin
 register_provider "websocket" 9093 "surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider"
 register_provider "gateway" 9094 "surprising-gateway/surprising-gateway-provider" "surprising-gateway-provider"
 register_provider "trigger" 9095 "surprising-trading/surprising-trigger-provider" "surprising-trigger-provider"
+register_provider "market-maker" 9096 "surprising-market-maker/surprising-market-maker-provider" "surprising-market-maker-provider"
 
 require_command curl
 require_command python3
@@ -1233,12 +1391,12 @@ fi
 if [[ "${START_PROVIDERS}" == "true" ]]; then
   package_services
 
-  for provider in instrument candlestick index-price mark-price matching account risk liquidation funding insurance adl websocket order trigger gateway; do
+  for provider in instrument candlestick index-price mark-price matching account risk liquidation funding insurance adl websocket order trigger gateway market-maker; do
     start_provider "${provider}"
   done
 else
   echo "Reusing already running providers"
-  for provider in instrument candlestick index-price mark-price matching account risk liquidation funding insurance adl websocket order trigger gateway; do
+  for provider in instrument candlestick index-price mark-price matching account risk liquidation funding insurance adl websocket order trigger gateway market-maker; do
     wait_http "${provider}" "$(provider_port "${provider}")"
   done
 fi
@@ -1248,6 +1406,7 @@ WS_DEPTH_LOG="${TMP_DIR}/ws-depth.jsonl"
 WS_FULL_TAKER_LOG="${TMP_DIR}/ws-full-taker.jsonl"
 WS_PARTIAL_MAKER_LOG="${TMP_DIR}/ws-partial-maker.jsonl"
 WS_CANCEL_LOG="${TMP_DIR}/ws-cancel.jsonl"
+WS_ISOLATED_LOG="${TMP_DIR}/ws-isolated.jsonl"
 WS_MARK_LOG="${TMP_DIR}/ws-mark.jsonl"
 WS_FUNDING_LOG="${TMP_DIR}/ws-funding.jsonl"
 start_ws_capture "${WS_DEPTH_LOG}" "ws://localhost:9093/ws/v1" \
@@ -1255,15 +1414,25 @@ start_ws_capture "${WS_DEPTH_LOG}" "ws://localhost:9093/ws/v1" \
 start_ws_capture "${WS_FULL_TAKER_LOG}" "ws://localhost:9093/ws/v1?userId=${FULL_TAKER_USER}" \
   "{\"op\":\"subscribe\",\"id\":\"ft-orders\",\"channel\":\"orders\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"ft-matches\",\"channel\":\"matches\",\"symbol\":\"${BTC_SYMBOL}\"}" \
-  "{\"op\":\"subscribe\",\"id\":\"ft-positions\",\"channel\":\"positions\",\"symbol\":\"${BTC_SYMBOL}\"}"
+  "{\"op\":\"subscribe\",\"id\":\"ft-positions\",\"channel\":\"positions\",\"symbol\":\"${BTC_SYMBOL}\"}" \
+  "{\"op\":\"subscribe\",\"id\":\"ft-position-risk\",\"channel\":\"positionRisk\",\"symbol\":\"${BTC_SYMBOL}\"}" \
+  "{\"op\":\"subscribe\",\"id\":\"ft-account-risk\",\"channel\":\"accountRisk\"}"
 start_ws_capture "${WS_PARTIAL_MAKER_LOG}" "ws://localhost:9093/ws/v1?userId=${PARTIAL_MAKER_USER}" \
   "{\"op\":\"subscribe\",\"id\":\"pm-orders\",\"channel\":\"orders\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"pm-matches\",\"channel\":\"matches\",\"symbol\":\"${BTC_SYMBOL}\"}" \
-  "{\"op\":\"subscribe\",\"id\":\"pm-positions\",\"channel\":\"positions\",\"symbol\":\"${BTC_SYMBOL}\"}"
+  "{\"op\":\"subscribe\",\"id\":\"pm-positions\",\"channel\":\"positions\",\"symbol\":\"${BTC_SYMBOL}\"}" \
+  "{\"op\":\"subscribe\",\"id\":\"pm-position-risk\",\"channel\":\"positionRisk\",\"symbol\":\"${BTC_SYMBOL}\"}" \
+  "{\"op\":\"subscribe\",\"id\":\"pm-account-risk\",\"channel\":\"accountRisk\"}"
 start_ws_capture "${WS_CANCEL_LOG}" "ws://localhost:9093/ws/v1?userId=${CANCEL_USER}" \
   "{\"op\":\"subscribe\",\"id\":\"cu-orders\",\"channel\":\"orders\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"cu-matches\",\"channel\":\"matches\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"cu-positions\",\"channel\":\"positions\",\"symbol\":\"${BTC_SYMBOL}\"}"
+start_ws_capture "${WS_ISOLATED_LOG}" "ws://localhost:9093/ws/v1?userId=${ISOLATED_USER}" \
+  "{\"op\":\"subscribe\",\"id\":\"iso-orders\",\"channel\":\"orders\",\"symbol\":\"${BTC_SYMBOL}\"}" \
+  "{\"op\":\"subscribe\",\"id\":\"iso-matches\",\"channel\":\"matches\",\"symbol\":\"${BTC_SYMBOL}\"}" \
+  "{\"op\":\"subscribe\",\"id\":\"iso-positions\",\"channel\":\"positions\",\"symbol\":\"${BTC_SYMBOL}\"}" \
+  "{\"op\":\"subscribe\",\"id\":\"iso-position-risk\",\"channel\":\"positionRisk\",\"symbol\":\"${BTC_SYMBOL}\"}" \
+  "{\"op\":\"subscribe\",\"id\":\"iso-account-risk\",\"channel\":\"accountRisk\"}"
 start_ws_capture "${WS_MARK_LOG}" "ws://localhost:9093/ws/v1" \
   "{\"op\":\"subscribe\",\"id\":\"mark\",\"channel\":\"mark\",\"symbol\":\"${BTC_SYMBOL}\"}"
 start_ws_capture "${WS_FUNDING_LOG}" "ws://localhost:9093/ws/v1" \
@@ -1273,8 +1442,17 @@ wait_ws_subscribed "${WS_DEPTH_LOG}" "depth" 1
 wait_ws_subscribed "${WS_FULL_TAKER_LOG}" "orders" 1
 wait_ws_subscribed "${WS_FULL_TAKER_LOG}" "matches" 1
 wait_ws_subscribed "${WS_FULL_TAKER_LOG}" "positions" 1
+wait_ws_subscribed "${WS_FULL_TAKER_LOG}" "positionRisk" 1
+wait_ws_subscribed "${WS_FULL_TAKER_LOG}" "accountRisk" 1
 wait_ws_subscribed "${WS_PARTIAL_MAKER_LOG}" "orders" 1
+wait_ws_subscribed "${WS_PARTIAL_MAKER_LOG}" "positionRisk" 1
+wait_ws_subscribed "${WS_PARTIAL_MAKER_LOG}" "accountRisk" 1
 wait_ws_subscribed "${WS_CANCEL_LOG}" "orders" 1
+wait_ws_subscribed "${WS_ISOLATED_LOG}" "orders" 1
+wait_ws_subscribed "${WS_ISOLATED_LOG}" "matches" 1
+wait_ws_subscribed "${WS_ISOLATED_LOG}" "positions" 1
+wait_ws_subscribed "${WS_ISOLATED_LOG}" "positionRisk" 1
+wait_ws_subscribed "${WS_ISOLATED_LOG}" "accountRisk" 1
 wait_ws_subscribed "${WS_MARK_LOG}" "mark" 1
 wait_ws_subscribed "${WS_FUNDING_LOG}" "funding" 1
 
@@ -1287,6 +1465,7 @@ echo "Funding users through gateway"
 fund_users
 
 echo "Scenario: full fill"
+refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
 full_maker_order="$(place_order "${FULL_MAKER_USER}" "real-full-maker-${RUN_ID}" "SELL" "LIMIT" "GTC" "${FULL_PRICE_TICKS}" "${QUANTITY_STEPS}" false false)"
 wait_order_result "${full_maker_order}" "SUCCESS"
 assert_order_book_ask "full maker REST book" "${FULL_PRICE_TICKS}" "${QUANTITY_STEPS}"
@@ -1312,7 +1491,56 @@ if [[ "${before_positions}" != "${after_positions}" || "${before_processed}" != 
   exit 1
 fi
 
+echo "Scenario: isolated position margin add, safe remove, and unsafe remove rejection"
+refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
+isolated_maker_order="$(place_order "${ISOLATED_MAKER_USER}" "real-isolated-maker-${RUN_ID}" "SELL" "LIMIT" "GTC" "${BTC_PRICE_TICKS}" "${ISOLATED_QTY}" false false)"
+wait_order_result "${isolated_maker_order}" "SUCCESS"
+isolated_order="$(place_order_symbol "${BTC_SYMBOL}" "${ISOLATED_USER}" "real-isolated-long-${RUN_ID}" "BUY" "LIMIT" "IOC" "${BTC_PRICE_TICKS}" "${ISOLATED_QTY}" false false "ISOLATED")"
+wait_order_state "${isolated_order}" "FILLED" "${ISOLATED_QTY}" "0"
+wait_position_symbol_margin "${BTC_SYMBOL}" "${ISOLATED_USER}" "ISOLATED" "${ISOLATED_QTY}" "${BTC_PRICE_TICKS}"
+wait_consumer_group_lag_zero "surprising-risk-v1" "surprising.account.position.events.v1"
+initial_isolated_margin="$(query_value "SELECT margin_units FROM account_position_margins WHERE user_id = ${ISOLATED_USER} AND symbol = '${BTC_SYMBOL}' AND margin_mode = 'ISOLATED'")"
+if [[ -z "${initial_isolated_margin}" || "${initial_isolated_margin}" == "0" ]]; then
+  echo "isolated position did not migrate order margin into account_position_margins" >&2
+  exit 1
+fi
+wait_latest_isolated_risk_position_margin "${BTC_SYMBOL}" "${ISOLATED_USER}" "${initial_isolated_margin}"
+initial_available="$(query_value "SELECT available_units FROM account_balances WHERE user_id = ${ISOLATED_USER} AND asset = 'USDT'")"
+initial_locked="$(query_value "SELECT locked_units FROM account_balances WHERE user_id = ${ISOLATED_USER} AND asset = 'USDT'")"
+isolated_add_units=$((initial_isolated_margin / 2))
+if (( isolated_add_units <= 0 )); then
+  isolated_add_units=1
+fi
+adjust_position_margin "${ISOLATED_USER}" "${BTC_SYMBOL}" "${isolated_add_units}" "real-isolated-add-${RUN_ID}" >/dev/null
+after_add_margin=$((initial_isolated_margin + isolated_add_units))
+wait_position_margin_units "${BTC_SYMBOL}" "${ISOLATED_USER}" "${after_add_margin}"
+refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
+wait_sql_equals "isolated add moved available to locked" \
+  "SELECT available_units || ':' || locked_units FROM account_balances WHERE user_id = ${ISOLATED_USER} AND asset = 'USDT'" \
+  "$((initial_available - isolated_add_units)):$((initial_locked + isolated_add_units))"
+wait_consumer_group_lag_zero "surprising-risk-v1" "surprising.account.position.events.v1"
+wait_latest_isolated_risk_position_margin "${BTC_SYMBOL}" "${ISOLATED_USER}" "${after_add_margin}"
+isolated_remove_units=$((isolated_add_units / 2))
+if (( isolated_remove_units <= 0 )); then
+  isolated_remove_units=1
+fi
+adjust_position_margin "${ISOLATED_USER}" "${BTC_SYMBOL}" "-${isolated_remove_units}" "real-isolated-remove-${RUN_ID}" >/dev/null
+after_remove_margin=$((after_add_margin - isolated_remove_units))
+wait_position_margin_units "${BTC_SYMBOL}" "${ISOLATED_USER}" "${after_remove_margin}"
+refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
+wait_sql_equals "isolated safe remove moved locked to available" \
+  "SELECT available_units || ':' || locked_units FROM account_balances WHERE user_id = ${ISOLATED_USER} AND asset = 'USDT'" \
+  "$((initial_available - isolated_add_units + isolated_remove_units)):$((initial_locked + isolated_add_units - isolated_remove_units))"
+wait_consumer_group_lag_zero "surprising-risk-v1" "surprising.account.position.events.v1"
+wait_latest_isolated_risk_position_margin "${BTC_SYMBOL}" "${ISOLATED_USER}" "${after_remove_margin}"
+expect_position_margin_adjustment_rejected "${ISOLATED_USER}" "${BTC_SYMBOL}" "-${after_remove_margin}" "real-isolated-unsafe-remove-${RUN_ID}" "400"
+wait_position_margin_units "${BTC_SYMBOL}" "${ISOLATED_USER}" "${after_remove_margin}"
+wait_sql_equals "unsafe isolated remove did not write ledger" \
+  "SELECT count(*) FROM account_ledger_entries WHERE user_id = ${ISOLATED_USER} AND reference_type = 'POSITION_MARGIN_ADJUSTMENT' AND reference_id = 'real-isolated-unsafe-remove-${RUN_ID}'" \
+  "0"
+
 echo "Scenario: partial fill then cancel"
+refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
 partial_maker_order="$(place_order "${PARTIAL_MAKER_USER}" "real-partial-maker-${RUN_ID}" "SELL" "LIMIT" "GTC" "${PARTIAL_PRICE_TICKS}" "${PARTIAL_MAKER_QTY}" false false)"
 wait_order_result "${partial_maker_order}" "SUCCESS"
 assert_order_book_ask "partial maker REST book" "${PARTIAL_PRICE_TICKS}" "${PARTIAL_MAKER_QTY}"
@@ -1325,6 +1553,7 @@ cancel_order "${PARTIAL_MAKER_USER}" "${partial_maker_order}"
 wait_order_state "${partial_maker_order}" "CANCELED" "${PARTIAL_TAKER_QTY}" "0"
 
 echo "Scenario: cancel-only and cancel-all"
+refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
 cancel_order_id="$(place_order "${CANCEL_USER}" "real-cancel-only-${RUN_ID}" "SELL" "LIMIT" "GTC" "${CANCEL_PRICE_TICKS}" "${QUANTITY_STEPS}" false false)"
 wait_order_result "${cancel_order_id}" "SUCCESS"
 cancel_order "${CANCEL_USER}" "${cancel_order_id}"
@@ -1362,6 +1591,7 @@ wait_position "${FULL_TAKER_USER}" "$((QUANTITY_STEPS - CLOSE_QTY))" "${FULL_PRI
 wait_position "${CLOSE_MAKER_USER}" "${CLOSE_QTY}" "${FULL_PRICE_TICKS}"
 
 echo "Scenario: take-profit trigger order"
+refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
 if (( TRIGGER_CLOSE_QTY <= 0 )); then
   echo "TRIGGER_CLOSE_QTY must be positive; increase QUANTITY_STEPS or lower CLOSE_QTY" >&2
   exit 1
@@ -1369,9 +1599,9 @@ fi
 trigger_maker_order="$(place_order "${TRIGGER_MAKER_USER}" "real-trigger-maker-${RUN_ID}" "BUY" "LIMIT" "GTC" "${FULL_PRICE_TICKS}" "${TRIGGER_CLOSE_QTY}" false false)"
 wait_order_result "${trigger_maker_order}" "SUCCESS"
 trigger_order_id="$(place_trigger_order "${FULL_TAKER_USER}" "real-tp-${RUN_ID}" "SELL" "TAKE_PROFIT" \
-  "$((FULL_PRICE_TICKS + 500))" "MARKET" "IOC" 0 "${TRIGGER_CLOSE_QTY}" "real-oco-${RUN_ID}")"
+  "$((FULL_PRICE_TICKS + 500))" "LIMIT" "IOC" "${FULL_PRICE_TICKS}" "${TRIGGER_CLOSE_QTY}" "real-oco-${RUN_ID}")"
 stop_trigger_order_id="$(place_trigger_order "${FULL_TAKER_USER}" "real-sl-${RUN_ID}" "SELL" "STOP_LOSS" \
-  "$((FULL_PRICE_TICKS - 500))" "MARKET" "IOC" 0 "${TRIGGER_CLOSE_QTY}" "real-oco-${RUN_ID}")"
+  "$((FULL_PRICE_TICKS - 500))" "LIMIT" "IOC" "${FULL_PRICE_TICKS}" "${TRIGGER_CLOSE_QTY}" "real-oco-${RUN_ID}")"
 wait_trigger_state "${trigger_order_id}" "PENDING"
 wait_trigger_state "${stop_trigger_order_id}" "PENDING"
 publish_mark_price_event "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "$((FULL_PRICE_TICKS + 1000))"
@@ -1384,6 +1614,7 @@ wait_position "${FULL_TAKER_USER}" "0" "0"
 wait_position "${TRIGGER_MAKER_USER}" "${TRIGGER_CLOSE_QTY}" "${FULL_PRICE_TICKS}"
 
 echo "Scenario: risk controls"
+refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
 no_funds_order="$(place_order "${NO_FUNDS_USER}" "real-no-funds-${RUN_ID}" "BUY" "LIMIT" "GTC" "${BTC_PRICE_TICKS}" "${QUANTITY_STEPS}" false false)"
 wait_order_state "${no_funds_order}" "REJECTED" "0" "0"
 wait_sql_equals "insufficient margin reject reason" \
@@ -1400,6 +1631,7 @@ wait_order_result "${post_only_taker_order}" "POST_ONLY_WOULD_TAKE"
 
 if [[ "${RUN_FAILURE_SCENARIOS}" == "true" ]]; then
   echo "Scenario: matching restart restores open order book"
+  refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
   fault_maker_order="$(place_order "${FAULT_MAKER_USER}" "real-fault-maker-${RUN_ID}" "SELL" "LIMIT" "GTC" "${FAULT_PRICE_TICKS}" "${QUANTITY_STEPS}" false false)"
   wait_order_result "${fault_maker_order}" "SUCCESS"
   stop_provider "matching"
@@ -1415,6 +1647,7 @@ if [[ "${RUN_FAILURE_SCENARIOS}" == "true" ]]; then
   wait_position "${FAULT_TAKER_USER}" "${QUANTITY_STEPS}" "${FAULT_PRICE_TICKS}"
 
   echo "Scenario: account restart replays unsettled match trades safely"
+  refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
   stop_provider "account"
   account_fault_maker_order="$(place_order "${ACCOUNT_FAULT_MAKER_USER}" "real-account-fault-maker-${RUN_ID}" "SELL" "LIMIT" "GTC" "${ACCOUNT_FAULT_PRICE_TICKS}" "${QUANTITY_STEPS}" false false)"
   wait_order_result "${account_fault_maker_order}" "SUCCESS"
@@ -1432,6 +1665,7 @@ else
 fi
 
 echo "Scenario: concurrent high-frequency load PAIR_COUNT=${PAIR_COUNT} LOAD_CONCURRENCY=${LOAD_CONCURRENCY}"
+refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
 maker_commands=()
 taker_commands=()
 for ((i = 0; i < PAIR_COUNT; i++)); do
@@ -1462,6 +1696,7 @@ wait_sql_equals "no open load orders remain" \
   "0"
 
 echo "Scenario: deep order book snapshot"
+refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
 for ((i = 0; i < BOOK_DEPTH_LEVELS; i++)); do
   place_order "${DEPTH_USER}" "real-depth-${RUN_ID}-${i}" "SELL" "LIMIT" "GTC" "$((DEPTH_START_PRICE_TICKS + i))" 1 false false >/dev/null
 done
@@ -1491,6 +1726,7 @@ wait_sql_equals "funding settlement totals match payments" \
   "1"
 
 echo "Scenario: margin top-up recovers ETH account risk"
+refresh_mark_price "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" "${ETH_PRICE_TICKS}"
 topup_maker_order="$(place_order_symbol "${ETH_SYMBOL}" "${TOPUP_MAKER_USER}" "real-topup-maker-${RUN_ID}" "SELL" "LIMIT" "GTC" "${ETH_PRICE_TICKS}" "${TOPUP_QTY}" false false)"
 wait_order_result "${topup_maker_order}" "SUCCESS"
 topup_order="$(place_order_symbol "${ETH_SYMBOL}" "${TOPUP_USER}" "real-topup-long-${RUN_ID}" "BUY" "LIMIT" "IOC" "${ETH_PRICE_TICKS}" "${TOPUP_QTY}" false false)"
@@ -1558,12 +1794,13 @@ fund_balance="$(query_value "SELECT COALESCE(balance_units, 0) FROM insurance_fu
 if [[ "${fund_balance}" != "0" ]]; then
   adjust_insurance_fund "-${fund_balance}" "real-config-insurance-drain-${RUN_ID}"
 fi
-insert_mark_price "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" 6001 360000
-adl_maker_order="$(place_order_symbol "${ETH_SYMBOL}" "${ADL_OPEN_MAKER_USER}" "real-adl-open-maker-${RUN_ID}" "SELL" "LIMIT" "GTC" "${ETH_PRICE_TICKS}" "${LIQ_QTY}" false false)"
-wait_order_result "${adl_maker_order}" "SUCCESS"
-adl_target_order="$(place_order_symbol "${ETH_SYMBOL}" "${ADL_TARGET_USER}" "real-adl-target-long-${RUN_ID}" "BUY" "LIMIT" "IOC" "${ETH_PRICE_TICKS}" "${LIQ_QTY}" false false)"
-wait_order_state "${adl_target_order}" "FILLED" "${LIQ_QTY}" "0"
-psql_exec <<SQL >/dev/null
+  refresh_mark_price "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" "${ETH_PRICE_TICKS}"
+  adl_maker_order="$(place_order_symbol "${ETH_SYMBOL}" "${ADL_OPEN_MAKER_USER}" "real-adl-open-maker-${RUN_ID}" "SELL" "LIMIT" "GTC" "${ETH_PRICE_TICKS}" "${LIQ_QTY}" false false)"
+  wait_order_result "${adl_maker_order}" "SUCCESS"
+  adl_target_order="$(place_order_symbol "${ETH_SYMBOL}" "${ADL_TARGET_USER}" "real-adl-target-long-${RUN_ID}" "BUY" "LIMIT" "IOC" "${ETH_PRICE_TICKS}" "${LIQ_QTY}" false false)"
+  wait_order_state "${adl_target_order}" "FILLED" "${LIQ_QTY}" "0"
+  refresh_mark_price "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" 360000
+  psql_exec <<SQL >/dev/null
 INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
 VALUES (${ADL_DEFICIT_USER}, 'USDT', 0, 0, now())
 ON CONFLICT (user_id, asset) DO UPDATE SET available_units = 0, locked_units = 0, updated_at = now();
@@ -1579,13 +1816,20 @@ wait_sql_equals "ADL reduced residual deficit" \
   "SELECT deficit_units FROM account_deficits WHERE user_id = ${ADL_DEFICIT_USER} AND asset = 'USDT'" \
   "0"
 
+run_market_maker_provider_smoke
+
 echo "Asserting websocket and accounting invariants"
 wait_consumer_group_lag_zero "surprising-account-v1" "surprising.perp.match.trades.v1"
+wait_consumer_group_lag_zero "surprising-risk-v1" "surprising.account.position.events.v1"
+wait_sql_equals "risk outbox drained before websocket risk assertions" \
+  "SELECT count(*) FROM risk_outbox_events WHERE published_at IS NULL" \
+  "0"
 sleep 5
 assert_ws_depth "${WS_DEPTH_LOG}"
-assert_ws_private "${WS_FULL_TAKER_LOG}" "${FULL_TAKER_USER}" "0"
-assert_ws_private "${WS_PARTIAL_MAKER_LOG}" "${PARTIAL_MAKER_USER}" "-${PARTIAL_TAKER_QTY}"
+assert_ws_private "${WS_FULL_TAKER_LOG}" "${FULL_TAKER_USER}" "0" "0"
+assert_ws_private "${WS_PARTIAL_MAKER_LOG}" "${PARTIAL_MAKER_USER}" "-${PARTIAL_TAKER_QTY}" "-${PARTIAL_TAKER_QTY}"
 assert_ws_private "${WS_CANCEL_LOG}" "${CANCEL_USER}" "0"
+assert_ws_private "${WS_ISOLATED_LOG}" "${ISOLATED_USER}" "${ISOLATED_QTY}" "${ISOLATED_QTY}"
 assert_ws_public_channel "${WS_MARK_LOG}" "mark" "${BTC_SYMBOL}"
 assert_ws_public_channel "${WS_FUNDING_LOG}" "funding" "${BTC_SYMBOL}"
 assert_no_negative_balances
@@ -1594,6 +1838,9 @@ wait_sql_equals "unpublished trading outbox drained" \
   "0"
 wait_sql_equals "unpublished account outbox drained" \
   "SELECT count(*) FROM account_outbox_events WHERE published_at IS NULL AND attempts > 0" \
+  "0"
+wait_sql_equals "unpublished risk outbox drained" \
+  "SELECT count(*) FROM risk_outbox_events WHERE published_at IS NULL AND attempts > 0" \
   "0"
 
 touch "${WS_STOP_FILE}"

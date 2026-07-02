@@ -24,8 +24,11 @@ surprising:
       bootstrap-servers: localhost:9092
       group-id: surprising-risk-v1
       position-events-topic: surprising.account.position.events.v1
+      account-risk-events-topic: surprising.risk.account.events.v1
+      position-risk-events-topic: surprising.risk.position.events.v1
       liquidation-candidates-topic: surprising.perp.liquidation.candidates.v1
       concurrency: 2
+      max-poll-records: 500
     calculation:
       scan-delay-ms: 1000
       warning-margin-ratio-ppm: 800000

@@ -16,11 +16,28 @@ public record PlaceOrderRequest(
         @Min(0) long priceTicks,
         @Positive long quantitySteps,
         MarginMode marginMode,
+        PositionSide positionSide,
         boolean reduceOnly,
         boolean postOnly) {
 
     public PlaceOrderRequest {
         marginMode = MarginMode.defaultIfNull(marginMode);
+        positionSide = PositionSide.defaultIfNull(positionSide);
+    }
+
+    public PlaceOrderRequest(long userId,
+                             String clientOrderId,
+                             String symbol,
+                             OrderSide side,
+                             OrderType orderType,
+                             TimeInForce timeInForce,
+                             long priceTicks,
+                             long quantitySteps,
+                             MarginMode marginMode,
+                             boolean reduceOnly,
+                             boolean postOnly) {
+        this(userId, clientOrderId, symbol, side, orderType, timeInForce, priceTicks, quantitySteps,
+                marginMode, PositionSide.NET, reduceOnly, postOnly);
     }
 
     public PlaceOrderRequest(long userId,
@@ -34,6 +51,6 @@ public record PlaceOrderRequest(
                              boolean reduceOnly,
                              boolean postOnly) {
         this(userId, clientOrderId, symbol, side, orderType, timeInForce, priceTicks, quantitySteps,
-                MarginMode.CROSS, reduceOnly, postOnly);
+                MarginMode.CROSS, PositionSide.NET, reduceOnly, postOnly);
     }
 }

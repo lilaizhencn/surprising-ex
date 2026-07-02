@@ -21,6 +21,7 @@ Order entry does not use `BigDecimal`. API, database, and Kafka commands use lon
 - `MARKET` orders only allow `IOC` or `FOK`.
 - Notional validation uses `contract_type`. Linear contracts check `priceTicks * quantitySteps * notional_multiplier_units`; inverse contracts check `quantitySteps * notional_multiplier_units` because the multiplier is the quote face value per contract step. Both paths use `Math.multiplyExact` to reject long overflow.
 - Market orders are protected by `markPriceTicks +/- marketMaxSlippagePpm` before exchange-core IOC/FOK submission. Order entry uses the same mark-derived execution band for risk checks: linear contracts reserve initial margin at the upper bound for both BUY and SELL, while inverse contracts reserve at the lower bound because collateral requirement increases as price falls.
+- When `surprising.trading.order.risk.limit-price-protection-enabled=true`, limit orders also require a fresh mark price. BUY limit prices cannot exceed `markPriceTicks * (1 + limitPriceBandPpm / 1_000_000)`, and SELL limit prices cannot be below `markPriceTicks * (1 - limitPriceBandPpm / 1_000_000)`. Passive low bids and high asks are still allowed.
 - Instrument versions store default maker/taker ppm fees. Order entry resolves user/VIP/market-maker overrides, snapshots the final rates on `trading_orders`, and account settlement charges fills from that snapshot.
 
 Example for `BTC-USDT` with `price_tick_units = 10000000`, `quantity_step_units = 100000`,
@@ -70,8 +71,14 @@ The default is `CROSS`. `ISOLATED` is wired through order entry, matching events
 risk snapshots, funding, and liquidation. Cross-margin losses, trading fees, and funding payments can use cross
 available balance plus cross position margin as collateral. Isolated margin consumes only the exact
 `userId + symbol + asset + marginMode` position margin and does not touch other symbols or cross balance.
-Manual isolated margin add/remove, margin-mode switching constraints, and hedge-mode `positionSide` are not implemented
-yet, so clients should present one-way net positions.
+Manual isolated margin add/remove is handled by `surprising-account-provider` through
+`POST /api/v1/accounts/position-margin-adjustments`. In the one-way net-position model, switching a
+symbol between `CROSS` and `ISOLATED` requires the user to close that symbol's existing position and
+cancel open normal or trigger orders first; order-provider and trigger-provider serialize this check
+with a PostgreSQL transaction advisory lock on `userId + symbol`. Order and trigger-order APIs now
+recognize `positionSide`, but the current engine supports only `NET`; `LONG` and `SHORT` are rejected
+at admission so clients cannot accidentally send hedge-mode orders into a net-position account model.
+Order and trigger-order responses return `positionSide = NET` for the same reason.
 
 ## Trading Fees
 
@@ -208,12 +215,12 @@ The trading Java module remains long-only.
 - `trading_orders_user_client_order_uidx` makes `(userId, clientOrderId)` idempotent.
 - Order inserts only suppress that partial `(userId, clientOrderId)` conflict. `orderId` or unrelated unique-key conflicts must fail instead of being treated as request replay.
 - Idempotency conflicts happen before margin reservation. Replayed requests return the existing order and never create a new reservation or lock balance twice.
-- `trading_sequences` atomically allocates `orderId`, `eventId`, `commandId`, and `outboxId` with PostgreSQL `INSERT ... ON CONFLICT ... RETURNING`.
+- PostgreSQL native sequences (`trading_order_seq`, `trading_event_seq`, `trading_command_seq`, `trading_outbox_seq`, and related trading sequences) allocate ids. They are used instead of table-counter rows to avoid a hot row-lock under concurrent order entry and matching.
 - `trading_outbox_events` is committed in the same transaction as the order.
 - `trading_trigger_orders_user_client_uidx` makes `(userId, clientTriggerOrderId)` idempotent for TP/SL placement.
 - `ocoGroupId` groups paired TP/SL rows for one-cancels-other behavior; it is optional, scoped by `userId + symbol + marginMode`, and does not replace `clientTriggerOrderId`.
 - `trading_order_events` and `trading_outbox_events` inserts must affect exactly one row; otherwise the transaction fails to avoid order/message divergence.
-- The outbox publisher uses `FOR UPDATE SKIP LOCKED`, so multiple order-provider nodes can publish concurrently without locking the same rows.
+- The outbox publisher first claims due rows with `FOR UPDATE SKIP LOCKED` by moving `next_attempt_at` to a short lease, then publishes to Kafka outside the database transaction. This keeps Kafka network waits from holding PostgreSQL row locks or connections.
 - Failed outbox rows retry with exponential backoff through `next_attempt_at`, avoiding hot loops during Kafka incidents.
 - Kafka producer uses `acks=all` and `enable.idempotence=true`.
 - Downstream consumers must deduplicate commands by `commandId/orderId` and events by `eventId`.
@@ -228,6 +235,7 @@ The trading Java module remains long-only.
 - `surprising.perp.mark.price.v1`: mark-price stream consumed by trigger-provider, key = `symbol`.
 
 Partitions should continue to scale by symbol. All commands for the same symbol must route to the same matching shard/order book.
+`surprising.trading.matching.kafka.max-poll-records` defaults to `500`; tune it with Kafka lag and command processing latency instead of changing code.
 
 ## exchange-core Matching
 
@@ -311,6 +319,7 @@ The matching consumer uses cooperative sticky assignment and `MatchingPartitionA
 - Keep `surprising.trading.matching.kafka.restart-on-partition-reassignment=true` in production.
 - `surprising.trading.matching.kafka.partition-assignment-startup-grace-ms` defaults to `30000` so concurrent listener containers can finish their initial assignment before the guard starts treating new partitions as unsafe runtime movement.
 - The command-failure restart is unconditional; the partition-reassignment flag only controls restart behavior for partition movement.
+- Set `surprising.trading.matching.kafka.client-id` to a stable unique value per matching pod. This keeps Kafka consumer-group output usable for mapping a `symbol` partition to the exact node that owns the local exchange-core order book.
 
 Scaling rule: increase topic partitions and matching instances deliberately. Avoid frequent autoscaling of matching pods because every partition movement may require restart-and-recover.
 Treat any matching process exit during command handling as a required DB-recovery restart, not as an in-place consumer retry.
@@ -367,7 +376,8 @@ curl 'http://localhost:9084/api/v1/trading/orders/open?userId=1001&symbol=BTC-US
 
 Root [init.sql](../init.sql) creates:
 
-- `trading_sequences`
+- `trading_sequences` (legacy low-frequency counter compatibility; high-frequency trading ids use native sequences)
+- `trading_order_seq`, `trading_event_seq`, `trading_command_seq`, `trading_outbox_seq`
 - `trading_orders`
 - `trading_order_events`
 - `trading_trigger_orders`
@@ -427,8 +437,11 @@ Port:
 - Run the matching provider on JDK 21. Chronicle/OpenHFT dependencies used by exchange-core require explicit Java module opens/exports; set the same `JAVA_TOOL_OPTIONS` shown in local run for production pods.
 - A new symbol must first be enabled in instrument, Kafka partitions must be checked, and only then should order entry be opened.
 - MARKET orders require fresh mark price at order entry and matching. Order entry enforces min/max notional with the configured mark-derived execution band before publishing a matching command; linear max-notional and initial-margin checks use the upper bound to avoid under-collateralized market SELL opens. Tune `surprising.trading.*.market-max-slippage-ppm` per product liquidity.
+- LIMIT order price-band protection is enabled in the default application configuration with `limit-price-band-ppm: 50000` (5%). Tune this per instrument liquidity before exposing high-frequency users or market-maker quoting.
 - Matching open-order recovery is implemented from PostgreSQL; native exchange-core journal/snapshot persistence is still optional future hardening for faster very-large-book recovery.
 - Instrument `max_notional_units` is enforced for both limit orders and protected-price market orders. Keep product notional limits conservative until real venue depth, latency, and liquidation stress tests prove larger limits safe.
+- Order margin admission also enforces projected position exposure. It uses current position plus same-side open non-reduce-only orders plus the new order to check `max_position_notional_units`, the dynamic platform-OI cap, and the selected `instrument_risk_brackets.notional_cap_units`; pure reducing orders are checked against the reduced projection, not current exposure plus order notional.
+- Dynamic per-user position caps are implemented. Account settlement maintains `trading_symbol_open_interest` with long, short, and open quantities; `open_quantity_steps=max(long_quantity_steps, short_quantity_steps)`. Order entry converts current platform OI to notional at the admission price and uses `min(max_position_notional_units, max(openInterestNotional * user_open_interest_limit_rate_ppm / 1_000_000, user_open_interest_limit_floor_units))` as the effective user cap. BTC/ETH default to 30% platform OI with a 250,000 USDT floor. Production should periodically rebuild-check this table from `account_positions`, especially after manual data repair or disaster recovery.
 - User-initiated close orders should use `reduceOnly=true`; liquidation orders are generated by the liquidation provider and bypass user order-entry validation after a risk re-check.
 - TP/SL trigger execution always submits reduce-only close orders through order-provider. WebSocket clients will see the generated order id and fills through the normal private order/match/position channels after trigger execution.
 - Outbox delivery is at least once; downstream matching and push consumers must be idempotent.

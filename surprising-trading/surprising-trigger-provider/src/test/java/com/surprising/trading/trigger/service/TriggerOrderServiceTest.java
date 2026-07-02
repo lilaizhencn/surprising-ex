@@ -1,10 +1,14 @@
 package com.surprising.trading.trigger.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -17,6 +21,7 @@ import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PlaceTriggerOrderRequest;
+import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.TriggerCondition;
 import com.surprising.trading.api.model.TriggerOrderResponse;
@@ -57,6 +62,7 @@ class TriggerOrderServiceTest {
         TriggerOrderResponse response = service.place(request);
 
         assertThat(response.triggerOrderId()).isEqualTo(501L);
+        assertThat(response.positionSide()).isEqualTo(PositionSide.NET);
         verify(repository).insert(orderCaptor.capture());
         TriggerOrderRecord saved = orderCaptor.getValue();
         assertThat(saved.symbol()).isEqualTo("BTC-USDT");
@@ -80,6 +86,44 @@ class TriggerOrderServiceTest {
 
         assertThat(response.triggerOrderId()).isEqualTo(501L);
         assertThat(response.status()).isEqualTo(TriggerOrderStatus.PENDING);
+    }
+
+    @Test
+    void placeRejectsMarginModeSwitchWhileOtherModeIsActive() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties());
+        PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-iso", null, "BTC-USDT",
+                OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, TriggerPriceType.MARK_PRICE, 70_000L,
+                OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.ISOLATED, null);
+        when(repository.hasActiveMarginModeConflict(1001L, "BTC-USDT", MarginMode.ISOLATED))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> service.place(request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("margin mode switch requires closing positions and open orders first");
+
+        verify(repository).lockUserSymbolMarginScope(1001L, "BTC-USDT");
+        verify(repository, never()).nextSequence("trigger-order");
+        verify(repository, never()).insert(any());
+    }
+
+    @Test
+    void placeRejectsHedgePositionSideBeforePersistence() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties());
+        PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-hedge", null, "BTC-USDT",
+                OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, TriggerPriceType.MARK_PRICE, 70_000L,
+                OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS, PositionSide.SHORT, null);
+
+        assertThatThrownBy(() -> service.place(request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("hedge-mode positionSide is not supported; use NET");
+
+        verify(repository, never()).lockUserSymbolMarginScope(anyLong(), anyString());
+        verify(repository, never()).nextSequence("trigger-order");
+        verify(repository, never()).insert(any());
     }
 
     @Test

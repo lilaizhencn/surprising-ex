@@ -5,8 +5,10 @@ import com.surprising.risk.api.model.LiquidationCandidateQueryResponse;
 import com.surprising.risk.api.model.LiquidationCandidateResponse;
 import com.surprising.risk.api.model.LiquidationCandidateStatus;
 import com.surprising.risk.api.model.RiskAccountSnapshotResponse;
+import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
 import com.surprising.risk.api.model.RiskPositionQueryResponse;
 import com.surprising.risk.api.model.RiskPositionSnapshotResponse;
+import com.surprising.risk.api.model.RiskPositionUpdatedEvent;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.model.CalculatedPositionRisk;
@@ -86,6 +88,14 @@ public class RiskService {
      * fallback, but this method cuts liquidation latency after fills by scanning only the affected user/settle group.
      */
     public void scanPositionUpdate(long userId, String symbol, MarginMode marginMode, long instrumentVersion) {
+        scanPositionUpdate(userId, symbol, marginMode, instrumentVersion, null);
+    }
+
+    public void scanPositionUpdate(long userId,
+                                   String symbol,
+                                   MarginMode marginMode,
+                                   long instrumentVersion,
+                                   String traceId) {
         if (!properties.getCalculation().isEnabled()) {
             return;
         }
@@ -96,7 +106,7 @@ public class RiskService {
                     userId, symbol, instrumentVersion);
             return;
         }
-        scanRiskGroup(target.riskGroupKey(), target);
+        scanRiskGroup(target.riskGroupKey(), target, traceId);
     }
 
     public void scanPositionUpdate(long userId, String symbol, long instrumentVersion) {
@@ -111,10 +121,14 @@ public class RiskService {
     }
 
     private void scanRiskGroup(RiskGroupKey key) {
-        scanRiskGroup(key, null);
+        scanRiskGroup(key, null, null);
     }
 
     private void scanRiskGroup(RiskGroupKey key, PositionRiskTarget eventTarget) {
+        scanRiskGroup(key, eventTarget, null);
+    }
+
+    private void scanRiskGroup(RiskGroupKey key, PositionRiskTarget eventTarget, String traceId) {
         if (!ownsRiskGroup(key)) {
             return;
         }
@@ -124,7 +138,7 @@ public class RiskService {
             if (positions.isEmpty() && riskRepository.hasOpenPositions(key)) {
                 return;
             }
-            scanGroup(key, positions, eventTarget, Instant.now());
+            scanGroup(key, positions, eventTarget, Instant.now(), traceId);
         });
     }
 
@@ -147,7 +161,8 @@ public class RiskService {
     private void scanGroup(RiskGroupKey key,
                            List<CalculatedPositionRisk> positions,
                            PositionRiskTarget eventTarget,
-                           Instant now) {
+                           Instant now,
+                           String traceId) {
         long walletBalance = riskRepository.walletBalanceUnits(key.userId(), key.settleAsset());
         List<CalculatedPositionRisk> crossPositions = positions.stream()
                 .filter(position -> position.marginMode() == MarginMode.CROSS)
@@ -164,6 +179,7 @@ public class RiskService {
                 key.settleAsset(), walletBalance, unrealizedPnl, equity, maintenanceMargin, marginRatio,
                 accountStatus, now);
         riskRepository.saveAccountSnapshot(account);
+        enqueueAccountRisk(account, now, traceId);
 
         for (CalculatedPositionRisk position : positions) {
             long positionEquity = position.marginMode() == MarginMode.ISOLATED
@@ -174,6 +190,7 @@ public class RiskService {
                     properties.getCalculation().getWarningMarginRatioPpm(),
                     properties.getCalculation().getLiquidationMarginRatioPpm());
             riskRepository.savePositionSnapshot(snapshotId, position, positionMarginRatio, positionStatus, now);
+            enqueuePositionRisk(snapshotId, position, positionMarginRatio, positionStatus, now, traceId);
             if ((position.marginMode() == MarginMode.CROSS && accountStatus == RiskStatus.LIQUIDATION)
                     || (position.marginMode() == MarginMode.ISOLATED && positionStatus == RiskStatus.LIQUIDATION)) {
                 createCandidate(account, position, positionMarginRatio, positionEquity, now);
@@ -185,7 +202,44 @@ public class RiskService {
                     eventTarget.symbol(), eventTarget.marginMode(), eventTarget.instrumentVersion(), eventTarget.settleAsset(),
                     0L, 0L, 0L, 0L, 0L, 0L, 0L);
             riskRepository.savePositionSnapshot(snapshotId, flatPosition, 0L, RiskStatus.NORMAL, now);
+            enqueuePositionRisk(snapshotId, flatPosition, 0L, RiskStatus.NORMAL, now, traceId);
         }
+    }
+
+    private void enqueueAccountRisk(RiskAccountSnapshotResponse account, Instant now, String traceId) {
+        RiskAccountUpdatedEvent event = RiskAccountUpdatedEvent.from(sequenceRepository.nextSequence("risk-event"),
+                account, traceId);
+        outboxRepository.enqueue(properties.getKafka().getAccountRiskEventsTopic(),
+                account.userId() + ":" + account.settleAsset(), "RISK_ACCOUNT_UPDATED", payload(event), now);
+    }
+
+    private void enqueuePositionRisk(long snapshotId,
+                                     CalculatedPositionRisk position,
+                                     long marginRatioPpm,
+                                     RiskStatus status,
+                                     Instant now,
+                                     String traceId) {
+        RiskPositionUpdatedEvent event = new RiskPositionUpdatedEvent(
+                sequenceRepository.nextSequence("risk-event"),
+                snapshotId,
+                position.userId(),
+                position.symbol(),
+                position.marginMode(),
+                position.instrumentVersion(),
+                position.settleAsset(),
+                position.signedQuantitySteps(),
+                position.entryPriceTicks(),
+                position.markPriceTicks(),
+                position.notionalUnits(),
+                position.unrealizedPnlUnits(),
+                position.maintenanceMarginUnits(),
+                position.positionMarginUnits(),
+                marginRatioPpm,
+                status,
+                now,
+                traceId);
+        outboxRepository.enqueue(properties.getKafka().getPositionRiskEventsTopic(), position.symbol(),
+                "RISK_POSITION_UPDATED", payload(event), now);
     }
 
     private void createCandidate(RiskAccountSnapshotResponse account,

@@ -25,6 +25,8 @@ public class InstrumentValidator {
         requireFeeRate("makerFeeRatePpm", request.makerFeeRatePpm());
         requireFeeRate("takerFeeRatePpm", request.takerFeeRatePpm());
         requirePositive("maxPositionNotionalUnits", request.maxPositionNotionalUnits());
+        requireNonNegative("userOpenInterestLimitRatePpm", request.userOpenInterestLimitRatePpm());
+        requirePositive("userOpenInterestLimitFloorUnits", request.userOpenInterestLimitFloorUnits());
         requirePositive("impactNotionalUnits", request.impactNotionalUnits());
         if (request.fundingIntervalHours() <= 0) {
             throw new IllegalArgumentException("fundingIntervalHours must be positive");
@@ -109,6 +111,12 @@ public class InstrumentValidator {
     private void requirePositive(String name, long value) {
         if (value <= 0) {
             throw new IllegalArgumentException(name + " must be positive");
+        }
+    }
+
+    private void requireNonNegative(String name, long value) {
+        if (value < 0) {
+            throw new IllegalArgumentException(name + " must be non-negative");
         }
     }
 
