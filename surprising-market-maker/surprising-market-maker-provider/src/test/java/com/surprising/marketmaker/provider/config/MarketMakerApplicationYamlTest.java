@@ -12,13 +12,19 @@ import org.springframework.core.io.ClassPathResource;
 class MarketMakerApplicationYamlTest {
 
     @Test
-    void defaultStrategyIsManualOnlyAndUsesKnownInternalAccounts() throws IOException {
+    void defaultStrategyRunsWithDeepBookAndKnownInternalAccounts() throws IOException {
         YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
         List<PropertySource<?>> sources = loader.load("application", new ClassPathResource("application.yml"));
 
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.market-maker.engine.enabled"))
-                .contains(false);
+                .contains(true);
+        assertThat(sources)
+                .extracting(source -> source.getProperty("surprising.market-maker.quoting.order-levels"))
+                .contains(20);
+        assertThat(sources)
+                .extracting(source -> source.getProperty("surprising.market-maker.trade.enabled"))
+                .contains(true);
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.market-maker.strategies[0].enabled"))
                 .contains(true);

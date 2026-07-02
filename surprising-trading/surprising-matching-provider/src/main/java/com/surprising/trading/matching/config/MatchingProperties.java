@@ -1,6 +1,8 @@
 package com.surprising.trading.matching.config;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.trading.matching")
@@ -60,7 +62,7 @@ public class MatchingProperties {
         private String matchResultsTopic = "surprising.perp.match.results.v1";
         private String matchTradesTopic = "surprising.perp.match.trades.v1";
         private String orderBookDepthTopic = "surprising.perp.orderbook.depth.v1";
-        private int concurrency = 2;
+        private int concurrency = 1;
         private int maxPollRecords = 500;
         private boolean restartOnPartitionReassignment = true;
         private long partitionAssignmentStartupGraceMs = 30000L;
@@ -243,6 +245,7 @@ public class MatchingProperties {
 
     public static class Protection {
         private boolean selfTradePreventionEnabled = true;
+        private List<Long> selfTradePreventionBypassUserIds = new ArrayList<>();
         private long marketMaxSlippagePpm = 10_000L;
         private long marketMaxMarkAgeMs = 5_000L;
 
@@ -252,6 +255,20 @@ public class MatchingProperties {
 
         public void setSelfTradePreventionEnabled(boolean selfTradePreventionEnabled) {
             this.selfTradePreventionEnabled = selfTradePreventionEnabled;
+        }
+
+        public List<Long> getSelfTradePreventionBypassUserIds() {
+            return selfTradePreventionBypassUserIds;
+        }
+
+        public void setSelfTradePreventionBypassUserIds(List<Long> selfTradePreventionBypassUserIds) {
+            this.selfTradePreventionBypassUserIds = selfTradePreventionBypassUserIds == null
+                    ? new ArrayList<>()
+                    : new ArrayList<>(selfTradePreventionBypassUserIds);
+        }
+
+        public boolean isSelfTradePreventionBypassed(long userId) {
+            return selfTradePreventionBypassUserIds.contains(userId);
         }
 
         public long getMarketMaxSlippagePpm() {

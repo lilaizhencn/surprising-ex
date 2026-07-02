@@ -13,7 +13,7 @@ Surprising Exchange 合约 K 线服务。
 
 K 线服务按多节点部署设计，采用分区化行情数据流水线：
 
-- 合约交易模块把 `TradeEvent` JSON 写入 Kafka topic：`surprising.perp.trade.events.v1`。
+- 撮合模块把 `MatchTradeEvent` JSON 写入 Kafka topic：`surprising.perp.match.trades.v1`。
 - Kafka record key 必须是标准化后的交易对，例如 `BTC-USDT`。
 - Kafka partition 在多个服务节点之间分配 symbol，不采用“一个合约一个线程”的模型。
 - Kafka Streams 使用 RocksDB state store 保存热 K 线状态、成交幂等状态、待落库 dirty snapshot、每个 symbol 的最新 sequence。
@@ -105,7 +105,7 @@ surprising.candlestick.rocksdb.write-buffer-manager-size=512MB
 
 本项目使用一个合约成交 topic 承载所有 symbol，通过多 partition 扩展：
 
-- 输入 topic：`surprising.perp.trade.events.v1`
+- 输入 topic：`surprising.perp.match.trades.v1`
 - 输出 topic：`surprising.perp.candle.events.v1`
 
 不要按每个 symbol 创建一个 topic。应该在共享 topic 上创建足够多的 partition。
@@ -157,7 +157,7 @@ SYMBOL_COUNT=500 PROVIDER_INSTANCES=4 STREAM_THREADS=4 REPLICATION_FACTOR=3 ./sc
 surprising:
   candlestick:
     kafka:
-      trade-topic: surprising.perp.trade.events.v1
+      trade-topic: surprising.perp.match.trades.v1
       candle-topic: surprising.perp.candle.events.v1
       application-id: surprising-candlestick-v1
     stream:

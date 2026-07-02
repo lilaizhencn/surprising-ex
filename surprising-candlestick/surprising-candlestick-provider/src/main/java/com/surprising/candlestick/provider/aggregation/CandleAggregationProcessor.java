@@ -4,7 +4,9 @@ import com.surprising.candlestick.api.model.CandlePeriod;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.candlestick.api.model.TradeEvent;
 import com.surprising.candlestick.provider.config.CandlestickProperties;
+import com.surprising.candlestick.provider.service.MatchTradeEventMapper;
 import com.surprising.candlestick.provider.service.SymbolRegistryService;
+import com.surprising.trading.api.model.MatchTradeEvent;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,13 +29,14 @@ import org.slf4j.LoggerFactory;
  * keep hot candles, dedupe keys, dirty snapshots, and latest sequence locally, while Kafka Streams
  * changelog topics make the state restorable after restart or rebalance.</p>
  */
-public class CandleAggregationProcessor implements Processor<String, TradeEvent, String, CandleUpdatedEvent> {
+public class CandleAggregationProcessor implements Processor<String, MatchTradeEvent, String, CandleUpdatedEvent> {
 
     private static final Logger log = LoggerFactory.getLogger(CandleAggregationProcessor.class);
 
     private final CandlestickProperties properties;
     private final CandleSink candleSink;
     private final SymbolRegistryService symbolRegistryService;
+    private final MatchTradeEventMapper tradeEventMapper;
     private final List<CandlePeriod> periods;
 
     private ProcessorContext<String, CandleUpdatedEvent> context;
@@ -43,10 +46,12 @@ public class CandleAggregationProcessor implements Processor<String, TradeEvent,
     private KeyValueStore<String, Long> sequenceStore;
 
     public CandleAggregationProcessor(CandlestickProperties properties, CandleSink candleSink,
-                                      SymbolRegistryService symbolRegistryService) {
+                                      SymbolRegistryService symbolRegistryService,
+                                      MatchTradeEventMapper tradeEventMapper) {
         this.properties = properties;
         this.candleSink = candleSink;
         this.symbolRegistryService = symbolRegistryService;
+        this.tradeEventMapper = tradeEventMapper;
         this.periods = properties.getPeriods().stream()
                 .map(CandlePeriod::fromCode)
                 .toList();
@@ -68,14 +73,16 @@ public class CandleAggregationProcessor implements Processor<String, TradeEvent,
      * before they can change candle state.
      */
     @Override
-    public void process(Record<String, TradeEvent> record) {
-        TradeEvent trade = record.value();
-        if (trade == null) {
+    public void process(Record<String, MatchTradeEvent> record) {
+        MatchTradeEvent matchTrade = record.value();
+        if (matchTrade == null) {
             return;
         }
 
+        TradeEvent trade;
         String symbol;
         try {
+            trade = tradeEventMapper.toTradeEvent(matchTrade);
             symbol = CandleKey.normalizeSymbol(trade.symbol());
             validateRecordKey(record.key(), symbol);
             if (!symbolRegistryService.isEnabled(symbol)) {

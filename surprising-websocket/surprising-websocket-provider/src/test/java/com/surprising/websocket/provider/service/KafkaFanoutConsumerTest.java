@@ -17,6 +17,8 @@ import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
 import com.surprising.risk.api.model.RiskPositionUpdatedEvent;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.MatchTradeEvent;
+import com.surprising.trading.api.model.OrderSide;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import java.math.BigDecimal;
@@ -77,6 +79,30 @@ class KafkaFanoutConsumerTest {
         assertThat(topic.getValue().channel()).isEqualTo(WsChannel.FUNDING_RATE);
         assertThat(topic.getValue().symbol()).isEqualTo("BTC-USDT");
         assertThat(payload.getValue()).isEqualTo(event);
+    }
+
+    @Test
+    void fansOutMatchTradeToPublicTradesAndPrivateMatches() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        MatchTradeEvent event = new MatchTradeEvent(91L, 11L, "BTC-USDT", 202L, 7L,
+                2002L, OrderSide.BUY, MarginMode.CROSS, 101L, 5L, 1001L, MarginMode.CROSS,
+                600_000L, 3L, true, false, eventTime, "trace-trade-1");
+
+        consumer.onMatchTrade(new ConsumerRecord<>("surprising.perp.match.trades.v1", 0, 0L,
+                "BTC-USDT", objectMapper.writeValueAsString(event)));
+
+        ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
+        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+        verify(registry, org.mockito.Mockito.times(3)).publish(topic.capture(), payload.capture(), eq(eventTime));
+        assertThat(topic.getAllValues().get(0).channel()).isEqualTo(WsChannel.TRADES);
+        assertThat(topic.getAllValues().get(0).userId()).isNull();
+        assertThat(topic.getAllValues().get(1).channel()).isEqualTo(WsChannel.MATCHES);
+        assertThat(topic.getAllValues().get(1).userId()).isEqualTo(2002L);
+        assertThat(topic.getAllValues().get(2).channel()).isEqualTo(WsChannel.MATCHES);
+        assertThat(topic.getAllValues().get(2).userId()).isEqualTo(1001L);
+        assertThat(payload.getAllValues()).containsOnly(event);
     }
 
     @Test

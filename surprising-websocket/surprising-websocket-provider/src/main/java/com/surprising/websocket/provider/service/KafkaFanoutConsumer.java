@@ -181,6 +181,8 @@ public class KafkaFanoutConsumer {
         try {
             MatchTradeEvent event = objectMapper.readValue(record.value(), MatchTradeEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "match trade");
+            registry.publish(new SubscriptionTopic(WsChannel.TRADES, event.symbol(), null, null),
+                    event, event.eventTime());
             registry.publish(new SubscriptionTopic(WsChannel.MATCHES, event.symbol(), null, event.takerUserId()),
                     event, event.eventTime());
             registry.publish(new SubscriptionTopic(WsChannel.MATCHES, event.symbol(), null, event.makerUserId()),

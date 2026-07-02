@@ -75,7 +75,7 @@ public class CandlestickProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
-        private String tradeTopic = "surprising.perp.trade.events.v1";
+        private String tradeTopic = "surprising.perp.match.trades.v1";
         private String candleTopic = "surprising.perp.candle.events.v1";
         private String applicationId = "surprising-candlestick-v1";
 

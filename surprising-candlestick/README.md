@@ -13,7 +13,7 @@ Perpetual candlestick service for Surprising Exchange.
 
 The candlestick service is designed for multi-node deployment and follows a partitioned market-data pipeline:
 
-- The perpetual trading service produces `TradeEvent` JSON to Kafka topic `surprising.perp.trade.events.v1`.
+- The matching service produces `MatchTradeEvent` JSON to Kafka topic `surprising.perp.match.trades.v1`.
 - Kafka record key must be the normalized symbol, for example `BTC-USDT`.
 - Kafka partitions distribute symbols across service nodes. There is no one-thread-per-symbol model.
 - Kafka Streams uses RocksDB state stores for hot candle state, trade idempotency, dirty snapshots, and latest sequence per symbol.
@@ -106,7 +106,7 @@ Tuning rules:
 
 This project uses one perpetual trade topic with many partitions:
 
-- Input topic: `surprising.perp.trade.events.v1`
+- Input topic: `surprising.perp.match.trades.v1`
 - Output topic: `surprising.perp.candle.events.v1`
 
 Do not create one topic per symbol. Create enough partitions on the shared topic.
@@ -158,7 +158,7 @@ Runtime processing is configured here:
 surprising:
   candlestick:
     kafka:
-      trade-topic: surprising.perp.trade.events.v1
+      trade-topic: surprising.perp.match.trades.v1
       candle-topic: surprising.perp.candle.events.v1
       application-id: surprising-candlestick-v1
     stream:

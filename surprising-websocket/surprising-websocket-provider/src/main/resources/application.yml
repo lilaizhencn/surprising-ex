@@ -41,7 +41,7 @@ surprising:
       user-id-header: X-User-Id
       allow-query-user-id-fallback: true
       issuer: surprising-ex-gateway
-      jwt-secret: ${SURPRISING_WEBSOCKET_JWT_SECRET:}
+      jwt-secret: ${SURPRISING_WEBSOCKET_JWT_SECRET:local-dev-change-me-surprising-ex-gateway-secret-2026}
       allowed-origins:
         - "*"
     fanout:

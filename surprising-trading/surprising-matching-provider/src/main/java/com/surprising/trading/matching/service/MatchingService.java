@@ -138,6 +138,9 @@ public class MatchingService {
                 || !properties.getProtection().isSelfTradePreventionEnabled()) {
             return false;
         }
+        if (properties.getProtection().isSelfTradePreventionBypassed(command.userId())) {
+            return false;
+        }
         return protectionRepository.wouldSelfTrade(command.userId(), command.symbol(), command.instrumentVersion(),
                 command.side(), effectivePriceTicks);
     }

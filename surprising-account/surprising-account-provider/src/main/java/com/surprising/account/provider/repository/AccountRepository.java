@@ -25,6 +25,7 @@ import java.math.BigInteger;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -123,25 +124,33 @@ public class AccountRepository {
     }
 
     private List<ProductBalanceResponse> productBalancesFromTable(long userId, AccountType accountType) {
-        String normalizedType = accountType == null ? null : accountType.name();
-        return jdbcTemplate.query("""
+        StringBuilder sql = new StringBuilder("""
                 SELECT user_id, account_type, asset, available_units, locked_units,
                        available_units + locked_units - COALESCE(d.deficit_units, 0) AS equity_units,
                        b.updated_at
                   FROM account_product_balances b
                   LEFT JOIN account_product_deficits d USING (account_type, user_id, asset)
                  WHERE b.user_id = ?
-                   AND (? IS NULL OR b.account_type = ?)
-                   AND (? IS NOT NULL OR b.account_type <> 'USDT_PERPETUAL')
+                """);
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        if (accountType == null) {
+            sql.append("   AND b.account_type <> 'USDT_PERPETUAL'\n");
+        } else {
+            sql.append("   AND b.account_type = ?\n");
+            args.add(accountType.name());
+        }
+        sql.append("""
                  ORDER BY account_type ASC, asset ASC
-                """, (rs, rowNum) -> new ProductBalanceResponse(
+                """);
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new ProductBalanceResponse(
                 rs.getLong("user_id"),
                 AccountType.valueOf(rs.getString("account_type")),
                 rs.getString("asset"),
                 rs.getLong("available_units"),
                 rs.getLong("locked_units"),
                 rs.getLong("equity_units"),
-                rs.getTimestamp("updated_at").toInstant()), userId, normalizedType, normalizedType, normalizedType);
+                rs.getTimestamp("updated_at").toInstant()), args.toArray());
     }
 
     public ProductBalanceResponse adjustProductBalance(long userId,

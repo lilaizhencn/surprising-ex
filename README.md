@@ -111,12 +111,11 @@ Ports:
 ## Kafka Topics
 
 - `surprising.instrument.events.v1`: instrument configuration change events.
-- `surprising.perp.trade.events.v1`: perpetual trade input.
 - `surprising.perp.candle.events.v1`: candlestick snapshot output.
 - `surprising.perp.order.commands.v1`: order matching commands.
 - `surprising.perp.order.events.v1`: order entry events.
 - `surprising.perp.match.results.v1`: matching result events.
-- `surprising.perp.match.trades.v1`: matching trade events with long fixed-point values.
+- `surprising.perp.match.trades.v1`: matching trade events with long fixed-point values, consumed by candlestick and public trade fanout.
 - `surprising.perp.orderbook.depth.v1`: exchange-core L2 order book `SNAPSHOT`/`DELTA` events for frontend depth fanout.
 - `surprising.account.position.events.v1`: account position update events for private WebSocket fanout.
 - `surprising.perp.liquidation.candidates.v1`: liquidation candidate events.

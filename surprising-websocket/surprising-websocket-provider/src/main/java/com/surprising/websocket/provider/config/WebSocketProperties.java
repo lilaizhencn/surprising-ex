@@ -228,7 +228,7 @@ public class WebSocketProperties {
         private List<String> allowedOrigins = new ArrayList<>(List.of("*"));
         private boolean allowQueryUserIdFallback = true;
         private String issuer = "surprising-ex-gateway";
-        private String jwtSecret = "";
+        private String jwtSecret = "local-dev-change-me-surprising-ex-gateway-secret-2026";
 
         public String getUserIdHeader() {
             return userIdHeader;

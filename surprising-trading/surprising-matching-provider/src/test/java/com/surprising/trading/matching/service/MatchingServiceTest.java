@@ -230,6 +230,39 @@ class MatchingServiceTest {
         }
     }
 
+    @Test
+    void marketMakerBypassSkipsSelfTradePreventionCheck() {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getEngine().setExchangeId("matching-service-mm-stp-bypass-test");
+        properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
+        properties.getProtection().setSelfTradePreventionEnabled(true);
+        properties.getProtection().setSelfTradePreventionBypassUserIds(List.of(900001L));
+
+        MatchingSymbol matchingSymbol = new MatchingSymbol("BTC-USDT", 301, 11, 12);
+        InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
+        ExchangeCoreEngine engine = new ExchangeCoreEngine(properties,
+                new FakeMatchingSymbolRepository(instrument, matchingSymbol),
+                new FakeRecoveryRepository());
+        FakeProtectionRepository protectionRepository = new FakeProtectionRepository(true);
+        FakeResultRepository resultRepository = new FakeResultRepository();
+        MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
+                protectionRepository, new FakeSequenceRepository(), resultRepository, new FakeOutboxRepository());
+
+        try {
+            engine.start();
+
+            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 900001L,
+                    "mm-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
+                    100L, 10L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
+
+            assertThat(resultRepository.results).singleElement()
+                    .satisfies(result -> assertThat(result.orderStatus()).isEqualTo(OrderStatus.ACCEPTED));
+            assertThat(protectionRepository.selfTradeChecks).isZero();
+        } finally {
+            engine.stop();
+        }
+    }
+
     private static final class FakeMatchingSymbolRepository extends MatchingSymbolRepository {
         private final InstrumentSymbol instrument;
         private final MatchingSymbol matchingSymbol;
@@ -270,8 +303,16 @@ class MatchingServiceTest {
     }
 
     private static final class FakeProtectionRepository extends MatchingProtectionRepository {
+        private final boolean wouldSelfTrade;
+        private int selfTradeChecks;
+
         private FakeProtectionRepository() {
+            this(false);
+        }
+
+        private FakeProtectionRepository(boolean wouldSelfTrade) {
             super(null);
+            this.wouldSelfTrade = wouldSelfTrade;
         }
 
         @Override
@@ -285,7 +326,8 @@ class MatchingServiceTest {
                                       long instrumentVersion,
                                       OrderSide side,
                                       long effectivePriceTicks) {
-            return false;
+            selfTradeChecks++;
+            return wouldSelfTrade;
         }
 
         @Override

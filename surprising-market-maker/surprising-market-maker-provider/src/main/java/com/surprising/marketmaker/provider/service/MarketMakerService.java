@@ -17,6 +17,7 @@ import com.surprising.price.api.client.MarkPriceRpcApi;
 import com.surprising.price.api.model.MarkPriceResponse;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.CancelOrderRequest;
+import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
@@ -41,6 +42,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.zip.CRC32;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,6 +64,8 @@ public class MarketMakerService {
     private final QuotePlanner quotePlanner;
     private final MarketMakerLeaseCoordinator leaseCoordinator;
     private final Map<String, StrategyRuntimeState> states = new ConcurrentHashMap<>();
+    private final Map<String, Instant> lastTradeTimes = new ConcurrentHashMap<>();
+    private final Map<String, OrderSide> lastTradeSides = new ConcurrentHashMap<>();
     private final String nodeId;
     private final String orderNonce;
 
@@ -171,6 +175,7 @@ public class MarketMakerService {
             for (long accountId : strategy.getAccountIds()) {
                 quoteAccount(strategy, state, cycleSequence, symbol, instrument, orderBook, markPrice, accountId, now);
             }
+            maybeTrade(strategy, state, cycleSequence, symbol, instrument, markPrice, now);
             state.markSuccess(traceId, now);
         } catch (RuntimeException ex) {
             log.warn("Market-maker cycle failed strategyId={} symbol={} error={}",
@@ -294,6 +299,185 @@ public class MarketMakerService {
         return orderRpcApi.place(request);
     }
 
+    private void maybeTrade(MarketMakerProperties.Strategy strategy,
+                            StrategyRuntimeState state,
+                            long cycleSequence,
+                            String symbol,
+                            InstrumentResponse instrument,
+                            MarkPriceResponse markPrice,
+                            Instant now) {
+        MarketMakerProperties.Trade trade = properties.getTrade();
+        if (!trade.isEnabled()) {
+            return;
+        }
+        String tradeKey = strategy.getStrategyId() + ":" + symbol;
+        Instant lastTradeTime = lastTradeTimes.get(tradeKey);
+        if (lastTradeTime != null && lastTradeTime.plusMillis(trade.getMinIntervalMs()).isAfter(now)) {
+            return;
+        }
+        long accountId = activeTradeAccount(strategy, cycleSequence);
+        if (accountId <= 0) {
+            return;
+        }
+
+        OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
+                properties.getQuoting().getOrderBookDepth());
+        PositionResponse position = accountRpcApi.position(accountId, symbol, strategy.getMarginMode().name(),
+                PositionSide.NET.name());
+        OrderSide side = tradeSide(tradeKey, trade, instrument, orderBook, markPrice,
+                position.signedQuantitySteps());
+        if (side == null) {
+            return;
+        }
+        long priceTicks = tradePriceTicks(side, orderBook, trade.getSlippageTicks());
+        long availableQuantity = bestAvailableQuantity(side, orderBook);
+        long quantitySteps = tradeQuantity(instrument, trade, availableQuantity);
+        if (priceTicks <= 0 || quantitySteps <= 0) {
+            return;
+        }
+
+        PlaceOrderRequest request = new PlaceOrderRequest(accountId,
+                takerClientOrderId(strategy, symbol, accountId, cycleSequence),
+                symbol, side, OrderType.LIMIT, TimeInForce.IOC, priceTicks, quantitySteps,
+                strategy.getMarginMode(), PositionSide.NET, false, false);
+        OrderResponse response = orderRpcApi.place(request);
+        if (response.status() == OrderStatus.REJECTED) {
+            state.addRejected(1L);
+        } else {
+            state.addSubmitted(1L);
+            lastTradeTimes.put(tradeKey, now);
+            lastTradeSides.put(tradeKey, side);
+        }
+    }
+
+    private long activeTradeAccount(MarketMakerProperties.Strategy strategy, long cycleSequence) {
+        List<Long> accountIds = properties.getTrade().getAccountIds().isEmpty()
+                ? strategy.getAccountIds()
+                : properties.getTrade().getAccountIds();
+        if (accountIds == null || accountIds.isEmpty()) {
+            return 0L;
+        }
+        return accountIds.get((int) Math.floorMod(cycleSequence, accountIds.size()));
+    }
+
+    private OrderSide tradeSide(String tradeKey,
+                                MarketMakerProperties.Trade trade,
+                                InstrumentResponse instrument,
+                                OrderBookSnapshotResponse orderBook,
+                                MarkPriceResponse markPrice,
+                                long signedPositionSteps) {
+        boolean canBuy = bestAsk(orderBook) > 0;
+        boolean canSell = bestBid(orderBook) > 0;
+        if (!canBuy && !canSell) {
+            return null;
+        }
+        long inventoryThreshold = trade.getInventoryThresholdSteps();
+        if (inventoryThreshold > 0 && signedPositionSteps > inventoryThreshold && canSell) {
+            return OrderSide.SELL;
+        }
+        if (inventoryThreshold > 0 && signedPositionSteps < -inventoryThreshold && canBuy) {
+            return OrderSide.BUY;
+        }
+
+        long markTicks = markPriceTicks(instrument, markPrice);
+        long midTicks = midPriceTicks(orderBook);
+        if (markTicks > 0 && midTicks > 0) {
+            if (markTicks > midTicks && canBuy) {
+                return OrderSide.BUY;
+            }
+            if (markTicks < midTicks && canSell) {
+                return OrderSide.SELL;
+            }
+        }
+
+        OrderSide previous = lastTradeSides.get(tradeKey);
+        if (previous == OrderSide.BUY && canSell) {
+            return OrderSide.SELL;
+        }
+        if (previous == OrderSide.SELL && canBuy) {
+            return OrderSide.BUY;
+        }
+        if (canBuy && canSell) {
+            return ThreadLocalRandom.current().nextBoolean() ? OrderSide.BUY : OrderSide.SELL;
+        }
+        return canBuy ? OrderSide.BUY : OrderSide.SELL;
+    }
+
+    private long tradePriceTicks(OrderSide side, OrderBookSnapshotResponse orderBook, long slippageTicks) {
+        long slippage = Math.max(0L, slippageTicks);
+        if (side == OrderSide.BUY) {
+            long bestAsk = bestAsk(orderBook);
+            return bestAsk <= 0 ? 0L : Math.addExact(bestAsk, slippage);
+        }
+        long bestBid = bestBid(orderBook);
+        return bestBid <= 0 ? 0L : Math.max(1L, bestBid - slippage);
+    }
+
+    private long bestAvailableQuantity(OrderSide side, OrderBookSnapshotResponse orderBook) {
+        OrderBookLevel level = side == OrderSide.BUY ? firstAsk(orderBook) : firstBid(orderBook);
+        return level == null ? 0L : level.quantitySteps();
+    }
+
+    private long tradeQuantity(InstrumentResponse instrument,
+                               MarketMakerProperties.Trade trade,
+                               long availableQuantity) {
+        long minQuantity = Math.max(trade.getMinQuantitySteps(),
+                instrument == null ? 1L : Math.max(1L, instrument.minQuantitySteps()));
+        long maxQuantity = Math.max(minQuantity, trade.getMaxQuantitySteps());
+        long upperBound = Math.min(maxQuantity, availableQuantity);
+        if (upperBound < minQuantity) {
+            return 0L;
+        }
+        if (upperBound == minQuantity) {
+            return minQuantity;
+        }
+        return ThreadLocalRandom.current().nextLong(minQuantity, upperBound + 1L);
+    }
+
+    private long markPriceTicks(InstrumentResponse instrument, MarkPriceResponse markPrice) {
+        if (instrument == null || markPrice == null || instrument.priceTickUnits() <= 0
+                || markPrice.markPriceUnits() <= 0) {
+            return 0L;
+        }
+        return (markPrice.markPriceUnits() + instrument.priceTickUnits() / 2L) / instrument.priceTickUnits();
+    }
+
+    private long midPriceTicks(OrderBookSnapshotResponse orderBook) {
+        long bestBid = bestBid(orderBook);
+        long bestAsk = bestAsk(orderBook);
+        if (bestBid > 0 && bestAsk > 0) {
+            return (bestBid + bestAsk) / 2L;
+        }
+        if (bestBid > 0) {
+            return bestBid;
+        }
+        return bestAsk;
+    }
+
+    private long bestBid(OrderBookSnapshotResponse orderBook) {
+        OrderBookLevel level = firstBid(orderBook);
+        return level == null ? 0L : level.priceTicks();
+    }
+
+    private long bestAsk(OrderBookSnapshotResponse orderBook) {
+        OrderBookLevel level = firstAsk(orderBook);
+        return level == null ? 0L : level.priceTicks();
+    }
+
+    private OrderBookLevel firstBid(OrderBookSnapshotResponse orderBook) {
+        if (orderBook == null || orderBook.bids() == null || orderBook.bids().isEmpty()) {
+            return null;
+        }
+        return orderBook.bids().get(0);
+    }
+
+    private OrderBookLevel firstAsk(OrderBookSnapshotResponse orderBook) {
+        if (orderBook == null || orderBook.asks() == null || orderBook.asks().isEmpty()) {
+            return null;
+        }
+        return orderBook.asks().get(0);
+    }
+
     private void cancel(long accountId, long orderId) {
         orderRpcApi.cancel(new CancelOrderRequest(accountId, orderId));
     }
@@ -329,6 +513,14 @@ public class MarketMakerService {
 
     private String quotePrefix(String accountPrefix, OrderSide side, int level) {
         return accountPrefix + (side == OrderSide.BUY ? "b" : "s") + level + "-";
+    }
+
+    private String takerClientOrderId(MarketMakerProperties.Strategy strategy,
+                                      String symbol,
+                                      long accountId,
+                                      long cycleSequence) {
+        return "mm-tk-" + stableToken(strategy.getStrategyId() + ":" + symbol) + "-" + accountId + "-"
+                + cycleSequence + "-" + Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36);
     }
 
     private String stableToken(String value) {

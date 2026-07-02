@@ -31,6 +31,9 @@ public class MarketMakerProperties {
     private Risk risk = new Risk();
 
     @Valid
+    private Trade trade = new Trade();
+
+    @Valid
     private List<Strategy> strategies = new ArrayList<>();
 
     public Engine getEngine() {
@@ -63,6 +66,14 @@ public class MarketMakerProperties {
 
     public void setRisk(Risk risk) {
         this.risk = risk;
+    }
+
+    public Trade getTrade() {
+        return trade;
+    }
+
+    public void setTrade(Trade trade) {
+        this.trade = trade;
     }
 
     public List<Strategy> getStrategies() {
@@ -232,6 +243,78 @@ public class MarketMakerProperties {
 
         public void setMaxInventorySkewPpm(long maxInventorySkewPpm) {
             this.maxInventorySkewPpm = maxInventorySkewPpm;
+        }
+    }
+
+    public static class Trade {
+        private boolean enabled;
+        @Size(max = 50)
+        private List<@Positive Long> accountIds = new ArrayList<>();
+        @Min(50)
+        private long minIntervalMs = 250L;
+        @Positive
+        private long minQuantitySteps = 1L;
+        @Positive
+        private long maxQuantitySteps = 10L;
+        @PositiveOrZero
+        private long slippageTicks = 5L;
+        @PositiveOrZero
+        private long inventoryThresholdSteps = 5_000L;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public List<Long> getAccountIds() {
+            return accountIds;
+        }
+
+        public void setAccountIds(List<Long> accountIds) {
+            this.accountIds = accountIds == null ? new ArrayList<>() : new ArrayList<>(accountIds);
+        }
+
+        public long getMinIntervalMs() {
+            return minIntervalMs;
+        }
+
+        public void setMinIntervalMs(long minIntervalMs) {
+            this.minIntervalMs = minIntervalMs;
+        }
+
+        public long getMinQuantitySteps() {
+            return minQuantitySteps;
+        }
+
+        public void setMinQuantitySteps(long minQuantitySteps) {
+            this.minQuantitySteps = minQuantitySteps;
+        }
+
+        public long getMaxQuantitySteps() {
+            return maxQuantitySteps;
+        }
+
+        public void setMaxQuantitySteps(long maxQuantitySteps) {
+            this.maxQuantitySteps = maxQuantitySteps;
+        }
+
+        public long getSlippageTicks() {
+            return slippageTicks;
+        }
+
+        public void setSlippageTicks(long slippageTicks) {
+            this.slippageTicks = slippageTicks;
+        }
+
+        public long getInventoryThresholdSteps() {
+            return inventoryThresholdSteps;
+        }
+
+        public void setInventoryThresholdSteps(long inventoryThresholdSteps) {
+            this.inventoryThresholdSteps = inventoryThresholdSteps;
         }
     }
 

@@ -29,7 +29,7 @@ surprising:
         match-results-topic: surprising.perp.match.results.v1
         match-trades-topic: surprising.perp.match.trades.v1
         order-book-depth-topic: surprising.perp.orderbook.depth.v1
-        concurrency: 2
+        concurrency: 1
         max-poll-records: 500
         restart-on-partition-reassignment: true
         partition-assignment-startup-grace-ms: 30000
@@ -46,6 +46,7 @@ surprising:
         open-order-batch-size: 10000
       protection:
         self-trade-prevention-enabled: true
+        self-trade-prevention-bypass-user-ids: [900001, 900002, 910001]
         market-max-slippage-ppm: 10000
         market-max-mark-age-ms: 5000
       outbox:

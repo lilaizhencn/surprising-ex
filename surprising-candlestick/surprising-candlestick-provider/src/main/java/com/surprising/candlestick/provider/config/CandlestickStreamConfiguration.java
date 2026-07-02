@@ -1,13 +1,14 @@
 package com.surprising.candlestick.provider.config;
 
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
-import com.surprising.candlestick.api.model.TradeEvent;
 import com.surprising.candlestick.provider.aggregation.CandleAccumulator;
 import com.surprising.candlestick.provider.aggregation.CandleAggregationProcessor;
 import com.surprising.candlestick.provider.aggregation.CandleSink;
 import com.surprising.candlestick.provider.aggregation.CandleSnapshot;
 import com.surprising.candlestick.provider.aggregation.CandleStores;
+import com.surprising.candlestick.provider.service.MatchTradeEventMapper;
 import com.surprising.candlestick.provider.service.SymbolRegistryService;
+import com.surprising.trading.api.model.MatchTradeEvent;
 import java.util.HashMap;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -82,9 +83,10 @@ public class CandlestickStreamConfiguration {
             StreamsBuilder streamsBuilder,
             CandlestickProperties properties,
             CandleSink candleSink,
-            SymbolRegistryService symbolRegistryService) {
+            SymbolRegistryService symbolRegistryService,
+            MatchTradeEventMapper tradeEventMapper) {
 
-        Serde<TradeEvent> tradeSerde = jsonSerde(TradeEvent.class);
+        Serde<MatchTradeEvent> tradeSerde = jsonSerde(MatchTradeEvent.class);
         Serde<CandleUpdatedEvent> updateSerde = jsonSerde(CandleUpdatedEvent.class);
         Serde<CandleAccumulator> accumulatorSerde = jsonSerde(CandleAccumulator.class);
         Serde<CandleSnapshot> snapshotSerde = jsonSerde(CandleSnapshot.class);
@@ -109,7 +111,8 @@ public class CandlestickStreamConfiguration {
 
         KStream<String, CandleUpdatedEvent> updates = streamsBuilder
                 .stream(properties.getKafka().getTradeTopic(), Consumed.with(Serdes.String(), tradeSerde))
-                .process(() -> new CandleAggregationProcessor(properties, candleSink, symbolRegistryService),
+                .process(() -> new CandleAggregationProcessor(properties, candleSink, symbolRegistryService,
+                                tradeEventMapper),
                         Named.as("candlestick-aggregator"),
                         CandleStores.CANDLE_STORE,
                         CandleStores.DIRTY_STORE,

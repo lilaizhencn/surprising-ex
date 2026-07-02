@@ -10,6 +10,7 @@ import com.surprising.instrument.api.model.RiskLimitBracket;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -121,18 +122,24 @@ public class InstrumentRepository {
     }
 
     public List<InstrumentResponse> list(InstrumentType type, InstrumentStatus status) {
-        String sql = """
+        StringBuilder sql = new StringBuilder("""
                 SELECT i.*
                   FROM instruments i
                   JOIN instrument_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
-                 WHERE (? IS NULL OR i.instrument_type = ?)
-                   AND (? IS NULL OR i.status = ?)
-                 ORDER BY i.symbol ASC
-                """;
-        String typeName = type == null ? null : type.name();
-        String statusName = status == null ? null : status.name();
-        return jdbcTemplate.query(sql, (rs, rowNum) -> toResponse(rs), typeName, typeName, statusName, statusName);
+                 WHERE 1 = 1
+                """);
+        List<Object> args = new ArrayList<>();
+        if (type != null) {
+            sql.append(" AND i.instrument_type = ?");
+            args.add(type.name());
+        }
+        if (status != null) {
+            sql.append(" AND i.status = ?");
+            args.add(status.name());
+        }
+        sql.append(" ORDER BY i.symbol ASC");
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toResponse(rs), args.toArray());
     }
 
     private void insertBrackets(String symbol, long version, List<RiskLimitBracket> brackets) {

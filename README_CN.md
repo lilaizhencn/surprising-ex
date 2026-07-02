@@ -112,12 +112,11 @@ mvn -pl :surprising-market-maker-provider -am spring-boot:run
 ## Kafka Topics
 
 - `surprising.instrument.events.v1`：合约配置变更事件。
-- `surprising.perp.trade.events.v1`：合约成交输入。
 - `surprising.perp.candle.events.v1`：K 线快照输出。
 - `surprising.perp.order.commands.v1`：订单撮合命令。
 - `surprising.perp.order.events.v1`：订单入口事件。
 - `surprising.perp.match.results.v1`：撮合结果事件。
-- `surprising.perp.match.trades.v1`：撮合成交事件，long 定点数。
+- `surprising.perp.match.trades.v1`：撮合成交事件，long 定点数，供 K 线和公开成交推送消费。
 - `surprising.perp.orderbook.depth.v1`：exchange-core L2 盘口 `SNAPSHOT`/`DELTA` 事件，供前端深度推送消费。
 - `surprising.account.position.events.v1`：账户持仓变化事件，供私有 WebSocket 推送消费。
 - `surprising.perp.liquidation.candidates.v1`：爆仓候选事件。
