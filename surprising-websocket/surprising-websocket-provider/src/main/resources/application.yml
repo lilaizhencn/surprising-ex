@@ -39,6 +39,9 @@ surprising:
       send-timeout: 5s
     security:
       user-id-header: X-User-Id
+      allow-query-user-id-fallback: true
+      issuer: surprising-ex-gateway
+      jwt-secret: ${SURPRISING_WEBSOCKET_JWT_SECRET:}
       allowed-origins:
         - "*"
     fanout:

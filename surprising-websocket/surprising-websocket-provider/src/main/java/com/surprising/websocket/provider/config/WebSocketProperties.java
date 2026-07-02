@@ -226,6 +226,9 @@ public class WebSocketProperties {
     public static class Security {
         private String userIdHeader = "X-User-Id";
         private List<String> allowedOrigins = new ArrayList<>(List.of("*"));
+        private boolean allowQueryUserIdFallback = true;
+        private String issuer = "surprising-ex-gateway";
+        private String jwtSecret = "";
 
         public String getUserIdHeader() {
             return userIdHeader;
@@ -241,6 +244,30 @@ public class WebSocketProperties {
 
         public void setAllowedOrigins(List<String> allowedOrigins) {
             this.allowedOrigins = allowedOrigins;
+        }
+
+        public boolean isAllowQueryUserIdFallback() {
+            return allowQueryUserIdFallback;
+        }
+
+        public void setAllowQueryUserIdFallback(boolean allowQueryUserIdFallback) {
+            this.allowQueryUserIdFallback = allowQueryUserIdFallback;
+        }
+
+        public String getIssuer() {
+            return issuer;
+        }
+
+        public void setIssuer(String issuer) {
+            this.issuer = issuer;
+        }
+
+        public String getJwtSecret() {
+            return jwtSecret;
+        }
+
+        public void setJwtSecret(String jwtSecret) {
+            this.jwtSecret = jwtSecret;
         }
     }
 

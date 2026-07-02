@@ -20,13 +20,16 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
     private final SubscriptionRegistry registry;
     private final WebSocketProperties properties;
+    private final WebSocketJwtAuthenticator jwtAuthenticator;
 
     public ClientWebSocketHandler(ObjectMapper objectMapper,
                                   SubscriptionRegistry registry,
-                                  WebSocketProperties properties) {
+                                  WebSocketProperties properties,
+                                  WebSocketJwtAuthenticator jwtAuthenticator) {
         this.objectMapper = objectMapper;
         this.registry = registry;
         this.properties = properties;
+        this.jwtAuthenticator = jwtAuthenticator;
     }
 
     @Override
@@ -76,6 +79,11 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
     }
 
     private Long authenticatedUserId(WebSocketSession session) {
+        URI uri = session.getUri();
+        String queryToken = queryValue(uri, "token");
+        if (queryToken != null && !queryToken.isBlank()) {
+            return jwtAuthenticator.authenticate(queryToken.trim());
+        }
         List<String> headers = session.getHandshakeHeaders().get(properties.getSecurity().getUserIdHeader());
         if (headers != null && !headers.isEmpty() && !headers.get(0).isBlank()) {
             return Long.parseLong(headers.get(0).trim());
@@ -85,13 +93,22 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
         if (forwarded != null && !forwarded.isEmpty() && !forwarded.get(0).isBlank()) {
             return Long.parseLong(forwarded.get(0).trim());
         }
-        URI uri = session.getUri();
-        if (uri != null && uri.getQuery() != null) {
-            for (String part : uri.getQuery().split("&")) {
-                String[] kv = part.split("=", 2);
-                if (kv.length == 2 && "userId".equals(kv[0]) && !kv[1].isBlank()) {
-                    return Long.parseLong(kv[1]);
-                }
+        String queryUserId = queryValue(uri, "userId");
+        if (properties.getSecurity().isAllowQueryUserIdFallback()
+                && queryUserId != null && !queryUserId.isBlank()) {
+            return Long.parseLong(queryUserId.trim());
+        }
+        return null;
+    }
+
+    private String queryValue(URI uri, String name) {
+        if (uri == null || uri.getQuery() == null) {
+            return null;
+        }
+        for (String part : uri.getQuery().split("&")) {
+            String[] kv = part.split("=", 2);
+            if (kv.length == 2 && name.equals(kv[0])) {
+                return kv[1];
             }
         }
         return null;
