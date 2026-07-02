@@ -176,6 +176,28 @@ class RiskRepositoryTest {
     }
 
     @Test
+    void walletBalanceUsesCoinProductAccountForInversePerpetualRiskGroup() {
+        RiskRepository repository = new RiskRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(),
+                eq(1001L), eq("BTC"), eq(1001L), eq("BTC"), eq(1001L), eq("BTC"),
+                eq(1001L), eq("BTC"), eq(1001L), eq("BTC"))).thenReturn(List.of(123L));
+
+        long walletBalanceUnits = repository.walletBalanceUnits(1001L, "BTC");
+
+        assertThat(walletBalanceUnits).isEqualTo(123L);
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
+                eq(1001L), eq("BTC"), eq(1001L), eq("BTC"), eq(1001L), eq("BTC"),
+                eq(1001L), eq("BTC"), eq(1001L), eq("BTC"));
+        assertThat(sql.getValue())
+                .contains("i.contract_type = 'INVERSE_PERPETUAL'")
+                .contains("THEN 'COIN_PERPETUAL'")
+                .contains("r.account_type = ctx.account_type")
+                .contains("LEFT JOIN account_product_balances pb")
+                .contains("LEFT JOIN account_product_deficits pd");
+    }
+
+    @Test
     void calculatePositionsUsesRiskBracketMaintenanceMarginRate() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(10_000L))).thenReturn(List.of());

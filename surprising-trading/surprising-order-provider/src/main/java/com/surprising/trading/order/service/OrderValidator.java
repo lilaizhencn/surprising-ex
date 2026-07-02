@@ -52,31 +52,35 @@ public class OrderValidator {
             return ValidationResult.reject("unknown symbol");
         }
         if (!"TRADING".equals(rule.status())) {
-            return ValidationResult.reject("instrument is not trading");
+            return ValidationResult.reject("instrument is not trading", rule.version(), rule.instrumentType());
         }
         if (!rule.supportedOrderTypes().contains(request.orderType().name())) {
-            return ValidationResult.reject("order type is not supported");
+            return ValidationResult.reject("order type is not supported", rule.version(), rule.instrumentType());
         }
         if (!rule.supportedTimeInForce().contains(request.timeInForce().name())) {
-            return ValidationResult.reject("time in force is not supported");
+            return ValidationResult.reject("time in force is not supported", rule.version(), rule.instrumentType());
         }
         if (request.quantitySteps() < rule.minQuantitySteps()) {
-            return ValidationResult.reject("quantity is below minimum step limit");
+            return ValidationResult.reject("quantity is below minimum step limit", rule.version(), rule.instrumentType());
         }
         if (request.quantitySteps() > rule.maxQuantitySteps()) {
-            return ValidationResult.reject("quantity is above maximum step limit");
+            return ValidationResult.reject("quantity is above maximum step limit", rule.version(), rule.instrumentType());
+        }
+        if (request.reduceOnly() && rule.spot()) {
+            return ValidationResult.reject("reduce-only is only supported for perpetual instruments",
+                    rule.version(), rule.instrumentType());
         }
         if (request.reduceOnly() && !rule.reduceOnlyEnabled()) {
-            return ValidationResult.reject("reduce-only is disabled");
+            return ValidationResult.reject("reduce-only is disabled", rule.version(), rule.instrumentType());
         }
         if (request.postOnly() && !rule.postOnlyEnabled()) {
-            return ValidationResult.reject("post-only is disabled");
+            return ValidationResult.reject("post-only is disabled", rule.version(), rule.instrumentType());
         }
         if (request.timeInForce() == TimeInForce.GTX && (!request.postOnly() || request.orderType() != OrderType.LIMIT)) {
-            return ValidationResult.reject("GTX requires a post-only limit order");
+            return ValidationResult.reject("GTX requires a post-only limit order", rule.version(), rule.instrumentType());
         }
         if (request.postOnly() && request.orderType() != OrderType.LIMIT) {
-            return ValidationResult.reject("post-only requires a limit order");
+            return ValidationResult.reject("post-only requires a limit order", rule.version(), rule.instrumentType());
         }
         if (request.orderType() == OrderType.MARKET) {
             return validateMarket(request, rule);
@@ -86,18 +90,18 @@ public class OrderValidator {
 
     private ValidationResult validateMarket(PlaceOrderRequest request, InstrumentRule rule) {
         if (!rule.marketOrderEnabled()) {
-            return ValidationResult.reject("market order is disabled");
+            return ValidationResult.reject("market order is disabled", rule.version(), rule.instrumentType());
         }
         if (request.priceTicks() != 0) {
-            return ValidationResult.reject("market order priceTicks must be zero");
+            return ValidationResult.reject("market order priceTicks must be zero", rule.version(), rule.instrumentType());
         }
         if (request.timeInForce() != TimeInForce.IOC && request.timeInForce() != TimeInForce.FOK) {
-            return ValidationResult.reject("market order requires IOC or FOK");
+            return ValidationResult.reject("market order requires IOC or FOK", rule.version(), rule.instrumentType());
         }
         OptionalLong markPriceTicks = markPriceLookup.latestMarkPriceTicks(request.symbol(), rule.version(),
                 properties.getRisk().getMarketMaxMarkAgeMs());
         if (markPriceTicks.isEmpty()) {
-            return ValidationResult.reject("mark price unavailable");
+            return ValidationResult.reject("mark price unavailable", rule.version(), rule.instrumentType());
         }
         long lowerPriceTicks;
         long upperPriceTicks;
@@ -107,14 +111,14 @@ public class OrderValidator {
             upperPriceTicks = OrderMarginMath.upperBoundPriceTicks(request.orderType(), request.priceTicks(),
                     markPriceTicks.getAsLong(), properties.getRisk().getMarketMaxSlippagePpm());
         } catch (ArithmeticException ex) {
-            return ValidationResult.reject("notional overflow");
+            return ValidationResult.reject("notional overflow", rule.version(), rule.instrumentType());
         }
         return validateNotionalRange(request, rule, lowerPriceTicks, upperPriceTicks);
     }
 
     private ValidationResult validateLimit(PlaceOrderRequest request, InstrumentRule rule) {
         if (request.priceTicks() <= 0) {
-            return ValidationResult.reject("limit order priceTicks must be positive");
+            return ValidationResult.reject("limit order priceTicks must be positive", rule.version(), rule.instrumentType());
         }
         ValidationResult priceBand = validateLimitPriceBand(request, rule);
         if (!priceBand.accepted()) {
@@ -125,27 +129,27 @@ public class OrderValidator {
 
     private ValidationResult validateLimitPriceBand(PlaceOrderRequest request, InstrumentRule rule) {
         if (!properties.getRisk().isLimitPriceProtectionEnabled()) {
-            return ValidationResult.ok(rule.version());
+            return ValidationResult.ok(rule.version(), rule.instrumentType());
         }
         OptionalLong markPriceTicks = markPriceLookup.latestMarkPriceTicks(request.symbol(), rule.version(),
                 properties.getRisk().getLimitPriceMaxMarkAgeMs());
         if (markPriceTicks.isEmpty()) {
-            return ValidationResult.reject("mark price unavailable");
+            return ValidationResult.reject("mark price unavailable", rule.version(), rule.instrumentType());
         }
         long boundaryTicks;
         try {
             boundaryTicks = MarketPriceProtection.protectedPriceTicks(request.side(), markPriceTicks.getAsLong(),
                     properties.getRisk().getLimitPriceBandPpm());
         } catch (ArithmeticException ex) {
-            return ValidationResult.reject("price protection overflow");
+            return ValidationResult.reject("price protection overflow", rule.version(), rule.instrumentType());
         }
         if (request.side() == OrderSide.BUY && request.priceTicks() > boundaryTicks) {
-            return ValidationResult.reject("limit buy price exceeds mark price band");
+            return ValidationResult.reject("limit buy price exceeds mark price band", rule.version(), rule.instrumentType());
         }
         if (request.side() == OrderSide.SELL && request.priceTicks() < boundaryTicks) {
-            return ValidationResult.reject("limit sell price exceeds mark price band");
+            return ValidationResult.reject("limit sell price exceeds mark price band", rule.version(), rule.instrumentType());
         }
-        return ValidationResult.ok(rule.version());
+        return ValidationResult.ok(rule.version(), rule.instrumentType());
     }
 
     private ValidationResult validateNotionalRange(PlaceOrderRequest request,
@@ -161,15 +165,15 @@ public class OrderValidator {
                     ? minExecutionNotionalUnits
                     : notionalUnits(request, rule, upperPriceTicks);
         } catch (ArithmeticException ex) {
-            return ValidationResult.reject("notional overflow");
+            return ValidationResult.reject("notional overflow", rule.version(), rule.instrumentType());
         }
         if (minExecutionNotionalUnits < rule.minNotionalUnits()) {
-            return ValidationResult.reject("notional is below minimum limit");
+            return ValidationResult.reject("notional is below minimum limit", rule.version(), rule.instrumentType());
         }
         if (maxExecutionNotionalUnits > rule.maxNotionalUnits()) {
-            return ValidationResult.reject("notional is above maximum limit");
+            return ValidationResult.reject("notional is above maximum limit", rule.version(), rule.instrumentType());
         }
-        return ValidationResult.ok(rule.version());
+        return ValidationResult.ok(rule.version(), rule.instrumentType());
     }
 
     private long notionalUnits(PlaceOrderRequest request, InstrumentRule rule, long effectivePriceTicks) {

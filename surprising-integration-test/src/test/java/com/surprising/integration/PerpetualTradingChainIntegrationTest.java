@@ -2,6 +2,7 @@ package com.surprising.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
@@ -16,6 +17,7 @@ import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.account.provider.model.LiquidationFeeSettlement;
 import com.surprising.account.provider.model.OrderFeeSnapshot;
 import com.surprising.account.provider.model.PositionState;
+import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.account.provider.service.AccountService;
@@ -24,6 +26,7 @@ import com.surprising.account.provider.service.PnlSettlementMath;
 import com.surprising.account.provider.service.PositionCalculator;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.liquidation.api.model.LiquidationOrderResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderStatus;
 import com.surprising.liquidation.provider.config.LiquidationProperties;
@@ -86,10 +89,12 @@ import com.surprising.trading.order.model.MarginRequirement;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.OutboxRecord;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
+import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.repository.OrderFeeRepository;
 import com.surprising.trading.order.repository.OrderMarginRepository;
 import com.surprising.trading.order.repository.OrderRepository;
 import com.surprising.trading.order.repository.OutboxRepository;
+import com.surprising.trading.order.repository.SpotOrderReservationRepository;
 import com.surprising.trading.order.service.OrderMarginMath;
 import com.surprising.trading.order.service.OrderService;
 import com.surprising.trading.order.service.OrderValidator;
@@ -185,6 +190,34 @@ class PerpetualTradingChainIntegrationTest {
             assertThat(harness.state.balance(2002L).availableUnits).isEqualTo(1_033_333L);
             assertThat(harness.state.balance(2002L).lockedUnits).isZero();
             assertThat(harness.state.balance(2002L).deficitUnits).isZero();
+        }
+    }
+
+    @Test
+    void spotLimitTradeMovesProductBalancesWithoutPerpetualPositions() {
+        try (Harness harness = Harness.spot()) {
+            harness.state.setSpotBalance(1001L, "BTC", 10L);
+            harness.state.setSpotBalance(2002L, "USDT", 100_000L);
+
+            OrderResponse maker = harness.place(1001L, "spot-maker-sell-100", OrderSide.SELL,
+                    OrderType.LIMIT, TimeInForce.GTC, 100L, 2L, false);
+            OrderResponse taker = harness.place(2002L, "spot-taker-buy-100", OrderSide.BUY,
+                    OrderType.LIMIT, TimeInForce.IOC, 100L, 2L, false);
+            harness.processNewOrderCommands();
+
+            assertThat(harness.orderRepository.findByOrderId(maker.orderId()).orElseThrow().status())
+                    .isEqualTo(OrderStatus.FILLED);
+            assertThat(harness.orderRepository.findByOrderId(taker.orderId()).orElseThrow().status())
+                    .isEqualTo(OrderStatus.FILLED);
+            assertThat(harness.state.spotBalance(1001L, "BTC").availableUnits).isEqualTo(8L);
+            assertThat(harness.state.spotBalance(1001L, "BTC").lockedUnits).isZero();
+            assertThat(harness.state.spotBalance(1001L, "USDT").availableUnits).isEqualTo(20_000L);
+            assertThat(harness.state.spotBalance(2002L, "USDT").availableUnits).isEqualTo(80_000L);
+            assertThat(harness.state.spotBalance(2002L, "USDT").lockedUnits).isZero();
+            assertThat(harness.state.spotBalance(2002L, "BTC").availableUnits).isEqualTo(2L);
+            assertThat(harness.state.position(1001L)).isEqualTo(new PositionState(0L, 0L, 0L, 0L));
+            assertThat(harness.state.position(2002L)).isEqualTo(new PositionState(0L, 0L, 0L, 0L));
+            assertThat(harness.accountOutbox.positionEvents).isEmpty();
         }
     }
 
@@ -440,6 +473,12 @@ class PerpetualTradingChainIntegrationTest {
             return new Harness(0L, state);
         }
 
+        private static Harness spot() {
+            SharedState state = SharedState.spot();
+            state.markPriceTicks = 100L;
+            return new Harness(0L, state);
+        }
+
         private Harness(long marketMaxSlippagePpm, SharedState state) {
             this.state = state;
             orderRepository = new FakeOrderRepository(state);
@@ -451,12 +490,14 @@ class PerpetualTradingChainIntegrationTest {
             liquidationRepository = new FakeLiquidationRepository(state);
             liquidationOrderRepository = new FakeLiquidationOrderRepository(state);
 
-            InstrumentRule rule = new InstrumentRule(SYMBOL, VERSION, "TRADING", state.contractType,
+            InstrumentRule rule = new InstrumentRule(SYMBOL, VERSION, "TRADING", state.instrumentType,
+                    state.contractType, state.baseAsset, state.quoteAsset, state.settleAsset,
                     Set.of(OrderType.LIMIT.name(), OrderType.MARKET.name()),
                     Set.of(TimeInForce.GTC.name(), TimeInForce.IOC.name(), TimeInForce.FOK.name(),
                             TimeInForce.GTX.name()),
-                    true, true, true, 1L, 1_000_000L, 1L, Long.MAX_VALUE / 4, state.notionalMultiplierUnits,
-                    100_000_000L, 10_000L);
+                    true, true, state.instrumentType != InstrumentType.SPOT, state.quantityStepUnits,
+                    1L, 1_000_000L, 1L, Long.MAX_VALUE / 4, state.notionalMultiplierUnits,
+                    100_000_000L, state.initialMarginRatePpm);
             TradingOrderProperties orderProperties = new TradingOrderProperties();
             orderProperties.getRisk().setMarketMaxSlippagePpm(marketMaxSlippagePpm);
             OrderValidator orderValidator = new OrderValidator(symbol -> SYMBOL.equals(symbol)
@@ -465,8 +506,12 @@ class PerpetualTradingChainIntegrationTest {
                     (symbol, instrumentVersion, maxAgeMs) -> OptionalLong.of(state.markPriceTicks));
             ReduceOnlyValidator reduceOnlyValidator = new ReduceOnlyValidator(new FakeReduceOnlyLookup(state));
             FakeOrderMarginRepository marginRepository = new FakeOrderMarginRepository(state);
+            SpotOrderReservationRepository spotReservationRepository = state.instrumentType == InstrumentType.SPOT
+                    ? new FakeSpotOrderReservationRepository(state)
+                    : null;
             orderService = new OrderService(objectMapper, orderProperties, orderValidator,
-                    reduceOnlyValidator, orderRepository, orderFeeRepository, marginRepository, orderOutbox);
+                    reduceOnlyValidator, orderRepository, orderFeeRepository, marginRepository,
+                    spotReservationRepository, orderOutbox);
 
             MatchingProperties matchingProperties = new MatchingProperties();
             matchingProperties.getEngine().setExchangeId("integration-" + System.nanoTime());
@@ -550,8 +595,12 @@ class PerpetualTradingChainIntegrationTest {
     }
 
     private static final class SharedState {
+        private final InstrumentType instrumentType;
         private final ContractType contractType;
+        private final String baseAsset;
+        private final String quoteAsset;
         private final String settleAsset;
+        private final long quantityStepUnits;
         private final long notionalMultiplierUnits;
         private final long priceTickUnits;
         private final long settleScaleUnits;
@@ -562,9 +611,11 @@ class PerpetualTradingChainIntegrationTest {
         private final Map<String, Long> sequences = new HashMap<>();
         private final Map<Long, OrderRecord> orders = new LinkedHashMap<>();
         private final Map<UserAssetKey, BalanceState> balances = new HashMap<>();
+        private final Map<UserAssetKey, BalanceState> spotBalances = new HashMap<>();
         private final Map<PositionKey, PositionState> positions = new HashMap<>();
         private final Map<PositionKey, Long> positionMargins = new HashMap<>();
         private final Map<Long, MarginReservationState> reservations = new HashMap<>();
+        private final Map<Long, SpotReservationState> spotReservations = new HashMap<>();
         private final Map<Long, LiquidationOrderResponse> liquidationOrders = new LinkedHashMap<>();
         private final Map<String, PositionMarginAdjustmentResponse> positionMarginAdjustmentReferences = new HashMap<>();
         private final Set<String> liquidationFeeReferences = new HashSet<>();
@@ -577,8 +628,31 @@ class PerpetualTradingChainIntegrationTest {
                             long priceTickUnits,
                             long settleScaleUnits,
                             long initialMarginRatePpm) {
+            this(InstrumentType.PERPETUAL, contractType, "BTC", "USDT", settleAsset, 1L,
+                    notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm);
+        }
+
+        private static SharedState spot() {
+            return new SharedState(InstrumentType.SPOT, ContractType.SPOT, "BTC", "USDT", "USDT",
+                    1L, 100L, 1L, 1L, 0L);
+        }
+
+        private SharedState(InstrumentType instrumentType,
+                            ContractType contractType,
+                            String baseAsset,
+                            String quoteAsset,
+                            String settleAsset,
+                            long quantityStepUnits,
+                            long notionalMultiplierUnits,
+                            long priceTickUnits,
+                            long settleScaleUnits,
+                            long initialMarginRatePpm) {
+            this.instrumentType = instrumentType;
             this.contractType = contractType;
+            this.baseAsset = baseAsset;
+            this.quoteAsset = quoteAsset;
             this.settleAsset = settleAsset;
+            this.quantityStepUnits = quantityStepUnits;
             this.notionalMultiplierUnits = notionalMultiplierUnits;
             this.priceTickUnits = priceTickUnits;
             this.settleScaleUnits = settleScaleUnits;
@@ -596,9 +670,22 @@ class PerpetualTradingChainIntegrationTest {
             balances.put(new UserAssetKey(userId, settleAsset), new BalanceState(availableUnits, 0L, 0L));
         }
 
+        private void setSpotBalance(long userId, String asset, long availableUnits) {
+            spotBalances.put(new UserAssetKey(userId, asset), new BalanceState(availableUnits, 0L, 0L));
+        }
+
         private BalanceState balance(long userId) {
             return balances.computeIfAbsent(new UserAssetKey(userId, settleAsset),
                     ignored -> new BalanceState(0L, 0L, 0L));
+        }
+
+        private BalanceState spotBalance(long userId, String asset) {
+            return spotBalances.computeIfAbsent(new UserAssetKey(userId, asset),
+                    ignored -> new BalanceState(0L, 0L, 0L));
+        }
+
+        private String perpetualAccountType() {
+            return contractType == ContractType.INVERSE_PERPETUAL ? "COIN_PERPETUAL" : "USDT_PERPETUAL";
         }
 
         private PositionState position(long userId) {
@@ -782,7 +869,7 @@ class PerpetualTradingChainIntegrationTest {
             long marginUnits = OrderMarginMath.initialMarginUnits(state.contractType, side, orderType,
                     priceTicks, quantitySteps, state.markPriceTicks, marketMaxSlippagePpm, state.notionalMultiplierUnits,
                     state.priceTickUnits, state.settleScaleUnits, state.initialMarginRatePpm);
-            return Optional.of(new MarginRequirement(state.settleAsset, marginUnits));
+            return Optional.of(new MarginRequirement(state.perpetualAccountType(), state.settleAsset, marginUnits));
         }
 
         @Override
@@ -801,6 +888,72 @@ class PerpetualTradingChainIntegrationTest {
             balance.lockedUnits += amountUnits;
             state.reservations.put(orderId, new MarginReservationState(userId, asset, orderId, symbol,
                     MarginMode.defaultIfNull(marginMode), amountUnits, 0L, 0L, lastQuantitySteps, false));
+            return true;
+        }
+
+        @Override
+        public boolean reserve(long userId,
+                               String accountType,
+                               String asset,
+                               long orderId,
+                               String symbol,
+                               MarginMode marginMode,
+                               long amountUnits,
+                               Instant now) {
+            assertThat(accountType).isEqualTo(state.perpetualAccountType());
+            return reserve(userId, asset, orderId, symbol, marginMode, amountUnits, now);
+        }
+    }
+
+    private static final class FakeSpotOrderReservationRepository extends SpotOrderReservationRepository {
+        private final SharedState state;
+
+        private FakeSpotOrderReservationRepository(SharedState state) {
+            super(null, null);
+            this.state = state;
+        }
+
+        @Override
+        public Optional<SpotReservationRequirement> requirement(String symbol,
+                                                                long instrumentVersion,
+                                                                OrderSide side,
+                                                                OrderType orderType,
+                                                                long priceTicks,
+                                                                long quantitySteps,
+                                                                long marketMaxSlippagePpm,
+                                                                long marketMaxMarkAgeMs,
+                                                                com.surprising.trading.order.model.OrderFeeSnapshot feeSnapshot) {
+            assertThat(symbol).isEqualTo(SYMBOL);
+            assertThat(instrumentVersion).isEqualTo(VERSION);
+            if (side == OrderSide.SELL) {
+                return Optional.of(new SpotReservationRequirement(state.baseAsset,
+                        Math.multiplyExact(quantitySteps, state.quantityStepUnits)));
+            }
+            long notionalUnits = Math.multiplyExact(Math.multiplyExact(priceTicks, quantitySteps),
+                    state.notionalMultiplierUnits);
+            long feeRatePpm = Math.max(0L, Math.max(feeSnapshot.makerFeeRatePpm(), feeSnapshot.takerFeeRatePpm()));
+            long feeUnits = feeRatePpm == 0L
+                    ? 0L
+                    : (Math.multiplyExact(notionalUnits, feeRatePpm) + 999_999L) / 1_000_000L;
+            return Optional.of(new SpotReservationRequirement(state.quoteAsset,
+                    Math.addExact(notionalUnits, feeUnits)));
+        }
+
+        @Override
+        public boolean reserve(long userId,
+                               String asset,
+                               long orderId,
+                               String symbol,
+                               OrderSide side,
+                               long amountUnits,
+                               Instant now) {
+            BalanceState balance = state.spotBalance(userId, asset);
+            if (balance.availableUnits < amountUnits) {
+                return false;
+            }
+            balance.availableUnits = Math.subtractExact(balance.availableUnits, amountUnits);
+            balance.lockedUnits = Math.addExact(balance.lockedUnits, amountUnits);
+            state.spotReservations.put(orderId, new SpotReservationState(userId, asset, side, amountUnits));
             return true;
         }
     }
@@ -1094,6 +1247,17 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public InstrumentType instrumentType(String symbol, long instrumentVersion) {
+            return state.instrumentType;
+        }
+
+        @Override
+        public SpotInstrumentSpec spotInstrumentSpec(String symbol, long instrumentVersion) {
+            return new SpotInstrumentSpec(VERSION, state.baseAsset, state.quoteAsset,
+                    state.quantityStepUnits, state.notionalMultiplierUnits);
+        }
+
+        @Override
         public OrderFeeSnapshot orderFeeSnapshot(long orderId, long userId, String symbol) {
             OrderRecord order = state.orders.get(orderId);
             if (order == null || order.userId() != userId || !symbol.equals(order.symbol())) {
@@ -1274,6 +1438,20 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public void settleRealizedPnl(AccountType accountType,
+                                      long userId,
+                                      String asset,
+                                      long orderId,
+                                      long tradeId,
+                                      String symbol,
+                                      MarginMode marginMode,
+                                      long realizedPnlDeltaUnits,
+                                      Instant now) {
+            assertThat(accountType).isEqualTo(expectedAccountType());
+            settleRealizedPnl(userId, asset, orderId, tradeId, symbol, marginMode, realizedPnlDeltaUnits, now);
+        }
+
+        @Override
         public void settleTradeFee(long userId,
                                    String asset,
                                    long orderId,
@@ -1299,6 +1477,79 @@ class PerpetualTradingChainIntegrationTest {
                                    MarginMode marginMode,
                                    Instant now) {
             applyBalanceSettlement(userId, symbol, marginMode, feeDeltaUnits);
+        }
+
+        @Override
+        public void settleTradeFee(AccountType accountType,
+                                   long userId,
+                                   String asset,
+                                   long orderId,
+                                   long tradeId,
+                                   long feeDeltaUnits,
+                                   String reason,
+                                   long feeRatePpm,
+                                   String symbol,
+                                   MarginMode marginMode,
+                                   Instant now) {
+            assertThat(accountType).isEqualTo(expectedAccountType());
+            settleTradeFee(userId, asset, orderId, tradeId, feeDeltaUnits, reason, feeRatePpm, symbol,
+                    marginMode, now);
+        }
+
+        @Override
+        public void settleSpotTradeSide(long userId,
+                                        long orderId,
+                                        long tradeId,
+                                        String symbol,
+                                        OrderSide side,
+                                        long priceTicks,
+                                        long quantitySteps,
+                                        SpotInstrumentSpec spec,
+                                        long feeRatePpm,
+                                        String feeReason,
+                                        boolean orderCompleted,
+                                        Instant now) {
+            SpotReservationState reservation = state.spotReservations.get(orderId);
+            assertThat(reservation).isNotNull();
+            assertThat(reservation.userId).isEqualTo(userId);
+            assertThat(reservation.side).isEqualTo(side);
+            long baseUnits = Math.multiplyExact(quantitySteps, spec.quantityStepUnits());
+            long quoteUnits = Math.multiplyExact(Math.multiplyExact(priceTicks, quantitySteps),
+                    spec.notionalMultiplierUnits());
+            long feeUnits = spotFeeUnits(quoteUnits, feeRatePpm);
+            long positiveFeeUnits = feeRatePpm > 0 ? feeUnits : 0L;
+            long settledUnits = side == OrderSide.BUY
+                    ? Math.addExact(quoteUnits, positiveFeeUnits)
+                    : baseUnits;
+            long remainingUnits = Math.subtractExact(reservation.reservedUnits,
+                    Math.addExact(reservation.settledUnits, reservation.releasedUnits));
+            assertThat(remainingUnits).isGreaterThanOrEqualTo(settledUnits);
+            long releaseUnits = orderCompleted ? Math.subtractExact(remainingUnits, settledUnits) : 0L;
+            if (side == OrderSide.BUY) {
+                BalanceState quote = state.spotBalance(userId, spec.quoteAsset());
+                quote.lockedUnits = Math.subtractExact(quote.lockedUnits, quoteUnits);
+                if (positiveFeeUnits > 0) {
+                    quote.lockedUnits = Math.subtractExact(quote.lockedUnits, positiveFeeUnits);
+                } else if (feeUnits > 0) {
+                    quote.availableUnits = Math.addExact(quote.availableUnits, feeUnits);
+                }
+                state.spotBalance(userId, spec.baseAsset()).availableUnits =
+                        Math.addExact(state.spotBalance(userId, spec.baseAsset()).availableUnits, baseUnits);
+                releaseSpotLock(userId, spec.quoteAsset(), releaseUnits);
+            } else {
+                BalanceState base = state.spotBalance(userId, spec.baseAsset());
+                base.lockedUnits = Math.subtractExact(base.lockedUnits, baseUnits);
+                BalanceState quote = state.spotBalance(userId, spec.quoteAsset());
+                quote.availableUnits = Math.addExact(quote.availableUnits, quoteUnits);
+                if (positiveFeeUnits > 0) {
+                    quote.availableUnits = Math.subtractExact(quote.availableUnits, positiveFeeUnits);
+                } else if (feeUnits > 0) {
+                    quote.availableUnits = Math.addExact(quote.availableUnits, feeUnits);
+                }
+                releaseSpotLock(userId, spec.baseAsset(), releaseUnits);
+            }
+            reservation.settledUnits = Math.addExact(reservation.settledUnits, settledUnits);
+            reservation.releasedUnits = Math.addExact(reservation.releasedUnits, releaseUnits);
         }
 
         @Override
@@ -1344,6 +1595,22 @@ class PerpetualTradingChainIntegrationTest {
             state.liquidationFeeReferences.add(referenceId);
             return Optional.of(new LiquidationFeeSettlement(context.liquidationOrderId(), context.candidateId(),
                     collectibleUnits, context.feeRatePpm()));
+        }
+
+        @Override
+        public Optional<LiquidationFeeSettlement> settleLiquidationFee(AccountType accountType,
+                                                                       long userId,
+                                                                       String asset,
+                                                                       long orderId,
+                                                                       long tradeId,
+                                                                       String symbol,
+                                                                       MarginMode marginMode,
+                                                                       long requestedFeeUnits,
+                                                                       LiquidationFeeContext context,
+                                                                       Instant now) {
+            assertThat(accountType).isEqualTo(expectedAccountType());
+            return settleLiquidationFee(userId, asset, orderId, tradeId, symbol, marginMode, requestedFeeUnits,
+                    context, now);
         }
 
         private void applyBalanceSettlement(long userId, String symbol, MarginMode marginMode, long amountUnits) {
@@ -1436,6 +1703,30 @@ class PerpetualTradingChainIntegrationTest {
             assertThat(balance.lockedUnits).isGreaterThanOrEqualTo(amount);
             balance.lockedUnits -= amount;
             balance.availableUnits += amount;
+        }
+
+        private void releaseSpotLock(long userId, String asset, long amount) {
+            if (amount <= 0) {
+                return;
+            }
+            BalanceState balance = state.spotBalance(userId, asset);
+            assertThat(balance.lockedUnits).isGreaterThanOrEqualTo(amount);
+            balance.lockedUnits = Math.subtractExact(balance.lockedUnits, amount);
+            balance.availableUnits = Math.addExact(balance.availableUnits, amount);
+        }
+
+        private long spotFeeUnits(long quoteUnits, long feeRatePpm) {
+            if (feeRatePpm == 0L) {
+                return 0L;
+            }
+            long numerator = Math.multiplyExact(quoteUnits, Math.absExact(feeRatePpm));
+            return (numerator + 999_999L) / 1_000_000L;
+        }
+
+        private AccountType expectedAccountType() {
+            return state.contractType == ContractType.INVERSE_PERPETUAL
+                    ? AccountType.COIN_PERPETUAL
+                    : AccountType.USDT_PERPETUAL;
         }
     }
 
@@ -2025,6 +2316,22 @@ class PerpetualTradingChainIntegrationTest {
             this.positionMarginUnits = positionMarginUnits;
             this.orderQuantitySteps = orderQuantitySteps;
             this.reduceOnly = reduceOnly;
+        }
+    }
+
+    private static final class SpotReservationState {
+        private final long userId;
+        private final String asset;
+        private final OrderSide side;
+        private final long reservedUnits;
+        private long settledUnits;
+        private long releasedUnits;
+
+        private SpotReservationState(long userId, String asset, OrderSide side, long reservedUnits) {
+            this.userId = userId;
+            this.asset = asset;
+            this.side = side;
+            this.reservedUnits = reservedUnits;
         }
     }
 

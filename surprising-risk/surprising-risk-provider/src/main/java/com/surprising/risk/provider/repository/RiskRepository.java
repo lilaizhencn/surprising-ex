@@ -339,7 +339,23 @@ public class RiskRepository {
 
     public long walletBalanceUnits(long userId, String settleAsset) {
         return jdbcTemplate.query("""
-                WITH isolated_position_locks AS (
+                WITH account_context AS (
+                    SELECT CASE
+                               WHEN EXISTS (
+                                   SELECT 1
+                                     FROM account_positions p
+                                     JOIN instruments i
+                                       ON i.symbol = p.symbol
+                                      AND i.version = p.instrument_version
+                                    WHERE p.user_id = ?
+                                      AND i.settle_asset = ?
+                                      AND i.contract_type = 'INVERSE_PERPETUAL'
+                                      AND p.signed_quantity_steps <> 0
+                               ) THEN 'COIN_PERPETUAL'
+                               ELSE 'USDT_PERPETUAL'
+                           END AS account_type
+                ),
+                isolated_position_locks AS (
                     SELECT COALESCE(SUM(m.margin_units), 0) AS units
                       FROM account_position_margins m
                      WHERE m.user_id = ?
@@ -350,22 +366,44 @@ public class RiskRepository {
                     SELECT COALESCE(SUM(GREATEST(r.reserved_units - r.released_units - r.position_margin_units, 0)), 0)
                            AS units
                       FROM account_margin_reservations r
+                      CROSS JOIN account_context ctx
                      WHERE r.user_id = ?
                        AND r.asset = ?
+                       AND r.account_type = ctx.account_type
                        AND r.margin_mode = 'ISOLATED'
                        AND r.status IN ('ACTIVE', 'PARTIALLY_RELEASED', 'PARTIALLY_CONSUMED')
                 )
-                SELECT COALESCE(
-                       b.available_units + b.locked_units
-                       - isolated_position_locks.units
-                       - isolated_order_locks.units
-                       - COALESCE(d.deficit_units, 0), 0)
-                  FROM account_balances b
+                SELECT CASE
+                           WHEN ctx.account_type = 'COIN_PERPETUAL' THEN COALESCE(
+                               pb.available_units + pb.locked_units
+                               - isolated_position_locks.units
+                               - isolated_order_locks.units
+                               - COALESCE(pd.deficit_units, 0), 0)
+                           ELSE COALESCE(
+                               b.available_units + b.locked_units
+                               - isolated_position_locks.units
+                               - isolated_order_locks.units
+                               - COALESCE(d.deficit_units, 0), 0)
+                       END
+                  FROM account_context ctx
                   CROSS JOIN isolated_position_locks
                   CROSS JOIN isolated_order_locks
-                  LEFT JOIN account_deficits d USING (user_id, asset)
-                 WHERE b.user_id = ? AND b.asset = ?
-                """, (rs, rowNum) -> rs.getLong(1), userId, settleAsset, userId, settleAsset, userId, settleAsset)
+                  LEFT JOIN account_balances b
+                    ON b.user_id = ?
+                   AND b.asset = ?
+                  LEFT JOIN account_deficits d
+                    ON d.user_id = b.user_id
+                   AND d.asset = b.asset
+                  LEFT JOIN account_product_balances pb
+                    ON pb.account_type = ctx.account_type
+                   AND pb.user_id = ?
+                   AND pb.asset = ?
+                  LEFT JOIN account_product_deficits pd
+                    ON pd.account_type = pb.account_type
+                   AND pd.user_id = pb.user_id
+                   AND pd.asset = pb.asset
+                """, (rs, rowNum) -> rs.getLong(1), userId, settleAsset, userId, settleAsset,
+                userId, settleAsset, userId, settleAsset, userId, settleAsset)
                 .stream()
                 .findFirst()
                 .orElse(0L);

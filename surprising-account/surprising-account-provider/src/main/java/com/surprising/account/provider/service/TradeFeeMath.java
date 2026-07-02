@@ -35,7 +35,7 @@ public final class TradeFeeMath {
         }
         BigInteger numerator;
         BigInteger denominator;
-        if (spec.contractType() == ContractType.LINEAR_PERPETUAL) {
+        if (spec.contractType().usesPriceQuantityNotional()) {
             numerator = big(quantitySteps)
                     .multiply(big(priceTicks))
                     .multiply(big(spec.notionalMultiplierUnits()))

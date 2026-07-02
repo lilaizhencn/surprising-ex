@@ -2,6 +2,7 @@ package com.surprising.trading.order.service;
 
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.CancelOrderRequest;
+import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.api.model.OrderCommandEvent;
 import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderEvent;
@@ -20,6 +21,7 @@ import com.surprising.trading.order.repository.OrderFeeRepository;
 import com.surprising.trading.order.repository.OrderMarginRepository;
 import com.surprising.trading.order.repository.OrderRepository;
 import com.surprising.trading.order.repository.OutboxRepository;
+import com.surprising.trading.order.repository.SpotOrderReservationRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -43,6 +45,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final OrderFeeRepository orderFeeRepository;
     private final OrderMarginRepository orderMarginRepository;
+    private final SpotOrderReservationRepository spotOrderReservationRepository;
     private final OutboxRepository outboxRepository;
 
     public OrderService(ObjectMapper objectMapper,
@@ -52,6 +55,7 @@ public class OrderService {
                         OrderRepository orderRepository,
                         OrderFeeRepository orderFeeRepository,
                         OrderMarginRepository orderMarginRepository,
+                        SpotOrderReservationRepository spotOrderReservationRepository,
                         OutboxRepository outboxRepository) {
         this.objectMapper = objectMapper;
         this.properties = properties;
@@ -60,6 +64,7 @@ public class OrderService {
         this.orderRepository = orderRepository;
         this.orderFeeRepository = orderFeeRepository;
         this.orderMarginRepository = orderMarginRepository;
+        this.spotOrderReservationRepository = spotOrderReservationRepository;
         this.outboxRepository = outboxRepository;
     }
 
@@ -135,7 +140,7 @@ public class OrderService {
         }
 
         if (validation.accepted() && !normalized.reduceOnly()) {
-            validation = reserveInitialMargin(normalized, orderId, validation.instrumentVersion(), now);
+            validation = reserveOpeningFunds(normalized, orderId, validation, feeSnapshot, now);
             if (!validation.accepted()) {
                 orderRepository.reject(orderId, validation.rejectReason(), now);
                 order = rejectOrder(order, validation.rejectReason(), now);
@@ -148,6 +153,40 @@ public class OrderService {
             enqueueCommand(order, OrderCommandType.PLACE, now, traceId);
         }
         return toResponse(order);
+    }
+
+    private ValidationResult reserveOpeningFunds(PlaceOrderRequest request,
+                                                 long orderId,
+                                                 ValidationResult validation,
+                                                 OrderFeeSnapshot feeSnapshot,
+                                                 Instant now) {
+        if (validation.instrumentType() == InstrumentType.SPOT) {
+            return reserveSpotAssets(request, orderId, validation.instrumentVersion(), feeSnapshot, now);
+        }
+        return reserveInitialMargin(request, orderId, validation.instrumentVersion(), now);
+    }
+
+    private ValidationResult reserveSpotAssets(PlaceOrderRequest request,
+                                               long orderId,
+                                               long instrumentVersion,
+                                               OrderFeeSnapshot feeSnapshot,
+                                               Instant now) {
+        var requirement = spotOrderReservationRepository.requirement(
+                request.symbol(), instrumentVersion, request.side(), request.orderType(), request.priceTicks(),
+                request.quantitySteps(), properties.getRisk().getMarketMaxSlippagePpm(),
+                properties.getRisk().getMarketMaxMarkAgeMs(), feeSnapshot);
+        if (requirement.isEmpty()) {
+            return ValidationResult.reject("spot reservation requirement unavailable", instrumentVersion,
+                    InstrumentType.SPOT);
+        }
+        if (!requirement.get().accepted()) {
+            return ValidationResult.reject(requirement.get().rejectReason(), instrumentVersion, InstrumentType.SPOT);
+        }
+        boolean reserved = spotOrderReservationRepository.reserve(request.userId(), requirement.get().asset(),
+                orderId, request.symbol(), request.side(), requirement.get().reservedUnits(), now);
+        return reserved ? ValidationResult.ok(instrumentVersion, InstrumentType.SPOT)
+                : ValidationResult.reject("insufficient spot available balance", instrumentVersion,
+                InstrumentType.SPOT);
     }
 
     private ValidationResult reserveInitialMargin(PlaceOrderRequest request,
@@ -168,8 +207,9 @@ public class OrderService {
         if (requirement.get().initialMarginUnits() <= 0) {
             return ValidationResult.reject("invalid margin requirement", instrumentVersion);
         }
-        boolean reserved = orderMarginRepository.reserve(request.userId(), requirement.get().asset(), orderId,
-                request.symbol(), request.marginMode(), requirement.get().initialMarginUnits(), now);
+        boolean reserved = orderMarginRepository.reserve(request.userId(), requirement.get().accountType(),
+                requirement.get().asset(), orderId, request.symbol(), request.marginMode(),
+                requirement.get().initialMarginUnits(), now);
         return reserved ? ValidationResult.ok(instrumentVersion)
                 : ValidationResult.reject("insufficient available margin", instrumentVersion);
     }

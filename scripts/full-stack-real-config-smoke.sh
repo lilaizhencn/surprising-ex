@@ -5,15 +5,20 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${COMPOSE_FILE:-${ROOT_DIR}/docker-compose.yml}"
 DB_USER="${DB_USER:-surprising}"
 DB_PASSWORD="${DB_PASSWORD:-surprising}"
-DB_NAME="surprising_exchange"
+DB_NAME="${DB_NAME:-surprising_exchange}"
+SPRING_DATASOURCE_URL="${SPRING_DATASOURCE_URL:-jdbc:postgresql://localhost:5432/${DB_NAME}}"
 RUN_ID="${RUN_ID:-$(date +%s%N)}"
 RUN_SEQ=$((RUN_ID % 1000000000))
 BTC_SYMBOL="BTC-USDT"
 ETH_SYMBOL="ETH-USDT"
+COIN_SYMBOL="BTC-USD"
+SPOT_SYMBOL="BTC-USDT-SPOT"
 BTC_TICK_UNITS=10000000
 ETH_TICK_UNITS=1000000
 BTC_PRICE_TICKS=600000
 ETH_PRICE_TICKS=300000
+COIN_PRICE_TICKS=600000
+SPOT_PRICE_TICKS=600000
 MM_PROVIDER_STRATEGY_ID="btc-usdt-mm-a"
 MM_PROVIDER_USER_A=900001
 MM_PROVIDER_USER_B=900002
@@ -71,6 +76,10 @@ INSURANCE_DEFICIT_USER=$((9805000000 + RUN_SEQ))
 ADL_DEFICIT_USER=$((9806000000 + RUN_SEQ))
 ADL_TARGET_USER=$((9807000000 + RUN_SEQ))
 ADL_OPEN_MAKER_USER=$((9808000000 + RUN_SEQ))
+COIN_MAKER_USER=$((9810000000 + RUN_SEQ))
+COIN_TAKER_USER=$((9811000000 + RUN_SEQ))
+SPOT_SELLER_USER=$((9820000000 + RUN_SEQ))
+SPOT_BUYER_USER=$((9821000000 + RUN_SEQ))
 
 FULL_PRICE_TICKS="${BTC_PRICE_TICKS}"
 PARTIAL_PRICE_TICKS=$((BTC_PRICE_TICKS + 100))
@@ -93,6 +102,9 @@ ISOLATED_QTY=10
 TOPUP_QTY=10
 LIQ_QTY=10
 LIQ_MARK_PRICE_TICKS=160000
+COIN_QTY=10
+COIN_CLOSE_PRICE_TICKS=$((COIN_PRICE_TICKS + 10000))
+SPOT_QTY=2
 
 PROVIDER_NAMES=()
 PROVIDER_PIDS=()
@@ -273,6 +285,19 @@ psql_exec() {
     psql -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 "$@"
 }
 
+ensure_database() {
+  if [[ ! "${DB_NAME}" =~ ^[A-Za-z0-9_]+$ ]]; then
+    echo "DB_NAME must contain only letters, numbers, and underscore: ${DB_NAME}" >&2
+    exit 1
+  fi
+  local exists
+  exists="$(postgres_exec psql -U "${DB_USER}" -d postgres -At \
+    -c "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'")"
+  if [[ "${exists}" != "1" ]]; then
+    postgres_exec createdb -U "${DB_USER}" "${DB_NAME}"
+  fi
+}
+
 query_value() {
   local sql="$1"
   psql_exec -At -c "${sql}"
@@ -321,6 +346,95 @@ DROP SCHEMA IF EXISTS public CASCADE;
 CREATE SCHEMA public;
 SQL
   psql_exec -f - < "${ROOT_DIR}/init.sql" >/dev/null
+}
+
+seed_full_stack_products() {
+  psql_exec <<SQL >/dev/null
+INSERT INTO instruments (
+    symbol, version, instrument_type, contract_type, base_asset, quote_asset, settle_asset,
+    contract_multiplier_ppm, contract_value_asset, price_tick_units, quantity_step_units,
+    min_quantity_steps, max_quantity_steps, min_notional_units, max_notional_units,
+    notional_multiplier_units,
+    price_precision, quantity_precision, supported_order_types, supported_time_in_force,
+    post_only_enabled, reduce_only_enabled, market_order_enabled,
+    max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm,
+    maker_fee_rate_ppm, taker_fee_rate_ppm, max_position_notional_units,
+    user_open_interest_limit_rate_ppm, user_open_interest_limit_floor_units,
+    funding_interval_hours, interest_rate_ppm, funding_rate_cap_ppm, funding_rate_floor_ppm,
+    impact_notional_units, min_valid_index_sources, status, effective_time, created_at, updated_at
+) VALUES
+('${COIN_SYMBOL}', 1, 'PERPETUAL', 'INVERSE_PERPETUAL', 'BTC', 'USD', 'BTC',
+ 1000000, 'USD', ${BTC_TICK_UNITS}, 1, 1, 100000, 1, 1000000000000, 10000000000, 1, 0,
+ 'LIMIT,MARKET', 'GTC,IOC,FOK,GTX', TRUE, TRUE, TRUE,
+ 100000000, 10000, 5000, 200, 500, 1000000000000, 300000, 100000000000, 8, 100, 3000, -3000,
+ 1000000000000, 1, 'TRADING', now(), now(), now()),
+('${SPOT_SYMBOL}', 1, 'SPOT', 'SPOT', 'BTC', 'USDT', 'USDT',
+ 1000000, 'USDT', ${BTC_TICK_UNITS}, 100000, 1, 100000, 500000000, 1000000000000000,
+ 10000, 1, 3, 'LIMIT', 'GTC,IOC,FOK,GTX', TRUE, FALSE, FALSE,
+ 1000000, 1000000, 1000000, 200, 500, 1000000000000000, 0, 1, 8, 0, 0, 0,
+ 1000000000000, 1, 'TRADING', now(), now(), now())
+ON CONFLICT (symbol, version) DO UPDATE SET
+    instrument_type = EXCLUDED.instrument_type,
+    contract_type = EXCLUDED.contract_type,
+    base_asset = EXCLUDED.base_asset,
+    quote_asset = EXCLUDED.quote_asset,
+    settle_asset = EXCLUDED.settle_asset,
+    contract_multiplier_ppm = EXCLUDED.contract_multiplier_ppm,
+    contract_value_asset = EXCLUDED.contract_value_asset,
+    price_tick_units = EXCLUDED.price_tick_units,
+    quantity_step_units = EXCLUDED.quantity_step_units,
+    min_quantity_steps = EXCLUDED.min_quantity_steps,
+    max_quantity_steps = EXCLUDED.max_quantity_steps,
+    min_notional_units = EXCLUDED.min_notional_units,
+    max_notional_units = EXCLUDED.max_notional_units,
+    notional_multiplier_units = EXCLUDED.notional_multiplier_units,
+    price_precision = EXCLUDED.price_precision,
+    quantity_precision = EXCLUDED.quantity_precision,
+    supported_order_types = EXCLUDED.supported_order_types,
+    supported_time_in_force = EXCLUDED.supported_time_in_force,
+    post_only_enabled = EXCLUDED.post_only_enabled,
+    reduce_only_enabled = EXCLUDED.reduce_only_enabled,
+    market_order_enabled = EXCLUDED.market_order_enabled,
+    max_leverage_ppm = EXCLUDED.max_leverage_ppm,
+    initial_margin_rate_ppm = EXCLUDED.initial_margin_rate_ppm,
+    maintenance_margin_rate_ppm = EXCLUDED.maintenance_margin_rate_ppm,
+    maker_fee_rate_ppm = EXCLUDED.maker_fee_rate_ppm,
+    taker_fee_rate_ppm = EXCLUDED.taker_fee_rate_ppm,
+    max_position_notional_units = EXCLUDED.max_position_notional_units,
+    user_open_interest_limit_rate_ppm = EXCLUDED.user_open_interest_limit_rate_ppm,
+    user_open_interest_limit_floor_units = EXCLUDED.user_open_interest_limit_floor_units,
+    funding_interval_hours = EXCLUDED.funding_interval_hours,
+    interest_rate_ppm = EXCLUDED.interest_rate_ppm,
+    funding_rate_cap_ppm = EXCLUDED.funding_rate_cap_ppm,
+    funding_rate_floor_ppm = EXCLUDED.funding_rate_floor_ppm,
+    impact_notional_units = EXCLUDED.impact_notional_units,
+    min_valid_index_sources = EXCLUDED.min_valid_index_sources,
+    status = EXCLUDED.status,
+    effective_time = EXCLUDED.effective_time,
+    updated_at = EXCLUDED.updated_at;
+
+INSERT INTO instrument_current_versions (symbol, version, updated_at)
+VALUES ('${COIN_SYMBOL}', 1, now()), ('${SPOT_SYMBOL}', 1, now())
+ON CONFLICT (symbol) DO UPDATE SET version = EXCLUDED.version, updated_at = EXCLUDED.updated_at;
+
+INSERT INTO instrument_symbol_sequences (symbol, version, updated_at)
+VALUES ('${COIN_SYMBOL}', 1, now()), ('${SPOT_SYMBOL}', 1, now())
+ON CONFLICT (symbol) DO UPDATE SET
+    version = GREATEST(instrument_symbol_sequences.version, EXCLUDED.version),
+    updated_at = EXCLUDED.updated_at;
+
+INSERT INTO instrument_risk_brackets (
+    symbol, version, bracket_no, notional_floor_units, notional_cap_units,
+    max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm
+) VALUES
+('${COIN_SYMBOL}', 1, 1, 0, 1000000000000, 100000000, 10000, 5000)
+ON CONFLICT (symbol, version, bracket_no) DO UPDATE SET
+    notional_floor_units = EXCLUDED.notional_floor_units,
+    notional_cap_units = EXCLUDED.notional_cap_units,
+    max_leverage_ppm = EXCLUDED.max_leverage_ppm,
+    initial_margin_rate_ppm = EXCLUDED.initial_margin_rate_ppm,
+    maintenance_margin_rate_ppm = EXCLUDED.maintenance_margin_rate_ppm;
+SQL
 }
 
 delete_surprising_topics() {
@@ -561,7 +675,11 @@ start_provider() {
     if (( ${#app_args[@]} > 0 )); then
       command+=("${app_args[@]}")
     fi
-    exec "${command[@]}"
+    exec env \
+      "SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}" \
+      "SPRING_DATASOURCE_USERNAME=${DB_USER}" \
+      "SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}" \
+      "${command[@]}"
   ) >"${log_file}" 2>&1 &
   local pid="$!"
   set_provider_pid "${name}" "${pid}"
@@ -657,6 +775,8 @@ SQL
 seed_prices() {
   insert_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" 1001 "${BTC_PRICE_TICKS}"
   insert_mark_price "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" 1001 "${ETH_PRICE_TICKS}"
+  insert_mark_price "${COIN_SYMBOL}" "${BTC_TICK_UNITS}" 1001 "${COIN_PRICE_TICKS}"
+  insert_mark_price "${SPOT_SYMBOL}" "${BTC_TICK_UNITS}" 1001 "${SPOT_PRICE_TICKS}"
 }
 
 refresh_mark_price() {
@@ -667,6 +787,22 @@ refresh_mark_price() {
   insert_mark_price "${symbol}" "${tick_units}" "${NEXT_MARK_SEQUENCE}" "${price_ticks}"
   wait_sql_nonzero "fresh mark price ${symbol}" \
     "SELECT count(*) FROM price_mark_ticks WHERE symbol = '${symbol}' AND event_time >= now() - interval '5 seconds'"
+}
+
+wait_latest_mark_price_between() {
+  local symbol="$1"
+  local tick_units="$2"
+  local min_ticks="$3"
+  local max_ticks="$4"
+  wait_sql_equals "latest mark price ${symbol} between ${min_ticks} and ${max_ticks}" \
+    "SELECT CASE WHEN COALESCE((SELECT ((mark_price_units + ${tick_units} / 2) / ${tick_units}) FROM price_mark_ticks WHERE symbol = '${symbol}' ORDER BY event_time DESC, sequence DESC LIMIT 1), 0) BETWEEN ${min_ticks} AND ${max_ticks} THEN 1 ELSE 0 END" \
+    "1"
+}
+
+latest_mark_price_ticks() {
+  local symbol="$1"
+  local tick_units="$2"
+  query_value "SELECT COALESCE((SELECT ((mark_price_units + ${tick_units} / 2) / ${tick_units}) FROM price_mark_ticks WHERE symbol = '${symbol}' ORDER BY event_time DESC, sequence DESC LIMIT 1), 0)"
 }
 
 publish_mark_price_event() {
@@ -840,6 +976,22 @@ adjust_balance() {
     }" >/dev/null
 }
 
+adjust_product_balance() {
+  local user_id="$1"
+  local account_type="$2"
+  local asset="$3"
+  local amount_units="$4"
+  local reference_id="$5"
+  gateway_post "account/admin/product-balance-adjustments" 1 "real-config-${RUN_ID}-${reference_id}" "{
+      \"userId\": ${user_id},
+      \"accountType\": \"${account_type}\",
+      \"asset\": \"${asset}\",
+      \"amountUnits\": ${amount_units},
+      \"referenceId\": \"${reference_id}\",
+      \"reason\": \"FULL_STACK_REAL_CONFIG_TEST\"
+    }" >/dev/null
+}
+
 adjust_position_margin() {
   local user_id="$1"
   local symbol="$2"
@@ -901,6 +1053,8 @@ run_market_maker_provider_smoke() {
     return
   fi
   echo "Scenario: market-maker provider run-once places post-only quotes"
+  refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
+  wait_latest_mark_price_between "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "$((BTC_PRICE_TICKS * 95 / 100))" "$((BTC_PRICE_TICKS * 105 / 100))"
   gateway_post "market-maker/run-once" 1 "${trace_id}" "{
       \"strategyId\": \"${MM_PROVIDER_STRATEGY_ID}\",
       \"symbol\": \"${BTC_SYMBOL}\"
@@ -954,6 +1108,26 @@ wait_position_symbol() {
 
 wait_position() {
   wait_position_symbol "${BTC_SYMBOL}" "$@"
+}
+
+wait_product_balance() {
+  local user_id="$1"
+  local account_type="$2"
+  local asset="$3"
+  local available="$4"
+  local locked="$5"
+  wait_sql_equals "product balance user=${user_id} type=${account_type} asset=${asset}" \
+    "SELECT COALESCE((SELECT available_units || ':' || locked_units FROM account_product_balances WHERE account_type = '${account_type}' AND user_id = ${user_id} AND asset = '${asset}'), '0:0')" \
+    "${available}:${locked}"
+}
+
+wait_product_locked_zero() {
+  local user_id="$1"
+  local account_type="$2"
+  local asset="$3"
+  wait_sql_equals "product locked balance zero user=${user_id} type=${account_type} asset=${asset}" \
+    "SELECT COALESCE((SELECT locked_units FROM account_product_balances WHERE account_type = '${account_type}' AND user_id = ${user_id} AND asset = '${asset}'), 0)" \
+    "0"
 }
 
 wait_position_symbol_margin() {
@@ -1306,6 +1480,10 @@ fund_users() {
     adjust_balance "$((LOAD_MAKER_START + i))" "${default_deposit}" "real-config-maker-${RUN_ID}-${i}"
     adjust_balance "$((LOAD_TAKER_START + i))" "${default_deposit}" "real-config-taker-${RUN_ID}-${i}"
   done
+  adjust_product_balance "${COIN_MAKER_USER}" "COIN_PERPETUAL" "BTC" 100000000 "real-config-coin-maker-btc-${RUN_ID}"
+  adjust_product_balance "${COIN_TAKER_USER}" "COIN_PERPETUAL" "BTC" 100000000 "real-config-coin-taker-btc-${RUN_ID}"
+  adjust_product_balance "${SPOT_SELLER_USER}" "SPOT" "BTC" 1000000 "real-config-spot-seller-btc-${RUN_ID}"
+  adjust_product_balance "${SPOT_BUYER_USER}" "SPOT" "USDT" 100000000000 "real-config-spot-buyer-usdt-${RUN_ID}"
 }
 
 run_with_concurrency() {
@@ -1330,9 +1508,89 @@ assert_no_negative_balances() {
   wait_sql_equals "no negative account balances" \
     "SELECT count(*) FROM account_balances WHERE available_units < 0 OR locked_units < 0" \
     "0"
+  wait_sql_equals "no negative product balances" \
+    "SELECT count(*) FROM account_product_balances WHERE available_units < 0 OR locked_units < 0" \
+    "0"
   wait_sql_equals "no over-released margin reservations" \
     "SELECT count(*) FROM account_margin_reservations WHERE released_units + position_margin_units > reserved_units" \
     "0"
+  wait_sql_equals "no over-released spot reservations" \
+    "SELECT count(*) FROM account_spot_order_reservations WHERE settled_units + released_units > reserved_units" \
+    "0"
+}
+
+run_coin_perpetual_user_flow() {
+  echo "Scenario: coin-margined perpetual open, reduce-only close, and BTC settlement"
+  refresh_mark_price "${COIN_SYMBOL}" "${BTC_TICK_UNITS}" "${COIN_PRICE_TICKS}"
+  wait_product_balance "${COIN_MAKER_USER}" "COIN_PERPETUAL" "BTC" 100000000 0
+  wait_product_balance "${COIN_TAKER_USER}" "COIN_PERPETUAL" "BTC" 100000000 0
+
+  coin_maker_order="$(place_order_symbol "${COIN_SYMBOL}" "${COIN_MAKER_USER}" "real-coin-maker-open-${RUN_ID}" "SELL" "LIMIT" "GTC" "${COIN_PRICE_TICKS}" "${COIN_QTY}" false false)"
+  wait_order_result "${coin_maker_order}" "SUCCESS"
+  wait_sql_equals "coin maker margin reserved from product account" \
+    "SELECT account_type || ':' || asset FROM account_margin_reservations WHERE order_id = ${coin_maker_order}" \
+    "COIN_PERPETUAL:BTC"
+  coin_taker_order="$(place_order_symbol "${COIN_SYMBOL}" "${COIN_TAKER_USER}" "real-coin-taker-open-${RUN_ID}" "BUY" "LIMIT" "IOC" "${COIN_PRICE_TICKS}" "${COIN_QTY}" false false)"
+  wait_order_state "${coin_maker_order}" "FILLED" "${COIN_QTY}" "0"
+  wait_order_state "${coin_taker_order}" "FILLED" "${COIN_QTY}" "0"
+  wait_position_symbol "${COIN_SYMBOL}" "${COIN_MAKER_USER}" "-${COIN_QTY}" "${COIN_PRICE_TICKS}"
+  wait_position_symbol "${COIN_SYMBOL}" "${COIN_TAKER_USER}" "${COIN_QTY}" "${COIN_PRICE_TICKS}"
+  wait_consumer_group_lag_zero "surprising-risk-v1" "surprising.account.position.events.v1"
+  wait_sql_equals "coin perpetual risk snapshots settle in BTC" \
+    "SELECT count(DISTINCT user_id) FROM risk_account_snapshots WHERE user_id IN (${COIN_MAKER_USER}, ${COIN_TAKER_USER}) AND settle_asset = 'BTC'" \
+    "2"
+
+  refresh_mark_price "${COIN_SYMBOL}" "${BTC_TICK_UNITS}" "${COIN_CLOSE_PRICE_TICKS}"
+  coin_close_maker_order="$(place_order_symbol "${COIN_SYMBOL}" "${COIN_MAKER_USER}" "real-coin-maker-close-${RUN_ID}" "BUY" "LIMIT" "GTC" "${COIN_CLOSE_PRICE_TICKS}" "${COIN_QTY}" true false)"
+  wait_order_result "${coin_close_maker_order}" "SUCCESS"
+  coin_close_taker_order="$(place_order_symbol "${COIN_SYMBOL}" "${COIN_TAKER_USER}" "real-coin-taker-close-${RUN_ID}" "SELL" "LIMIT" "IOC" "${COIN_CLOSE_PRICE_TICKS}" "${COIN_QTY}" true false)"
+  wait_order_state "${coin_close_maker_order}" "FILLED" "${COIN_QTY}" "0"
+  wait_order_state "${coin_close_taker_order}" "FILLED" "${COIN_QTY}" "0"
+  wait_position_symbol "${COIN_SYMBOL}" "${COIN_MAKER_USER}" "0" "0"
+  wait_position_symbol "${COIN_SYMBOL}" "${COIN_TAKER_USER}" "0" "0"
+  wait_product_locked_zero "${COIN_MAKER_USER}" "COIN_PERPETUAL" "BTC"
+  wait_product_locked_zero "${COIN_TAKER_USER}" "COIN_PERPETUAL" "BTC"
+  wait_sql_equals "coin trades processed by account settlement" \
+    "SELECT count(*) FROM account_processed_trades p JOIN trading_match_trades t ON t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.symbol = '${COIN_SYMBOL}' AND t.maker_user_id IN (${COIN_MAKER_USER}, ${COIN_TAKER_USER}) AND t.taker_user_id IN (${COIN_MAKER_USER}, ${COIN_TAKER_USER})" \
+    "2"
+  wait_consumer_group_lag_zero "surprising-risk-v1" "surprising.account.position.events.v1"
+  wait_sql_equals "coin taker latest risk position is flat" \
+    "SELECT signed_quantity_steps || ':' || notional_units || ':' || maintenance_margin_units FROM risk_position_snapshots WHERE user_id = ${COIN_TAKER_USER} AND symbol = '${COIN_SYMBOL}' ORDER BY event_time DESC, snapshot_id DESC LIMIT 1" \
+    "0:0:0"
+}
+
+run_spot_user_flow() {
+  echo "Scenario: spot sell and buy settle product balances without perpetual positions"
+  refresh_mark_price "${SPOT_SYMBOL}" "${BTC_TICK_UNITS}" "${SPOT_PRICE_TICKS}"
+  wait_product_balance "${SPOT_SELLER_USER}" "SPOT" "BTC" 1000000 0
+  wait_product_balance "${SPOT_BUYER_USER}" "SPOT" "USDT" 100000000000 0
+
+  spot_sell_order="$(place_order_symbol "${SPOT_SYMBOL}" "${SPOT_SELLER_USER}" "real-spot-seller-${RUN_ID}" "SELL" "LIMIT" "GTC" "${SPOT_PRICE_TICKS}" "${SPOT_QTY}" false false)"
+  wait_order_result "${spot_sell_order}" "SUCCESS"
+  wait_sql_equals "spot seller reserved base asset" \
+    "SELECT asset FROM account_spot_order_reservations WHERE order_id = ${spot_sell_order}" \
+    "BTC"
+  spot_buy_order="$(place_order_symbol "${SPOT_SYMBOL}" "${SPOT_BUYER_USER}" "real-spot-buyer-${RUN_ID}" "BUY" "LIMIT" "IOC" "${SPOT_PRICE_TICKS}" "${SPOT_QTY}" false false)"
+  wait_order_state "${spot_sell_order}" "FILLED" "${SPOT_QTY}" "0"
+  wait_order_state "${spot_buy_order}" "FILLED" "${SPOT_QTY}" "0"
+  wait_consumer_group_lag_zero "surprising-account-v1" "surprising.perp.match.trades.v1"
+  wait_product_locked_zero "${SPOT_SELLER_USER}" "SPOT" "BTC"
+  wait_product_locked_zero "${SPOT_BUYER_USER}" "SPOT" "USDT"
+  wait_sql_equals "spot buyer received BTC" \
+    "SELECT CASE WHEN COALESCE((SELECT available_units FROM account_product_balances WHERE account_type = 'SPOT' AND user_id = ${SPOT_BUYER_USER} AND asset = 'BTC'), 0) > 0 THEN 1 ELSE 0 END" \
+    "1"
+  wait_sql_equals "spot seller received USDT" \
+    "SELECT CASE WHEN COALESCE((SELECT available_units FROM account_product_balances WHERE account_type = 'SPOT' AND user_id = ${SPOT_SELLER_USER} AND asset = 'USDT'), 0) > 0 THEN 1 ELSE 0 END" \
+    "1"
+  wait_sql_equals "spot orders did not create perpetual positions" \
+    "SELECT count(*) FROM account_positions WHERE symbol = '${SPOT_SYMBOL}' AND user_id IN (${SPOT_SELLER_USER}, ${SPOT_BUYER_USER})" \
+    "0"
+  wait_sql_equals "spot reservations settled" \
+    "SELECT count(*) FROM account_spot_order_reservations WHERE symbol = '${SPOT_SYMBOL}' AND status = 'SETTLED'" \
+    "2"
+  wait_sql_equals "spot trade processed by account settlement" \
+    "SELECT count(*) FROM account_processed_trades p JOIN trading_match_trades t ON t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.symbol = '${SPOT_SYMBOL}' AND t.maker_user_id = ${SPOT_SELLER_USER} AND t.taker_user_id = ${SPOT_BUYER_USER}" \
+    "1"
 }
 
 register_provider "instrument" 9080 "surprising-instrument/surprising-instrument-provider" "surprising-instrument-provider"
@@ -1374,10 +1632,12 @@ fi
 
 wait_until "PostgreSQL" 120 compose_exec postgres pg_isready -U "${DB_USER}"
 wait_until "Kafka" 120 compose_exec kafka kafka-topics.sh --bootstrap-server localhost:9092 --list
+ensure_database
 
 if [[ "${RESET_STATE}" == "true" ]]; then
-  echo "Resetting default database ${DB_NAME}"
+  echo "Resetting database ${DB_NAME}"
   reset_database
+  seed_full_stack_products
   seed_prices
 
   echo "Resetting Kafka topics and local RocksDB state"
@@ -1459,10 +1719,14 @@ wait_ws_subscribed "${WS_FUNDING_LOG}" "funding" 1
 echo "Publishing price inputs through Kafka"
 publish_price_inputs "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" 2001 "${BTC_PRICE_TICKS}"
 publish_price_inputs "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" 2001 "${ETH_PRICE_TICKS}"
+publish_price_inputs "${COIN_SYMBOL}" "${BTC_TICK_UNITS}" 2001 "${COIN_PRICE_TICKS}"
 publish_price_inputs_until_mark_event
 
 echo "Funding users through gateway"
 fund_users
+
+run_coin_perpetual_user_flow
+run_spot_user_flow
 
 echo "Scenario: full fill"
 refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
@@ -1765,15 +2029,15 @@ refresh_mark_price "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" "${LIQ_MARK_PRICE_TICKS}"
 wait_sql_nonzero "liquidation candidate created" \
   "SELECT count(*) FROM risk_liquidation_candidates WHERE user_id = ${LIQ_USER} AND symbol = '${ETH_SYMBOL}'"
 wait_sql_nonzero "liquidation order submitted" \
-  "SELECT count(*) FROM liquidation_orders WHERE user_id = ${LIQ_USER} AND symbol = '${ETH_SYMBOL}' AND status IN ('SUBMITTED', 'PARTIALLY_FILLED', 'FILLED')"
-liq_order_id="$(query_value "SELECT order_id FROM liquidation_orders WHERE user_id = ${LIQ_USER} AND symbol = '${ETH_SYMBOL}' ORDER BY created_at DESC LIMIT 1")"
+  "SELECT count(*) FROM liquidation_orders WHERE user_id = ${LIQ_USER} AND symbol = '${ETH_SYMBOL}' AND order_id > 0 AND status IN ('SUBMITTED', 'PARTIALLY_FILLED', 'FILLED')"
+liq_order_id="$(query_value "SELECT order_id FROM liquidation_orders WHERE user_id = ${LIQ_USER} AND symbol = '${ETH_SYMBOL}' AND order_id > 0 AND status IN ('SUBMITTED', 'PARTIALLY_FILLED', 'FILLED') ORDER BY created_at DESC LIMIT 1")"
 wait_order_state "${liq_order_id}" "FILLED" "${LIQ_QTY}" "0"
 wait_sql_equals "liquidation audit filled" \
   "SELECT status FROM liquidation_orders WHERE order_id = ${liq_order_id}" \
   "FILLED"
 wait_position_symbol "${ETH_SYMBOL}" "${LIQ_USER}" "0" "0"
 wait_sql_equals "liquidation candidate completed" \
-  "SELECT status FROM risk_liquidation_candidates WHERE user_id = ${LIQ_USER} AND symbol = '${ETH_SYMBOL}' ORDER BY event_time DESC LIMIT 1" \
+  "SELECT c.status FROM risk_liquidation_candidates c JOIN liquidation_orders l ON l.candidate_id = c.candidate_id WHERE l.order_id = ${liq_order_id}" \
   "COMPLETED"
 wait_sql_nonzero "insurance covered liquidation or synthetic deficit" \
   "SELECT count(*) FROM insurance_deficit_coverages WHERE asset = 'USDT'"
@@ -1794,13 +2058,22 @@ fund_balance="$(query_value "SELECT COALESCE(balance_units, 0) FROM insurance_fu
 if [[ "${fund_balance}" != "0" ]]; then
   adjust_insurance_fund "-${fund_balance}" "real-config-insurance-drain-${RUN_ID}"
 fi
-  refresh_mark_price "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" "${ETH_PRICE_TICKS}"
-  adl_maker_order="$(place_order_symbol "${ETH_SYMBOL}" "${ADL_OPEN_MAKER_USER}" "real-adl-open-maker-${RUN_ID}" "SELL" "LIMIT" "GTC" "${ETH_PRICE_TICKS}" "${LIQ_QTY}" false false)"
-  wait_order_result "${adl_maker_order}" "SUCCESS"
-  adl_target_order="$(place_order_symbol "${ETH_SYMBOL}" "${ADL_TARGET_USER}" "real-adl-target-long-${RUN_ID}" "BUY" "LIMIT" "IOC" "${ETH_PRICE_TICKS}" "${LIQ_QTY}" false false)"
-  wait_order_state "${adl_target_order}" "FILLED" "${LIQ_QTY}" "0"
-  refresh_mark_price "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" 360000
-  psql_exec <<SQL >/dev/null
+wait_sql_equals "insurance fund drained before ADL" \
+  "SELECT COALESCE((SELECT balance_units FROM insurance_fund_balances WHERE asset = 'USDT'), 0)" \
+  "0"
+adl_latest_mark_ticks="$(latest_mark_price_ticks "${ETH_SYMBOL}" "${ETH_TICK_UNITS}")"
+if ((adl_latest_mark_ticks <= 0)); then
+  echo "No latest ETH mark price available for ADL setup" >&2
+  exit 1
+fi
+adl_entry_price_ticks=$((adl_latest_mark_ticks * 98 / 100))
+adl_maker_order="$(place_order_symbol "${ETH_SYMBOL}" "${ADL_OPEN_MAKER_USER}" "real-adl-open-maker-${RUN_ID}" "SELL" "LIMIT" "GTC" "${adl_entry_price_ticks}" "${LIQ_QTY}" false false)"
+wait_order_result "${adl_maker_order}" "SUCCESS"
+adl_target_order="$(place_order_symbol "${ETH_SYMBOL}" "${ADL_TARGET_USER}" "real-adl-target-long-${RUN_ID}" "BUY" "LIMIT" "IOC" "${adl_entry_price_ticks}" "${LIQ_QTY}" false false)"
+wait_order_state "${adl_target_order}" "FILLED" "${LIQ_QTY}" "0"
+publish_price_inputs "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" 940002 360000
+refresh_mark_price "${ETH_SYMBOL}" "${ETH_TICK_UNITS}" 360000
+psql_exec <<SQL >/dev/null
 INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
 VALUES (${ADL_DEFICIT_USER}, 'USDT', 0, 0, now())
 ON CONFLICT (user_id, asset) DO UPDATE SET available_units = 0, locked_units = 0, updated_at = now();

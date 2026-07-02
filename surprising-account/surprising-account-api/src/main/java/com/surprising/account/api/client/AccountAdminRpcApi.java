@@ -3,6 +3,8 @@ package com.surprising.account.api.client;
 import com.surprising.account.api.AccountApiPaths;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.BalanceResponse;
+import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
+import com.surprising.account.api.model.ProductBalanceResponse;
 import jakarta.validation.Valid;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,4 +19,7 @@ public interface AccountAdminRpcApi {
 
     @PostMapping("/balance-adjustments")
     BalanceResponse adjustBalance(@Valid @RequestBody BalanceAdjustmentRequest request);
+
+    @PostMapping("/product-balance-adjustments")
+    ProductBalanceResponse adjustProductBalance(@Valid @RequestBody ProductBalanceAdjustmentRequest request);
 }

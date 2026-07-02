@@ -45,8 +45,12 @@ CREATE TABLE IF NOT EXISTS instruments (
     updated_at                  TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (symbol, version),
     CONSTRAINT instruments_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
-    CONSTRAINT instruments_type_check CHECK (instrument_type IN ('PERPETUAL')),
-    CONSTRAINT instruments_contract_type_check CHECK (contract_type IN ('LINEAR_PERPETUAL', 'INVERSE_PERPETUAL')),
+    CONSTRAINT instruments_type_check CHECK (instrument_type IN ('SPOT', 'PERPETUAL')),
+    CONSTRAINT instruments_contract_type_check CHECK (contract_type IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL')),
+    CONSTRAINT instruments_product_contract_check CHECK (
+        (instrument_type = 'SPOT' AND contract_type = 'SPOT')
+        OR (instrument_type = 'PERPETUAL' AND contract_type IN ('LINEAR_PERPETUAL', 'INVERSE_PERPETUAL'))
+    ),
     CONSTRAINT instruments_status_check CHECK (status IN ('PRE_TRADING', 'TRADING', 'HALT', 'SETTLING', 'CLOSED')),
     CONSTRAINT instruments_positive_values CHECK (
         contract_multiplier_ppm > 0
@@ -508,6 +512,7 @@ CREATE SEQUENCE IF NOT EXISTS trading_event_seq AS BIGINT START WITH 1 INCREMENT
 CREATE SEQUENCE IF NOT EXISTS trading_command_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_outbox_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_margin_reservation_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+CREATE SEQUENCE IF NOT EXISTS trading_spot_reservation_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_fee_schedule_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 CREATE SEQUENCE IF NOT EXISTS trading_match_trade_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_orderbook_depth_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
@@ -1065,6 +1070,98 @@ CREATE TABLE IF NOT EXISTS account_balances (
 CREATE INDEX IF NOT EXISTS account_balances_user_idx
     ON account_balances (user_id);
 
+CREATE TABLE IF NOT EXISTS account_product_balances (
+    account_type        TEXT NOT NULL,
+    user_id             BIGINT NOT NULL,
+    asset               TEXT NOT NULL,
+    available_units     BIGINT NOT NULL DEFAULT 0,
+    locked_units        BIGINT NOT NULL DEFAULT 0,
+    updated_at          TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (account_type, user_id, asset),
+    CONSTRAINT account_product_balances_type_check CHECK (
+        account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL')
+    ),
+    CONSTRAINT account_product_balances_user_positive CHECK (user_id > 0),
+    CONSTRAINT account_product_balances_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
+    CONSTRAINT account_product_balances_non_negative CHECK (available_units >= 0 AND locked_units >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS account_product_balances_user_idx
+    ON account_product_balances (user_id, account_type);
+
+CREATE TABLE IF NOT EXISTS account_product_deficits (
+    account_type        TEXT NOT NULL,
+    user_id             BIGINT NOT NULL,
+    asset               TEXT NOT NULL,
+    deficit_units       BIGINT NOT NULL DEFAULT 0,
+    updated_at          TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (account_type, user_id, asset),
+    CONSTRAINT account_product_deficits_type_check CHECK (
+        account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL')
+    ),
+    CONSTRAINT account_product_deficits_user_positive CHECK (user_id > 0),
+    CONSTRAINT account_product_deficits_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
+    CONSTRAINT account_product_deficits_non_negative CHECK (deficit_units >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS account_product_deficits_user_idx
+    ON account_product_deficits (user_id, account_type);
+
+CREATE TABLE IF NOT EXISTS account_product_ledger_entries (
+    entry_id            BIGINT PRIMARY KEY,
+    user_id             BIGINT NOT NULL,
+    account_type        TEXT NOT NULL,
+    asset               TEXT NOT NULL,
+    amount_units        BIGINT NOT NULL,
+    balance_after_units BIGINT NOT NULL,
+    reference_type      TEXT NOT NULL,
+    reference_id        TEXT NOT NULL,
+    reason              TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT account_product_ledger_type_check CHECK (
+        account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL')
+    ),
+    CONSTRAINT account_product_ledger_user_positive CHECK (user_id > 0),
+    CONSTRAINT account_product_ledger_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
+    CONSTRAINT account_product_ledger_amount_non_zero CHECK (amount_units <> 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS account_product_ledger_reference_uidx
+    ON account_product_ledger_entries (reference_type, reference_id, user_id, account_type, asset);
+
+CREATE INDEX IF NOT EXISTS account_product_ledger_user_time_idx
+    ON account_product_ledger_entries (user_id, account_type, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS account_product_transfers (
+    transfer_id         BIGINT PRIMARY KEY,
+    user_id             BIGINT NOT NULL,
+    source_account_type TEXT NOT NULL,
+    target_account_type TEXT NOT NULL,
+    asset               TEXT NOT NULL,
+    amount_units        BIGINT NOT NULL,
+    reference_id        TEXT NOT NULL,
+    status              TEXT NOT NULL,
+    reason              TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT account_product_transfers_type_check CHECK (
+        source_account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL')
+        AND target_account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL')
+        AND source_account_type <> target_account_type
+    ),
+    CONSTRAINT account_product_transfers_user_positive CHECK (user_id > 0),
+    CONSTRAINT account_product_transfers_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
+    CONSTRAINT account_product_transfers_amount_positive CHECK (amount_units > 0),
+    CONSTRAINT account_product_transfers_reference_present CHECK (length(reference_id) > 0),
+    CONSTRAINT account_product_transfers_status_check CHECK (status IN ('COMPLETED'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS account_product_transfers_reference_uidx
+    ON account_product_transfers (user_id, reference_id);
+
+CREATE INDEX IF NOT EXISTS account_product_transfers_user_time_idx
+    ON account_product_transfers (user_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS account_deficits (
     user_id             BIGINT NOT NULL,
     asset               TEXT NOT NULL,
@@ -1124,6 +1221,7 @@ CREATE INDEX IF NOT EXISTS account_ledger_liquidation_fee_order_idx
 
 CREATE TABLE IF NOT EXISTS account_margin_reservations (
     reservation_id      BIGINT PRIMARY KEY,
+    account_type        TEXT NOT NULL DEFAULT 'USDT_PERPETUAL',
     user_id             BIGINT NOT NULL,
     asset               TEXT NOT NULL,
     order_id            BIGINT NOT NULL UNIQUE,
@@ -1136,6 +1234,9 @@ CREATE TABLE IF NOT EXISTS account_margin_reservations (
     reason              TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT account_margin_reservations_type_check CHECK (
+        account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL')
+    ),
     CONSTRAINT account_margin_reservations_user_positive CHECK (user_id > 0),
     CONSTRAINT account_margin_reservations_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT account_margin_reservations_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
@@ -1158,6 +1259,43 @@ CREATE INDEX IF NOT EXISTS account_margin_reservations_user_idx
 
 CREATE INDEX IF NOT EXISTS account_margin_reservations_symbol_idx
     ON account_margin_reservations (symbol, status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS account_spot_order_reservations (
+    reservation_id      BIGINT PRIMARY KEY,
+    order_id            BIGINT NOT NULL UNIQUE,
+    user_id             BIGINT NOT NULL,
+    symbol              TEXT NOT NULL,
+    side                TEXT NOT NULL,
+    asset               TEXT NOT NULL,
+    reserved_units      BIGINT NOT NULL,
+    settled_units       BIGINT NOT NULL DEFAULT 0,
+    released_units      BIGINT NOT NULL DEFAULT 0,
+    status              TEXT NOT NULL,
+    reason              TEXT,
+    created_at          TIMESTAMPTZ NOT NULL,
+    updated_at          TIMESTAMPTZ NOT NULL,
+    CONSTRAINT account_spot_reservations_user_positive CHECK (user_id > 0),
+    CONSTRAINT account_spot_reservations_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT account_spot_reservations_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
+    CONSTRAINT account_spot_reservations_side_check CHECK (side IN ('BUY', 'SELL')),
+    CONSTRAINT account_spot_reservations_non_negative CHECK (
+        reserved_units > 0
+        AND settled_units >= 0
+        AND released_units >= 0
+        AND settled_units + released_units <= reserved_units
+    ),
+    CONSTRAINT account_spot_reservations_status_check CHECK (
+        status IN ('ACTIVE', 'PARTIALLY_SETTLED', 'PARTIALLY_RELEASED', 'SETTLED', 'RELEASED')
+    ),
+    CONSTRAINT account_spot_reservations_order_fk
+        FOREIGN KEY (order_id) REFERENCES trading_orders(order_id)
+);
+
+CREATE INDEX IF NOT EXISTS account_spot_reservations_user_idx
+    ON account_spot_order_reservations (user_id, status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS account_spot_reservations_symbol_idx
+    ON account_spot_order_reservations (symbol, status, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS account_position_margins (
     user_id             BIGINT NOT NULL,

@@ -17,6 +17,8 @@ import org.springframework.stereotype.Repository;
 public class OrderMarginRepository {
 
     private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);
+    private static final String USDT_PERPETUAL = "USDT_PERPETUAL";
+    private static final String COIN_PERPETUAL = "COIN_PERPETUAL";
 
     private final JdbcTemplate jdbcTemplate;
     private final OrderRepository orderRepository;
@@ -93,6 +95,7 @@ public class OrderMarginRepository {
             long markTicks = rs.getLong("mark_ticks");
             Long nullableMarkTicks = rs.wasNull() ? null : markTicks;
             ContractType contractType = ContractType.valueOf(rs.getString("contract_type"));
+            String accountType = accountType(contractType);
             long notionalMultiplierUnits = rs.getLong("notional_multiplier_units");
             long priceTickUnits = rs.getLong("price_tick_units");
             long settleScaleUnits = rs.getLong("settle_scale_units");
@@ -114,12 +117,12 @@ public class OrderMarginRepository {
                     priceTickUnits, settleScaleUnits, openInterestLimitRatePpm, openInterestLimitFloorUnits,
                     maxPositionNotionalUnits);
             if (projectedPositionNotionalUnits > maxPositionNotionalUnits) {
-                return new MarginRequirement(rs.getString("asset"), 0L,
+                return new MarginRequirement(accountType, rs.getString("asset"), 0L,
                         "position notional exceeds instrument limit", configuredLeveragePpm == null ? 0L : configuredLeveragePpm,
                         instrumentMaxLeveragePpm, instrumentInitialMarginRatePpm);
             }
             if (projectedPositionNotionalUnits > dynamicPositionLimitUnits) {
-                return new MarginRequirement(rs.getString("asset"), 0L,
+                return new MarginRequirement(accountType, rs.getString("asset"), 0L,
                         "position notional exceeds open interest limit", configuredLeveragePpm == null ? 0L : configuredLeveragePpm,
                         instrumentMaxLeveragePpm, instrumentInitialMarginRatePpm);
             }
@@ -128,12 +131,12 @@ public class OrderMarginRepository {
                     .orElse(new RiskBracket(instrumentMaxLeveragePpm, instrumentInitialMarginRatePpm,
                             maxPositionNotionalUnits));
             if (projectedPositionNotionalUnits > bracket.notionalCapUnits()) {
-                return new MarginRequirement(rs.getString("asset"), 0L,
+                return new MarginRequirement(accountType, rs.getString("asset"), 0L,
                         "position notional exceeds risk bracket", configuredLeveragePpm == null ? 0L : configuredLeveragePpm,
                         bracket.maxLeveragePpm(), bracket.initialMarginRatePpm());
             }
             if (configuredLeveragePpm != null && configuredLeveragePpm > bracket.maxLeveragePpm()) {
-                return new MarginRequirement(rs.getString("asset"), 0L,
+                return new MarginRequirement(accountType, rs.getString("asset"), 0L,
                         "leverage exceeds risk limit", configuredLeveragePpm, bracket.maxLeveragePpm(),
                         bracket.initialMarginRatePpm());
             }
@@ -154,7 +157,7 @@ public class OrderMarginRepository {
                     priceTickUnits,
                     settleScaleUnits,
                     effectiveInitialMarginRatePpm);
-            return new MarginRequirement(rs.getString("asset"), initialMarginUnits, null,
+            return new MarginRequirement(accountType, rs.getString("asset"), initialMarginUnits, null,
                     selectedLeveragePpm, bracket.maxLeveragePpm(), effectiveInitialMarginRatePpm);
         }, userId, MarginMode.defaultIfNull(marginMode).name(), userId, MarginMode.defaultIfNull(marginMode).name(),
                 userId, MarginMode.defaultIfNull(marginMode).name(), side.name(),
@@ -221,9 +224,37 @@ public class OrderMarginRepository {
                            MarginMode marginMode,
                            long amountUnits,
                            Instant now) {
+        return reserve(userId, USDT_PERPETUAL, asset, orderId, symbol, marginMode, amountUnits, now);
+    }
+
+    public boolean reserve(long userId,
+                           String accountType,
+                           String asset,
+                           long orderId,
+                           String symbol,
+                           MarginMode marginMode,
+                           long amountUnits,
+                           Instant now) {
         if (amountUnits <= 0) {
             return true;
         }
+        String normalizedAccountType = normalizePerpetualAccountType(accountType);
+        if (COIN_PERPETUAL.equals(normalizedAccountType)) {
+            return reserveProductMargin(userId, normalizedAccountType, asset, orderId, symbol, marginMode,
+                    amountUnits, now);
+        }
+        return reserveLegacyMargin(userId, normalizedAccountType, asset, orderId, symbol, marginMode, amountUnits,
+                now);
+    }
+
+    private boolean reserveLegacyMargin(long userId,
+                                        String accountType,
+                                        String asset,
+                                        long orderId,
+                                        String symbol,
+                                        MarginMode marginMode,
+                                        long amountUnits,
+                                        Instant now) {
         jdbcTemplate.update("""
                 INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
                 VALUES (?, ?, 0, 0, ?)
@@ -242,12 +273,12 @@ public class OrderMarginRepository {
         long reservationId = orderRepository.nextSequence("margin-reservation");
         int rows = jdbcTemplate.update("""
                 INSERT INTO account_margin_reservations (
-                    reservation_id, user_id, asset, order_id, symbol,
+                    reservation_id, account_type, user_id, asset, order_id, symbol,
                     margin_mode, reserved_units, released_units, status, reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
                 ON CONFLICT (order_id) DO NOTHING
-                """, reservationId, userId, asset, orderId, symbol, MarginMode.defaultIfNull(marginMode).name(),
-                amountUnits,
+                """, reservationId, accountType, userId, asset, orderId, symbol,
+                MarginMode.defaultIfNull(marginMode).name(), amountUnits,
                 Timestamp.from(now), Timestamp.from(now));
         if (rows != 1) {
             throw new IllegalStateException("failed to insert margin reservation for order " + orderId);
@@ -264,6 +295,76 @@ public class OrderMarginRepository {
             throw new IllegalStateException("failed to reserve order margin for order " + orderId);
         }
         return true;
+    }
+
+    private boolean reserveProductMargin(long userId,
+                                         String accountType,
+                                         String asset,
+                                         long orderId,
+                                         String symbol,
+                                         MarginMode marginMode,
+                                         long amountUnits,
+                                         Instant now) {
+        jdbcTemplate.update("""
+                INSERT INTO account_product_balances (
+                    account_type, user_id, asset, available_units, locked_units, updated_at
+                ) VALUES (?, ?, ?, 0, 0, ?)
+                ON CONFLICT (account_type, user_id, asset) DO NOTHING
+                """, accountType, userId, asset, Timestamp.from(now));
+        var balance = jdbcTemplate.query("""
+                SELECT available_units, locked_units
+                  FROM account_product_balances
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                 FOR UPDATE
+                """, (rs, rowNum) -> new long[] {rs.getLong("available_units"), rs.getLong("locked_units")},
+                accountType, userId, asset).stream().findFirst().orElse(new long[] {0L, 0L});
+        if (balance[0] < amountUnits) {
+            return false;
+        }
+        long reservationId = orderRepository.nextSequence("margin-reservation");
+        int rows = jdbcTemplate.update("""
+                INSERT INTO account_margin_reservations (
+                    reservation_id, account_type, user_id, asset, order_id, symbol,
+                    margin_mode, reserved_units, released_units, status, reason, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
+                ON CONFLICT (order_id) DO NOTHING
+                """, reservationId, accountType, userId, asset, orderId, symbol,
+                MarginMode.defaultIfNull(marginMode).name(), amountUnits,
+                Timestamp.from(now), Timestamp.from(now));
+        if (rows != 1) {
+            throw new IllegalStateException("failed to insert margin reservation for order " + orderId);
+        }
+        rows = jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET available_units = available_units - ?,
+                       locked_units = locked_units + ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                   AND available_units >= ?
+                """, amountUnits, amountUnits, Timestamp.from(now), accountType, userId, asset, amountUnits);
+        if (rows != 1) {
+            throw new IllegalStateException("failed to reserve order margin for order " + orderId);
+        }
+        return true;
+    }
+
+    private String accountType(ContractType contractType) {
+        return contractType == ContractType.INVERSE_PERPETUAL ? COIN_PERPETUAL : USDT_PERPETUAL;
+    }
+
+    private String normalizePerpetualAccountType(String accountType) {
+        if (accountType == null || accountType.isBlank()) {
+            return USDT_PERPETUAL;
+        }
+        String normalized = accountType.trim().toUpperCase();
+        if (!USDT_PERPETUAL.equals(normalized) && !COIN_PERPETUAL.equals(normalized)) {
+            throw new IllegalArgumentException("invalid perpetual account type: " + accountType);
+        }
+        return normalized;
     }
 
     private Optional<RiskBracket> riskBracket(String symbol, long instrumentVersion, long notionalUnits) {

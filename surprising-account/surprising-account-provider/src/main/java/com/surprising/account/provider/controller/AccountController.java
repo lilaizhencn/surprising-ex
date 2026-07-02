@@ -1,6 +1,7 @@
 package com.surprising.account.provider.controller;
 
 import com.surprising.account.api.AccountApiPaths;
+import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
@@ -9,6 +10,11 @@ import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
 import com.surprising.account.api.model.PositionMarginResponse;
 import com.surprising.account.api.model.PositionQueryResponse;
 import com.surprising.account.api.model.PositionResponse;
+import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
+import com.surprising.account.api.model.ProductBalanceQueryResponse;
+import com.surprising.account.api.model.ProductBalanceResponse;
+import com.surprising.account.api.model.ProductTransferRequest;
+import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.provider.service.AccountService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,6 +42,17 @@ public class AccountController {
         }
     }
 
+    @PostMapping(AccountApiPaths.ACCOUNT_ADMIN_BASE_PATH + "/product-balance-adjustments")
+    public ProductBalanceResponse adjustProductBalance(@RequestBody ProductBalanceAdjustmentRequest request) {
+        try {
+            return accountService.adjustProductBalance(request);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        }
+    }
+
     @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/balance")
     public BalanceResponse balance(@RequestParam("userId") long userId,
                                    @RequestParam("asset") String asset) {
@@ -49,6 +66,39 @@ public class AccountController {
     @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/balances")
     public BalanceQueryResponse balances(@RequestParam("userId") long userId) {
         return accountService.balances(userId);
+    }
+
+    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/product-balance")
+    public ProductBalanceResponse productBalance(@RequestParam("userId") long userId,
+                                                 @RequestParam("accountType") AccountType accountType,
+                                                 @RequestParam("asset") String asset) {
+        try {
+            return accountService.productBalance(userId, accountType, asset);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
+    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/product-balances")
+    public ProductBalanceQueryResponse productBalances(@RequestParam("userId") long userId,
+                                                       @RequestParam(value = "accountType", required = false)
+                                                       AccountType accountType) {
+        try {
+            return accountService.productBalances(userId, accountType);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
+    @PostMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/transfers")
+    public ProductTransferResponse transfer(@RequestBody ProductTransferRequest request) {
+        try {
+            return accountService.transfer(request);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        }
     }
 
     @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position")

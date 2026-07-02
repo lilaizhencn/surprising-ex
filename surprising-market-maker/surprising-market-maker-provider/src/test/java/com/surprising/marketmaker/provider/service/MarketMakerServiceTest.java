@@ -3,6 +3,7 @@ package com.surprising.marketmaker.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.account.api.client.AccountRpcApi;
+import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
@@ -10,6 +11,10 @@ import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
 import com.surprising.account.api.model.PositionMarginResponse;
 import com.surprising.account.api.model.PositionQueryResponse;
 import com.surprising.account.api.model.PositionResponse;
+import com.surprising.account.api.model.ProductBalanceQueryResponse;
+import com.surprising.account.api.model.ProductBalanceResponse;
+import com.surprising.account.api.model.ProductTransferRequest;
+import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.instrument.api.client.InstrumentRpcApi;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentQueryResponse;
@@ -254,6 +259,21 @@ class MarketMakerServiceTest {
 
         @Override
         public BalanceQueryResponse balances(long userId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ProductBalanceResponse productBalance(long userId, AccountType accountType, String asset) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ProductBalanceQueryResponse productBalances(long userId, AccountType accountType) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ProductTransferResponse transfer(ProductTransferRequest request) {
             throw new UnsupportedOperationException();
         }
 

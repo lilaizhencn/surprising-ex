@@ -3,8 +3,10 @@ package com.surprising.trading.matching.service;
 import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.StoredOutboxRecord;
 import com.surprising.trading.matching.repository.MatchingOutboxRepository;
+import java.util.Comparator;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +23,7 @@ public class MatchingOutboxPublisher {
     private final MatchingProperties properties;
     private final MatchingOutboxRepository outboxRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
+    private final AtomicBoolean publishing = new AtomicBoolean(false);
 
     public MatchingOutboxPublisher(MatchingProperties properties,
                                    MatchingOutboxRepository outboxRepository,
@@ -32,17 +35,29 @@ public class MatchingOutboxPublisher {
 
     @Scheduled(fixedDelayString = "${surprising.trading.matching.outbox.publish-delay-ms:100}")
     public void publishPending() {
-        int remaining = properties.getOutbox().getBatchSize();
-        while (remaining > 0) {
-            Instant now = Instant.now();
-            var rows = outboxRepository.claimPending(remaining, now.plus(CLAIM_LEASE), now);
-            if (rows.isEmpty()) {
-                return;
+        if (!publishing.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            int remaining = properties.getOutbox().getBatchSize();
+            while (remaining > 0) {
+                Instant now = Instant.now();
+                var rows = outboxRepository.claimPending(remaining, now.plus(CLAIM_LEASE), now)
+                        .stream()
+                        .sorted(Comparator.comparing(StoredOutboxRecord::topic)
+                                .thenComparing(StoredOutboxRecord::eventKey)
+                                .thenComparingLong(StoredOutboxRecord::id))
+                        .toList();
+                if (rows.isEmpty()) {
+                    return;
+                }
+                for (var row : rows) {
+                    publish(row);
+                }
+                remaining -= rows.size();
             }
-            for (var row : rows) {
-                publish(row);
-            }
-            remaining -= rows.size();
+        } finally {
+            publishing.set(false);
         }
     }
 

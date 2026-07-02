@@ -104,10 +104,10 @@ public final class OrderMarginMath {
         return priceTicks;
     }
 
-    static long lowerBoundPriceTicks(OrderType orderType,
-                                     long priceTicks,
-                                     Long markPriceTicks,
-                                     long marketMaxSlippagePpm) {
+    public static long lowerBoundPriceTicks(OrderType orderType,
+                                            long priceTicks,
+                                            Long markPriceTicks,
+                                            long marketMaxSlippagePpm) {
         if (orderType != OrderType.MARKET) {
             requirePositive(priceTicks, "priceTicks");
             return priceTicks;
@@ -118,10 +118,10 @@ public final class OrderMarginMath {
                 big(markPriceTicks).multiply(big(1_000_000L - slippagePpm)), PPM));
     }
 
-    static long upperBoundPriceTicks(OrderType orderType,
-                                     long priceTicks,
-                                     Long markPriceTicks,
-                                     long marketMaxSlippagePpm) {
+    public static long upperBoundPriceTicks(OrderType orderType,
+                                            long priceTicks,
+                                            Long markPriceTicks,
+                                            long marketMaxSlippagePpm) {
         if (orderType != OrderType.MARKET) {
             requirePositive(priceTicks, "priceTicks");
             return priceTicks;

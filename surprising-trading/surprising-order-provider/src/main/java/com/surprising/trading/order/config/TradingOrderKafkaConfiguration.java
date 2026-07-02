@@ -23,7 +23,7 @@ public class TradingOrderKafkaConfiguration {
         config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         config.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
         config.put(ProducerConfig.LINGER_MS_CONFIG, 5);
-        config.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
+        config.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);
         return new DefaultKafkaProducerFactory<>(config);
     }
 

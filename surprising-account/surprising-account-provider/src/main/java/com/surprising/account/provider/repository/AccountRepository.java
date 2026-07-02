@@ -1,6 +1,9 @@
 package com.surprising.account.provider.repository;
 
 import com.surprising.account.api.model.BalanceResponse;
+import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.ProductBalanceResponse;
+import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
 import com.surprising.account.api.model.PositionMarginResponse;
 import com.surprising.account.api.model.PositionResponse;
@@ -11,10 +14,13 @@ import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.account.provider.model.LiquidationFeeSettlement;
 import com.surprising.account.provider.model.OrderFeeSnapshot;
 import com.surprising.account.provider.model.PositionState;
+import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.account.provider.service.MarginTransferMath;
 import com.surprising.account.provider.service.PnlSettlementMath;
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.OrderSide;
 import java.math.BigInteger;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -72,6 +78,157 @@ public class AccountRepository {
                 rs.getLong("locked_units"),
                 rs.getLong("equity_units"),
                 rs.getTimestamp("updated_at").toInstant()), userId);
+    }
+
+    public Optional<ProductBalanceResponse> productBalance(long userId, AccountType accountType, String asset) {
+        AccountType normalizedType = requireAccountType(accountType);
+        if (isLegacyPerpetualAccount(normalizedType)) {
+            return balance(userId, asset).map(balance -> toProductBalance(normalizedType, balance));
+        }
+        return jdbcTemplate.query("""
+                SELECT user_id, account_type, asset, available_units, locked_units,
+                       available_units + locked_units - COALESCE(d.deficit_units, 0) AS equity_units,
+                       b.updated_at
+                  FROM account_product_balances b
+                  LEFT JOIN account_product_deficits d USING (account_type, user_id, asset)
+                 WHERE b.user_id = ?
+                   AND b.account_type = ?
+                   AND b.asset = ?
+                """, (rs, rowNum) -> new ProductBalanceResponse(
+                rs.getLong("user_id"),
+                AccountType.valueOf(rs.getString("account_type")),
+                rs.getString("asset"),
+                rs.getLong("available_units"),
+                rs.getLong("locked_units"),
+                rs.getLong("equity_units"),
+                rs.getTimestamp("updated_at").toInstant()), userId, normalizedType.name(), asset)
+                .stream().findFirst();
+    }
+
+    public List<ProductBalanceResponse> productBalances(long userId, AccountType accountType) {
+        if (accountType != null && isLegacyPerpetualAccount(accountType)) {
+            return balances(userId).stream()
+                    .map(balance -> toProductBalance(accountType, balance))
+                    .toList();
+        }
+        if (accountType != null) {
+            return productBalancesFromTable(userId, accountType);
+        }
+        List<ProductBalanceResponse> legacyBalances = balances(userId).stream()
+                .map(balance -> toProductBalance(AccountType.USDT_PERPETUAL, balance))
+                .toList();
+        List<ProductBalanceResponse> isolatedBalances = productBalancesFromTable(userId, null);
+        return java.util.stream.Stream.concat(legacyBalances.stream(), isolatedBalances.stream())
+                .toList();
+    }
+
+    private List<ProductBalanceResponse> productBalancesFromTable(long userId, AccountType accountType) {
+        String normalizedType = accountType == null ? null : accountType.name();
+        return jdbcTemplate.query("""
+                SELECT user_id, account_type, asset, available_units, locked_units,
+                       available_units + locked_units - COALESCE(d.deficit_units, 0) AS equity_units,
+                       b.updated_at
+                  FROM account_product_balances b
+                  LEFT JOIN account_product_deficits d USING (account_type, user_id, asset)
+                 WHERE b.user_id = ?
+                   AND (? IS NULL OR b.account_type = ?)
+                   AND (? IS NOT NULL OR b.account_type <> 'USDT_PERPETUAL')
+                 ORDER BY account_type ASC, asset ASC
+                """, (rs, rowNum) -> new ProductBalanceResponse(
+                rs.getLong("user_id"),
+                AccountType.valueOf(rs.getString("account_type")),
+                rs.getString("asset"),
+                rs.getLong("available_units"),
+                rs.getLong("locked_units"),
+                rs.getLong("equity_units"),
+                rs.getTimestamp("updated_at").toInstant()), userId, normalizedType, normalizedType, normalizedType);
+    }
+
+    public ProductBalanceResponse adjustProductBalance(long userId,
+                                                       AccountType accountType,
+                                                       String asset,
+                                                       long amountUnits,
+                                                       String referenceId,
+                                                       String reason) {
+        AccountType normalizedType = requireAccountType(accountType);
+        if (isLegacyPerpetualAccount(normalizedType)) {
+            BalanceResponse updated = adjustBalance(userId, asset, amountUnits,
+                    normalizedType.name() + ":" + referenceId, reason);
+            return toProductBalance(normalizedType, updated);
+        }
+        Instant now = Instant.now();
+        int ledgerRows = jdbcTemplate.update("""
+                INSERT INTO account_product_ledger_entries (
+                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, 0, 'PRODUCT_BALANCE_ADJUSTMENT', ?, ?, ?)
+                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
+                """, sequenceRepository.nextSequence("product-ledger-entry"), userId, normalizedType.name(), asset,
+                amountUnits, referenceId, reason, Timestamp.from(now));
+        if (ledgerRows == 0) {
+            requireDuplicateProductBalanceAdjustmentMatches(userId, normalizedType, asset, amountUnits, referenceId,
+                    reason);
+            return productBalance(userId, normalizedType, asset)
+                    .orElseThrow(() -> new IllegalStateException("duplicate product adjustment but balance missing"));
+        }
+        long nextAvailable = applyProductAvailableDelta(userId, normalizedType, asset, amountUnits, now);
+        int ledgerRowsAfter = jdbcTemplate.update("""
+                UPDATE account_product_ledger_entries
+                   SET balance_after_units = ?
+                 WHERE reference_type = 'PRODUCT_BALANCE_ADJUSTMENT'
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND account_type = ?
+                   AND asset = ?
+                """, nextAvailable, referenceId, userId, normalizedType.name(), asset);
+        requireSingleRow(ledgerRowsAfter, "product balance adjustment ledger update");
+        return productBalance(userId, normalizedType, asset)
+                .orElseThrow(() -> new IllegalStateException("product balance not found after adjustment"));
+    }
+
+    public ProductTransferResponse transferProductBalance(long userId,
+                                                          AccountType sourceAccountType,
+                                                          AccountType targetAccountType,
+                                                          String asset,
+                                                          long amountUnits,
+                                                          String referenceId,
+                                                          String reason) {
+        AccountType source = requireAccountType(sourceAccountType);
+        AccountType target = requireAccountType(targetAccountType);
+        if (source == target) {
+            throw new IllegalArgumentException("source and target account types must be different");
+        }
+        if (amountUnits <= 0) {
+            throw new IllegalArgumentException("amountUnits must be positive");
+        }
+        Instant now = Instant.now();
+        long transferId = sequenceRepository.nextSequence("product-transfer");
+        int rows = jdbcTemplate.update("""
+                INSERT INTO account_product_transfers (
+                    transfer_id, user_id, source_account_type, target_account_type, asset,
+                    amount_units, reference_id, status, reason, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?)
+                ON CONFLICT (user_id, reference_id) DO NOTHING
+                """, transferId, userId, source.name(), target.name(), asset, amountUnits, referenceId, reason,
+                Timestamp.from(now), Timestamp.from(now));
+        if (rows == 0) {
+            return duplicateProductTransfer(userId, source, target, asset, amountUnits, referenceId, reason);
+        }
+
+        long sourceAfter = applyProductAvailableDelta(userId, source, asset, Math.negateExact(amountUnits), now);
+        long targetAfter = applyProductAvailableDelta(userId, target, asset, amountUnits, now);
+        insertProductTransferLedger(userId, source, asset, Math.negateExact(amountUnits), sourceAfter,
+                referenceId + ":OUT", reason, now);
+        insertProductTransferLedger(userId, target, asset, amountUnits, targetAfter,
+                referenceId + ":IN", reason, now);
+
+        return new ProductTransferResponse(transferId, userId, source, target, asset, amountUnits, referenceId,
+                "COMPLETED",
+                productBalance(userId, source, asset)
+                        .orElseThrow(() -> new IllegalStateException("source balance missing after transfer")),
+                productBalance(userId, target, asset)
+                        .orElseThrow(() -> new IllegalStateException("target balance missing after transfer")),
+                now);
     }
 
     public BalanceResponse adjustBalance(long userId, String asset, long amountUnits, String referenceId, String reason) {
@@ -613,6 +770,36 @@ public class AccountRepository {
                         + symbol + " version " + instrumentVersion));
     }
 
+    public InstrumentType instrumentType(String symbol, long instrumentVersion) {
+        return jdbcTemplate.query("""
+                SELECT instrument_type
+                  FROM instruments
+                 WHERE symbol = ?
+                   AND version = ?
+                """, (rs, rowNum) -> InstrumentType.valueOf(rs.getString("instrument_type")),
+                symbol, instrumentVersion).stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("instrument type not found for "
+                        + symbol + " version " + instrumentVersion));
+    }
+
+    public SpotInstrumentSpec spotInstrumentSpec(String symbol, long instrumentVersion) {
+        return jdbcTemplate.query("""
+                SELECT version, base_asset, quote_asset, quantity_step_units, notional_multiplier_units
+                  FROM instruments
+                 WHERE symbol = ?
+                   AND version = ?
+                   AND instrument_type = 'SPOT'
+                   AND contract_type = 'SPOT'
+                """, (rs, rowNum) -> new SpotInstrumentSpec(
+                rs.getLong("version"),
+                rs.getString("base_asset"),
+                rs.getString("quote_asset"),
+                rs.getLong("quantity_step_units"),
+                rs.getLong("notional_multiplier_units")), symbol, instrumentVersion).stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("spot instrument spec not found for "
+                        + symbol + " version " + instrumentVersion));
+    }
+
     public OrderFeeSnapshot orderFeeSnapshot(long orderId, long userId, String symbol) {
         return jdbcTemplate.query("""
                 SELECT maker_fee_rate_ppm,
@@ -660,29 +847,53 @@ public class AccountRepository {
                                   MarginMode marginMode,
                                   long realizedPnlDeltaUnits,
                                   Instant now) {
+        settleRealizedPnl(AccountType.USDT_PERPETUAL, userId, asset, orderId, tradeId, symbol, marginMode,
+                realizedPnlDeltaUnits, now);
+    }
+
+    public void settleRealizedPnl(AccountType accountType,
+                                  long userId,
+                                  String asset,
+                                  long orderId,
+                                  long tradeId,
+                                  String symbol,
+                                  MarginMode marginMode,
+                                  long realizedPnlDeltaUnits,
+                                  Instant now) {
         if (realizedPnlDeltaUnits == 0) {
             return;
         }
+        AccountType normalizedType = requireAccountType(accountType);
         String referenceId = tradeId + ":" + orderId;
-        int ledgerRows = jdbcTemplate.update("""
-                INSERT INTO account_ledger_entries (
-                    entry_id, user_id, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, created_at
-                ) VALUES (?, ?, ?, ?, 0, 'TRADE_PNL', ?, 'REALIZED_PNL', ?)
-                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, sequenceRepository.nextSequence("ledger-entry"), userId, asset, realizedPnlDeltaUnits,
-                referenceId, Timestamp.from(now));
-        requireSingleRow(ledgerRows, "trade pnl ledger insert");
-        long balanceAfterUnits = applyAmountToBalance(userId, asset, symbol, marginMode, realizedPnlDeltaUnits, now);
-        int ledgerRowsAfter = jdbcTemplate.update("""
-                UPDATE account_ledger_entries
-                   SET balance_after_units = ?
-                 WHERE reference_type = 'TRADE_PNL'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, balanceAfterUnits, referenceId, userId, asset);
-        requireSingleRow(ledgerRowsAfter, "trade pnl ledger update");
+        if (isLegacyPerpetualAccount(normalizedType)) {
+            int ledgerRows = jdbcTemplate.update("""
+                    INSERT INTO account_ledger_entries (
+                        entry_id, user_id, asset, amount_units, balance_after_units,
+                        reference_type, reference_id, reason, created_at
+                    ) VALUES (?, ?, ?, ?, 0, 'TRADE_PNL', ?, 'REALIZED_PNL', ?)
+                    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
+                    """, sequenceRepository.nextSequence("ledger-entry"), userId, asset, realizedPnlDeltaUnits,
+                    referenceId, Timestamp.from(now));
+            requireSingleRow(ledgerRows, "trade pnl ledger insert");
+            long balanceAfterUnits = applyAmountToBalance(normalizedType, userId, asset, symbol, marginMode,
+                    realizedPnlDeltaUnits, now);
+            int ledgerRowsAfter = jdbcTemplate.update("""
+                    UPDATE account_ledger_entries
+                       SET balance_after_units = ?
+                     WHERE reference_type = 'TRADE_PNL'
+                       AND reference_id = ?
+                       AND user_id = ?
+                       AND asset = ?
+                    """, balanceAfterUnits, referenceId, userId, asset);
+            requireSingleRow(ledgerRowsAfter, "trade pnl ledger update");
+            return;
+        }
+        insertProductSettlementLedger(userId, normalizedType, asset, realizedPnlDeltaUnits, 0L,
+                "TRADE_PNL", referenceId, "REALIZED_PNL", now);
+        long balanceAfterUnits = applyAmountToBalance(normalizedType, userId, asset, symbol, marginMode,
+                realizedPnlDeltaUnits, now);
+        updateProductSettlementLedgerBalance(userId, normalizedType, asset, "TRADE_PNL", referenceId,
+                balanceAfterUnits);
     }
 
     public void settleRealizedPnl(long userId,
@@ -704,29 +915,109 @@ public class AccountRepository {
                                String symbol,
                                MarginMode marginMode,
                                Instant now) {
+        settleTradeFee(AccountType.USDT_PERPETUAL, userId, asset, orderId, tradeId, feeDeltaUnits, reason,
+                feeRatePpm, symbol, marginMode, now);
+    }
+
+    public void settleTradeFee(AccountType accountType,
+                               long userId,
+                               String asset,
+                               long orderId,
+                               long tradeId,
+                               long feeDeltaUnits,
+                               String reason,
+                               long feeRatePpm,
+                               String symbol,
+                               MarginMode marginMode,
+                               Instant now) {
         if (feeDeltaUnits == 0) {
             return;
         }
+        AccountType normalizedType = requireAccountType(accountType);
         String referenceId = tradeId + ":" + orderId;
-        int ledgerRows = jdbcTemplate.update("""
-                INSERT INTO account_ledger_entries (
-                    entry_id, user_id, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, trade_id, order_id, symbol, fee_rate_ppm, created_at
-                ) VALUES (?, ?, ?, ?, 0, 'TRADE_FEE', ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, sequenceRepository.nextSequence("ledger-entry"), userId, asset, feeDeltaUnits, referenceId,
-                reason, tradeId, orderId, symbol, feeRatePpm, Timestamp.from(now));
-        requireSingleRow(ledgerRows, "trade fee ledger insert");
-        long balanceAfterUnits = applyAmountToBalance(userId, asset, symbol, marginMode, feeDeltaUnits, now);
-        int ledgerRowsAfter = jdbcTemplate.update("""
-                UPDATE account_ledger_entries
-                   SET balance_after_units = ?
-                 WHERE reference_type = 'TRADE_FEE'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, balanceAfterUnits, referenceId, userId, asset);
-        requireSingleRow(ledgerRowsAfter, "trade fee ledger update");
+        if (isLegacyPerpetualAccount(normalizedType)) {
+            int ledgerRows = jdbcTemplate.update("""
+                    INSERT INTO account_ledger_entries (
+                        entry_id, user_id, asset, amount_units, balance_after_units,
+                        reference_type, reference_id, reason, trade_id, order_id, symbol, fee_rate_ppm, created_at
+                    ) VALUES (?, ?, ?, ?, 0, 'TRADE_FEE', ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
+                    """, sequenceRepository.nextSequence("ledger-entry"), userId, asset, feeDeltaUnits, referenceId,
+                    reason, tradeId, orderId, symbol, feeRatePpm, Timestamp.from(now));
+            requireSingleRow(ledgerRows, "trade fee ledger insert");
+            long balanceAfterUnits = applyAmountToBalance(normalizedType, userId, asset, symbol, marginMode,
+                    feeDeltaUnits, now);
+            int ledgerRowsAfter = jdbcTemplate.update("""
+                    UPDATE account_ledger_entries
+                       SET balance_after_units = ?
+                     WHERE reference_type = 'TRADE_FEE'
+                       AND reference_id = ?
+                       AND user_id = ?
+                       AND asset = ?
+                    """, balanceAfterUnits, referenceId, userId, asset);
+            requireSingleRow(ledgerRowsAfter, "trade fee ledger update");
+            return;
+        }
+        insertProductSettlementLedger(userId, normalizedType, asset, feeDeltaUnits, 0L,
+                "TRADE_FEE", referenceId, reason, now);
+        long balanceAfterUnits = applyAmountToBalance(normalizedType, userId, asset, symbol, marginMode,
+                feeDeltaUnits, now);
+        updateProductSettlementLedgerBalance(userId, normalizedType, asset, "TRADE_FEE", referenceId,
+                balanceAfterUnits);
+    }
+
+    public void settleSpotTradeSide(long userId,
+                                    long orderId,
+                                    long tradeId,
+                                    String symbol,
+                                    OrderSide side,
+                                    long priceTicks,
+                                    long quantitySteps,
+                                    SpotInstrumentSpec spec,
+                                    long feeRatePpm,
+                                    String feeReason,
+                                    boolean orderCompleted,
+                                    Instant now) {
+        if (priceTicks <= 0 || quantitySteps <= 0) {
+            throw new IllegalArgumentException("priceTicks and quantitySteps must be positive");
+        }
+        SpotReservation reservation = lockSpotReservation(orderId, userId, symbol);
+        if (reservation.side() != side) {
+            throw new IllegalStateException("spot reservation side mismatch for order " + orderId);
+        }
+        long baseUnits = multiplyToLong(quantitySteps, spec.quantityStepUnits());
+        long quoteUnits = multiplyToLong(priceTicks, quantitySteps, spec.notionalMultiplierUnits());
+        long feeUnits = spotFeeUnits(quoteUnits, feeRatePpm);
+        long positiveFeeUnits = feeRatePpm > 0 ? feeUnits : 0L;
+        long settledUnits = side == OrderSide.BUY
+                ? Math.addExact(quoteUnits, positiveFeeUnits)
+                : baseUnits;
+        long remainingReservationUnits = Math.subtractExact(reservation.reservedUnits(),
+                Math.addExact(reservation.settledUnits(), reservation.releasedUnits()));
+        if (settledUnits > remainingReservationUnits) {
+            throw new IllegalStateException("spot reservation is smaller than filled amount for order " + orderId);
+        }
+        long releaseUnits = orderCompleted ? Math.subtractExact(remainingReservationUnits, settledUnits) : 0L;
+        if (side == OrderSide.BUY) {
+            debitSpotLocked(userId, spec.quoteAsset(), quoteUnits, now, tradeId, orderId, "SPOT_BUY_COST");
+            if (positiveFeeUnits > 0) {
+                debitSpotLocked(userId, spec.quoteAsset(), positiveFeeUnits, now, tradeId, orderId, feeReason);
+            } else if (feeUnits > 0) {
+                creditSpotAvailable(userId, spec.quoteAsset(), feeUnits, now, tradeId, orderId, feeReason);
+            }
+            creditSpotAvailable(userId, spec.baseAsset(), baseUnits, now, tradeId, orderId, "SPOT_BUY_FILL");
+            releaseSpotLocked(userId, spec.quoteAsset(), releaseUnits, now);
+        } else {
+            debitSpotLocked(userId, spec.baseAsset(), baseUnits, now, tradeId, orderId, "SPOT_SELL_BASE");
+            creditSpotAvailable(userId, spec.quoteAsset(), quoteUnits, now, tradeId, orderId, "SPOT_SELL_PROCEEDS");
+            if (positiveFeeUnits > 0) {
+                debitSpotAvailable(userId, spec.quoteAsset(), positiveFeeUnits, now, tradeId, orderId, feeReason);
+            } else if (feeUnits > 0) {
+                creditSpotAvailable(userId, spec.quoteAsset(), feeUnits, now, tradeId, orderId, feeReason);
+            }
+            releaseSpotLocked(userId, spec.baseAsset(), releaseUnits, now);
+        }
+        updateSpotReservation(orderId, settledUnits, releaseUnits, feeReason, now);
     }
 
     public void settleTradeFee(long userId,
@@ -752,28 +1043,49 @@ public class AccountRepository {
                                                                    long requestedFeeUnits,
                                                                    LiquidationFeeContext context,
                                                                    Instant now) {
+        return settleLiquidationFee(AccountType.USDT_PERPETUAL, userId, asset, orderId, tradeId, symbol,
+                marginMode, requestedFeeUnits, context, now);
+    }
+
+    @Transactional
+    public Optional<LiquidationFeeSettlement> settleLiquidationFee(AccountType accountType,
+                                                                   long userId,
+                                                                   String asset,
+                                                                   long orderId,
+                                                                   long tradeId,
+                                                                   String symbol,
+                                                                   MarginMode marginMode,
+                                                                   long requestedFeeUnits,
+                                                                   LiquidationFeeContext context,
+                                                                   Instant now) {
         if (requestedFeeUnits <= 0 || context == null || context.feeRatePpm() <= 0) {
             return Optional.empty();
         }
+        AccountType normalizedType = requireAccountType(accountType);
         String referenceId = tradeId + ":" + orderId;
-        if (liquidationFeeReferenceExists(userId, asset, referenceId)) {
+        if (liquidationFeeReferenceExists(normalizedType, userId, asset, referenceId)) {
             return Optional.empty();
         }
-        BalanceDebitResult debit = applyCappedDebitToBalance(userId, asset, symbol, marginMode,
+        BalanceDebitResult debit = applyCappedDebitToBalance(normalizedType, userId, asset, symbol, marginMode,
                 requestedFeeUnits, now);
         if (debit.debitedUnits() <= 0) {
             return Optional.empty();
         }
-        int ledgerRows = jdbcTemplate.update("""
-                INSERT INTO account_ledger_entries (
-                    entry_id, user_id, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, trade_id, order_id, symbol, fee_rate_ppm, created_at
-                ) VALUES (?, ?, ?, ?, ?, 'LIQUIDATION_FEE', ?, 'COLLECT_LIQUIDATION_FEE', ?, ?, ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, sequenceRepository.nextSequence("ledger-entry"), userId, asset,
-                Math.negateExact(debit.debitedUnits()), debit.balanceAfterUnits(), referenceId, tradeId,
-                orderId, symbol, context.feeRatePpm(), Timestamp.from(now));
-        requireSingleRow(ledgerRows, "liquidation fee ledger insert");
+        if (isLegacyPerpetualAccount(normalizedType)) {
+            int ledgerRows = jdbcTemplate.update("""
+                    INSERT INTO account_ledger_entries (
+                        entry_id, user_id, asset, amount_units, balance_after_units,
+                        reference_type, reference_id, reason, trade_id, order_id, symbol, fee_rate_ppm, created_at
+                    ) VALUES (?, ?, ?, ?, ?, 'LIQUIDATION_FEE', ?, 'COLLECT_LIQUIDATION_FEE', ?, ?, ?, ?, ?)
+                    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
+                    """, sequenceRepository.nextSequence("ledger-entry"), userId, asset,
+                    Math.negateExact(debit.debitedUnits()), debit.balanceAfterUnits(), referenceId, tradeId,
+                    orderId, symbol, context.feeRatePpm(), Timestamp.from(now));
+            requireSingleRow(ledgerRows, "liquidation fee ledger insert");
+        } else {
+            insertProductSettlementLedger(userId, normalizedType, asset, Math.negateExact(debit.debitedUnits()),
+                    debit.balanceAfterUnits(), "LIQUIDATION_FEE", referenceId, "COLLECT_LIQUIDATION_FEE", now);
+        }
         return Optional.of(new LiquidationFeeSettlement(context.liquidationOrderId(), context.candidateId(),
                 debit.debitedUnits(), context.feeRatePpm()));
     }
@@ -792,7 +1104,7 @@ public class AccountRepository {
         long amountUnits = MarginTransferMath.orderMarginReleaseAmount(reservation.reservedUnits(),
                 reservation.releasedUnits(), reservation.positionMarginUnits(), reservation.orderQuantitySteps(),
                 closeSteps, sweepRemainder);
-        releaseReservedMargin(orderId, reservation.userId(), reservation.asset(), amountUnits,
+        releaseReservedMargin(orderId, reservation.accountType(), reservation.userId(), reservation.asset(), amountUnits,
                 "POSITION_REDUCED", now);
     }
 
@@ -846,7 +1158,7 @@ public class AccountRepository {
                     Timestamp.from(now));
             requireSingleRow(positionMarginRows, "position margin upsert");
         }
-        releaseReservedMargin(orderId, reservation.userId(), reservation.asset(), excessUnits,
+        releaseReservedMargin(orderId, reservation.accountType(), reservation.userId(), reservation.asset(), excessUnits,
                 "ORDER_PRICE_IMPROVEMENT", now);
     }
 
@@ -858,13 +1170,27 @@ public class AccountRepository {
                                       Instant now) {
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         List<PositionMargin> margins = jdbcTemplate.query("""
-                SELECT asset, margin_mode, margin_units
-                  FROM account_position_margins
-                 WHERE user_id = ? AND symbol = ? AND margin_mode = ?
-                   AND margin_units > 0
-                 FOR UPDATE
+                SELECT m.asset,
+                       m.margin_mode,
+                       m.margin_units,
+                       CASE
+                           WHEN i.contract_type = 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
+                           ELSE 'USDT_PERPETUAL'
+                       END AS account_type
+                  FROM account_position_margins m
+                  JOIN account_positions p
+                    ON p.user_id = m.user_id
+                   AND p.symbol = m.symbol
+                   AND p.margin_mode = m.margin_mode
+                  JOIN instruments i
+                    ON i.symbol = p.symbol
+                   AND i.version = p.instrument_version
+                 WHERE m.user_id = ? AND m.symbol = ? AND m.margin_mode = ?
+                   AND m.margin_units > 0
+                 FOR UPDATE OF m
                 """, (rs, rowNum) -> new PositionMargin(symbol, rs.getString("asset"),
-                MarginMode.fromNullableDbValue(rs.getString("margin_mode")), rs.getLong("margin_units")),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")), rs.getLong("margin_units"),
+                accountTypeFromNullableDbValue(rs.getString("account_type"))),
                 userId, symbol, normalizedMarginMode.name());
         for (PositionMargin margin : margins) {
             long amountUnits = MarginTransferMath.positionMarginReleaseAmount(margin.marginUnits(),
@@ -872,7 +1198,7 @@ public class AccountRepository {
             if (amountUnits <= 0) {
                 continue;
             }
-            releaseBalanceLock(userId, margin.asset(), amountUnits, now);
+            releaseBalanceLock(margin.accountType(), userId, margin.asset(), amountUnits, now);
             int marginRows = jdbcTemplate.update("""
                     UPDATE account_position_margins
                        SET margin_units = margin_units - ?,
@@ -892,7 +1218,7 @@ public class AccountRepository {
 
     private OrderMarginReservation lockOrderMarginReservation(long orderId, long userId, String symbol) {
         return jdbcTemplate.query("""
-                SELECT r.user_id, r.asset, r.reserved_units, r.released_units,
+                SELECT r.account_type, r.user_id, r.asset, r.reserved_units, r.released_units,
                        r.position_margin_units, r.margin_mode, o.quantity_steps, o.reduce_only
                   FROM account_margin_reservations r
                   JOIN trading_orders o
@@ -902,6 +1228,7 @@ public class AccountRepository {
                    AND r.symbol = ?
                  FOR UPDATE OF r
                 """, (rs, rowNum) -> new OrderMarginReservation(
+                accountTypeFromNullableDbValue(rs.getString("account_type")),
                 rs.getLong("user_id"),
                 rs.getString("asset"),
                 rs.getLong("reserved_units"),
@@ -933,6 +1260,7 @@ public class AccountRepository {
     }
 
     private void releaseReservedMargin(long orderId,
+                                       AccountType accountType,
                                        long userId,
                                        String asset,
                                        long amountUnits,
@@ -941,7 +1269,7 @@ public class AccountRepository {
         if (amountUnits <= 0) {
             return;
         }
-        releaseBalanceLock(userId, asset, amountUnits, now);
+        releaseBalanceLock(accountType, userId, asset, amountUnits, now);
         int reservationRows = jdbcTemplate.update("""
                 UPDATE account_margin_reservations
                    SET released_units = released_units + ?,
@@ -958,7 +1286,27 @@ public class AccountRepository {
         requireSingleRow(reservationRows, "reserved margin release");
     }
 
-    private void releaseBalanceLock(long userId, String asset, long amountUnits, Instant now) {
+    private void releaseBalanceLock(AccountType accountType, long userId, String asset, long amountUnits, Instant now) {
+        if (isLegacyPerpetualAccount(accountType)) {
+            releaseLegacyBalanceLock(userId, asset, amountUnits, now);
+            return;
+        }
+        int rows = jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET locked_units = locked_units - ?,
+                       available_units = available_units + ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                   AND locked_units >= ?
+                """, amountUnits, amountUnits, Timestamp.from(now), accountType.name(), userId, asset, amountUnits);
+        if (rows != 1) {
+            throw new IllegalStateException("insufficient locked product balance for margin release");
+        }
+    }
+
+    private void releaseLegacyBalanceLock(long userId, String asset, long amountUnits, Instant now) {
         int rows = jdbcTemplate.update("""
                 UPDATE account_balances
                    SET locked_units = locked_units - ?,
@@ -972,12 +1320,25 @@ public class AccountRepository {
         }
     }
 
-    private long applyAmountToBalance(long userId,
+    private long applyAmountToBalance(AccountType accountType,
+                                      long userId,
                                       String asset,
                                       String symbol,
                                       MarginMode marginMode,
                                       long amountUnits,
                                       Instant now) {
+        if (isLegacyPerpetualAccount(accountType)) {
+            return applyAmountToLegacyBalance(userId, asset, symbol, marginMode, amountUnits, now);
+        }
+        return applyAmountToProductBalance(accountType, userId, asset, symbol, marginMode, amountUnits, now);
+    }
+
+    private long applyAmountToLegacyBalance(long userId,
+                                            String asset,
+                                            String symbol,
+                                            MarginMode marginMode,
+                                            long amountUnits,
+                                            Instant now) {
         jdbcTemplate.update("""
                 INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
                 VALUES (?, ?, 0, 0, ?)
@@ -1028,12 +1389,87 @@ public class AccountRepository {
         return PnlSettlementMath.netEquityUnits(next.availableUnits(), next.lockedUnits(), next.deficitUnits());
     }
 
-    private BalanceDebitResult applyCappedDebitToBalance(long userId,
+    private long applyAmountToProductBalance(AccountType accountType,
+                                             long userId,
+                                             String asset,
+                                             String symbol,
+                                             MarginMode marginMode,
+                                             long amountUnits,
+                                             Instant now) {
+        jdbcTemplate.update("""
+                INSERT INTO account_product_balances (
+                    account_type, user_id, asset, available_units, locked_units, updated_at
+                ) VALUES (?, ?, ?, 0, 0, ?)
+                ON CONFLICT (account_type, user_id, asset) DO NOTHING
+                """, accountType.name(), userId, asset, Timestamp.from(now));
+        jdbcTemplate.update("""
+                INSERT INTO account_product_deficits (account_type, user_id, asset, deficit_units, updated_at)
+                VALUES (?, ?, ?, 0, ?)
+                ON CONFLICT (account_type, user_id, asset) DO NOTHING
+                """, accountType.name(), userId, asset, Timestamp.from(now));
+        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        List<PositionMargin> lockedMargins = amountUnits < 0
+                ? lockPositionMargins(userId, asset, symbol, normalizedMarginMode)
+                : List.of();
+        long maxLockedDebitUnits = lockedMargins.stream()
+                .mapToLong(PositionMargin::marginUnits)
+                .reduce(0L, Math::addExact);
+        BalanceSettlementState current = jdbcTemplate.queryForObject("""
+                SELECT b.available_units, b.locked_units, d.deficit_units
+                  FROM account_product_balances b
+                  JOIN account_product_deficits d USING (account_type, user_id, asset)
+                 WHERE b.account_type = ? AND b.user_id = ? AND b.asset = ?
+                 FOR UPDATE OF b, d
+        """, (rs, rowNum) -> new BalanceSettlementState(
+                rs.getLong("available_units"),
+                rs.getLong("locked_units"),
+                rs.getLong("deficit_units")), accountType.name(), userId, asset);
+        long availableInput = amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED
+                ? 0L
+                : current.availableUnits();
+        BalanceSettlementState next = PnlSettlementMath.apply(availableInput, current.lockedUnits(),
+                current.deficitUnits(), amountUnits, maxLockedDebitUnits);
+        if (amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED) {
+            next = new BalanceSettlementState(current.availableUnits(), next.lockedUnits(), next.deficitUnits());
+        }
+        long lockedDebitUnits = Math.subtractExact(current.lockedUnits(), next.lockedUnits());
+        reducePositionMargins(userId, asset, lockedDebitUnits, lockedMargins, now);
+        int balanceRows = jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET available_units = ?,
+                       locked_units = ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, next.availableUnits(), next.lockedUnits(), Timestamp.from(now), accountType.name(), userId,
+                asset);
+        requireSingleRow(balanceRows, "product pnl balance update");
+        updateProductDeficitIfChanged(accountType, userId, asset, current.deficitUnits(), next.deficitUnits(), now,
+                "product pnl deficit update");
+        return PnlSettlementMath.netEquityUnits(next.availableUnits(), next.lockedUnits(), next.deficitUnits());
+    }
+
+    private BalanceDebitResult applyCappedDebitToBalance(AccountType accountType,
+                                                         long userId,
                                                          String asset,
                                                          String symbol,
                                                          MarginMode marginMode,
                                                          long requestedDebitUnits,
                                                          Instant now) {
+        if (isLegacyPerpetualAccount(accountType)) {
+            return applyCappedDebitToLegacyBalance(userId, asset, symbol, marginMode, requestedDebitUnits, now);
+        }
+        return applyCappedDebitToProductBalance(accountType, userId, asset, symbol, marginMode, requestedDebitUnits,
+                now);
+    }
+
+    private BalanceDebitResult applyCappedDebitToLegacyBalance(long userId,
+                                                               String asset,
+                                                               String symbol,
+                                                               MarginMode marginMode,
+                                                               long requestedDebitUnits,
+                                                               Instant now) {
         jdbcTemplate.update("""
                 INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
                 VALUES (?, ?, 0, 0, ?)
@@ -1089,6 +1525,72 @@ public class AccountRepository {
                 PnlSettlementMath.netEquityUnits(next.availableUnits(), next.lockedUnits(), next.deficitUnits()));
     }
 
+    private BalanceDebitResult applyCappedDebitToProductBalance(AccountType accountType,
+                                                                long userId,
+                                                                String asset,
+                                                                String symbol,
+                                                                MarginMode marginMode,
+                                                                long requestedDebitUnits,
+                                                                Instant now) {
+        jdbcTemplate.update("""
+                INSERT INTO account_product_balances (
+                    account_type, user_id, asset, available_units, locked_units, updated_at
+                ) VALUES (?, ?, ?, 0, 0, ?)
+                ON CONFLICT (account_type, user_id, asset) DO NOTHING
+                """, accountType.name(), userId, asset, Timestamp.from(now));
+        jdbcTemplate.update("""
+                INSERT INTO account_product_deficits (account_type, user_id, asset, deficit_units, updated_at)
+                VALUES (?, ?, ?, 0, ?)
+                ON CONFLICT (account_type, user_id, asset) DO NOTHING
+                """, accountType.name(), userId, asset, Timestamp.from(now));
+        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        List<PositionMargin> lockedMargins = lockPositionMargins(userId, asset, symbol, normalizedMarginMode);
+        long maxLockedDebitUnits = lockedMargins.stream()
+                .mapToLong(PositionMargin::marginUnits)
+                .reduce(0L, Math::addExact);
+        BalanceSettlementState current = jdbcTemplate.queryForObject("""
+                SELECT b.available_units, b.locked_units, d.deficit_units
+                  FROM account_product_balances b
+                  JOIN account_product_deficits d USING (account_type, user_id, asset)
+                 WHERE b.account_type = ? AND b.user_id = ? AND b.asset = ?
+                 FOR UPDATE OF b, d
+        """, (rs, rowNum) -> new BalanceSettlementState(
+                rs.getLong("available_units"),
+                rs.getLong("locked_units"),
+                rs.getLong("deficit_units")), accountType.name(), userId, asset);
+        long availableInput = normalizedMarginMode == MarginMode.ISOLATED ? 0L : current.availableUnits();
+        long collectibleUnits = Math.min(requestedDebitUnits, Math.addExact(availableInput, maxLockedDebitUnits));
+        if (collectibleUnits <= 0) {
+            return new BalanceDebitResult(0L, PnlSettlementMath.netEquityUnits(current.availableUnits(),
+                    current.lockedUnits(), current.deficitUnits()));
+        }
+        BalanceSettlementState next = PnlSettlementMath.apply(availableInput, current.lockedUnits(),
+                current.deficitUnits(), Math.negateExact(collectibleUnits), maxLockedDebitUnits);
+        if (normalizedMarginMode == MarginMode.ISOLATED) {
+            next = new BalanceSettlementState(current.availableUnits(), next.lockedUnits(), next.deficitUnits());
+        }
+        if (next.deficitUnits() != current.deficitUnits()) {
+            throw new IllegalStateException("liquidation fee must not create account deficit");
+        }
+        long lockedDebitUnits = Math.subtractExact(current.lockedUnits(), next.lockedUnits());
+        reducePositionMargins(userId, asset, lockedDebitUnits, lockedMargins, now);
+        int balanceRows = jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET available_units = ?,
+                       locked_units = ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, next.availableUnits(), next.lockedUnits(), Timestamp.from(now), accountType.name(), userId,
+                asset);
+        requireSingleRow(balanceRows, "product liquidation fee balance update");
+        updateProductDeficitIfChanged(accountType, userId, asset, current.deficitUnits(), next.deficitUnits(), now,
+                "product liquidation fee deficit update");
+        return new BalanceDebitResult(collectibleUnits,
+                PnlSettlementMath.netEquityUnits(next.availableUnits(), next.lockedUnits(), next.deficitUnits()));
+    }
+
     private void updateDeficitIfChanged(long userId,
                                         String asset,
                                         long currentDeficitUnits,
@@ -1107,7 +1609,42 @@ public class AccountRepository {
         requireSingleRow(deficitRows, operation);
     }
 
-    private boolean liquidationFeeReferenceExists(long userId, String asset, String referenceId) {
+    private void updateProductDeficitIfChanged(AccountType accountType,
+                                               long userId,
+                                               String asset,
+                                               long currentDeficitUnits,
+                                               long nextDeficitUnits,
+                                               Instant now,
+                                               String operation) {
+        if (currentDeficitUnits == nextDeficitUnits) {
+            return;
+        }
+        int deficitRows = jdbcTemplate.update("""
+                UPDATE account_product_deficits
+                   SET deficit_units = ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, nextDeficitUnits, Timestamp.from(now), accountType.name(), userId, asset);
+        requireSingleRow(deficitRows, operation);
+    }
+
+    private boolean liquidationFeeReferenceExists(AccountType accountType, long userId, String asset,
+                                                  String referenceId) {
+        if (!isLegacyPerpetualAccount(accountType)) {
+            return jdbcTemplate.query("""
+                    SELECT 1
+                      FROM account_product_ledger_entries
+                     WHERE reference_type = 'LIQUIDATION_FEE'
+                       AND reference_id = ?
+                       AND user_id = ?
+                       AND account_type = ?
+                       AND asset = ?
+                     FOR UPDATE
+                    """, (rs, rowNum) -> 1, referenceId, userId, accountType.name(), asset)
+                    .stream().findFirst().isPresent();
+        }
         return jdbcTemplate.query("""
                 SELECT 1
                   FROM account_ledger_entries
@@ -1117,6 +1654,44 @@ public class AccountRepository {
                    AND asset = ?
                  FOR UPDATE
                 """, (rs, rowNum) -> 1, referenceId, userId, asset).stream().findFirst().isPresent();
+    }
+
+    private void insertProductSettlementLedger(long userId,
+                                               AccountType accountType,
+                                               String asset,
+                                               long amountUnits,
+                                               long balanceAfterUnits,
+                                               String referenceType,
+                                               String referenceId,
+                                               String reason,
+                                               Instant now) {
+        int rows = jdbcTemplate.update("""
+                INSERT INTO account_product_ledger_entries (
+                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
+                """, sequenceRepository.nextSequence("product-ledger-entry"), userId, accountType.name(), asset,
+                amountUnits, balanceAfterUnits, referenceType, referenceId, reason, Timestamp.from(now));
+        requireSingleRow(rows, referenceType.toLowerCase().replace('_', ' ') + " product ledger insert");
+    }
+
+    private void updateProductSettlementLedgerBalance(long userId,
+                                                      AccountType accountType,
+                                                      String asset,
+                                                      String referenceType,
+                                                      String referenceId,
+                                                      long balanceAfterUnits) {
+        int rows = jdbcTemplate.update("""
+                UPDATE account_product_ledger_entries
+                   SET balance_after_units = ?
+                 WHERE reference_type = ?
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND account_type = ?
+                   AND asset = ?
+                """, balanceAfterUnits, referenceType, referenceId, userId, accountType.name(), asset);
+        requireSingleRow(rows, referenceType.toLowerCase().replace('_', ' ') + " product ledger update");
     }
 
     private List<PositionMargin> lockPositionMargins(long userId, String asset, String symbol, MarginMode marginMode) {
@@ -1183,6 +1758,393 @@ public class AccountRepository {
         }
     }
 
+    private SpotReservation lockSpotReservation(long orderId, long userId, String symbol) {
+        return jdbcTemplate.query("""
+                SELECT user_id, side, asset, reserved_units, settled_units, released_units
+                  FROM account_spot_order_reservations
+                 WHERE order_id = ?
+                   AND user_id = ?
+                   AND symbol = ?
+                   AND status NOT IN ('RELEASED', 'SETTLED')
+                 FOR UPDATE
+                """, (rs, rowNum) -> new SpotReservation(
+                rs.getLong("user_id"),
+                OrderSide.valueOf(rs.getString("side")),
+                rs.getString("asset"),
+                rs.getLong("reserved_units"),
+                rs.getLong("settled_units"),
+                rs.getLong("released_units")), orderId, userId, symbol).stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("active spot reservation not found for order " + orderId));
+    }
+
+    private void debitSpotLocked(long userId,
+                                 String asset,
+                                 long amountUnits,
+                                 Instant now,
+                                 long tradeId,
+                                 long orderId,
+                                 String reason) {
+        if (amountUnits <= 0) {
+            return;
+        }
+        ensureSpotBalance(userId, asset, now);
+        int rows = jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET locked_units = locked_units - ?,
+                       updated_at = ?
+                 WHERE account_type = 'SPOT'
+                   AND user_id = ?
+                   AND asset = ?
+                   AND locked_units >= ?
+                """, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
+        if (rows != 1) {
+            throw new IllegalStateException("insufficient locked spot balance for order " + orderId);
+        }
+        insertSpotLedger(userId, asset, Math.negateExact(amountUnits), spotEquity(userId, asset),
+                tradeId, orderId, reason, now);
+    }
+
+    private void releaseSpotLocked(long userId, String asset, long amountUnits, Instant now) {
+        if (amountUnits <= 0) {
+            return;
+        }
+        ensureSpotBalance(userId, asset, now);
+        int rows = jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET locked_units = locked_units - ?,
+                       available_units = available_units + ?,
+                       updated_at = ?
+                 WHERE account_type = 'SPOT'
+                   AND user_id = ?
+                   AND asset = ?
+                   AND locked_units >= ?
+                """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
+        if (rows != 1) {
+            throw new IllegalStateException("insufficient locked spot balance for release");
+        }
+    }
+
+    private void creditSpotAvailable(long userId,
+                                     String asset,
+                                     long amountUnits,
+                                     Instant now,
+                                     long tradeId,
+                                     long orderId,
+                                     String reason) {
+        if (amountUnits <= 0) {
+            return;
+        }
+        ensureSpotBalance(userId, asset, now);
+        int rows = jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET available_units = available_units + ?,
+                       updated_at = ?
+                 WHERE account_type = 'SPOT'
+                   AND user_id = ?
+                   AND asset = ?
+                """, amountUnits, Timestamp.from(now), userId, asset);
+        requireSingleRow(rows, "spot available credit");
+        insertSpotLedger(userId, asset, amountUnits, spotEquity(userId, asset),
+                tradeId, orderId, reason, now);
+    }
+
+    private void debitSpotAvailable(long userId,
+                                    String asset,
+                                    long amountUnits,
+                                    Instant now,
+                                    long tradeId,
+                                    long orderId,
+                                    String reason) {
+        if (amountUnits <= 0) {
+            return;
+        }
+        ensureSpotBalance(userId, asset, now);
+        int rows = jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET available_units = available_units - ?,
+                       updated_at = ?
+                 WHERE account_type = 'SPOT'
+                   AND user_id = ?
+                   AND asset = ?
+                   AND available_units >= ?
+                """, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
+        if (rows != 1) {
+            throw new IllegalStateException("insufficient available spot balance for fee");
+        }
+        insertSpotLedger(userId, asset, Math.negateExact(amountUnits), spotEquity(userId, asset),
+                tradeId, orderId, reason, now);
+    }
+
+    private void ensureSpotBalance(long userId, String asset, Instant now) {
+        jdbcTemplate.update("""
+                INSERT INTO account_product_balances (
+                    account_type, user_id, asset, available_units, locked_units, updated_at
+                ) VALUES ('SPOT', ?, ?, 0, 0, ?)
+                ON CONFLICT (account_type, user_id, asset) DO NOTHING
+                """, userId, asset, Timestamp.from(now));
+    }
+
+    private long spotEquity(long userId, String asset) {
+        Long equityUnits = jdbcTemplate.queryForObject("""
+                SELECT available_units + locked_units
+                  FROM account_product_balances
+                 WHERE account_type = 'SPOT'
+                   AND user_id = ?
+                   AND asset = ?
+                """, Long.class, userId, asset);
+        return equityUnits == null ? 0L : equityUnits;
+    }
+
+    private void insertSpotLedger(long userId,
+                                  String asset,
+                                  long amountUnits,
+                                  long balanceAfterUnits,
+                                  long tradeId,
+                                  long orderId,
+                                  String reason,
+                                  Instant now) {
+        if (amountUnits == 0) {
+            return;
+        }
+        String referenceId = tradeId + ":" + orderId + ":" + reason;
+        int rows = jdbcTemplate.update("""
+                INSERT INTO account_product_ledger_entries (
+                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, created_at
+                ) VALUES (?, ?, 'SPOT', ?, ?, ?, 'SPOT_TRADE', ?, ?, ?)
+                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
+                """, sequenceRepository.nextSequence("product-ledger-entry"), userId, asset, amountUnits,
+                balanceAfterUnits, referenceId, reason, Timestamp.from(now));
+        requireSingleRow(rows, "spot trade ledger insert");
+    }
+
+    private void updateSpotReservation(long orderId,
+                                       long settledUnits,
+                                       long releasedUnits,
+                                       String reason,
+                                       Instant now) {
+        int rows = jdbcTemplate.update("""
+                UPDATE account_spot_order_reservations
+                   SET settled_units = settled_units + ?,
+                       released_units = released_units + ?,
+                       status = CASE
+                           WHEN settled_units + released_units + ? + ? >= reserved_units THEN 'SETTLED'
+                           WHEN settled_units + ? > 0 THEN 'PARTIALLY_SETTLED'
+                           WHEN released_units + ? > 0 THEN 'PARTIALLY_RELEASED'
+                           ELSE status
+                       END,
+                       reason = ?,
+                       updated_at = ?
+                 WHERE order_id = ?
+                   AND settled_units + released_units + ? + ? <= reserved_units
+                """, settledUnits, releasedUnits, settledUnits, releasedUnits, settledUnits, releasedUnits,
+                reason, Timestamp.from(now), orderId, settledUnits, releasedUnits);
+        requireSingleRow(rows, "spot reservation settlement update");
+    }
+
+    private long spotFeeUnits(long quoteUnits, long feeRatePpm) {
+        if (feeRatePpm == 0) {
+            return 0L;
+        }
+        BigInteger numerator = BigInteger.valueOf(quoteUnits)
+                .multiply(BigInteger.valueOf(Math.absExact(feeRatePpm)));
+        return divideCeiling(numerator, BigInteger.valueOf(PPM));
+    }
+
+    private long multiplyToLong(long... values) {
+        BigInteger product = BigInteger.ONE;
+        for (long value : values) {
+            if (value <= 0) {
+                throw new IllegalArgumentException("spot settlement inputs must be positive");
+            }
+            product = product.multiply(BigInteger.valueOf(value));
+        }
+        return product.longValueExact();
+    }
+
+    private long divideCeiling(BigInteger numerator, BigInteger denominator) {
+        if (numerator.signum() < 0 || denominator.signum() <= 0) {
+            throw new IllegalArgumentException("positive numerator and denominator are required");
+        }
+        BigInteger[] quotientAndRemainder = numerator.divideAndRemainder(denominator);
+        return (quotientAndRemainder[1].signum() == 0
+                ? quotientAndRemainder[0]
+                : quotientAndRemainder[0].add(BigInteger.ONE)).longValueExact();
+    }
+
+    private ProductTransferResponse duplicateProductTransfer(long userId,
+                                                             AccountType source,
+                                                             AccountType target,
+                                                             String asset,
+                                                             long amountUnits,
+                                                             String referenceId,
+                                                             String reason) {
+        ProductTransferRecord existing = jdbcTemplate.query("""
+                SELECT transfer_id, source_account_type, target_account_type, asset,
+                       amount_units, status, reason, created_at
+                  FROM account_product_transfers
+                 WHERE user_id = ?
+                   AND reference_id = ?
+                 FOR UPDATE
+                """, (rs, rowNum) -> new ProductTransferRecord(
+                rs.getLong("transfer_id"),
+                AccountType.valueOf(rs.getString("source_account_type")),
+                AccountType.valueOf(rs.getString("target_account_type")),
+                rs.getString("asset"),
+                rs.getLong("amount_units"),
+                rs.getString("status"),
+                rs.getString("reason"),
+                rs.getTimestamp("created_at").toInstant()), userId, referenceId).stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("duplicate product transfer but transfer row missing"));
+        if (existing.sourceAccountType() != source
+                || existing.targetAccountType() != target
+                || existing.amountUnits() != amountUnits
+                || !Objects.equals(existing.asset(), asset)
+                || !Objects.equals(existing.reason(), reason)) {
+            throw new IllegalStateException("conflicting duplicate product transfer reference " + referenceId);
+        }
+        return new ProductTransferResponse(existing.transferId(), userId, source, target, asset, amountUnits,
+                referenceId, existing.status(),
+                productBalance(userId, source, asset)
+                        .orElseThrow(() -> new IllegalStateException("source balance missing for duplicate transfer")),
+                productBalance(userId, target, asset)
+                        .orElseThrow(() -> new IllegalStateException("target balance missing for duplicate transfer")),
+                existing.createdAt());
+    }
+
+    private void requireDuplicateProductBalanceAdjustmentMatches(long userId,
+                                                                 AccountType accountType,
+                                                                 String asset,
+                                                                 long amountUnits,
+                                                                 String referenceId,
+                                                                 String reason) {
+        AdjustmentReference existing = jdbcTemplate.query("""
+                SELECT amount_units, reason
+                  FROM account_product_ledger_entries
+                 WHERE reference_type = 'PRODUCT_BALANCE_ADJUSTMENT'
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND account_type = ?
+                   AND asset = ?
+                 FOR UPDATE
+                """, (rs, rowNum) -> new AdjustmentReference(
+                rs.getLong("amount_units"),
+                rs.getString("reason")), referenceId, userId, accountType.name(), asset)
+                .stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("duplicate product adjustment but ledger missing"));
+        if (existing.amountUnits() != amountUnits || !Objects.equals(existing.reason(), reason)) {
+            throw new IllegalStateException("conflicting duplicate product balance adjustment reference " + referenceId);
+        }
+    }
+
+    private long applyProductAvailableDelta(long userId,
+                                            AccountType accountType,
+                                            String asset,
+                                            long amountUnits,
+                                            Instant now) {
+        if (isLegacyPerpetualAccount(accountType)) {
+            return applyLegacyAvailableDelta(userId, asset, amountUnits, now);
+        }
+        jdbcTemplate.update("""
+                INSERT INTO account_product_balances (
+                    account_type, user_id, asset, available_units, locked_units, updated_at
+                ) VALUES (?, ?, ?, 0, 0, ?)
+                ON CONFLICT (account_type, user_id, asset) DO NOTHING
+                """, accountType.name(), userId, asset, Timestamp.from(now));
+        Long currentAvailable = jdbcTemplate.queryForObject("""
+                SELECT available_units
+                  FROM account_product_balances
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                 FOR UPDATE
+                """, Long.class, accountType.name(), userId, asset);
+        long nextAvailable = Math.addExact(currentAvailable == null ? 0L : currentAvailable, amountUnits);
+        if (nextAvailable < 0) {
+            throw new IllegalArgumentException("insufficient available balance");
+        }
+        int rows = jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET available_units = ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, nextAvailable, Timestamp.from(now), accountType.name(), userId, asset);
+        requireSingleRow(rows, "product balance available update");
+        return nextAvailable;
+    }
+
+    private long applyLegacyAvailableDelta(long userId, String asset, long amountUnits, Instant now) {
+        jdbcTemplate.update("""
+                INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
+                VALUES (?, ?, 0, 0, ?)
+                ON CONFLICT (user_id, asset) DO NOTHING
+                """, userId, asset, Timestamp.from(now));
+        Long currentAvailable = jdbcTemplate.queryForObject("""
+                SELECT available_units
+                  FROM account_balances
+                 WHERE user_id = ?
+                   AND asset = ?
+                 FOR UPDATE
+                """, Long.class, userId, asset);
+        long nextAvailable = Math.addExact(currentAvailable == null ? 0L : currentAvailable, amountUnits);
+        if (nextAvailable < 0) {
+            throw new IllegalArgumentException("insufficient available balance");
+        }
+        int rows = jdbcTemplate.update("""
+                UPDATE account_balances
+                   SET available_units = ?,
+                       updated_at = ?
+                 WHERE user_id = ?
+                   AND asset = ?
+                """, nextAvailable, Timestamp.from(now), userId, asset);
+        requireSingleRow(rows, "legacy product balance available update");
+        return nextAvailable;
+    }
+
+    private void insertProductTransferLedger(long userId,
+                                             AccountType accountType,
+                                             String asset,
+                                             long amountUnits,
+                                             long balanceAfterUnits,
+                                             String referenceId,
+                                             String reason,
+                                             Instant now) {
+        int rows = jdbcTemplate.update("""
+                INSERT INTO account_product_ledger_entries (
+                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'PRODUCT_TRANSFER', ?, ?, ?)
+                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
+                """, sequenceRepository.nextSequence("product-ledger-entry"), userId, accountType.name(), asset,
+                amountUnits, balanceAfterUnits, referenceId, reason, Timestamp.from(now));
+        requireSingleRow(rows, "product transfer ledger insert");
+    }
+
+    private ProductBalanceResponse toProductBalance(AccountType accountType, BalanceResponse balance) {
+        return new ProductBalanceResponse(balance.userId(), accountType, balance.asset(), balance.availableUnits(),
+                balance.lockedUnits(), balance.equityUnits(), balance.updatedAt());
+    }
+
+    private AccountType requireAccountType(AccountType accountType) {
+        if (accountType == null) {
+            throw new IllegalArgumentException("accountType is required");
+        }
+        return accountType;
+    }
+
+    private AccountType accountTypeFromNullableDbValue(String accountType) {
+        if (accountType == null || accountType.isBlank()) {
+            return AccountType.USDT_PERPETUAL;
+        }
+        return AccountType.valueOf(accountType);
+    }
+
+    private boolean isLegacyPerpetualAccount(AccountType accountType) {
+        return accountType == AccountType.USDT_PERPETUAL;
+    }
+
     private PositionResponse toPositionResponse(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new PositionResponse(
                 rs.getLong("user_id"),
@@ -1196,6 +2158,7 @@ public class AccountRepository {
     }
 
     private record OrderMarginReservation(
+            AccountType accountType,
             long userId,
             String asset,
             long reservedUnits,
@@ -1206,10 +2169,37 @@ public class AccountRepository {
             boolean reduceOnly) {
     }
 
-    private record PositionMargin(String symbol, String asset, MarginMode marginMode, long marginUnits) {
+    private record PositionMargin(String symbol,
+                                  String asset,
+                                  MarginMode marginMode,
+                                  long marginUnits,
+                                  AccountType accountType) {
+        private PositionMargin(String symbol, String asset, MarginMode marginMode, long marginUnits) {
+            this(symbol, asset, marginMode, marginUnits, AccountType.USDT_PERPETUAL);
+        }
+    }
+
+    private record SpotReservation(
+            long userId,
+            OrderSide side,
+            String asset,
+            long reservedUnits,
+            long settledUnits,
+            long releasedUnits) {
     }
 
     private record AdjustmentReference(long amountUnits, String reason) {
+    }
+
+    private record ProductTransferRecord(
+            long transferId,
+            AccountType sourceAccountType,
+            AccountType targetAccountType,
+            String asset,
+            long amountUnits,
+            String status,
+            String reason,
+            Instant createdAt) {
     }
 
     private record PositionCollateralTarget(

@@ -148,6 +148,35 @@ class OrderMarginRepositoryTest {
     }
 
     @Test
+    void inversePerpetualRequirementUsesCoinPerpetualAccount() throws Exception {
+        OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
+        when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
+                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"),
+                eq("BUY"), eq(5_000L),
+                eq("BTC-USD"), eq(1L), eq("LIMIT")))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    return List.of(mapper.mapRow(instrumentRequirementRow(
+                            0L, 0L, 100_000L, 300_000L, 50_000L, 0L,
+                            "INVERSE_PERPETUAL", "BTC"), 0));
+                });
+        when(jdbcTemplate.query(contains("FROM instrument_risk_brackets"), anyRowMapper(),
+                eq("BTC-USD"), eq(1L), eq(10_000L)))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    return List.of(mapper.mapRow(riskBracketRow(100_000L), 0));
+                });
+
+        var requirement = repository.requirement("BTC-USD", 1L, 1001L, MarginMode.CROSS,
+                OrderSide.BUY, OrderType.LIMIT, 100_000L, 1L, 10_000L, 5_000L);
+
+        assertThat(requirement).isPresent();
+        assertThat(requirement.get().accepted()).isTrue();
+        assertThat(requirement.get().accountType()).isEqualTo("COIN_PERPETUAL");
+        assertThat(requirement.get().asset()).isEqualTo("BTC");
+    }
+
+    @Test
     void reserveFailsFastWhenGuardedBalanceUpdateDoesNotApply() throws Exception {
         OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
         when(jdbcTemplate.query(contains("FROM account_balances"), anyRowMapper(), eq(1001L), eq("USDT")))
@@ -188,9 +217,22 @@ class OrderMarginRepositoryTest {
                                                long openInterestLimitRatePpm,
                                                long openInterestLimitFloorUnits,
                                                long symbolOpenQuantitySteps) throws Exception {
+        return instrumentRequirementRow(currentSignedQuantitySteps, pendingSameSideSteps, maxPositionNotionalUnits,
+                openInterestLimitRatePpm, openInterestLimitFloorUnits, symbolOpenQuantitySteps,
+                "LINEAR_PERPETUAL", "USDT");
+    }
+
+    private ResultSet instrumentRequirementRow(long currentSignedQuantitySteps,
+                                               long pendingSameSideSteps,
+                                               long maxPositionNotionalUnits,
+                                               long openInterestLimitRatePpm,
+                                               long openInterestLimitFloorUnits,
+                                               long symbolOpenQuantitySteps,
+                                               String contractType,
+                                               String asset) throws Exception {
         ResultSet rs = mock(ResultSet.class);
-        when(rs.getString("contract_type")).thenReturn("LINEAR_PERPETUAL");
-        when(rs.getString("asset")).thenReturn("USDT");
+        when(rs.getString("contract_type")).thenReturn(contractType);
+        when(rs.getString("asset")).thenReturn(asset);
         when(rs.getLong("notional_multiplier_units")).thenReturn(10L);
         when(rs.getLong("price_tick_units")).thenReturn(1L);
         when(rs.getLong("settle_scale_units")).thenReturn(100_000_000L);

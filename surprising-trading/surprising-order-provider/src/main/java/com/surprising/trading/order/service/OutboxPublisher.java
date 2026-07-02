@@ -1,9 +1,12 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.trading.order.config.TradingOrderProperties;
+import com.surprising.trading.order.model.OutboxRecord;
 import com.surprising.trading.order.repository.OutboxRepository;
+import java.util.Comparator;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +23,7 @@ public class OutboxPublisher {
     private final TradingOrderProperties properties;
     private final OutboxRepository outboxRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
+    private final AtomicBoolean publishing = new AtomicBoolean(false);
 
     public OutboxPublisher(TradingOrderProperties properties,
                            OutboxRepository outboxRepository,
@@ -31,21 +35,33 @@ public class OutboxPublisher {
 
     @Scheduled(fixedDelayString = "${surprising.trading.order.outbox.publish-delay-ms:200}")
     public void publishPending() {
-        int remaining = properties.getOutbox().getBatchSize();
-        while (remaining > 0) {
-            Instant now = Instant.now();
-            var rows = outboxRepository.claimPending(remaining, now.plus(CLAIM_LEASE), now);
-            if (rows.isEmpty()) {
-                return;
+        if (!publishing.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            int remaining = properties.getOutbox().getBatchSize();
+            while (remaining > 0) {
+                Instant now = Instant.now();
+                var rows = outboxRepository.claimPending(remaining, now.plus(CLAIM_LEASE), now)
+                        .stream()
+                        .sorted(Comparator.comparing(OutboxRecord::topic)
+                                .thenComparing(OutboxRecord::eventKey)
+                                .thenComparingLong(OutboxRecord::id))
+                        .toList();
+                if (rows.isEmpty()) {
+                    return;
+                }
+                for (var row : rows) {
+                    publish(row);
+                }
+                remaining -= rows.size();
             }
-            for (var row : rows) {
-                publish(row);
-            }
-            remaining -= rows.size();
+        } finally {
+            publishing.set(false);
         }
     }
 
-    private void publish(com.surprising.trading.order.model.OutboxRecord row) {
+    private void publish(OutboxRecord row) {
         // Delivery is at least once; downstream consumers must dedupe by commandId/orderId or eventId.
         try {
             kafkaTemplate.send(row.topic(), row.eventKey(), row.payload())

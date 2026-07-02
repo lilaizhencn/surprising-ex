@@ -1,6 +1,8 @@
 package com.surprising.instrument.provider.service;
 
 import com.surprising.instrument.api.model.IndexSourceConfig;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.api.model.RiskLimitBracket;
 import java.util.HashSet;
@@ -13,6 +15,7 @@ public class InstrumentValidator {
 
     public void validate(InstrumentUpsertRequest request) {
         requireSymbol(request.symbol());
+        validateProductContractPair(request.instrumentType(), request.contractType());
         requirePositive("contractMultiplierPpm", request.contractMultiplierPpm());
         requirePositive("priceTickUnits", request.priceTickUnits());
         requirePositive("quantityStepUnits", request.quantityStepUnits());
@@ -37,8 +40,36 @@ public class InstrumentValidator {
         if (request.minValidIndexSources() <= 0) {
             throw new IllegalArgumentException("minValidIndexSources must be positive");
         }
-        validateBrackets(request.riskLimitBrackets());
-        validateIndexSources(request.indexSources(), request.minValidIndexSources());
+        if (request.instrumentType() == InstrumentType.PERPETUAL) {
+            validateBrackets(request.riskLimitBrackets());
+            validateIndexSources(request.indexSources(), request.minValidIndexSources());
+        } else {
+            validateSpotRules(request);
+        }
+    }
+
+    private void validateProductContractPair(InstrumentType instrumentType, ContractType contractType) {
+        if (instrumentType == null) {
+            throw new IllegalArgumentException("instrumentType is required");
+        }
+        if (contractType == null) {
+            throw new IllegalArgumentException("contractType is required");
+        }
+        if (instrumentType == InstrumentType.SPOT && contractType != ContractType.SPOT) {
+            throw new IllegalArgumentException("SPOT instruments must use SPOT contractType");
+        }
+        if (instrumentType == InstrumentType.PERPETUAL && !contractType.isPerpetual()) {
+            throw new IllegalArgumentException("PERPETUAL instruments must use a perpetual contractType");
+        }
+    }
+
+    private void validateSpotRules(InstrumentUpsertRequest request) {
+        if (request.reduceOnlyEnabled()) {
+            throw new IllegalArgumentException("spot instruments cannot enable reduce-only");
+        }
+        if (request.riskLimitBrackets() != null && !request.riskLimitBrackets().isEmpty()) {
+            throw new IllegalArgumentException("spot instruments must not define risk limit brackets");
+        }
     }
 
     private void validateBrackets(List<RiskLimitBracket> brackets) {

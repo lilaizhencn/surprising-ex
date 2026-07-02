@@ -1,6 +1,7 @@
 package com.surprising.trading.order.repository;
 
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.InstrumentRuleLookup;
 import java.util.Arrays;
@@ -26,12 +27,17 @@ public class InstrumentRuleRepository implements InstrumentRuleLookup {
                 SELECT i.symbol,
                        i.version,
                        i.status,
+                       i.instrument_type,
                        i.contract_type,
+                       i.base_asset,
+                       i.quote_asset,
+                       i.settle_asset,
                        i.supported_order_types,
                        i.supported_time_in_force,
                        i.market_order_enabled,
                        i.post_only_enabled,
                        i.reduce_only_enabled,
+                       i.quantity_step_units,
                        i.min_quantity_steps,
                        i.max_quantity_steps,
                        i.min_notional_units,
@@ -48,12 +54,17 @@ public class InstrumentRuleRepository implements InstrumentRuleLookup {
                 rs.getString("symbol"),
                 rs.getLong("version"),
                 rs.getString("status"),
+                InstrumentType.valueOf(rs.getString("instrument_type")),
                 ContractType.valueOf(rs.getString("contract_type")),
+                rs.getString("base_asset"),
+                rs.getString("quote_asset"),
+                rs.getString("settle_asset"),
                 csv(rs.getString("supported_order_types")),
                 csv(rs.getString("supported_time_in_force")),
                 rs.getBoolean("market_order_enabled"),
                 rs.getBoolean("post_only_enabled"),
                 rs.getBoolean("reduce_only_enabled"),
+                rs.getLong("quantity_step_units"),
                 rs.getLong("min_quantity_steps"),
                 rs.getLong("max_quantity_steps"),
                 rs.getLong("min_notional_units"),

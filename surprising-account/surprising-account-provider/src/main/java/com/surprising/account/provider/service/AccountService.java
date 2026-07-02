@@ -1,5 +1,6 @@
 package com.surprising.account.provider.service;
 
+import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
@@ -8,6 +9,11 @@ import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
 import com.surprising.account.api.model.PositionMarginResponse;
 import com.surprising.account.api.model.PositionQueryResponse;
 import com.surprising.account.api.model.PositionResponse;
+import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
+import com.surprising.account.api.model.ProductBalanceQueryResponse;
+import com.surprising.account.api.model.ProductBalanceResponse;
+import com.surprising.account.api.model.ProductTransferRequest;
+import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.ContractSpec;
 import com.surprising.account.provider.model.LiquidationFeeContext;
@@ -15,8 +21,10 @@ import com.surprising.account.provider.model.LiquidationFeeSettlement;
 import com.surprising.account.provider.model.OrderFeeSnapshot;
 import com.surprising.account.provider.model.PositionChange;
 import com.surprising.account.provider.model.PositionState;
+import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRepository;
+import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
@@ -80,6 +88,40 @@ public class AccountService {
     public BalanceQueryResponse balances(long userId) {
         List<BalanceResponse> rows = accountRepository.balances(userId);
         return new BalanceQueryResponse(rows.size(), rows);
+    }
+
+    @Transactional
+    public ProductBalanceResponse adjustProductBalance(ProductBalanceAdjustmentRequest request) {
+        if (request.amountUnits() == 0) {
+            throw new IllegalArgumentException("amountUnits must not be zero");
+        }
+        AccountType accountType = normalizeAccountType(request.accountType());
+        return accountRepository.adjustProductBalance(request.userId(), accountType, normalizeAsset(request.asset()),
+                request.amountUnits(), normalizeReferenceId(request.referenceId()), request.reason());
+    }
+
+    public ProductBalanceResponse productBalance(long userId, AccountType accountType, String asset) {
+        AccountType normalizedType = normalizeAccountType(accountType);
+        String normalizedAsset = normalizeAsset(asset);
+        return accountRepository.productBalance(userId, normalizedType, normalizedAsset)
+                .orElse(new ProductBalanceResponse(userId, normalizedType, normalizedAsset, 0L, 0L, 0L,
+                        Instant.EPOCH));
+    }
+
+    public ProductBalanceQueryResponse productBalances(long userId, AccountType accountType) {
+        List<ProductBalanceResponse> rows = accountRepository.productBalances(userId, accountType);
+        return new ProductBalanceQueryResponse(rows.size(), rows);
+    }
+
+    @Transactional
+    public ProductTransferResponse transfer(ProductTransferRequest request) {
+        AccountType source = normalizeAccountType(request.sourceAccountType());
+        AccountType target = normalizeAccountType(request.targetAccountType());
+        if (source == target) {
+            throw new IllegalArgumentException("sourceAccountType and targetAccountType must be different");
+        }
+        return accountRepository.transferProductBalance(request.userId(), source, target, normalizeAsset(request.asset()),
+                request.amountUnits(), normalizeReferenceId(request.referenceId()), request.reason());
     }
 
     public PositionResponse position(long userId, String symbol) {
@@ -153,6 +195,22 @@ public class AccountService {
             return false;
         }
         String traceId = trade.traceId();
+        InstrumentType takerInstrumentType = accountRepository.instrumentType(trade.symbol(),
+                trade.takerInstrumentVersion());
+        InstrumentType makerInstrumentType = accountRepository.instrumentType(trade.symbol(),
+                trade.makerInstrumentVersion());
+        if (takerInstrumentType != makerInstrumentType) {
+            throw new IllegalStateException("matched orders use different instrument types for " + trade.symbol());
+        }
+        if (takerInstrumentType == InstrumentType.SPOT) {
+            applySpotTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
+                    trade.takerInstrumentVersion(), trade.takerSide(), trade.priceTicks(), trade.quantitySteps(),
+                    trade.takerOrderCompleted(), true, trade.eventTime());
+            applySpotTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
+                    trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.priceTicks(),
+                    trade.quantitySteps(), trade.makerOrderCompleted(), false, trade.eventTime());
+            return true;
+        }
         applyTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
                 trade.takerInstrumentVersion(), trade.takerSide(), trade.takerMarginMode(), trade.priceTicks(), trade.quantitySteps(),
                 trade.takerOrderCompleted(), true, trade.eventTime(), traceId);
@@ -160,6 +218,24 @@ public class AccountService {
                 trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.makerMarginMode(), trade.priceTicks(), trade.quantitySteps(),
                 trade.makerOrderCompleted(), false, trade.eventTime(), traceId);
         return true;
+    }
+
+    private void applySpotTradeSide(long tradeId,
+                                    long orderId,
+                                    long userId,
+                                    String symbol,
+                                    long instrumentVersion,
+                                    OrderSide side,
+                                    long priceTicks,
+                                    long quantitySteps,
+                                    boolean orderCompleted,
+                                    boolean taker,
+                                    Instant eventTime) {
+        SpotInstrumentSpec spec = accountRepository.spotInstrumentSpec(symbol, instrumentVersion);
+        OrderFeeSnapshot feeSnapshot = orderFeeSnapshot(orderId, userId, symbol);
+        long feeRatePpm = taker ? feeSnapshot.takerFeeRatePpm() : feeSnapshot.makerFeeRatePpm();
+        accountRepository.settleSpotTradeSide(userId, orderId, tradeId, symbol, side, priceTicks,
+                quantitySteps, spec, feeRatePpm, taker ? "TAKER_FEE" : "MAKER_FEE", orderCompleted, eventTime);
     }
 
     private PositionResponse applyTradeSide(long tradeId,
@@ -186,8 +262,9 @@ public class AccountService {
         PositionChange change = positionCalculator.apply(current, side, priceTicks, quantitySteps,
                 positionSpec, fillSpec);
         if (closeSteps > 0) {
-            accountRepository.settleRealizedPnl(userId, positionSpec.settleAsset(), orderId, tradeId, symbol,
-                    normalizedMarginMode, change.realizedPnlDeltaUnits(), eventTime);
+            accountRepository.settleRealizedPnl(perpetualAccountType(positionSpec), userId,
+                    positionSpec.settleAsset(), orderId, tradeId, symbol, normalizedMarginMode,
+                    change.realizedPnlDeltaUnits(), eventTime);
         }
         if (openSteps > 0) {
             long actualMarginUnits = MarginTransferMath.openingInitialMarginUnits(fillSpec, priceTicks, openSteps);
@@ -197,8 +274,9 @@ public class AccountService {
         OrderFeeSnapshot feeSnapshot = orderFeeSnapshot(orderId, userId, symbol);
         long feeRatePpm = taker ? feeSnapshot.takerFeeRatePpm() : feeSnapshot.makerFeeRatePpm();
         long feeDeltaUnits = TradeFeeMath.feeDeltaUnits(fillSpec, priceTicks, quantitySteps, feeRatePpm);
-        accountRepository.settleTradeFee(userId, fillSpec.settleAsset(), orderId, tradeId, feeDeltaUnits,
-                taker ? "TAKER_FEE" : "MAKER_FEE", feeRatePpm, symbol, normalizedMarginMode, eventTime);
+        accountRepository.settleTradeFee(perpetualAccountType(fillSpec), userId, fillSpec.settleAsset(),
+                orderId, tradeId, feeDeltaUnits, taker ? "TAKER_FEE" : "MAKER_FEE", feeRatePpm, symbol,
+                normalizedMarginMode, eventTime);
         if (closeSteps > 0) {
             settleLiquidationFeeIfNeeded(tradeId, orderId, userId, symbol, normalizedMarginMode, fillSpec,
                     priceTicks, quantitySteps, eventTime, traceId);
@@ -233,8 +311,8 @@ public class AccountService {
                                               String traceId) {
         accountRepository.liquidationFeeContext(orderId, userId, symbol).ifPresent(context -> {
             long requestedFeeUnits = liquidationFeeUnits(fillSpec, priceTicks, quantitySteps, context);
-            accountRepository.settleLiquidationFee(userId, fillSpec.settleAsset(), orderId, tradeId, symbol,
-                    marginMode, requestedFeeUnits, context, eventTime)
+            accountRepository.settleLiquidationFee(perpetualAccountType(fillSpec), userId, fillSpec.settleAsset(),
+                    orderId, tradeId, symbol, marginMode, requestedFeeUnits, context, eventTime)
                     .ifPresent(settlement -> enqueueLiquidationFeeEvent(tradeId, orderId, userId, symbol,
                             marginMode, fillSpec.settleAsset(), settlement, eventTime, traceId));
         });
@@ -276,6 +354,12 @@ public class AccountService {
     private OrderFeeSnapshot orderFeeSnapshot(long orderId, long userId, String symbol) {
         return orderFeeSnapshotCache.get(new OrderFeeSnapshotKey(orderId, userId, symbol),
                 key -> accountRepository.orderFeeSnapshot(key.orderId(), key.userId(), key.symbol()));
+    }
+
+    private AccountType perpetualAccountType(ContractSpec spec) {
+        return spec.contractType() == com.surprising.instrument.api.model.ContractType.INVERSE_PERPETUAL
+                ? AccountType.COIN_PERPETUAL
+                : AccountType.USDT_PERPETUAL;
     }
 
     private OrderSide opposite(OrderSide side) {
@@ -329,6 +413,13 @@ public class AccountService {
             throw new IllegalArgumentException("hedge-mode positionSide is not supported; use NET");
         }
         return normalized;
+    }
+
+    private AccountType normalizeAccountType(AccountType accountType) {
+        if (accountType == null) {
+            throw new IllegalArgumentException("accountType is required");
+        }
+        return accountType;
     }
 
     private String normalizeReferenceId(String referenceId) {

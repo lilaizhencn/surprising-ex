@@ -3,6 +3,7 @@ package com.surprising.trading.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
@@ -69,6 +70,30 @@ class OrderValidatorTest {
 
         assertThat(result.accepted()).isTrue();
         assertThat(result.rejectReason()).isNull();
+    }
+
+    @Test
+    void acceptsSpotLimitOrderWithLinearQuoteNotionalAndProductType() {
+        OrderValidator validator = new OrderValidator(lookup(spotRule()));
+
+        var result = validator.validate(limit(1_000_000L, 10L));
+
+        assertThat(result.accepted()).isTrue();
+        assertThat(result.instrumentType()).isEqualTo(InstrumentType.SPOT);
+        assertThat(result.instrumentVersion()).isEqualTo(3L);
+    }
+
+    @Test
+    void rejectsSpotReduceOnlyOrderBeforePerpetualPositionValidation() {
+        OrderValidator validator = new OrderValidator(lookup(spotRule()));
+        var request = new PlaceOrderRequest(1001L, "spot-reduce", "BTC-USDT", OrderSide.SELL,
+                OrderType.LIMIT, TimeInForce.GTC, 1_000_000L, 10L, true, false);
+
+        var result = validator.validate(request);
+
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.instrumentType()).isEqualTo(InstrumentType.SPOT);
+        assertThat(result.rejectReason()).isEqualTo("reduce-only is only supported for perpetual instruments");
     }
 
     @Test
@@ -286,6 +311,31 @@ class OrderValidatorTest {
                 100L,
                 100_000_000L,
                 10_000L);
+    }
+
+    private InstrumentRule spotRule() {
+        return new InstrumentRule(
+                "BTC-USDT",
+                3L,
+                "TRADING",
+                InstrumentType.SPOT,
+                ContractType.SPOT,
+                "BTC",
+                "USDT",
+                "USDT",
+                Set.of("LIMIT"),
+                Set.of("GTC", "IOC", "FOK", "GTX"),
+                false,
+                true,
+                false,
+                100_000L,
+                1L,
+                100_000L,
+                1_000L,
+                1_000_000_000_000L,
+                10_000L,
+                1_000_000L,
+                1_000_000L);
     }
 
     private InstrumentRuleLookup lookup(InstrumentRule rule) {

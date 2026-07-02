@@ -170,10 +170,40 @@ class MatchingResultRepositoryTest {
     }
 
     @Test
+    void coinPerpetualMarginReleaseCreditsProductAccountBalance() throws Exception {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        MatchingMarginRepository repository = new MatchingMarginRepository(jdbcTemplate);
+        when(jdbcTemplate.query(contains("FROM account_margin_reservations"), anyRowMapper(), eq(101L)))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getString("account_type")).thenReturn("COIN_PERPETUAL");
+                    when(rs.getLong("user_id")).thenReturn(1001L);
+                    when(rs.getString("asset")).thenReturn("BTC");
+                    when(rs.getLong("reserved_units")).thenReturn(100L);
+                    when(rs.getLong("released_units")).thenReturn(20L);
+                    when(rs.getLong("position_margin_units")).thenReturn(0L);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+        when(jdbcTemplate.update(contains("UPDATE account_product_balances"), eq(80L), eq(80L),
+                any(Timestamp.class), eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"), eq(80L))).thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_margin_reservations"), any(Object[].class)))
+                .thenReturn(1);
+
+        repository.releaseAll(101L, "ORDER_REJECTED", EVENT_TIME);
+
+        verify(jdbcTemplate).update(contains("UPDATE account_product_balances"), eq(80L), eq(80L),
+                any(Timestamp.class), eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"), eq(80L));
+        verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
+    }
+
+    @Test
     void missingMarginReservationFailsForNonReduceOnlyOrders() throws Exception {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         MatchingMarginRepository repository = new MatchingMarginRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("FROM account_margin_reservations"), anyRowMapper(), eq(101L)))
+                .thenReturn(List.of());
+        when(jdbcTemplate.query(contains("FROM account_spot_order_reservations"), anyRowMapper(), eq(101L)))
                 .thenReturn(List.of());
         when(jdbcTemplate.query(contains("SELECT reduce_only"), anyRowMapper(), eq(101L)))
                 .thenAnswer(invocation -> {
@@ -194,6 +224,8 @@ class MatchingResultRepositoryTest {
         MatchingMarginRepository repository = new MatchingMarginRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("FROM account_margin_reservations"), anyRowMapper(), eq(101L)))
                 .thenReturn(List.of());
+        when(jdbcTemplate.query(contains("FROM account_spot_order_reservations"), anyRowMapper(), eq(101L)))
+                .thenReturn(List.of());
         when(jdbcTemplate.query(contains("SELECT reduce_only"), anyRowMapper(), eq(101L)))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -205,6 +237,35 @@ class MatchingResultRepositoryTest {
         repository.releaseUnused(101L, "ORDER_TERMINAL", EVENT_TIME);
 
         verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
+    }
+
+    @Test
+    void missingMarginReservationReleasesSpotReservationInsteadOfFailing() throws Exception {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        MatchingMarginRepository repository = new MatchingMarginRepository(jdbcTemplate);
+        when(jdbcTemplate.query(contains("FROM account_margin_reservations"), anyRowMapper(), eq(101L)))
+                .thenReturn(List.of());
+        when(jdbcTemplate.query(contains("FROM account_spot_order_reservations"), anyRowMapper(), eq(101L)))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("user_id")).thenReturn(1001L);
+                    when(rs.getString("asset")).thenReturn("USDT");
+                    when(rs.getLong("reserved_units")).thenReturn(1_000L);
+                    when(rs.getLong("settled_units")).thenReturn(0L);
+                    when(rs.getLong("released_units")).thenReturn(0L);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+        when(jdbcTemplate.update(contains("UPDATE account_product_balances"), eq(1_000L), eq(1_000L),
+                any(Timestamp.class), eq(1001L), eq("USDT"), eq(1_000L))).thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_spot_order_reservations"), any(Object[].class)))
+                .thenReturn(1);
+
+        repository.releaseAll(101L, "ORDER_REJECTED", EVENT_TIME);
+
+        verify(jdbcTemplate).update(contains("UPDATE account_product_balances"), eq(1_000L), eq(1_000L),
+                any(Timestamp.class), eq(1001L), eq("USDT"), eq(1_000L));
+        verify(jdbcTemplate, never()).query(contains("SELECT reduce_only"), anyRowMapper(), eq(101L));
     }
 
     @Test

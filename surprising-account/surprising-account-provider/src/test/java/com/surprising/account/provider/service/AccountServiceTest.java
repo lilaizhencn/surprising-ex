@@ -3,6 +3,7 @@ package com.surprising.account.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
@@ -15,9 +16,11 @@ import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.account.provider.model.LiquidationFeeSettlement;
 import com.surprising.account.provider.model.OrderFeeSnapshot;
 import com.surprising.account.provider.model.PositionState;
+import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
@@ -102,6 +105,59 @@ class AccountServiceTest {
         service.processTrade(trade);
 
         assertThat(repository.feeByUser).containsEntry(2002L, -1_800L).containsEntry(1001L, 180L);
+    }
+
+    @Test
+    void spotTradeSettlesProductAccountsWithoutPerpetualPositionUpdates() {
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.instrumentTypes.put("BTC-USDT-SPOT:3", InstrumentType.SPOT);
+        repository.spotSpecs.put("BTC-USDT-SPOT:3",
+                new SpotInstrumentSpec(3L, "BTC", "USDT", 100_000L, 1L));
+        repository.feeSnapshots.put(9102L, new OrderFeeSnapshot(-100L, 800L));
+        repository.feeSnapshots.put(9101L, new OrderFeeSnapshot(-200L, 900L));
+        FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
+        AccountService service = new AccountService(repository, new PositionCalculator(), null,
+                new AccountProperties(), outboxRepository);
+
+        MatchTradeEvent trade = new MatchTradeEvent(
+                9501L,
+                9301L,
+                "BTC-USDT-SPOT",
+                9102L,
+                3L,
+                2002L,
+                OrderSide.BUY,
+                9101L,
+                3L,
+                1001L,
+                650_000L,
+                4L,
+                true,
+                false,
+                EVENT_TIME.plusSeconds(5),
+                "trace-spot");
+
+        service.processTrade(trade);
+
+        assertThat(repository.spotSettlements).hasSize(2);
+        assertThat(repository.spotSettlements)
+                .extracting(SpotSettlementCall::orderId)
+                .containsExactly(9102L, 9101L);
+        assertThat(repository.spotSettlements)
+                .extracting(SpotSettlementCall::side)
+                .containsExactly(OrderSide.BUY, OrderSide.SELL);
+        assertThat(repository.spotSettlements)
+                .extracting(SpotSettlementCall::feeRatePpm)
+                .containsExactly(800L, -200L);
+        assertThat(repository.spotSettlements)
+                .extracting(SpotSettlementCall::orderCompleted)
+                .containsExactly(true, false);
+        assertThat(repository.positionUpdates).isZero();
+        assertThat(repository.consumedOrderMargin).isEmpty();
+        assertThat(repository.releasedOrderMargin).isEmpty();
+        assertThat(repository.pnlByUser).isEmpty();
+        assertThat(repository.feeByUser).isEmpty();
+        assertThat(outboxRepository.calls).isEmpty();
     }
 
     @Test
@@ -472,6 +528,9 @@ class AccountServiceTest {
         private final Map<Long, Long> liquidationFeeByUser = new HashMap<>();
         private final Map<String, Integer> contractSpecLoads = new HashMap<>();
         private final Map<Long, Integer> feeSnapshotLoads = new HashMap<>();
+        private final Map<String, InstrumentType> instrumentTypes = new HashMap<>();
+        private final Map<String, SpotInstrumentSpec> spotSpecs = new HashMap<>();
+        private final List<SpotSettlementCall> spotSettlements = new ArrayList<>();
         private final Set<ProcessedTradeKey> processedTradeIds = new HashSet<>();
         private int tradeProcessingAttempts;
         private int positionUpdates;
@@ -487,6 +546,17 @@ class AccountServiceTest {
             contractSpecLoads.merge(symbol + ":" + instrumentVersion, 1, Integer::sum);
             return new ContractSpec(instrumentVersion, ContractType.LINEAR_PERPETUAL,
                     "USDT", 1L, 100_000_000L, 100_000_000L, 10_000L, 2L, 5L);
+        }
+
+        @Override
+        public InstrumentType instrumentType(String symbol, long instrumentVersion) {
+            return instrumentTypes.getOrDefault(symbol + ":" + instrumentVersion, InstrumentType.PERPETUAL);
+        }
+
+        @Override
+        public SpotInstrumentSpec spotInstrumentSpec(String symbol, long instrumentVersion) {
+            return Optional.ofNullable(spotSpecs.get(symbol + ":" + instrumentVersion))
+                    .orElseThrow(() -> new IllegalStateException("missing spot spec " + symbol));
         }
 
         @Override
@@ -589,6 +659,20 @@ class AccountServiceTest {
         }
 
         @Override
+        public void settleRealizedPnl(AccountType accountType,
+                                      long userId,
+                                      String asset,
+                                      long orderId,
+                                      long tradeId,
+                                      String symbol,
+                                      MarginMode marginMode,
+                                      long realizedPnlDeltaUnits,
+                                      Instant now) {
+            assertThat(accountType).isEqualTo(AccountType.USDT_PERPETUAL);
+            settleRealizedPnl(userId, asset, orderId, tradeId, symbol, marginMode, realizedPnlDeltaUnits, now);
+        }
+
+        @Override
         public void settleTradeFee(long userId,
                                    String asset,
                                    long orderId,
@@ -616,6 +700,40 @@ class AccountServiceTest {
         }
 
         @Override
+        public void settleTradeFee(AccountType accountType,
+                                   long userId,
+                                   String asset,
+                                   long orderId,
+                                   long tradeId,
+                                   long feeDeltaUnits,
+                                   String reason,
+                                   long feeRatePpm,
+                                   String symbol,
+                                   MarginMode marginMode,
+                                   Instant now) {
+            assertThat(accountType).isEqualTo(AccountType.USDT_PERPETUAL);
+            settleTradeFee(userId, asset, orderId, tradeId, feeDeltaUnits, reason, feeRatePpm, symbol,
+                    marginMode, now);
+        }
+
+        @Override
+        public void settleSpotTradeSide(long userId,
+                                        long orderId,
+                                        long tradeId,
+                                        String symbol,
+                                        OrderSide side,
+                                        long priceTicks,
+                                        long quantitySteps,
+                                        SpotInstrumentSpec spec,
+                                        long feeRatePpm,
+                                        String feeReason,
+                                        boolean orderCompleted,
+                                        Instant now) {
+            spotSettlements.add(new SpotSettlementCall(userId, orderId, tradeId, symbol, side, priceTicks,
+                    quantitySteps, spec, feeRatePpm, feeReason, orderCompleted, now));
+        }
+
+        @Override
         public Optional<LiquidationFeeSettlement> settleLiquidationFee(long userId,
                                                                        String asset,
                                                                        long orderId,
@@ -631,6 +749,22 @@ class AccountServiceTest {
             liquidationFeeByUser.merge(userId, requestedFeeUnits, Long::sum);
             return Optional.of(new LiquidationFeeSettlement(context.liquidationOrderId(), context.candidateId(),
                     requestedFeeUnits, context.feeRatePpm()));
+        }
+
+        @Override
+        public Optional<LiquidationFeeSettlement> settleLiquidationFee(AccountType accountType,
+                                                                       long userId,
+                                                                       String asset,
+                                                                       long orderId,
+                                                                       long tradeId,
+                                                                       String symbol,
+                                                                       MarginMode marginMode,
+                                                                       long requestedFeeUnits,
+                                                                       LiquidationFeeContext context,
+                                                                       Instant now) {
+            assertThat(accountType).isEqualTo(AccountType.USDT_PERPETUAL);
+            return settleLiquidationFee(userId, asset, orderId, tradeId, symbol, marginMode, requestedFeeUnits,
+                    context, now);
         }
 
         @Override
@@ -730,6 +864,20 @@ class AccountServiceTest {
                                              long feeRatePpm,
                                              Instant eventTime,
                                              String traceId) {
+    }
+
+    private record SpotSettlementCall(long userId,
+                                      long orderId,
+                                      long tradeId,
+                                      String symbol,
+                                      OrderSide side,
+                                      long priceTicks,
+                                      long quantitySteps,
+                                      SpotInstrumentSpec spec,
+                                      long feeRatePpm,
+                                      String feeReason,
+                                      boolean orderCompleted,
+                                      Instant eventTime) {
     }
 
     private record PositionKey(long userId, String symbol, MarginMode marginMode) {

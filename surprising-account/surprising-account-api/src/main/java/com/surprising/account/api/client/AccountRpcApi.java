@@ -1,6 +1,7 @@
 package com.surprising.account.api.client;
 
 import com.surprising.account.api.AccountApiPaths;
+import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
@@ -8,6 +9,10 @@ import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
 import com.surprising.account.api.model.PositionMarginResponse;
 import com.surprising.account.api.model.PositionQueryResponse;
 import com.surprising.account.api.model.PositionResponse;
+import com.surprising.account.api.model.ProductBalanceQueryResponse;
+import com.surprising.account.api.model.ProductBalanceResponse;
+import com.surprising.account.api.model.ProductTransferRequest;
+import com.surprising.account.api.model.ProductTransferResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
@@ -30,6 +35,19 @@ public interface AccountRpcApi {
 
     @GetMapping("/balances")
     BalanceQueryResponse balances(@RequestParam("userId") @Positive long userId);
+
+    @GetMapping("/product-balance")
+    ProductBalanceResponse productBalance(@RequestParam("userId") @Positive long userId,
+                                          @RequestParam("accountType") AccountType accountType,
+                                          @RequestParam("asset") @NotBlank String asset);
+
+    @GetMapping("/product-balances")
+    ProductBalanceQueryResponse productBalances(@RequestParam("userId") @Positive long userId,
+                                                @RequestParam(value = "accountType", required = false)
+                                                AccountType accountType);
+
+    @PostMapping("/transfers")
+    ProductTransferResponse transfer(@Valid @RequestBody ProductTransferRequest request);
 
     @GetMapping("/position")
     PositionResponse position(@RequestParam("userId") @Positive long userId,
