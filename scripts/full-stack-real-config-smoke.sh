@@ -29,6 +29,12 @@ QUANTITY_STEPS="${QUANTITY_STEPS:-10}"
 PAIR_COUNT="${PAIR_COUNT:-50}"
 LOAD_CONCURRENCY="${LOAD_CONCURRENCY:-16}"
 BOOK_DEPTH_LEVELS="${BOOK_DEPTH_LEVELS:-60}"
+RISK_BACKGROUND_LOAD_ENABLED="${FULL_STACK_RISK_BACKGROUND_LOAD_ENABLED:-false}"
+RISK_BACKGROUND_PAIR_COUNT="${FULL_STACK_RISK_BACKGROUND_PAIR_COUNT:-4}"
+RISK_BACKGROUND_ROUNDS="${FULL_STACK_RISK_BACKGROUND_ROUNDS:-3}"
+RISK_BACKGROUND_CONCURRENCY="${FULL_STACK_RISK_BACKGROUND_CONCURRENCY:-2}"
+RISK_BACKGROUND_INTERVAL_SECONDS="${FULL_STACK_RISK_BACKGROUND_INTERVAL_SECONDS:-1}"
+RISK_BACKGROUND_TOTAL_PAIRS=$((RISK_BACKGROUND_PAIR_COUNT * RISK_BACKGROUND_ROUNDS))
 START_INFRA="${START_INFRA:-true}"
 STOP_INFRA="${STOP_INFRA:-false}"
 BUILD_SERVICES="${BUILD_SERVICES:-auto}"
@@ -89,6 +95,8 @@ POSITION_MODE_LONG_MAKER_USER=$((9831000000 + RUN_SEQ))
 POSITION_MODE_SHORT_MAKER_USER=$((9832000000 + RUN_SEQ))
 POSITION_MODE_BLOCK_ORDER_USER=$((9833000000 + RUN_SEQ))
 POSITION_MODE_BLOCK_TRIGGER_USER=$((9834000000 + RUN_SEQ))
+RISK_BACKGROUND_MAKER_START=$((9840000000 + RUN_SEQ * 1000))
+RISK_BACKGROUND_TAKER_START=$((9850000000 + RUN_SEQ * 1000))
 POSITION_MODE_SYMBOL="${BTC_SYMBOL}"
 POSITION_MODE_TICK_UNITS="${BTC_TICK_UNITS}"
 
@@ -123,10 +131,13 @@ POSITION_MODE_QTY=3
 POSITION_MODE_LONG_PRICE_TICKS="${BTC_PRICE_TICKS}"
 POSITION_MODE_SHORT_PRICE_TICKS="${BTC_PRICE_TICKS}"
 POSITION_MODE_BLOCK_PRICE_TICKS=$((BTC_PRICE_TICKS + 32000))
+RISK_BACKGROUND_PRICE_TICKS=$((BTC_PRICE_TICKS + 15000))
+RISK_BACKGROUND_QTY=1
 
 PROVIDER_NAMES=()
 PROVIDER_PIDS=()
 PIDS=()
+RISK_BACKGROUND_LOAD_PID=""
 SMOKE_PROVIDERS=(
   instrument candlestick index-price mark-price matching account risk liquidation
   funding insurance adl websocket order trigger gateway market-maker
@@ -1897,6 +1908,12 @@ fund_users() {
     adjust_balance "$((LOAD_MAKER_START + i))" "${default_deposit}" "real-config-maker-${RUN_ID}-${i}"
     adjust_balance "$((LOAD_TAKER_START + i))" "${default_deposit}" "real-config-taker-${RUN_ID}-${i}"
   done
+  if [[ "${RISK_BACKGROUND_LOAD_ENABLED}" == "true" ]]; then
+    for ((i = 0; i < RISK_BACKGROUND_TOTAL_PAIRS; i++)); do
+      adjust_balance "$((RISK_BACKGROUND_MAKER_START + i))" "${default_deposit}" "real-config-risk-bg-maker-${RUN_ID}-${i}"
+      adjust_balance "$((RISK_BACKGROUND_TAKER_START + i))" "${default_deposit}" "real-config-risk-bg-taker-${RUN_ID}-${i}"
+    done
+  fi
   adjust_product_balance "${COIN_MAKER_USER}" "COIN_PERPETUAL" "BTC" 100000000 "real-config-coin-maker-btc-${RUN_ID}"
   adjust_product_balance "${COIN_TAKER_USER}" "COIN_PERPETUAL" "BTC" 100000000 "real-config-coin-taker-btc-${RUN_ID}"
   adjust_product_balance "${SPOT_SELLER_USER}" "SPOT" "BTC" 1000000 "real-config-spot-seller-btc-${RUN_ID}"
@@ -1921,6 +1938,70 @@ run_with_concurrency() {
       wait "${pid}"
     done
   fi
+}
+
+run_risk_background_load() {
+  local round
+  local i
+  local idx
+  local price_ticks
+  local expected
+  local maker_commands=()
+  local taker_commands=()
+
+  for ((round = 0; round < RISK_BACKGROUND_ROUNDS; round++)); do
+    maker_commands=()
+    taker_commands=()
+    for ((i = 0; i < RISK_BACKGROUND_PAIR_COUNT; i++)); do
+      idx=$((round * RISK_BACKGROUND_PAIR_COUNT + i))
+      price_ticks="${RISK_BACKGROUND_PRICE_TICKS}"
+      maker_commands+=("curl -fsS -X POST 'http://localhost:9094/api/v1/gateway/trading' -H 'Content-Type: application/json' -H 'X-User-Id: $((RISK_BACKGROUND_MAKER_START + idx))' -H 'X-Trace-Id: real-config-${RUN_ID}-risk-bg-maker-${idx}' -d '{\"userId\": $((RISK_BACKGROUND_MAKER_START + idx)), \"clientOrderId\": \"real-risk-bg-maker-${RUN_ID}-${idx}\", \"symbol\": \"${BTC_SYMBOL}\", \"side\": \"SELL\", \"orderType\": \"LIMIT\", \"timeInForce\": \"GTC\", \"priceTicks\": ${price_ticks}, \"quantitySteps\": ${RISK_BACKGROUND_QTY}, \"marginMode\": \"CROSS\", \"positionSide\": \"NET\", \"reduceOnly\": false, \"postOnly\": false}' >/dev/null")
+      taker_commands+=("curl -fsS -X POST 'http://localhost:9094/api/v1/gateway/trading' -H 'Content-Type: application/json' -H 'X-User-Id: $((RISK_BACKGROUND_TAKER_START + idx))' -H 'X-Trace-Id: real-config-${RUN_ID}-risk-bg-taker-${idx}' -d '{\"userId\": $((RISK_BACKGROUND_TAKER_START + idx)), \"clientOrderId\": \"real-risk-bg-taker-${RUN_ID}-${idx}\", \"symbol\": \"${BTC_SYMBOL}\", \"side\": \"BUY\", \"orderType\": \"LIMIT\", \"timeInForce\": \"IOC\", \"priceTicks\": ${price_ticks}, \"quantitySteps\": ${RISK_BACKGROUND_QTY}, \"marginMode\": \"CROSS\", \"positionSide\": \"NET\", \"reduceOnly\": false, \"postOnly\": false}' >/dev/null")
+    done
+    run_with_concurrency "${RISK_BACKGROUND_CONCURRENCY}" "${maker_commands[@]}"
+    run_with_concurrency "${RISK_BACKGROUND_CONCURRENCY}" "${taker_commands[@]}"
+    expected=$(((round + 1) * RISK_BACKGROUND_PAIR_COUNT))
+    wait_sql_equals "risk background maker orders filled through round ${round}" \
+      "SELECT count(*) FROM trading_orders WHERE client_order_id LIKE 'real-risk-bg-maker-${RUN_ID}-%' AND status = 'FILLED' AND executed_quantity_steps = ${RISK_BACKGROUND_QTY} AND remaining_quantity_steps = 0" \
+      "${expected}"
+    wait_sql_equals "risk background taker orders filled through round ${round}" \
+      "SELECT count(*) FROM trading_orders WHERE client_order_id LIKE 'real-risk-bg-taker-${RUN_ID}-%' AND status = 'FILLED' AND executed_quantity_steps = ${RISK_BACKGROUND_QTY} AND remaining_quantity_steps = 0" \
+      "${expected}"
+    if ((round + 1 < RISK_BACKGROUND_ROUNDS)); then
+      sleep "${RISK_BACKGROUND_INTERVAL_SECONDS}"
+    fi
+  done
+}
+
+start_risk_background_load() {
+  if [[ "${RISK_BACKGROUND_LOAD_ENABLED}" != "true" ]]; then
+    return
+  fi
+  echo "Scenario: background order flow during liquidation and ADL PAIRS=${RISK_BACKGROUND_TOTAL_PAIRS} CONCURRENCY=${RISK_BACKGROUND_CONCURRENCY}"
+  refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
+  (
+    run_risk_background_load
+  ) >"${TMP_DIR}/risk-background-load.log" 2>&1 &
+  RISK_BACKGROUND_LOAD_PID="$!"
+  PIDS+=("${RISK_BACKGROUND_LOAD_PID}")
+}
+
+wait_risk_background_load() {
+  if [[ "${RISK_BACKGROUND_LOAD_ENABLED}" != "true" || -z "${RISK_BACKGROUND_LOAD_PID}" ]]; then
+    return
+  fi
+  if ! wait "${RISK_BACKGROUND_LOAD_PID}"; then
+    echo "Background order flow failed while liquidation/ADL scenarios were running" >&2
+    cat "${TMP_DIR}/risk-background-load.log" >&2 || true
+    exit 1
+  fi
+  wait_sql_equals "risk background trade count and quantity" \
+    "SELECT count(*) || ':' || COALESCE(sum(quantity_steps), 0) FROM trading_match_trades WHERE symbol = '${BTC_SYMBOL}' AND maker_user_id BETWEEN ${RISK_BACKGROUND_MAKER_START} AND $((RISK_BACKGROUND_MAKER_START + RISK_BACKGROUND_TOTAL_PAIRS - 1)) AND taker_user_id BETWEEN ${RISK_BACKGROUND_TAKER_START} AND $((RISK_BACKGROUND_TAKER_START + RISK_BACKGROUND_TOTAL_PAIRS - 1))" \
+    "${RISK_BACKGROUND_TOTAL_PAIRS}:$((RISK_BACKGROUND_TOTAL_PAIRS * RISK_BACKGROUND_QTY))"
+  wait_sql_equals "risk background account processed trades" \
+    "SELECT count(*) FROM account_processed_trades p JOIN trading_match_trades t ON t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.symbol = '${BTC_SYMBOL}' AND t.maker_user_id BETWEEN ${RISK_BACKGROUND_MAKER_START} AND $((RISK_BACKGROUND_MAKER_START + RISK_BACKGROUND_TOTAL_PAIRS - 1)) AND t.taker_user_id BETWEEN ${RISK_BACKGROUND_TAKER_START} AND $((RISK_BACKGROUND_TAKER_START + RISK_BACKGROUND_TOTAL_PAIRS - 1))" \
+    "${RISK_BACKGROUND_TOTAL_PAIRS}"
+  echo "Background order flow completed during liquidation/ADL scenarios"
 }
 
 run_position_mode_flow() {
@@ -2408,12 +2489,19 @@ done
 run_index_source_fail_closed_flow
 
 echo "Scenario: active reduce-only close"
-expire_mark_price "${BTC_SYMBOL}"
-stale_market_order="$(place_order "${FULL_TAKER_USER}" "real-stale-mark-market-${RUN_ID}" "BUY" "MARKET" "IOC" 0 1 false false)"
-wait_order_state "${stale_market_order}" "REJECTED" "0" "0"
-wait_sql_equals "stale mark market reject reason" \
-  "SELECT reject_reason FROM trading_orders WHERE order_id = ${stale_market_order}" \
-  "mark price unavailable"
+if [[ "${RUN_FAILURE_SCENARIOS}" == "true" ]]; then
+  echo "Scenario: stale mark price rejects market order"
+  stop_provider "mark-price"
+  expire_mark_price "${BTC_SYMBOL}"
+  stale_market_order="$(place_order "${FULL_TAKER_USER}" "real-stale-mark-market-${RUN_ID}" "BUY" "MARKET" "IOC" 0 1 false false)"
+  wait_order_state "${stale_market_order}" "REJECTED" "0" "0"
+  wait_sql_equals "stale mark market reject reason" \
+    "SELECT reject_reason FROM trading_orders WHERE order_id = ${stale_market_order}" \
+    "mark price unavailable"
+  start_provider "mark-price"
+else
+  echo "Skipping stale mark market reject scenario because failure scenarios are disabled"
+fi
 refresh_mark_price "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${BTC_PRICE_TICKS}"
 close_maker_order="$(place_order "${CLOSE_MAKER_USER}" "real-close-maker-${RUN_ID}" "BUY" "LIMIT" "GTC" "${FULL_PRICE_TICKS}" "${CLOSE_QTY}" false false)"
 wait_order_result "${close_maker_order}" "SUCCESS"
@@ -2590,6 +2678,8 @@ wait_sql_equals "top-up user latest risk position is flat" \
   "SELECT signed_quantity_steps || ':' || notional_units || ':' || maintenance_margin_units FROM risk_position_snapshots WHERE user_id = ${TOPUP_USER} AND symbol = '${ETH_SYMBOL}' ORDER BY event_time DESC, snapshot_id DESC LIMIT 1" \
   "0:0:0"
 
+start_risk_background_load
+
 echo "Scenario: liquidation links risk, liquidation, matching, account, and insurance"
 adjust_insurance_fund 100000000000 "real-config-insurance-seed-${RUN_ID}"
 liq_entry_price_ticks="$(latest_mark_price_ticks "${ETH_SYMBOL}" "${ETH_TICK_UNITS}")"
@@ -2690,6 +2780,8 @@ wait_sql_nonzero "ADL target position reduced" \
 wait_sql_equals "ADL reduced residual deficit" \
   "SELECT deficit_units FROM account_deficits WHERE user_id = ${ADL_DEFICIT_USER} AND asset = 'USDT'" \
   "0"
+
+wait_risk_background_load
 
 run_market_maker_provider_smoke
 

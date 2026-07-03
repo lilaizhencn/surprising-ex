@@ -161,6 +161,25 @@ class LiquidationOrderRepositoryTest {
     }
 
     @Test
+    void lockPendingOnlyClaimsEarliestLiquidationOwnedOutboxRowsByTopicAndKey() {
+        LiquidationOrderRepository repository = repository();
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(100))).thenReturn(java.util.List.of());
+
+        repository.lockPending(100);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(100));
+        assertThat(sql.getValue())
+                .contains("DISTINCT ON (topic, event_key)")
+                .contains("aggregate_type IN ('ORDER', 'LIQUIDATION_ORDER')")
+                .contains("pg_try_advisory_xact_lock")
+                .contains("FOR UPDATE OF e SKIP LOCKED")
+                .doesNotContain("ORDER_BOOK_DEPTH")
+                .doesNotContain("MATCH_RESULT")
+                .doesNotContain("MATCH_TRADE");
+    }
+
+    @Test
     void markFailedFailsWhenNoRowIsUpdated() {
         LiquidationOrderRepository repository = repository();
         when(jdbcTemplate.update(contains("SET attempts = attempts + 1"), any(), any(), any(), eq(901L)))
@@ -174,6 +193,11 @@ class LiquidationOrderRepositoryTest {
 
     private LiquidationOrderRepository repository() {
         return new LiquidationOrderRepository(jdbcTemplate, sequenceRepository, new LiquidationProperties());
+    }
+
+    @SuppressWarnings("unchecked")
+    private RowMapper<Object> anyRowMapper() {
+        return any(RowMapper.class);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})

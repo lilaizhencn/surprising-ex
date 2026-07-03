@@ -267,13 +267,24 @@ public class LiquidationOrderRepository {
 
     public List<TradingOutboxRecord> lockPending(int limit) {
         return jdbcTemplate.query("""
-                SELECT id, topic, event_key, payload::text AS payload
-                  FROM trading_outbox_events
-                 WHERE published_at IS NULL
-                   AND next_attempt_at <= now()
-                 ORDER BY next_attempt_at ASC, id ASC
+                WITH earliest AS (
+                    SELECT DISTINCT ON (topic, event_key)
+                           id
+                      FROM trading_outbox_events
+                     WHERE published_at IS NULL
+                       AND aggregate_type IN ('ORDER', 'LIQUIDATION_ORDER')
+                     ORDER BY topic, event_key, id
+                )
+                SELECT e.id, e.topic, e.event_key, e.payload::text AS payload
+                  FROM trading_outbox_events e
+                  JOIN earliest c ON c.id = e.id
+                 WHERE e.published_at IS NULL
+                   AND e.aggregate_type IN ('ORDER', 'LIQUIDATION_ORDER')
+                   AND e.next_attempt_at <= now()
+                   AND pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))
+                 ORDER BY e.topic, e.event_key, e.id
                  LIMIT ?
-                 FOR UPDATE SKIP LOCKED
+                 FOR UPDATE OF e SKIP LOCKED
                 """, (rs, rowNum) -> new TradingOutboxRecord(
                 rs.getLong("id"),
                 rs.getString("topic"),
