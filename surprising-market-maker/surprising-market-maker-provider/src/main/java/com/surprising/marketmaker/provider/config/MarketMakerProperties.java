@@ -342,9 +342,11 @@ public class MarketMakerProperties {
 
     public static class ReferenceMarket {
         private boolean enabled;
+        private boolean webSocketEnabled;
         private Duration refreshInterval = Duration.ofMillis(500);
         private Duration maxAge = Duration.ofSeconds(3);
         private Duration requestTimeout = Duration.ofSeconds(2);
+        private Duration reconnectBackoff = Duration.ofSeconds(5);
         @Min(1)
         @Max(100)
         private int depthLevels = 20;
@@ -365,6 +367,14 @@ public class MarketMakerProperties {
 
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
+        }
+
+        public boolean isWebSocketEnabled() {
+            return webSocketEnabled;
+        }
+
+        public void setWebSocketEnabled(boolean webSocketEnabled) {
+            this.webSocketEnabled = webSocketEnabled;
         }
 
         public Duration getRefreshInterval() {
@@ -389,6 +399,14 @@ public class MarketMakerProperties {
 
         public void setRequestTimeout(Duration requestTimeout) {
             this.requestTimeout = requestTimeout;
+        }
+
+        public Duration getReconnectBackoff() {
+            return reconnectBackoff;
+        }
+
+        public void setReconnectBackoff(Duration reconnectBackoff) {
+            this.reconnectBackoff = reconnectBackoff;
         }
 
         public int getDepthLevels() {
@@ -448,6 +466,12 @@ public class MarketMakerProperties {
             @NotBlank
             @Size(max = 64)
             private String parser;
+            @Size(max = 2048)
+            private String webSocketUrl;
+            @Size(max = 2048)
+            private String webSocketSubscribeMessage;
+            @Size(max = 64)
+            private String webSocketParser;
 
             public boolean isEnabled() {
                 return enabled;
@@ -495,6 +519,30 @@ public class MarketMakerProperties {
 
             public void setParser(String parser) {
                 this.parser = parser;
+            }
+
+            public String getWebSocketUrl() {
+                return webSocketUrl;
+            }
+
+            public void setWebSocketUrl(String webSocketUrl) {
+                this.webSocketUrl = webSocketUrl;
+            }
+
+            public String getWebSocketSubscribeMessage() {
+                return webSocketSubscribeMessage;
+            }
+
+            public void setWebSocketSubscribeMessage(String webSocketSubscribeMessage) {
+                this.webSocketSubscribeMessage = webSocketSubscribeMessage;
+            }
+
+            public String getWebSocketParser() {
+                return webSocketParser;
+            }
+
+            public void setWebSocketParser(String webSocketParser) {
+                this.webSocketParser = webSocketParser;
             }
         }
     }

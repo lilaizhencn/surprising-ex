@@ -18,7 +18,7 @@ The module is not a matching shortcut. It calls the same order-entry RPCs as eve
 - The strategy queries account position before quoting. If account state is unavailable, the cycle fails closed and does not quote.
 - Inventory caps stop quoting the exposure-increasing side once `maxInventorySteps` is reached.
 - Existing market-maker orders are reconciled by `clientOrderId` prefix and canceled when stale, too far from the target price, or no longer desired.
-- Optional reference-market calibration is fail-closed per cycle: if enabled sources are unavailable and no fresh cache exists, the provider falls back to the normal local mark/order-book quote model instead of using stale external depth.
+- Optional reference-market calibration is fail-closed per cycle: if enabled WebSocket/REST sources are unavailable and no fresh cache exists, the provider falls back to the normal local mark/order-book quote model instead of using stale external depth.
 - The service should be deployed on an internal network only. Exposing it to public clients would allow operational control of liquidity accounts.
 - HTTP `X-Trace-Id` is accepted and forwarded to downstream Feign calls. Scheduled cycles create a trace id and expose the last value in `/strategies`.
 
@@ -106,9 +106,11 @@ surprising:
       max-inventory-skew-ppm: 800000
     reference-market:
       enabled: false
+      websocket-enabled: false
       refresh-interval: 500ms
       max-age: 3s
       request-timeout: 2s
+      reconnect-backoff: 5s
       depth-levels: 20
       quantity-scale-ppm: 1000000
       min-quantity-steps: 1
@@ -120,18 +122,26 @@ surprising:
           external-symbol: BTCUSDT
           url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
           parser: BINANCE_DEPTH
+          websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
+          websocket-parser: BINANCE_DEPTH_STREAM
         - name: OKX_SWAP
           enabled: true
           symbol: BTC-USDT
           external-symbol: BTC-USDT-SWAP
           url: https://www.okx.com/api/v5/market/books?instId={symbol}&sz=20
           parser: OKX_BOOKS
+          websocket-url: wss://ws.okx.com:8443/ws/v5/public
+          websocket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"{externalSymbol}"}]}'
+          websocket-parser: OKX_BOOKS_WS
         - name: BYBIT_LINEAR
           enabled: true
           symbol: BTC-USDT
           external-symbol: BTCUSDT
           url: https://api.bybit.com/v5/market/orderbook?category=linear&symbol={symbol}&limit=50
           parser: BYBIT_ORDERBOOK
+          websocket-url: wss://stream.bybit.com/v5/public/linear
+          websocket-subscribe-message: '{"op":"subscribe","args":["orderbook.50.{externalSymbol}"]}'
+          websocket-parser: BYBIT_ORDERBOOK_WS
     strategies:
       - strategy-id: btc-usdt-mm-a
         enabled: true
@@ -148,13 +158,13 @@ For each configured `strategyId + symbol`, the provider:
 1. Acquires a PostgreSQL lease in `market_maker_strategy_leases` when coordination is enabled.
 2. Reads instrument config, latest order book, latest mark price, and the market-maker account position.
 3. Uses mark price as the anchor when available; otherwise it falls back to order-book midpoint.
-4. If `reference-market.enabled=true`, fetches a fresh Binance/OKX/Bybit-style order book snapshot and mirrors each reference level's distance from midpoint plus its quantity into local ticks/steps, subject to local price-deviation, post-only, quantity, and inventory caps.
+4. If `reference-market.enabled=true`, uses a fresh Binance/OKX/Bybit-style reference book and mirrors each reference level's distance from midpoint plus its quantity into local ticks/steps, subject to local price-deviation, post-only, quantity, and inventory caps.
 5. Without a fresh reference snapshot, places symmetric post-only levels around the anchor using configured spread and spacing.
 6. Applies inventory skew and inventory caps before submitting orders.
 7. Cancels stale or off-target owned orders and submits only missing desired quotes.
 8. Propagates the cycle trace id to order-provider, so order events, matching events, account settlement, risk events, and private WebSocket pushes can be correlated.
 
-Reference-market calibration currently uses REST depth snapshots and a short in-memory cache. It is enough to make local quoting depth, per-level spacing, and quantities follow mainstream exchange snapshots during stress tests. A production market maker should still maintain a streaming WebSocket local book for lower latency and better resilience.
+Reference-market calibration uses WebSocket local books when `websocket-enabled=true` and falls back to REST depth snapshots when no fresh streaming book is available. The built-in parsers cover Binance depth streams, OKX books, and Bybit V5 orderbook messages. It is enough for stress tests to follow mainstream exchange depth, per-level spacing, and per-level quantities; production tests still need long-running evidence with the streaming source enabled.
 
 ## Multi-Node Deployment
 

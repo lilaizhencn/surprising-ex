@@ -18,7 +18,7 @@
 - 策略每轮都会查询账户持仓。账户状态不可用时，本轮 fail closed，不继续报价。
 - 当前净仓位达到 `maxInventorySteps` 后，会停止继续增加该方向风险的报价。
 - 自己的做市订单通过 `clientOrderId` 前缀识别；过期、偏离目标价格或不再需要的订单会撤掉。
-- 可选参考市场校准按轮次 fail closed：如果开启的外部 source 不可用且没有新鲜缓存，provider 会回退到本地 mark/order-book 报价模型，不使用过期外部深度继续报价。
+- 可选参考市场校准按轮次 fail closed：如果开启的 WebSocket/REST 外部 source 不可用且没有新鲜缓存，provider 会回退到本地 mark/order-book 报价模型，不使用过期外部深度继续报价。
 - 这个服务只能部署在内网。不要把做市商控制接口暴露给普通公网用户。
 - HTTP `X-Trace-Id` 会被接收并透传到下游 Feign 调用。定时策略会生成 traceId，最后一轮的值会暴露在 `/strategies` 返回里。
 
@@ -106,9 +106,11 @@ surprising:
       max-inventory-skew-ppm: 800000
     reference-market:
       enabled: false
+      websocket-enabled: false
       refresh-interval: 500ms
       max-age: 3s
       request-timeout: 2s
+      reconnect-backoff: 5s
       depth-levels: 20
       quantity-scale-ppm: 1000000
       min-quantity-steps: 1
@@ -120,18 +122,26 @@ surprising:
           external-symbol: BTCUSDT
           url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
           parser: BINANCE_DEPTH
+          websocket-url: wss://fstream.binance.com/ws/{externalSymbolLower}@depth20@100ms
+          websocket-parser: BINANCE_DEPTH_STREAM
         - name: OKX_SWAP
           enabled: true
           symbol: BTC-USDT
           external-symbol: BTC-USDT-SWAP
           url: https://www.okx.com/api/v5/market/books?instId={symbol}&sz=20
           parser: OKX_BOOKS
+          websocket-url: wss://ws.okx.com:8443/ws/v5/public
+          websocket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"{externalSymbol}"}]}'
+          websocket-parser: OKX_BOOKS_WS
         - name: BYBIT_LINEAR
           enabled: true
           symbol: BTC-USDT
           external-symbol: BTCUSDT
           url: https://api.bybit.com/v5/market/orderbook?category=linear&symbol={symbol}&limit=50
           parser: BYBIT_ORDERBOOK
+          websocket-url: wss://stream.bybit.com/v5/public/linear
+          websocket-subscribe-message: '{"op":"subscribe","args":["orderbook.50.{externalSymbol}"]}'
+          websocket-parser: BYBIT_ORDERBOOK_WS
     strategies:
       - strategy-id: btc-usdt-mm-a
         enabled: true
@@ -148,13 +158,13 @@ surprising:
 1. 如果开启多节点协调，先在 PostgreSQL 的 `market_maker_strategy_leases` 获取租约。
 2. 读取合约配置、最新盘口、最新标记价格和做市账号当前持仓。
 3. 优先使用 mark price 作为报价锚点；mark 不可用时回退盘口中价。
-4. 如果 `reference-market.enabled=true`，抓取新鲜的 Binance/OKX/Bybit 风格盘口快照，把外部每档相对中间价的距离和该档数量映射成本地 ticks/steps，同时仍受本地价格偏离、post-only、数量和库存上限保护。
+4. 如果 `reference-market.enabled=true`，使用新鲜的 Binance/OKX/Bybit 风格参考盘口，把外部每档相对中间价的距离和该档数量映射成本地 ticks/steps，同时仍受本地价格偏离、post-only、数量和库存上限保护。
 5. 没有新鲜参考盘口时，继续按配置的 spread 和 spacing 围绕锚点生成对称 post-only 报价。
 6. 按库存偏移和库存上限调整报价数量和方向。
 7. 撤掉过期或偏离目标的自有订单，只补齐缺失报价。
 8. 把本轮 traceId 透传给 order-provider，后续订单事件、撮合事件、账户结算、风控事件和私有 WebSocket 推送都可以关联排查。
 
-参考市场校准当前使用 REST 深度快照和短内存缓存，足够让压测时的本地盘口档位、档间距和每档数量跟随主流交易所快照。生产做市仍建议维护 WebSocket 本地订单簿，以获得更低延迟和更强容错。
+参考市场校准在 `websocket-enabled=true` 时优先维护 WebSocket 本地订单簿；没有新鲜流式盘口时，回退 REST 深度快照。内置解析器覆盖 Binance depth stream、OKX books 和 Bybit V5 orderbook 消息，足够让压测时的本地盘口档位、档间距和每档数量跟随主流交易所深度；生产前仍需要补一轮启用流式 source 的长时间真实进程压测证据。
 
 ## 多节点部署
 

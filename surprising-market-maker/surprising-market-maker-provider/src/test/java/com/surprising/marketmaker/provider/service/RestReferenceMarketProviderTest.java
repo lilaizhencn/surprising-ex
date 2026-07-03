@@ -66,6 +66,62 @@ class RestReferenceMarketProviderTest {
                 .satisfies(level -> assertThat(level.quantitySteps()).isEqualTo(17L));
     }
 
+    @Test
+    void parsesBinanceWebSocketDepthStreamIntoLiveBook() {
+        RestReferenceMarketProvider provider = provider();
+        MarketMakerProperties.ReferenceMarket.Source source = source("BINANCE_DEPTH");
+        source.setWebSocketParser("BINANCE_DEPTH_STREAM");
+
+        var snapshot = provider.parseWebSocketPayload(source, "BTC-USDT", instrument(), """
+                {"e":"depthUpdate","E":1,"b":[["60000.1","0.015"],["59999.9","0.020"]],
+                 "a":[["60000.3","0.017"],["60000.5","0.025"]]}
+                """, Instant.parse("2026-07-04T00:00:00Z"));
+
+        assertThat(snapshot.bids()).extracting(level -> level.priceTicks()).containsExactly(600_001L, 599_999L);
+        assertThat(snapshot.asks()).extracting(level -> level.quantitySteps()).containsExactly(17L, 25L);
+    }
+
+    @Test
+    void appliesOkxWebSocketDeltaToLocalBook() {
+        RestReferenceMarketProvider provider = provider();
+        MarketMakerProperties.ReferenceMarket.Source source = source("OKX_BOOKS");
+        source.setWebSocketParser("OKX_BOOKS_WS");
+
+        provider.parseWebSocketPayload(source, "BTC-USDT", instrument(), """
+                {"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"snapshot",
+                 "data":[{"bids":[["60000.1","0.015","0","1"],["59999.9","0.020","0","1"]],
+                 "asks":[["60000.3","0.017","0","1"]]}]}
+                """, Instant.parse("2026-07-04T00:00:00Z"));
+
+        var snapshot = provider.parseWebSocketPayload(source, "BTC-USDT", instrument(), """
+                {"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"update",
+                 "data":[{"bids":[["60000.1","0","0","0"],["60000.0","0.025","0","1"]],
+                 "asks":[["60000.3","0.018","0","1"]]}]}
+                """, Instant.parse("2026-07-04T00:00:01Z"));
+
+        assertThat(snapshot.bids()).extracting(level -> level.priceTicks()).containsExactly(600_000L, 599_999L);
+        assertThat(snapshot.bids()).extracting(level -> level.quantitySteps()).containsExactly(25L, 20L);
+        assertThat(snapshot.asks()).singleElement()
+                .satisfies(level -> assertThat(level.quantitySteps()).isEqualTo(18L));
+    }
+
+    @Test
+    void parsesBybitWebSocketOrderBookSnapshot() {
+        RestReferenceMarketProvider provider = provider();
+        MarketMakerProperties.ReferenceMarket.Source source = source("BYBIT_ORDERBOOK");
+        source.setWebSocketParser("BYBIT_ORDERBOOK_WS");
+
+        var snapshot = provider.parseWebSocketPayload(source, "BTC-USDT", instrument(), """
+                {"topic":"orderbook.50.BTCUSDT","type":"snapshot",
+                 "data":{"s":"BTCUSDT","b":[["60000.1","0.015"]],"a":[["60000.3","0.017"]]}}
+                """, Instant.parse("2026-07-04T00:00:00Z"));
+
+        assertThat(snapshot.bids()).singleElement()
+                .satisfies(level -> assertThat(level.quantitySteps()).isEqualTo(15L));
+        assertThat(snapshot.asks()).singleElement()
+                .satisfies(level -> assertThat(level.priceTicks()).isEqualTo(600_003L));
+    }
+
     private RestReferenceMarketProvider provider() {
         MarketMakerProperties properties = new MarketMakerProperties();
         properties.getReferenceMarket().setEnabled(true);

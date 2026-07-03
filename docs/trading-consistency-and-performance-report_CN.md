@@ -13,7 +13,7 @@
 - 账户余额、订单和持仓的一致性不是靠撮合内存状态兜底，而是靠 PostgreSQL 事务、幂等键、行锁/advisory lock、guarded update、transactional outbox 和 Kafka replay 共同保证。
 - 止盈止损多档位已补放置时前置校验：锁定当前仓位后聚合 active reduce-only 平仓单和待触发 TP/SL 总待平量；同一 OCO 组合按最大 sibling 数量计入容量，避免止盈/止损双倍占用。
 - HEDGE 仓位侧已经补充到关键资金链路的回归验证：撮合成交事件、风控事件/强平候选、强平下单、资金费扣款和 ADL 审计都保留 `positionSide`。ADL 事件新增 `target_position_side`，避免审计里只看到 LONG/SHORT 方向而无法区分 NET/LONG/SHORT 仓位桶。
-- 已有压测包含真实 provider、PostgreSQL、Kafka、做市商铺单和普通用户 taker 流量。2026-07-04 又补跑了一次全 provider real-config smoke，覆盖仓位模式、HEDGE LONG/SHORT、TP/SL OCO、逐仓保证金、重启恢复、资金费、强平、保险基金、ADL 和 WebSocket/accounting invariants；同日又用 `MM_REFRESH_CYCLES=2` 记录了一次干净状态连续做市刷新 smoke，确认脚本可以连续跑 maker 刷新挂单和 taker 流量。当前又补了 market-maker provider 的可选 REST 参考盘口快照校准：可以把 Binance/OKX/Bybit 风格深度快照映射成本地每档价格距离和数量。但现有压测仍不是生产级全链路压力测试：尚未维护主流交易所 WebSocket 本地订单簿，也没有执行长时间真实进程样本；规模和持续时间仍不够。
+- 已有压测包含真实 provider、PostgreSQL、Kafka、做市商铺单和普通用户 taker 流量。2026-07-04 又补跑了一次全 provider real-config smoke，覆盖仓位模式、HEDGE LONG/SHORT、TP/SL OCO、逐仓保证金、重启恢复、资金费、强平、保险基金、ADL 和 WebSocket/accounting invariants；同日又用 `MM_REFRESH_CYCLES=2` 记录了一次干净状态连续做市刷新 smoke，确认脚本可以连续跑 maker 刷新挂单和 taker 流量。当前又补了 market-maker provider 的可选 WebSocket 本地订单簿和 REST 参考盘口兜底：可以把 Binance/OKX/Bybit 风格深度消息映射成本地每档价格距离和数量。但现有压测仍不是生产级全链路压力测试：还没有执行启用流式参考盘口的长时间真实进程样本；规模和持续时间仍不够。
 
 ## 标记价/指数价不可用时的下单限制
 
@@ -146,7 +146,7 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 
 当前还不能声称完成生产级真实全链路压力测试，原因：
 
-- `scripts/market-maker-stress.sh` 仍使用静态配置：`MM_DEPTH_LEVELS`、`MM_LEVEL_QUANTITY_STEPS`、`MM_REFRESH_LEVELS`、`MM_REFRESH_QUANTITY_STEPS`。`surprising-market-maker-provider` 已新增可选 REST 参考盘口快照校准，但还没有接入 WebSocket 本地订单簿，也没有在长时间真实进程压测中启用并记录报告。
+- `scripts/market-maker-stress.sh` 仍使用静态配置：`MM_DEPTH_LEVELS`、`MM_LEVEL_QUANTITY_STEPS`、`MM_REFRESH_LEVELS`、`MM_REFRESH_QUANTITY_STEPS`。`surprising-market-maker-provider` 已新增可选 WebSocket 本地订单簿和 REST 参考盘口兜底，但还没有在长时间真实进程压测中启用并记录报告。
 - 做市程序有 provider 和 run-once smoke；压测脚本现在支持用 `MM_REFRESH_CYCLES` / `MM_REFRESH_INTERVAL_SECONDS` 连续执行多轮 maker 刷新和 taker 流量，并已有 2 轮短时干净状态样本，但还没有执行并记录生产级长时间样本。
 - 1000 笔 taker、单机 PostgreSQL/Kafka、本机 provider 规模太小，且持续时间短。
 - 还缺少从“用户 REST 下单 -> order DB -> Kafka -> matching -> DB result/trades -> account DB -> risk/liquidation/insurance/ADL -> WebSocket 私有推送”的逐节点 p50/p95/p99 时延链路追踪。
@@ -157,7 +157,7 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 建议新增一个生产前压测任务，要求如下：
 
 - 做市程序必须持续运行，不使用一次性 run-once 作为主要流量来源；本地脚本可先用 `MM_REFRESH_CYCLES` 放大为多轮连续流量。
-- 做市深度、价差、每档量、刷新频率来自主流交易所订阅数据。当前最低实现已经有 REST depth/books/orderbook 快照校准；生产前还需要订阅 Binance/OKX/Bybit depth/trades，维护本地订单簿，并按中位 spread、每档累计量和成交量分位数生成本地盘口。
+- 做市深度、价差、每档量、刷新频率来自主流交易所订阅数据。当前最低实现已经有 Binance/OKX/Bybit WebSocket depth/books/orderbook 本地订单簿和 REST 快照兜底；生产前还需要把它启用到长时间真实进程压测，并按中位 spread、每档累计量和成交量分位数生成本地盘口报告。
 - 每个阶段都输出延迟分布：REST 入参、order 入库、outbox 发布、matching 收到 command、matching result 落库、account 结算、risk 扫描、liquidation 下单、insurance/ADL、WebSocket fanout。
 - 指标必须包含：PostgreSQL CPU/IO/WAL/locks/Hikari pending、Kafka lag/rebalance、provider JVM CPU/heap/gc、HTTP p95/p99、account settlement event lag、WebSocket fanout 延迟。
 - 场景必须包含：普通下单、部分成交撤单、reduce-only、TP/SL 多档触发、mark price 过期、index source 断线、强平早于止损、account provider 重启、matching owner 重启、Kafka broker 故障。
@@ -214,5 +214,5 @@ npm run lint
 - `PostLiquidationFundingInsuranceAdlIntegrationTest` 通过，确认 ADL API 模型兼容性和强平后资金费/保险/ADL 集成链路未破坏。
 - full-stack real-config smoke 通过，确认真实进程下仓位模式、TP/SL、撮合/account 恢复、资金费、强平、保险基金、ADL、WebSocket 和会计不变量可跑通；该结果仍是短时 smoke，不等同生产级长时间压测。
 - 连续做市刷新 smoke 通过，确认真实 order/matching/account/websocket/gateway 进程在 2 轮 maker 刷新和 taker 流量下可以完成成交、account 结算、Kafka lag 清零和 WebSocket 事件接收；该结果仍是小规模短时样本。
-- market-maker provider 定向测试通过，确认参考盘口 REST 快照解析和报价规划可用：Binance/OKX/Bybit 风格 payload 可以转换成本地 ticks/steps，QuotePlanner 可按外部每档距离和数量生成本地 post-only 报价；配置默认关闭，未启用时保持原本本地报价模型。
+- market-maker provider 定向测试通过，确认参考盘口 WebSocket 本地订单簿、REST 快照兜底和报价规划可用：Binance/OKX/Bybit 风格 payload 可以转换成本地 ticks/steps，QuotePlanner 可按外部每档距离和数量生成本地 post-only 报价；配置默认关闭，未启用时保持原本本地报价模型。
 - Web 前端本轮没有改动；上一次 `npm run lint` 已在 2026-07-04 通过。
