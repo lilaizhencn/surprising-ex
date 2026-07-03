@@ -11,6 +11,8 @@ import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.PositionMode;
+import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.model.OrderRecord;
 import java.sql.Timestamp;
@@ -28,9 +30,9 @@ public class OrderRepository {
             INSERT INTO trading_orders (
                 order_id, user_id, client_order_id, symbol, instrument_version, side, order_type, time_in_force,
                 price_ticks, quantity_steps, executed_quantity_steps, remaining_quantity_steps,
-                margin_mode, maker_fee_rate_ppm, taker_fee_rate_ppm,
+                margin_mode, position_side, maker_fee_rate_ppm, taker_fee_rate_ppm,
                 reduce_only, post_only, status, reject_reason, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (user_id, client_order_id) WHERE client_order_id IS NOT NULL DO NOTHING
             """;
 
@@ -56,10 +58,25 @@ public class OrderRepository {
                 nullableVersion(order.instrumentVersion()), order.side().name(), order.orderType().name(),
                 order.timeInForce().name(),
                 order.priceTicks(), order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
-                order.marginMode().name(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
+                order.marginMode().name(), order.positionSide().name(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
                 order.reduceOnly(), order.postOnly(), order.status().name(), order.rejectReason(),
                 Timestamp.from(order.createdAt()), Timestamp.from(order.updatedAt()));
         return rows == 1;
+    }
+
+    public void lockUserPositionMode(long userId) {
+        jdbcTemplate.query("""
+                SELECT pg_advisory_xact_lock(hashtext('position-mode'), hashtext(?))
+                """, rs -> null, Long.toString(userId));
+    }
+
+    public PositionMode positionMode(long userId) {
+        String mode = jdbcTemplate.query("""
+                SELECT position_mode
+                  FROM account_position_modes
+                 WHERE user_id = ?
+                """, (rs, rowNum) -> rs.getString("position_mode"), userId).stream().findFirst().orElse(null);
+        return PositionMode.fromNullableDbValue(mode);
     }
 
     public void lockUserSymbolMarginScope(long userId, String symbol) {
@@ -333,7 +350,8 @@ public class OrderRepository {
         args.add(safeLimit + 1);
         List<AdminMatchTradeResponse> rows = jdbcTemplate.query("""
                 SELECT trade_id, command_id, symbol, taker_order_id, taker_user_id, taker_side,
-                       taker_margin_mode, maker_order_id, maker_user_id, maker_margin_mode,
+                       taker_margin_mode, taker_position_side, maker_order_id, maker_user_id, maker_margin_mode,
+                       maker_position_side,
                        price_ticks, quantity_steps, taker_order_completed, maker_order_completed,
                        trace_id, event_time, created_at
                   FROM trading_match_trades
@@ -353,9 +371,11 @@ public class OrderRepository {
                 rs.getLong("taker_user_id"),
                 OrderSide.valueOf(rs.getString("taker_side")),
                 MarginMode.fromNullableDbValue(rs.getString("taker_margin_mode")),
+                PositionSide.fromNullableDbValue(rs.getString("taker_position_side")),
                 rs.getLong("maker_order_id"),
                 rs.getLong("maker_user_id"),
                 MarginMode.fromNullableDbValue(rs.getString("maker_margin_mode")),
+                PositionSide.fromNullableDbValue(rs.getString("maker_position_side")),
                 rs.getLong("price_ticks"),
                 rs.getLong("quantity_steps"),
                 rs.getBoolean("taker_order_completed"),
@@ -382,6 +402,7 @@ public class OrderRepository {
                 rs.getLong("executed_quantity_steps"),
                 rs.getLong("remaining_quantity_steps"),
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                PositionSide.fromNullableDbValue(rs.getString("position_side")),
                 rs.getLong("maker_fee_rate_ppm"),
                 rs.getLong("taker_fee_rate_ppm"),
                 rs.getBoolean("reduce_only"),

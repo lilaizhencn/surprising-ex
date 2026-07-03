@@ -18,6 +18,7 @@ import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
+import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -67,30 +68,34 @@ public class LiquidationService {
         if (latestStatus != RiskStatus.LIQUIDATION) {
             liquidationRepository.markCandidate(candidate.candidateId(), "CANCELED");
             insertAudit(candidate.candidateId(), 0L, candidate.userId(), candidate.symbol(),
-                    candidate.marginMode(), LiquidationSideResolver.closeSide(candidate.signedQuantitySteps()),
+                    candidate.marginMode(), candidate.positionSide(),
+                    LiquidationSideResolver.closeSide(candidate.signedQuantitySteps()),
                     LiquidationSideResolver.closeQuantity(candidate.signedQuantitySteps()),
                     LiquidationOrderStatus.CANCELED, "RISK_RECOVERED");
             return;
         }
 
         var closeState = liquidationRepository.lockCloseState(candidate.userId(), candidate.symbol(),
-                candidate.marginMode(),
+                candidate.marginMode(), candidate.positionSide(),
                 candidate.instrumentVersion());
         if (closeState.isEmpty() || closeState.get().signedQuantitySteps() == 0) {
             liquidationRepository.markCandidate(candidate.candidateId(), "CANCELED");
             insertAudit(candidate.candidateId(), 0L, candidate.userId(), candidate.symbol(),
-                    candidate.marginMode(), LiquidationSideResolver.closeSide(candidate.signedQuantitySteps()),
+                    candidate.marginMode(), candidate.positionSide(),
+                    LiquidationSideResolver.closeSide(candidate.signedQuantitySteps()),
                     LiquidationSideResolver.closeQuantity(candidate.signedQuantitySteps()),
                     LiquidationOrderStatus.CANCELED, "NO_OPEN_POSITION");
             return;
         }
         var pricingInput = liquidationRepository.latestPricingInput(candidate.userId(), candidate.symbol(),
-                candidate.marginMode(), candidate.instrumentVersion(), properties.getRisk().getMaxSnapshotAge())
+                candidate.marginMode(), candidate.positionSide(), candidate.instrumentVersion(),
+                properties.getRisk().getMaxSnapshotAge())
                 .orElseThrow(() -> new IllegalStateException("fresh liquidation pricing input not found"));
         if (pricingInput.signedQuantitySteps() != closeState.get().signedQuantitySteps()) {
             liquidationRepository.markCandidate(candidate.candidateId(), "CANCELED");
             insertAudit(candidate.candidateId(), 0L, candidate.userId(), candidate.symbol(),
-                    candidate.marginMode(), LiquidationSideResolver.closeSide(closeState.get().signedQuantitySteps()),
+                    candidate.marginMode(), candidate.positionSide(),
+                    LiquidationSideResolver.closeSide(closeState.get().signedQuantitySteps()),
                     LiquidationSideResolver.closeQuantity(closeState.get().signedQuantitySteps()),
                     LiquidationOrderStatus.CANCELED, "RISK_POSITION_CHANGED");
             return;
@@ -99,27 +104,29 @@ public class LiquidationService {
         OrderSide side = LiquidationSideResolver.closeSide(closeState.get().signedQuantitySteps());
         long positionAbsSteps = LiquidationSideResolver.closeQuantity(closeState.get().signedQuantitySteps());
         orderRepository.cancelOpenReduceOnlyCloseOrders(candidate.userId(), candidate.symbol(),
-                candidate.marginMode(), candidate.instrumentVersion(), side, Instant.now(), this::payload);
+                candidate.marginMode(), candidate.positionSide(), candidate.instrumentVersion(), side, Instant.now(),
+                this::payload);
 
         LiquidationSizingInput sizingInput = liquidationRepository.sizingInput(candidate.userId(),
-                        candidate.symbol(), candidate.marginMode(), candidate.instrumentVersion(), positionAbsSteps)
+                        candidate.symbol(), candidate.marginMode(), candidate.positionSide(), candidate.instrumentVersion(),
+                        positionAbsSteps)
                 .orElse(new LiquidationSizingInput(positionAbsSteps, positionAbsSteps, 0L, 0L, 0L));
         var decision = sizingPolicy.decide(sizingInput, candidate.marginRatioPpm(), properties.getSizing());
         long quantitySteps = decision.quantitySteps();
         if (quantitySteps <= 0) {
             liquidationRepository.markCandidate(candidate.candidateId(), "CANCELED");
-            insertAudit(candidate.candidateId(), 0L, candidate.userId(), candidate.symbol(), candidate.marginMode(), side, 0L,
-                    LiquidationOrderStatus.CANCELED, decision.reason());
+            insertAudit(candidate.candidateId(), 0L, candidate.userId(), candidate.symbol(), candidate.marginMode(),
+                    candidate.positionSide(), side, 0L, LiquidationOrderStatus.CANCELED, decision.reason());
             return;
         }
         var command = orderRepository.createReduceOnlyMarketOrder(candidate.candidateId(), candidate.userId(),
-                candidate.symbol(), candidate.marginMode(), candidate.instrumentVersion(), side, quantitySteps,
-                Instant.now(), this::payload);
+                candidate.symbol(), candidate.marginMode(), candidate.positionSide(), candidate.instrumentVersion(), side,
+                quantitySteps, Instant.now(), this::payload);
         LiquidationPricingDecision pricing = priceCalculator.decide(pricingInput,
                 properties.getExecution().getLiquidationFeeRatePpm());
         insertAudit(candidate.candidateId(), command.orderId(), candidate.userId(), candidate.symbol(),
-                candidate.marginMode(), side, quantitySteps, LiquidationOrderStatus.SUBMITTED, decision.reason(),
-                pricing);
+                candidate.marginMode(), candidate.positionSide(), side, quantitySteps, LiquidationOrderStatus.SUBMITTED,
+                decision.reason(), pricing);
     }
 
     @Transactional
@@ -177,11 +184,12 @@ public class LiquidationService {
                              long userId,
                              String symbol,
                              MarginMode marginMode,
+                             PositionSide positionSide,
                              OrderSide side,
                              long quantitySteps,
                              LiquidationOrderStatus status,
                              String reason) {
-        insertAudit(candidateId, orderId, userId, symbol, marginMode, side, quantitySteps, status, reason,
+        insertAudit(candidateId, orderId, userId, symbol, marginMode, positionSide, side, quantitySteps, status, reason,
                 LiquidationPricingDecision.empty());
     }
 
@@ -193,12 +201,26 @@ public class LiquidationService {
                              OrderSide side,
                              long quantitySteps,
                              LiquidationOrderStatus status,
+                             String reason) {
+        insertAudit(candidateId, orderId, userId, symbol, marginMode, PositionSide.NET, side, quantitySteps, status,
+                reason);
+    }
+
+    private void insertAudit(long candidateId,
+                             long orderId,
+                             long userId,
+                             String symbol,
+                             MarginMode marginMode,
+                             PositionSide positionSide,
+                             OrderSide side,
+                             long quantitySteps,
+                             LiquidationOrderStatus status,
                              String reason,
                              LiquidationPricingDecision pricing) {
         boolean inserted = liquidationRepository.insertLiquidationOrder(
                 sequenceRepository.nextLiquidationSequence("liquidation-order"),
-                candidateId, orderId, userId, symbol, marginMode, side, quantitySteps, status, reason, pricing,
-                Instant.now());
+                candidateId, orderId, userId, symbol, marginMode, positionSide, side, quantitySteps, status, reason,
+                pricing, Instant.now());
         if (!inserted) {
             throw new IllegalStateException("failed to insert liquidation order audit");
         }
@@ -218,7 +240,8 @@ public class LiquidationService {
                     properties.getRisk().getMaxSnapshotAge());
         }
         return liquidationRepository.latestRiskStatus(candidate.userId(), candidate.symbol(),
-                candidate.marginMode(), candidate.instrumentVersion(), properties.getRisk().getMaxSnapshotAge());
+                candidate.marginMode(), candidate.positionSide(), candidate.instrumentVersion(),
+                properties.getRisk().getMaxSnapshotAge());
     }
 
     private LifecycleUpdate lifecycleUpdate(MatchResultEvent event) {

@@ -34,7 +34,7 @@ public class PositionRiskTriggerConsumer {
         try {
             PositionUpdatedEvent event = objectMapper.readValue(record.value(), PositionUpdatedEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "position update");
-            riskService.scanPositionUpdate(event.userId(), event.symbol(), event.marginMode(),
+            riskService.scanPositionUpdate(event.userId(), event.symbol(), event.marginMode(), event.positionSide(),
                     event.instrumentVersion(), event.traceId());
         } catch (Exception ex) {
             log.error("Failed to process position risk trigger: {}", ex.getMessage(), ex);

@@ -5,6 +5,7 @@ import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderStatus;
+import com.surprising.trading.api.model.PositionSide;
 import java.sql.Timestamp;
 import java.time.Instant;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -52,6 +53,18 @@ public class MatchingResultRepository {
         return MarginMode.fromNullableDbValue(marginMode);
     }
 
+    public PositionSide orderPositionSide(long orderId) {
+        String positionSide = jdbcTemplate.query("""
+                SELECT position_side
+                  FROM trading_orders
+                 WHERE order_id = ?
+                """, (rs, rowNum) -> rs.getString("position_side"), orderId).stream().findFirst().orElse(null);
+        if (positionSide == null) {
+            throw new IllegalStateException("position side not found for order " + orderId);
+        }
+        return PositionSide.fromNullableDbValue(positionSide);
+    }
+
     public boolean saveResult(MatchResultEvent event) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO trading_match_results (
@@ -69,15 +82,17 @@ public class MatchingResultRepository {
         int rows = jdbcTemplate.update("""
                 INSERT INTO trading_match_trades (
                     trade_id, command_id, symbol, taker_order_id, taker_instrument_version,
-                    taker_user_id, taker_side, taker_margin_mode, maker_order_id, maker_instrument_version,
-                    maker_user_id, maker_margin_mode, price_ticks, quantity_steps,
+                    taker_user_id, taker_side, taker_margin_mode, taker_position_side,
+                    maker_order_id, maker_instrument_version,
+                    maker_user_id, maker_margin_mode, maker_position_side, price_ticks, quantity_steps,
                     taker_order_completed, maker_order_completed, trace_id, event_time, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
                 ON CONFLICT (symbol, trade_id) DO NOTHING
                 """, trade.tradeId(), trade.commandId(), trade.symbol(), trade.takerOrderId(),
                 trade.takerInstrumentVersion(), trade.takerUserId(), trade.takerSide().name(),
-                trade.takerMarginMode().name(), trade.makerOrderId(), trade.makerInstrumentVersion(),
-                trade.makerUserId(), trade.makerMarginMode().name(), trade.priceTicks(),
+                trade.takerMarginMode().name(), trade.takerPositionSide().name(), trade.makerOrderId(),
+                trade.makerInstrumentVersion(), trade.makerUserId(), trade.makerMarginMode().name(),
+                trade.makerPositionSide().name(), trade.priceTicks(),
                 trade.quantitySteps(), trade.takerOrderCompleted(), trade.makerOrderCompleted(),
                 trade.traceId(), Timestamp.from(trade.eventTime()));
         return rows == 1;

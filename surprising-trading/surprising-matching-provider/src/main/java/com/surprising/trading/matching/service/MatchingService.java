@@ -14,6 +14,7 @@ import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
+import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.MatchingSymbol;
@@ -169,11 +170,12 @@ public class MatchingService {
         List<MatchTradeEvent> trades = new ArrayList<>();
         Map<Long, Long> makerVersions = new HashMap<>();
         Map<Long, MarginMode> makerMarginModes = new HashMap<>();
+        Map<Long, PositionSide> makerPositionSides = new HashMap<>();
         response.processMatcherEvents(event -> {
             if (event.eventType != MatcherEventType.TRADE) {
                 return;
             }
-            trades.add(toTrade(command, event, now, makerVersions, makerMarginModes));
+            trades.add(toTrade(command, event, now, makerVersions, makerMarginModes, makerPositionSides));
         });
         return trades;
     }
@@ -182,11 +184,14 @@ public class MatchingService {
                                     MatcherTradeEvent event,
                                     Instant now,
                                     Map<Long, Long> makerVersions,
-                                    Map<Long, MarginMode> makerMarginModes) {
+                                    Map<Long, MarginMode> makerMarginModes,
+                                    Map<Long, PositionSide> makerPositionSides) {
         long makerInstrumentVersion = makerVersions.computeIfAbsent(event.matchedOrderId,
                 resultRepository::orderInstrumentVersion);
         MarginMode makerMarginMode = makerMarginModes.computeIfAbsent(event.matchedOrderId,
                 resultRepository::orderMarginMode);
+        PositionSide makerPositionSide = makerPositionSides.computeIfAbsent(event.matchedOrderId,
+                resultRepository::orderPositionSide);
         return new MatchTradeEvent(
                 sequenceRepository.nextSequence("match-trade"),
                 command.commandId(),
@@ -196,10 +201,12 @@ public class MatchingService {
                 command.userId(),
                 command.side(),
                 command.marginMode(),
+                command.positionSide(),
                 event.matchedOrderId,
                 makerInstrumentVersion,
                 event.matchedOrderUid,
                 makerMarginMode,
+                makerPositionSide,
                 event.price,
                 event.size,
                 event.activeOrderCompleted,

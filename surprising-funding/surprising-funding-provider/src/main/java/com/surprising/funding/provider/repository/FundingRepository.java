@@ -11,6 +11,7 @@ import com.surprising.funding.provider.model.FundingPaymentCandidate;
 import com.surprising.funding.provider.model.FundingRateInput;
 import com.surprising.funding.provider.service.FundingMath;
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.PositionSide;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -213,6 +214,7 @@ public class FundingRepository {
                 SELECT p.user_id,
                        p.symbol,
                        p.margin_mode,
+                       p.position_side,
                        i.contract_type,
                        i.settle_asset AS asset,
                        i.notional_multiplier_units,
@@ -250,6 +252,7 @@ public class FundingRepository {
                     rs.getLong("user_id"),
                     rs.getString("symbol"),
                     MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                    PositionSide.fromNullableDbValue(rs.getString("position_side")),
                     rs.getString("asset"),
                     signedQuantity,
                     notionalUnits,
@@ -265,13 +268,13 @@ public class FundingRepository {
         long paymentId = nextSequence("funding-payment");
         int rows = jdbcTemplate.update("""
                 INSERT INTO funding_payments (
-                    payment_id, settlement_id, user_id, symbol, margin_mode, asset,
+                    payment_id, settlement_id, user_id, symbol, margin_mode, position_side, asset,
                     signed_quantity_steps, notional_units, funding_rate_ppm,
                     amount_units, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (settlement_id, user_id, symbol, margin_mode) DO NOTHING
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (settlement_id, user_id, symbol, margin_mode, position_side) DO NOTHING
                 """, paymentId, settlementId, payment.userId(), payment.symbol(), payment.marginMode().name(),
-                payment.asset(),
+                payment.positionSide().name(), payment.asset(),
                 payment.signedQuantitySteps(), payment.notionalUnits(), payment.fundingRatePpm(),
                 payment.amountUnits(), Timestamp.from(now));
         return rows == 1;
@@ -279,7 +282,7 @@ public class FundingRepository {
 
     public void applyPaymentToAccount(long settlementId, FundingPaymentCandidate payment, Instant now) {
         String referenceId = settlementId + ":" + payment.userId() + ":" + payment.symbol() + ":"
-                + payment.marginMode().name();
+                + payment.marginMode().name() + ":" + payment.positionSide().name();
         int ledgerRows = jdbcTemplate.update("""
                 INSERT INTO account_ledger_entries (
                     entry_id, user_id, asset, amount_units, balance_after_units,
@@ -289,8 +292,8 @@ public class FundingRepository {
                 """, nextAccountSequence("ledger-entry"), payment.userId(), payment.asset(), payment.amountUnits(),
                 referenceId, payment.amountUnits() >= 0 ? "FUNDING_RECEIVED" : "FUNDING_PAID", Timestamp.from(now));
         requireSingleRow(ledgerRows, "funding account ledger insert");
-        long balanceAfterUnits = applyBalance(payment.userId(), payment.symbol(), payment.marginMode(), payment.asset(),
-                payment.amountUnits(), now);
+        long balanceAfterUnits = applyBalance(payment.userId(), payment.symbol(), payment.marginMode(),
+                payment.positionSide(), payment.asset(), payment.amountUnits(), now);
         int ledgerUpdateRows = jdbcTemplate.update("""
                 UPDATE account_ledger_entries
                    SET balance_after_units = ?
@@ -379,6 +382,7 @@ public class FundingRepository {
     private long applyBalance(long userId,
                               String symbol,
                               MarginMode marginMode,
+                              PositionSide positionSide,
                               String asset,
                               long amountUnits,
                               Instant now) {
@@ -394,7 +398,8 @@ public class FundingRepository {
                 """, userId, asset, Timestamp.from(now));
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         List<PositionMargin> lockedMargins = amountUnits < 0
-                ? lockPositionMargins(userId, symbol, normalizedMarginMode, asset)
+                ? lockPositionMargins(userId, symbol, normalizedMarginMode, PositionSide.defaultIfNull(positionSide),
+                asset)
                 : List.of();
         long maxLockedDebitUnits = lockedMargins.stream()
                 .mapToLong(PositionMargin::marginUnits)
@@ -440,34 +445,40 @@ public class FundingRepository {
     private List<PositionMargin> lockPositionMargins(long userId,
                                                      String symbol,
                                                      MarginMode marginMode,
+                                                     PositionSide positionSide,
                                                      String asset) {
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
         if (normalizedMarginMode == MarginMode.ISOLATED) {
             return jdbcTemplate.query("""
-                    SELECT symbol, asset, margin_mode, margin_units
+                    SELECT symbol, asset, margin_mode, position_side, margin_units
                       FROM account_position_margins
-                     WHERE user_id = ? AND symbol = ? AND margin_mode = ? AND asset = ?
+                     WHERE user_id = ? AND symbol = ? AND margin_mode = ? AND position_side = ? AND asset = ?
                        AND margin_units > 0
-                     ORDER BY updated_at ASC, symbol ASC, margin_mode ASC
+                     ORDER BY updated_at ASC, symbol ASC, margin_mode ASC, position_side ASC
                      FOR UPDATE
                     """, (rs, rowNum) -> new PositionMargin(
                     rs.getString("symbol"),
                     rs.getString("asset"),
                     MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                    rs.getLong("margin_units")), userId, symbol, normalizedMarginMode.name(), asset);
+                    PositionSide.fromNullableDbValue(rs.getString("position_side")),
+                    rs.getLong("margin_units")), userId, symbol, normalizedMarginMode.name(),
+                    normalizedPositionSide.name(), asset);
         }
         return jdbcTemplate.query("""
-                SELECT symbol, asset, margin_mode, margin_units
+                SELECT symbol, asset, margin_mode, position_side, margin_units
                   FROM account_position_margins
-                 WHERE user_id = ? AND asset = ? AND margin_mode = ?
+                 WHERE user_id = ? AND asset = ? AND margin_mode = ? AND position_side = ?
                    AND margin_units > 0
-                 ORDER BY updated_at ASC, symbol ASC, margin_mode ASC
+                 ORDER BY updated_at ASC, symbol ASC, margin_mode ASC, position_side ASC
                  FOR UPDATE
                 """, (rs, rowNum) -> new PositionMargin(
                 rs.getString("symbol"),
                 rs.getString("asset"),
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                rs.getLong("margin_units")), userId, asset, normalizedMarginMode.name());
+                PositionSide.fromNullableDbValue(rs.getString("position_side")),
+                rs.getLong("margin_units")), userId, asset, normalizedMarginMode.name(),
+                normalizedPositionSide.name());
     }
 
     private void reducePositionMargins(long userId,
@@ -487,15 +498,18 @@ public class FundingRepository {
                            updated_at = ?
                      WHERE user_id = ? AND symbol = ? AND asset = ?
                        AND margin_mode = ?
+                       AND position_side = ?
                        AND margin_units >= ?
-                    """, debit, Timestamp.from(now), userId, margin.symbol(), asset, margin.marginMode().name(), debit);
+                    """, debit, Timestamp.from(now), userId, margin.symbol(), asset, margin.marginMode().name(),
+                    margin.positionSide().name(), debit);
             if (rows != 1) {
                 throw new IllegalStateException("failed to reduce consumed position margin");
             }
             jdbcTemplate.update("""
                     DELETE FROM account_position_margins
-                     WHERE user_id = ? AND symbol = ? AND asset = ? AND margin_mode = ? AND margin_units = 0
-                    """, userId, margin.symbol(), asset, margin.marginMode().name());
+                     WHERE user_id = ? AND symbol = ? AND asset = ? AND margin_mode = ?
+                       AND position_side = ? AND margin_units = 0
+                    """, userId, margin.symbol(), asset, margin.marginMode().name(), margin.positionSide().name());
             remaining = Math.subtractExact(remaining, debit);
         }
         if (remaining != 0) {
@@ -552,6 +566,7 @@ public class FundingRepository {
                 rs.getLong("user_id"),
                 rs.getString("symbol"),
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                PositionSide.fromNullableDbValue(rs.getString("position_side")),
                 rs.getString("asset"),
                 rs.getLong("signed_quantity_steps"),
                 rs.getLong("notional_units"),
@@ -566,9 +581,14 @@ public class FundingRepository {
         }
     }
 
-    private record PositionMargin(String symbol, String asset, MarginMode marginMode, long marginUnits) {
+    private record PositionMargin(String symbol,
+                                  String asset,
+                                  MarginMode marginMode,
+                                  PositionSide positionSide,
+                                  long marginUnits) {
         private PositionMargin {
             marginMode = MarginMode.defaultIfNull(marginMode);
+            positionSide = PositionSide.defaultIfNull(positionSide);
         }
     }
 }

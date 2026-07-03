@@ -107,10 +107,12 @@ class AdlRepositoryTest {
         when(jdbcTemplate.update(contains("UPDATE account_positions"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT"), eq("USDT"))).thenAnswer(invocation -> {
+                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq("NET"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getString("asset")).thenReturn("USDT");
+                    when(rs.getString("margin_mode")).thenReturn("CROSS");
+                    when(rs.getString("position_side")).thenReturn("NET");
                     when(rs.getLong("margin_units")).thenReturn(100L);
                     return List.of(mapper.mapRow(rs, 0));
                 });
@@ -141,11 +143,12 @@ class AdlRepositoryTest {
         assertThat(remaining).isZero();
         verify(jdbcTemplate).update(contains("UPDATE account_positions"),
                 eq(5L), eq(5L), eq(100L), eq(500L), any(Timestamp.class),
-                eq(1001L), eq("BTC-USDT"));
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET"));
         verify(jdbcTemplate).update(contains("locked_units = locked_units - ?"),
                 eq(50L), eq(50L), any(Timestamp.class), eq(1001L), eq("USDT"), eq(50L));
         verify(jdbcTemplate).update(contains("UPDATE account_position_margins"),
-                eq(50L), any(Timestamp.class), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq(50L));
+                eq(50L), any(Timestamp.class), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq("NET"),
+                eq(50L));
         verify(jdbcTemplate).update(contains("UPDATE account_balances"),
                 eq(550L), eq(50L), any(Timestamp.class), eq(1001L), eq("USDT"));
         verify(jdbcTemplate).update(contains("UPDATE account_balances"),
@@ -204,10 +207,12 @@ class AdlRepositoryTest {
         when(jdbcTemplate.update(contains("UPDATE account_positions"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT"), eq("USDT"))).thenAnswer(invocation -> {
+                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq("NET"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getString("asset")).thenReturn("USDT");
+                    when(rs.getString("margin_mode")).thenReturn("CROSS");
+                    when(rs.getString("position_side")).thenReturn("NET");
                     when(rs.getLong("margin_units")).thenReturn(100L);
                     return List.of(mapper.mapRow(rs, 0));
                 });
@@ -229,7 +234,7 @@ class AdlRepositoryTest {
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).update(sql.capture(), eq(50L), any(Timestamp.class),
-                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq(50L));
+                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq("NET"), eq(50L));
         assertThat(sql.getValue()).contains("margin_units >= ?");
         verify(jdbcTemplate, never()).update(contains("INSERT INTO account_ledger_entries"), any(Object[].class));
         verify(jdbcTemplate, never()).update(contains("INSERT INTO adl_events"), any(Object[].class));

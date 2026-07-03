@@ -21,6 +21,7 @@ import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.PlaceOrderRequest;
+import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
@@ -89,6 +90,9 @@ public class OrderService {
             }
         }
 
+        orderRepository.lockUserPositionMode(normalized.userId());
+        PositionMode positionMode = orderRepository.positionMode(normalized.userId());
+        normalized = normalizePositionMode(normalized, positionMode);
         orderRepository.lockUserSymbolMarginScope(normalized.userId(), normalized.symbol());
         Instant now = Instant.now();
         ValidationResult validation = validateMarginMode(normalized);
@@ -129,6 +133,7 @@ public class OrderService {
                 0L,
                 validation.accepted() ? normalized.quantitySteps() : 0L,
                 normalized.marginMode(),
+                normalized.positionSide(),
                 feeSnapshot.makerFeeRatePpm(),
                 feeSnapshot.takerFeeRatePpm(),
                 normalized.reduceOnly(),
@@ -203,7 +208,7 @@ public class OrderService {
                                                   long instrumentVersion,
                                                   Instant now) {
         var requirement = orderMarginRepository.requirement(
-                request.symbol(), instrumentVersion, request.userId(), request.marginMode(), request.side(),
+                request.symbol(), instrumentVersion, request.userId(), request.marginMode(), request.positionSide(), request.side(),
                 request.orderType(), request.priceTicks(), request.quantitySteps(),
                 properties.getRisk().getMarketMaxSlippagePpm(),
                 properties.getRisk().getMarketMaxMarkAgeMs());
@@ -218,7 +223,7 @@ public class OrderService {
         }
         boolean reserved = orderMarginRepository.reserve(request.userId(), requirement.get().accountType(),
                 requirement.get().asset(), orderId, request.symbol(), request.marginMode(),
-                requirement.get().initialMarginUnits(), now);
+                request.positionSide(), requirement.get().initialMarginUnits(), now);
         return reserved ? ValidationResult.ok(instrumentVersion)
                 : ValidationResult.reject("insufficient available margin", instrumentVersion);
     }
@@ -483,6 +488,7 @@ public class OrderService {
                 order.priceTicks(),
                 order.quantitySteps(),
                 order.marginMode(),
+                order.positionSide(),
                 order.reduceOnly(),
                 order.postOnly(),
                 now,
@@ -506,6 +512,7 @@ public class OrderService {
                 order.executedQuantitySteps(),
                 0L,
                 order.marginMode(),
+                order.positionSide(),
                 order.makerFeeRatePpm(),
                 order.takerFeeRatePpm(),
                 order.reduceOnly(),
@@ -546,10 +553,10 @@ public class OrderService {
     }
 
     private PlaceOrderRequest normalize(PlaceOrderRequest request) {
-        PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
-        if (positionSide.isHedgeSide()) {
-            throw new IllegalArgumentException("hedge-mode positionSide is not supported; use NET");
+        if (request == null) {
+            throw new IllegalArgumentException("order request is required");
         }
+        PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
         return new PlaceOrderRequest(
                 request.userId(),
                 emptyToNull(request.clientOrderId()),
@@ -562,6 +569,34 @@ public class OrderService {
                 MarginMode.defaultIfNull(request.marginMode()),
                 positionSide,
                 request.reduceOnly(),
+                request.postOnly());
+    }
+
+    private PlaceOrderRequest normalizePositionMode(PlaceOrderRequest request, PositionMode positionMode) {
+        PositionMode normalizedMode = PositionMode.defaultIfNull(positionMode);
+        PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
+        if (normalizedMode == PositionMode.ONE_WAY) {
+            if (positionSide.isHedgeSide()) {
+                throw new IllegalArgumentException("positionSide LONG/SHORT requires HEDGE position mode");
+            }
+            return request;
+        }
+        if (!positionSide.isHedgeSide()) {
+            throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
+        }
+        boolean reduceOnly = request.reduceOnly() || positionSide.isClosingSide(request.side());
+        return new PlaceOrderRequest(
+                request.userId(),
+                request.clientOrderId(),
+                request.symbol(),
+                request.side(),
+                request.orderType(),
+                request.timeInForce(),
+                request.priceTicks(),
+                request.quantitySteps(),
+                request.marginMode(),
+                positionSide,
+                reduceOnly,
                 request.postOnly());
     }
 
@@ -622,6 +657,7 @@ public class OrderService {
                 order.executedQuantitySteps(),
                 order.remainingQuantitySteps(),
                 order.marginMode(),
+                order.positionSide(),
                 order.makerFeeRatePpm(),
                 order.takerFeeRatePpm(),
                 order.reduceOnly(),

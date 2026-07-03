@@ -216,24 +216,35 @@ class AccountServiceTest {
         FakeAccountRepository repository = new FakeAccountRepository();
         repository.positions.put(new PositionKey(1001L, "BTC-USDT", MarginMode.CROSS),
                 new PositionState(3L, 1L, 600_000L, 0L));
+        repository.positions.put(new PositionKey(1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.LONG),
+                new PositionState(2L, 1L, 610_000L, 0L));
         AccountService service = new AccountService(repository, new PositionCalculator());
 
         PositionResponse response = service.position(1001L, "btc-usdt", "cross", "net");
 
         assertThat(response.positionSide()).isEqualTo(PositionSide.NET);
         assertThat(response.signedQuantitySteps()).isEqualTo(3L);
-        assertThatThrownBy(() -> service.position(1001L, "BTC-USDT", "CROSS", "LONG"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("hedge-mode positionSide is not supported; use NET");
+        PositionResponse hedgeResponse = service.position(1001L, "BTC-USDT", "CROSS", "LONG");
+        assertThat(hedgeResponse.positionSide()).isEqualTo(PositionSide.LONG);
+        assertThat(hedgeResponse.signedQuantitySteps()).isEqualTo(2L);
     }
 
     @Test
-    void positionsQueryRejectsHedgePositionSide() {
-        AccountService service = new AccountService(new FakeAccountRepository(), new PositionCalculator());
+    void positionsQueryFiltersByHedgePositionSide() {
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.positions.put(new PositionKey(1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.LONG),
+                new PositionState(2L, 1L, 610_000L, 0L));
+        repository.positions.put(new PositionKey(1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.SHORT),
+                new PositionState(-1L, 1L, 620_000L, 0L));
+        AccountService service = new AccountService(repository, new PositionCalculator());
 
-        assertThatThrownBy(() -> service.positions(1001L, "SHORT"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("hedge-mode positionSide is not supported; use NET");
+        var response = service.positions(1001L, "SHORT");
+
+        assertThat(response.count()).isEqualTo(1);
+        assertThat(response.positions()).singleElement().satisfies(position -> {
+            assertThat(position.positionSide()).isEqualTo(PositionSide.SHORT);
+            assertThat(position.signedQuantitySteps()).isEqualTo(-1L);
+        });
     }
 
     @Test
@@ -579,21 +590,66 @@ class AccountServiceTest {
 
         @Override
         public PositionState lockPosition(long userId, String symbol, MarginMode marginMode) {
-            return positions.getOrDefault(new PositionKey(userId, symbol, marginMode),
+            return lockPosition(userId, symbol, marginMode, PositionSide.NET);
+        }
+
+        @Override
+        public PositionState lockPosition(long userId, String symbol, MarginMode marginMode,
+                                          PositionSide positionSide) {
+            return positions.getOrDefault(new PositionKey(userId, symbol, marginMode,
+                            PositionSide.defaultIfNull(positionSide)),
                     new PositionState(0L, 0L, 0L, 0L));
         }
 
         @Override
         public Optional<PositionResponse> position(long userId, String symbol, MarginMode marginMode) {
-            return Optional.ofNullable(positions.get(new PositionKey(userId, symbol, marginMode)))
+            return position(userId, symbol, marginMode, PositionSide.NET);
+        }
+
+        @Override
+        public Optional<PositionResponse> position(long userId, String symbol, MarginMode marginMode,
+                                                   PositionSide positionSide) {
+            PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
+            return Optional.ofNullable(positions.get(new PositionKey(userId, symbol, marginMode, normalizedPositionSide)))
                     .map(state -> new PositionResponse(userId, symbol, state.instrumentVersion(), marginMode,
+                            normalizedPositionSide,
                             state.signedQuantitySteps(), state.entryPriceTicks(), state.realizedPnlUnits(),
                             EVENT_TIME));
         }
 
         @Override
+        public List<PositionResponse> positions(long userId, PositionSide positionSide) {
+            PositionSide normalizedPositionSide = positionSide == null ? null : PositionSide.defaultIfNull(positionSide);
+            return positions.entrySet().stream()
+                    .filter(entry -> entry.getKey().userId() == userId)
+                    .filter(entry -> normalizedPositionSide == null
+                            || entry.getKey().positionSide() == normalizedPositionSide)
+                    .map(entry -> {
+                        PositionKey key = entry.getKey();
+                        PositionState state = entry.getValue();
+                        return new PositionResponse(key.userId(), key.symbol(), state.instrumentVersion(),
+                                key.marginMode(), key.positionSide(), state.signedQuantitySteps(),
+                                state.entryPriceTicks(), state.realizedPnlUnits(), EVENT_TIME);
+                    })
+                    .toList();
+        }
+
+        @Override
         public PositionMarginAdjustmentResponse adjustIsolatedPositionMargin(long userId,
                                                                              String symbol,
+                                                                             long amountUnits,
+                                                                             String referenceId,
+                                                                             String reason,
+                                                                             java.time.Duration maxRiskSnapshotAge,
+                                                                             long removalBufferPpm) {
+            return adjustIsolatedPositionMargin(userId, symbol, PositionSide.NET, amountUnits, referenceId, reason,
+                    maxRiskSnapshotAge, removalBufferPpm);
+        }
+
+        @Override
+        public PositionMarginAdjustmentResponse adjustIsolatedPositionMargin(long userId,
+                                                                             String symbol,
+                                                                             PositionSide positionSide,
                                                                              long amountUnits,
                                                                              String referenceId,
                                                                              String reason,
@@ -639,7 +695,19 @@ class AccountServiceTest {
                                           long closeSteps,
                                           long positionAbsSteps,
                                           Instant now) {
-            releasedPositionMargin.merge(new PositionKey(userId, symbol, marginMode), closeSteps, Long::sum);
+            releasePositionMargin(userId, symbol, marginMode, closeSteps, PositionSide.NET, positionAbsSteps, now);
+        }
+
+        @Override
+        public void releasePositionMargin(long userId,
+                                          String symbol,
+                                          MarginMode marginMode,
+                                          long closeSteps,
+                                          PositionSide positionSide,
+                                          long positionAbsSteps,
+                                          Instant now) {
+            releasedPositionMargin.merge(new PositionKey(userId, symbol, marginMode,
+                    PositionSide.defaultIfNull(positionSide)), closeSteps, Long::sum);
             assertThat(closeSteps).isLessThanOrEqualTo(positionAbsSteps);
         }
 
@@ -773,9 +841,22 @@ class AccountServiceTest {
                                                MarginMode marginMode,
                                                PositionState state,
                                                Instant now) {
-            PositionState previous = positions.getOrDefault(new PositionKey(userId, symbol, marginMode),
+            return updatePosition(userId, symbol, marginMode, PositionSide.NET, state, now);
+        }
+
+        @Override
+        public PositionResponse updatePosition(long userId,
+                                               String symbol,
+                                               MarginMode marginMode,
+                                               PositionSide positionSide,
+                                               PositionState state,
+                                               Instant now) {
+            PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
+            PositionState previous = positions.getOrDefault(new PositionKey(userId, symbol, marginMode,
+                            normalizedPositionSide),
                     new PositionState(0L, 0L, 0L, 0L));
-            return updatePosition(userId, symbol, marginMode, state, previous.signedQuantitySteps(), now);
+            return updatePosition(userId, symbol, marginMode, normalizedPositionSide, state,
+                    previous.signedQuantitySteps(), now);
         }
 
         @Override
@@ -785,9 +866,23 @@ class AccountServiceTest {
                                                PositionState state,
                                                long previousSignedQuantitySteps,
                                                Instant now) {
+            return updatePosition(userId, symbol, marginMode, PositionSide.NET, state, previousSignedQuantitySteps,
+                    now);
+        }
+
+        @Override
+        public PositionResponse updatePosition(long userId,
+                                               String symbol,
+                                               MarginMode marginMode,
+                                               PositionSide positionSide,
+                                               PositionState state,
+                                               long previousSignedQuantitySteps,
+                                               Instant now) {
+            PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
             positionUpdates++;
-            positions.put(new PositionKey(userId, symbol, marginMode), state);
+            positions.put(new PositionKey(userId, symbol, marginMode, normalizedPositionSide), state);
             return new PositionResponse(userId, symbol, state.instrumentVersion(), marginMode,
+                    normalizedPositionSide,
                     state.signedQuantitySteps(), state.entryPriceTicks(), state.realizedPnlUnits(), now);
         }
 
@@ -880,7 +975,10 @@ class AccountServiceTest {
                                       Instant eventTime) {
     }
 
-    private record PositionKey(long userId, String symbol, MarginMode marginMode) {
+    private record PositionKey(long userId, String symbol, MarginMode marginMode, PositionSide positionSide) {
+        private PositionKey(long userId, String symbol, MarginMode marginMode) {
+            this(userId, symbol, marginMode, PositionSide.NET);
+        }
     }
 
     private record ProcessedTradeKey(String symbol, long tradeId) {

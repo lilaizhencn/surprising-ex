@@ -7,6 +7,8 @@ import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
 import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
 import com.surprising.account.api.model.PositionMarginResponse;
+import com.surprising.account.api.model.PositionModeResponse;
+import com.surprising.account.api.model.PositionModeUpdateRequest;
 import com.surprising.account.api.model.PositionQueryResponse;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.api.model.ProductBalanceQueryResponse;
@@ -48,6 +50,12 @@ public interface AccountRpcApi {
 
     @PostMapping("/transfers")
     ProductTransferResponse transfer(@Valid @RequestBody ProductTransferRequest request);
+
+    @GetMapping("/position-mode")
+    PositionModeResponse positionMode(@RequestParam("userId") @Positive long userId);
+
+    @PostMapping("/position-mode")
+    PositionModeResponse updatePositionMode(@Valid @RequestBody PositionModeUpdateRequest request);
 
     @GetMapping("/position")
     PositionResponse position(@RequestParam("userId") @Positive long userId,

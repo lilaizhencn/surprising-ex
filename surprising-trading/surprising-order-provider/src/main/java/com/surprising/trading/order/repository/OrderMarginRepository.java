@@ -4,6 +4,7 @@ import com.surprising.instrument.api.model.ContractType;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.order.model.MarginRequirement;
 import com.surprising.trading.order.service.OrderMarginMath;
 import java.math.BigInteger;
@@ -32,6 +33,21 @@ public class OrderMarginRepository {
                                                    long instrumentVersion,
                                                    long userId,
                                                    MarginMode marginMode,
+                                                   OrderSide side,
+                                                   OrderType orderType,
+                                                   long priceTicks,
+                                                   long quantitySteps,
+                                                   long marketMaxSlippagePpm,
+                                                   long marketMaxMarkAgeMs) {
+        return requirement(symbol, instrumentVersion, userId, marginMode, PositionSide.NET, side, orderType,
+                priceTicks, quantitySteps, marketMaxSlippagePpm, marketMaxMarkAgeMs);
+    }
+
+    public Optional<MarginRequirement> requirement(String symbol,
+                                                   long instrumentVersion,
+                                                   long userId,
+                                                   MarginMode marginMode,
+                                                   PositionSide positionSide,
                                                    OrderSide side,
                                                    OrderType orderType,
                                                    long priceTicks,
@@ -69,12 +85,14 @@ public class OrderMarginRepository {
                     ON p.user_id = ?
                    AND p.symbol = i.symbol
                    AND p.margin_mode = ?
+                   AND p.position_side = ?
                   LEFT JOIN LATERAL (
                       SELECT COALESCE(SUM(o.remaining_quantity_steps), 0) AS pending_same_side_steps
                         FROM trading_orders o
                        WHERE o.user_id = ?
                          AND o.symbol = i.symbol
                          AND o.margin_mode = ?
+                         AND o.position_side = ?
                          AND o.side = ?
                          AND o.reduce_only = FALSE
                          AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
@@ -91,6 +109,8 @@ public class OrderMarginRepository {
                    AND i.version = ?
                    AND (? <> 'MARKET' OR pm.mark_ticks IS NOT NULL)
                 """;
+        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
             long markTicks = rs.getLong("mark_ticks");
             Long nullableMarkTicks = rs.wasNull() ? null : markTicks;
@@ -159,8 +179,8 @@ public class OrderMarginRepository {
                     effectiveInitialMarginRatePpm);
             return new MarginRequirement(accountType, rs.getString("asset"), initialMarginUnits, null,
                     selectedLeveragePpm, bracket.maxLeveragePpm(), effectiveInitialMarginRatePpm);
-        }, userId, MarginMode.defaultIfNull(marginMode).name(), userId, MarginMode.defaultIfNull(marginMode).name(),
-                userId, MarginMode.defaultIfNull(marginMode).name(), side.name(),
+        }, userId, normalizedMarginMode.name(), userId, normalizedMarginMode.name(), normalizedPositionSide.name(),
+                userId, normalizedMarginMode.name(), normalizedPositionSide.name(), side.name(),
                 marketMaxMarkAgeMs, symbol, instrumentVersion, orderType.name()).stream().findFirst();
     }
 
@@ -172,7 +192,7 @@ public class OrderMarginRepository {
                                                    long quantitySteps,
                                                    long marketMaxSlippagePpm,
                                                    long marketMaxMarkAgeMs) {
-        return requirement(symbol, instrumentVersion, 0L, MarginMode.CROSS, side, orderType, priceTicks,
+        return requirement(symbol, instrumentVersion, 0L, MarginMode.CROSS, PositionSide.NET, side, orderType, priceTicks,
                 quantitySteps, marketMaxSlippagePpm, marketMaxMarkAgeMs);
     }
 
@@ -224,7 +244,7 @@ public class OrderMarginRepository {
                            MarginMode marginMode,
                            long amountUnits,
                            Instant now) {
-        return reserve(userId, USDT_PERPETUAL, asset, orderId, symbol, marginMode, amountUnits, now);
+        return reserve(userId, USDT_PERPETUAL, asset, orderId, symbol, marginMode, PositionSide.NET, amountUnits, now);
     }
 
     public boolean reserve(long userId,
@@ -235,15 +255,27 @@ public class OrderMarginRepository {
                            MarginMode marginMode,
                            long amountUnits,
                            Instant now) {
+        return reserve(userId, accountType, asset, orderId, symbol, marginMode, PositionSide.NET, amountUnits, now);
+    }
+
+    public boolean reserve(long userId,
+                           String accountType,
+                           String asset,
+                           long orderId,
+                           String symbol,
+                           MarginMode marginMode,
+                           PositionSide positionSide,
+                           long amountUnits,
+                           Instant now) {
         if (amountUnits <= 0) {
             return true;
         }
         String normalizedAccountType = normalizePerpetualAccountType(accountType);
         if (COIN_PERPETUAL.equals(normalizedAccountType)) {
             return reserveProductMargin(userId, normalizedAccountType, asset, orderId, symbol, marginMode,
-                    amountUnits, now);
+                    positionSide, amountUnits, now);
         }
-        return reserveLegacyMargin(userId, normalizedAccountType, asset, orderId, symbol, marginMode, amountUnits,
+        return reserveLegacyMargin(userId, normalizedAccountType, asset, orderId, symbol, marginMode, positionSide, amountUnits,
                 now);
     }
 
@@ -253,6 +285,7 @@ public class OrderMarginRepository {
                                         long orderId,
                                         String symbol,
                                         MarginMode marginMode,
+                                        PositionSide positionSide,
                                         long amountUnits,
                                         Instant now) {
         jdbcTemplate.update("""
@@ -274,11 +307,11 @@ public class OrderMarginRepository {
         int rows = jdbcTemplate.update("""
                 INSERT INTO account_margin_reservations (
                     reservation_id, account_type, user_id, asset, order_id, symbol,
-                    margin_mode, reserved_units, released_units, status, reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
+                    margin_mode, position_side, reserved_units, released_units, status, reason, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
                 ON CONFLICT (order_id) DO NOTHING
                 """, reservationId, accountType, userId, asset, orderId, symbol,
-                MarginMode.defaultIfNull(marginMode).name(), amountUnits,
+                MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name(), amountUnits,
                 Timestamp.from(now), Timestamp.from(now));
         if (rows != 1) {
             throw new IllegalStateException("failed to insert margin reservation for order " + orderId);
@@ -300,11 +333,12 @@ public class OrderMarginRepository {
     private boolean reserveProductMargin(long userId,
                                          String accountType,
                                          String asset,
-                                         long orderId,
-                                         String symbol,
-                                         MarginMode marginMode,
-                                         long amountUnits,
-                                         Instant now) {
+                                     long orderId,
+                                     String symbol,
+                                     MarginMode marginMode,
+                                     PositionSide positionSide,
+                                     long amountUnits,
+                                     Instant now) {
         jdbcTemplate.update("""
                 INSERT INTO account_product_balances (
                     account_type, user_id, asset, available_units, locked_units, updated_at
@@ -327,11 +361,11 @@ public class OrderMarginRepository {
         int rows = jdbcTemplate.update("""
                 INSERT INTO account_margin_reservations (
                     reservation_id, account_type, user_id, asset, order_id, symbol,
-                    margin_mode, reserved_units, released_units, status, reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
+                    margin_mode, position_side, reserved_units, released_units, status, reason, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
                 ON CONFLICT (order_id) DO NOTHING
                 """, reservationId, accountType, userId, asset, orderId, symbol,
-                MarginMode.defaultIfNull(marginMode).name(), amountUnits,
+                MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name(), amountUnits,
                 Timestamp.from(now), Timestamp.from(now));
         if (rows != 1) {
             throw new IllegalStateException("failed to insert margin reservation for order " + orderId);

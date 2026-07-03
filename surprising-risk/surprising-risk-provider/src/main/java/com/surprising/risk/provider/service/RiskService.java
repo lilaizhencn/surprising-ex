@@ -21,6 +21,7 @@ import com.surprising.risk.provider.repository.RiskRepository.HighRiskAccount;
 import com.surprising.risk.provider.repository.RiskRepository.RiskRuleOverride;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -91,7 +92,27 @@ public class RiskService {
      * fallback, but this method cuts liquidation latency after fills by scanning only the affected user/settle group.
      */
     public void scanPositionUpdate(long userId, String symbol, MarginMode marginMode, long instrumentVersion) {
-        scanPositionUpdate(userId, symbol, marginMode, instrumentVersion, null);
+        scanPositionUpdate(userId, symbol, marginMode, PositionSide.NET, instrumentVersion, null);
+    }
+
+    public void scanPositionUpdate(long userId,
+                                   String symbol,
+                                   MarginMode marginMode,
+                                   PositionSide positionSide,
+                                   long instrumentVersion,
+                                   String traceId) {
+        if (!properties.getCalculation().isEnabled()) {
+            return;
+        }
+        PositionRiskTarget target = riskRepository.riskTargetForPositionEvent(userId, normalizeSymbol(symbol),
+                MarginMode.defaultIfNull(marginMode), PositionSide.defaultIfNull(positionSide),
+                instrumentVersion).orElse(null);
+        if (target == null) {
+            log.debug("Position update did not resolve to a risk group userId={} symbol={} version={}",
+                    userId, symbol, instrumentVersion);
+            return;
+        }
+        scanRiskGroup(target.riskGroupKey(), target, traceId);
     }
 
     public void scanPositionUpdate(long userId,
@@ -99,17 +120,7 @@ public class RiskService {
                                    MarginMode marginMode,
                                    long instrumentVersion,
                                    String traceId) {
-        if (!properties.getCalculation().isEnabled()) {
-            return;
-        }
-        PositionRiskTarget target = riskRepository.riskTargetForPositionEvent(userId, normalizeSymbol(symbol),
-                MarginMode.defaultIfNull(marginMode), instrumentVersion).orElse(null);
-        if (target == null) {
-            log.debug("Position update did not resolve to a risk group userId={} symbol={} version={}",
-                    userId, symbol, instrumentVersion);
-            return;
-        }
-        scanRiskGroup(target.riskGroupKey(), target, traceId);
+        scanPositionUpdate(userId, symbol, marginMode, PositionSide.NET, instrumentVersion, traceId);
     }
 
     public void scanPositionUpdate(long userId, String symbol, long instrumentVersion) {
@@ -331,10 +342,11 @@ public class RiskService {
             }
         }
         if (eventTarget != null && positions.stream().noneMatch(position -> position.symbol().equals(eventTarget.symbol())
-                && position.marginMode() == eventTarget.marginMode())) {
+                && position.marginMode() == eventTarget.marginMode()
+                && position.positionSide() == eventTarget.positionSide())) {
             CalculatedPositionRisk flatPosition = new CalculatedPositionRisk(eventTarget.userId(),
-                    eventTarget.symbol(), eventTarget.marginMode(), eventTarget.instrumentVersion(), eventTarget.settleAsset(),
-                    0L, 0L, 0L, 0L, 0L, 0L, 0L);
+                    eventTarget.symbol(), eventTarget.marginMode(), eventTarget.positionSide(),
+                    eventTarget.instrumentVersion(), eventTarget.settleAsset(), 0L, 0L, 0L, 0L, 0L, 0L, 0L);
             riskRepository.savePositionSnapshot(snapshotId, flatPosition, 0L, RiskStatus.NORMAL, now);
             enqueuePositionRisk(snapshotId, flatPosition, 0L, RiskStatus.NORMAL, now, traceId);
         }
@@ -359,6 +371,7 @@ public class RiskService {
                 position.userId(),
                 position.symbol(),
                 position.marginMode(),
+                position.positionSide(),
                 position.instrumentVersion(),
                 position.settleAsset(),
                 position.signedQuantitySteps(),
@@ -396,6 +409,7 @@ public class RiskService {
                 candidate.userId(),
                 candidate.symbol(),
                 candidate.marginMode(),
+                candidate.positionSide(),
                 candidate.instrumentVersion(),
                 candidate.settleAsset(),
                 candidate.signedQuantitySteps(),

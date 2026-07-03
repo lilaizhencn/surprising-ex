@@ -9,6 +9,8 @@ import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
 import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
 import com.surprising.account.api.model.PositionMarginResponse;
+import com.surprising.account.api.model.PositionModeResponse;
+import com.surprising.account.api.model.PositionModeUpdateRequest;
 import com.surprising.account.api.model.PositionQueryResponse;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.api.model.ProductBalanceQueryResponse;
@@ -46,6 +48,7 @@ import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
+import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.client.MarketDataRpcApi;
@@ -502,6 +505,17 @@ class MarketMakerServiceTest {
         @Override
         public ProductTransferResponse transfer(ProductTransferRequest request) {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public PositionModeResponse positionMode(long userId) {
+            return new PositionModeResponse(userId, PositionMode.ONE_WAY, Instant.parse("2026-01-01T00:00:00Z"));
+        }
+
+        @Override
+        public PositionModeResponse updatePositionMode(PositionModeUpdateRequest request) {
+            return new PositionModeResponse(request.userId(), request.positionMode(),
+                    Instant.parse("2026-01-01T00:00:00Z"));
         }
 
         @Override

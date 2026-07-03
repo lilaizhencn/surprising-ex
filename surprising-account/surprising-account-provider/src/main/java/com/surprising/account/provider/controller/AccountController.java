@@ -10,6 +10,8 @@ import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
 import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
 import com.surprising.account.api.model.PositionMarginResponse;
+import com.surprising.account.api.model.PositionModeResponse;
+import com.surprising.account.api.model.PositionModeUpdateRequest;
 import com.surprising.account.api.model.PositionQueryResponse;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
@@ -148,6 +150,26 @@ public class AccountController {
     public ProductTransferResponse transfer(@RequestBody ProductTransferRequest request) {
         try {
             return accountService.transfer(request);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        }
+    }
+
+    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-mode")
+    public PositionModeResponse positionMode(@RequestParam("userId") long userId) {
+        try {
+            return accountService.positionMode(userId);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
+    @PostMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-mode")
+    public PositionModeResponse updatePositionMode(@RequestBody PositionModeUpdateRequest request) {
+        try {
+            return accountService.updatePositionMode(request);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

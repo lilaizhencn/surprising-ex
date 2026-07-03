@@ -3,6 +3,7 @@ package com.surprising.trading.trigger.model;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.TriggerCondition;
 import com.surprising.trading.api.model.TriggerOrderStatus;
@@ -26,6 +27,7 @@ public record TriggerOrderRecord(
         long priceTicks,
         long quantitySteps,
         MarginMode marginMode,
+        PositionSide positionSide,
         TriggerOrderStatus status,
         Long placedOrderId,
         Long triggerSequence,
@@ -36,4 +38,40 @@ public record TriggerOrderRecord(
         Instant triggeredAt,
         Instant createdAt,
         Instant updatedAt) {
+
+    public TriggerOrderRecord {
+        marginMode = MarginMode.defaultIfNull(marginMode);
+        positionSide = PositionSide.defaultIfNull(positionSide);
+    }
+
+    public TriggerOrderRecord(long triggerOrderId,
+                              long userId,
+                              String clientTriggerOrderId,
+                              String ocoGroupId,
+                              String symbol,
+                              OrderSide side,
+                              TriggerOrderType triggerType,
+                              TriggerPriceType triggerPriceType,
+                              TriggerCondition triggerCondition,
+                              long triggerPriceTicks,
+                              OrderType orderType,
+                              TimeInForce timeInForce,
+                              long priceTicks,
+                              long quantitySteps,
+                              MarginMode marginMode,
+                              TriggerOrderStatus status,
+                              Long placedOrderId,
+                              Long triggerSequence,
+                              Long triggeredPriceTicks,
+                              String rejectReason,
+                              String traceId,
+                              Instant expiresAt,
+                              Instant triggeredAt,
+                              Instant createdAt,
+                              Instant updatedAt) {
+        this(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType, triggerPriceType,
+                triggerCondition, triggerPriceTicks, orderType, timeInForce, priceTicks, quantitySteps, marginMode,
+                PositionSide.NET, status, placedOrderId, triggerSequence, triggeredPriceTicks, rejectReason, traceId,
+                expiresAt, triggeredAt, createdAt, updatedAt);
+    }
 }

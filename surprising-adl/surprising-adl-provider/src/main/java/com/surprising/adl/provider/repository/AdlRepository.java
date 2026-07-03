@@ -8,6 +8,8 @@ import com.surprising.adl.provider.model.DeficitRow;
 import com.surprising.adl.provider.service.AdlMath;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.PositionSide;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -24,6 +26,8 @@ public class AdlRepository {
             SELECT p.user_id,
                    i.settle_asset AS asset,
                    p.symbol,
+                   p.margin_mode,
+                   p.position_side,
                    i.contract_type,
                    i.notional_multiplier_units,
                    i.price_tick_units,
@@ -47,6 +51,8 @@ public class AdlRepository {
                 ON m.user_id = p.user_id
                AND m.symbol = p.symbol
                AND m.asset = i.settle_asset
+               AND m.margin_mode = p.margin_mode
+               AND m.position_side = p.position_side
               LEFT JOIN account_deficits d
                 ON d.user_id = p.user_id
                AND d.asset = i.settle_asset
@@ -140,16 +146,28 @@ public class AdlRepository {
                 .toList();
     }
 
-    public Optional<AdlCandidate> lockCandidate(long userId, String symbol, String asset, Duration maxMarkAge) {
+    public Optional<AdlCandidate> lockCandidate(long userId,
+                                                String symbol,
+                                                MarginMode marginMode,
+                                                PositionSide positionSide,
+                                                String asset,
+                                                Duration maxMarkAge) {
         String sql = CANDIDATE_SELECT + """
                    AND p.user_id = ?
                    AND p.symbol = ?
+                   AND p.margin_mode = ?
+                   AND p.position_side = ?
                  FOR UPDATE OF p SKIP LOCKED
                 """;
-        return jdbcTemplate.query(sql, (rs, rowNum) -> toCandidate(rs), asset, maxMarkAge.toMillis(), userId, symbol)
+        return jdbcTemplate.query(sql, (rs, rowNum) -> toCandidate(rs), asset, maxMarkAge.toMillis(), userId, symbol,
+                        MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name())
                 .stream()
                 .filter(candidate -> candidate.profitTicksPerStep() > 0 && candidate.unrealizedProfitUnits() > 0)
                 .findFirst();
+    }
+
+    public Optional<AdlCandidate> lockCandidate(long userId, String symbol, String asset, Duration maxMarkAge) {
+        return lockCandidate(userId, symbol, MarginMode.CROSS, PositionSide.NET, asset, maxMarkAge);
     }
 
     public long executeAdl(DeficitRow deficit, AdlCandidate candidate, long remainingDeficitUnits) {
@@ -264,21 +282,27 @@ public class AdlRepository {
                        entry_price_ticks = ?,
                        realized_pnl_units = realized_pnl_units + ?,
                        updated_at = ?
-                 WHERE user_id = ? AND symbol = ?
+                 WHERE user_id = ? AND symbol = ? AND margin_mode = ? AND position_side = ?
                 """, nextSignedQuantity, nextSignedQuantity, nextEntryPrice, realizedPnlUnits, Timestamp.from(now),
-                candidate.userId(), candidate.symbol());
+                candidate.userId(), candidate.symbol(), candidate.marginMode().name(), candidate.positionSide().name());
         requireSingleRow(rows, "ADL target position update");
     }
 
     private void releaseTargetMargin(AdlCandidate candidate, long closeSteps, Instant now) {
         var margins = jdbcTemplate.query("""
-                SELECT asset, margin_units
+                SELECT asset, margin_mode, position_side, margin_units
                   FROM account_position_margins
                  WHERE user_id = ? AND symbol = ? AND asset = ?
+                   AND margin_mode = ?
+                   AND position_side = ?
                    AND margin_units > 0
                  FOR UPDATE
-                """, (rs, rowNum) -> new PositionMargin(rs.getString("asset"), rs.getLong("margin_units")),
-                candidate.userId(), candidate.symbol(), candidate.asset());
+                """, (rs, rowNum) -> new PositionMargin(rs.getString("asset"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                PositionSide.fromNullableDbValue(rs.getString("position_side")),
+                rs.getLong("margin_units")),
+                candidate.userId(), candidate.symbol(), candidate.asset(), candidate.marginMode().name(),
+                candidate.positionSide().name());
         for (PositionMargin margin : margins) {
             long releaseUnits = AdlMath.proportionalUnits(margin.marginUnits(), closeSteps,
                     candidate.absQuantitySteps());
@@ -303,14 +327,18 @@ public class AdlRepository {
                        SET margin_units = margin_units - ?,
                            updated_at = ?
                      WHERE user_id = ? AND symbol = ? AND asset = ?
+                       AND margin_mode = ?
+                       AND position_side = ?
                        AND margin_units >= ?
                     """, releaseUnits, Timestamp.from(now), candidate.userId(), candidate.symbol(), margin.asset(),
-                    releaseUnits);
+                    margin.marginMode().name(), margin.positionSide().name(), releaseUnits);
             requireSingleRow(marginRows, "ADL target position margin release");
             jdbcTemplate.update("""
                     DELETE FROM account_position_margins
-                     WHERE user_id = ? AND symbol = ? AND asset = ? AND margin_units = 0
-                    """, candidate.userId(), candidate.symbol(), margin.asset());
+                     WHERE user_id = ? AND symbol = ? AND asset = ?
+                       AND margin_mode = ? AND position_side = ? AND margin_units = 0
+                    """, candidate.userId(), candidate.symbol(), margin.asset(), margin.marginMode().name(),
+                    margin.positionSide().name());
         }
     }
 
@@ -478,6 +506,8 @@ public class AdlRepository {
                 rs.getLong("user_id"),
                 rs.getString("asset"),
                 rs.getString("symbol"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                PositionSide.fromNullableDbValue(rs.getString("position_side")),
                 signedQuantity > 0 ? AdlSide.LONG : AdlSide.SHORT,
                 signedQuantity,
                 absQuantitySteps,
@@ -512,7 +542,11 @@ public class AdlRepository {
                 rs.getTimestamp("created_at").toInstant());
     }
 
-    private record PositionMargin(String asset, long marginUnits) {
+    private record PositionMargin(String asset, MarginMode marginMode, PositionSide positionSide, long marginUnits) {
+        private PositionMargin {
+            marginMode = MarginMode.defaultIfNull(marginMode);
+            positionSide = PositionSide.defaultIfNull(positionSide);
+        }
     }
 
     private record BalanceState(long availableUnits, long lockedUnits, long deficitUnits) {

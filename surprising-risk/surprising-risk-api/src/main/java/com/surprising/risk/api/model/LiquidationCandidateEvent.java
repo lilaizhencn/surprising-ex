@@ -1,6 +1,7 @@
 package com.surprising.risk.api.model;
 
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 
 public record LiquidationCandidateEvent(
@@ -9,6 +10,7 @@ public record LiquidationCandidateEvent(
         long userId,
         String symbol,
         MarginMode marginMode,
+        PositionSide positionSide,
         long instrumentVersion,
         String settleAsset,
         long signedQuantitySteps,
@@ -20,6 +22,24 @@ public record LiquidationCandidateEvent(
 
     public LiquidationCandidateEvent {
         marginMode = MarginMode.defaultIfNull(marginMode);
+        positionSide = PositionSide.defaultIfNull(positionSide);
+    }
+
+    public LiquidationCandidateEvent(long candidateId,
+                                     long snapshotId,
+                                     long userId,
+                                     String symbol,
+                                     MarginMode marginMode,
+                                     long instrumentVersion,
+                                     String settleAsset,
+                                     long signedQuantitySteps,
+                                     long markPriceTicks,
+                                     long equityUnits,
+                                     long maintenanceMarginUnits,
+                                     long marginRatioPpm,
+                                     Instant eventTime) {
+        this(candidateId, snapshotId, userId, symbol, marginMode, PositionSide.NET, instrumentVersion, settleAsset,
+                signedQuantitySteps, markPriceTicks, equityUnits, maintenanceMarginUnits, marginRatioPpm, eventTime);
     }
 
     public LiquidationCandidateEvent(long candidateId,
@@ -34,7 +54,7 @@ public record LiquidationCandidateEvent(
                                      long maintenanceMarginUnits,
                                      long marginRatioPpm,
                                      Instant eventTime) {
-        this(candidateId, snapshotId, userId, symbol, MarginMode.CROSS, instrumentVersion, settleAsset,
+        this(candidateId, snapshotId, userId, symbol, MarginMode.CROSS, PositionSide.NET, instrumentVersion, settleAsset,
                 signedQuantitySteps, markPriceTicks, equityUnits, maintenanceMarginUnits, marginRatioPpm, eventTime);
     }
 }

@@ -99,7 +99,8 @@ class ReduceOnlyOrderPrunerTest {
 
     @SafeVarargs
     private void whenOpenOrders(RowConfigurer... orders) {
-        when(jdbcTemplate.query(contains("FROM trading_orders"), anyRowMapper(), eq(1001L), eq("BTC-USDT")))
+        when(jdbcTemplate.query(contains("FROM trading_orders"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT"), eq("NET")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     java.util.ArrayList<Object> rows = new java.util.ArrayList<>();

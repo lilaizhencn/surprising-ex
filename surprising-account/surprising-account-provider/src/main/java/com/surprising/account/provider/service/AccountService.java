@@ -9,6 +9,8 @@ import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
 import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
 import com.surprising.account.api.model.PositionMarginResponse;
+import com.surprising.account.api.model.PositionModeResponse;
+import com.surprising.account.api.model.PositionModeUpdateRequest;
 import com.surprising.account.api.model.PositionQueryResponse;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
@@ -257,6 +259,20 @@ public class AccountService {
                 request.amountUnits(), normalizeReferenceId(request.referenceId()), request.reason());
     }
 
+    public PositionModeResponse positionMode(long userId) {
+        if (userId <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        return accountRepository.positionMode(userId);
+    }
+
+    public PositionModeResponse updatePositionMode(PositionModeUpdateRequest request) {
+        if (request.userId() <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        return accountRepository.updatePositionMode(request.userId(), request.positionMode(), Instant.now());
+    }
+
     public PositionResponse position(long userId, String symbol) {
         return position(userId, symbol, null, null);
     }
@@ -268,18 +284,18 @@ public class AccountService {
     public PositionResponse position(long userId, String symbol, String marginMode, String positionSide) {
         String normalizedSymbol = normalizeSymbol(symbol);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
-        normalizePositionSide(positionSide);
-        return accountRepository.position(userId, normalizedSymbol, normalizedMarginMode)
+        PositionSide normalizedPositionSide = normalizePositionSide(positionSide);
+        return accountRepository.position(userId, normalizedSymbol, normalizedMarginMode, normalizedPositionSide)
                 .orElse(new PositionResponse(userId, normalizedSymbol, 0L, normalizedMarginMode,
-                        0L, 0L, 0L, Instant.EPOCH));
+                        normalizedPositionSide, 0L, 0L, 0L, Instant.EPOCH));
     }
 
     public PositionMarginResponse positionMargin(long userId, String symbol, String marginMode) {
         String normalizedSymbol = normalizeSymbol(symbol);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
-        return accountRepository.positionMargin(userId, normalizedSymbol, normalizedMarginMode)
+        return accountRepository.positionMargin(userId, normalizedSymbol, normalizedMarginMode, PositionSide.NET)
                 .orElse(new PositionMarginResponse(userId, normalizedSymbol, "", normalizedMarginMode,
-                        0L, Instant.EPOCH));
+                        PositionSide.NET, 0L, Instant.EPOCH));
     }
 
     public PositionQueryResponse positions(long userId) {
@@ -287,8 +303,10 @@ public class AccountService {
     }
 
     public PositionQueryResponse positions(long userId, String positionSide) {
-        normalizePositionSide(positionSide);
-        List<PositionResponse> rows = accountRepository.positions(userId);
+        PositionSide normalizedPositionSide = positionSide == null || positionSide.isBlank()
+                ? null
+                : normalizePositionSide(positionSide);
+        List<PositionResponse> rows = accountRepository.positions(userId, normalizedPositionSide);
         return new PositionQueryResponse(rows.size(), rows);
     }
 
@@ -303,12 +321,13 @@ public class AccountService {
             throw new IllegalArgumentException("position margin adjustment only supports ISOLATED margin mode");
         }
         PositionMarginAdjustmentResponse response = accountRepository.adjustIsolatedPositionMargin(
-                request.userId(), symbol, request.amountUnits(),
+                request.userId(), symbol, request.positionSide(), request.amountUnits(),
                 normalizeReferenceId(request.referenceId()), normalizeReason(request.reason(), request.amountUnits()),
                 properties.getPositionMargin().getMaxRiskSnapshotAge(),
                 properties.getPositionMargin().getRemovalBufferPpm());
         if (outboxRepository != null) {
-            PositionResponse current = accountRepository.position(request.userId(), symbol, MarginMode.ISOLATED)
+            PositionResponse current = accountRepository.position(request.userId(), symbol, MarginMode.ISOLATED,
+                            request.positionSide())
                     .orElseThrow(() -> new IllegalStateException("isolated position missing after margin adjustment"));
             // Manual margin changes do not have a trade id; tradeId=0 tells downstream consumers this is a state trigger.
             outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
@@ -345,10 +364,12 @@ public class AccountService {
             return true;
         }
         applyTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
-                trade.takerInstrumentVersion(), trade.takerSide(), trade.takerMarginMode(), trade.priceTicks(), trade.quantitySteps(),
+                trade.takerInstrumentVersion(), trade.takerSide(), trade.takerMarginMode(), trade.takerPositionSide(),
+                trade.priceTicks(), trade.quantitySteps(),
                 trade.takerOrderCompleted(), true, trade.eventTime(), traceId);
         applyTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
-                trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.makerMarginMode(), trade.priceTicks(), trade.quantitySteps(),
+                trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.makerMarginMode(),
+                trade.makerPositionSide(), trade.priceTicks(), trade.quantitySteps(),
                 trade.makerOrderCompleted(), false, trade.eventTime(), traceId);
         return true;
     }
@@ -378,6 +399,7 @@ public class AccountService {
                                             long fillInstrumentVersion,
                                             OrderSide side,
                                             MarginMode marginMode,
+                                            PositionSide positionSide,
                                             long priceTicks,
                                             long quantitySteps,
                                             boolean orderCompleted,
@@ -385,8 +407,10 @@ public class AccountService {
                                             Instant eventTime,
                                             String traceId) {
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
         ContractSpec fillSpec = contractSpec(symbol, fillInstrumentVersion);
-        PositionState current = accountRepository.lockPosition(userId, symbol, normalizedMarginMode);
+        PositionState current = accountRepository.lockPosition(userId, symbol, normalizedMarginMode,
+                normalizedPositionSide);
         ContractSpec positionSpec = current.signedQuantitySteps() == 0
                 ? fillSpec
                 : contractSpec(symbol, current.instrumentVersion());
@@ -416,14 +440,15 @@ public class AccountService {
         }
         if (closeSteps > 0) {
             accountRepository.releasePositionMargin(userId, symbol, normalizedMarginMode, closeSteps,
-                    Math.absExact(current.signedQuantitySteps()), eventTime);
+                    normalizedPositionSide, Math.absExact(current.signedQuantitySteps()), eventTime);
             accountRepository.releaseOrderMargin(orderId, userId, symbol, closeSteps,
                     orderCompleted && openSteps == 0, eventTime);
         }
         PositionResponse updated = accountRepository.updatePosition(userId, symbol, normalizedMarginMode,
+                normalizedPositionSide,
                 change.next(), current.signedQuantitySteps(), eventTime);
         if (reduceOnlyOrderPruner != null) {
-            reduceOnlyOrderPruner.prune(userId, symbol, change.next(), eventTime, traceId);
+            reduceOnlyOrderPruner.prune(userId, symbol, normalizedPositionSide, change.next(), eventTime, traceId);
         }
         if (outboxRepository != null) {
             outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
@@ -556,9 +581,6 @@ public class AccountService {
             normalized = PositionSide.valueOf(positionSide.trim().toUpperCase());
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException("invalid positionSide: " + positionSide, ex);
-        }
-        if (normalized.isHedgeSide()) {
-            throw new IllegalArgumentException("hedge-mode positionSide is not supported; use NET");
         }
         return normalized;
     }

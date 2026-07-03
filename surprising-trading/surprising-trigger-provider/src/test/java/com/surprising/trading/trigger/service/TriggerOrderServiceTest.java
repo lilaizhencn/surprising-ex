@@ -110,7 +110,7 @@ class TriggerOrderServiceTest {
     }
 
     @Test
-    void placeRejectsHedgePositionSideBeforePersistence() {
+    void placeRejectsHedgePositionSideInOneWayModeBeforePersistence() {
         TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
@@ -120,7 +120,7 @@ class TriggerOrderServiceTest {
 
         assertThatThrownBy(() -> service.place(request))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("hedge-mode positionSide is not supported; use NET");
+                .hasMessage("positionSide LONG/SHORT requires HEDGE position mode");
 
         verify(repository, never()).lockUserSymbolMarginScope(anyLong(), anyString());
         verify(repository, never()).nextSequence("trigger-order");

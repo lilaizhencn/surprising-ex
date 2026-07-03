@@ -4,6 +4,8 @@ import com.surprising.trading.api.model.AdminCursorPage;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.PositionMode;
+import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.TriggerCondition;
 import com.surprising.trading.api.model.TriggerOrderStatus;
@@ -50,16 +52,17 @@ public class TriggerOrderRepository {
                 INSERT INTO trading_trigger_orders (
                     trigger_order_id, user_id, client_trigger_order_id, oco_group_id, symbol, side, trigger_type,
                     trigger_price_type, trigger_condition, trigger_price_ticks, order_type, time_in_force,
-                    price_ticks, quantity_steps, margin_mode, status, placed_order_id, trigger_sequence,
+                    price_ticks, quantity_steps, margin_mode, position_side, status, placed_order_id, trigger_sequence,
                     triggered_price_ticks, reject_reason, trace_id, expires_at, triggered_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT DO NOTHING
                 """, order.triggerOrderId(), order.userId(), order.clientTriggerOrderId(), order.ocoGroupId(),
                 order.symbol(),
                 order.side().name(), order.triggerType().name(), order.triggerPriceType().name(),
                 order.triggerCondition().name(), order.triggerPriceTicks(), order.orderType().name(),
                 order.timeInForce().name(), order.priceTicks(), order.quantitySteps(), order.marginMode().name(),
-                order.status().name(), order.placedOrderId(), order.triggerSequence(), order.triggeredPriceTicks(),
+                PositionSide.defaultIfNull(order.positionSide()).name(), order.status().name(), order.placedOrderId(),
+                order.triggerSequence(), order.triggeredPriceTicks(),
                 order.rejectReason(), order.traceId(), timestampOrNull(order.expiresAt()),
                 timestampOrNull(order.triggeredAt()), Timestamp.from(order.createdAt()),
                 Timestamp.from(order.updatedAt())) == 1;
@@ -69,6 +72,21 @@ public class TriggerOrderRepository {
         jdbcTemplate.query("""
                 SELECT pg_advisory_xact_lock(hashtext('trading-margin-mode'), hashtext(?))
                 """, rs -> null, userId + ":" + symbol);
+    }
+
+    public void lockUserPositionMode(long userId) {
+        jdbcTemplate.query("""
+                SELECT pg_advisory_xact_lock(hashtext('position-mode'), hashtext(?))
+                """, rs -> null, Long.toString(userId));
+    }
+
+    public PositionMode positionMode(long userId) {
+        String mode = jdbcTemplate.query("""
+                SELECT position_mode
+                  FROM account_position_modes
+                 WHERE user_id = ?
+                """, (rs, rowNum) -> rs.getString("position_mode"), userId).stream().findFirst().orElse(null);
+        return PositionMode.fromNullableDbValue(mode);
     }
 
     public boolean hasActiveMarginModeConflict(long userId, String symbol, MarginMode marginMode) {
@@ -370,6 +388,7 @@ public class TriggerOrderRepository {
                 rs.getLong("price_ticks"),
                 rs.getLong("quantity_steps"),
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                PositionSide.fromNullableDbValue(rs.getString("position_side")),
                 TriggerOrderStatus.valueOf(rs.getString("status")),
                 longOrNull(rs, "placed_order_id"),
                 longOrNull(rs, "trigger_sequence"),

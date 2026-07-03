@@ -29,6 +29,7 @@ import com.surprising.insurance.provider.repository.InsuranceRepository;
 import com.surprising.insurance.provider.service.InsuranceMath;
 import com.surprising.insurance.provider.service.InsuranceService;
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.PositionSide;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -343,6 +344,20 @@ class PostLiquidationFundingInsuranceAdlIntegrationTest {
 
         @Override
         public Optional<AdlCandidate> lockCandidate(long userId, String symbol, String asset, Duration maxMarkAge) {
+            return lockCandidate(userId, symbol, MarginMode.CROSS, PositionSide.NET, asset, maxMarkAge);
+        }
+
+        @Override
+        public Optional<AdlCandidate> lockCandidate(long userId,
+                                                    String symbol,
+                                                    MarginMode marginMode,
+                                                    PositionSide positionSide,
+                                                    String asset,
+                                                    Duration maxMarkAge) {
+            if (MarginMode.defaultIfNull(marginMode) != MarginMode.CROSS
+                    || PositionSide.defaultIfNull(positionSide) != PositionSide.NET) {
+                return Optional.empty();
+            }
             PositionState position = state.positions.get(userId);
             if (position == null || !SYMBOL.equals(symbol) || !ASSET.equals(asset)) {
                 return Optional.empty();

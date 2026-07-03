@@ -123,8 +123,8 @@ public class AdlService {
             if (remaining <= 0 || executions >= maxDeleverages) {
                 break;
             }
-            var locked = adlRepository.lockCandidate(candidate.userId(), candidate.symbol(), deficit.asset(),
-                    maxMarkAge());
+            var locked = adlRepository.lockCandidate(candidate.userId(), candidate.symbol(), candidate.marginMode(),
+                    candidate.positionSide(), deficit.asset(), maxMarkAge());
             if (locked.isEmpty()) {
                 continue;
             }
@@ -165,7 +165,7 @@ public class AdlService {
 
     private AdlQueuePositionResponse toQueuePosition(AdlCandidate candidate) {
         return new AdlQueuePositionResponse(candidate.userId(), candidate.asset(),
-                candidate.symbol(), candidate.side(), candidate.signedQuantitySteps(),
+                candidate.symbol(), candidate.positionSide(), candidate.side(), candidate.signedQuantitySteps(),
                 candidate.entryPriceTicks(), candidate.markPriceTicks(), candidate.notionalUnits(),
                 candidate.unrealizedProfitUnits(), candidate.marginUnits(), candidate.profitRatePpm(),
                 candidate.effectiveLeveragePpm(), candidate.priorityScorePpm());
@@ -182,7 +182,8 @@ public class AdlService {
         return Comparator.comparingLong(AdlQueuePositionResponse::priorityScorePpm).reversed()
                 .thenComparing(Comparator.comparingLong(AdlQueuePositionResponse::unrealizedProfitUnits).reversed())
                 .thenComparingLong(AdlQueuePositionResponse::userId)
-                .thenComparing(AdlQueuePositionResponse::symbol);
+                .thenComparing(AdlQueuePositionResponse::symbol)
+                .thenComparing(position -> position.positionSide().name());
     }
 
     private boolean afterQueueCursor(AdlQueuePositionResponse position,
@@ -200,7 +201,11 @@ public class AdlService {
         if (user != 0) {
             return user > 0;
         }
-        return position.symbol().compareTo(cursor.symbol()) > 0;
+        int symbol = position.symbol().compareTo(cursor.symbol());
+        if (symbol != 0) {
+            return symbol > 0;
+        }
+        return position.positionSide().name().compareTo(cursor.positionSide()) > 0;
     }
 
     private QueueCursor decodeQueueCursor(String value) {
@@ -209,12 +214,12 @@ public class AdlService {
         }
         try {
             String decoded = new String(Base64.getUrlDecoder().decode(value.trim()), StandardCharsets.UTF_8);
-            String[] parts = decoded.split(":", 4);
-            if (parts.length != 4) {
+            String[] parts = decoded.split(":", 5);
+            if (parts.length != 4 && parts.length != 5) {
                 throw new IllegalArgumentException("invalid cursor");
             }
             return new QueueCursor(Long.parseLong(parts[0]), Long.parseLong(parts[1]),
-                    Long.parseLong(parts[2]), parts[3]);
+                    Long.parseLong(parts[2]), parts[3], parts.length == 5 ? parts[4] : "NET");
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException("invalid cursor", ex);
         }
@@ -222,7 +227,7 @@ public class AdlService {
 
     private String encodeQueueCursor(AdlQueuePositionResponse position) {
         String raw = position.priorityScorePpm() + ":" + position.unrealizedProfitUnits()
-                + ":" + position.userId() + ":" + position.symbol();
+                + ":" + position.userId() + ":" + position.symbol() + ":" + position.positionSide().name();
         return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 
@@ -232,6 +237,7 @@ public class AdlService {
     private record QueueCursor(long priorityScorePpm,
                                long unrealizedProfitUnits,
                                long userId,
-                               String symbol) {
+                               String symbol,
+                               String positionSide) {
     }
 }

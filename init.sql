@@ -465,6 +465,7 @@ CREATE TABLE IF NOT EXISTS funding_payments (
     user_id                 BIGINT NOT NULL,
     symbol                  TEXT NOT NULL,
     margin_mode             TEXT NOT NULL DEFAULT 'CROSS',
+    position_side           TEXT NOT NULL DEFAULT 'NET',
     asset                   TEXT NOT NULL,
     signed_quantity_steps   BIGINT NOT NULL,
     notional_units          BIGINT NOT NULL,
@@ -476,13 +477,14 @@ CREATE TABLE IF NOT EXISTS funding_payments (
     CONSTRAINT funding_payments_user_positive CHECK (user_id > 0),
     CONSTRAINT funding_payments_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT funding_payments_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
+    CONSTRAINT funding_payments_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
     CONSTRAINT funding_payments_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT funding_payments_notional_non_negative CHECK (notional_units >= 0),
     CONSTRAINT funding_payments_amount_non_zero CHECK (amount_units <> 0)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS funding_payments_settlement_user_uidx
-    ON funding_payments (settlement_id, user_id, symbol, margin_mode);
+    ON funding_payments (settlement_id, user_id, symbol, margin_mode, position_side);
 
 CREATE INDEX IF NOT EXISTS funding_payments_user_time_idx
     ON funding_payments (user_id, created_at DESC);
@@ -673,6 +675,14 @@ CREATE TABLE IF NOT EXISTS trading_leverage_settings (
 CREATE INDEX IF NOT EXISTS trading_leverage_settings_symbol_idx
     ON trading_leverage_settings (symbol, margin_mode, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS account_position_modes (
+    user_id             BIGINT PRIMARY KEY,
+    position_mode       TEXT NOT NULL DEFAULT 'ONE_WAY',
+    updated_at          TIMESTAMPTZ NOT NULL,
+    CONSTRAINT account_position_modes_user_positive CHECK (user_id > 0),
+    CONSTRAINT account_position_modes_mode_check CHECK (position_mode IN ('ONE_WAY', 'HEDGE'))
+);
+
 CREATE TABLE IF NOT EXISTS trading_orders (
     order_id                    BIGINT PRIMARY KEY,
     user_id                     BIGINT NOT NULL,
@@ -687,6 +697,7 @@ CREATE TABLE IF NOT EXISTS trading_orders (
     executed_quantity_steps     BIGINT NOT NULL DEFAULT 0,
     remaining_quantity_steps    BIGINT NOT NULL,
     margin_mode                 TEXT NOT NULL DEFAULT 'CROSS',
+    position_side               TEXT NOT NULL DEFAULT 'NET',
     maker_fee_rate_ppm          BIGINT NOT NULL DEFAULT 0,
     taker_fee_rate_ppm          BIGINT NOT NULL DEFAULT 0,
     reduce_only                 BOOLEAN NOT NULL DEFAULT FALSE,
@@ -702,6 +713,7 @@ CREATE TABLE IF NOT EXISTS trading_orders (
         FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT trading_orders_side_check CHECK (side IN ('BUY', 'SELL')),
     CONSTRAINT trading_orders_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
+    CONSTRAINT trading_orders_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
     CONSTRAINT trading_orders_fee_rate_check CHECK (
         maker_fee_rate_ppm BETWEEN -1000000 AND 1000000
         AND taker_fee_rate_ppm BETWEEN -1000000 AND 1000000
@@ -784,6 +796,7 @@ CREATE TABLE IF NOT EXISTS trading_trigger_orders (
     price_ticks                BIGINT NOT NULL,
     quantity_steps             BIGINT NOT NULL,
     margin_mode                TEXT NOT NULL DEFAULT 'CROSS',
+    position_side              TEXT NOT NULL DEFAULT 'NET',
     status                     TEXT NOT NULL,
     placed_order_id            BIGINT,
     trigger_sequence           BIGINT,
@@ -807,6 +820,7 @@ CREATE TABLE IF NOT EXISTS trading_trigger_orders (
     CONSTRAINT trading_trigger_orders_placed_order_fk
         FOREIGN KEY (placed_order_id) REFERENCES trading_orders(order_id),
     CONSTRAINT trading_trigger_orders_side_check CHECK (side IN ('BUY', 'SELL')),
+    CONSTRAINT trading_trigger_orders_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
     CONSTRAINT trading_trigger_orders_type_check CHECK (trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')),
     CONSTRAINT trading_trigger_orders_price_type_check CHECK (trigger_price_type IN ('MARK_PRICE')),
     CONSTRAINT trading_trigger_orders_condition_check CHECK (
@@ -1007,10 +1021,12 @@ CREATE TABLE IF NOT EXISTS trading_match_trades (
     taker_user_id           BIGINT NOT NULL,
     taker_side              TEXT NOT NULL,
     taker_margin_mode       TEXT NOT NULL DEFAULT 'CROSS',
+    taker_position_side     TEXT NOT NULL DEFAULT 'NET',
     maker_order_id          BIGINT NOT NULL,
     maker_instrument_version BIGINT NOT NULL,
     maker_user_id           BIGINT NOT NULL,
     maker_margin_mode       TEXT NOT NULL DEFAULT 'CROSS',
+    maker_position_side     TEXT NOT NULL DEFAULT 'NET',
     price_ticks             BIGINT NOT NULL,
     quantity_steps          BIGINT NOT NULL,
     taker_order_completed   BOOLEAN NOT NULL,
@@ -1028,6 +1044,9 @@ CREATE TABLE IF NOT EXISTS trading_match_trades (
     CONSTRAINT trading_match_trades_side_check CHECK (taker_side IN ('BUY', 'SELL')),
     CONSTRAINT trading_match_trades_margin_mode_check CHECK (
         taker_margin_mode IN ('CROSS', 'ISOLATED') AND maker_margin_mode IN ('CROSS', 'ISOLATED')
+    ),
+    CONSTRAINT trading_match_trades_position_side_check CHECK (
+        taker_position_side IN ('NET', 'LONG', 'SHORT') AND maker_position_side IN ('NET', 'LONG', 'SHORT')
     ),
     CONSTRAINT trading_match_trades_positive_values CHECK (price_ticks > 0 AND quantity_steps > 0)
 );
@@ -1279,6 +1298,7 @@ CREATE TABLE IF NOT EXISTS account_margin_reservations (
     order_id            BIGINT NOT NULL UNIQUE,
     symbol              TEXT NOT NULL,
     margin_mode         TEXT NOT NULL DEFAULT 'CROSS',
+    position_side       TEXT NOT NULL DEFAULT 'NET',
     reserved_units      BIGINT NOT NULL,
     released_units      BIGINT NOT NULL DEFAULT 0,
     position_margin_units BIGINT NOT NULL DEFAULT 0,
@@ -1293,6 +1313,7 @@ CREATE TABLE IF NOT EXISTS account_margin_reservations (
     CONSTRAINT account_margin_reservations_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT account_margin_reservations_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT account_margin_reservations_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
+    CONSTRAINT account_margin_reservations_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
     CONSTRAINT account_margin_reservations_non_negative CHECK (
         reserved_units >= 0
         AND released_units >= 0
@@ -1354,32 +1375,36 @@ CREATE TABLE IF NOT EXISTS account_position_margins (
     symbol              TEXT NOT NULL,
     asset               TEXT NOT NULL,
     margin_mode         TEXT NOT NULL DEFAULT 'CROSS',
+    position_side       TEXT NOT NULL DEFAULT 'NET',
     margin_units        BIGINT NOT NULL,
     updated_at          TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (user_id, symbol, asset, margin_mode),
+    PRIMARY KEY (user_id, symbol, asset, margin_mode, position_side),
     CONSTRAINT account_position_margins_user_positive CHECK (user_id > 0),
     CONSTRAINT account_position_margins_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT account_position_margins_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT account_position_margins_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
+    CONSTRAINT account_position_margins_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
     CONSTRAINT account_position_margins_non_negative CHECK (margin_units >= 0)
 );
 
 CREATE INDEX IF NOT EXISTS account_position_margins_user_idx
-    ON account_position_margins (user_id, symbol, margin_mode);
+    ON account_position_margins (user_id, symbol, margin_mode, position_side);
 
 CREATE TABLE IF NOT EXISTS account_positions (
     user_id                 BIGINT NOT NULL,
     symbol                  TEXT NOT NULL,
     margin_mode             TEXT NOT NULL DEFAULT 'CROSS',
+    position_side           TEXT NOT NULL DEFAULT 'NET',
     instrument_version      BIGINT,
     signed_quantity_steps   BIGINT NOT NULL,
     entry_price_ticks       BIGINT NOT NULL,
     realized_pnl_units      BIGINT NOT NULL,
     updated_at              TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (user_id, symbol, margin_mode),
+    PRIMARY KEY (user_id, symbol, margin_mode, position_side),
     CONSTRAINT account_positions_user_positive CHECK (user_id > 0),
     CONSTRAINT account_positions_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT account_positions_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
+    CONSTRAINT account_positions_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
     CONSTRAINT account_positions_instrument_fk
         FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT account_positions_entry_price_check CHECK (
@@ -1392,10 +1417,10 @@ CREATE INDEX IF NOT EXISTS account_positions_user_idx
     ON account_positions (user_id);
 
 CREATE INDEX IF NOT EXISTS account_positions_symbol_idx
-    ON account_positions (symbol, margin_mode);
+    ON account_positions (symbol, margin_mode, position_side);
 
 CREATE INDEX IF NOT EXISTS account_positions_open_scan_idx
-    ON account_positions (user_id, symbol, margin_mode)
+    ON account_positions (user_id, symbol, margin_mode, position_side)
     WHERE signed_quantity_steps <> 0;
 
 CREATE TABLE IF NOT EXISTS account_processed_trades (
@@ -1491,6 +1516,7 @@ CREATE TABLE IF NOT EXISTS risk_position_snapshots (
     user_id                     BIGINT NOT NULL,
     symbol                      TEXT NOT NULL,
     margin_mode                 TEXT NOT NULL DEFAULT 'CROSS',
+    position_side               TEXT NOT NULL DEFAULT 'NET',
     instrument_version          BIGINT NOT NULL,
     settle_asset                TEXT NOT NULL,
     signed_quantity_steps       BIGINT NOT NULL,
@@ -1504,13 +1530,14 @@ CREATE TABLE IF NOT EXISTS risk_position_snapshots (
     status                      TEXT NOT NULL,
     event_time                  TIMESTAMPTZ NOT NULL,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (snapshot_id, user_id, symbol, margin_mode),
+    PRIMARY KEY (snapshot_id, user_id, symbol, margin_mode, position_side),
     CONSTRAINT risk_position_snapshots_snapshot_fk
         FOREIGN KEY (snapshot_id) REFERENCES risk_account_snapshots(snapshot_id),
     CONSTRAINT risk_position_snapshots_instrument_fk
         FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT risk_position_snapshots_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT risk_position_snapshots_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
+    CONSTRAINT risk_position_snapshots_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
     CONSTRAINT risk_position_snapshots_price_check CHECK (
         (signed_quantity_steps = 0 AND entry_price_ticks = 0 AND mark_price_ticks = 0)
         OR (signed_quantity_steps <> 0 AND entry_price_ticks > 0 AND mark_price_ticks > 0)
@@ -1526,7 +1553,7 @@ CREATE INDEX IF NOT EXISTS risk_position_snapshots_user_idx
     ON risk_position_snapshots (user_id, event_time DESC);
 
 CREATE INDEX IF NOT EXISTS risk_position_snapshots_symbol_idx
-    ON risk_position_snapshots (symbol, margin_mode, event_time DESC);
+    ON risk_position_snapshots (symbol, margin_mode, position_side, event_time DESC);
 
 CREATE TABLE IF NOT EXISTS risk_liquidation_candidates (
     candidate_id                BIGINT PRIMARY KEY,
@@ -1534,6 +1561,7 @@ CREATE TABLE IF NOT EXISTS risk_liquidation_candidates (
     user_id                     BIGINT NOT NULL,
     symbol                      TEXT NOT NULL,
     margin_mode                 TEXT NOT NULL DEFAULT 'CROSS',
+    position_side               TEXT NOT NULL DEFAULT 'NET',
     instrument_version          BIGINT NOT NULL,
     settle_asset                TEXT NOT NULL,
     signed_quantity_steps       BIGINT NOT NULL,
@@ -1551,14 +1579,15 @@ CREATE TABLE IF NOT EXISTS risk_liquidation_candidates (
         FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT risk_liquidation_candidates_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT risk_liquidation_candidates_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
+    CONSTRAINT risk_liquidation_candidates_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
     CONSTRAINT risk_liquidation_candidates_status_check CHECK (status IN ('NEW', 'PROCESSING', 'COMPLETED', 'CANCELED'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS risk_liquidation_candidates_snapshot_uidx
-    ON risk_liquidation_candidates (snapshot_id, user_id, symbol, margin_mode);
+    ON risk_liquidation_candidates (snapshot_id, user_id, symbol, margin_mode, position_side);
 
 CREATE UNIQUE INDEX IF NOT EXISTS risk_liquidation_candidates_active_uidx
-    ON risk_liquidation_candidates (user_id, symbol, margin_mode)
+    ON risk_liquidation_candidates (user_id, symbol, margin_mode, position_side)
     WHERE status IN ('NEW', 'PROCESSING');
 
 CREATE INDEX IF NOT EXISTS risk_liquidation_candidates_status_idx
@@ -1642,6 +1671,7 @@ CREATE TABLE IF NOT EXISTS liquidation_orders (
     user_id                 BIGINT NOT NULL,
     symbol                  TEXT NOT NULL,
     margin_mode             TEXT NOT NULL DEFAULT 'CROSS',
+    position_side           TEXT NOT NULL DEFAULT 'NET',
     side                    TEXT NOT NULL,
     quantity_steps          BIGINT NOT NULL,
     status                  TEXT NOT NULL,
@@ -1656,6 +1686,7 @@ CREATE TABLE IF NOT EXISTS liquidation_orders (
     CONSTRAINT liquidation_orders_user_positive CHECK (user_id > 0),
     CONSTRAINT liquidation_orders_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT liquidation_orders_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
+    CONSTRAINT liquidation_orders_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
     CONSTRAINT liquidation_orders_side_check CHECK (side IN ('BUY', 'SELL')),
     CONSTRAINT liquidation_orders_quantity_check CHECK (
         quantity_steps >= 0

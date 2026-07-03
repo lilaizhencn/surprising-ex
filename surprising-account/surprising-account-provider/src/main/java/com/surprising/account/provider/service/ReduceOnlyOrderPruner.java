@@ -9,6 +9,7 @@ import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -34,11 +35,16 @@ public class ReduceOnlyOrderPruner {
     }
 
     public void prune(long userId, String symbol, PositionState position, Instant now) {
-        prune(userId, symbol, position, now, null);
+        prune(userId, symbol, PositionSide.NET, position, now, null);
     }
 
     public void prune(long userId, String symbol, PositionState position, Instant now, String traceId) {
-        List<OpenReduceOnlyOrder> orders = lockOpenReduceOnlyOrders(userId, symbol);
+        prune(userId, symbol, PositionSide.NET, position, now, traceId);
+    }
+
+    public void prune(long userId, String symbol, PositionSide positionSide, PositionState position, Instant now,
+                      String traceId) {
+        List<OpenReduceOnlyOrder> orders = lockOpenReduceOnlyOrders(userId, symbol, positionSide);
         if (orders.isEmpty()) {
             return;
         }
@@ -62,7 +68,7 @@ public class ReduceOnlyOrderPruner {
         }
     }
 
-    private List<OpenReduceOnlyOrder> lockOpenReduceOnlyOrders(long userId, String symbol) {
+    private List<OpenReduceOnlyOrder> lockOpenReduceOnlyOrders(long userId, String symbol, PositionSide positionSide) {
         return jdbcTemplate.query("""
                 SELECT order_id, user_id, client_order_id, symbol, instrument_version, side, order_type,
                        time_in_force, price_ticks, quantity_steps, remaining_quantity_steps, status, post_only,
@@ -70,6 +76,7 @@ public class ReduceOnlyOrderPruner {
                   FROM trading_orders
                  WHERE user_id = ?
                    AND symbol = ?
+                   AND position_side = ?
                    AND reduce_only = TRUE
                    AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                    AND remaining_quantity_steps > 0
@@ -89,7 +96,8 @@ public class ReduceOnlyOrderPruner {
                 rs.getLong("remaining_quantity_steps"),
                 OrderStatus.valueOf(rs.getString("status")),
                 rs.getBoolean("post_only"),
-                rs.getTimestamp("created_at").toInstant()), userId, symbol);
+                rs.getTimestamp("created_at").toInstant()), userId, symbol,
+                PositionSide.defaultIfNull(positionSide).name());
     }
 
     private void requestReduceOnlyCancel(OpenReduceOnlyOrder order, Instant now, String traceId) {

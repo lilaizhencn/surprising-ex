@@ -26,7 +26,7 @@ class ReduceOnlyPositionRepositoryTest {
     void lockedOpenReduceOnlyStepsFailsOnOverflow() {
         ReduceOnlyPositionRepository repository = new ReduceOnlyPositionRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("FROM trading_orders"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq(7L), eq("SELL")))
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(7L), eq("SELL")))
                 .thenReturn(List.of(Long.MAX_VALUE, 1L));
 
         assertThatThrownBy(() -> repository.lockedOpenReduceOnlySteps(1001L, "BTC-USDT",

@@ -17,6 +17,7 @@ import com.surprising.risk.provider.repository.RiskSequenceRepository;
 import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.PositionSide;
 import java.util.Comparator;
 import java.time.Duration;
 import java.time.Instant;
@@ -95,6 +96,7 @@ class RiskServiceTest {
         assertThat(riskRepository.positionEventResolveCalls).isEqualTo(1);
         assertThat(riskRepository.lastPositionEventUserId).isEqualTo(2002L);
         assertThat(riskRepository.lastPositionEventSymbol).isEqualTo("ETH-USDT");
+        assertThat(riskRepository.lastPositionEventPositionSide).isEqualTo(PositionSide.NET);
         assertThat(riskRepository.lastPositionEventVersion).isEqualTo(7L);
         assertThat(riskRepository.riskGroupCalls).isZero();
         assertThat(riskRepository.calculateCalls).isEqualTo(1);
@@ -447,6 +449,7 @@ class RiskServiceTest {
         private long lastPositionEventUserId;
         private String lastPositionEventSymbol;
         private MarginMode lastPositionEventMarginMode;
+        private PositionSide lastPositionEventPositionSide;
         private long lastPositionEventVersion;
         private long walletBalanceUnits;
         private boolean openPositionsExist;
@@ -489,13 +492,23 @@ class RiskServiceTest {
         public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId,
                                                                        String symbol,
                                                                        MarginMode marginMode,
+                                                                       PositionSide positionSide,
                                                                        long instrumentVersion) {
             positionEventResolveCalls++;
             lastPositionEventUserId = userId;
             lastPositionEventSymbol = symbol;
             lastPositionEventMarginMode = marginMode;
+            lastPositionEventPositionSide = PositionSide.defaultIfNull(positionSide);
             lastPositionEventVersion = instrumentVersion;
             return positionEventTarget;
+        }
+
+        @Override
+        public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId,
+                                                                       String symbol,
+                                                                       MarginMode marginMode,
+                                                                       long instrumentVersion) {
+            return riskTargetForPositionEvent(userId, symbol, marginMode, PositionSide.NET, instrumentVersion);
         }
 
         @Override

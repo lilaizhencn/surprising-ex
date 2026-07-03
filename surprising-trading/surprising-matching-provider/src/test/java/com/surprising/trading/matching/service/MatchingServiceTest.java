@@ -12,6 +12,7 @@ import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.InstrumentSymbol;
@@ -382,6 +383,11 @@ class MatchingServiceTest {
         @Override
         public MarginMode orderMarginMode(long orderId) {
             return orderMarginModes.getOrDefault(orderId, MarginMode.CROSS);
+        }
+
+        @Override
+        public PositionSide orderPositionSide(long orderId) {
+            return PositionSide.NET;
         }
 
         @Override

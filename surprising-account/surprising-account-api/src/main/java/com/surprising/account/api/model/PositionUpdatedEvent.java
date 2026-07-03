@@ -1,6 +1,7 @@
 package com.surprising.account.api.model;
 
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 
 public record PositionUpdatedEvent(
@@ -10,6 +11,7 @@ public record PositionUpdatedEvent(
         String symbol,
         long instrumentVersion,
         MarginMode marginMode,
+        PositionSide positionSide,
         long signedQuantitySteps,
         long entryPriceTicks,
         long realizedPnlUnits,
@@ -18,6 +20,22 @@ public record PositionUpdatedEvent(
 
     public PositionUpdatedEvent {
         marginMode = MarginMode.defaultIfNull(marginMode);
+        positionSide = PositionSide.defaultIfNull(positionSide);
+    }
+
+    public PositionUpdatedEvent(long eventId,
+                                long tradeId,
+                                long userId,
+                                String symbol,
+                                long instrumentVersion,
+                                MarginMode marginMode,
+                                long signedQuantitySteps,
+                                long entryPriceTicks,
+                                long realizedPnlUnits,
+                                Instant eventTime,
+                                String traceId) {
+        this(eventId, tradeId, userId, symbol, instrumentVersion, marginMode, PositionSide.NET, signedQuantitySteps,
+                entryPriceTicks, realizedPnlUnits, eventTime, traceId);
     }
 
     public PositionUpdatedEvent(long eventId,
@@ -43,7 +61,7 @@ public record PositionUpdatedEvent(
                                 long realizedPnlUnits,
                                 Instant eventTime,
                                 String traceId) {
-        this(eventId, tradeId, userId, symbol, instrumentVersion, MarginMode.CROSS, signedQuantitySteps,
+        this(eventId, tradeId, userId, symbol, instrumentVersion, MarginMode.CROSS, PositionSide.NET, signedQuantitySteps,
                 entryPriceTicks, realizedPnlUnits, eventTime, traceId);
     }
 }

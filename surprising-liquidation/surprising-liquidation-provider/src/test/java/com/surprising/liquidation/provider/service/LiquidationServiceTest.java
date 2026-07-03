@@ -27,6 +27,7 @@ import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import java.time.Duration;
 import java.time.Instant;
@@ -369,14 +370,26 @@ class LiquidationServiceTest {
         public RiskStatus latestRiskStatus(long userId,
                                            String symbol,
                                            MarginMode marginMode,
+                                           PositionSide positionSide,
                                            long instrumentVersion,
                                            Duration maxSnapshotAge) {
             positionRiskChecks++;
             assertThat(maxSnapshotAge).isEqualTo(Duration.ofSeconds(5));
             assertThat(symbol).isEqualTo("BTC-USDT");
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
+            assertThat(positionSide).isEqualTo(PositionSide.NET);
             assertThat(instrumentVersion).isEqualTo(8L);
             return positionRiskStatus;
+        }
+
+        @Override
+        public RiskStatus latestRiskStatus(long userId,
+                                           String symbol,
+                                           MarginMode marginMode,
+                                           long instrumentVersion,
+                                           Duration maxSnapshotAge) {
+            return latestRiskStatus(userId, symbol, marginMode, PositionSide.NET, instrumentVersion,
+                    maxSnapshotAge);
         }
 
         @Override
@@ -388,10 +401,20 @@ class LiquidationServiceTest {
         public Optional<LiquidationCloseState> lockCloseState(long userId,
                                                              String symbol,
                                                              MarginMode marginMode,
+                                                             PositionSide positionSide,
                                                              long instrumentVersion) {
             assertThat(instrumentVersion).isEqualTo(8L);
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
+            assertThat(positionSide).isEqualTo(PositionSide.NET);
             return Optional.of(new LiquidationCloseState(10L));
+        }
+
+        @Override
+        public Optional<LiquidationCloseState> lockCloseState(long userId,
+                                                             String symbol,
+                                                             MarginMode marginMode,
+                                                             long instrumentVersion) {
+            return lockCloseState(userId, symbol, marginMode, PositionSide.NET, instrumentVersion);
         }
 
         @Override
@@ -403,12 +426,24 @@ class LiquidationServiceTest {
         public long lockOpenReduceOnlySteps(long userId,
                                             String symbol,
                                             MarginMode marginMode,
+                                            PositionSide positionSide,
                                             long instrumentVersion,
                                             OrderSide closeSide) {
             assertThat(instrumentVersion).isEqualTo(8L);
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
+            assertThat(positionSide).isEqualTo(PositionSide.NET);
             assertThat(closeSide).isEqualTo(OrderSide.SELL);
             return pendingCloseSteps;
+        }
+
+        @Override
+        public long lockOpenReduceOnlySteps(long userId,
+                                            String symbol,
+                                            MarginMode marginMode,
+                                            long instrumentVersion,
+                                            OrderSide closeSide) {
+            return lockOpenReduceOnlySteps(userId, symbol, marginMode, PositionSide.NET, instrumentVersion,
+                    closeSide);
         }
 
         @Override
@@ -423,13 +458,42 @@ class LiquidationServiceTest {
         public Optional<LiquidationSizingInput> sizingInput(long userId,
                                                            String symbol,
                                                            MarginMode marginMode,
+                                                           PositionSide positionSide,
                                                            long instrumentVersion,
                                                            long availableCloseSteps) {
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
+            assertThat(positionSide).isEqualTo(PositionSide.NET);
             LiquidationSizingInput input = new LiquidationSizingInput(10L, availableCloseSteps,
                     40_000L, 400L, 0L);
             sizingInputs.add(input);
             return Optional.of(input);
+        }
+
+        @Override
+        public Optional<LiquidationSizingInput> sizingInput(long userId,
+                                                           String symbol,
+                                                           MarginMode marginMode,
+                                                           long instrumentVersion,
+                                                           long availableCloseSteps) {
+            return sizingInput(userId, symbol, marginMode, PositionSide.NET, instrumentVersion,
+                    availableCloseSteps);
+        }
+
+        @Override
+        public Optional<LiquidationPricingInput> latestPricingInput(long userId,
+                                                                    String symbol,
+                                                                    MarginMode marginMode,
+                                                                    PositionSide positionSide,
+                                                                    long instrumentVersion,
+                                                                    Duration maxSnapshotAge) {
+            assertThat(userId).isEqualTo(2002L);
+            assertThat(symbol).isEqualTo("BTC-USDT");
+            assertThat(marginMode).isEqualTo(MarginMode.CROSS);
+            assertThat(positionSide).isEqualTo(PositionSide.NET);
+            assertThat(instrumentVersion).isEqualTo(8L);
+            return Optional.of(new LiquidationPricingInput(
+                    com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL,
+                    pricingSignedQuantitySteps, 100L, 200L, 50L, 1L, 1L, 100_000_000L));
         }
 
         @Override
@@ -438,13 +502,8 @@ class LiquidationServiceTest {
                                                                     MarginMode marginMode,
                                                                     long instrumentVersion,
                                                                     Duration maxSnapshotAge) {
-            assertThat(userId).isEqualTo(2002L);
-            assertThat(symbol).isEqualTo("BTC-USDT");
-            assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(instrumentVersion).isEqualTo(8L);
-            return Optional.of(new LiquidationPricingInput(
-                    com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL,
-                    pricingSignedQuantitySteps, 100L, 200L, 50L, 1L, 1L, 100_000_000L));
+            return latestPricingInput(userId, symbol, marginMode, PositionSide.NET, instrumentVersion,
+                    maxSnapshotAge);
         }
 
         @Override
@@ -517,6 +576,7 @@ class LiquidationServiceTest {
                                               long userId,
                                               String symbol,
                                               MarginMode marginMode,
+                                              PositionSide positionSide,
                                               OrderSide side,
                                               long quantitySteps,
                                               LiquidationOrderStatus status,
@@ -527,12 +587,30 @@ class LiquidationServiceTest {
                 return false;
             }
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
+            assertThat(positionSide).isEqualTo(PositionSide.NET);
             LiquidationPricingDecision auditPricing = pricing == null ? LiquidationPricingDecision.empty() : pricing;
             orders.add(new LiquidationOrderResponse(liquidationOrderId, candidateId, orderId, userId,
                     symbol, marginMode, side, quantitySteps, auditPricing.bankruptcyPriceTicks(),
                     auditPricing.takeoverPriceTicks(), auditPricing.liquidationFeeRatePpm(),
                     auditPricing.liquidationFeeUnits(), status, reason, now));
             return true;
+        }
+
+        @Override
+        public boolean insertLiquidationOrder(long liquidationOrderId,
+                                              long candidateId,
+                                              long orderId,
+                                              long userId,
+                                              String symbol,
+                                              MarginMode marginMode,
+                                              OrderSide side,
+                                              long quantitySteps,
+                                              LiquidationOrderStatus status,
+                                              String reason,
+                                              LiquidationPricingDecision pricing,
+                                              Instant now) {
+            return insertLiquidationOrder(liquidationOrderId, candidateId, orderId, userId, symbol,
+                    marginMode, PositionSide.NET, side, quantitySteps, status, reason, pricing, now);
         }
     }
 
@@ -560,13 +638,27 @@ class LiquidationServiceTest {
         public int cancelOpenReduceOnlyCloseOrders(long userId,
                                                    String symbol,
                                                    MarginMode marginMode,
+                                                   PositionSide positionSide,
                                                    long instrumentVersion,
                                                    OrderSide closeSide,
                                                    Instant now,
                                                    Function<Object, String> serializer) {
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
+            assertThat(positionSide).isEqualTo(PositionSide.NET);
             preemptions.add(userId + ":" + symbol + ":" + instrumentVersion + ":" + closeSide);
             return openReduceOnlyCloseOrders;
+        }
+
+        @Override
+        public int cancelOpenReduceOnlyCloseOrders(long userId,
+                                                   String symbol,
+                                                   MarginMode marginMode,
+                                                   long instrumentVersion,
+                                                   OrderSide closeSide,
+                                                   Instant now,
+                                                   Function<Object, String> serializer) {
+            return cancelOpenReduceOnlyCloseOrders(userId, symbol, marginMode, PositionSide.NET,
+                    instrumentVersion, closeSide, now, serializer);
         }
 
         @Override
@@ -587,17 +679,33 @@ class LiquidationServiceTest {
                                                              long userId,
                                                              String symbol,
                                                              MarginMode marginMode,
+                                                             PositionSide positionSide,
                                                              long instrumentVersion,
                                                              OrderSide side,
                                                              long quantitySteps,
                                                              Instant now,
                                                              Function<Object, String> serializer) {
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
+            assertThat(positionSide).isEqualTo(PositionSide.NET);
             OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, 8001L, 7001L, userId,
                     "LIQ-" + candidateId, symbol, instrumentVersion, side, OrderType.MARKET,
                     TimeInForce.IOC, 0L, quantitySteps, true, false, now);
             commands.add(command);
             return command;
+        }
+
+        @Override
+        public OrderCommandEvent createReduceOnlyMarketOrder(long candidateId,
+                                                             long userId,
+                                                             String symbol,
+                                                             MarginMode marginMode,
+                                                             long instrumentVersion,
+                                                             OrderSide side,
+                                                             long quantitySteps,
+                                                             Instant now,
+                                                             Function<Object, String> serializer) {
+            return createReduceOnlyMarketOrder(candidateId, userId, symbol, marginMode, PositionSide.NET,
+                    instrumentVersion, side, quantitySteps, now, serializer);
         }
     }
 

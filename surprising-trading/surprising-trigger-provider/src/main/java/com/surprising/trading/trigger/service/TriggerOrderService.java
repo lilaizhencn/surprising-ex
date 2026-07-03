@@ -12,6 +12,7 @@ import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PlaceTriggerOrderRequest;
+import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.TriggerCondition;
@@ -74,6 +75,9 @@ public class TriggerOrderService {
         if (normalized.expiresAt() != null && !normalized.expiresAt().isAfter(now)) {
             throw new IllegalArgumentException("expiresAt must be in the future");
         }
+        triggerOrderRepository.lockUserPositionMode(normalized.userId());
+        PositionMode positionMode = triggerOrderRepository.positionMode(normalized.userId());
+        normalized = normalizePositionMode(normalized, positionMode);
         triggerOrderRepository.lockUserSymbolMarginScope(normalized.userId(), normalized.symbol());
         if (triggerOrderRepository.hasActiveMarginModeConflict(
                 normalized.userId(), normalized.symbol(), normalized.marginMode())) {
@@ -96,6 +100,7 @@ public class TriggerOrderService {
                 normalized.priceTicks(),
                 normalized.quantitySteps(),
                 normalized.marginMode(),
+                normalized.positionSide(),
                 TriggerOrderStatus.PENDING,
                 null,
                 null,
@@ -242,6 +247,7 @@ public class TriggerOrderService {
                     order.priceTicks(),
                     order.quantitySteps(),
                     order.marginMode(),
+                    order.positionSide(),
                     true,
                     false));
             Instant now = Instant.now();
@@ -264,9 +270,6 @@ public class TriggerOrderService {
             throw new IllegalArgumentException("trigger order request is required");
         }
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
-        if (positionSide.isHedgeSide()) {
-            throw new IllegalArgumentException("hedge-mode positionSide is not supported; use NET");
-        }
         if (request.userId() <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
@@ -305,6 +308,24 @@ public class TriggerOrderService {
                 MarginMode.defaultIfNull(request.marginMode()),
                 positionSide,
                 request.expiresAt());
+    }
+
+    private PlaceTriggerOrderRequest normalizePositionMode(PlaceTriggerOrderRequest request, PositionMode positionMode) {
+        PositionMode normalizedMode = PositionMode.defaultIfNull(positionMode);
+        PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
+        if (normalizedMode == PositionMode.ONE_WAY) {
+            if (positionSide.isHedgeSide()) {
+                throw new IllegalArgumentException("positionSide LONG/SHORT requires HEDGE position mode");
+            }
+            return request;
+        }
+        if (!positionSide.isHedgeSide()) {
+            throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
+        }
+        if (!positionSide.isClosingSide(request.side())) {
+            throw new IllegalArgumentException("trigger order side must close the selected hedge positionSide");
+        }
+        return request;
     }
 
     private void validateExecutionOrder(OrderType orderType, TimeInForce timeInForce, long priceTicks) {
@@ -353,6 +374,7 @@ public class TriggerOrderService {
                 order.priceTicks(),
                 order.quantitySteps(),
                 order.marginMode(),
+                order.positionSide(),
                 order.status(),
                 order.placedOrderId(),
                 order.triggerSequence(),

@@ -37,7 +37,8 @@ class OrderMarginRepositoryTest {
     void requirementRejectsProjectedPositionAboveInstrumentLimit() throws Exception {
         OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
-                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"),
+                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
+                eq(1001L), eq("CROSS"), eq("NET"),
                 eq("BUY"), eq(5_000L),
                 eq("BTC-USDT"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
@@ -57,7 +58,8 @@ class OrderMarginRepositoryTest {
     void requirementRejectsProjectedPositionAboveRiskBracketCap() throws Exception {
         OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
-                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"),
+                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
+                eq(1001L), eq("CROSS"), eq("NET"),
                 eq("BUY"), eq(5_000L),
                 eq("BTC-USDT"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
@@ -83,7 +85,8 @@ class OrderMarginRepositoryTest {
     void requirementIncludesPendingSameSideOpenOrdersInProjectedLimit() throws Exception {
         OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
-                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"),
+                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
+                eq(1001L), eq("CROSS"), eq("NET"),
                 eq("BUY"), eq(5_000L),
                 eq("BTC-USDT"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
@@ -103,7 +106,8 @@ class OrderMarginRepositoryTest {
     void requirementRejectsProjectedPositionAboveOpenInterestLimit() throws Exception {
         OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
-                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"),
+                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
+                eq(1001L), eq("CROSS"), eq("NET"),
                 eq("BUY"), eq(5_000L),
                 eq("BTC-USDT"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
@@ -125,7 +129,8 @@ class OrderMarginRepositoryTest {
     void requirementAllowsOrderThatReducesProjectedPositionNotional() throws Exception {
         OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
-                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"),
+                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
+                eq(1001L), eq("CROSS"), eq("NET"),
                 eq("SELL"), eq(5_000L),
                 eq("BTC-USDT"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
@@ -151,7 +156,8 @@ class OrderMarginRepositoryTest {
     void inversePerpetualRequirementUsesCoinPerpetualAccount() throws Exception {
         OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
-                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"),
+                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
+                eq(1001L), eq("CROSS"), eq("NET"),
                 eq("BUY"), eq(5_000L),
                 eq("BTC-USD"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {

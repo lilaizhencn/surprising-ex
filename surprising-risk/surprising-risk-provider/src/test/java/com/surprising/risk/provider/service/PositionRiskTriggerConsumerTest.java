@@ -6,6 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.PositionSide;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
@@ -19,7 +20,8 @@ class PositionRiskTriggerConsumerTest {
 
         consumer.onPositionUpdated(record("BTC-USDT", positionPayload("BTC-USDT")));
 
-        verify(riskService).scanPositionUpdate(1001L, "BTC-USDT", MarginMode.CROSS, 7L, "trace-1");
+        verify(riskService).scanPositionUpdate(1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET,
+                7L, "trace-1");
     }
 
     @Test

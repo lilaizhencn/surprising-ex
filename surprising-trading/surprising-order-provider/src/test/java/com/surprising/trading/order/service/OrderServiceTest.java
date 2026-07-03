@@ -154,10 +154,11 @@ class OrderServiceTest {
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
         when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
         when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
-                eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(), anyLong()))
+                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
+                anyLong()))
                 .thenReturn(Optional.of(new MarginRequirement("USDT", 100L)));
         when(orderMarginRepository.reserve(eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq(9002L), eq("BTC-USDT"),
-                eq(MarginMode.CROSS), eq(100L), any())).thenReturn(false);
+                eq(MarginMode.CROSS), eq(PositionSide.NET), eq(100L), any())).thenReturn(false);
 
         var response = service.place(request("no-margin"));
 
@@ -199,7 +200,8 @@ class OrderServiceTest {
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
         when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
         when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
-                eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(), anyLong()))
+                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
+                anyLong()))
                 .thenReturn(Optional.of(new MarginRequirement("USDT", 0L, "leverage exceeds risk limit",
                         100_000_000L, 50_000_000L, 20_000L)));
 
@@ -224,10 +226,11 @@ class OrderServiceTest {
         when(orderRepository.nextSequence("command")).thenReturn(9200L);
         when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
         when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.ISOLATED),
-                eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(), anyLong()))
+                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
+                anyLong()))
                 .thenReturn(Optional.of(new MarginRequirement("USDT", 100L)));
         when(orderMarginRepository.reserve(eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq(9002L), eq("BTC-USDT"),
-                eq(MarginMode.ISOLATED), eq(100L), any())).thenReturn(true);
+                eq(MarginMode.ISOLATED), eq(PositionSide.NET), eq(100L), any())).thenReturn(true);
 
         PlaceOrderRequest request = new PlaceOrderRequest(1001L, "iso-1", "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, MarginMode.ISOLATED, false, false);
@@ -242,7 +245,7 @@ class OrderServiceTest {
         verify(orderRepository).insert(orderCaptor.capture());
         assertThat(orderCaptor.getValue().marginMode()).isEqualTo(MarginMode.ISOLATED);
         verify(orderMarginRepository).reserve(eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq(9002L), eq("BTC-USDT"),
-                eq(MarginMode.ISOLATED), eq(100L), any());
+                eq(MarginMode.ISOLATED), eq(PositionSide.NET), eq(100L), any());
         verify(orderRepository).nextSequence("command");
         verify(outboxRepository, times(2)).enqueue(eq("ORDER"), eq(9002L), anyString(), eq("BTC-USDT"),
                 anyString(), anyString(), any());
@@ -259,11 +262,12 @@ class OrderServiceTest {
         when(orderRepository.nextSequence("command")).thenReturn(9200L);
         when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
         when(orderMarginRepository.requirement(eq("BTC-USD"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
-                eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(), anyLong()))
+                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
+                anyLong()))
                 .thenReturn(Optional.of(new MarginRequirement("COIN_PERPETUAL", "BTC", 100L, null,
                         0L, 0L, 0L)));
         when(orderMarginRepository.reserve(eq(1001L), eq("COIN_PERPETUAL"), eq("BTC"), eq(9002L), eq("BTC-USD"),
-                eq(MarginMode.CROSS), eq(100L), any())).thenReturn(true);
+                eq(MarginMode.CROSS), eq(PositionSide.NET), eq(100L), any())).thenReturn(true);
 
         PlaceOrderRequest request = new PlaceOrderRequest(1001L, "coin-1", "BTC-USD", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, false, false);
@@ -273,7 +277,7 @@ class OrderServiceTest {
         assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
         assertThat(response.rejectReason()).isNull();
         verify(orderMarginRepository).reserve(eq(1001L), eq("COIN_PERPETUAL"), eq("BTC"), eq(9002L), eq("BTC-USD"),
-                eq(MarginMode.CROSS), eq(100L), any());
+                eq(MarginMode.CROSS), eq(PositionSide.NET), eq(100L), any());
         verify(orderRepository).nextSequence("command");
     }
 
@@ -333,7 +337,7 @@ class OrderServiceTest {
     }
 
     @Test
-    void hedgePositionSideIsRejectedBeforePersistence() {
+    void hedgePositionSideRequiresHedgeModeBeforePersistence() {
         OrderService service = service();
         PlaceOrderRequest request = new PlaceOrderRequest(1001L, "hedge-long", "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, MarginMode.CROSS, PositionSide.LONG,
@@ -341,7 +345,7 @@ class OrderServiceTest {
 
         assertThatThrownBy(() -> service.place(request))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("hedge-mode positionSide is not supported; use NET");
+                .hasMessage("positionSide LONG/SHORT requires HEDGE position mode");
 
         verify(orderRepository, never()).lockUserSymbolMarginScope(anyLong(), anyString());
         verify(orderRepository, never()).insert(any());
