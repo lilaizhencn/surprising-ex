@@ -33,6 +33,7 @@ import com.surprising.trading.api.model.TriggerPriceType;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import com.surprising.trading.trigger.model.MarkTrigger;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
+import com.surprising.trading.trigger.model.TriggerPosition;
 import com.surprising.trading.trigger.repository.TriggerOrderRepository;
 import java.time.Instant;
 import java.util.List;
@@ -58,6 +59,7 @@ class TriggerOrderServiceTest {
                 OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, TriggerPriceType.MARK_PRICE, 70_000L,
                 OrderType.LIMIT, TimeInForce.GTC, 69_950L, 10L, MarginMode.CROSS, null);
         when(repository.nextSequence("trigger-order")).thenReturn(501L);
+        stubCloseCapacity(repository, 20L, 0L, 0L, 0L);
         when(repository.insert(any())).thenReturn(true);
         ArgumentCaptor<TriggerOrderRecord> orderCaptor = ArgumentCaptor.forClass(TriggerOrderRecord.class);
 
@@ -83,6 +85,7 @@ class TriggerOrderServiceTest {
                 OrderSide.SELL, TriggerOrderType.STOP_LOSS, TriggerPriceType.MARK_PRICE, 60_000L,
                 OrderType.MARKET, TimeInForce.IOC, 0L, 4L, MarginMode.CROSS, null);
         when(repository.nextSequence("trigger-order")).thenReturn(502L);
+        stubCloseCapacity(repository, 20L, 0L, 0L, 0L);
         when(repository.insert(any())).thenReturn(true);
         ArgumentCaptor<TriggerOrderRecord> orderCaptor = ArgumentCaptor.forClass(TriggerOrderRecord.class);
 
@@ -105,6 +108,7 @@ class TriggerOrderServiceTest {
                 OrderType.MARKET, TimeInForce.IOC, 0L, 5L, MarginMode.CROSS, PositionSide.SHORT, null);
         when(repository.positionMode(1001L)).thenReturn(PositionMode.HEDGE);
         when(repository.nextSequence("trigger-order")).thenReturn(503L);
+        stubCloseCapacity(repository, -20L, 0L, 0L, 0L);
         when(repository.insert(any())).thenReturn(true);
         ArgumentCaptor<TriggerOrderRecord> orderCaptor = ArgumentCaptor.forClass(TriggerOrderRecord.class);
 
@@ -169,6 +173,79 @@ class TriggerOrderServiceTest {
         verify(repository, never()).lockUserSymbolMarginScope(anyLong(), anyString());
         verify(repository, never()).nextSequence("trigger-order");
         verify(repository, never()).insert(any());
+    }
+
+    @Test
+    void placeRejectsTriggerOrderWithoutOpenPosition() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties());
+        PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-empty", null, "BTC-USDT",
+                OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, TriggerPriceType.MARK_PRICE, 70_000L,
+                OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS, null);
+        when(repository.lockedPosition(1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.place(request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("trigger order requires an open position");
+
+        verify(repository, never()).nextSequence("trigger-order");
+        verify(repository, never()).insert(any());
+    }
+
+    @Test
+    void placeRejectsTriggerSideThatWouldIncreasePosition() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties());
+        PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-wrong-side", null, "BTC-USDT",
+                OrderSide.BUY, TriggerOrderType.TAKE_PROFIT, TriggerPriceType.MARK_PRICE, 70_000L,
+                OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS, null);
+        stubCloseCapacity(repository, 20L, 0L, 0L, 0L);
+
+        assertThatThrownBy(() -> service.place(request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("trigger order side does not reduce current position");
+
+        verify(repository, never()).nextSequence("trigger-order");
+        verify(repository, never()).insert(any());
+    }
+
+    @Test
+    void placeRejectsWhenMultiLevelTriggersWouldExceedAvailablePosition() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties());
+        PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-too-much", null, "BTC-USDT",
+                OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, TriggerPriceType.MARK_PRICE, 72_000L,
+                OrderType.MARKET, TimeInForce.IOC, 0L, 5L, MarginMode.CROSS, null);
+        stubCloseCapacity(repository, 10L, 2L, 4L, 0L);
+
+        assertThatThrownBy(() -> service.place(request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("trigger order quantity exceeds available position");
+
+        verify(repository, never()).nextSequence("trigger-order");
+        verify(repository, never()).insert(any());
+    }
+
+    @Test
+    void placeCountsSameOcoGroupByMaximumCloseQuantity() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties());
+        PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "sl-oco", "oco-1", "BTC-USDT",
+                OrderSide.SELL, TriggerOrderType.STOP_LOSS, TriggerPriceType.MARK_PRICE, 60_000L,
+                OrderType.MARKET, TimeInForce.IOC, 0L, 6L, MarginMode.CROSS, null);
+        when(repository.nextSequence("trigger-order")).thenReturn(504L);
+        stubCloseCapacity(repository, 10L, 0L, 6L, 6L);
+        when(repository.insert(any())).thenReturn(true);
+
+        TriggerOrderResponse response = service.place(request);
+
+        assertThat(response.triggerOrderId()).isEqualTo(504L);
+        verify(repository).insert(any());
     }
 
     @Test
@@ -378,5 +455,20 @@ class TriggerOrderServiceTest {
         return new OrderResponse(orderId, 1001L, "trigger-501", "BTC-USDT", 1L, OrderSide.SELL,
                 OrderType.MARKET, TimeInForce.IOC, 0L, 10L, 0L, 10L, MarginMode.CROSS, 0L, 0L,
                 true, false, status, rejectReason, now, now);
+    }
+
+    private void stubCloseCapacity(TriggerOrderRepository repository,
+                                   long signedQuantitySteps,
+                                   long openReduceOnlySteps,
+                                   long pendingTriggerCloseSteps,
+                                   long sameOcoGroupMaxSteps) {
+        when(repository.lockedPosition(anyLong(), anyString(), any(), any()))
+                .thenReturn(Optional.of(new TriggerPosition(signedQuantitySteps, 1L)));
+        when(repository.openReduceOnlySteps(anyLong(), anyString(), any(), any(), anyLong(), any()))
+                .thenReturn(openReduceOnlySteps);
+        when(repository.pendingTriggerCloseSteps(anyLong(), anyString(), any(), any(), any()))
+                .thenReturn(pendingTriggerCloseSteps);
+        when(repository.pendingTriggerOcoGroupMaxSteps(anyLong(), anyString(), any(), any(), any(), any()))
+                .thenReturn(sameOcoGroupMaxSteps);
     }
 }

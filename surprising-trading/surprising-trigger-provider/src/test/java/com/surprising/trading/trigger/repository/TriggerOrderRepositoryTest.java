@@ -9,6 +9,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.OrderSide;
+import com.surprising.trading.api.model.PositionSide;
 import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.List;
@@ -93,5 +95,37 @@ class TriggerOrderRepositoryTest {
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"));
+    }
+
+    @Test
+    void pendingTriggerCloseStepsCountsOcoGroupByMaximumQuantity() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        when(jdbcTemplate.queryForObject(contains("MAX(quantity_steps)"), eq(Long.class),
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("LONG"), eq("SELL")))
+                .thenReturn(6L);
+
+        long steps = repository.pendingTriggerCloseSteps(1001L, "BTC-USDT", MarginMode.CROSS,
+                PositionSide.LONG, OrderSide.SELL);
+
+        assertThat(steps).isEqualTo(6L);
+        verify(jdbcTemplate).queryForObject(contains("GROUP BY capacity_group"), eq(Long.class),
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("LONG"), eq("SELL"));
+    }
+
+    @Test
+    void pendingTriggerOcoGroupMaxStepsReadsOnlySameCloseBucket() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        when(jdbcTemplate.queryForObject(contains("oco_group_id = ?"), eq(Long.class),
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("LONG"), eq("SELL"), eq("oco-1")))
+                .thenReturn(4L);
+
+        long steps = repository.pendingTriggerOcoGroupMaxSteps(1001L, "BTC-USDT", MarginMode.CROSS,
+                PositionSide.LONG, OrderSide.SELL, "oco-1");
+
+        assertThat(steps).isEqualTo(4L);
+        verify(jdbcTemplate).queryForObject(contains("status IN ('PENDING', 'TRIGGERING')"), eq(Long.class),
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("LONG"), eq("SELL"), eq("oco-1"));
     }
 }

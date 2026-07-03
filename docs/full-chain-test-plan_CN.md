@@ -16,6 +16,8 @@
   预期：`positionSide=SHORT` 传到 order-provider，不落到 NET。
 - [x] TP/SL 多档位后端触发：同一 symbol 下两条满足条件的 trigger order 被 claim。
   预期：两档分别生成 `trigger-<triggerOrderId>` client order，每档使用自己的 `quantitySteps`。
+- [x] TP/SL 多档位总待平量前置校验。
+  预期：放置条件单时锁定当前仓位，聚合已有 active reduce-only 平仓单和待触发 TP/SL；同一 OCO 组合按最大平仓量占用额度，不按两条 sibling 叠加；超过当前可平仓位时拒绝。
 - [x] TP/SL mark price 不可用。
   预期：trigger-provider 查不到触发事件对应的持久化 mark price 时，不 claim 条件单、不生成平仓单。
 - [x] 强平早于 TP/SL。
@@ -41,7 +43,7 @@
 
 ```bash
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
-  mvn -q -pl surprising-trading/surprising-trigger-provider -am \
+  mvn -q -pl :surprising-trigger-provider -am \
   -Dtest=TriggerOrderServiceTest,TriggerOrderRepositoryTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
@@ -149,8 +151,8 @@ npm run lint
   预期：full-stack smoke 中 trigger-provider 经 gateway/order-provider 生成 reduce-only 平仓单，并完成撮合、账户结算和 WebSocket fanout。
 - [x] 前端多档位。
   预期：用户可以一次配置多行，前端逐条调用 trigger order API；提交后可查询和撤销。
-- [ ] 多档位总数量前置校验。
-  预期：同一 symbol/side/positionSide 的开放 TP/SL 总待平量不应超过当前可平仓位。当前主要依赖 reduce-only 在触发执行时兜底，建议后续补前置聚合校验。
+- [x] 多档位总数量前置校验。
+  预期：同一 symbol/marginMode/positionSide/closeSide 的开放 TP/SL 总待平量加上 active reduce-only 平仓单不超过当前可平仓位；同一 OCO 组合按最大 `quantitySteps` 计数，避免止盈止损 sibling 双倍占用。
 - [x] 强平早于 TP/SL。
   预期：如果 mark price 先触发强平，强平 reduce-only 订单优先进入风险处理；之后 TP/SL 触发时应因无可平仓位被拒绝或失败，不得重新开仓。
 - [x] mark price 不可用时 TP/SL。

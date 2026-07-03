@@ -12,6 +12,7 @@ import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
 import com.surprising.trading.api.model.TriggerPriceType;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
+import com.surprising.trading.trigger.model.TriggerPosition;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -118,6 +119,98 @@ public class TriggerOrderRepository {
                 """, Boolean.class, userId, symbol, normalizedMode, userId, symbol, normalizedMode,
                 userId, symbol, normalizedMode);
         return Boolean.TRUE.equals(conflict);
+    }
+
+    public Optional<TriggerPosition> lockedPosition(long userId,
+                                                    String symbol,
+                                                    MarginMode marginMode,
+                                                    PositionSide positionSide) {
+        return jdbcTemplate.query("""
+                SELECT signed_quantity_steps, instrument_version
+                  FROM account_positions
+                 WHERE user_id = ?
+                   AND symbol = ?
+                   AND margin_mode = ?
+                   AND position_side = ?
+                 FOR UPDATE
+                """, (rs, rowNum) -> new TriggerPosition(
+                rs.getLong("signed_quantity_steps"),
+                rs.getLong("instrument_version")), userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                PositionSide.defaultIfNull(positionSide).name()).stream().findFirst();
+    }
+
+    public long openReduceOnlySteps(long userId,
+                                    String symbol,
+                                    MarginMode marginMode,
+                                    PositionSide positionSide,
+                                    long instrumentVersion,
+                                    OrderSide closeSide) {
+        Long value = jdbcTemplate.queryForObject("""
+                SELECT COALESCE(SUM(remaining_quantity_steps), 0)
+                  FROM trading_orders
+                 WHERE user_id = ?
+                   AND symbol = ?
+                   AND margin_mode = ?
+                   AND position_side = ?
+                   AND instrument_version = ?
+                   AND side = ?
+                   AND reduce_only = TRUE
+                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                """, Long.class, userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                PositionSide.defaultIfNull(positionSide).name(), instrumentVersion, closeSide.name());
+        return value == null ? 0L : value;
+    }
+
+    public long pendingTriggerCloseSteps(long userId,
+                                         String symbol,
+                                         MarginMode marginMode,
+                                         PositionSide positionSide,
+                                         OrderSide closeSide) {
+        Long value = jdbcTemplate.queryForObject("""
+                WITH trigger_capacity AS (
+                    SELECT CASE
+                               WHEN oco_group_id IS NULL THEN 'order:' || trigger_order_id::text
+                               ELSE 'oco:' || oco_group_id
+                           END AS capacity_group,
+                           MAX(quantity_steps) AS quantity_steps
+                      FROM trading_trigger_orders
+                     WHERE user_id = ?
+                       AND symbol = ?
+                       AND margin_mode = ?
+                       AND position_side = ?
+                       AND side = ?
+                       AND status IN ('PENDING', 'TRIGGERING')
+                     GROUP BY capacity_group
+                )
+                SELECT COALESCE(SUM(quantity_steps), 0)
+                  FROM trigger_capacity
+                """, Long.class, userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                PositionSide.defaultIfNull(positionSide).name(), closeSide.name());
+        return value == null ? 0L : value;
+    }
+
+    public long pendingTriggerOcoGroupMaxSteps(long userId,
+                                               String symbol,
+                                               MarginMode marginMode,
+                                               PositionSide positionSide,
+                                               OrderSide closeSide,
+                                               String ocoGroupId) {
+        if (ocoGroupId == null || ocoGroupId.isBlank()) {
+            return 0L;
+        }
+        Long value = jdbcTemplate.queryForObject("""
+                SELECT COALESCE(MAX(quantity_steps), 0)
+                  FROM trading_trigger_orders
+                 WHERE user_id = ?
+                   AND symbol = ?
+                   AND margin_mode = ?
+                   AND position_side = ?
+                   AND side = ?
+                   AND oco_group_id = ?
+                   AND status IN ('PENDING', 'TRIGGERING')
+                """, Long.class, userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                PositionSide.defaultIfNull(positionSide).name(), closeSide.name(), ocoGroupId);
+        return value == null ? 0L : value;
     }
 
     public Optional<TriggerOrderRecord> findById(long triggerOrderId) {

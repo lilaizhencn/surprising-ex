@@ -11,6 +11,7 @@
 - 永续合约下单当前已经按“标记价不可用则拒绝”的思路做了保护。市价单需要新鲜 mark price；LIMIT 订单默认也启用 mark price 价格带保护。撮合侧对市价单再次读取新鲜 mark price，取不到会拒绝 `MARK_PRICE_UNAVAILABLE`。
 - 这套设计符合主流交易所的风险控制方向：Binance Futures 的价格过滤、market order 保护区间基于 mark price；OKX 使用价格区间和 mark price 降低异常成交/异常强平风险；Bybit 的强平以 mark price 为核心，且止损可能晚于强平触发。因此衍生品下单入口建议继续 fail closed。
 - 账户余额、订单和持仓的一致性不是靠撮合内存状态兜底，而是靠 PostgreSQL 事务、幂等键、行锁/advisory lock、guarded update、transactional outbox 和 Kafka replay 共同保证。
+- 止盈止损多档位已补放置时前置校验：锁定当前仓位后聚合 active reduce-only 平仓单和待触发 TP/SL 总待平量；同一 OCO 组合按最大 sibling 数量计入容量，避免止盈/止损双倍占用。
 - HEDGE 仓位侧已经补充到关键资金链路的回归验证：撮合成交事件、风控事件/强平候选、强平下单、资金费扣款和 ADL 审计都保留 `positionSide`。ADL 事件新增 `target_position_side`，避免审计里只看到 LONG/SHORT 方向而无法区分 NET/LONG/SHORT 仓位桶。
 - 已有压测包含真实 provider、PostgreSQL、Kafka、做市商铺单和普通用户 taker 流量。2026-07-04 又补跑了一次全 provider real-config smoke，覆盖仓位模式、HEDGE LONG/SHORT、TP/SL OCO、逐仓保证金、重启恢复、资金费、强平、保险基金、ADL 和 WebSocket/accounting invariants。但现有压测仍不是生产级全链路压力测试：做市逻辑是本地静态盘口参数，不会实时订阅主流交易所盘口来校准滑点/深度/成交量；规模和持续时间也还不够。
 
@@ -158,6 +159,11 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 
 ```bash
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  mvn -q -pl :surprising-trigger-provider -am \
+  -Dtest=TriggerOrderServiceTest,TriggerOrderRepositoryTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   mvn -q -pl :surprising-risk-provider,:surprising-liquidation-provider,:surprising-funding-provider,:surprising-adl-provider,:surprising-matching-provider,:surprising-order-provider,:surprising-trigger-provider -am \
   -Dtest=RiskServiceTest,LiquidationServiceTest,FundingRepositoryTest,AdlRepositoryTest,MatchingServiceTest,OrderValidatorTest,TriggerOrderServiceTest,OrderServiceTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
@@ -178,6 +184,7 @@ npm run lint
 
 结果：
 
+- trigger 定向测试通过，覆盖 TP/SL 放置时已有仓位、减仓方向、多档总待平量、active reduce-only 占用和 OCO 最大 sibling 容量校验。
 - risk/liquidation/funding/adl/matching/order/trigger 定向测试通过，覆盖 HEDGE 仓位侧透传、ADL `target_position_side`、TP/SL 多档触发、TP/SL 在 mark price 不可用时不 claim、强平先清仓后 TP/SL 转 `TRIGGER_FAILED`，以及 mark price 不可用时 matching 拒绝。
 - account 定向测试通过，覆盖持仓模式切换全部前置条件：无非零持仓、无活动订单、无待触发条件单、无未结算成交、无活动保证金预占。
 - `PostLiquidationFundingInsuranceAdlIntegrationTest` 通过，确认 ADL API 模型兼容性和强平后资金费/保险/ADL 集成链路未破坏。

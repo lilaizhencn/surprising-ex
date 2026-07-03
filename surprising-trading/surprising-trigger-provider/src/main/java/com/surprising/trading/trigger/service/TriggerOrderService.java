@@ -25,6 +25,7 @@ import com.surprising.trading.trigger.config.TriggerProperties;
 import com.surprising.trading.trigger.config.TriggerTraceContext;
 import com.surprising.trading.trigger.model.MarkTrigger;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
+import com.surprising.trading.trigger.model.TriggerPosition;
 import com.surprising.trading.trigger.repository.TriggerOrderRepository;
 import java.time.Instant;
 import java.util.List;
@@ -83,6 +84,7 @@ public class TriggerOrderService {
                 normalized.userId(), normalized.symbol(), normalized.marginMode())) {
             throw new IllegalArgumentException("margin mode switch requires closing positions and open orders first");
         }
+        validateCloseCapacity(normalized);
         long triggerOrderId = triggerOrderRepository.nextSequence(TRIGGER_ORDER_SEQUENCE);
         TriggerOrderRecord order = new TriggerOrderRecord(
                 triggerOrderId,
@@ -326,6 +328,35 @@ public class TriggerOrderService {
             throw new IllegalArgumentException("trigger order side must close the selected hedge positionSide");
         }
         return request;
+    }
+
+    private void validateCloseCapacity(PlaceTriggerOrderRequest request) {
+        TriggerPosition position = triggerOrderRepository.lockedPosition(request.userId(), request.symbol(),
+                request.marginMode(), request.positionSide()).orElse(null);
+        long signedQuantity = position == null ? 0L : position.signedQuantitySteps();
+        if (signedQuantity == 0) {
+            throw new IllegalArgumentException("trigger order requires an open position");
+        }
+        if (position.instrumentVersion() <= 0) {
+            throw new IllegalArgumentException("trigger order position instrument version is missing");
+        }
+        OrderSide closeSide = signedQuantity > 0 ? OrderSide.SELL : OrderSide.BUY;
+        if (request.side() != closeSide) {
+            throw new IllegalArgumentException("trigger order side does not reduce current position");
+        }
+        long openReduceOnlySteps = triggerOrderRepository.openReduceOnlySteps(request.userId(), request.symbol(),
+                request.marginMode(), request.positionSide(), position.instrumentVersion(), closeSide);
+        long triggerCapacitySteps = triggerOrderRepository.pendingTriggerCloseSteps(request.userId(), request.symbol(),
+                request.marginMode(), request.positionSide(), closeSide);
+        long sameOcoGroupMax = triggerOrderRepository.pendingTriggerOcoGroupMaxSteps(request.userId(),
+                request.symbol(), request.marginMode(), request.positionSide(), closeSide, request.ocoGroupId());
+        long projectedTriggerCapacity = Math.addExact(
+                Math.subtractExact(triggerCapacitySteps, sameOcoGroupMax),
+                Math.max(sameOcoGroupMax, request.quantitySteps()));
+        long projectedCloseSteps = Math.addExact(openReduceOnlySteps, projectedTriggerCapacity);
+        if (projectedCloseSteps > Math.absExact(signedQuantity)) {
+            throw new IllegalArgumentException("trigger order quantity exceeds available position");
+        }
     }
 
     private void validateExecutionOrder(OrderType orderType, TimeInForce timeInForce, long priceTicks) {
