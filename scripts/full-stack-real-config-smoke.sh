@@ -39,6 +39,8 @@ RUN_FAILURE_SCENARIOS="${RUN_FAILURE_SCENARIOS:-true}"
 KEEP_TMP="${KEEP_TMP:-false}"
 WS_TIMEOUT="${WS_TIMEOUT:-360}"
 FULL_STACK_EXTERNAL_INDEX_WS_ENABLED="${FULL_STACK_EXTERNAL_INDEX_WS_ENABLED:-false}"
+MM_REFERENCE_MARKET_ENABLED="${MM_REFERENCE_MARKET_ENABLED:-false}"
+MM_REFERENCE_MARKET_WEBSOCKET_ENABLED="${MM_REFERENCE_MARKET_WEBSOCKET_ENABLED:-false}"
 TMP_DIR="$(mktemp -d /tmp/surprising-full-stack-real-config.XXXXXX)"
 WS_STOP_FILE="${TMP_DIR}/ws.stop"
 COMPOSE_BIN=""
@@ -799,6 +801,8 @@ start_provider() {
   fi
   if [[ "${name}" == "market-maker" ]]; then
     app_args+=("--surprising.market-maker.engine.enabled=false")
+    app_args+=("--surprising.market-maker.reference-market.enabled=${MM_REFERENCE_MARKET_ENABLED}")
+    app_args+=("--surprising.market-maker.reference-market.websocket-enabled=${MM_REFERENCE_MARKET_WEBSOCKET_ENABLED}")
   fi
   echo "Starting ${name} provider on port ${port}"
   (
@@ -2621,3 +2625,4 @@ touch "${WS_STOP_FILE}"
 echo "Full-stack real-config smoke passed"
 echo "logs=${TMP_DIR}"
 echo "pairs=${PAIR_COUNT} depthLevels=${BOOK_DEPTH_LEVELS} loadTotalQuantity=${LOAD_TOTAL_QTY}"
+echo "marketMakerReferenceMarket=${MM_REFERENCE_MARKET_ENABLED} marketMakerReferenceMarketWebSocket=${MM_REFERENCE_MARKET_WEBSOCKET_ENABLED}"
