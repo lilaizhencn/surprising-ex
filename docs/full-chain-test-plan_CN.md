@@ -22,8 +22,8 @@
   预期：trigger-provider 查不到触发事件对应的持久化 mark price 时，不 claim 条件单、不生成平仓单。
 - [x] 强平早于 TP/SL。
   预期：如果强平已经清掉仓位，后续 TP/SL 触发时生成的 reduce-only 平仓单会被 order-provider 拒绝，条件单转 `TRIGGER_FAILED`，不会反向开仓。
-- [x] 前端多档位录入和打通。
-  预期：交易面板可以新增多条 TP/SL，每档选择平多/平空、触发价、数量；提交后走 gateway `trading-trigger` 下单；底部账户面板展示并支持撤销。
+- [x] Web 与移动端多档位录入和打通。
+  预期：Web 交易面板和 Flutter iOS/Android 共用交易页都可以新增多条 TP/SL，每档选择平多/平空、触发价、数量；提交后走 gateway `trading-trigger` 下单；账户面板展示开放条件单并支持撤销。
 - [x] 撮合 HEDGE 仓位侧成交事件。
   预期：taker 的 `positionSide` 来自 order command，maker 的 `positionSide` 从订单表读取，成交事件保留 `LONG/SHORT`。
 - [x] 风控 HEDGE 仓位侧扫描与强平候选事件。
@@ -97,7 +97,7 @@ flutter analyze
 flutter test
 ```
 
-结果：以上后端定向测试、market-maker 参考盘口校准测试、真实 provider full-stack smoke、连续做市刷新 smoke、Web lint、Flutter analyze/test 均通过。full-stack smoke 日志保留在 `/tmp/surprising-full-stack-real-config.3qu3b9`；追加的最小真实配置回归也已通过，日志保留在 `/tmp/surprising-full-stack-real-config.xAFD0M`，该轮确认 provider jar 未变化时 `BUILD_SERVICES=auto` 会跳过 Maven package，并验证持仓模式 pending TP/SL 阻断用例和 `LOAD_CONCURRENCY=1` 收尾边界。连续做市刷新 smoke 报告为 `docs/market-maker-continuous-smoke-report.md`，日志保留在 `/tmp/surprising-mm-stress.qiFDht`。本机默认 `5432` 被本地 PostgreSQL/SSH 占用，所以 full-stack 该轮使用 `POSTGRES_PORT=55433` 隔离 Docker PostgreSQL。ADL 事件表核对结果为 `1|NET`，说明真实 ADL 场景写入了 `target_position_side`。market-maker provider 新增的 Binance/OKX/Bybit WebSocket 本地订单簿解析和 REST 兜底也已由定向测试覆盖。full-stack smoke 现在可通过 `MM_REFERENCE_MARKET_ENABLED=true MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=true` 显式启用 market-maker provider 的流式参考盘口，但该开关还没有跑长时间真实进程压测报告。Flutter 第一次与 `flutter analyze` 并行跑 `flutter test` 时因 iOS ephemeral 文件锁竞争失败，随后单独重跑 `flutter test` 通过。
+结果：以上后端定向测试、market-maker 参考盘口校准测试、真实 provider full-stack smoke、连续做市刷新 smoke、Web lint、Flutter analyze/test 均通过。full-stack smoke 日志保留在 `/tmp/surprising-full-stack-real-config.3qu3b9`；追加的最小真实配置回归也已通过，日志保留在 `/tmp/surprising-full-stack-real-config.xAFD0M`，该轮确认 provider jar 未变化时 `BUILD_SERVICES=auto` 会跳过 Maven package，并验证持仓模式 pending TP/SL 阻断用例和 `LOAD_CONCURRENCY=1` 收尾边界。连续做市刷新 smoke 报告为 `docs/market-maker-continuous-smoke-report.md`，日志保留在 `/tmp/surprising-mm-stress.qiFDht`。本机默认 `5432` 被本地 PostgreSQL/SSH 占用，所以 full-stack 该轮使用 `POSTGRES_PORT=55433` 隔离 Docker PostgreSQL。ADL 事件表核对结果为 `1|NET`，说明真实 ADL 场景写入了 `target_position_side`。market-maker provider 新增的 Binance/OKX/Bybit WebSocket 本地订单簿解析和 REST 兜底也已由定向测试覆盖。full-stack smoke 现在可通过 `MM_REFERENCE_MARKET_ENABLED=true MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=true` 显式启用 market-maker provider 的流式参考盘口，但该开关还没有跑长时间真实进程压测报告。Flutter 第一次与 `flutter analyze` 并行跑 `flutter test` 时因 iOS ephemeral 文件锁竞争失败，随后单独重跑 `flutter test` 通过；移动端新增 TP/SL 多档条件单模型、API、提交面板、开放条件单列表和撤销入口后，`flutter analyze` 与 `flutter test` 再次通过。
 
 ## 下单
 
@@ -175,8 +175,8 @@ flutter test
   预期：每个价格是一条独立 trigger order，每档有自己的 `quantitySteps`，满足条件时逐条触发。
 - [x] 真实进程 TP/SL OCO 触发执行。
   预期：full-stack smoke 中 trigger-provider 经 gateway/order-provider 生成 reduce-only 平仓单，并完成撮合、账户结算和 WebSocket fanout。
-- [x] 前端多档位。
-  预期：用户可以一次配置多行，前端逐条调用 trigger order API；提交后可查询和撤销。
+- [x] Web 与移动端多档位。
+  预期：用户可以在 Web 和 Flutter iOS/Android 共用客户端一次配置多行，前端逐条调用 trigger order API；提交后可查询和撤销。
 - [x] 多档位总数量前置校验。
   预期：同一 symbol/marginMode/positionSide/closeSide 的开放 TP/SL 总待平量加上 active reduce-only 平仓单不超过当前可平仓位；同一 OCO 组合按最大 `quantitySteps` 计数，避免止盈止损 sibling 双倍占用。
 - [x] 强平早于 TP/SL。

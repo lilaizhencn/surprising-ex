@@ -239,4 +239,4 @@ flutter test
 - 连续做市刷新 smoke 通过，确认真实 order/matching/account/websocket/gateway 进程在 2 轮 maker 刷新和 taker 流量下可以完成成交、account 结算、Kafka lag 清零和 WebSocket 事件接收；该结果仍是小规模短时样本。
 - market-maker provider 定向测试通过，确认参考盘口 WebSocket 本地订单簿、REST 快照兜底和报价规划可用：Binance/OKX/Bybit 风格 payload 可以转换成本地 ticks/steps，QuotePlanner 可按外部每档距离和数量生成本地 post-only 报价；配置默认关闭，未启用时保持原本本地报价模型。
 - Web 前端 `npm run lint` 通过，覆盖多档 TP/SL 和持仓模式 UI/API TypeScript 表面。
-- Flutter `flutter analyze` 和 `flutter test` 通过，覆盖 iOS/Android 共用客户端壳和移动端交易基础逻辑。第一次把 `flutter analyze` 与 `flutter test` 并行执行时，`flutter test` 因 iOS ephemeral 文件锁竞争失败；随后单独重跑通过，结论以单独重跑结果为准。
+- Flutter `flutter analyze` 和 `flutter test` 通过，覆盖 iOS/Android 共用客户端壳、移动端交易基础逻辑、持仓模式 UI/API，以及新增的多档 TP/SL 条件单模型、提交面板、开放条件单列表和撤销入口。第一次把 `flutter analyze` 与 `flutter test` 并行执行时，`flutter test` 因 iOS ephemeral 文件锁竞争失败；随后单独重跑通过，结论以单独重跑结果为准；移动端 TP/SL 补丁后已再次单独重跑 `flutter test` 和 `flutter analyze` 通过。
