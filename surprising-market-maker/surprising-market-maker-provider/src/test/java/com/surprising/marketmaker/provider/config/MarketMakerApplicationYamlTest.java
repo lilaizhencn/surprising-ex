@@ -26,6 +26,12 @@ class MarketMakerApplicationYamlTest {
                 .extracting(source -> source.getProperty("surprising.market-maker.trade.enabled"))
                 .contains(true);
         assertThat(sources)
+                .extracting(source -> source.getProperty("surprising.market-maker.reference-market.enabled"))
+                .contains(false);
+        assertThat(sources)
+                .extracting(source -> source.getProperty("surprising.market-maker.reference-market.sources[0].parser"))
+                .contains("BINANCE_DEPTH");
+        assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.market-maker.strategies[0].enabled"))
                 .contains(true);
         assertThat(sources)

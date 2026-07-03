@@ -12,6 +12,7 @@ import com.surprising.marketmaker.api.model.MarketMakerStrategyStatus;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.model.DesiredQuote;
 import com.surprising.marketmaker.provider.model.QuotePlan;
+import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
 import com.surprising.marketmaker.provider.model.StrategyConfigOverride;
 import com.surprising.marketmaker.provider.model.StrategyRuntimeState;
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository;
@@ -73,6 +74,7 @@ public class MarketMakerService {
     private final OrderRpcApi orderRpcApi;
     private final AccountRpcApi accountRpcApi;
     private final QuotePlanner quotePlanner;
+    private final ReferenceMarketProvider referenceMarketProvider;
     private final MarketMakerLeaseCoordinator leaseCoordinator;
     private final MarketMakerStrategyOverrideStore overrideStore;
     private final MarketMakerAdminRepository adminRepository;
@@ -94,7 +96,22 @@ public class MarketMakerService {
                        MarketMakerLeaseCoordinator leaseCoordinator,
                        MarketMakerStrategyOverrideStore overrideStore) {
         this(properties, instrumentRpcApi, markPriceRpcApi, marketDataRpcApi, orderRpcApi, accountRpcApi,
-                quotePlanner, leaseCoordinator, overrideStore, new NoopMarketMakerAdminRepository());
+                quotePlanner, ReferenceMarketProvider.disabled(), leaseCoordinator, overrideStore,
+                new NoopMarketMakerAdminRepository());
+    }
+
+    MarketMakerService(MarketMakerProperties properties,
+                       InstrumentRpcApi instrumentRpcApi,
+                       MarkPriceRpcApi markPriceRpcApi,
+                       MarketDataRpcApi marketDataRpcApi,
+                       OrderRpcApi orderRpcApi,
+                       AccountRpcApi accountRpcApi,
+                       QuotePlanner quotePlanner,
+                       MarketMakerLeaseCoordinator leaseCoordinator,
+                       MarketMakerStrategyOverrideStore overrideStore,
+                       MarketMakerAdminRepository adminRepository) {
+        this(properties, instrumentRpcApi, markPriceRpcApi, marketDataRpcApi, orderRpcApi, accountRpcApi,
+                quotePlanner, ReferenceMarketProvider.disabled(), leaseCoordinator, overrideStore, adminRepository);
     }
 
     @Autowired
@@ -105,6 +122,7 @@ public class MarketMakerService {
                               OrderRpcApi orderRpcApi,
                               AccountRpcApi accountRpcApi,
                               QuotePlanner quotePlanner,
+                              ReferenceMarketProvider referenceMarketProvider,
                               MarketMakerLeaseCoordinator leaseCoordinator,
                               MarketMakerStrategyOverrideStore overrideStore,
                               MarketMakerAdminRepository adminRepository) {
@@ -115,6 +133,7 @@ public class MarketMakerService {
         this.orderRpcApi = orderRpcApi;
         this.accountRpcApi = accountRpcApi;
         this.quotePlanner = quotePlanner;
+        this.referenceMarketProvider = referenceMarketProvider;
         this.leaseCoordinator = leaseCoordinator;
         this.overrideStore = overrideStore;
         this.adminRepository = adminRepository;
@@ -335,10 +354,11 @@ public class MarketMakerService {
             OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
                     properties.getQuoting().getOrderBookDepth());
             MarkPriceResponse markPrice = latestMarkPrice(symbol);
+            ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol, instrument);
             QuotePlan plan = instrument == null || instrument.status() != InstrumentStatus.TRADING
                     ? new QuotePlan(0L, position.signedQuantitySteps(), List.of())
                     : quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
-                    orderBook, markPrice, position.signedQuantitySteps());
+                    orderBook, markPrice, position.signedQuantitySteps(), referenceOrderBook);
             int desiredQuotes = plan.quotes().size();
             long matchedDesired = plan.quotes().stream()
                     .filter(quote -> hasLiveQuote(ownedLive, quote, accountPrefix))
@@ -577,9 +597,10 @@ public class MarketMakerService {
             OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
                     properties.getQuoting().getOrderBookDepth());
             MarkPriceResponse markPrice = latestMarkPrice(symbol);
+            ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol, instrument);
             for (long accountId : strategy.getAccountIds()) {
-                quoteAccount(strategy, state, cycleSequence, symbol, instrument, orderBook, markPrice, accountId,
-                        now, traceId);
+                quoteAccount(strategy, state, cycleSequence, symbol, instrument, orderBook, markPrice,
+                        referenceOrderBook, accountId, now, traceId);
             }
             maybeTrade(strategy, state, cycleSequence, symbol, instrument, markPrice, now, traceId);
             state.markSuccess(traceId, now);
@@ -601,13 +622,14 @@ public class MarketMakerService {
                               InstrumentResponse instrument,
                               OrderBookSnapshotResponse orderBook,
                               MarkPriceResponse markPrice,
+                              ReferenceOrderBookSnapshot referenceOrderBook,
                               long accountId,
                               Instant now,
                               String traceId) {
         PositionResponse position = accountRpcApi.position(accountId, symbol, strategy.getMarginMode().name(),
                 PositionSide.NET.name());
         QuotePlan plan = quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
-                orderBook, markPrice, position.signedQuantitySteps());
+                orderBook, markPrice, position.signedQuantitySteps(), referenceOrderBook);
         List<OrderResponse> openOrders = openOrders(accountId, symbol);
         ReconcileResult result = reconcile(strategy, accountId, symbol, plan, openOrders, cycleSequence, now);
         state.addCanceled(result.canceled());

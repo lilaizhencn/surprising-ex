@@ -80,10 +80,15 @@ SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange \
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   ./scripts/market-maker-stress.sh
 
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  mvn -q -pl :surprising-market-maker-provider -am \
+  -Dtest=QuotePlannerTest,RestReferenceMarketProviderTest,MarketMakerServiceTest,MarketMakerApplicationYamlTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
 npm run lint
 ```
 
-结果：以上后端定向测试、真实 provider full-stack smoke、连续做市刷新 smoke 和 Web lint 均通过。full-stack smoke 日志保留在 `/tmp/surprising-full-stack-real-config.3qu3b9`；连续做市刷新 smoke 报告为 `docs/market-maker-continuous-smoke-report.md`，日志保留在 `/tmp/surprising-mm-stress.qiFDht`。本机默认 `5432` 被本地 PostgreSQL/SSH 占用，所以 full-stack 该轮使用 `POSTGRES_PORT=55433` 隔离 Docker PostgreSQL。ADL 事件表核对结果为 `1|NET`，说明真实 ADL 场景写入了 `target_position_side`。
+结果：以上后端定向测试、market-maker 参考盘口校准测试、真实 provider full-stack smoke、连续做市刷新 smoke 和 Web lint 均通过。full-stack smoke 日志保留在 `/tmp/surprising-full-stack-real-config.3qu3b9`；连续做市刷新 smoke 报告为 `docs/market-maker-continuous-smoke-report.md`，日志保留在 `/tmp/surprising-mm-stress.qiFDht`。本机默认 `5432` 被本地 PostgreSQL/SSH 占用，所以 full-stack 该轮使用 `POSTGRES_PORT=55433` 隔离 Docker PostgreSQL。ADL 事件表核对结果为 `1|NET`，说明真实 ADL 场景写入了 `target_position_side`。
 
 ## 下单
 
@@ -242,6 +247,8 @@ npm run lint
   预期：`scripts/market-maker-stress.sh` 可通过 `MM_REFRESH_CYCLES` 和 `MM_REFRESH_INTERVAL_SECONDS` 持续执行多轮 maker 刷新挂单 + taker 流量，并继续输出 PostgreSQL/Kafka/JVM/WebSocket/account 结算指标。
 - [x] 小规模连续做市刷新真实进程 smoke。
   预期：`MM_REFRESH_CYCLES=2` 的干净状态样本通过；报告记录连续 maker 刷新挂单 8 笔、普通用户 taker 订单 4 笔、撮合成交 4 笔、account 结算 4 笔、最终 Kafka lag 为 0。
+- [x] 做市商参考盘口 REST 快照校准。
+  预期：`surprising-market-maker-provider` 可选 `reference-market.enabled=true` 后，支持 Binance depth、OKX books、Bybit V5 orderbook 风格 payload，把外部每档价格距离和数量转换成本地 ticks/steps，并继续受 post-only、价格偏离、数量和库存上限保护；默认关闭，不影响现有本地静态报价模型。
 - [x] matching/account/WebSocket 本机多节点 smoke。
   预期：consumer group 成员可识别，WebSocket 节点都收到 depth。
 - [x] account failover。
@@ -259,5 +266,5 @@ npm run lint
   原因：后端已有单条 trigger order API，多档通过多条 trigger order 表达；前端当前逐条提交。部分提交失败时需要前端提示用户检查开放条件单列表。
 - [!] 当前 TP/SL trigger price type 只支持 `MARK_PRICE`。
   原因：后端 `TriggerPriceType` 目前只定义 `MARK_PRICE`。如要支持 Last/Index 触发，需要新增价格流、claim 条件和 UI。
-- [!] 主流交易所真实盘口订阅驱动做市尚未实现。
-  原因：现有 market-maker stress 使用静态深度/价差/数量配置，不能代表真实市场微结构。
+- [!] 主流交易所 WebSocket 本地订单簿驱动做市尚未实现。
+  原因：market-maker provider 已支持 REST 参考盘口快照校准，但尚未维护 Binance/OKX/Bybit WebSocket 本地订单簿，也没有把该能力放进长时间真实进程压测并记录报告。

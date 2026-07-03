@@ -7,6 +7,8 @@ import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
+import com.surprising.marketmaker.provider.model.ReferenceOrderBookLevel;
+import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
 import com.surprising.marketmaker.provider.model.QuotePlan;
 import com.surprising.price.api.model.MarkPriceResponse;
 import com.surprising.price.api.model.PriceStatus;
@@ -58,6 +60,32 @@ class QuotePlannerTest {
                 orderBook(49_900L, 50_100L), null, 0L);
 
         assertThat(plan.anchorPriceTicks()).isEqualTo(50_000L);
+    }
+
+    @Test
+    void mirrorsReferenceMarketDistancesAndQuantitiesWhenAvailable() {
+        ReferenceOrderBookSnapshot reference = new ReferenceOrderBookSnapshot("BINANCE", "BTC-USDT",
+                List.of(new ReferenceOrderBookLevel(49_990L, 3L),
+                        new ReferenceOrderBookLevel(49_970L, 4L)),
+                List.of(new ReferenceOrderBookLevel(50_020L, 7L),
+                        new ReferenceOrderBookLevel(50_040L, 8L)),
+                Instant.parse("2026-01-01T00:00:00Z"));
+
+        QuotePlan plan = quotePlanner.plan(strategy(), quoting(), risk(), instrument(),
+                orderBook(49_900L, 50_100L), mark(5_000_000L), 0L, reference);
+
+        assertThat(plan.anchorPriceTicks()).isEqualTo(50_000L);
+        assertThat(plan.quotes()).hasSize(4);
+        assertThat(plan.quotes().get(0).side()).isEqualTo(OrderSide.BUY);
+        assertThat(plan.quotes().get(0).priceTicks()).isEqualTo(49_985L);
+        assertThat(plan.quotes().get(0).quantitySteps()).isEqualTo(3L);
+        assertThat(plan.quotes().get(1).side()).isEqualTo(OrderSide.SELL);
+        assertThat(plan.quotes().get(1).priceTicks()).isEqualTo(50_015L);
+        assertThat(plan.quotes().get(1).quantitySteps()).isEqualTo(7L);
+        assertThat(plan.quotes().get(2).priceTicks()).isEqualTo(49_965L);
+        assertThat(plan.quotes().get(2).quantitySteps()).isEqualTo(4L);
+        assertThat(plan.quotes().get(3).priceTicks()).isEqualTo(50_035L);
+        assertThat(plan.quotes().get(3).quantitySteps()).isEqualTo(8L);
     }
 
     private MarketMakerProperties.Strategy strategy() {

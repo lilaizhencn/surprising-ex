@@ -4,6 +4,8 @@ import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.model.DesiredQuote;
 import com.surprising.marketmaker.provider.model.QuotePlan;
+import com.surprising.marketmaker.provider.model.ReferenceOrderBookLevel;
+import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
 import com.surprising.price.api.model.MarkPriceResponse;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
@@ -24,7 +26,18 @@ public class QuotePlanner {
                           OrderBookSnapshotResponse orderBook,
                           MarkPriceResponse markPrice,
                           long signedPositionSteps) {
-        long anchor = anchorPriceTicks(instrument, orderBook, markPrice);
+        return plan(strategy, quoting, risk, instrument, orderBook, markPrice, signedPositionSteps, null);
+    }
+
+    public QuotePlan plan(MarketMakerProperties.Strategy strategy,
+                          MarketMakerProperties.Quoting quoting,
+                          MarketMakerProperties.Risk risk,
+                          InstrumentResponse instrument,
+                          OrderBookSnapshotResponse orderBook,
+                          MarkPriceResponse markPrice,
+                          long signedPositionSteps,
+                          ReferenceOrderBookSnapshot referenceOrderBook) {
+        long anchor = anchorPriceTicks(instrument, orderBook, markPrice, referenceOrderBook);
         int levels = orderLevels(strategy, quoting);
         long halfSpread = Math.max(1L, spreadTicks(strategy, quoting) / 2L);
         long spacing = levelSpacingTicks(strategy, quoting);
@@ -35,17 +48,21 @@ public class QuotePlanner {
         long bestAsk = bestAsk(orderBook);
         List<DesiredQuote> quotes = new ArrayList<>(levels * 2);
         for (int level = 0; level < levels; level++) {
-            long bidPrice = Math.max(minPrice, anchor - halfSpread - spacing * level);
+            long bidDistance = referenceDistance(referenceOrderBook, OrderSide.BUY, level);
+            long askDistance = referenceDistance(referenceOrderBook, OrderSide.SELL, level);
+            long bidPrice = Math.max(minPrice, anchor - (bidDistance > 0 ? bidDistance : halfSpread + spacing * level));
             if (bestAsk > 0) {
                 bidPrice = Math.min(bidPrice, bestAsk - 1L);
             }
-            addQuoteIfAllowed(strategy, risk, quotes, OrderSide.BUY, level, bidPrice, signedPositionSteps);
+            addQuoteIfAllowed(strategy, risk, quotes, OrderSide.BUY, level, bidPrice, signedPositionSteps,
+                    referenceQuantity(referenceOrderBook, OrderSide.BUY, level));
 
-            long askPrice = Math.min(maxPrice, anchor + halfSpread + spacing * level);
+            long askPrice = Math.min(maxPrice, anchor + (askDistance > 0 ? askDistance : halfSpread + spacing * level));
             if (bestBid > 0) {
                 askPrice = Math.max(askPrice, bestBid + 1L);
             }
-            addQuoteIfAllowed(strategy, risk, quotes, OrderSide.SELL, level, askPrice, signedPositionSteps);
+            addQuoteIfAllowed(strategy, risk, quotes, OrderSide.SELL, level, askPrice, signedPositionSteps,
+                    referenceQuantity(referenceOrderBook, OrderSide.SELL, level));
         }
         return new QuotePlan(anchor, signedPositionSteps, List.copyOf(quotes));
     }
@@ -56,11 +73,12 @@ public class QuotePlanner {
                                    OrderSide side,
                                    int level,
                                    long priceTicks,
-                                   long signedPositionSteps) {
+                                   long signedPositionSteps,
+                                   long referenceQuantitySteps) {
         if (priceTicks <= 0 || !sideAllowed(side, strategy, risk, signedPositionSteps)) {
             return;
         }
-        long quantity = adjustedQuantity(strategy, risk, side, signedPositionSteps);
+        long quantity = adjustedQuantity(strategy, risk, side, signedPositionSteps, referenceQuantitySteps);
         if (quantity > 0) {
             quotes.add(new DesiredQuote(side, level, priceTicks, quantity));
         }
@@ -80,8 +98,9 @@ public class QuotePlanner {
     private long adjustedQuantity(MarketMakerProperties.Strategy strategy,
                                   MarketMakerProperties.Risk risk,
                                   OrderSide side,
-                                  long signedPositionSteps) {
-        long base = Math.max(1L, strategy.getBaseQuantitySteps());
+                                  long signedPositionSteps,
+                                  long referenceQuantitySteps) {
+        long base = referenceQuantitySteps > 0 ? referenceQuantitySteps : Math.max(1L, strategy.getBaseQuantitySteps());
         long maxInventory = maxInventory(strategy, risk);
         long skewPpm = Math.min(maxSkewPpm(strategy, risk),
                 multiplyDiv(Math.abs(signedPositionSteps), ONE_PPM, maxInventory));
@@ -97,10 +116,15 @@ public class QuotePlanner {
 
     private long anchorPriceTicks(InstrumentResponse instrument,
                                   OrderBookSnapshotResponse orderBook,
-                                  MarkPriceResponse markPrice) {
+                                  MarkPriceResponse markPrice,
+                                  ReferenceOrderBookSnapshot referenceOrderBook) {
         long fromMark = markToTicks(instrument, markPrice);
         if (fromMark > 0) {
             return fromMark;
+        }
+        long fromReference = referenceMid(referenceOrderBook);
+        if (fromReference > 0) {
+            return fromReference;
         }
         long bestBid = bestBid(orderBook);
         long bestAsk = bestAsk(orderBook);
@@ -167,6 +191,44 @@ public class QuotePlanner {
         }
         OrderBookLevel level = orderBook.asks().get(0);
         return level == null ? 0L : level.priceTicks();
+    }
+
+    private long referenceDistance(ReferenceOrderBookSnapshot referenceOrderBook, OrderSide side, int level) {
+        long mid = referenceMid(referenceOrderBook);
+        ReferenceOrderBookLevel referenceLevel = referenceLevel(referenceOrderBook, side, level);
+        if (mid <= 0 || referenceLevel == null || referenceLevel.priceTicks() <= 0) {
+            return 0L;
+        }
+        long distance = side == OrderSide.BUY
+                ? mid - referenceLevel.priceTicks()
+                : referenceLevel.priceTicks() - mid;
+        return Math.max(1L, distance);
+    }
+
+    private long referenceQuantity(ReferenceOrderBookSnapshot referenceOrderBook, OrderSide side, int level) {
+        ReferenceOrderBookLevel referenceLevel = referenceLevel(referenceOrderBook, side, level);
+        return referenceLevel == null ? 0L : referenceLevel.quantitySteps();
+    }
+
+    private ReferenceOrderBookLevel referenceLevel(ReferenceOrderBookSnapshot referenceOrderBook,
+                                                  OrderSide side,
+                                                  int level) {
+        if (referenceOrderBook == null || !referenceOrderBook.hasTwoSidedDepth() || level < 0) {
+            return null;
+        }
+        List<ReferenceOrderBookLevel> levels = side == OrderSide.BUY
+                ? referenceOrderBook.bids()
+                : referenceOrderBook.asks();
+        if (level >= levels.size()) {
+            return null;
+        }
+        return levels.get(level);
+    }
+
+    private long referenceMid(ReferenceOrderBookSnapshot referenceOrderBook) {
+        return referenceOrderBook != null && referenceOrderBook.hasTwoSidedDepth()
+                ? referenceOrderBook.midPriceTicks()
+                : 0L;
     }
 
     private long multiplyDiv(long value, long multiplier, long divisor) {

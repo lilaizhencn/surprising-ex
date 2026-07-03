@@ -59,6 +59,34 @@ surprising:
       slippage-ticks: 20
       max-sweep-levels: 5
       inventory-threshold-steps: 5000
+    reference-market:
+      enabled: false
+      refresh-interval: 500ms
+      max-age: 3s
+      request-timeout: 2s
+      depth-levels: 20
+      quantity-scale-ppm: 1000000
+      min-quantity-steps: 1
+      max-quantity-steps: 1000
+      sources:
+        - name: BINANCE_USDM
+          enabled: true
+          symbol: BTC-USDT
+          external-symbol: BTCUSDT
+          url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
+          parser: BINANCE_DEPTH
+        - name: OKX_SWAP
+          enabled: true
+          symbol: BTC-USDT
+          external-symbol: BTC-USDT-SWAP
+          url: https://www.okx.com/api/v5/market/books?instId={symbol}&sz=20
+          parser: OKX_BOOKS
+        - name: BYBIT_LINEAR
+          enabled: true
+          symbol: BTC-USDT
+          external-symbol: BTCUSDT
+          url: https://api.bybit.com/v5/market/orderbook?category=linear&symbol={symbol}&limit=50
+          parser: BYBIT_ORDERBOOK
     strategies:
       - strategy-id: btc-usdt-mm-a
         enabled: true

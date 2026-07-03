@@ -34,6 +34,9 @@ public class MarketMakerProperties {
     private Trade trade = new Trade();
 
     @Valid
+    private ReferenceMarket referenceMarket = new ReferenceMarket();
+
+    @Valid
     private List<Strategy> strategies = new ArrayList<>();
 
     public Engine getEngine() {
@@ -74,6 +77,14 @@ public class MarketMakerProperties {
 
     public void setTrade(Trade trade) {
         this.trade = trade;
+    }
+
+    public ReferenceMarket getReferenceMarket() {
+        return referenceMarket;
+    }
+
+    public void setReferenceMarket(ReferenceMarket referenceMarket) {
+        this.referenceMarket = referenceMarket == null ? new ReferenceMarket() : referenceMarket;
     }
 
     public List<Strategy> getStrategies() {
@@ -326,6 +337,165 @@ public class MarketMakerProperties {
 
         public void setInventoryThresholdSteps(long inventoryThresholdSteps) {
             this.inventoryThresholdSteps = inventoryThresholdSteps;
+        }
+    }
+
+    public static class ReferenceMarket {
+        private boolean enabled;
+        private Duration refreshInterval = Duration.ofMillis(500);
+        private Duration maxAge = Duration.ofSeconds(3);
+        private Duration requestTimeout = Duration.ofSeconds(2);
+        @Min(1)
+        @Max(100)
+        private int depthLevels = 20;
+        @Min(1)
+        @Max(1_000_000)
+        private long quantityScalePpm = 1_000_000L;
+        @Positive
+        private long minQuantitySteps = 1L;
+        @Positive
+        private long maxQuantitySteps = 1_000L;
+        @Size(max = 20)
+        @Valid
+        private List<Source> sources = new ArrayList<>();
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public Duration getRefreshInterval() {
+            return refreshInterval;
+        }
+
+        public void setRefreshInterval(Duration refreshInterval) {
+            this.refreshInterval = refreshInterval;
+        }
+
+        public Duration getMaxAge() {
+            return maxAge;
+        }
+
+        public void setMaxAge(Duration maxAge) {
+            this.maxAge = maxAge;
+        }
+
+        public Duration getRequestTimeout() {
+            return requestTimeout;
+        }
+
+        public void setRequestTimeout(Duration requestTimeout) {
+            this.requestTimeout = requestTimeout;
+        }
+
+        public int getDepthLevels() {
+            return depthLevels;
+        }
+
+        public void setDepthLevels(int depthLevels) {
+            this.depthLevels = depthLevels;
+        }
+
+        public long getQuantityScalePpm() {
+            return quantityScalePpm;
+        }
+
+        public void setQuantityScalePpm(long quantityScalePpm) {
+            this.quantityScalePpm = quantityScalePpm;
+        }
+
+        public long getMinQuantitySteps() {
+            return minQuantitySteps;
+        }
+
+        public void setMinQuantitySteps(long minQuantitySteps) {
+            this.minQuantitySteps = minQuantitySteps;
+        }
+
+        public long getMaxQuantitySteps() {
+            return maxQuantitySteps;
+        }
+
+        public void setMaxQuantitySteps(long maxQuantitySteps) {
+            this.maxQuantitySteps = maxQuantitySteps;
+        }
+
+        public List<Source> getSources() {
+            return sources;
+        }
+
+        public void setSources(List<Source> sources) {
+            this.sources = sources == null ? new ArrayList<>() : new ArrayList<>(sources);
+        }
+
+        public static class Source {
+            private boolean enabled = true;
+            @NotBlank
+            @Size(max = 64)
+            private String name;
+            @NotBlank
+            @Size(max = 64)
+            private String symbol;
+            @NotBlank
+            @Size(max = 64)
+            private String externalSymbol;
+            @NotBlank
+            @Size(max = 2048)
+            private String url;
+            @NotBlank
+            @Size(max = 64)
+            private String parser;
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public String getName() {
+                return name;
+            }
+
+            public void setName(String name) {
+                this.name = name;
+            }
+
+            public String getSymbol() {
+                return symbol;
+            }
+
+            public void setSymbol(String symbol) {
+                this.symbol = symbol;
+            }
+
+            public String getExternalSymbol() {
+                return externalSymbol;
+            }
+
+            public void setExternalSymbol(String externalSymbol) {
+                this.externalSymbol = externalSymbol;
+            }
+
+            public String getUrl() {
+                return url;
+            }
+
+            public void setUrl(String url) {
+                this.url = url;
+            }
+
+            public String getParser() {
+                return parser;
+            }
+
+            public void setParser(String parser) {
+                this.parser = parser;
+            }
         }
     }
 
