@@ -1,8 +1,13 @@
 package com.surprising.account.provider.repository;
 
-import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.AdminBalanceAdjustmentRecord;
+import com.surprising.account.api.model.AdminCursorPage;
+import com.surprising.account.api.model.AccountLedgerEntryResponse;
+import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.ProductBalanceResponse;
+import com.surprising.account.api.model.ProductLedgerEntryResponse;
+import com.surprising.account.api.model.ProductTransferRecordResponse;
 import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
 import com.surprising.account.api.model.PositionMarginResponse;
@@ -121,6 +126,355 @@ public class AccountRepository {
         List<ProductBalanceResponse> isolatedBalances = productBalancesFromTable(userId, null);
         return java.util.stream.Stream.concat(legacyBalances.stream(), isolatedBalances.stream())
                 .toList();
+    }
+
+    public List<AccountLedgerEntryResponse> accountLedger(Long userId,
+                                                          String asset,
+                                                          String referenceType,
+                                                          int limit) {
+        return accountLedgerPage(userId, asset, referenceType, limit, null, null).items();
+    }
+
+    public AdminCursorPage.CursorPage<AccountLedgerEntryResponse> accountLedgerPage(Long userId,
+                                                                                    String asset,
+                                                                                    String referenceType,
+                                                                                    int limit,
+                                                                                    String cursor,
+                                                                                    String sort) {
+        String normalizedAsset = emptyToNull(asset);
+        String normalizedReferenceType = emptyToNull(referenceType);
+        int safeLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort, "entry_id");
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.add(userId);
+        args.add(normalizedAsset);
+        args.add(normalizedAsset);
+        args.add(normalizedReferenceType);
+        args.add(normalizedReferenceType);
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        List<AccountLedgerEntryResponse> rows = jdbcTemplate.query("""
+                SELECT entry_id, user_id, asset, amount_units, balance_after_units, reference_type,
+                       reference_id, reason, trade_id, order_id, symbol, fee_rate_ppm, created_at
+                  FROM account_ledger_entries
+                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR asset = ?)
+                   AND (CAST(? AS text) IS NULL OR reference_type = ?)
+                %s
+                 ORDER BY %s %s, %s %s
+                 LIMIT ?
+                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
+                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
+                (rs, rowNum) -> new AccountLedgerEntryResponse(
+                rs.getLong("entry_id"),
+                rs.getLong("user_id"),
+                rs.getString("asset"),
+                rs.getLong("amount_units"),
+                rs.getLong("balance_after_units"),
+                rs.getString("reference_type"),
+                rs.getString("reference_id"),
+                rs.getString("reason"),
+                nullableLong(rs, "trade_id"),
+                nullableLong(rs, "order_id"),
+                rs.getString("symbol"),
+                nullableLong(rs, "fee_rate_ppm"),
+                rs.getTimestamp("created_at").toInstant()), args.toArray());
+        return AdminCursorPage.page(rows, safeLimit, sortSpec, AccountLedgerEntryResponse::createdAt,
+                AccountLedgerEntryResponse::entryId);
+    }
+
+    public List<ProductLedgerEntryResponse> productLedger(Long userId,
+                                                          AccountType accountType,
+                                                          String asset,
+                                                          String referenceType,
+                                                          int limit) {
+        return productLedgerPage(userId, accountType, asset, referenceType, limit, null, null).items();
+    }
+
+    public AdminCursorPage.CursorPage<ProductLedgerEntryResponse> productLedgerPage(Long userId,
+                                                                                    AccountType accountType,
+                                                                                    String asset,
+                                                                                    String referenceType,
+                                                                                    int limit,
+                                                                                    String cursor,
+                                                                                    String sort) {
+        String normalizedAsset = emptyToNull(asset);
+        String normalizedReferenceType = emptyToNull(referenceType);
+        String normalizedAccountType = accountType == null ? null : accountType.name();
+        int safeLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort, "entry_id");
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.add(userId);
+        args.add(normalizedAccountType);
+        args.add(normalizedAccountType);
+        args.add(normalizedAsset);
+        args.add(normalizedAsset);
+        args.add(normalizedReferenceType);
+        args.add(normalizedReferenceType);
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        List<ProductLedgerEntryResponse> rows = jdbcTemplate.query("""
+                SELECT entry_id, user_id, account_type, asset, amount_units, balance_after_units,
+                       reference_type, reference_id, reason, created_at
+                  FROM account_product_ledger_entries
+                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR account_type = ?)
+                   AND (CAST(? AS text) IS NULL OR asset = ?)
+                   AND (CAST(? AS text) IS NULL OR reference_type = ?)
+                %s
+                 ORDER BY %s %s, %s %s
+                 LIMIT ?
+                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
+                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
+                (rs, rowNum) -> new ProductLedgerEntryResponse(
+                rs.getLong("entry_id"),
+                rs.getLong("user_id"),
+                AccountType.valueOf(rs.getString("account_type")),
+                rs.getString("asset"),
+                rs.getLong("amount_units"),
+                rs.getLong("balance_after_units"),
+                rs.getString("reference_type"),
+                rs.getString("reference_id"),
+                rs.getString("reason"),
+                rs.getTimestamp("created_at").toInstant()), args.toArray());
+        return AdminCursorPage.page(rows, safeLimit, sortSpec, ProductLedgerEntryResponse::createdAt,
+                ProductLedgerEntryResponse::entryId);
+    }
+
+    public List<ProductTransferRecordResponse> productTransfers(Long userId,
+                                                                AccountType accountType,
+                                                                String asset,
+                                                                int limit) {
+        String normalizedAsset = emptyToNull(asset);
+        String normalizedAccountType = accountType == null ? null : accountType.name();
+        int safeLimit = Math.max(1, Math.min(limit, 1000));
+        return jdbcTemplate.query("""
+                SELECT transfer_id, user_id, source_account_type, target_account_type, asset, amount_units,
+                       reference_id, status, reason, created_at, updated_at
+                  FROM account_product_transfers
+                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR source_account_type = ? OR target_account_type = ?)
+                   AND (CAST(? AS text) IS NULL OR asset = ?)
+                 ORDER BY created_at DESC, transfer_id DESC
+                 LIMIT ?
+                """, (rs, rowNum) -> new ProductTransferRecordResponse(
+                rs.getLong("transfer_id"),
+                rs.getLong("user_id"),
+                AccountType.valueOf(rs.getString("source_account_type")),
+                AccountType.valueOf(rs.getString("target_account_type")),
+                rs.getString("asset"),
+                rs.getLong("amount_units"),
+                rs.getString("reference_id"),
+                rs.getString("status"),
+                rs.getString("reason"),
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant()), userId, userId,
+                normalizedAccountType, normalizedAccountType, normalizedAccountType,
+                normalizedAsset, normalizedAsset, safeLimit);
+    }
+
+    public AdminCursorPage.CursorPage<ProductTransferRecordResponse> productTransferPage(Long userId,
+                                                                                         AccountType accountType,
+                                                                                         String asset,
+                                                                                         int limit,
+                                                                                         String cursor,
+                                                                                         String sort) {
+        String normalizedAsset = emptyToNull(asset);
+        String normalizedAccountType = accountType == null ? null : accountType.name();
+        int safeLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort, "transfer_id");
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.add(userId);
+        args.add(normalizedAccountType);
+        args.add(normalizedAccountType);
+        args.add(normalizedAccountType);
+        args.add(normalizedAsset);
+        args.add(normalizedAsset);
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        List<ProductTransferRecordResponse> rows = jdbcTemplate.query("""
+                SELECT transfer_id, user_id, source_account_type, target_account_type, asset, amount_units,
+                       reference_id, status, reason, created_at, updated_at
+                  FROM account_product_transfers
+                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR source_account_type = ? OR target_account_type = ?)
+                   AND (CAST(? AS text) IS NULL OR asset = ?)
+                %s
+                 ORDER BY %s %s, %s %s
+                 LIMIT ?
+                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
+                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
+                (rs, rowNum) -> new ProductTransferRecordResponse(
+                rs.getLong("transfer_id"),
+                rs.getLong("user_id"),
+                AccountType.valueOf(rs.getString("source_account_type")),
+                AccountType.valueOf(rs.getString("target_account_type")),
+                rs.getString("asset"),
+                rs.getLong("amount_units"),
+                rs.getString("reference_id"),
+                rs.getString("status"),
+                rs.getString("reason"),
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant()), args.toArray());
+        return AdminCursorPage.page(rows, safeLimit, sortSpec, ProductTransferRecordResponse::createdAt,
+                ProductTransferRecordResponse::transferId);
+    }
+
+    public AdminBalanceAdjustmentRecord recordAdminBalanceAdjustment(String adjustmentKind,
+                                                                     long adminUserId,
+                                                                     String adminUsername,
+                                                                     long userId,
+                                                                     AccountType accountType,
+                                                                     String asset,
+                                                                     long amountUnits,
+                                                                     long balanceAfterUnits,
+                                                                     String referenceId,
+                                                                     String reason) {
+        String normalizedKind = requireAdjustmentKind(adjustmentKind);
+        String referenceKey = adminAdjustmentReferenceKey(normalizedKind, userId, accountType, asset, referenceId);
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO account_admin_balance_adjustments (
+                    reference_key, adjustment_kind, admin_user_id, admin_username, user_id, account_type,
+                    asset, amount_units, balance_after_units, reference_id, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (reference_key) DO UPDATE
+                   SET reference_key = EXCLUDED.reference_key
+                RETURNING adjustment_id, adjustment_kind, admin_user_id, admin_username, user_id, account_type,
+                          asset, amount_units, balance_after_units, reference_id, reason, created_at
+                """, (rs, rowNum) -> new AdminBalanceAdjustmentRecord(
+                rs.getLong("adjustment_id"),
+                rs.getString("adjustment_kind"),
+                rs.getLong("admin_user_id"),
+                rs.getString("admin_username"),
+                rs.getLong("user_id"),
+                nullableAccountType(rs.getString("account_type")),
+                rs.getString("asset"),
+                rs.getLong("amount_units"),
+                rs.getLong("balance_after_units"),
+                rs.getString("reference_id"),
+                rs.getString("reason"),
+                rs.getTimestamp("created_at").toInstant()),
+                referenceKey, normalizedKind, adminUserId, emptyToNull(adminUsername), userId,
+                accountType == null ? null : accountType.name(), asset, amountUnits, balanceAfterUnits,
+                referenceId, reason, Timestamp.from(Instant.now()));
+    }
+
+    public List<AdminBalanceAdjustmentRecord> adminBalanceAdjustments(Long adminUserId,
+                                                                      Long userId,
+                                                                      String adjustmentKind,
+                                                                      AccountType accountType,
+                                                                      String asset,
+                                                                      String referenceId,
+                                                                      int limit) {
+        String normalizedKind = emptyToNull(adjustmentKind);
+        String normalizedAccountType = accountType == null ? null : accountType.name();
+        String normalizedAsset = emptyToNull(asset);
+        String normalizedReferenceId = emptyToNull(referenceId);
+        int safeLimit = Math.max(1, Math.min(limit, 1000));
+        return jdbcTemplate.query("""
+                SELECT adjustment_id, adjustment_kind, admin_user_id, admin_username, user_id, account_type,
+                       asset, amount_units, balance_after_units, reference_id, reason, created_at
+                  FROM account_admin_balance_adjustments
+                 WHERE (CAST(? AS text) IS NULL OR admin_user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR adjustment_kind = ?)
+                   AND (CAST(? AS text) IS NULL OR account_type = ?)
+                   AND (CAST(? AS text) IS NULL OR asset = ?)
+                   AND (CAST(? AS text) IS NULL OR reference_id = ?)
+                 ORDER BY created_at DESC, adjustment_id DESC
+                 LIMIT ?
+                """, (rs, rowNum) -> new AdminBalanceAdjustmentRecord(
+                rs.getLong("adjustment_id"),
+                rs.getString("adjustment_kind"),
+                rs.getLong("admin_user_id"),
+                rs.getString("admin_username"),
+                rs.getLong("user_id"),
+                nullableAccountType(rs.getString("account_type")),
+                rs.getString("asset"),
+                rs.getLong("amount_units"),
+                rs.getLong("balance_after_units"),
+                rs.getString("reference_id"),
+                rs.getString("reason"),
+                rs.getTimestamp("created_at").toInstant()), adminUserId, adminUserId, userId, userId,
+                normalizedKind, normalizedKind, normalizedAccountType, normalizedAccountType,
+                normalizedAsset, normalizedAsset, normalizedReferenceId, normalizedReferenceId, safeLimit);
+    }
+
+    public AdminCursorPage.CursorPage<AdminBalanceAdjustmentRecord> adminBalanceAdjustmentPage(Long adminUserId,
+                                                                                               Long userId,
+                                                                                               String adjustmentKind,
+                                                                                               AccountType accountType,
+                                                                                               String asset,
+                                                                                               String referenceId,
+                                                                                               int limit,
+                                                                                               String cursor,
+                                                                                               String sort) {
+        String normalizedKind = emptyToNull(adjustmentKind);
+        String normalizedAccountType = accountType == null ? null : accountType.name();
+        String normalizedAsset = emptyToNull(asset);
+        String normalizedReferenceId = emptyToNull(referenceId);
+        int safeLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort, "adjustment_id");
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(adminUserId);
+        args.add(adminUserId);
+        args.add(userId);
+        args.add(userId);
+        args.add(normalizedKind);
+        args.add(normalizedKind);
+        args.add(normalizedAccountType);
+        args.add(normalizedAccountType);
+        args.add(normalizedAsset);
+        args.add(normalizedAsset);
+        args.add(normalizedReferenceId);
+        args.add(normalizedReferenceId);
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        List<AdminBalanceAdjustmentRecord> rows = jdbcTemplate.query("""
+                SELECT adjustment_id, adjustment_kind, admin_user_id, admin_username, user_id, account_type,
+                       asset, amount_units, balance_after_units, reference_id, reason, created_at
+                  FROM account_admin_balance_adjustments
+                 WHERE (CAST(? AS text) IS NULL OR admin_user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR adjustment_kind = ?)
+                   AND (CAST(? AS text) IS NULL OR account_type = ?)
+                   AND (CAST(? AS text) IS NULL OR asset = ?)
+                   AND (CAST(? AS text) IS NULL OR reference_id = ?)
+                %s
+                 ORDER BY %s %s, %s %s
+                 LIMIT ?
+                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
+                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
+                (rs, rowNum) -> new AdminBalanceAdjustmentRecord(
+                rs.getLong("adjustment_id"),
+                rs.getString("adjustment_kind"),
+                rs.getLong("admin_user_id"),
+                rs.getString("admin_username"),
+                rs.getLong("user_id"),
+                nullableAccountType(rs.getString("account_type")),
+                rs.getString("asset"),
+                rs.getLong("amount_units"),
+                rs.getLong("balance_after_units"),
+                rs.getString("reference_id"),
+                rs.getString("reason"),
+                rs.getTimestamp("created_at").toInstant()), args.toArray());
+        return AdminCursorPage.page(rows, safeLimit, sortSpec, AdminBalanceAdjustmentRecord::createdAt,
+                AdminBalanceAdjustmentRecord::adjustmentId);
+    }
+
+    private AdminCursorPage.SortSpec parseCreatedAtSort(String sort, String idColumn) {
+        AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", idColumn, true);
+        AdminCursorPage.SortSpec createdAtAsc = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", idColumn, false);
+        return AdminCursorPage.parseSort(sort, createdAtDesc, List.of(createdAtDesc, createdAtAsc));
     }
 
     private List<ProductBalanceResponse> productBalancesFromTable(long userId, AccountType accountType) {
@@ -2150,6 +2504,26 @@ public class AccountRepository {
         return AccountType.valueOf(accountType);
     }
 
+    private AccountType nullableAccountType(String accountType) {
+        return accountType == null || accountType.isBlank() ? null : AccountType.valueOf(accountType);
+    }
+
+    private String requireAdjustmentKind(String adjustmentKind) {
+        if (!"BASIC".equals(adjustmentKind) && !"PRODUCT".equals(adjustmentKind)) {
+            throw new IllegalArgumentException("adjustmentKind must be BASIC or PRODUCT");
+        }
+        return adjustmentKind;
+    }
+
+    private String adminAdjustmentReferenceKey(String adjustmentKind,
+                                               long userId,
+                                               AccountType accountType,
+                                               String asset,
+                                               String referenceId) {
+        String accountSegment = accountType == null ? "" : accountType.name();
+        return adjustmentKind + "|" + userId + "|" + accountSegment + "|" + asset + "|" + referenceId;
+    }
+
     private boolean isLegacyPerpetualAccount(AccountType accountType) {
         return accountType == AccountType.USDT_PERPETUAL;
     }
@@ -2242,6 +2616,15 @@ public class AccountRepository {
     private long longOrZero(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
         long value = rs.getLong(column);
         return rs.wasNull() ? 0L : value;
+    }
+
+    private Long nullableLong(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
+        long value = rs.getLong(column);
+        return rs.wasNull() ? null : value;
+    }
+
+    private String emptyToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private void requireSingleRow(int rows, String operation) {

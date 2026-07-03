@@ -7,10 +7,13 @@ import com.surprising.trading.api.model.FeeTierQualificationMode;
 import com.surprising.trading.api.model.FeeTierQueryResponse;
 import com.surprising.trading.api.model.FeeTierResponse;
 import com.surprising.trading.api.model.FeeTierUpsertRequest;
+import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -20,6 +23,11 @@ import org.springframework.stereotype.Repository;
 public class FeeTierRepository {
 
     private static final long MAX_ABS_FEE_RATE_PPM = 1_000_000L;
+    private static final int MAX_QUERY_LIMIT = 500;
+    private static final TierSortSpec TIER_PRIORITY_DESC = new TierSortSpec("priority.desc", true);
+    private static final List<TierSortSpec> TIER_SORTS = List.of(
+            TIER_PRIORITY_DESC,
+            new TierSortSpec("priority.asc", false));
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -55,16 +63,48 @@ public class FeeTierRepository {
     }
 
     public FeeTierQueryResponse queryTiers(FeeScheduleStatus status, int limit) {
-        int normalizedLimit = Math.max(1, Math.min(limit, 500));
+        int normalizedLimit = Math.max(1, Math.min(limit, MAX_QUERY_LIMIT));
         String statusName = status == null ? null : status.name();
         List<FeeTierResponse> tiers = jdbcTemplate.query("""
                 SELECT *
                   FROM trading_fee_tiers
-                 WHERE (? IS NULL OR status = ?)
+                 WHERE (CAST(? AS text) IS NULL OR status = ?)
                  ORDER BY priority DESC, min_30d_volume_units DESC, min_asset_balance_units DESC, tier_code ASC
                  LIMIT ?
                 """, (rs, rowNum) -> toTierResponse(rs), statusName, statusName, normalizedLimit);
         return new FeeTierQueryResponse(tiers.size(), tiers);
+    }
+
+    public FeeTierQueryResponse queryTiersPage(FeeScheduleStatus status, int limit, String cursor, String sort) {
+        int normalizedLimit = Math.max(1, Math.min(limit, MAX_QUERY_LIMIT));
+        String statusName = status == null ? null : status.name();
+        TierSortSpec sortSpec = parseTierSort(sort);
+        TierCursor decodedCursor = decodeTierCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(statusName);
+        args.add(statusName);
+        String sql = """
+                SELECT *
+                  FROM trading_fee_tiers
+                 WHERE (CAST(? AS text) IS NULL OR status = ?)
+                """ + tierSeekCondition(sortSpec, decodedCursor) + """
+                 ORDER BY %s
+                 LIMIT ?
+                """.formatted(sortSpec.orderBy());
+        addTierCursorArgs(args, decodedCursor);
+        args.add(normalizedLimit + 1);
+        List<FeeTierResponse> fetchedRows = jdbcTemplate.query(sql, (rs, rowNum) -> toTierResponse(rs),
+                args.toArray());
+        boolean hasMore = fetchedRows.size() > normalizedLimit;
+        List<FeeTierResponse> rows = hasMore
+                ? List.copyOf(fetchedRows.subList(0, normalizedLimit))
+                : List.copyOf(fetchedRows);
+        String nextCursor = null;
+        if (hasMore && !rows.isEmpty()) {
+            nextCursor = encodeTierCursor(rows.get(rows.size() - 1));
+        }
+        return new FeeTierQueryResponse(rows.size(), rows, nextCursor, hasMore, sortSpec.token(),
+                normalizedLimit);
     }
 
     public Optional<FeeTierResponse> findTier(String tierCode) {
@@ -370,6 +410,94 @@ public class FeeTierRepository {
     private static FeeScheduleSourceType sourceTypeOrNull(ResultSet rs, String column) throws SQLException {
         String value = rs.getString(column);
         return rs.wasNull() ? null : FeeScheduleSourceType.valueOf(value);
+    }
+
+    private static TierSortSpec parseTierSort(String sort) {
+        if (sort == null || sort.isBlank()) {
+            return TIER_PRIORITY_DESC;
+        }
+        String normalized = sort.trim();
+        return TIER_SORTS.stream()
+                .filter(spec -> spec.token().equals(normalized))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("unsupported sort: " + sort));
+    }
+
+    private static String tierSeekCondition(TierSortSpec sort, TierCursor cursor) {
+        if (cursor == null) {
+            return "";
+        }
+        String operator = sort.numberOperator();
+        return """
+                   AND (priority %1$s ?
+                        OR (priority = ? AND min_30d_volume_units %1$s ?)
+                        OR (priority = ? AND min_30d_volume_units = ? AND min_asset_balance_units %1$s ?)
+                        OR (priority = ? AND min_30d_volume_units = ? AND min_asset_balance_units = ?
+                            AND tier_code > ?))
+                """.formatted(operator);
+    }
+
+    private static void addTierCursorArgs(List<Object> args, TierCursor cursor) {
+        if (cursor == null) {
+            return;
+        }
+        args.add(cursor.priority());
+        args.add(cursor.priority());
+        args.add(cursor.min30dVolumeUnits());
+        args.add(cursor.priority());
+        args.add(cursor.min30dVolumeUnits());
+        args.add(cursor.minAssetBalanceUnits());
+        args.add(cursor.priority());
+        args.add(cursor.min30dVolumeUnits());
+        args.add(cursor.minAssetBalanceUnits());
+        args.add(cursor.tierCode());
+    }
+
+    private static TierCursor decodeTierCursor(String cursor) {
+        if (cursor == null || cursor.isBlank()) {
+            return null;
+        }
+        try {
+            String decoded = new String(Base64.getUrlDecoder().decode(cursor.trim()), StandardCharsets.UTF_8);
+            String[] parts = decoded.split(":", 4);
+            if (parts.length != 4) {
+                throw new IllegalArgumentException("invalid cursor");
+            }
+            return new TierCursor(Integer.parseInt(parts[0]), Long.parseLong(parts[1]),
+                    Long.parseLong(parts[2]), normalizeTierCode(parts[3]));
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("invalid cursor", ex);
+        }
+    }
+
+    private static String encodeTierCursor(FeeTierResponse tier) {
+        String raw = tier.priority() + ":" + tier.min30dVolumeUnits() + ":"
+                + tier.minAssetBalanceUnits() + ":" + tier.tierCode();
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private record TierSortSpec(String token, boolean descending) {
+        String numberOperator() {
+            return descending ? "<" : ">";
+        }
+
+        String numberDirectionSql() {
+            return descending ? "DESC" : "ASC";
+        }
+
+        String orderBy() {
+            return "priority " + numberDirectionSql()
+                    + ", min_30d_volume_units " + numberDirectionSql()
+                    + ", min_asset_balance_units " + numberDirectionSql()
+                    + ", tier_code ASC";
+        }
+    }
+
+    private record TierCursor(
+            int priority,
+            long min30dVolumeUnits,
+            long minAssetBalanceUnits,
+            String tierCode) {
     }
 
     public record FeeTierMetrics(

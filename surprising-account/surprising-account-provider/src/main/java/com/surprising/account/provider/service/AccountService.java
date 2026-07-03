@@ -1,6 +1,8 @@
 package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.AdminBalanceAdjustmentQueryResponse;
+import com.surprising.account.api.model.AccountLedgerQueryResponse;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
@@ -12,6 +14,8 @@ import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
 import com.surprising.account.api.model.ProductBalanceQueryResponse;
 import com.surprising.account.api.model.ProductBalanceResponse;
+import com.surprising.account.api.model.ProductLedgerQueryResponse;
+import com.surprising.account.api.model.ProductTransferRecordQueryResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.provider.config.AccountProperties;
@@ -80,6 +84,24 @@ public class AccountService {
                 normalizeReferenceId(request.referenceId()), request.reason());
     }
 
+    @Transactional
+    public BalanceResponse adminAdjustBalance(String adminUserId,
+                                              String adminUsername,
+                                              BalanceAdjustmentRequest request) {
+        if (request.amountUnits() == 0) {
+            throw new IllegalArgumentException("amountUnits must not be zero");
+        }
+        long normalizedAdminUserId = normalizeAdminUserId(adminUserId);
+        String normalizedAsset = normalizeAsset(request.asset());
+        String normalizedReferenceId = normalizeReferenceId(request.referenceId());
+        BalanceResponse response = accountRepository.adjustBalance(request.userId(), normalizedAsset,
+                request.amountUnits(), normalizedReferenceId, request.reason());
+        accountRepository.recordAdminBalanceAdjustment("BASIC", normalizedAdminUserId,
+                normalizeAdminUsername(adminUsername), request.userId(), null, normalizedAsset, request.amountUnits(),
+                response.availableUnits(), normalizedReferenceId, request.reason());
+        return response;
+    }
+
     public BalanceResponse balance(long userId, String asset) {
         return accountRepository.balance(userId, normalizeAsset(asset))
                 .orElse(new BalanceResponse(userId, normalizeAsset(asset), 0L, 0L, 0L, Instant.EPOCH));
@@ -100,6 +122,25 @@ public class AccountService {
                 request.amountUnits(), normalizeReferenceId(request.referenceId()), request.reason());
     }
 
+    @Transactional
+    public ProductBalanceResponse adminAdjustProductBalance(String adminUserId,
+                                                            String adminUsername,
+                                                            ProductBalanceAdjustmentRequest request) {
+        if (request.amountUnits() == 0) {
+            throw new IllegalArgumentException("amountUnits must not be zero");
+        }
+        long normalizedAdminUserId = normalizeAdminUserId(adminUserId);
+        AccountType accountType = normalizeAccountType(request.accountType());
+        String normalizedAsset = normalizeAsset(request.asset());
+        String normalizedReferenceId = normalizeReferenceId(request.referenceId());
+        ProductBalanceResponse response = accountRepository.adjustProductBalance(request.userId(), accountType,
+                normalizedAsset, request.amountUnits(), normalizedReferenceId, request.reason());
+        accountRepository.recordAdminBalanceAdjustment("PRODUCT", normalizedAdminUserId,
+                normalizeAdminUsername(adminUsername), request.userId(), accountType, normalizedAsset,
+                request.amountUnits(), response.availableUnits(), normalizedReferenceId, request.reason());
+        return response;
+    }
+
     public ProductBalanceResponse productBalance(long userId, AccountType accountType, String asset) {
         AccountType normalizedType = normalizeAccountType(accountType);
         String normalizedAsset = normalizeAsset(asset);
@@ -111,6 +152,98 @@ public class AccountService {
     public ProductBalanceQueryResponse productBalances(long userId, AccountType accountType) {
         List<ProductBalanceResponse> rows = accountRepository.productBalances(userId, accountType);
         return new ProductBalanceQueryResponse(rows.size(), rows);
+    }
+
+    public AccountLedgerQueryResponse accountLedger(Long userId, String asset, String referenceType, int limit) {
+        return accountLedger(userId, asset, referenceType, limit, null, null);
+    }
+
+    public AccountLedgerQueryResponse accountLedger(Long userId,
+                                                    String asset,
+                                                    String referenceType,
+                                                    int limit,
+                                                    String cursor,
+                                                    String sort) {
+        requireOptionalUserId(userId);
+        int safeLimit = normalizeLimit(limit);
+        var page = accountRepository.accountLedgerPage(userId, normalizeOptionalAsset(asset),
+                normalizeOptionalReferenceType(referenceType), safeLimit, cursor, sort);
+        return new AccountLedgerQueryResponse(page.items().size(), page.items(),
+                page.nextCursor(), page.hasMore(), page.sort(), page.limit());
+    }
+
+    public ProductLedgerQueryResponse productLedger(Long userId,
+                                                    AccountType accountType,
+                                                    String asset,
+                                                    String referenceType,
+                                                    int limit) {
+        return productLedger(userId, accountType, asset, referenceType, limit, null, null);
+    }
+
+    public ProductLedgerQueryResponse productLedger(Long userId,
+                                                    AccountType accountType,
+                                                    String asset,
+                                                    String referenceType,
+                                                    int limit,
+                                                    String cursor,
+                                                    String sort) {
+        requireOptionalUserId(userId);
+        int safeLimit = normalizeLimit(limit);
+        var page = accountRepository.productLedgerPage(userId, accountType, normalizeOptionalAsset(asset),
+                normalizeOptionalReferenceType(referenceType), safeLimit, cursor, sort);
+        return new ProductLedgerQueryResponse(page.items().size(), page.items(),
+                page.nextCursor(), page.hasMore(), page.sort(), page.limit());
+    }
+
+    public ProductTransferRecordQueryResponse productTransfers(Long userId,
+                                                               AccountType accountType,
+                                                               String asset,
+                                                               int limit) {
+        return productTransfers(userId, accountType, asset, limit, null, null);
+    }
+
+    public ProductTransferRecordQueryResponse productTransfers(Long userId,
+                                                               AccountType accountType,
+                                                               String asset,
+                                                               int limit,
+                                                               String cursor,
+                                                               String sort) {
+        requireOptionalUserId(userId);
+        int safeLimit = normalizeLimit(limit);
+        var page = accountRepository.productTransferPage(userId, accountType, normalizeOptionalAsset(asset),
+                safeLimit, cursor, sort);
+        return new ProductTransferRecordQueryResponse(page.items().size(), page.items(),
+                page.nextCursor(), page.hasMore(), page.sort(), page.limit());
+    }
+
+    public AdminBalanceAdjustmentQueryResponse adminBalanceAdjustments(Long adminUserId,
+                                                                       Long userId,
+                                                                       String adjustmentKind,
+                                                                       AccountType accountType,
+                                                                       String asset,
+                                                                       String referenceId,
+                                                                       int limit) {
+        return adminBalanceAdjustments(adminUserId, userId, adjustmentKind, accountType, asset, referenceId,
+                limit, null, null);
+    }
+
+    public AdminBalanceAdjustmentQueryResponse adminBalanceAdjustments(Long adminUserId,
+                                                                       Long userId,
+                                                                       String adjustmentKind,
+                                                                       AccountType accountType,
+                                                                       String asset,
+                                                                       String referenceId,
+                                                                       int limit,
+                                                                       String cursor,
+                                                                       String sort) {
+        requireOptionalUserId(adminUserId);
+        requireOptionalUserId(userId);
+        int safeLimit = normalizeLimit(limit);
+        var page = accountRepository.adminBalanceAdjustmentPage(adminUserId, userId,
+                normalizeOptionalAdjustmentKind(adjustmentKind), accountType, normalizeOptionalAsset(asset),
+                normalizeOptionalReferenceId(referenceId), safeLimit, cursor, sort);
+        return new AdminBalanceAdjustmentQueryResponse(page.items().size(), page.items(),
+                page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
     @Transactional
@@ -377,6 +510,21 @@ public class AccountService {
         return normalized;
     }
 
+    private String normalizeOptionalAsset(String asset) {
+        return asset == null || asset.isBlank() ? null : normalizeAsset(asset);
+    }
+
+    private String normalizeOptionalReferenceType(String referenceType) {
+        if (referenceType == null || referenceType.isBlank()) {
+            return null;
+        }
+        String normalized = referenceType.trim().toUpperCase();
+        if (!normalized.matches("[A-Z0-9_:-]{2,80}")) {
+            throw new IllegalArgumentException("invalid referenceType: " + referenceType);
+        }
+        return normalized;
+    }
+
     private String normalizeSymbol(String symbol) {
         if (symbol == null || symbol.isBlank()) {
             throw new IllegalArgumentException("symbol is required");
@@ -433,6 +581,50 @@ public class AccountService {
         return normalized;
     }
 
+    private String normalizeOptionalReferenceId(String referenceId) {
+        if (referenceId == null || referenceId.isBlank()) {
+            return null;
+        }
+        return normalizeReferenceId(referenceId);
+    }
+
+    private String normalizeOptionalAdjustmentKind(String adjustmentKind) {
+        if (adjustmentKind == null || adjustmentKind.isBlank()) {
+            return null;
+        }
+        String normalized = adjustmentKind.trim().toUpperCase();
+        if (!"BASIC".equals(normalized) && !"PRODUCT".equals(normalized)) {
+            throw new IllegalArgumentException("adjustmentKind must be BASIC or PRODUCT");
+        }
+        return normalized;
+    }
+
+    private long normalizeAdminUserId(String adminUserId) {
+        if (adminUserId == null || adminUserId.isBlank()) {
+            throw new IllegalArgumentException("adminUserId is required");
+        }
+        try {
+            long value = Long.parseLong(adminUserId.trim());
+            if (value <= 0) {
+                throw new IllegalArgumentException("adminUserId must be positive");
+            }
+            return value;
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("adminUserId must be numeric", ex);
+        }
+    }
+
+    private String normalizeAdminUsername(String adminUsername) {
+        if (adminUsername == null || adminUsername.isBlank()) {
+            return null;
+        }
+        String normalized = adminUsername.trim();
+        if (normalized.length() > 128) {
+            throw new IllegalArgumentException("adminUsername length must be <= 128");
+        }
+        return normalized;
+    }
+
     private String normalizeReason(String reason, long amountUnits) {
         if (reason == null || reason.isBlank()) {
             return amountUnits > 0 ? "ADD_POSITION_MARGIN" : "REMOVE_POSITION_MARGIN";
@@ -442,6 +634,19 @@ public class AccountService {
             throw new IllegalArgumentException("reason length must be <= 128");
         }
         return normalized;
+    }
+
+    private void requireOptionalUserId(Long userId) {
+        if (userId != null && userId <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+    }
+
+    private int normalizeLimit(int limit) {
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
+        return limit;
     }
 
     private record ContractSpecKey(String symbol, long instrumentVersion) {

@@ -79,6 +79,12 @@ CREATE TABLE IF NOT EXISTS instruments (
 CREATE INDEX IF NOT EXISTS instruments_status_idx
     ON instruments (status, instrument_type, symbol);
 
+CREATE INDEX IF NOT EXISTS instruments_updated_page_idx
+    ON instruments (updated_at DESC, symbol DESC, version DESC);
+
+CREATE INDEX IF NOT EXISTS instruments_created_page_idx
+    ON instruments (created_at DESC, symbol DESC, version DESC);
+
 CREATE TABLE IF NOT EXISTS instrument_current_versions (
     symbol              TEXT PRIMARY KEY,
     version             BIGINT NOT NULL,
@@ -860,6 +866,10 @@ CREATE INDEX IF NOT EXISTS trading_trigger_orders_triggering_idx
     ON trading_trigger_orders (updated_at, trigger_order_id)
     WHERE status = 'TRIGGERING';
 
+CREATE INDEX IF NOT EXISTS trading_trigger_orders_trace_idx
+    ON trading_trigger_orders (trace_id)
+    WHERE trace_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS trading_order_events (
     event_id            BIGINT PRIMARY KEY,
     order_id            BIGINT NOT NULL,
@@ -912,6 +922,10 @@ CREATE INDEX IF NOT EXISTS trading_outbox_pending_idx
 
 CREATE INDEX IF NOT EXISTS trading_outbox_aggregate_idx
     ON trading_outbox_events (aggregate_type, aggregate_id);
+
+CREATE INDEX IF NOT EXISTS trading_outbox_events_trace_idx
+    ON trading_outbox_events ((payload ->> 'traceId'))
+    WHERE payload ? 'traceId';
 
 CREATE TABLE IF NOT EXISTS trading_matching_assets (
     asset               TEXT PRIMARY KEY,
@@ -1219,6 +1233,44 @@ CREATE INDEX IF NOT EXISTS account_ledger_liquidation_fee_order_idx
     ON account_ledger_entries (order_id, trade_id)
     WHERE reference_type = 'LIQUIDATION_FEE';
 
+CREATE TABLE IF NOT EXISTS account_admin_balance_adjustments (
+    adjustment_id       BIGSERIAL PRIMARY KEY,
+    reference_key       TEXT NOT NULL,
+    adjustment_kind     TEXT NOT NULL,
+    admin_user_id       BIGINT NOT NULL,
+    admin_username      TEXT,
+    user_id             BIGINT NOT NULL,
+    account_type        TEXT,
+    asset               TEXT NOT NULL,
+    amount_units        BIGINT NOT NULL,
+    balance_after_units BIGINT NOT NULL,
+    reference_id        TEXT NOT NULL,
+    reason              TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT account_admin_adjustments_kind_check CHECK (adjustment_kind IN ('BASIC', 'PRODUCT')),
+    CONSTRAINT account_admin_adjustments_type_check CHECK (
+        account_type IS NULL OR account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL')
+    ),
+    CONSTRAINT account_admin_adjustments_kind_type_check CHECK (
+        (adjustment_kind = 'BASIC' AND account_type IS NULL)
+        OR (adjustment_kind = 'PRODUCT' AND account_type IS NOT NULL)
+    ),
+    CONSTRAINT account_admin_adjustments_admin_positive CHECK (admin_user_id > 0),
+    CONSTRAINT account_admin_adjustments_user_positive CHECK (user_id > 0),
+    CONSTRAINT account_admin_adjustments_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
+    CONSTRAINT account_admin_adjustments_amount_non_zero CHECK (amount_units <> 0),
+    CONSTRAINT account_admin_adjustments_reference_present CHECK (length(reference_id) > 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS account_admin_adjustments_reference_uidx
+    ON account_admin_balance_adjustments (reference_key);
+
+CREATE INDEX IF NOT EXISTS account_admin_adjustments_admin_time_idx
+    ON account_admin_balance_adjustments (admin_user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS account_admin_adjustments_user_time_idx
+    ON account_admin_balance_adjustments (user_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS account_margin_reservations (
     reservation_id      BIGINT PRIMARY KEY,
     account_type        TEXT NOT NULL DEFAULT 'USDT_PERPETUAL',
@@ -1383,6 +1435,10 @@ CREATE INDEX IF NOT EXISTS account_outbox_pending_idx
 CREATE INDEX IF NOT EXISTS account_outbox_aggregate_idx
     ON account_outbox_events (aggregate_type, aggregate_id);
 
+CREATE INDEX IF NOT EXISTS account_outbox_events_trace_idx
+    ON account_outbox_events ((payload ->> 'traceId'))
+    WHERE payload ? 'traceId';
+
 CREATE TABLE IF NOT EXISTS risk_sequences (
     sequence_name       TEXT PRIMARY KEY,
     sequence_value      BIGINT NOT NULL,
@@ -1508,6 +1564,47 @@ CREATE UNIQUE INDEX IF NOT EXISTS risk_liquidation_candidates_active_uidx
 CREATE INDEX IF NOT EXISTS risk_liquidation_candidates_status_idx
     ON risk_liquidation_candidates (status, event_time ASC);
 
+CREATE TABLE IF NOT EXISTS risk_admin_rule_overrides (
+    rule_code                    TEXT PRIMARY KEY,
+    rule_name                    TEXT NOT NULL,
+    rule_type                    TEXT NOT NULL,
+    enabled                      BOOLEAN NOT NULL DEFAULT TRUE,
+    warning_margin_ratio_ppm     BIGINT,
+    liquidation_margin_ratio_ppm BIGINT,
+    scan_delay_ms                BIGINT,
+    scan_batch_size              INTEGER,
+    admin_user_id                TEXT NOT NULL,
+    reason                       TEXT NOT NULL,
+    created_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT risk_admin_rule_overrides_code_check CHECK (rule_code ~ '^[A-Z0-9_.:-]{2,96}$'),
+    CONSTRAINT risk_admin_rule_overrides_type_check CHECK (
+        rule_type IN ('GLOBAL_MARGIN', 'SCAN_CONTROL')
+    ),
+    CONSTRAINT risk_admin_rule_overrides_margin_check CHECK (
+        warning_margin_ratio_ppm IS NULL OR warning_margin_ratio_ppm >= 0
+    ),
+    CONSTRAINT risk_admin_rule_overrides_liquidation_check CHECK (
+        liquidation_margin_ratio_ppm IS NULL OR liquidation_margin_ratio_ppm >= 0
+    ),
+    CONSTRAINT risk_admin_rule_overrides_margin_order_check CHECK (
+        warning_margin_ratio_ppm IS NULL
+        OR liquidation_margin_ratio_ppm IS NULL
+        OR warning_margin_ratio_ppm < liquidation_margin_ratio_ppm
+    ),
+    CONSTRAINT risk_admin_rule_overrides_scan_delay_check CHECK (
+        scan_delay_ms IS NULL OR scan_delay_ms >= 0
+    ),
+    CONSTRAINT risk_admin_rule_overrides_batch_check CHECK (
+        scan_batch_size IS NULL OR scan_batch_size BETWEEN 1 AND 10000
+    ),
+    CONSTRAINT risk_admin_rule_overrides_admin_present CHECK (length(admin_user_id) > 0),
+    CONSTRAINT risk_admin_rule_overrides_reason_present CHECK (length(reason) BETWEEN 1 AND 500)
+);
+
+CREATE INDEX IF NOT EXISTS risk_admin_rule_overrides_type_idx
+    ON risk_admin_rule_overrides (rule_type, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS risk_outbox_events (
     id                  BIGINT PRIMARY KEY,
     topic               TEXT NOT NULL,
@@ -1526,6 +1623,10 @@ CREATE TABLE IF NOT EXISTS risk_outbox_events (
 CREATE INDEX IF NOT EXISTS risk_outbox_pending_idx
     ON risk_outbox_events (next_attempt_at, id)
     WHERE published_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS risk_outbox_events_trace_idx
+    ON risk_outbox_events ((payload ->> 'traceId'))
+    WHERE payload ? 'traceId';
 
 CREATE TABLE IF NOT EXISTS liquidation_sequences (
     sequence_name       TEXT PRIMARY KEY,
@@ -1579,6 +1680,23 @@ CREATE INDEX IF NOT EXISTS liquidation_orders_user_time_idx
 
 CREATE INDEX IF NOT EXISTS liquidation_orders_symbol_time_idx
     ON liquidation_orders (symbol, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS liquidation_admin_actions (
+    action_id            BIGSERIAL PRIMARY KEY,
+    candidate_id         BIGINT NOT NULL REFERENCES risk_liquidation_candidates(candidate_id),
+    action_type          TEXT NOT NULL,
+    admin_user_id        TEXT NOT NULL,
+    reason               TEXT NOT NULL,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT liquidation_admin_actions_type_check CHECK (
+        action_type IN ('CANCEL_CANDIDATE')
+    ),
+    CONSTRAINT liquidation_admin_actions_admin_present CHECK (length(admin_user_id) > 0),
+    CONSTRAINT liquidation_admin_actions_reason_present CHECK (length(reason) BETWEEN 1 AND 500)
+);
+
+CREATE INDEX IF NOT EXISTS liquidation_admin_actions_candidate_time_idx
+    ON liquidation_admin_actions (candidate_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS insurance_sequences (
     sequence_name       TEXT PRIMARY KEY,
@@ -1708,6 +1826,83 @@ CREATE TABLE IF NOT EXISTS market_maker_strategy_leases (
 CREATE INDEX IF NOT EXISTS market_maker_strategy_leases_until_idx
     ON market_maker_strategy_leases (lease_until ASC);
 
+CREATE TABLE IF NOT EXISTS market_maker_strategy_overrides (
+    strategy_id                 TEXT PRIMARY KEY,
+    enabled                     BOOLEAN,
+    base_quantity_steps         BIGINT,
+    margin_mode                 TEXT,
+    spread_ticks                BIGINT,
+    level_spacing_ticks         BIGINT,
+    max_inventory_steps         BIGINT,
+    max_inventory_skew_ppm      BIGINT,
+    order_levels                INTEGER,
+    updated_by_admin_user_id    TEXT NOT NULL,
+    reason                      TEXT NOT NULL,
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    version                     BIGINT NOT NULL DEFAULT 1,
+    CONSTRAINT market_maker_overrides_strategy_format CHECK (strategy_id ~ '^[A-Za-z0-9_.:-]{1,64}$'),
+    CONSTRAINT market_maker_overrides_margin_mode CHECK (margin_mode IS NULL OR margin_mode IN ('CROSS', 'ISOLATED')),
+    CONSTRAINT market_maker_overrides_base_qty CHECK (base_quantity_steps IS NULL OR base_quantity_steps > 0),
+    CONSTRAINT market_maker_overrides_spread CHECK (spread_ticks IS NULL OR spread_ticks >= 0),
+    CONSTRAINT market_maker_overrides_level_spacing CHECK (level_spacing_ticks IS NULL OR level_spacing_ticks >= 0),
+    CONSTRAINT market_maker_overrides_inventory CHECK (max_inventory_steps IS NULL OR max_inventory_steps > 0),
+    CONSTRAINT market_maker_overrides_inventory_skew CHECK (
+        max_inventory_skew_ppm IS NULL OR max_inventory_skew_ppm BETWEEN 0 AND 1000000
+    ),
+    CONSTRAINT market_maker_overrides_order_levels CHECK (order_levels IS NULL OR order_levels BETWEEN 1 AND 20),
+    CONSTRAINT market_maker_overrides_admin_present CHECK (length(updated_by_admin_user_id) > 0),
+    CONSTRAINT market_maker_overrides_reason_present CHECK (length(reason) BETWEEN 1 AND 500),
+    CONSTRAINT market_maker_overrides_version_positive CHECK (version > 0)
+);
+
+CREATE INDEX IF NOT EXISTS market_maker_strategy_overrides_updated_idx
+    ON market_maker_strategy_overrides (updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS market_maker_strategy_run_events (
+    event_id                    BIGSERIAL PRIMARY KEY,
+    strategy_id                 TEXT NOT NULL,
+    symbol                      TEXT,
+    account_id                  BIGINT,
+    node_id                     TEXT NOT NULL,
+    cycle_sequence              BIGINT NOT NULL DEFAULT 0,
+    event_type                  TEXT NOT NULL,
+    submitted_orders            BIGINT NOT NULL DEFAULT 0,
+    canceled_orders             BIGINT NOT NULL DEFAULT 0,
+    rejected_orders             BIGINT NOT NULL DEFAULT 0,
+    skipped_reason              TEXT,
+    error_message               TEXT,
+    trace_id                    TEXT,
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT market_maker_run_events_strategy_format CHECK (strategy_id ~ '^[A-Za-z0-9_.:-]{1,64}$'),
+    CONSTRAINT market_maker_run_events_symbol_format CHECK (
+        symbol IS NULL OR symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'
+    ),
+    CONSTRAINT market_maker_run_events_account_positive CHECK (account_id IS NULL OR account_id > 0),
+    CONSTRAINT market_maker_run_events_node_present CHECK (length(node_id) > 0),
+    CONSTRAINT market_maker_run_events_cycle_non_negative CHECK (cycle_sequence >= 0),
+    CONSTRAINT market_maker_run_events_type_check CHECK (
+        event_type IN ('CYCLE_SUCCESS', 'CYCLE_FAILED', 'QUOTE_RECONCILED', 'TRADE_SUBMITTED', 'TRADE_REJECTED', 'SKIPPED')
+    ),
+    CONSTRAINT market_maker_run_events_counts_non_negative CHECK (
+        submitted_orders >= 0 AND canceled_orders >= 0 AND rejected_orders >= 0
+    )
+);
+
+CREATE INDEX IF NOT EXISTS market_maker_run_events_strategy_time_idx
+    ON market_maker_strategy_run_events (strategy_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS market_maker_run_events_symbol_time_idx
+    ON market_maker_strategy_run_events (symbol, created_at DESC)
+    WHERE symbol IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS market_maker_run_events_account_time_idx
+    ON market_maker_strategy_run_events (account_id, created_at DESC)
+    WHERE account_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS market_maker_run_events_trace_idx
+    ON market_maker_strategy_run_events (trace_id)
+    WHERE trace_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS gateway_users (
     user_id             BIGSERIAL PRIMARY KEY,
     username            TEXT NOT NULL,
@@ -1741,6 +1936,14 @@ CREATE TABLE IF NOT EXISTS gateway_roles (
 CREATE UNIQUE INDEX IF NOT EXISTS gateway_roles_code_uidx
     ON gateway_roles (role_code);
 
+INSERT INTO gateway_roles (role_code, role_name)
+VALUES
+    ('USER', 'Standard user'),
+    ('SUPPORT', 'Customer support read-only operator'),
+    ('ADMIN', 'Admin operator'),
+    ('SUPER_ADMIN', 'Super administrator')
+ON CONFLICT (role_code) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS gateway_user_roles (
     user_id             BIGINT NOT NULL REFERENCES gateway_users(user_id),
     role_id             BIGINT NOT NULL REFERENCES gateway_roles(role_id),
@@ -1750,6 +1953,271 @@ CREATE TABLE IF NOT EXISTS gateway_user_roles (
 
 CREATE INDEX IF NOT EXISTS gateway_user_roles_role_idx
     ON gateway_user_roles (role_id);
+
+CREATE TABLE IF NOT EXISTS gateway_permissions (
+    permission_id       BIGSERIAL PRIMARY KEY,
+    permission_code     TEXT NOT NULL,
+    permission_name     TEXT NOT NULL,
+    description         TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_permissions_code_format CHECK (permission_code ~ '^[a-z0-9*][a-z0-9.*_-]{1,127}$')
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_permissions_code_uidx
+    ON gateway_permissions (permission_code);
+
+INSERT INTO gateway_permissions (permission_code, permission_name, description)
+VALUES
+    ('admin.*', 'All admin permissions', 'Full access to every local and proxied admin operation.'),
+    ('admin.users.read', 'Read users', 'View users, sessions, login logs and user profile aggregates.'),
+    ('admin.users.write', 'Write users', 'Change user status, roles and sessions.'),
+    ('admin.audit.read', 'Read audit logs', 'View admin operation logs and login audit logs.'),
+    ('admin.approvals.read', 'Read approvals', 'View admin approval requests.'),
+    ('admin.approvals.write', 'Write approvals', 'Create, approve, reject and consume admin approvals.'),
+    ('admin.system.read', 'Read system state', 'View configured routes and backend health.'),
+    ('admin.traces.read', 'Read TraceId timelines', 'View cross-module TraceId timelines for incident investigation.'),
+    ('admin.market.read', 'Read market health', 'View index source, mark price and candlestick freshness metrics.'),
+    ('admin.alerts.read', 'Read alerts', 'View admin alert rules and alert events.'),
+    ('admin.alerts.write', 'Write alerts', 'Create, update, evaluate and acknowledge admin alerts.'),
+    ('admin.trading.read', 'Read trading operations', 'View trading operation metrics and aggregated order flow.'),
+    ('admin.reports.read', 'Read admin reports', 'View account asset valuation and back-office reports.'),
+    ('admin.reports.write', 'Write admin reports', 'Generate account asset report snapshots.'),
+    ('admin.security.mfa', 'Manage own MFA', 'Enroll, confirm and disable own admin TOTP MFA.'),
+    ('admin.support.read', 'Read support console', 'View read-only customer support user overviews.'),
+    ('admin.support.write', 'Write support tickets', 'Create and update customer support tickets and internal notes.'),
+    ('admin.compliance.read', 'Read compliance', 'View KYC, AML cases and risk tags.'),
+    ('admin.compliance.write', 'Write compliance', 'Update KYC, AML cases and risk tags.'),
+    ('admin.exports.read', 'Read exports', 'View and download admin export jobs.'),
+    ('admin.exports.write', 'Write exports', 'Create admin export jobs.'),
+    ('admin.queries.read', 'Read query tasks', 'View long-running admin query tasks and results.'),
+    ('admin.queries.write', 'Write query tasks', 'Create controlled long-running admin query tasks.'),
+    ('admin.permissions.read', 'Read permissions', 'View roles, permission catalog and role assignments.'),
+    ('admin.permissions.write', 'Write permissions', 'Replace role permission assignments.'),
+    ('admin.gateway.*.read', 'Read admin gateway services', 'Read through any configured admin gateway service.'),
+    ('admin.gateway.*.write', 'Write admin gateway services', 'Write through any configured admin gateway service.')
+ON CONFLICT (permission_code) DO UPDATE
+   SET permission_name = EXCLUDED.permission_name,
+       description = EXCLUDED.description;
+
+CREATE TABLE IF NOT EXISTS gateway_role_permissions (
+    role_id             BIGINT NOT NULL REFERENCES gateway_roles(role_id),
+    permission_id       BIGINT NOT NULL REFERENCES gateway_permissions(permission_id),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (role_id, permission_id)
+);
+
+CREATE INDEX IF NOT EXISTS gateway_role_permissions_permission_idx
+    ON gateway_role_permissions (permission_id);
+
+INSERT INTO gateway_role_permissions (role_id, permission_id)
+SELECT r.role_id, p.permission_id
+  FROM gateway_roles r
+  JOIN gateway_permissions p ON p.permission_code = 'admin.*'
+ WHERE r.role_code = 'SUPER_ADMIN'
+ON CONFLICT (role_id, permission_id) DO NOTHING;
+
+INSERT INTO gateway_role_permissions (role_id, permission_id)
+SELECT r.role_id, p.permission_id
+  FROM gateway_roles r
+  JOIN gateway_permissions p ON p.permission_code IN (
+      'admin.support.read',
+      'admin.users.read',
+      'admin.users.write',
+      'admin.audit.read',
+      'admin.approvals.read',
+      'admin.approvals.write',
+      'admin.system.read',
+      'admin.traces.read',
+      'admin.market.read',
+      'admin.alerts.read',
+      'admin.alerts.write',
+      'admin.trading.read',
+      'admin.reports.read',
+      'admin.reports.write',
+      'admin.security.mfa',
+      'admin.compliance.read',
+      'admin.compliance.write',
+      'admin.exports.read',
+      'admin.exports.write',
+      'admin.queries.read',
+      'admin.queries.write',
+      'admin.permissions.read',
+      'admin.support.write',
+      'admin.gateway.*.read',
+      'admin.gateway.*.write'
+  )
+ WHERE r.role_code = 'ADMIN'
+ON CONFLICT (role_id, permission_id) DO NOTHING;
+
+INSERT INTO gateway_role_permissions (role_id, permission_id)
+SELECT r.role_id, p.permission_id
+  FROM gateway_roles r
+  JOIN gateway_permissions p ON p.permission_code IN (
+      'admin.support.read',
+      'admin.support.write',
+      'admin.security.mfa'
+  )
+ WHERE r.role_code = 'SUPPORT'
+ON CONFLICT (role_id, permission_id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS gateway_user_mfa (
+    user_id                 BIGINT PRIMARY KEY REFERENCES gateway_users(user_id),
+    totp_secret_ciphertext  TEXT NOT NULL,
+    enabled                 BOOLEAN NOT NULL DEFAULT FALSE,
+    verified_at             TIMESTAMPTZ,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_user_mfa_secret_present CHECK (length(totp_secret_ciphertext) > 0),
+    CONSTRAINT gateway_user_mfa_verified_enabled CHECK (enabled = FALSE OR verified_at IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS gateway_user_mfa_enabled_idx
+    ON gateway_user_mfa (enabled);
+
+CREATE TABLE IF NOT EXISTS gateway_user_kyc_profiles (
+    user_id                 BIGINT PRIMARY KEY REFERENCES gateway_users(user_id),
+    kyc_level               TEXT NOT NULL DEFAULT 'NONE',
+    status                  TEXT NOT NULL DEFAULT 'UNVERIFIED',
+    country                 TEXT,
+    document_type           TEXT,
+    provider                TEXT,
+    provider_reference      TEXT,
+    reviewed_by_user_id     BIGINT REFERENCES gateway_users(user_id),
+    reviewed_at             TIMESTAMPTZ,
+    rejection_reason        TEXT,
+    expires_at              TIMESTAMPTZ,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_user_kyc_level_check CHECK (kyc_level IN ('NONE', 'BASIC', 'STANDARD', 'ENHANCED', 'INSTITUTIONAL')),
+    CONSTRAINT gateway_user_kyc_status_check CHECK (status IN ('UNVERIFIED', 'PENDING', 'VERIFIED', 'REJECTED', 'EXPIRED')),
+    CONSTRAINT gateway_user_kyc_country_check CHECK (country IS NULL OR country ~ '^[A-Z]{2}$')
+);
+
+CREATE INDEX IF NOT EXISTS gateway_user_kyc_status_idx
+    ON gateway_user_kyc_profiles (status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS gateway_user_risk_tags (
+    tag_id                  BIGSERIAL PRIMARY KEY,
+    user_id                 BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    tag_code                TEXT NOT NULL,
+    severity                TEXT NOT NULL,
+    status                  TEXT NOT NULL DEFAULT 'ACTIVE',
+    source                  TEXT,
+    reason                  TEXT NOT NULL,
+    created_by_user_id      BIGINT REFERENCES gateway_users(user_id),
+    resolved_by_user_id     BIGINT REFERENCES gateway_users(user_id),
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at             TIMESTAMPTZ,
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_user_risk_tags_code_check CHECK (tag_code ~ '^[A-Z0-9_.:-]{2,64}$'),
+    CONSTRAINT gateway_user_risk_tags_severity_check CHECK (severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
+    CONSTRAINT gateway_user_risk_tags_status_check CHECK (status IN ('ACTIVE', 'RESOLVED')),
+    CONSTRAINT gateway_user_risk_tags_reason_present CHECK (length(reason) > 0)
+);
+
+CREATE INDEX IF NOT EXISTS gateway_user_risk_tags_user_time_idx
+    ON gateway_user_risk_tags (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_user_risk_tags_status_idx
+    ON gateway_user_risk_tags (status, severity, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_user_risk_tags_created_page_idx
+    ON gateway_user_risk_tags (created_at DESC, tag_id DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_user_risk_tags_updated_page_idx
+    ON gateway_user_risk_tags (updated_at DESC, tag_id DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_user_risk_tags_active_uidx
+    ON gateway_user_risk_tags (user_id, tag_code)
+    WHERE status = 'ACTIVE';
+
+CREATE TABLE IF NOT EXISTS gateway_user_aml_cases (
+    case_id                 BIGSERIAL PRIMARY KEY,
+    user_id                 BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    status                  TEXT NOT NULL DEFAULT 'OPEN',
+    risk_score              INTEGER NOT NULL DEFAULT 0,
+    source                  TEXT,
+    summary                 TEXT NOT NULL,
+    assigned_admin_user_id  BIGINT REFERENCES gateway_users(user_id),
+    created_by_user_id      BIGINT REFERENCES gateway_users(user_id),
+    reviewed_by_user_id     BIGINT REFERENCES gateway_users(user_id),
+    reviewed_at             TIMESTAMPTZ,
+    closed_at               TIMESTAMPTZ,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_user_aml_cases_status_check CHECK (
+        status IN ('OPEN', 'REVIEWING', 'CLEARED', 'ESCALATED', 'RESTRICTED', 'CLOSED')
+    ),
+    CONSTRAINT gateway_user_aml_cases_risk_score_check CHECK (risk_score BETWEEN 0 AND 100),
+    CONSTRAINT gateway_user_aml_cases_summary_present CHECK (length(summary) > 0)
+);
+
+CREATE INDEX IF NOT EXISTS gateway_user_aml_cases_user_time_idx
+    ON gateway_user_aml_cases (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_user_aml_cases_status_idx
+    ON gateway_user_aml_cases (status, risk_score DESC, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_user_aml_cases_updated_page_idx
+    ON gateway_user_aml_cases (updated_at DESC, case_id DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_user_aml_cases_created_page_idx
+    ON gateway_user_aml_cases (created_at DESC, case_id DESC);
+
+CREATE TABLE IF NOT EXISTS gateway_support_tickets (
+    ticket_id               BIGSERIAL PRIMARY KEY,
+    user_id                 BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    status                  TEXT NOT NULL DEFAULT 'OPEN',
+    priority                TEXT NOT NULL DEFAULT 'MEDIUM',
+    category                TEXT NOT NULL DEFAULT 'GENERAL',
+    title                   TEXT NOT NULL,
+    assigned_admin_user_id  BIGINT REFERENCES gateway_users(user_id),
+    created_by_user_id      BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    resolved_by_user_id     BIGINT REFERENCES gateway_users(user_id),
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    closed_at               TIMESTAMPTZ,
+    CONSTRAINT gateway_support_tickets_status_check CHECK (
+        status IN ('OPEN', 'PENDING_USER', 'PENDING_INTERNAL', 'RESOLVED', 'CLOSED')
+    ),
+    CONSTRAINT gateway_support_tickets_priority_check CHECK (
+        priority IN ('LOW', 'MEDIUM', 'HIGH', 'URGENT')
+    ),
+    CONSTRAINT gateway_support_tickets_category_check CHECK (category ~ '^[A-Z0-9_.:-]{2,64}$'),
+    CONSTRAINT gateway_support_tickets_title_present CHECK (length(title) BETWEEN 1 AND 160),
+    CONSTRAINT gateway_support_tickets_closed_state_check CHECK (
+        (closed_at IS NULL AND status <> 'CLOSED') OR (closed_at IS NOT NULL AND status = 'CLOSED')
+    )
+);
+
+CREATE INDEX IF NOT EXISTS gateway_support_tickets_user_time_idx
+    ON gateway_support_tickets (user_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_support_tickets_status_idx
+    ON gateway_support_tickets (status, priority, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS gateway_support_ticket_notes (
+    note_id             BIGSERIAL PRIMARY KEY,
+    ticket_id           BIGINT NOT NULL REFERENCES gateway_support_tickets(ticket_id) ON DELETE CASCADE,
+    admin_user_id       BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    note_type           TEXT NOT NULL DEFAULT 'NOTE',
+    visibility          TEXT NOT NULL DEFAULT 'INTERNAL',
+    body                TEXT NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_support_ticket_notes_type_check CHECK (
+        note_type IN ('NOTE', 'STATUS_CHANGE', 'ESCALATION', 'FOLLOW_UP')
+    ),
+    CONSTRAINT gateway_support_ticket_notes_visibility_check CHECK (
+        visibility IN ('INTERNAL', 'CUSTOMER')
+    ),
+    CONSTRAINT gateway_support_ticket_notes_body_present CHECK (length(body) BETWEEN 1 AND 2000)
+);
+
+CREATE INDEX IF NOT EXISTS gateway_support_ticket_notes_ticket_time_idx
+    ON gateway_support_ticket_notes (ticket_id, created_at ASC);
+
+CREATE INDEX IF NOT EXISTS gateway_support_ticket_notes_page_idx
+    ON gateway_support_ticket_notes (ticket_id, created_at ASC, note_id ASC);
 
 CREATE TABLE IF NOT EXISTS gateway_refresh_sessions (
     session_id          BIGSERIAL PRIMARY KEY,
@@ -1790,3 +2258,353 @@ CREATE INDEX IF NOT EXISTS gateway_login_logs_user_time_idx
 
 CREATE INDEX IF NOT EXISTS gateway_login_logs_time_idx
     ON gateway_login_logs (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS gateway_admin_operation_logs (
+    operation_id          BIGSERIAL PRIMARY KEY,
+    admin_user_id        BIGINT REFERENCES gateway_users(user_id),
+    admin_username       TEXT,
+    admin_roles          TEXT,
+    service              TEXT NOT NULL,
+    http_method          TEXT NOT NULL,
+    request_path         TEXT NOT NULL,
+    query_string         TEXT,
+    target_uri           TEXT,
+    request_body_sha256  TEXT,
+    response_status      INTEGER,
+    duration_ms          BIGINT,
+    success              BOOLEAN NOT NULL,
+    error_message        TEXT,
+    trace_id             TEXT,
+    user_agent           TEXT,
+    ip_address           TEXT,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_admin_operation_service_check CHECK (service ~ '^[a-z0-9][a-z0-9_-]{0,63}$'),
+    CONSTRAINT gateway_admin_operation_method_check CHECK (http_method ~ '^[A-Z]{3,16}$'),
+    CONSTRAINT gateway_admin_operation_duration_non_negative CHECK (duration_ms IS NULL OR duration_ms >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_operation_logs_admin_time_idx
+    ON gateway_admin_operation_logs (admin_user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_operation_logs_service_time_idx
+    ON gateway_admin_operation_logs (service, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_operation_logs_time_idx
+    ON gateway_admin_operation_logs (created_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_operation_logs_trace_idx
+    ON gateway_admin_operation_logs (trace_id)
+    WHERE trace_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS gateway_admin_approval_requests (
+    approval_id          BIGSERIAL PRIMARY KEY,
+    requester_user_id    BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    requester_username   TEXT NOT NULL,
+    approver_user_id     BIGINT REFERENCES gateway_users(user_id),
+    approver_username    TEXT,
+    service              TEXT NOT NULL,
+    http_method          TEXT NOT NULL,
+    request_path         TEXT NOT NULL,
+    query_string         TEXT,
+    request_body_sha256  TEXT,
+    reason               TEXT NOT NULL,
+    decision_reason      TEXT,
+    status               TEXT NOT NULL DEFAULT 'PENDING',
+    requested_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at           TIMESTAMPTZ NOT NULL,
+    decided_at           TIMESTAMPTZ,
+    consumed_at          TIMESTAMPTZ,
+    consumed_trace_id    TEXT,
+    CONSTRAINT gateway_admin_approval_status_check CHECK (
+        status IN ('PENDING', 'APPROVED', 'REJECTED', 'CONSUMED')
+    ),
+    CONSTRAINT gateway_admin_approval_service_check CHECK (service ~ '^[a-z0-9][a-z0-9_-]{0,63}$'),
+    CONSTRAINT gateway_admin_approval_method_check CHECK (http_method ~ '^[A-Z]{3,16}$')
+);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_requester_time_idx
+    ON gateway_admin_approval_requests (requester_user_id, requested_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_status_time_idx
+    ON gateway_admin_approval_requests (status, requested_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_service_time_idx
+    ON gateway_admin_approval_requests (service, requested_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_consumed_trace_idx
+    ON gateway_admin_approval_requests (consumed_trace_id)
+    WHERE consumed_trace_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS gateway_admin_export_jobs (
+    export_id              BIGSERIAL PRIMARY KEY,
+    requested_by_user_id   BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    requested_by_username  TEXT NOT NULL,
+    export_type            TEXT NOT NULL,
+    status                 TEXT NOT NULL DEFAULT 'PENDING',
+    format                 TEXT NOT NULL DEFAULT 'CSV',
+    query_params           TEXT,
+    file_name              TEXT,
+    content_type           TEXT,
+    row_count              INTEGER NOT NULL DEFAULT 0,
+    byte_size              BIGINT NOT NULL DEFAULT 0,
+    result_content         TEXT,
+    error_message          TEXT,
+    requested_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at             TIMESTAMPTZ,
+    finished_at            TIMESTAMPTZ,
+    expires_at             TIMESTAMPTZ NOT NULL DEFAULT now() + interval '7 days',
+    CONSTRAINT gateway_admin_export_jobs_type_check CHECK (
+        export_type IN (
+            'USERS', 'LOGIN_LOGS', 'ADMIN_OPERATIONS', 'COMPLIANCE_USERS',
+            'ORDERS', 'TRIGGER_ORDERS', 'MATCH_TRADES',
+            'ACCOUNT_BALANCES', 'PRODUCT_BALANCES', 'POSITIONS',
+            'ACCOUNT_LEDGER', 'PRODUCT_LEDGER', 'PRODUCT_TRANSFERS', 'ACCOUNT_ADJUSTMENTS'
+        )
+    ),
+    CONSTRAINT gateway_admin_export_jobs_status_check CHECK (
+        status IN ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED')
+    ),
+    CONSTRAINT gateway_admin_export_jobs_format_check CHECK (format = 'CSV'),
+    CONSTRAINT gateway_admin_export_jobs_row_count_non_negative CHECK (row_count >= 0),
+    CONSTRAINT gateway_admin_export_jobs_byte_size_non_negative CHECK (byte_size >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_export_jobs_requester_time_idx
+    ON gateway_admin_export_jobs (requested_by_user_id, requested_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_export_jobs_status_time_idx
+    ON gateway_admin_export_jobs (status, requested_at DESC);
+
+CREATE TABLE IF NOT EXISTS gateway_admin_query_tasks (
+    query_task_id         BIGSERIAL PRIMARY KEY,
+    requested_by_user_id  BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    requested_by_username TEXT NOT NULL,
+    query_type            TEXT NOT NULL,
+    status                TEXT NOT NULL DEFAULT 'PENDING',
+    query_params          TEXT,
+    result_json           TEXT,
+    row_count             INTEGER NOT NULL DEFAULT 0,
+    byte_size             BIGINT NOT NULL DEFAULT 0,
+    error_message         TEXT,
+    requested_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at            TIMESTAMPTZ,
+    finished_at           TIMESTAMPTZ,
+    expires_at            TIMESTAMPTZ NOT NULL DEFAULT now() + interval '3 days',
+    archived_at           TIMESTAMPTZ,
+    archive_reason        TEXT,
+    CONSTRAINT gateway_admin_query_tasks_type_check CHECK (
+        query_type IN (
+            'SYSTEM_OPERATION_LATENCY', 'OUTBOX_BACKLOG',
+            'APPROVAL_BACKLOG', 'ALERT_DELIVERY_FAILURES',
+            'ORDER_AUDIT_SEARCH', 'TRIGGER_ORDER_AUDIT_SEARCH',
+            'MATCH_TRADE_AUDIT_SEARCH'
+        )
+    ),
+    CONSTRAINT gateway_admin_query_tasks_status_check CHECK (
+        status IN ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'ARCHIVED')
+    ),
+    CONSTRAINT gateway_admin_query_tasks_row_count_non_negative CHECK (row_count >= 0),
+    CONSTRAINT gateway_admin_query_tasks_byte_size_non_negative CHECK (byte_size >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_query_tasks_requester_time_idx
+    ON gateway_admin_query_tasks (requested_by_user_id, requested_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_query_tasks_status_time_idx
+    ON gateway_admin_query_tasks (status, requested_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_query_tasks_type_time_idx
+    ON gateway_admin_query_tasks (query_type, requested_at DESC);
+
+CREATE TABLE IF NOT EXISTS gateway_admin_account_asset_snapshots (
+    snapshot_id             BIGSERIAL PRIMARY KEY,
+    snapshot_date           DATE NOT NULL,
+    valuation_asset         TEXT NOT NULL,
+    account_type            TEXT NOT NULL,
+    asset                   TEXT NOT NULL,
+    total_available_units   NUMERIC(38, 0) NOT NULL,
+    total_locked_units      NUMERIC(38, 0) NOT NULL,
+    total_equity_units      NUMERIC(38, 0) NOT NULL,
+    valuation_rate          NUMERIC(38, 18),
+    total_value             NUMERIC(38, 18),
+    valuation_source        TEXT NOT NULL,
+    rate_updated_at         TIMESTAMPTZ,
+    source_updated_at       TIMESTAMPTZ,
+    user_count              BIGINT NOT NULL,
+    balance_count           BIGINT NOT NULL,
+    created_by_user_id      BIGINT REFERENCES gateway_users(user_id),
+    created_by_username     TEXT,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_account_asset_snapshots_valuation_asset_check CHECK (valuation_asset ~ '^[A-Z0-9]{2,20}$'),
+    CONSTRAINT gateway_account_asset_snapshots_asset_check CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
+    CONSTRAINT gateway_account_asset_snapshots_account_type_check CHECK (
+        account_type IN ('BASIC', 'FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL')
+    ),
+    CONSTRAINT gateway_account_asset_snapshots_counts_check CHECK (user_count >= 0 AND balance_count >= 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_account_asset_snapshots_uidx
+    ON gateway_admin_account_asset_snapshots (snapshot_date, valuation_asset, account_type, asset);
+
+CREATE INDEX IF NOT EXISTS gateway_account_asset_snapshots_date_idx
+    ON gateway_admin_account_asset_snapshots (snapshot_date DESC, valuation_asset, account_type, asset);
+
+CREATE INDEX IF NOT EXISTS gateway_account_asset_snapshots_page_idx
+    ON gateway_admin_account_asset_snapshots (snapshot_date DESC, total_value DESC NULLS LAST, snapshot_id DESC);
+
+CREATE TABLE IF NOT EXISTS gateway_admin_alert_rules (
+    alert_rule_id          BIGSERIAL PRIMARY KEY,
+    rule_code              TEXT NOT NULL,
+    rule_name              TEXT NOT NULL,
+    domain                 TEXT NOT NULL,
+    metric_key             TEXT NOT NULL,
+    target                 TEXT,
+    condition_operator     TEXT NOT NULL,
+    threshold_value        NUMERIC(38, 8) NOT NULL,
+    severity               TEXT NOT NULL,
+    enabled                BOOLEAN NOT NULL DEFAULT TRUE,
+    window_seconds         BIGINT NOT NULL DEFAULT 300,
+    cooldown_seconds       BIGINT NOT NULL DEFAULT 300,
+    description            TEXT,
+    created_by_user_id     BIGINT REFERENCES gateway_users(user_id),
+    updated_by_user_id     BIGINT REFERENCES gateway_users(user_id),
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_admin_alert_rules_code_check CHECK (rule_code ~ '^[A-Z0-9_.:-]{2,96}$'),
+    CONSTRAINT gateway_admin_alert_rules_domain_check CHECK (
+        domain IN ('SYSTEM', 'MARKET', 'TRADING', 'RISK', 'WALLET')
+    ),
+    CONSTRAINT gateway_admin_alert_rules_metric_check CHECK (metric_key ~ '^[A-Z0-9_.:-]{2,96}$'),
+    CONSTRAINT gateway_admin_alert_rules_operator_check CHECK (
+        condition_operator IN ('GT', 'GTE', 'LT', 'LTE', 'EQ', 'NE')
+    ),
+    CONSTRAINT gateway_admin_alert_rules_severity_check CHECK (
+        severity IN ('INFO', 'WARN', 'CRITICAL')
+    ),
+    CONSTRAINT gateway_admin_alert_rules_window_positive CHECK (
+        window_seconds > 0 AND cooldown_seconds >= 0
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_admin_alert_rules_code_uidx
+    ON gateway_admin_alert_rules (rule_code);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_alert_rules_domain_idx
+    ON gateway_admin_alert_rules (domain, enabled, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_alert_rules_updated_page_idx
+    ON gateway_admin_alert_rules (updated_at DESC, alert_rule_id DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_alert_rules_created_page_idx
+    ON gateway_admin_alert_rules (created_at DESC, alert_rule_id DESC);
+
+CREATE TABLE IF NOT EXISTS gateway_admin_alert_events (
+    alert_event_id         BIGSERIAL PRIMARY KEY,
+    alert_rule_id          BIGINT REFERENCES gateway_admin_alert_rules(alert_rule_id),
+    rule_code              TEXT NOT NULL,
+    domain                 TEXT NOT NULL,
+    metric_key             TEXT NOT NULL,
+    target                 TEXT,
+    severity               TEXT NOT NULL,
+    status                 TEXT NOT NULL DEFAULT 'OPEN',
+    condition_operator     TEXT NOT NULL,
+    threshold_value        NUMERIC(38, 8) NOT NULL,
+    current_value          NUMERIC(38, 8) NOT NULL,
+    fingerprint            TEXT NOT NULL,
+    message                TEXT NOT NULL,
+    occurrences            BIGINT NOT NULL DEFAULT 1,
+    first_seen_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    acknowledged_by_user_id BIGINT REFERENCES gateway_users(user_id),
+    acknowledged_at        TIMESTAMPTZ,
+    resolved_at            TIMESTAMPTZ,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_admin_alert_events_domain_check CHECK (
+        domain IN ('SYSTEM', 'MARKET', 'TRADING', 'RISK', 'WALLET')
+    ),
+    CONSTRAINT gateway_admin_alert_events_operator_check CHECK (
+        condition_operator IN ('GT', 'GTE', 'LT', 'LTE', 'EQ', 'NE')
+    ),
+    CONSTRAINT gateway_admin_alert_events_severity_check CHECK (
+        severity IN ('INFO', 'WARN', 'CRITICAL')
+    ),
+    CONSTRAINT gateway_admin_alert_events_status_check CHECK (
+        status IN ('OPEN', 'ACKNOWLEDGED', 'RESOLVED')
+    ),
+    CONSTRAINT gateway_admin_alert_events_occurrences_positive CHECK (occurrences > 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_admin_alert_events_active_uidx
+    ON gateway_admin_alert_events (fingerprint)
+    WHERE status IN ('OPEN', 'ACKNOWLEDGED');
+
+CREATE INDEX IF NOT EXISTS gateway_admin_alert_events_status_time_idx
+    ON gateway_admin_alert_events (status, severity, last_seen_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_alert_events_rule_time_idx
+    ON gateway_admin_alert_events (alert_rule_id, last_seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS gateway_admin_alert_channels (
+    alert_channel_id      BIGSERIAL PRIMARY KEY,
+    channel_code          TEXT NOT NULL,
+    channel_name          TEXT NOT NULL,
+    channel_type          TEXT NOT NULL,
+    enabled               BOOLEAN NOT NULL DEFAULT TRUE,
+    domain                TEXT,
+    min_severity          TEXT NOT NULL DEFAULT 'WARN',
+    endpoint              TEXT,
+    description           TEXT,
+    created_by_user_id    BIGINT REFERENCES gateway_users(user_id),
+    updated_by_user_id    BIGINT REFERENCES gateway_users(user_id),
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_admin_alert_channels_code_check CHECK (channel_code ~ '^[A-Z0-9_.:-]{2,96}$'),
+    CONSTRAINT gateway_admin_alert_channels_type_check CHECK (
+        channel_type IN ('WEBHOOK', 'EMAIL', 'SLACK', 'PAGERDUTY', 'OPS')
+    ),
+    CONSTRAINT gateway_admin_alert_channels_domain_check CHECK (
+        domain IS NULL OR domain IN ('SYSTEM', 'MARKET', 'TRADING', 'RISK', 'WALLET')
+    ),
+    CONSTRAINT gateway_admin_alert_channels_severity_check CHECK (
+        min_severity IN ('INFO', 'WARN', 'CRITICAL')
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_admin_alert_channels_code_uidx
+    ON gateway_admin_alert_channels (channel_code);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_alert_channels_enabled_idx
+    ON gateway_admin_alert_channels (enabled, domain, min_severity, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_alert_channels_updated_page_idx
+    ON gateway_admin_alert_channels (updated_at DESC, alert_channel_id DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_alert_channels_created_page_idx
+    ON gateway_admin_alert_channels (created_at DESC, alert_channel_id DESC);
+
+CREATE TABLE IF NOT EXISTS gateway_admin_alert_deliveries (
+    alert_delivery_id     BIGSERIAL PRIMARY KEY,
+    alert_event_id        BIGINT NOT NULL REFERENCES gateway_admin_alert_events(alert_event_id),
+    alert_channel_id      BIGINT NOT NULL REFERENCES gateway_admin_alert_channels(alert_channel_id),
+    channel_code          TEXT NOT NULL,
+    channel_type          TEXT NOT NULL,
+    delivery_status       TEXT NOT NULL DEFAULT 'PENDING',
+    attempt_count         INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at       TIMESTAMPTZ,
+    last_attempt_at       TIMESTAMPTZ,
+    delivered_at          TIMESTAMPTZ,
+    error_message         TEXT,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_admin_alert_deliveries_status_check CHECK (
+        delivery_status IN ('PENDING', 'SENT', 'FAILED', 'SKIPPED')
+    ),
+    CONSTRAINT gateway_admin_alert_deliveries_attempt_check CHECK (attempt_count >= 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_admin_alert_deliveries_event_channel_uidx
+    ON gateway_admin_alert_deliveries (alert_event_id, alert_channel_id);
+
+CREATE INDEX IF NOT EXISTS gateway_admin_alert_deliveries_status_idx
+    ON gateway_admin_alert_deliveries (delivery_status, next_attempt_at, created_at DESC);

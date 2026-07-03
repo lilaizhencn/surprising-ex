@@ -2,6 +2,7 @@ package com.surprising.risk.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.risk.api.model.AdminCursorPage;
 import com.surprising.risk.api.model.LiquidationCandidateResponse;
 import com.surprising.risk.api.model.LiquidationCandidateStatus;
 import com.surprising.risk.api.model.RiskAccountSnapshotResponse;
@@ -10,6 +11,8 @@ import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.model.CalculatedPositionRisk;
 import com.surprising.risk.provider.repository.RiskOutboxRepository;
 import com.surprising.risk.provider.repository.RiskRepository;
+import com.surprising.risk.provider.repository.RiskRepository.HighRiskAccount;
+import com.surprising.risk.provider.repository.RiskRepository.RiskRuleOverride;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
 import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
@@ -347,6 +350,85 @@ class RiskServiceTest {
         assertThat(transactionManager.commits).isEqualTo(2);
     }
 
+    @Test
+    void updatesMarginRiskRuleAndRuntimeThresholdsWithAuditMetadata() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        RiskProperties properties = new RiskProperties();
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                new FakeRiskSequenceRepository(), new FakeRiskOutboxRepository(), new TrackingTransactionManager());
+
+        RiskService.RiskRuleResponse response = service.updateRiskRule("global_margin_policy", " admin-risk ",
+                new RiskService.RiskRuleUpdateCommand("Margin policy", true, 700_000L,
+                        950_000L, null, null, "lower warning threshold"));
+
+        assertThat(properties.getCalculation().getWarningMarginRatioPpm()).isEqualTo(700_000L);
+        assertThat(properties.getCalculation().getLiquidationMarginRatioPpm()).isEqualTo(950_000L);
+        assertThat(response.ruleCode()).isEqualTo("GLOBAL_MARGIN_POLICY");
+        assertThat(response.ruleType()).isEqualTo("GLOBAL_MARGIN");
+        assertThat(response.source()).isEqualTo("override");
+        assertThat(response.adminUserId()).isEqualTo("admin-risk");
+        assertThat(response.reason()).isEqualTo("lower warning threshold");
+        assertThat(riskRepository.ruleOverrides).singleElement().satisfies(rule -> {
+            assertThat(rule.warningMarginRatioPpm()).isEqualTo(700_000L);
+            assertThat(rule.liquidationMarginRatioPpm()).isEqualTo(950_000L);
+        });
+    }
+
+    @Test
+    void returnsHighRiskAccountAggregationUsingWarningThresholdByDefault() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        riskRepository.highRiskRows = List.of(new HighRiskAccount(901L, 1001L, "USDT",
+                1_000_000L, -300_000L, 700_000L, 600_000L, 857_142L,
+                RiskStatus.WARNING, Instant.parse("2026-07-01T00:00:00Z"), 2, 1,
+                0, "BTC-USDT", MarginMode.CROSS, 900_000L, RiskStatus.WARNING, "WARNING"));
+        RiskProperties properties = new RiskProperties();
+        properties.getCalculation().setWarningMarginRatioPpm(750_000L);
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                new FakeRiskSequenceRepository(), new FakeRiskOutboxRepository(), new TrackingTransactionManager());
+
+        RiskService.HighRiskAccountsResponse response = service.highRiskAccounts(null, 50);
+
+        assertThat(riskRepository.lastHighRiskThreshold).isEqualTo(750_000L);
+        assertThat(riskRepository.lastHighRiskLimit).isEqualTo(50);
+        assertThat(response.accountCount()).isEqualTo(1);
+        assertThat(response.warningCount()).isEqualTo(1);
+        assertThat(response.liquidationCount()).isZero();
+        assertThat(response.accounts()).singleElement().satisfies(account -> {
+            assertThat(account.userId()).isEqualTo(1001L);
+            assertThat(account.topSymbol()).isEqualTo("BTC-USDT");
+            assertThat(account.riskLevel()).isEqualTo("WARNING");
+        });
+    }
+
+    @Test
+    void adminRiskQueriesExposeCursorMetadata() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        riskRepository.candidateRows = List.of(new LiquidationCandidateResponse(9401L, 9301L, 2002L,
+                "BTC-USDT", 8L, "USDT", 10L, 590_000L, -200_000_000L,
+                88_500_000L, 1_100_000L, LiquidationCandidateStatus.NEW,
+                Instant.parse("2026-07-01T00:00:00Z")));
+        riskRepository.highRiskRows = List.of(new HighRiskAccount(901L, 1001L, "USDT",
+                1_000_000L, -300_000L, 700_000L, 600_000L, 857_142L,
+                RiskStatus.WARNING, Instant.parse("2026-07-01T00:00:00Z"), 2, 1,
+                0, "BTC-USDT", MarginMode.CROSS, 900_000L, RiskStatus.WARNING, "WARNING"));
+        RiskService service = new RiskService(new ObjectMapper(), new RiskProperties(), riskRepository,
+                new FakeRiskSequenceRepository(), new FakeRiskOutboxRepository(), new TrackingTransactionManager());
+
+        var candidates = service.liquidationCandidates("new", 25, "cursor-candidates", "eventTime.asc");
+        var accounts = service.highRiskAccounts(null, 25, "cursor-accounts", "eventTime.desc");
+
+        assertThat(riskRepository.lastCandidateStatus).isEqualTo(LiquidationCandidateStatus.NEW);
+        assertThat(riskRepository.lastCandidateCursor).isEqualTo("cursor-candidates");
+        assertThat(riskRepository.lastCandidateSort).isEqualTo("eventTime.asc");
+        assertThat(candidates.candidates()).hasSize(1);
+        assertThat(candidates.nextCursor()).isEqualTo("next-candidates");
+        assertThat(candidates.hasMore()).isTrue();
+        assertThat(accounts.accounts()).hasSize(1);
+        assertThat(accounts.nextCursor()).isEqualTo("next-accounts");
+        assertThat(accounts.sort()).isEqualTo("eventTime.desc");
+        assertThat(accounts.limit()).isEqualTo(25);
+    }
+
     private static final class FakeRiskRepository extends RiskRepository {
         private List<CalculatedPositionRisk> positions = List.of(new CalculatedPositionRisk(1001L,
                 "BTC-USDT", 7L, "USDT", 10L, 65_000L, 60_000L, 600_000L, -100L, 100L));
@@ -372,6 +454,17 @@ class RiskServiceTest {
         private boolean scanLeaseAcquired = true;
         private int scanLeaseAttempts;
         private String lastOwnerId;
+        private final List<RiskRuleOverride> ruleOverrides = new ArrayList<>();
+        private List<HighRiskAccount> highRiskRows = List.of();
+        private List<LiquidationCandidateResponse> candidateRows = List.of();
+        private long lastHighRiskThreshold;
+        private int lastHighRiskLimit;
+        private String lastHighRiskCursor;
+        private String lastHighRiskSort;
+        private LiquidationCandidateStatus lastCandidateStatus;
+        private int lastCandidateLimit;
+        private String lastCandidateCursor;
+        private String lastCandidateSort;
 
         private FakeRiskRepository() {
             super(null);
@@ -494,6 +587,65 @@ class RiskServiceTest {
                     position.markPriceTicks(), -100L, position.maintenanceMarginUnits(),
                     RiskMath.INFINITE_MARGIN_RATIO, LiquidationCandidateStatus.NEW,
                     Instant.parse("2026-07-01T00:00:00Z")));
+        }
+
+        @Override
+        public List<RiskRuleOverride> riskRuleOverrides() {
+            return List.copyOf(ruleOverrides);
+        }
+
+        @Override
+        public RiskRuleOverride upsertRiskRuleOverride(String ruleCode,
+                                                       String ruleName,
+                                                       String ruleType,
+                                                       boolean enabled,
+                                                       Long warningMarginRatioPpm,
+                                                       Long liquidationMarginRatioPpm,
+                                                       Long scanDelayMs,
+                                                       Integer scanBatchSize,
+                                                       String adminUserId,
+                                                       String reason,
+                                                       Instant now) {
+            RiskRuleOverride override = new RiskRuleOverride(ruleCode, ruleName, ruleType, enabled,
+                    warningMarginRatioPpm, liquidationMarginRatioPpm, scanDelayMs, scanBatchSize,
+                    adminUserId, reason, now, now);
+            ruleOverrides.removeIf(item -> item.ruleCode().equals(ruleCode));
+            ruleOverrides.add(override);
+            return override;
+        }
+
+        @Override
+        public List<HighRiskAccount> highRiskAccounts(long minMarginRatioPpm, int limit) {
+            lastHighRiskThreshold = minMarginRatioPpm;
+            lastHighRiskLimit = limit;
+            return highRiskRows;
+        }
+
+        @Override
+        public AdminCursorPage.CursorPage<HighRiskAccount> highRiskAccountsPage(long minMarginRatioPpm,
+                                                                                int limit,
+                                                                                String cursor,
+                                                                                String sort) {
+            lastHighRiskThreshold = minMarginRatioPpm;
+            lastHighRiskLimit = limit;
+            lastHighRiskCursor = cursor;
+            lastHighRiskSort = sort;
+            return new AdminCursorPage.CursorPage<>(highRiskRows, "next-accounts", true,
+                    "eventTime.desc", limit);
+        }
+
+        @Override
+        public AdminCursorPage.CursorPage<LiquidationCandidateResponse> liquidationCandidatesPage(
+                LiquidationCandidateStatus status,
+                int limit,
+                String cursor,
+                String sort) {
+            lastCandidateStatus = status;
+            lastCandidateLimit = limit;
+            lastCandidateCursor = cursor;
+            lastCandidateSort = sort;
+            return new AdminCursorPage.CursorPage<>(candidateRows, "next-candidates", true,
+                    "eventTime.asc", limit);
         }
     }
 

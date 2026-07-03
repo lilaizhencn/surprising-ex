@@ -4,10 +4,16 @@ import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import com.surprising.websocket.api.model.WsServerMessage;
 import com.surprising.websocket.provider.config.WebSocketProperties;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -19,6 +25,12 @@ public class SubscriptionRegistry {
     private final Map<String, ClientConnection> sessions = new ConcurrentHashMap<>();
     private final Map<String, Set<SubscriptionTopic>> sessionTopics = new ConcurrentHashMap<>();
     private final Map<SubscriptionTopic, Set<ClientConnection>> subscribers = new ConcurrentHashMap<>();
+
+    @Autowired
+    public SubscriptionRegistry(ObjectMapper objectMapper, WebSocketProperties properties, MeterRegistry meterRegistry) {
+        this(objectMapper, properties);
+        registerMeters(meterRegistry);
+    }
 
     public SubscriptionRegistry(ObjectMapper objectMapper, WebSocketProperties properties) {
         this.objectMapper = objectMapper;
@@ -92,6 +104,66 @@ public class SubscriptionRegistry {
         return subscribers.getOrDefault(topic, Set.of()).size();
     }
 
+    public int activeConnectionCount() {
+        return sessions.size();
+    }
+
+    public long authenticatedConnectionCount() {
+        return sessions.values().stream()
+                .filter(connection -> connection.authenticatedUserId() != null)
+                .count();
+    }
+
+    public long anonymousConnectionCount() {
+        return activeConnectionCount() - authenticatedConnectionCount();
+    }
+
+    public long totalSubscriptionCount() {
+        return sessionTopics.values().stream()
+                .mapToLong(Set::size)
+                .sum();
+    }
+
+    public int uniqueTopicCount() {
+        return subscribers.size();
+    }
+
+    public int maxSubscriptionsPerSession() {
+        return sessionTopics.values().stream()
+                .mapToInt(Set::size)
+                .max()
+                .orElse(0);
+    }
+
+    public List<ChannelMetric> channelMetrics() {
+        Map<WsChannel, ChannelAccumulator> metrics = new EnumMap<>(WsChannel.class);
+        subscribers.forEach((topic, connections) -> {
+            ChannelAccumulator accumulator = metrics.computeIfAbsent(topic.channel(), ignored -> new ChannelAccumulator());
+            accumulator.topicCount++;
+            accumulator.subscriberCount += connections.size();
+        });
+        List<ChannelMetric> rows = new ArrayList<>();
+        metrics.forEach((channel, accumulator) -> rows.add(new ChannelMetric(
+                channel.name(), accumulator.topicCount, accumulator.subscriberCount)));
+        rows.sort((left, right) -> left.channel().compareTo(right.channel()));
+        return rows;
+    }
+
+    private void registerMeters(MeterRegistry meterRegistry) {
+        Gauge.builder("surprising.websocket.connections.active", this, SubscriptionRegistry::activeConnectionCount)
+                .description("Active WebSocket client connections on this node")
+                .register(meterRegistry);
+        Gauge.builder("surprising.websocket.connections.authenticated", this, SubscriptionRegistry::authenticatedConnectionCount)
+                .description("Authenticated WebSocket client connections on this node")
+                .register(meterRegistry);
+        Gauge.builder("surprising.websocket.subscriptions.active", this, SubscriptionRegistry::totalSubscriptionCount)
+                .description("Active WebSocket subscriptions on this node")
+                .register(meterRegistry);
+        Gauge.builder("surprising.websocket.topics.active", this, SubscriptionRegistry::uniqueTopicCount)
+                .description("Unique subscribed WebSocket topics on this node")
+                .register(meterRegistry);
+    }
+
     private void send(SubscriptionTopic topic, Object payload, Instant eventTime) {
         Set<ClientConnection> connections = subscribers.get(topic);
         if (connections == null || connections.isEmpty()) {
@@ -107,5 +179,16 @@ public class SubscriptionRegistry {
 
     public SubscriptionTopic publicTopic(WsChannel channel, String symbol) {
         return new SubscriptionTopic(channel, symbol, null, null);
+    }
+
+    private static final class ChannelAccumulator {
+        private int topicCount;
+        private int subscriberCount;
+    }
+
+    public record ChannelMetric(
+            String channel,
+            int topicCount,
+            int subscriberCount) {
     }
 }

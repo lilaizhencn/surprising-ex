@@ -1,5 +1,6 @@
 package com.surprising.liquidation.provider.repository;
 
+import com.surprising.liquidation.api.model.AdminCursorPage;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.liquidation.api.model.LiquidationOrderResponse;
@@ -15,7 +16,11 @@ import com.surprising.trading.api.model.OrderSide;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -358,10 +363,36 @@ public class LiquidationRepository {
         return jdbcTemplate.query("""
                 SELECT *
                   FROM liquidation_orders
-                 WHERE (? IS NULL OR user_id = ?)
+                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
                  ORDER BY created_at DESC
                  LIMIT ?
                 """, (rs, rowNum) -> toOrder(rs), userId, userId, limit);
+    }
+
+    public AdminCursorPage.CursorPage<LiquidationOrderResponse> ordersPage(
+            Long userId,
+            int limit,
+            String cursor,
+            String sort) {
+        int safeLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort);
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.add(userId);
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        String sql = """
+                SELECT *
+                  FROM liquidation_orders
+                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
+                """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
+                 ORDER BY created_at %s, liquidation_order_id %s
+                 LIMIT ?
+                """.formatted(sortSpec.directionSql(), sortSpec.directionSql());
+        List<LiquidationOrderResponse> rows = jdbcTemplate.query(sql, (rs, rowNum) -> toOrder(rs), args.toArray());
+        return AdminCursorPage.page(rows, safeLimit, sortSpec, LiquidationOrderResponse::createdAt,
+                LiquidationOrderResponse::liquidationOrderId);
     }
 
     public List<LiquidationOrderResponse> ordersByCandidate(long candidateId) {
@@ -371,6 +402,188 @@ public class LiquidationRepository {
                  WHERE candidate_id = ?
                  ORDER BY created_at DESC
                 """, (rs, rowNum) -> toOrder(rs), candidateId);
+    }
+
+    private AdminCursorPage.SortSpec parseCreatedAtSort(String value) {
+        AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", "liquidation_order_id", true);
+        AdminCursorPage.SortSpec createdAtAsc = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", "liquidation_order_id", false);
+        return AdminCursorPage.parseSort(value, createdAtDesc, List.of(createdAtDesc, createdAtAsc));
+    }
+
+    public Optional<Map<String, Object>> candidate(long candidateId) {
+        return jdbcTemplate.queryForList("""
+                SELECT c.candidate_id, c.snapshot_id, c.user_id, c.symbol, c.margin_mode,
+                       c.instrument_version, c.settle_asset, c.signed_quantity_steps,
+                       c.mark_price_ticks, c.equity_units, c.maintenance_margin_units,
+                       c.margin_ratio_ppm, c.status, c.event_time, c.created_at, c.updated_at,
+                       a.status AS account_risk_status
+                  FROM risk_liquidation_candidates c
+                  LEFT JOIN risk_account_snapshots a ON a.snapshot_id = c.snapshot_id
+                 WHERE c.candidate_id = ?
+                """, candidateId).stream().findFirst().map(this::normalizedRow);
+    }
+
+    public List<LiquidationTimelineEvent> timeline(long candidateId, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 500));
+        List<LiquidationTimelineEvent> events = new ArrayList<>();
+        addRows(events, "risk", "CANDIDATE_CREATED", "event_time", "candidate_id", "status", """
+                SELECT candidate_id, snapshot_id, user_id, symbol, margin_mode, instrument_version,
+                       settle_asset, signed_quantity_steps, mark_price_ticks, equity_units,
+                       maintenance_margin_units, margin_ratio_ppm, status, event_time, created_at, updated_at
+                  FROM risk_liquidation_candidates
+                 WHERE candidate_id = ?
+                """, candidateId);
+        addRows(events, "risk", "ACCOUNT_SNAPSHOT", "event_time", "snapshot_id", "status", """
+                SELECT a.snapshot_id, a.user_id, a.settle_asset, a.wallet_balance_units, a.unrealized_pnl_units,
+                       a.equity_units, a.maintenance_margin_units, a.margin_ratio_ppm, a.status,
+                       a.event_time, a.created_at
+                  FROM risk_account_snapshots a
+                  JOIN risk_liquidation_candidates c ON c.snapshot_id = a.snapshot_id
+                 WHERE c.candidate_id = ?
+                """, candidateId);
+        addRows(events, "risk", "POSITION_SNAPSHOT", "event_time", "symbol", "status", """
+                SELECT p.snapshot_id, p.user_id, p.symbol, p.margin_mode, p.instrument_version,
+                       p.signed_quantity_steps, p.entry_price_ticks, p.mark_price_ticks,
+                       p.unrealized_pnl_units, p.position_margin_units, p.maintenance_margin_units,
+                       p.margin_ratio_ppm, p.status, p.event_time, p.created_at
+                  FROM risk_position_snapshots p
+                  JOIN risk_liquidation_candidates c
+                    ON c.snapshot_id = p.snapshot_id
+                   AND c.user_id = p.user_id
+                   AND c.symbol = p.symbol
+                   AND c.margin_mode = p.margin_mode
+                 WHERE c.candidate_id = ?
+                """, candidateId);
+        addRows(events, "liquidation", "LIQUIDATION_AUDIT", "created_at", "liquidation_order_id", "status", """
+                SELECT liquidation_order_id, candidate_id, order_id, user_id, symbol, margin_mode, side,
+                       quantity_steps, status, reason, bankruptcy_price_ticks, takeover_price_ticks,
+                       liquidation_fee_rate_ppm, liquidation_fee_units, created_at
+                  FROM liquidation_orders
+                 WHERE candidate_id = ?
+                """, candidateId);
+        addRows(events, "liquidation", "ADMIN_ACTION", "created_at", "action_id", "action_type", """
+                SELECT action_id, candidate_id, action_type, admin_user_id, reason, created_at
+                  FROM liquidation_admin_actions
+                 WHERE candidate_id = ?
+                """, candidateId);
+        addRows(events, "trading", "ORDER_STATE", "updated_at", "order_id", "status", """
+                SELECT o.order_id, o.user_id, o.client_order_id, o.symbol, o.instrument_version,
+                       o.side, o.order_type, o.time_in_force, o.price_ticks, o.quantity_steps,
+                       o.executed_quantity_steps, o.remaining_quantity_steps, o.margin_mode,
+                       o.reduce_only, o.post_only, o.status, o.reject_reason, o.created_at, o.updated_at
+                  FROM trading_orders o
+                 WHERE o.order_id IN (
+                       SELECT order_id FROM liquidation_orders WHERE candidate_id = ? AND order_id > 0
+                 )
+                """, candidateId);
+        addRows(events, "trading", "ORDER_EVENT", "event_time", "event_id", "event_type", """
+                SELECT e.event_id, e.order_id, e.user_id, e.symbol, e.event_type, e.status,
+                       e.reason, e.trace_id, e.event_time, e.created_at
+                  FROM trading_order_events e
+                 WHERE e.order_id IN (
+                       SELECT order_id FROM liquidation_orders WHERE candidate_id = ? AND order_id > 0
+                 )
+                """, candidateId);
+        addRows(events, "matching", "MATCH_RESULT", "event_time", "command_id", "result_code", """
+                SELECT r.command_id, r.order_id, r.user_id, r.symbol, r.instrument_version,
+                       r.command_type, r.result_code, r.filled_quantity_steps, r.order_status,
+                       r.trace_id, r.event_time, r.created_at
+                  FROM trading_match_results r
+                 WHERE r.order_id IN (
+                       SELECT order_id FROM liquidation_orders WHERE candidate_id = ? AND order_id > 0
+                 )
+                """, candidateId);
+        addRows(events, "matching", "MATCH_TRADE", "event_time", "trade_id", "quantity_steps", """
+                SELECT t.trade_id, t.command_id, t.symbol, t.taker_order_id, t.taker_user_id,
+                       t.taker_side, t.maker_order_id, t.maker_user_id, t.price_ticks,
+                       t.quantity_steps, t.trace_id, t.event_time, t.created_at
+                  FROM trading_match_trades t
+                 WHERE t.taker_order_id IN (
+                       SELECT order_id FROM liquidation_orders WHERE candidate_id = ? AND order_id > 0
+                 )
+                    OR t.maker_order_id IN (
+                       SELECT order_id FROM liquidation_orders WHERE candidate_id = ? AND order_id > 0
+                 )
+                """, candidateId, candidateId);
+        return events.stream()
+                .sorted(Comparator.comparing(LiquidationTimelineEvent::eventTime,
+                        Comparator.nullsLast(Comparator.naturalOrder())))
+                .limit(safeLimit)
+                .toList();
+    }
+
+    public Optional<CanceledCandidate> cancelCandidateIfSafe(long candidateId, Instant now) {
+        return jdbcTemplate.query("""
+                UPDATE risk_liquidation_candidates c
+                   SET status = 'CANCELED',
+                       updated_at = ?
+                 WHERE c.candidate_id = ?
+                   AND c.status IN ('NEW', 'PROCESSING')
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM liquidation_orders lo
+                        WHERE lo.candidate_id = c.candidate_id
+                          AND lo.status IN ('SUBMITTED', 'PARTIALLY_FILLED')
+                   )
+                RETURNING c.candidate_id, c.status, c.updated_at
+                """, (rs, rowNum) -> new CanceledCandidate(
+                rs.getLong("candidate_id"),
+                rs.getString("status"),
+                rs.getTimestamp("updated_at").toInstant()), Timestamp.from(now), candidateId)
+                .stream().findFirst();
+    }
+
+    public LiquidationAdminAction insertAdminAction(long candidateId,
+                                                    String actionType,
+                                                    String adminUserId,
+                                                    String reason,
+                                                    Instant now) {
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO liquidation_admin_actions (
+                    candidate_id, action_type, admin_user_id, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                RETURNING action_id, candidate_id, action_type, admin_user_id, reason, created_at
+                """, (rs, rowNum) -> new LiquidationAdminAction(
+                rs.getLong("action_id"),
+                rs.getLong("candidate_id"),
+                rs.getString("action_type"),
+                rs.getString("admin_user_id"),
+                rs.getString("reason"),
+                rs.getTimestamp("created_at").toInstant()), candidateId, actionType, adminUserId, reason,
+                Timestamp.from(now));
+    }
+
+    private void addRows(List<LiquidationTimelineEvent> events,
+                         String source,
+                         String eventType,
+                         String timeColumn,
+                         String subjectColumn,
+                         String summaryColumn,
+                         String sql,
+                         Object... args) {
+        for (Map<String, Object> row : jdbcTemplate.queryForList(sql, args)) {
+            Map<String, Object> data = normalizedRow(row);
+            Object timeValue = row.get(timeColumn);
+            Instant eventTime = timeValue instanceof Timestamp timestamp ? timestamp.toInstant() : null;
+            String subject = stringValue(row.get(subjectColumn));
+            String summary = stringValue(row.get(summaryColumn));
+            events.add(new LiquidationTimelineEvent(eventTime, source, eventType, subject, summary, data));
+        }
+    }
+
+    private Map<String, Object> normalizedRow(Map<String, Object> row) {
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : row.entrySet()) {
+            Object value = entry.getValue();
+            normalized.put(entry.getKey(), value instanceof Timestamp timestamp ? timestamp.toInstant() : value);
+        }
+        return normalized;
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
     }
 
     private LiquidationOrderResponse toOrder(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -398,6 +611,27 @@ public class LiquidationRepository {
             long positionAbsSteps,
             long notionalUnits,
             long notionalPerStepUnits) {
+    }
+
+    public record LiquidationTimelineEvent(Instant eventTime,
+                                           String source,
+                                           String eventType,
+                                           String subject,
+                                           String summary,
+                                           Map<String, Object> data) {
+    }
+
+    public record CanceledCandidate(long candidateId,
+                                    String status,
+                                    Instant updatedAt) {
+    }
+
+    public record LiquidationAdminAction(long actionId,
+                                         long candidateId,
+                                         String actionType,
+                                         String adminUserId,
+                                         String reason,
+                                         Instant createdAt) {
     }
 
     private void requireSingleRow(int rows, String operation) {

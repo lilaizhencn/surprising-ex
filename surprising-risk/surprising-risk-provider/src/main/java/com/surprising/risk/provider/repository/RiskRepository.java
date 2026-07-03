@@ -1,6 +1,7 @@
 package com.surprising.risk.provider.repository;
 
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.risk.api.model.AdminCursorPage;
 import com.surprising.risk.api.model.LiquidationCandidateResponse;
 import com.surprising.risk.api.model.LiquidationCandidateStatus;
 import com.surprising.risk.api.model.RiskAccountSnapshotResponse;
@@ -14,6 +15,7 @@ import com.surprising.trading.api.model.MarginMode;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -475,6 +477,297 @@ public class RiskRepository {
                 """, (rs, rowNum) -> toCandidate(rs), status.name(), limit);
     }
 
+    public AdminCursorPage.CursorPage<LiquidationCandidateResponse> liquidationCandidatesPage(
+            LiquidationCandidateStatus status,
+            int limit,
+            String cursor,
+            String sort) {
+        int safeLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec sortSpec = parseCandidateSort(sort);
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(status.name());
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        String sql = """
+                SELECT *
+                  FROM risk_liquidation_candidates
+                 WHERE status = ?
+                """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
+                 ORDER BY event_time %s, candidate_id %s
+                 LIMIT ?
+                """.formatted(sortSpec.directionSql(), sortSpec.directionSql());
+        List<LiquidationCandidateResponse> rows = jdbcTemplate.query(sql, (rs, rowNum) -> toCandidate(rs),
+                args.toArray());
+        return AdminCursorPage.page(rows, safeLimit, sortSpec, LiquidationCandidateResponse::eventTime,
+                LiquidationCandidateResponse::candidateId);
+    }
+
+    public List<RiskRuleOverride> riskRuleOverrides() {
+        return jdbcTemplate.query("""
+                SELECT *
+                  FROM risk_admin_rule_overrides
+                 ORDER BY rule_type ASC, rule_code ASC
+                """, (rs, rowNum) -> toRuleOverride(rs));
+    }
+
+    public RiskRuleOverride upsertRiskRuleOverride(String ruleCode,
+                                                   String ruleName,
+                                                   String ruleType,
+                                                   boolean enabled,
+                                                   Long warningMarginRatioPpm,
+                                                   Long liquidationMarginRatioPpm,
+                                                   Long scanDelayMs,
+                                                   Integer scanBatchSize,
+                                                   String adminUserId,
+                                                   String reason,
+                                                   Instant now) {
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO risk_admin_rule_overrides (
+                    rule_code, rule_name, rule_type, enabled, warning_margin_ratio_ppm,
+                    liquidation_margin_ratio_ppm, scan_delay_ms, scan_batch_size,
+                    admin_user_id, reason, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (rule_code) DO UPDATE SET
+                    rule_name = EXCLUDED.rule_name,
+                    rule_type = EXCLUDED.rule_type,
+                    enabled = EXCLUDED.enabled,
+                    warning_margin_ratio_ppm = EXCLUDED.warning_margin_ratio_ppm,
+                    liquidation_margin_ratio_ppm = EXCLUDED.liquidation_margin_ratio_ppm,
+                    scan_delay_ms = EXCLUDED.scan_delay_ms,
+                    scan_batch_size = EXCLUDED.scan_batch_size,
+                    admin_user_id = EXCLUDED.admin_user_id,
+                    reason = EXCLUDED.reason,
+                    updated_at = EXCLUDED.updated_at
+                RETURNING *
+                """, (rs, rowNum) -> toRuleOverride(rs), ruleCode, ruleName, ruleType, enabled,
+                warningMarginRatioPpm, liquidationMarginRatioPpm, scanDelayMs, scanBatchSize, adminUserId, reason,
+                Timestamp.from(now), Timestamp.from(now));
+    }
+
+    public List<HighRiskAccount> highRiskAccounts(long minMarginRatioPpm, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 500));
+        return jdbcTemplate.query("""
+                WITH latest_accounts AS (
+                    SELECT DISTINCT ON (user_id, settle_asset) *
+                      FROM risk_account_snapshots
+                     ORDER BY user_id ASC, settle_asset ASC, event_time DESC
+                )
+                SELECT a.snapshot_id,
+                       a.user_id,
+                       a.settle_asset,
+                       a.wallet_balance_units,
+                       a.unrealized_pnl_units,
+                       a.equity_units,
+                       a.maintenance_margin_units,
+                       a.margin_ratio_ppm,
+                       a.status,
+                       a.event_time,
+                       COALESCE(position_stats.position_count, 0) AS position_count,
+                       COALESCE(position_stats.risk_position_count, 0) AS risk_position_count,
+                       COALESCE(candidate_stats.active_candidate_count, 0) AS active_candidate_count,
+                       top_position.symbol AS top_symbol,
+                       top_position.margin_mode AS top_margin_mode,
+                       top_position.margin_ratio_ppm AS top_position_margin_ratio_ppm,
+                       top_position.status AS top_position_status,
+                       CASE
+                           WHEN a.status = 'LIQUIDATION'
+                                OR COALESCE(candidate_stats.active_candidate_count, 0) > 0
+                               THEN 'LIQUIDATION'
+                           WHEN a.status = 'WARNING'
+                                OR a.margin_ratio_ppm >= ?
+                                OR COALESCE(position_stats.risk_position_count, 0) > 0
+                               THEN 'WARNING'
+                           ELSE 'WATCH'
+                       END AS risk_level
+                  FROM latest_accounts a
+                  LEFT JOIN LATERAL (
+                      SELECT COUNT(*) AS position_count,
+                             COUNT(*) FILTER (
+                                 WHERE p.status <> 'NORMAL' OR p.margin_ratio_ppm >= ?
+                             ) AS risk_position_count
+                        FROM risk_position_snapshots p
+                       WHERE p.snapshot_id = a.snapshot_id
+                         AND p.user_id = a.user_id
+                         AND p.settle_asset = a.settle_asset
+                  ) position_stats ON TRUE
+                  LEFT JOIN LATERAL (
+                      SELECT p.symbol, p.margin_mode, p.margin_ratio_ppm, p.status
+                        FROM risk_position_snapshots p
+                       WHERE p.snapshot_id = a.snapshot_id
+                         AND p.user_id = a.user_id
+                         AND p.settle_asset = a.settle_asset
+                       ORDER BY p.margin_ratio_ppm DESC, p.symbol ASC, p.margin_mode ASC
+                       LIMIT 1
+                  ) top_position ON TRUE
+                  LEFT JOIN LATERAL (
+                      SELECT COUNT(*) AS active_candidate_count
+                        FROM risk_liquidation_candidates c
+                       WHERE c.user_id = a.user_id
+                         AND c.settle_asset = a.settle_asset
+                         AND c.status IN ('NEW', 'PROCESSING')
+                  ) candidate_stats ON TRUE
+                 WHERE a.status IN ('WARNING', 'LIQUIDATION')
+                    OR a.margin_ratio_ppm >= ?
+                    OR COALESCE(position_stats.risk_position_count, 0) > 0
+                    OR COALESCE(candidate_stats.active_candidate_count, 0) > 0
+                 ORDER BY
+                       CASE
+                           WHEN a.status = 'LIQUIDATION'
+                                OR COALESCE(candidate_stats.active_candidate_count, 0) > 0 THEN 0
+                           WHEN a.status = 'WARNING'
+                                OR a.margin_ratio_ppm >= ?
+                                OR COALESCE(position_stats.risk_position_count, 0) > 0 THEN 1
+                           ELSE 2
+                       END,
+                       a.margin_ratio_ppm DESC,
+                       a.event_time DESC
+                 LIMIT ?
+                """, (rs, rowNum) -> new HighRiskAccount(
+                rs.getLong("snapshot_id"),
+                rs.getLong("user_id"),
+                rs.getString("settle_asset"),
+                rs.getLong("wallet_balance_units"),
+                rs.getLong("unrealized_pnl_units"),
+                rs.getLong("equity_units"),
+                rs.getLong("maintenance_margin_units"),
+                rs.getLong("margin_ratio_ppm"),
+                RiskStatus.valueOf(rs.getString("status")),
+                rs.getTimestamp("event_time").toInstant(),
+                rs.getInt("position_count"),
+                rs.getInt("risk_position_count"),
+                rs.getInt("active_candidate_count"),
+                rs.getString("top_symbol"),
+                nullableMarginMode(rs.getString("top_margin_mode")),
+                nullableLong(rs, "top_position_margin_ratio_ppm"),
+                nullableRiskStatus(rs.getString("top_position_status")),
+                rs.getString("risk_level")), minMarginRatioPpm, minMarginRatioPpm, minMarginRatioPpm,
+                minMarginRatioPpm, safeLimit);
+    }
+
+    public AdminCursorPage.CursorPage<HighRiskAccount> highRiskAccountsPage(
+            long minMarginRatioPpm,
+            int limit,
+            String cursor,
+            String sort) {
+        int safeLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec sortSpec = parseHighRiskAccountSort(sort);
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(minMarginRatioPpm);
+        args.add(minMarginRatioPpm);
+        args.add(minMarginRatioPpm);
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        String sql = """
+                WITH latest_accounts AS (
+                    SELECT DISTINCT ON (user_id, settle_asset) *
+                      FROM risk_account_snapshots
+                     ORDER BY user_id ASC, settle_asset ASC, event_time DESC
+                )
+                SELECT a.snapshot_id,
+                       a.user_id,
+                       a.settle_asset,
+                       a.wallet_balance_units,
+                       a.unrealized_pnl_units,
+                       a.equity_units,
+                       a.maintenance_margin_units,
+                       a.margin_ratio_ppm,
+                       a.status,
+                       a.event_time,
+                       COALESCE(position_stats.position_count, 0) AS position_count,
+                       COALESCE(position_stats.risk_position_count, 0) AS risk_position_count,
+                       COALESCE(candidate_stats.active_candidate_count, 0) AS active_candidate_count,
+                       top_position.symbol AS top_symbol,
+                       top_position.margin_mode AS top_margin_mode,
+                       top_position.margin_ratio_ppm AS top_position_margin_ratio_ppm,
+                       top_position.status AS top_position_status,
+                       CASE
+                           WHEN a.status = 'LIQUIDATION'
+                                OR COALESCE(candidate_stats.active_candidate_count, 0) > 0
+                               THEN 'LIQUIDATION'
+                           WHEN a.status = 'WARNING'
+                                OR a.margin_ratio_ppm >= ?
+                                OR COALESCE(position_stats.risk_position_count, 0) > 0
+                               THEN 'WARNING'
+                           ELSE 'WATCH'
+                       END AS risk_level
+                  FROM latest_accounts a
+                  LEFT JOIN LATERAL (
+                      SELECT COUNT(*) AS position_count,
+                             COUNT(*) FILTER (
+                                 WHERE p.status <> 'NORMAL' OR p.margin_ratio_ppm >= ?
+                             ) AS risk_position_count
+                        FROM risk_position_snapshots p
+                       WHERE p.snapshot_id = a.snapshot_id
+                         AND p.user_id = a.user_id
+                         AND p.settle_asset = a.settle_asset
+                  ) position_stats ON TRUE
+                  LEFT JOIN LATERAL (
+                      SELECT p.symbol, p.margin_mode, p.margin_ratio_ppm, p.status
+                        FROM risk_position_snapshots p
+                       WHERE p.snapshot_id = a.snapshot_id
+                         AND p.user_id = a.user_id
+                         AND p.settle_asset = a.settle_asset
+                       ORDER BY p.margin_ratio_ppm DESC, p.symbol ASC, p.margin_mode ASC
+                       LIMIT 1
+                  ) top_position ON TRUE
+                  LEFT JOIN LATERAL (
+                      SELECT COUNT(*) AS active_candidate_count
+                        FROM risk_liquidation_candidates c
+                       WHERE c.user_id = a.user_id
+                         AND c.settle_asset = a.settle_asset
+                         AND c.status IN ('NEW', 'PROCESSING')
+                  ) candidate_stats ON TRUE
+                 WHERE (
+                       a.status IN ('WARNING', 'LIQUIDATION')
+                    OR a.margin_ratio_ppm >= ?
+                    OR COALESCE(position_stats.risk_position_count, 0) > 0
+                    OR COALESCE(candidate_stats.active_candidate_count, 0) > 0
+                 )
+                """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
+                 ORDER BY a.event_time %s, a.snapshot_id %s
+                 LIMIT ?
+                """.formatted(sortSpec.directionSql(), sortSpec.directionSql());
+        List<HighRiskAccount> rows = jdbcTemplate.query(sql, (rs, rowNum) -> new HighRiskAccount(
+                rs.getLong("snapshot_id"),
+                rs.getLong("user_id"),
+                rs.getString("settle_asset"),
+                rs.getLong("wallet_balance_units"),
+                rs.getLong("unrealized_pnl_units"),
+                rs.getLong("equity_units"),
+                rs.getLong("maintenance_margin_units"),
+                rs.getLong("margin_ratio_ppm"),
+                RiskStatus.valueOf(rs.getString("status")),
+                rs.getTimestamp("event_time").toInstant(),
+                rs.getInt("position_count"),
+                rs.getInt("risk_position_count"),
+                rs.getInt("active_candidate_count"),
+                rs.getString("top_symbol"),
+                nullableMarginMode(rs.getString("top_margin_mode")),
+                nullableLong(rs, "top_position_margin_ratio_ppm"),
+                nullableRiskStatus(rs.getString("top_position_status")),
+                rs.getString("risk_level")), args.toArray());
+        return AdminCursorPage.page(rows, safeLimit, sortSpec, HighRiskAccount::eventTime,
+                HighRiskAccount::snapshotId);
+    }
+
+    private AdminCursorPage.SortSpec parseCandidateSort(String value) {
+        AdminCursorPage.SortSpec eventTimeAsc = new AdminCursorPage.SortSpec(
+                "eventTime", "event_time", "candidate_id", false);
+        AdminCursorPage.SortSpec eventTimeDesc = new AdminCursorPage.SortSpec(
+                "eventTime", "event_time", "candidate_id", true);
+        return AdminCursorPage.parseSort(value, eventTimeAsc, List.of(eventTimeAsc, eventTimeDesc));
+    }
+
+    private AdminCursorPage.SortSpec parseHighRiskAccountSort(String value) {
+        AdminCursorPage.SortSpec eventTimeDesc = new AdminCursorPage.SortSpec(
+                "eventTime", "a.event_time", "a.snapshot_id", true);
+        AdminCursorPage.SortSpec eventTimeAsc = new AdminCursorPage.SortSpec(
+                "eventTime", "a.event_time", "a.snapshot_id", false);
+        return AdminCursorPage.parseSort(value, eventTimeDesc, List.of(eventTimeDesc, eventTimeAsc));
+    }
+
     private RiskAccountSnapshotResponse toAccountSnapshot(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new RiskAccountSnapshotResponse(
                 rs.getLong("snapshot_id"),
@@ -527,6 +820,40 @@ public class RiskRepository {
                 rs.getTimestamp("event_time").toInstant());
     }
 
+    private RiskRuleOverride toRuleOverride(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new RiskRuleOverride(
+                rs.getString("rule_code"),
+                rs.getString("rule_name"),
+                rs.getString("rule_type"),
+                rs.getBoolean("enabled"),
+                nullableLong(rs, "warning_margin_ratio_ppm"),
+                nullableLong(rs, "liquidation_margin_ratio_ppm"),
+                nullableLong(rs, "scan_delay_ms"),
+                nullableInteger(rs, "scan_batch_size"),
+                rs.getString("admin_user_id"),
+                rs.getString("reason"),
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant());
+    }
+
+    private Long nullableLong(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
+        long value = rs.getLong(column);
+        return rs.wasNull() ? null : value;
+    }
+
+    private Integer nullableInteger(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
+        int value = rs.getInt(column);
+        return rs.wasNull() ? null : value;
+    }
+
+    private RiskStatus nullableRiskStatus(String value) {
+        return value == null ? null : RiskStatus.valueOf(value);
+    }
+
+    private MarginMode nullableMarginMode(String value) {
+        return value == null || value.isBlank() ? null : MarginMode.valueOf(value);
+    }
+
     private List<CalculatedPositionRisk> queryCalculatedPositions(String sql, Object... args) {
         return jdbcTemplate.query(sql, calculatedPositionMapper(), args);
     }
@@ -567,5 +894,39 @@ public class RiskRepository {
         if (rows != 1) {
             throw new IllegalStateException("failed to write " + operation);
         }
+    }
+
+    public record RiskRuleOverride(String ruleCode,
+                                   String ruleName,
+                                   String ruleType,
+                                   boolean enabled,
+                                   Long warningMarginRatioPpm,
+                                   Long liquidationMarginRatioPpm,
+                                   Long scanDelayMs,
+                                   Integer scanBatchSize,
+                                   String adminUserId,
+                                   String reason,
+                                   Instant createdAt,
+                                   Instant updatedAt) {
+    }
+
+    public record HighRiskAccount(long snapshotId,
+                                  long userId,
+                                  String settleAsset,
+                                  long walletBalanceUnits,
+                                  long unrealizedPnlUnits,
+                                  long equityUnits,
+                                  long maintenanceMarginUnits,
+                                  long marginRatioPpm,
+                                  RiskStatus status,
+                                  Instant eventTime,
+                                  int positionCount,
+                                  int riskPositionCount,
+                                  int activeCandidateCount,
+                                  String topSymbol,
+                                  MarginMode topMarginMode,
+                                  Long topPositionMarginRatioPpm,
+                                  RiskStatus topPositionStatus,
+                                  String riskLevel) {
     }
 }

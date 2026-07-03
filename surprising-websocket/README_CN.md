@@ -175,6 +175,8 @@ surprising:
 
 ## 运维注意事项
 
+- 后台指标接口：`GET /api/v1/admin/websocket/metrics`。该接口要求 gateway 注入 `X-Admin-User-Id`，返回本节点连接数、认证/匿名连接数、订阅数、唯一 topic 数和频道分布。
+- 服务同时暴露 Micrometer Gauge：`surprising.websocket.connections.active`、`surprising.websocket.connections.authenticated`、`surprising.websocket.subscriptions.active`、`surprising.websocket.topics.active`，可由 `/actuator/prometheus` 抓取。
 - 监控 WebSocket 连接数、发送队列压力、Kafka consumer lag 和 send timeout 关闭次数。
 - consumer lag 告警应只看活跃 WebSocket 节点 group。历史随机 group 应删除，或在看板里过滤。
 - Kafka topic 继续按 `symbol` 分区。

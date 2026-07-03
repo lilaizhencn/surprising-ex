@@ -105,7 +105,26 @@ curl -X POST 'http://localhost:9086/api/v1/accounts/admin/balance-adjustments' \
   -d '{"userId":1001,"asset":"USDT","amountUnits":100000000,"referenceId":"deposit-1001-1","reason":"INITIAL_DEPOSIT"}'
 ```
 
-In production, admin APIs must only be callable by deposit, settlement, or controlled back-office systems.
+Back-office operators should use the admin namespace through gateway:
+
+- `GET /api/v1/admin/accounts/balances`
+- `GET /api/v1/admin/accounts/product-balances`
+- `GET /api/v1/admin/accounts/positions`
+- `GET /api/v1/admin/accounts/ledger`
+- `GET /api/v1/admin/accounts/product-ledger`
+- `GET /api/v1/admin/accounts/transfers`
+- `POST /api/v1/admin/accounts/balance-adjustments`
+- `POST /api/v1/admin/accounts/product-balance-adjustments`
+- `GET /api/v1/admin/accounts/adjustments`
+
+`ledger`, `product-ledger`, `transfers`, and `adjustments` support the production admin cursor
+paging contract: `limit`, `cursor`, and `sort`. Supported sort values are `createdAt.desc` and
+`createdAt.asc`; responses keep the original list fields and additionally return `nextCursor`,
+`hasMore`, `sort`, and `limit` for large account-history pages behind gateway.
+
+The admin namespace requires `X-Admin-User-Id` from gateway, records `X-Admin-Username`, and writes
+`account_admin_balance_adjustments` in the same transaction as the balance mutation. In production,
+admin APIs must only be callable by deposit, settlement, or controlled back-office systems.
 
 ## Database
 
@@ -115,6 +134,7 @@ Root [init.sql](../init.sql) creates:
 - `account_balances`
 - `account_deficits`
 - `account_ledger_entries`
+- `account_admin_balance_adjustments`
 - `account_margin_reservations`
 - `account_position_margins`
 - `account_positions`

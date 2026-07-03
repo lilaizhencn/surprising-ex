@@ -60,7 +60,7 @@ public class JwtTokenService {
                 ? values.stream().map(Object::toString).toList()
                 : List.of("USER");
         return new JwtPrincipal(Long.parseLong(asString(claims.get("sub"))),
-                asString(claims.get("username")), roles, expiresAt);
+                asString(claims.get("username")), "UNKNOWN", roles, expiresAt);
     }
 
     private Map<String, Object> verify(String token) {

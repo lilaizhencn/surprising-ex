@@ -13,6 +13,7 @@ import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
 import com.surprising.trading.api.model.FeeTierAssignmentResponse;
 import com.surprising.trading.api.model.FeeTierQualificationMode;
+import com.surprising.trading.api.model.FeeTierQueryResponse;
 import com.surprising.trading.api.model.FeeTierResponse;
 import com.surprising.trading.api.model.FeeTierUpsertRequest;
 import com.surprising.trading.order.config.TradingOrderProperties;
@@ -22,6 +23,7 @@ import com.surprising.trading.order.repository.FeeTierRepository.FeeTierMetrics;
 import com.surprising.trading.order.repository.OrderFeeRepository;
 import com.surprising.trading.order.repository.OrderRepository;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -45,6 +47,24 @@ class FeeTierServiceTest {
         assertThat(response.tierCode()).isEqualTo("VIP7");
         verify(tierRepository).upsertTier(eq(request), any());
         verify(tierRepository).findTier("vip7");
+    }
+
+    @Test
+    void queryTiersWithCursorDelegatesToRepositoryPage() {
+        FeeTierRepository tierRepository = mock(FeeTierRepository.class);
+        FeeTierService service = new FeeTierService(tierRepository, mock(OrderFeeRepository.class),
+                mock(OrderRepository.class), new TradingOrderProperties());
+        FeeTierQueryResponse expected = new FeeTierQueryResponse(0, List.of(), "next", true,
+                "priority.desc", 25);
+
+        when(tierRepository.queryTiersPage(FeeScheduleStatus.ACTIVE, 25, "cursor", "priority.desc"))
+                .thenReturn(expected);
+
+        FeeTierQueryResponse response = service.queryTiers(FeeScheduleStatus.ACTIVE, 25,
+                "cursor", "priority.desc");
+
+        assertThat(response).isEqualTo(expected);
+        verify(tierRepository).queryTiersPage(FeeScheduleStatus.ACTIVE, 25, "cursor", "priority.desc");
     }
 
     @Test

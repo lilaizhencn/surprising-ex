@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.trading.api.model.FeeScheduleQueryResponse;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleSourceType;
 import com.surprising.trading.api.model.FeeScheduleStatus;
@@ -18,6 +19,7 @@ import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.repository.OrderFeeRepository;
 import com.surprising.trading.order.repository.OrderRepository;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -66,6 +68,26 @@ class TradingFeeServiceTest {
 
         assertThat(response).isEqualTo(persisted);
         verify(feeRepository).upsertSchedule(eq(request), eq(777L), any());
+    }
+
+    @Test
+    void querySchedulesWithCursorNormalizesSymbolAndDelegatesToRepositoryPage() {
+        OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
+        OrderRepository orderRepository = mock(OrderRepository.class);
+        InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
+        TradingFeeService service = new TradingFeeService(feeRepository, orderRepository, instrumentRuleLookup);
+        FeeScheduleQueryResponse expected = new FeeScheduleQueryResponse(0, List.of(), "next", true,
+                "updatedAt.asc", 50);
+
+        when(feeRepository.querySchedulesPage(1001L, "BTC-USDT", FeeScheduleStatus.ACTIVE, 50,
+                "cursor", "updatedAt.asc")).thenReturn(expected);
+
+        FeeScheduleQueryResponse response = service.querySchedules(1001L, "btc-usdt",
+                FeeScheduleStatus.ACTIVE, 50, "cursor", "updatedAt.asc");
+
+        assertThat(response).isEqualTo(expected);
+        verify(feeRepository).querySchedulesPage(1001L, "BTC-USDT", FeeScheduleStatus.ACTIVE, 50,
+                "cursor", "updatedAt.asc");
     }
 
     private InstrumentRule rule(long version) {

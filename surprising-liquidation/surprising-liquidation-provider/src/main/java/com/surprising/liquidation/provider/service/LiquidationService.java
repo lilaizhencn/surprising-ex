@@ -1,5 +1,6 @@
 package com.surprising.liquidation.provider.service;
 
+import com.surprising.liquidation.api.model.AdminCursorPage;
 import com.surprising.liquidation.api.model.LiquidationOrderQueryResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderStatus;
@@ -8,6 +9,8 @@ import com.surprising.liquidation.provider.model.LiquidationPricingDecision;
 import com.surprising.liquidation.provider.model.LiquidationSizingInput;
 import com.surprising.liquidation.provider.repository.LiquidationOrderRepository;
 import com.surprising.liquidation.provider.repository.LiquidationRepository;
+import com.surprising.liquidation.provider.repository.LiquidationRepository.LiquidationAdminAction;
+import com.surprising.liquidation.provider.repository.LiquidationRepository.LiquidationTimelineEvent;
 import com.surprising.liquidation.provider.repository.LiquidationSequenceRepository;
 import com.surprising.risk.api.model.LiquidationCandidateEvent;
 import com.surprising.risk.api.model.RiskStatus;
@@ -17,6 +20,7 @@ import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
@@ -128,13 +132,44 @@ public class LiquidationService {
     }
 
     public LiquidationOrderQueryResponse orders(Long userId, int limit) {
-        List<LiquidationOrderResponse> rows = liquidationRepository.orders(userId, limit);
+        List<LiquidationOrderResponse> rows = liquidationRepository.orders(userId, normalizeLimit(limit));
         return new LiquidationOrderQueryResponse(rows.size(), rows);
+    }
+
+    public LiquidationOrderQueryResponse orders(Long userId, int limit, String cursor, String sort) {
+        AdminCursorPage.CursorPage<LiquidationOrderResponse> page = liquidationRepository.ordersPage(userId,
+                normalizeLimit(limit), cursor, sort);
+        return new LiquidationOrderQueryResponse(page.items().size(), page.items(), page.nextCursor(),
+                page.hasMore(), page.sort(), page.limit());
     }
 
     public LiquidationOrderQueryResponse ordersByCandidate(long candidateId) {
         List<LiquidationOrderResponse> rows = liquidationRepository.ordersByCandidate(candidateId);
         return new LiquidationOrderQueryResponse(rows.size(), rows);
+    }
+
+    public LiquidationTimelineResponse timeline(long candidateId, int limit) {
+        Map<String, Object> candidate = liquidationRepository.candidate(candidateId)
+                .orElseThrow(() -> new IllegalArgumentException("liquidation candidate not found"));
+        List<LiquidationOrderResponse> orders = liquidationRepository.ordersByCandidate(candidateId);
+        List<LiquidationTimelineEvent> events = liquidationRepository.timeline(candidateId, limit);
+        return new LiquidationTimelineResponse(candidateId, candidate, orders, events.size(), events);
+    }
+
+    @Transactional
+    public LiquidationAdminActionResponse cancelCandidate(long candidateId, String adminUserId, String reason) {
+        String normalizedAdminUserId = requireText(adminUserId, "adminUserId");
+        String normalizedReason = requireText(reason, "reason");
+        if (normalizedReason.length() > 500) {
+            throw new IllegalArgumentException("reason must be at most 500 characters");
+        }
+        Instant now = Instant.now();
+        var canceled = liquidationRepository.cancelCandidateIfSafe(candidateId, now)
+                .orElseThrow(() -> new IllegalArgumentException("candidate is not cancelable"));
+        LiquidationAdminAction action = liquidationRepository.insertAdminAction(candidateId, "CANCEL_CANDIDATE",
+                normalizedAdminUserId, normalizedReason, now);
+        return new LiquidationAdminActionResponse(canceled.candidateId(), canceled.status(), action.actionType(),
+                action.adminUserId(), action.reason(), canceled.updatedAt(), action.createdAt());
     }
 
     private void insertAudit(long candidateId,
@@ -206,5 +241,35 @@ public class LiquidationService {
     }
 
     private record LifecycleUpdate(LiquidationOrderStatus orderStatus, String candidateStatus) {
+    }
+
+    private String requireText(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(field + " is required");
+        }
+        return value.trim();
+    }
+
+    private int normalizeLimit(int limit) {
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be between 1 and 1000");
+        }
+        return limit;
+    }
+
+    public record LiquidationTimelineResponse(long candidateId,
+                                              Map<String, Object> candidate,
+                                              List<LiquidationOrderResponse> orders,
+                                              int eventCount,
+                                              List<LiquidationTimelineEvent> timeline) {
+    }
+
+    public record LiquidationAdminActionResponse(long candidateId,
+                                                 String status,
+                                                 String actionType,
+                                                 String adminUserId,
+                                                 String reason,
+                                                 Instant candidateUpdatedAt,
+                                                 Instant actionCreatedAt) {
     }
 }

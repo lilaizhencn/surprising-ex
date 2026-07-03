@@ -81,13 +81,28 @@ curl 'http://localhost:9080/api/v1/instruments/version?symbol=BTC-USDT&version=1
 curl 'http://localhost:9080/api/v1/instruments/list?type=PERPETUAL&status=TRADING'
 ```
 
+后台分页查询当前产品：
+
+```bash
+curl 'http://localhost:9080/api/v1/instruments/admin/list?type=PERPETUAL&status=TRADING&limit=100&sort=symbol.asc'
+```
+
+后台查询当前产品详情和历史版本：
+
+```bash
+curl 'http://localhost:9080/api/v1/instruments/admin/BTC-USDT'
+curl 'http://localhost:9080/api/v1/instruments/admin/BTC-USDT/versions?limit=50&sort=version.desc'
+```
+
+后台列表支持 `limit/cursor/sort` 游标分页。当前版本列表排序白名单为 `symbol.asc`、`symbol.desc`、`updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc`；历史版本排序白名单为 `version.desc`、`version.asc`。响应保留 `count/instruments`，并返回 `nextCursor`、`hasMore`、`sort`、`limit`。
+
 更新状态：
 
 ```bash
 curl -X POST 'http://localhost:9080/api/v1/instruments/admin/BTC-USDT/status?status=HALT'
 ```
 
-完整 upsert 使用 `POST /api/v1/instruments/admin/upsert`，body 为 `InstrumentUpsertRequest`。生产应只允许后台管理系统或运维内网调用 admin API。
+完整 upsert 使用 `POST /api/v1/instruments/admin/upsert`，body 为 `InstrumentUpsertRequest`。生产应只允许后台管理系统通过 gateway 后台代理调用 admin API，产品配置和状态变更必须经过审批流、权限校验和操作审计。
 
 ## Kafka
 

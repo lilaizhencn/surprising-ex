@@ -175,6 +175,8 @@ For very large public fanout, add an internal pub/sub layer such as Redis, NATS,
 
 ## Operations
 
+- Admin metrics endpoint: `GET /api/v1/admin/websocket/metrics`. It requires the gateway-injected `X-Admin-User-Id` header and returns node-local connections, authenticated/anonymous connections, subscriptions, unique topics, and channel distribution.
+- The service also exposes Micrometer gauges for `/actuator/prometheus`: `surprising.websocket.connections.active`, `surprising.websocket.connections.authenticated`, `surprising.websocket.subscriptions.active`, and `surprising.websocket.topics.active`.
 - Monitor WebSocket connection count, outbound queue pressure, Kafka consumer lag, and send timeout closes.
 - Alert on lag for active WebSocket node groups only. Old random groups from retired nodes should be deleted or filtered out of dashboards.
 - Keep Kafka topics partitioned by `symbol`.

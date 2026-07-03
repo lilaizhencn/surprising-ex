@@ -71,9 +71,37 @@ class SubscriptionRegistryTest {
         assertThat(registry.subscriberCount(topic)).isEqualTo(1);
     }
 
+    @Test
+    void reportsConnectionSubscriptionAndChannelMetrics() {
+        SubscriptionRegistry registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
+        ClientConnection anonymous = connection("s-anon", null);
+        ClientConnection user = connection("s-user", 7001L);
+        registry.add(anonymous);
+        registry.add(user);
+        SubscriptionTopic publicTopic = new SubscriptionTopic(WsChannel.TRADES, "BTC-USDT", null, null);
+        SubscriptionTopic privateTopic = new SubscriptionTopic(WsChannel.ORDERS, "BTC-USDT", null, 7001L);
+        registry.subscribe(anonymous, publicTopic);
+        registry.subscribe(user, publicTopic);
+        registry.subscribe(user, privateTopic);
+
+        assertThat(registry.activeConnectionCount()).isEqualTo(2);
+        assertThat(registry.authenticatedConnectionCount()).isEqualTo(1);
+        assertThat(registry.anonymousConnectionCount()).isEqualTo(1);
+        assertThat(registry.totalSubscriptionCount()).isEqualTo(3);
+        assertThat(registry.uniqueTopicCount()).isEqualTo(2);
+        assertThat(registry.maxSubscriptionsPerSession()).isEqualTo(2);
+        assertThat(registry.channelMetrics()).extracting(SubscriptionRegistry.ChannelMetric::channel)
+                .containsExactly("ORDERS", "TRADES");
+    }
+
     private ClientConnection connection(String id) {
+        return connection(id, null);
+    }
+
+    private ClientConnection connection(String id, Long userId) {
         ClientConnection connection = mock(ClientConnection.class);
         when(connection.id()).thenReturn(id);
+        when(connection.authenticatedUserId()).thenReturn(userId);
         when(connection.send(anyString())).thenReturn(true);
         return connection;
     }

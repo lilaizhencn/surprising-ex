@@ -72,9 +72,11 @@ public class TradingFeeController {
                                           @RequestParam(value = "symbol", required = false) String symbol,
                                           @RequestParam(value = "status", required = false)
                                           FeeScheduleStatus status,
-                                          @RequestParam(value = "limit", defaultValue = "100") int limit) {
+                                          @RequestParam(value = "limit", defaultValue = "100") int limit,
+                                          @RequestParam(value = "cursor", required = false) String cursor,
+                                          @RequestParam(value = "sort", required = false) String sort) {
         try {
-            return tradingFeeService.querySchedules(userId, symbol, status, limit);
+            return tradingFeeService.querySchedules(userId, symbol, status, limit, cursor, sort);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -92,9 +94,11 @@ public class TradingFeeController {
     @GetMapping(TradingApiPaths.ADMIN_FEE_BASE_PATH + "/tiers")
     public FeeTierQueryResponse queryTiers(@RequestParam(value = "status", required = false)
                                            FeeScheduleStatus status,
-                                           @RequestParam(value = "limit", defaultValue = "100") int limit) {
+                                           @RequestParam(value = "limit", defaultValue = "100") int limit,
+                                           @RequestParam(value = "cursor", required = false) String cursor,
+                                           @RequestParam(value = "sort", required = false) String sort) {
         try {
-            return feeTierService.queryTiers(status, limit);
+            return feeTierService.queryTiers(status, limit, cursor, sort);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

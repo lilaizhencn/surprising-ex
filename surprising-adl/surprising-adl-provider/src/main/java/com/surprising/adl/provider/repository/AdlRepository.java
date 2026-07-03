@@ -1,5 +1,6 @@
 package com.surprising.adl.provider.repository;
 
+import com.surprising.adl.api.model.AdminCursorPage;
 import com.surprising.adl.api.model.AdlEventResponse;
 import com.surprising.adl.api.model.AdlSide;
 import com.surprising.adl.provider.model.AdlCandidate;
@@ -10,6 +11,7 @@ import com.surprising.instrument.api.model.ContractType;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -183,12 +185,55 @@ public class AdlRepository {
         return jdbcTemplate.query("""
                 SELECT *
                   FROM adl_events
-                 WHERE (? IS NULL OR deficit_user_id = ? OR target_user_id = ?)
-                   AND (? IS NULL OR asset = ?)
-                   AND (? IS NULL OR symbol = ?)
+                 WHERE (CAST(? AS text) IS NULL OR deficit_user_id = ? OR target_user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR asset = ?)
+                   AND (CAST(? AS text) IS NULL OR symbol = ?)
                  ORDER BY created_at DESC
                  LIMIT ?
                 """, (rs, rowNum) -> toEvent(rs), userId, userId, userId, asset, asset, symbol, symbol, limit);
+    }
+
+    public AdminCursorPage.CursorPage<AdlEventResponse> eventsPage(
+            Long userId,
+            String asset,
+            String symbol,
+            int limit,
+            String cursor,
+            String sort) {
+        int safeLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort);
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.add(userId);
+        args.add(userId);
+        args.add(asset);
+        args.add(asset);
+        args.add(symbol);
+        args.add(symbol);
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        String sql = """
+                SELECT *
+                  FROM adl_events
+                 WHERE (CAST(? AS text) IS NULL OR deficit_user_id = ? OR target_user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR asset = ?)
+                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
+                 ORDER BY created_at %s, event_id %s
+                 LIMIT ?
+                """.formatted(sortSpec.directionSql(), sortSpec.directionSql());
+        List<AdlEventResponse> rows = jdbcTemplate.query(sql, (rs, rowNum) -> toEvent(rs), args.toArray());
+        return AdminCursorPage.page(rows, safeLimit, sortSpec, AdlEventResponse::createdAt,
+                AdlEventResponse::eventId);
+    }
+
+    private AdminCursorPage.SortSpec parseCreatedAtSort(String value) {
+        AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", "event_id", true);
+        AdminCursorPage.SortSpec createdAtAsc = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", "event_id", false);
+        return AdminCursorPage.parseSort(value, createdAtDesc, List.of(createdAtDesc, createdAtAsc));
     }
 
     private long insuranceBalance(String asset) {

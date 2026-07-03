@@ -87,9 +87,14 @@ public class FundingService {
     }
 
     public FundingRateQueryResponse rateHistory(String symbol, int limit) {
-        int capped = Math.max(1, Math.min(1000, limit));
-        List<FundingRateResponse> rows = fundingRepository.rateHistory(normalizeSymbol(symbol), capped);
-        return new FundingRateQueryResponse(rows.size(), rows);
+        return rateHistory(symbol, limit, null, null);
+    }
+
+    public FundingRateQueryResponse rateHistory(String symbol, int limit, String cursor, String sort) {
+        int capped = normalizeLimit(limit);
+        var page = fundingRepository.rateHistoryPage(normalizeSymbol(symbol), capped, cursor, sort);
+        return new FundingRateQueryResponse(page.items().size(), page.items(),
+                page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
     public FundingSettlementResponse latestSettlement(String symbol) {
@@ -98,13 +103,18 @@ public class FundingService {
     }
 
     public FundingPaymentQueryResponse payments(long userId, String symbol, int limit) {
+        return payments(userId, symbol, limit, null, null);
+    }
+
+    public FundingPaymentQueryResponse payments(long userId, String symbol, int limit, String cursor, String sort) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        int capped = Math.max(1, Math.min(1000, limit));
+        int capped = normalizeLimit(limit);
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
-        var rows = fundingRepository.payments(userId, normalizedSymbol, capped);
-        return new FundingPaymentQueryResponse(rows.size(), rows);
+        var page = fundingRepository.paymentsPage(userId, normalizedSymbol, capped, cursor, sort);
+        return new FundingPaymentQueryResponse(page.items().size(), page.items(),
+                page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
     private void settleRate(FundingRateResponse rate, Instant now) {
@@ -160,6 +170,13 @@ public class FundingService {
             throw new IllegalArgumentException("invalid symbol: " + symbol);
         }
         return normalized;
+    }
+
+    private int normalizeLimit(int limit) {
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
+        return limit;
     }
 
     private String resolveNodeId(String configured) {

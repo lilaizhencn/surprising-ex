@@ -82,8 +82,11 @@ trigger-provider 会用 `userId + symbol` 的 PostgreSQL transaction advisory lo
   单 symbol 优先于用户全局，最后回退 instrument 默认费率。
 - 多个用户全局费率同时 active 时，source 优先级是 `RISK_OVERRIDE`、`USER_OVERRIDE`、`PROMOTION`、`MARKET_MAKER`、`VIP`，防止自动 VIP 刷新覆盖风控、人工、活动或做市商费率。
 - 管理接口：`POST /api/v1/admin/trading/fees/schedules` 新增/更新费率，`POST /api/v1/admin/trading/fees/schedules/{feeScheduleId}/disable` 禁用费率，
-  `GET /api/v1/admin/trading/fees/schedules` 查询配置。
+  `GET /api/v1/admin/trading/fees/schedules` 查询配置。查询支持 `limit/cursor/sort` 游标分页，排序白名单为 `updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc`、`effectiveTime.desc`、`effectiveTime.asc`，响应保留 `schedules/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。
 - VIP 档位接口：`POST /api/v1/admin/trading/fees/tiers` 新增/更新档位规则，`GET /api/v1/admin/trading/fees/tiers` 查询规则，`POST /api/v1/admin/trading/fees/tiers/refresh?userId=...` 重算单个用户，`POST /api/v1/admin/trading/fees/tiers/refresh-active` 重算活跃用户，`GET /api/v1/admin/trading/fees/tiers/users/{userId}` 查询当前档位。
+  档位查询支持 `limit/cursor/sort` 游标分页，排序白名单为 `priority.desc`、`priority.asc`，响应保留 `tiers/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。
+
+后台订单审计接口使用 `/api/v1/admin/trading` 前缀，并由 gateway 的 `/api/v1/admin/gateway/trading-orders` 与 `/api/v1/admin/gateway/trading-trigger` 后台安全域转发。`GET /orders`、`GET /trigger-orders` 和 `GET /orders/trades` 均支持 `limit/cursor/sort` 游标分页，响应保留 `orders` 或 `trades` 字段，并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。订单/条件单列表支持 `createdAt.desc`、`createdAt.asc`，成交列表支持 `eventTime.desc`、`eventTime.asc`。
 - 定时 VIP 刷新会计算用户 30 日 maker+taker 成交名义价值和账户资产估值，单位统一为 USD/USDT 最小单位，然后把命中的档位写回 `trading_fee_schedules`，作为用户全局 `VIP` 费率。稳定币余额按 1:1 计算；非稳定币余额用活跃 `baseAsset-USDT/USD` 合约的最新 mark price 估值，没有 mark price 时不计入。
 - 业务查询：`GET /api/v1/trading/fees/effective?userId=...&symbol=...` 返回当前最终 maker/taker ppm 和来源，例如 `INSTRUMENT`、`VIP_SYMBOL`。
 - 订单接受时会把最终 `maker_fee_rate_ppm`、`taker_fee_rate_ppm` 写入 `trading_orders`。后续用户 VIP 等级或活动费率变化，不会重解释已接受挂单。

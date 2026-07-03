@@ -1,5 +1,6 @@
 package com.surprising.trading.order.repository;
 
+import com.surprising.trading.api.model.AdminCursorPage;
 import com.surprising.trading.api.model.FeeScheduleQueryResponse;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleSourceType;
@@ -10,8 +11,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -19,6 +22,16 @@ import org.springframework.stereotype.Repository;
 public class OrderFeeRepository {
 
     private static final long MAX_ABS_FEE_RATE_PPM = 1_000_000L;
+    private static final int MAX_QUERY_LIMIT = 500;
+    private static final AdminCursorPage.SortSpec SCHEDULE_UPDATED_DESC =
+            new AdminCursorPage.SortSpec("updatedAt", "updated_at", "fee_schedule_id", true);
+    private static final List<AdminCursorPage.SortSpec> SCHEDULE_SORTS = List.of(
+            SCHEDULE_UPDATED_DESC,
+            new AdminCursorPage.SortSpec("updatedAt", "updated_at", "fee_schedule_id", false),
+            new AdminCursorPage.SortSpec("createdAt", "created_at", "fee_schedule_id", true),
+            new AdminCursorPage.SortSpec("createdAt", "created_at", "fee_schedule_id", false),
+            new AdminCursorPage.SortSpec("effectiveTime", "effective_time", "fee_schedule_id", true),
+            new AdminCursorPage.SortSpec("effectiveTime", "effective_time", "fee_schedule_id", false));
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -119,20 +132,62 @@ public class OrderFeeRepository {
     }
 
     public FeeScheduleQueryResponse querySchedules(long userId, String symbol, FeeScheduleStatus status, int limit) {
-        int normalizedLimit = Math.max(1, Math.min(limit, 500));
+        int normalizedLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
         String normalizedSymbol = emptyToNull(symbol);
         String statusName = status == null ? null : status.name();
         List<FeeScheduleResponse> schedules = jdbcTemplate.query("""
                 SELECT *
                   FROM trading_fee_schedules
                  WHERE (? <= 0 OR user_id = ?)
-                   AND (? IS NULL OR symbol = ?)
-                   AND (? IS NULL OR status = ?)
+                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR status = ?)
                  ORDER BY user_id ASC, symbol ASC NULLS FIRST, effective_time DESC, fee_schedule_id DESC
                  LIMIT ?
                 """, (rs, rowNum) -> toResponse(rs), userId, userId, normalizedSymbol, normalizedSymbol,
                 statusName, statusName, normalizedLimit);
         return new FeeScheduleQueryResponse(schedules.size(), schedules);
+    }
+
+    public FeeScheduleQueryResponse querySchedulesPage(long userId,
+                                                       String symbol,
+                                                       FeeScheduleStatus status,
+                                                       int limit,
+                                                       String cursor,
+                                                       String sort) {
+        int normalizedLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
+        String normalizedSymbol = emptyToNull(symbol);
+        String statusName = status == null ? null : status.name();
+        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, SCHEDULE_UPDATED_DESC, SCHEDULE_SORTS);
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.add(userId);
+        args.add(normalizedSymbol);
+        args.add(normalizedSymbol);
+        args.add(statusName);
+        args.add(statusName);
+        String sql = """
+                SELECT *
+                  FROM trading_fee_schedules
+                 WHERE (? <= 0 OR user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR status = ?)
+                """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
+                 ORDER BY %s %s, fee_schedule_id %s
+                 LIMIT ?
+                """.formatted(sortSpec.column(), sortSpec.directionSql(), sortSpec.directionSql());
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(normalizedLimit + 1);
+        List<FeeScheduleResponse> fetchedRows = jdbcTemplate.query(sql, (rs, rowNum) -> toResponse(rs),
+                args.toArray());
+        AdminCursorPage.CursorPage<FeeScheduleResponse> page = AdminCursorPage.page(
+                fetchedRows,
+                normalizedLimit,
+                sortSpec,
+                scheduleTimestampExtractor(sortSpec),
+                FeeScheduleResponse::feeScheduleId);
+        return new FeeScheduleQueryResponse(page.items().size(), page.items(), page.nextCursor(), page.hasMore(),
+                page.sort(), page.limit());
     }
 
     public static void validateSchedule(FeeScheduleUpsertRequest request) {
@@ -216,5 +271,15 @@ public class OrderFeeRepository {
             return null;
         }
         return value.trim().toUpperCase();
+    }
+
+    private static Function<FeeScheduleResponse, Instant> scheduleTimestampExtractor(
+            AdminCursorPage.SortSpec sort) {
+        return switch (sort.field()) {
+            case "createdAt" -> FeeScheduleResponse::createdAt;
+            case "effectiveTime" -> FeeScheduleResponse::effectiveTime;
+            case "updatedAt" -> FeeScheduleResponse::updatedAt;
+            default -> throw new IllegalArgumentException("unsupported sort: " + sort.token());
+        };
     }
 }

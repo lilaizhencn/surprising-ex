@@ -97,6 +97,17 @@ curl 'http://localhost:9090/api/v1/insurance/ledger?asset=USDT&limit=100'
 curl 'http://localhost:9090/api/v1/insurance/coverages?userId=1001&asset=USDT&limit=100'
 ```
 
+后台操作员应通过 gateway 使用 admin namespace：
+
+- `POST /api/v1/insurance/admin/fund-adjustments`
+- `GET /api/v1/insurance/admin/balances`
+- `GET /api/v1/insurance/admin/ledger`
+- `GET /api/v1/insurance/admin/coverages`
+- `GET /api/v1/insurance/admin/runtime-config`
+- `POST /api/v1/insurance/admin/runtime-config`
+
+其中 `/admin/ledger` 和 `/admin/coverages` 支持统一游标分页参数 `limit`、`cursor`、`sort`。排序白名单为 `createdAt.desc` 和 `createdAt.asc`，响应保留 `entries/coverages/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。
+
 ## 数据库
 
 根目录 [init.sql](../init.sql) 创建：

@@ -9,6 +9,17 @@ psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f in
 The local `docker-compose.yml` also mounts `init.sql` into PostgreSQL's init directory. It runs
 automatically only when the named PostgreSQL volume is created for the first time.
 
+## Admin gateway tables
+
+`gateway_admin_export_jobs` stores approved CSV export jobs. `gateway_admin_query_tasks` stores
+allowlisted long-running admin JSON query tasks, including status, query params, result JSON, row
+count, byte size, error message, expiry time, archive time, and archive reason. Expired query-task
+results can be cleared while retaining task metadata for audit and capacity tracking. Allowlisted
+query types include system latency/backlog checks plus order, trigger-order, and match-trade audit
+searches.
+`gateway_admin_operation_logs.duration_ms` stores admin gateway proxy request duration for audit
+exports and p50/p95/p99 system latency metrics.
+
 ## `instruments`
 
 One row stores one version of one tradable product:
@@ -290,10 +301,10 @@ Core indexes:
 
 ```sql
 CREATE UNIQUE INDEX risk_liquidation_candidates_snapshot_uidx
-    ON risk_liquidation_candidates (snapshot_id, user_id, symbol);
+    ON risk_liquidation_candidates (snapshot_id, user_id, symbol, margin_mode);
 
 CREATE UNIQUE INDEX risk_liquidation_candidates_active_uidx
-    ON risk_liquidation_candidates (user_id, symbol)
+    ON risk_liquidation_candidates (user_id, symbol, margin_mode)
     WHERE status IN ('NEW', 'PROCESSING');
 
 CREATE INDEX risk_liquidation_candidates_status_idx
@@ -307,6 +318,13 @@ candidate is `COMPLETED` or `CANCELED`, a later scan may create the next staged 
 Risk insertion should target only the partial active-candidate index for `DO NOTHING`; candidate-id
 or snapshot uniqueness conflicts are data-integrity issues and must fail rather than being treated
 as normal duplicate scans.
+
+`risk_admin_rule_overrides` stores admin-managed risk rule overrides:
+
+- `GLOBAL_MARGIN_POLICY` persists warning and liquidation margin-ratio thresholds.
+- `RISK_SCAN_CONTROL` persists scan enablement, scan delay, and scan batch size.
+- `admin_user_id`, `reason`, and `updated_at` provide an audit trail for risk policy changes.
+- The risk-provider applies a successful write to the current node's runtime configuration immediately; the row is the durable source for admin inspection and later startup/rollout automation.
 
 ## Insurance Tables
 
@@ -449,8 +467,26 @@ the same statement. The expiry and `TRIGGERING` indexes support scheduled expiry
 - Primary key is `(strategy_id, symbol)`, so one strategy may quote different symbols on different nodes.
 - `owner_id` should be the provider's stable node id in production.
 - `lease_until` lets another node take over after a failed owner stops refreshing the row.
-- The table does not store strategy config or balances. The provider still reads instruments, order book, mark price,
-  account positions, and open orders each cycle before placing normal post-only orders through order-provider.
+- The table does not store balances. The provider still reads instruments, order book, mark price, account positions,
+  and open orders each cycle before placing normal post-only orders through order-provider.
+
+`market_maker_strategy_overrides` stores the latest admin-approved hot override for a configured strategy:
+
+- Only quote/risk parameters are hot-editable: enabled, base quantity, margin mode, spread, level spacing,
+  inventory cap/skew, and quote levels. Account ids and symbols remain deployment-level config.
+- Null fields mean "use the configured value from `application.yml`"; deleting the row fully resets the strategy to
+  file config.
+- `updated_by_admin_user_id`, `reason`, `updated_at`, and `version` record the current effective override metadata.
+  Full operator audit and four-eyes approval are enforced in gateway admin operation logs and approval tables.
+
+`market_maker_strategy_run_events` stores best-effort strategy execution events for admin operations:
+
+- Events are keyed by strategy, symbol, account, node id, cycle sequence, event type, trace id, and creation time.
+- Event types cover cycle success/failure, quote reconciliation, IOC trade submit/reject outcomes, and skipped cycles.
+- The admin `/api/v1/admin/market-maker/strategy-logs` endpoint uses this table for run-log troubleshooting, while
+  `/api/v1/admin/market-maker/pnl-attribution` derives financial attribution from configured market-maker scopes,
+  market-maker `clientOrderId` prefixes, `trading_match_trades`, `account_ledger_entries` fee rows, and current
+  `account_positions`.
 
 `trading_user_fee_tiers` stores the current calculated fee tier per user:
 
@@ -495,8 +531,14 @@ events.
 `trading_match_results.trace_id`, `trading_match_trades.trace_id`, Kafka topic/partition/offset, and
 the relevant ids (`order_id`, `command_id`, `trade_id`) when tracing a user request across the trading
 chain.
-The `trading_order_events_trace_idx`, `trading_match_results_trace_idx`, and
-`trading_match_trades_trace_idx` partial indexes support incident-time lookups for non-null trace ids.
+The `trading_trigger_orders_trace_idx`, `trading_order_events_trace_idx`,
+`trading_match_results_trace_idx`, `trading_match_trades_trace_idx`,
+`trading_outbox_events_trace_idx`, `account_outbox_events_trace_idx`,
+`risk_outbox_events_trace_idx`, `gateway_admin_operation_logs_trace_idx`, and
+`gateway_admin_approval_requests_consumed_trace_idx` indexes support the admin
+TraceId lookup endpoint `/api/v1/admin/traces/{traceId}`.
+`gateway_admin_operation_logs.duration_ms` stores admin gateway proxy request duration for audit exports
+and p50/p95/p99 system latency metrics.
 The same side-specific versions are used for contract math, while maker/taker fee ppm comes from each
 side's `trading_orders` fee snapshot.
 
@@ -565,6 +607,39 @@ Manual isolated-margin transfers write `account_ledger_entries.reference_type = 
 with signed `amount_units`: positive means collateral added to the position, negative means collateral
 released from the position. The unique `account_ledger_reference_uidx` makes these requests idempotent
 by `reference_id + user_id + asset`.
+Back-office balance and product-balance adjustments also keep a dedicated operator audit trail in
+`account_admin_balance_adjustments`. The ledger rows remain the source of funds truth, while this
+admin table stores `admin_user_id`, `admin_username`, adjustment kind, account type, reference id,
+amount, balance-after value, and timestamp for back-office traceability.
+Gateway account-asset report snapshots are stored separately in
+`gateway_admin_account_asset_snapshots`. They are generated from account balances and
+`price_exchange_rates` for admin reporting; they are not an account ledger and must not be used as
+the source of funds truth.
+Snapshots can be generated manually through `/api/v1/admin/reports/account-assets/snapshots` or
+automatically by the gateway account-asset snapshot scheduler. Scheduled runs compare the generated
+snapshot with the previous day by `account_type + asset`; differences above configured thresholds
+raise `SYSTEM` alert events with metric key `ACCOUNT_ASSET_SNAPSHOT_DIFF_PPM`.
+Saved snapshot queries use keyset pagination over `snapshot_date`, `total_value`, and `snapshot_id`;
+`gateway_account_asset_snapshots_page_idx` supports the admin report paging path.
+
+Gateway support operations use two local admin tables:
+
+- `gateway_support_tickets` stores customer support cases by user, status, priority, category, assignee,
+  creator, resolver, and close time.
+- `gateway_support_ticket_notes` stores the chronological note timeline for each ticket. Notes carry the
+  admin user, note type, visibility, body, and creation time.
+
+Gateway admin alerting uses four tables:
+
+- `gateway_admin_alert_rules` stores configurable alert rules for `SYSTEM`, `MARKET`, `TRADING`, `RISK`, and
+  `WALLET` domains.
+- `gateway_admin_alert_events` stores the current and historical alert events keyed by a rule/target
+  fingerprint. Active events are unique while `OPEN` or `ACKNOWLEDGED`; a resolved fingerprint may open again later.
+- `gateway_admin_alert_channels` stores admin-managed notification channels with optional domain scope and minimum
+  severity. Channel config writes go through gateway admin RBAC, operation audit, and approval.
+- `gateway_admin_alert_deliveries` stores per-event/per-channel delivery queue rows. Evaluation creates `PENDING`
+  rows for matching enabled channels; external sender workers can claim these rows and update status to `SENT`,
+  `FAILED`, or `SKIPPED`. Admin-web can query and retry failed/skipped rows.
 
 `account_outbox_events` stores account-side Kafka events written inside the same transaction as the
 account state change. It carries `POSITION_UPDATED` events for WebSocket private position pushes and
@@ -612,3 +687,10 @@ trade id, or their own latest-position version rules. Insurance uses
 - Strong liquidation order creation does not use broad conflict suppression on `trading_orders`; uniqueness violations roll the transaction back.
 - Sizing first attempts risk-bracket reduction, then configured partial close ratios, and only fully closes when the margin ratio is above the full-close threshold.
 - Before submitting, the provider reads the latest fresh risk position/account snapshots and cancels with `RISK_POSITION_CHANGED` if the snapshot quantity no longer matches the locked live position.
+
+`liquidation_admin_actions` stores admin-side operational actions for liquidation candidates:
+
+- `CANCEL_CANDIDATE` is currently supported.
+- Actions reference `risk_liquidation_candidates(candidate_id)`.
+- `admin_user_id`, `reason`, and `created_at` are persisted for dispute review and audit.
+- A candidate can be canceled from the admin UI only while it is `NEW` or `PROCESSING` and has no active `SUBMITTED` or `PARTIALLY_FILLED` liquidation order.

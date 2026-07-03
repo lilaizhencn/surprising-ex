@@ -1,5 +1,6 @@
 package com.surprising.risk.provider.service;
 
+import com.surprising.risk.api.model.AdminCursorPage;
 import com.surprising.risk.api.model.LiquidationCandidateEvent;
 import com.surprising.risk.api.model.LiquidationCandidateQueryResponse;
 import com.surprising.risk.api.model.LiquidationCandidateResponse;
@@ -16,6 +17,8 @@ import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
 import com.surprising.risk.provider.repository.RiskOutboxRepository;
 import com.surprising.risk.provider.repository.RiskRepository;
+import com.surprising.risk.provider.repository.RiskRepository.HighRiskAccount;
+import com.surprising.risk.provider.repository.RiskRepository.RiskRuleOverride;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
 import com.surprising.trading.api.model.MarginMode;
 import java.time.Instant;
@@ -154,8 +157,139 @@ public class RiskService {
 
     public LiquidationCandidateQueryResponse liquidationCandidates(String status, int limit) {
         LiquidationCandidateStatus candidateStatus = LiquidationCandidateStatus.valueOf(status.trim().toUpperCase());
-        List<LiquidationCandidateResponse> rows = riskRepository.liquidationCandidates(candidateStatus, limit);
+        List<LiquidationCandidateResponse> rows = riskRepository.liquidationCandidates(candidateStatus,
+                normalizeLimit(limit));
         return new LiquidationCandidateQueryResponse(rows.size(), rows);
+    }
+
+    public LiquidationCandidateQueryResponse liquidationCandidates(String status,
+                                                                  int limit,
+                                                                  String cursor,
+                                                                  String sort) {
+        LiquidationCandidateStatus candidateStatus = LiquidationCandidateStatus.valueOf(status.trim().toUpperCase());
+        AdminCursorPage.CursorPage<LiquidationCandidateResponse> page = riskRepository.liquidationCandidatesPage(
+                candidateStatus, normalizeLimit(limit), cursor, sort);
+        return new LiquidationCandidateQueryResponse(page.items().size(), page.items(), page.nextCursor(),
+                page.hasMore(), page.sort(), page.limit());
+    }
+
+    public RiskRulesResponse riskRules() {
+        List<RiskRuleOverride> overrides = riskRepository.riskRuleOverrides();
+        RiskRuleOverride marginOverride = override(overrides, "GLOBAL_MARGIN_POLICY");
+        RiskRuleOverride scanOverride = override(overrides, "RISK_SCAN_CONTROL");
+        List<RiskRuleResponse> rules = List.of(
+                rule("GLOBAL_MARGIN_POLICY", "Global margin thresholds", "GLOBAL_MARGIN",
+                        marginOverride == null ? null : marginOverride.enabled(),
+                        properties.getCalculation().getWarningMarginRatioPpm(),
+                        properties.getCalculation().getLiquidationMarginRatioPpm(),
+                        null,
+                        null,
+                        marginOverride),
+                rule("RISK_SCAN_CONTROL", "Risk scan control", "SCAN_CONTROL",
+                        scanOverride == null ? properties.getCalculation().isEnabled() : scanOverride.enabled(),
+                        null,
+                        null,
+                        properties.getCalculation().getScanDelayMs(),
+                        properties.getCalculation().getScanBatchSize(),
+                        scanOverride));
+        return new RiskRulesResponse(rules.size(), rules);
+    }
+
+    public RiskRuleResponse updateRiskRule(String ruleCode, String adminUserId, RiskRuleUpdateCommand command) {
+        String normalizedCode = normalizeRuleCode(ruleCode);
+        String normalizedAdmin = requireText(adminUserId, "adminUserId");
+        if (command == null) {
+            throw new IllegalArgumentException("request is required");
+        }
+        String reason = requireText(command.reason(), "reason");
+        if (reason.length() > 500) {
+            throw new IllegalArgumentException("reason must be at most 500 characters");
+        }
+        if ("GLOBAL_MARGIN_POLICY".equals(normalizedCode)) {
+            long warning = nonNegative(
+                    command.warningMarginRatioPpm() == null
+                            ? properties.getCalculation().getWarningMarginRatioPpm()
+                            : command.warningMarginRatioPpm(),
+                    "warningMarginRatioPpm");
+            long liquidation = nonNegative(
+                    command.liquidationMarginRatioPpm() == null
+                            ? properties.getCalculation().getLiquidationMarginRatioPpm()
+                            : command.liquidationMarginRatioPpm(),
+                    "liquidationMarginRatioPpm");
+            if (warning >= liquidation) {
+                throw new IllegalArgumentException("warningMarginRatioPpm must be less than liquidationMarginRatioPpm");
+            }
+            properties.getCalculation().setWarningMarginRatioPpm(warning);
+            properties.getCalculation().setLiquidationMarginRatioPpm(liquidation);
+            RiskRuleOverride override = riskRepository.upsertRiskRuleOverride(normalizedCode,
+                    ruleName(command.ruleName(), "Global margin thresholds"), "GLOBAL_MARGIN",
+                    command.enabled() == null || command.enabled(), warning, liquidation, null, null,
+                    normalizedAdmin, reason, Instant.now());
+            return ruleFromOverride(override);
+        }
+        if ("RISK_SCAN_CONTROL".equals(normalizedCode)) {
+            boolean enabled = command.enabled() == null ? properties.getCalculation().isEnabled() : command.enabled();
+            long scanDelayMs = nonNegative(command.scanDelayMs() == null
+                    ? properties.getCalculation().getScanDelayMs()
+                    : command.scanDelayMs(), "scanDelayMs");
+            int scanBatchSize = bounded(command.scanBatchSize() == null
+                    ? properties.getCalculation().getScanBatchSize()
+                    : command.scanBatchSize(), 1, 10_000, "scanBatchSize");
+            properties.getCalculation().setEnabled(enabled);
+            properties.getCalculation().setScanDelayMs(scanDelayMs);
+            properties.getCalculation().setScanBatchSize(scanBatchSize);
+            RiskRuleOverride override = riskRepository.upsertRiskRuleOverride(normalizedCode,
+                    ruleName(command.ruleName(), "Risk scan control"), "SCAN_CONTROL", enabled,
+                    null, null, scanDelayMs, scanBatchSize, normalizedAdmin, reason, Instant.now());
+            return ruleFromOverride(override);
+        }
+        throw new IllegalArgumentException("unsupported risk rule: " + ruleCode);
+    }
+
+    public HighRiskAccountsResponse highRiskAccounts(Long minMarginRatioPpm, int limit) {
+        long threshold = nonNegative(minMarginRatioPpm == null
+                ? properties.getCalculation().getWarningMarginRatioPpm()
+                : minMarginRatioPpm, "minMarginRatioPpm");
+        List<HighRiskAccount> rows = riskRepository.highRiskAccounts(threshold, normalizeLimit(limit));
+        List<HighRiskAccountResponse> accounts = rows.stream()
+                .map(row -> new HighRiskAccountResponse(row.snapshotId(), row.userId(), row.settleAsset(),
+                        row.walletBalanceUnits(), row.unrealizedPnlUnits(), row.equityUnits(),
+                        row.maintenanceMarginUnits(), row.marginRatioPpm(), row.status(), row.eventTime(),
+                        row.positionCount(), row.riskPositionCount(), row.activeCandidateCount(),
+                        row.topSymbol(), row.topMarginMode(), row.topPositionMarginRatioPpm(),
+                        row.topPositionStatus(), row.riskLevel()))
+                .toList();
+        long liquidationCount = accounts.stream()
+                .filter(account -> "LIQUIDATION".equals(account.riskLevel()))
+                .count();
+        long warningCount = accounts.stream()
+                .filter(account -> "WARNING".equals(account.riskLevel()))
+                .count();
+        return new HighRiskAccountsResponse(threshold, accounts.size(), liquidationCount, warningCount, accounts);
+    }
+
+    public HighRiskAccountsResponse highRiskAccounts(Long minMarginRatioPpm, int limit, String cursor, String sort) {
+        long threshold = nonNegative(minMarginRatioPpm == null
+                ? properties.getCalculation().getWarningMarginRatioPpm()
+                : minMarginRatioPpm, "minMarginRatioPpm");
+        AdminCursorPage.CursorPage<HighRiskAccount> page = riskRepository.highRiskAccountsPage(threshold,
+                normalizeLimit(limit), cursor, sort);
+        List<HighRiskAccountResponse> accounts = page.items().stream()
+                .map(row -> new HighRiskAccountResponse(row.snapshotId(), row.userId(), row.settleAsset(),
+                        row.walletBalanceUnits(), row.unrealizedPnlUnits(), row.equityUnits(),
+                        row.maintenanceMarginUnits(), row.marginRatioPpm(), row.status(), row.eventTime(),
+                        row.positionCount(), row.riskPositionCount(), row.activeCandidateCount(),
+                        row.topSymbol(), row.topMarginMode(), row.topPositionMarginRatioPpm(),
+                        row.topPositionStatus(), row.riskLevel()))
+                .toList();
+        long liquidationCount = accounts.stream()
+                .filter(account -> "LIQUIDATION".equals(account.riskLevel()))
+                .count();
+        long warningCount = accounts.stream()
+                .filter(account -> "WARNING".equals(account.riskLevel()))
+                .count();
+        return new HighRiskAccountsResponse(threshold, accounts.size(), liquidationCount, warningCount, accounts,
+                page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
     private void scanGroup(RiskGroupKey key,
@@ -312,6 +446,81 @@ public class RiskService {
         return normalized;
     }
 
+    private RiskRuleOverride override(List<RiskRuleOverride> overrides, String ruleCode) {
+        return overrides.stream()
+                .filter(item -> ruleCode.equals(item.ruleCode()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private RiskRuleResponse rule(String ruleCode,
+                                  String ruleName,
+                                  String ruleType,
+                                  Boolean enabled,
+                                  Long warningMarginRatioPpm,
+                                  Long liquidationMarginRatioPpm,
+                                  Long scanDelayMs,
+                                  Integer scanBatchSize,
+                                  RiskRuleOverride override) {
+        return new RiskRuleResponse(ruleCode, ruleName, ruleType, enabled == null || enabled,
+                warningMarginRatioPpm, liquidationMarginRatioPpm, scanDelayMs, scanBatchSize,
+                override == null ? "runtime" : "override",
+                override == null ? null : override.adminUserId(),
+                override == null ? null : override.reason(),
+                override == null ? null : override.updatedAt());
+    }
+
+    private RiskRuleResponse ruleFromOverride(RiskRuleOverride override) {
+        return new RiskRuleResponse(override.ruleCode(), override.ruleName(), override.ruleType(),
+                override.enabled(), override.warningMarginRatioPpm(), override.liquidationMarginRatioPpm(),
+                override.scanDelayMs(), override.scanBatchSize(), "override", override.adminUserId(),
+                override.reason(), override.updatedAt());
+    }
+
+    private String normalizeRuleCode(String value) {
+        String normalized = requireText(value, "ruleCode").toUpperCase();
+        if (!normalized.matches("[A-Z0-9_.:-]{2,96}")) {
+            throw new IllegalArgumentException("invalid ruleCode: " + value);
+        }
+        return normalized;
+    }
+
+    private String ruleName(String value, String fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        String normalized = value.trim();
+        if (normalized.length() > 120) {
+            throw new IllegalArgumentException("ruleName must be at most 120 characters");
+        }
+        return normalized;
+    }
+
+    private String requireText(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(field + " is required");
+        }
+        return value.trim();
+    }
+
+    private long nonNegative(long value, String field) {
+        if (value < 0) {
+            throw new IllegalArgumentException(field + " must be non-negative");
+        }
+        return value;
+    }
+
+    private int bounded(int value, int min, int max, String field) {
+        if (value < min || value > max) {
+            throw new IllegalArgumentException(field + " must be between " + min + " and " + max);
+        }
+        return value;
+    }
+
+    private int normalizeLimit(int limit) {
+        return bounded(limit, 1, 1000, "limit");
+    }
+
     private String payload(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -325,5 +534,72 @@ public class RiskService {
             return configured.trim();
         }
         return "risk-" + UUID.randomUUID();
+    }
+
+    public record RiskRulesResponse(int ruleCount,
+                                    List<RiskRuleResponse> rules) {
+    }
+
+    public record RiskRuleResponse(String ruleCode,
+                                   String ruleName,
+                                   String ruleType,
+                                   boolean enabled,
+                                   Long warningMarginRatioPpm,
+                                   Long liquidationMarginRatioPpm,
+                                   Long scanDelayMs,
+                                   Integer scanBatchSize,
+                                   String source,
+                                   String adminUserId,
+                                   String reason,
+                                   Instant updatedAt) {
+    }
+
+    public record RiskRuleUpdateCommand(String ruleName,
+                                        Boolean enabled,
+                                        Long warningMarginRatioPpm,
+                                        Long liquidationMarginRatioPpm,
+                                        Long scanDelayMs,
+                                        Integer scanBatchSize,
+                                        String reason) {
+    }
+
+    public record HighRiskAccountsResponse(long minMarginRatioPpm,
+                                           int accountCount,
+                                           long liquidationCount,
+                                           long warningCount,
+                                           List<HighRiskAccountResponse> accounts,
+                                           String nextCursor,
+                                           boolean hasMore,
+                                           String sort,
+                                           int limit) {
+
+        public HighRiskAccountsResponse(long minMarginRatioPpm,
+                                        int accountCount,
+                                        long liquidationCount,
+                                        long warningCount,
+                                        List<HighRiskAccountResponse> accounts) {
+            this(minMarginRatioPpm, accountCount, liquidationCount, warningCount, accounts,
+                    null, false, "eventTime.desc", accountCount);
+        }
+    }
+
+    public record HighRiskAccountResponse(long snapshotId,
+                                          long userId,
+                                          String settleAsset,
+                                          long walletBalanceUnits,
+                                          long unrealizedPnlUnits,
+                                          long equityUnits,
+                                          long maintenanceMarginUnits,
+                                          long marginRatioPpm,
+                                          RiskStatus status,
+                                          Instant eventTime,
+                                          int positionCount,
+                                          int riskPositionCount,
+                                          int activeCandidateCount,
+                                          String topSymbol,
+                                          MarginMode topMarginMode,
+                                          Long topPositionMarginRatioPpm,
+                                          RiskStatus topPositionStatus,
+                                          String riskLevel) {
     }
 }

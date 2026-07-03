@@ -24,6 +24,16 @@ surprising:
       user-id-header: X-User-Id
       require-identity-for-private-routes: true
       allow-user-id-header-fallback: true
+      admin-roles:
+        - SUPPORT
+        - ADMIN
+        - SUPER_ADMIN
+      admin-ip-allowlist: []
+      require-approval-for-high-risk-admin-writes: true
+      admin-approval-header: X-Admin-Approval-Id
+      admin-approval-ttl: 30m
+      require-admin-mfa: false
+      mfa-secret-encryption-key: ${GATEWAY_MFA_SECRET_ENCRYPTION_KEY:}
       issuer: surprising-ex-gateway
       jwt-secret: local-dev-change-me-surprising-ex-gateway-secret-2026
       access-token-ttl: 30m
@@ -72,6 +82,10 @@ surprising:
         base-url: http://localhost:9087
         target-prefix: /api/v1/risk
         private-route: true
+      risk-admin:
+        base-url: http://localhost:9087
+        target-prefix: /api/v1/admin/risk
+        private-route: true
       liquidation:
         base-url: http://localhost:9088
         target-prefix: /api/v1/liquidations
@@ -92,3 +106,181 @@ surprising:
         base-url: http://localhost:9096
         target-prefix: /api/v1/market-maker
         private-route: true
+      wallet:
+        base-url: http://localhost:8002
+        target-prefix: /wallet/v1
+        private-route: true
+      websocket:
+        base-url: http://localhost:9093
+        target-prefix: /ws
+        private-route: false
+    admin-routes:
+      instrument:
+        base-url: http://localhost:9080
+        target-prefix: /api/v1/instruments
+        private-route: true
+      instrument-admin:
+        base-url: http://localhost:9080
+        target-prefix: /api/v1/instruments/admin
+        private-route: true
+      candlestick:
+        base-url: http://localhost:9081
+        target-prefix: /api/v1/candlestick
+        private-route: true
+      price-index:
+        base-url: http://localhost:9082
+        target-prefix: /api/v1/price/index
+        private-route: true
+      price-fx:
+        base-url: http://localhost:9082
+        target-prefix: /api/v1/price/fx
+        private-route: true
+      price-mark:
+        base-url: http://localhost:9083
+        target-prefix: /api/v1/price/mark
+        private-route: true
+      trading:
+        base-url: http://localhost:9084
+        target-prefix: /api/v1/admin/trading/orders
+        private-route: true
+      trading-orders:
+        base-url: http://localhost:9084
+        target-prefix: /api/v1/admin/trading/orders
+        private-route: true
+      trading-fees:
+        base-url: http://localhost:9084
+        target-prefix: /api/v1/admin/trading/fees
+        private-route: true
+      trading-market:
+        base-url: http://localhost:9085
+        target-prefix: /api/v1/trading/market
+        private-route: true
+      trading-trigger:
+        base-url: http://localhost:9095
+        target-prefix: /api/v1/admin/trading/trigger-orders
+        private-route: true
+      account:
+        base-url: http://localhost:9086
+        target-prefix: /api/v1/admin/accounts
+        private-route: true
+      account-public:
+        base-url: http://localhost:9086
+        target-prefix: /api/v1/accounts
+        private-route: true
+      risk:
+        base-url: http://localhost:9087
+        target-prefix: /api/v1/risk
+        private-route: true
+      liquidation:
+        base-url: http://localhost:9088
+        target-prefix: /api/v1/liquidations
+        private-route: true
+      liquidation-admin:
+        base-url: http://localhost:9088
+        target-prefix: /api/v1/admin/liquidations
+        private-route: true
+      funding:
+        base-url: http://localhost:9089
+        target-prefix: /api/v1/funding
+        private-route: true
+      insurance:
+        base-url: http://localhost:9090
+        target-prefix: /api/v1/insurance
+        private-route: true
+      insurance-admin:
+        base-url: http://localhost:9090
+        target-prefix: /api/v1/insurance/admin
+        private-route: true
+      adl:
+        base-url: http://localhost:9091
+        target-prefix: /api/v1/adl
+        private-route: true
+      market-maker:
+        base-url: http://localhost:9096
+        target-prefix: /api/v1/admin/market-maker
+        private-route: true
+      wallet:
+        base-url: http://localhost:8002
+        target-prefix: /wallet/v1
+        private-route: true
+      wallet-admin:
+        base-url: http://localhost:8002
+        target-prefix: /wallet/v1/admin
+        private-route: true
+        basic-auth-username: ${SW_WALLET_ADMIN_USERNAME:admin}
+        basic-auth-password: ${SW_WALLET_ADMIN_PASSWORD:}
+      websocket-admin:
+        base-url: http://localhost:9093
+        target-prefix: /api/v1/admin/websocket
+        private-route: true
+    observability:
+      kafka:
+        enabled: ${ADMIN_KAFKA_LAG_ENABLED:false}
+        bootstrap-servers: ${ADMIN_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+        client-id: surprising-gateway-admin-monitor
+        request-timeout: 3s
+        max-partitions-per-group: 200
+        consumer-groups:
+          - group-id: surprising-matching-v1
+            topics:
+              - surprising.perp.order.commands.v1
+          - group-id: surprising-account-v1
+            topics:
+              - surprising.perp.match.trades.v1
+          - group-id: surprising-risk-v1
+            topics:
+              - surprising.account.position.events.v1
+          - group-id: surprising-liquidation-v1
+            topics:
+              - surprising.perp.liquidation.candidates.v1
+              - surprising.perp.match.results.v1
+          - group-id: surprising-trigger-v1
+            topics:
+              - surprising.perp.mark.price.v1
+          - group-id: surprising-mark-price-v1
+            topics:
+              - surprising.perp.index.price.v1
+              - surprising.perp.book.ticker.v1
+              - surprising.perp.trade.events.v1
+              - surprising.perp.funding.rate.v1
+          - group-id: surprising-insurance-v1
+            topics:
+              - surprising.account.liquidation-fee.events.v1
+      web-socket:
+        enabled: true
+        admin-route: websocket-admin
+      prometheus:
+        enabled: true
+        sample-preview-limit: 8
+        max-body-bytes: 1000000
+    alerts:
+      delivery-worker:
+        enabled: ${ADMIN_ALERT_DELIVERY_WORKER_ENABLED:true}
+        initial-delay-ms: ${ADMIN_ALERT_DELIVERY_WORKER_INITIAL_DELAY_MS:5000}
+        poll-delay-ms: ${ADMIN_ALERT_DELIVERY_WORKER_POLL_DELAY_MS:2000}
+        batch-size: ${ADMIN_ALERT_DELIVERY_WORKER_BATCH_SIZE:25}
+        max-attempts: ${ADMIN_ALERT_DELIVERY_WORKER_MAX_ATTEMPTS:5}
+        retry-delay: ${ADMIN_ALERT_DELIVERY_WORKER_RETRY_DELAY:30s}
+        claim-lease: ${ADMIN_ALERT_DELIVERY_WORKER_CLAIM_LEASE:2m}
+        max-error-message-length: 500
+    query-tasks:
+      max-active-per-user: ${ADMIN_QUERY_TASK_MAX_ACTIVE_PER_USER:3}
+      max-active-global: ${ADMIN_QUERY_TASK_MAX_ACTIVE_GLOBAL:25}
+      max-created-per-user-in-window: ${ADMIN_QUERY_TASK_MAX_CREATED_PER_USER_IN_WINDOW:20}
+      creation-window: ${ADMIN_QUERY_TASK_CREATION_WINDOW:1h}
+      max-retained-result-bytes: ${ADMIN_QUERY_TASK_MAX_RETAINED_RESULT_BYTES:50000000}
+      archive-expired-on-create: ${ADMIN_QUERY_TASK_ARCHIVE_EXPIRED_ON_CREATE:true}
+      archive-batch-size: ${ADMIN_QUERY_TASK_ARCHIVE_BATCH_SIZE:500}
+    reports:
+      account-asset-snapshots:
+        scheduler-enabled: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_SCHEDULER_ENABLED:true}
+        initial-delay-ms: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_INITIAL_DELAY_MS:15000}
+        poll-delay-ms: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_POLL_DELAY_MS:60000}
+        valuation-asset: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_VALUATION_ASSET:USDT}
+        snapshot-hour-utc: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_HOUR_UTC:0}
+        snapshot-minute-utc: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_MINUTE_UTC:5}
+        snapshot-date-offset-days: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_DATE_OFFSET_DAYS:1}
+        discrepancy-threshold-ppm: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_DISCREPANCY_THRESHOLD_PPM:100000}
+        discrepancy-min-absolute-value: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_DISCREPANCY_MIN_ABSOLUTE_VALUE:0}
+        discrepancy-limit: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_DISCREPANCY_LIMIT:20}
+        discrepancy-severity: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_DISCREPANCY_SEVERITY:WARN}

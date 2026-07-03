@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.client.OrderRpcApi;
+import com.surprising.trading.api.model.AdminCursorPage;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
@@ -163,6 +164,52 @@ class TriggerOrderServiceTest {
 
         verify(repository).markTriggerFailed(eq(501L), eq(9002L),
                 eq("reduce-only requires an open position"), any());
+    }
+
+    @Test
+    void adminOrdersNormalizesFiltersAndMapsRows() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties());
+        TriggerOrderRecord row = record(501L, TriggerOrderStatus.PENDING);
+        when(repository.adminOrderPage(1001L, "BTC-USDT", TriggerOrderStatus.PENDING, 501L, 50,
+                "cursor-1", "createdAt.asc"))
+                .thenReturn(new AdminCursorPage.CursorPage<>(List.of(row),
+                        "cursor-2", true, "createdAt.asc", 50));
+
+        var response = service.adminOrders(1001L, "btc-usdt", "pending", 501L, 50,
+                "cursor-1", "createdAt.asc");
+
+        assertThat(response.count()).isEqualTo(1);
+        assertThat(response.orders().getFirst().triggerOrderId()).isEqualTo(501L);
+        assertThat(response.nextCursor()).isEqualTo("cursor-2");
+        assertThat(response.hasMore()).isTrue();
+        assertThat(response.sort()).isEqualTo("createdAt.asc");
+        assertThat(response.limit()).isEqualTo(50);
+        verify(repository).adminOrderPage(1001L, "BTC-USDT", TriggerOrderStatus.PENDING, 501L, 50,
+                "cursor-1", "createdAt.asc");
+    }
+
+    @Test
+    void adminTimelineBuildsExecutionEvents() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties());
+        Instant created = Instant.parse("2026-07-01T00:00:00Z");
+        Instant triggered = Instant.parse("2026-07-01T00:01:00Z");
+        Instant updated = Instant.parse("2026-07-01T00:01:02Z");
+        TriggerOrderRecord row = new TriggerOrderRecord(501L, 1001L, "tp-1", "oco-1", "BTC-USDT",
+                OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, TriggerPriceType.MARK_PRICE,
+                TriggerCondition.GREATER_OR_EQUAL, 70_000L, OrderType.MARKET, TimeInForce.IOC, 0L, 10L,
+                MarginMode.CROSS, TriggerOrderStatus.TRIGGERED, 9001L, 42L, 70_001L, null,
+                "trace-501", null, triggered, created, updated);
+        when(repository.findById(501L)).thenReturn(Optional.of(row));
+
+        var response = service.adminTimeline(501L);
+
+        assertThat(response.order().triggerOrderId()).isEqualTo(501L);
+        assertThat(response.events()).extracting("eventType")
+                .containsExactly("CREATED", "TRIGGERED_MARK", "EXECUTION_PLACED");
     }
 
     private TriggerOrderRecord record(long triggerOrderId, TriggerOrderStatus status) {

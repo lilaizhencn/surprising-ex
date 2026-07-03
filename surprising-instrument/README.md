@@ -81,13 +81,28 @@ List:
 curl 'http://localhost:9080/api/v1/instruments/list?type=PERPETUAL&status=TRADING'
 ```
 
+Admin paginated current-market list:
+
+```bash
+curl 'http://localhost:9080/api/v1/instruments/admin/list?type=PERPETUAL&status=TRADING&limit=100&sort=symbol.asc'
+```
+
+Admin current-market detail and version history:
+
+```bash
+curl 'http://localhost:9080/api/v1/instruments/admin/BTC-USDT'
+curl 'http://localhost:9080/api/v1/instruments/admin/BTC-USDT/versions?limit=50&sort=version.desc'
+```
+
+Admin list endpoints support `limit/cursor/sort` cursor pagination. Current-market sort tokens are `symbol.asc`, `symbol.desc`, `updatedAt.desc`, `updatedAt.asc`, `createdAt.desc`, and `createdAt.asc`; version-history sort tokens are `version.desc` and `version.asc`. Responses keep `count/instruments` and add `nextCursor`, `hasMore`, `sort`, and `limit`.
+
 Status update:
 
 ```bash
 curl -X POST 'http://localhost:9080/api/v1/instruments/admin/BTC-USDT/status?status=HALT'
 ```
 
-Full upsert uses `POST /api/v1/instruments/admin/upsert` with an `InstrumentUpsertRequest` body. In production, admin APIs should be available only to internal management systems or trusted operations networks.
+Full upsert uses `POST /api/v1/instruments/admin/upsert` with an `InstrumentUpsertRequest` body. In production, admin APIs should be called through the gateway admin proxy only; product configuration and status changes must pass approval, permission checks, and operation audit logging.
 
 ## Kafka
 

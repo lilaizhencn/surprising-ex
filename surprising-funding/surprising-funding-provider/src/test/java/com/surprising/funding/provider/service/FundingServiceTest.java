@@ -3,6 +3,8 @@ package com.surprising.funding.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.funding.api.model.AdminCursorPage;
+import com.surprising.funding.api.model.FundingPaymentResponse;
 import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.model.FundingPaymentCandidate;
@@ -84,12 +86,35 @@ class FundingServiceTest {
         assertThat(fundingRepository.completedSettlementIds).isEmpty();
     }
 
+    @Test
+    void queryMethodsExposeCursorMetadata() {
+        FakeFundingRepository fundingRepository = new FakeFundingRepository();
+        FundingService service = new FundingService(new FundingProperties(), fundingRepository,
+                new NoopFundingOutboxRepository(), transactionManager());
+
+        var rates = service.rateHistory("btc-usdt", 50, "rate-cursor", "eventTime.asc");
+        var payments = service.payments(1001L, "btc-usdt", 25, "payment-cursor", "createdAt.asc");
+
+        assertThat(rates.rates()).hasSize(1);
+        assertThat(rates.nextCursor()).isEqualTo("next-rate");
+        assertThat(rates.hasMore()).isTrue();
+        assertThat(rates.sort()).isEqualTo("eventTime.asc");
+        assertThat(rates.limit()).isEqualTo(50);
+        assertThat(payments.payments()).hasSize(1);
+        assertThat(payments.nextCursor()).isEqualTo("next-payment");
+        assertThat(payments.sort()).isEqualTo("createdAt.asc");
+        assertThat(fundingRepository.lastRateCursor).isEqualTo("rate-cursor");
+        assertThat(fundingRepository.lastPaymentCursor).isEqualTo("payment-cursor");
+    }
+
     private static final class FakeFundingRepository extends FundingRepository {
         private int savedRates;
         private int rateInputCalls;
         private int dueRateCalls;
         private List<FundingRateResponse> dueRates = List.of();
         private String failPaymentSymbol;
+        private String lastRateCursor;
+        private String lastPaymentCursor;
         private final List<String> appliedPaymentSymbols = new ArrayList<>();
         private final List<Long> completedSettlementIds = new ArrayList<>();
 
@@ -129,6 +154,28 @@ class FundingServiceTest {
         public List<FundingRateResponse> dueRates(Instant now, int limit) {
             dueRateCalls++;
             return dueRates;
+        }
+
+        @Override
+        public AdminCursorPage.CursorPage<FundingRateResponse> rateHistoryPage(String symbol,
+                                                                                int limit,
+                                                                                String cursor,
+                                                                                String sort) {
+            lastRateCursor = cursor;
+            return new AdminCursorPage.CursorPage<>(List.of(rate(symbol, 99L)), "next-rate", true,
+                    sort, limit);
+        }
+
+        @Override
+        public AdminCursorPage.CursorPage<FundingPaymentResponse> paymentsPage(long userId,
+                                                                                String symbol,
+                                                                                int limit,
+                                                                                String cursor,
+                                                                                String sort) {
+            lastPaymentCursor = cursor;
+            return new AdminCursorPage.CursorPage<>(List.of(new FundingPaymentResponse(
+                    501L, 301L, userId, symbol, "USDT", 1L, 100L, 10L, -1L,
+                    Instant.parse("2026-07-01T08:00:00Z"))), "next-payment", true, sort, limit);
         }
 
         @Override

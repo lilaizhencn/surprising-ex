@@ -13,10 +13,14 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.api.TraceContext;
+import com.surprising.trading.api.model.AdminCursorPage;
+import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
+import com.surprising.trading.api.model.AdminCancelBySymbolRequest;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderCommandEvent;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderEvent;
+import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
@@ -367,6 +371,149 @@ class OrderServiceTest {
         verify(orderRepository).lockUserSymbolMarginScope(1001L, "BTC-USDT");
         verify(orderRepository, never()).hasActiveMarginModeConflict(anyLong(), anyString(), any());
         verify(orderRepository).nextSequence("command");
+    }
+
+    @Test
+    void adminCancelOrderPublishesCancelEventAndCommand() throws Exception {
+        TraceContext.set("trace-admin-cancel");
+        OrderService service = service();
+        OrderRecord accepted = order(9001L, "cancel-1", OrderStatus.ACCEPTED, null);
+        OrderRecord cancelRequested = order(9001L, "cancel-1", OrderStatus.CANCEL_REQUESTED, null);
+        when(orderRepository.findByOrderId(9001L))
+                .thenReturn(Optional.of(accepted), Optional.of(cancelRequested));
+        when(orderRepository.requestCancel(eq(9001L), any())).thenReturn(true);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L);
+        when(orderRepository.nextSequence("command")).thenReturn(9200L);
+
+        var response = service.adminCancelOrder(9001L, "risk operation");
+
+        assertThat(response.cancelRequested()).isTrue();
+        assertThat(response.order().status()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
+        ArgumentCaptor<OrderEvent> eventCaptor = ArgumentCaptor.forClass(OrderEvent.class);
+        verify(orderRepository).insertEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().eventType()).isEqualTo(OrderEventType.CANCEL_REQUESTED);
+        assertThat(eventCaptor.getValue().reason()).isEqualTo("admin cancel: risk operation");
+        ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
+        verify(outboxRepository, times(2)).enqueue(eq("ORDER"), eq(9001L), anyString(), eq("BTC-USDT"),
+                anyString(), payloadCaptor.capture(), any());
+        OrderCommandEvent command = new ObjectMapper().readValue(payloadCaptor.getAllValues().get(1),
+                OrderCommandEvent.class);
+        assertThat(command.commandType()).isEqualTo(com.surprising.trading.api.model.OrderCommandType.CANCEL);
+        assertThat(command.traceId()).isEqualTo("trace-admin-cancel");
+    }
+
+    @Test
+    void adminBatchCancelOrdersCancelsOnlyRepositorySelectedOrders() {
+        OrderService service = service();
+        OrderRecord first = order(9001L, "batch-1", OrderStatus.ACCEPTED, null);
+        OrderRecord second = order(9002L, "batch-2", OrderStatus.PARTIALLY_FILLED, null);
+        OrderRecord firstCancelRequested = order(9001L, "batch-1", OrderStatus.CANCEL_REQUESTED, null);
+        OrderRecord secondCancelRequested = order(9002L, "batch-2", OrderStatus.CANCEL_REQUESTED, null);
+        when(orderRepository.adminCancelableOrders(null, "BTC-USDT", 2)).thenReturn(java.util.List.of(first, second));
+        when(orderRepository.requestCancel(eq(9001L), any())).thenReturn(true);
+        when(orderRepository.requestCancel(eq(9002L), any())).thenReturn(true);
+        when(orderRepository.findByOrderId(9001L)).thenReturn(Optional.of(firstCancelRequested));
+        when(orderRepository.findByOrderId(9002L)).thenReturn(Optional.of(secondCancelRequested));
+        when(orderRepository.nextSequence("event")).thenReturn(9100L, 9101L);
+        when(orderRepository.nextSequence("command")).thenReturn(9200L, 9201L);
+
+        var response = service.adminCancelOrders(new AdminBatchCancelOrdersRequest(null, "BTC-USDT", 2,
+                "symbol halt"));
+
+        assertThat(response.requested()).isEqualTo(2);
+        assertThat(response.canceled()).isEqualTo(2);
+        assertThat(response.skipped()).isZero();
+        verify(orderRepository).adminCancelableOrders(null, "BTC-USDT", 2);
+        verify(orderRepository).requestCancel(eq(9001L), any());
+        verify(orderRepository).requestCancel(eq(9002L), any());
+        verify(orderRepository, times(2)).insertEvent(any());
+        verify(outboxRepository, times(4)).enqueue(eq("ORDER"), anyLong(), anyString(), eq("BTC-USDT"),
+                anyString(), anyString(), any());
+    }
+
+    @Test
+    void adminCancelPreviewReturnsImpactAndSampleOrders() {
+        OrderService service = service();
+        OrderRecord first = order(9001L, "preview-1", OrderStatus.ACCEPTED, null);
+        when(orderRepository.adminCancelableImpact(1001L, "BTC-USDT"))
+                .thenReturn(new OrderRepository.CancelableOrderImpact(3, 25L, 2, 1));
+        when(orderRepository.adminCancelableOrders(1001L, "BTC-USDT", 2)).thenReturn(java.util.List.of(first));
+
+        var response = service.adminCancelPreview(1001L, "btc-usdt", 2);
+
+        assertThat(response.userId()).isEqualTo(1001L);
+        assertThat(response.symbol()).isEqualTo("BTC-USDT");
+        assertThat(response.matched()).isEqualTo(3);
+        assertThat(response.sampleSize()).isEqualTo(1);
+        assertThat(response.totalRemainingQuantitySteps()).isEqualTo(25L);
+        assertThat(response.buyOrders()).isEqualTo(2);
+        assertThat(response.sellOrders()).isEqualTo(1);
+        assertThat(response.orders()).extracting("orderId").containsExactly(9001L);
+    }
+
+    @Test
+    void adminOrdersDelegatesCursorAndSort() {
+        OrderService service = service();
+        OrderRecord row = order(9001L, "admin-page", OrderStatus.ACCEPTED, null);
+        when(orderRepository.adminOrderPage(1001L, "BTC-USDT", OrderStatus.ACCEPTED, 9001L, 25,
+                "cursor-1", "createdAt.asc"))
+                .thenReturn(new AdminCursorPage.CursorPage<>(java.util.List.of(row),
+                        "cursor-2", true, "createdAt.asc", 25));
+
+        var response = service.adminOrders(1001L, "btc-usdt", "accepted", 9001L, 25,
+                "cursor-1", "createdAt.asc");
+
+        assertThat(response.orders()).extracting("orderId").containsExactly(9001L);
+        assertThat(response.nextCursor()).isEqualTo("cursor-2");
+        assertThat(response.hasMore()).isTrue();
+        assertThat(response.sort()).isEqualTo("createdAt.asc");
+        assertThat(response.limit()).isEqualTo(25);
+        verify(orderRepository).adminOrderPage(1001L, "BTC-USDT", OrderStatus.ACCEPTED, 9001L, 25,
+                "cursor-1", "createdAt.asc");
+    }
+
+    @Test
+    void adminMatchTradesDelegatesCursorAndSort() {
+        OrderService service = service();
+        var trade = new com.surprising.trading.api.model.AdminMatchTradeResponse(
+                7001L, 8001L, "BTC-USDT", 9001L, 1001L, OrderSide.BUY, MarginMode.CROSS,
+                9002L, 1002L, MarginMode.CROSS, 65_000L, 3L, true, false,
+                "trace-trade", Instant.parse("2026-07-01T00:00:00Z"),
+                Instant.parse("2026-07-01T00:00:01Z"));
+        when(orderRepository.matchTradePage(1001L, 9001L, "BTC-USDT", 25,
+                "cursor-1", "eventTime.asc"))
+                .thenReturn(new AdminCursorPage.CursorPage<>(java.util.List.of(trade),
+                        "cursor-2", true, "eventTime.asc", 25));
+
+        var response = service.adminMatchTrades(1001L, 9001L, "btc-usdt", 25,
+                "cursor-1", "eventTime.asc");
+
+        assertThat(response.trades()).extracting("tradeId").containsExactly(7001L);
+        assertThat(response.nextCursor()).isEqualTo("cursor-2");
+        assertThat(response.hasMore()).isTrue();
+        assertThat(response.sort()).isEqualTo("eventTime.asc");
+        assertThat(response.limit()).isEqualTo(25);
+        verify(orderRepository).matchTradePage(1001L, 9001L, "BTC-USDT", 25,
+                "cursor-1", "eventTime.asc");
+    }
+
+    @Test
+    void adminCancelBySymbolRequiresSymbolAndCancelsSelectedSymbolOrders() {
+        OrderService service = service();
+        OrderRecord first = order(9001L, "symbol-1", OrderStatus.ACCEPTED, null);
+        OrderRecord firstCancelRequested = order(9001L, "symbol-1", OrderStatus.CANCEL_REQUESTED, null);
+        when(orderRepository.adminCancelableOrders(null, "BTC-USDT", 1)).thenReturn(java.util.List.of(first));
+        when(orderRepository.requestCancel(eq(9001L), any())).thenReturn(true);
+        when(orderRepository.findByOrderId(9001L)).thenReturn(Optional.of(firstCancelRequested));
+        when(orderRepository.nextSequence("event")).thenReturn(9100L);
+        when(orderRepository.nextSequence("command")).thenReturn(9200L);
+
+        var response = service.adminCancelBySymbol(new AdminCancelBySymbolRequest("btc-usdt", 1,
+                "symbol halt"));
+
+        assertThat(response.requested()).isEqualTo(1);
+        assertThat(response.canceled()).isEqualTo(1);
+        verify(orderRepository).adminCancelableOrders(null, "BTC-USDT", 1);
     }
 
     private OrderService service() {

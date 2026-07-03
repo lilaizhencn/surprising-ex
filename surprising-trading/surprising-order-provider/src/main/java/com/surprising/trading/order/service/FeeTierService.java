@@ -53,6 +53,10 @@ public class FeeTierService {
         return feeTierRepository.queryTiers(status, limit);
     }
 
+    public FeeTierQueryResponse queryTiers(FeeScheduleStatus status, int limit, String cursor, String sort) {
+        return feeTierRepository.queryTiersPage(status, limit, cursor, sort);
+    }
+
     @Transactional
     public FeeTierAssignmentResponse refreshUserTier(long userId) {
         if (userId <= 0) {

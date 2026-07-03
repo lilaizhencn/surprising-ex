@@ -1,6 +1,15 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.trading.api.TraceContext;
+import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
+import com.surprising.trading.api.model.AdminCancelBySymbolRequest;
+import com.surprising.trading.api.model.AdminCancelOrderResult;
+import com.surprising.trading.api.model.AdminCancelOrdersResponse;
+import com.surprising.trading.api.model.AdminCancelOrdersPreviewResponse;
+import com.surprising.trading.api.model.AdminMatchResultQueryResponse;
+import com.surprising.trading.api.model.AdminMatchTradeQueryResponse;
+import com.surprising.trading.api.model.AdminOrderEventQueryResponse;
+import com.surprising.trading.api.model.AdminOrderTimelineResponse;
 import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.api.model.OrderCommandEvent;
@@ -241,17 +250,7 @@ public class OrderService {
             return toResponse(order);
         }
 
-        Instant now = Instant.now();
-        String traceId = TraceContext.currentOrCreate();
-        boolean cancelRequested = orderRepository.requestCancel(order.orderId(), now);
-        OrderRecord updated = orderRepository.findByOrderId(order.orderId())
-                .orElseThrow(() -> new IllegalStateException("order disappeared after cancel update"));
-        if (!cancelRequested) {
-            return toResponse(updated);
-        }
-        enqueueOrderEvent(updated, OrderEventType.CANCEL_REQUESTED, null, now, traceId);
-        enqueueCommand(updated, OrderCommandType.CANCEL, now, traceId);
-        return toResponse(updated);
+        return requestCancel(order, null).order();
     }
 
     public OrderResponse get(long orderId) {
@@ -282,6 +281,189 @@ public class OrderService {
                 .map(this::toResponse)
                 .toList();
         return new OrderQueryResponse(rows.size(), rows);
+    }
+
+    public OrderQueryResponse adminOrders(Long userId, String symbol, String status, Long orderId, int limit) {
+        return adminOrders(userId, symbol, status, orderId, limit, null, null);
+    }
+
+    public OrderQueryResponse adminOrders(Long userId,
+                                          String symbol,
+                                          String status,
+                                          Long orderId,
+                                          int limit,
+                                          String cursor,
+                                          String sort) {
+        if (userId != null && userId <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        if (orderId != null && orderId <= 0) {
+            throw new IllegalArgumentException("orderId must be positive");
+        }
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
+        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
+        OrderStatus normalizedStatus = status == null || status.isBlank()
+                ? null
+                : OrderStatus.valueOf(status.trim().toUpperCase());
+        var page = orderRepository.adminOrderPage(userId, normalizedSymbol, normalizedStatus, orderId, limit, cursor, sort);
+        List<OrderResponse> rows = page.items()
+                .stream()
+                .map(this::toResponse)
+                .toList();
+        return new OrderQueryResponse(rows.size(), rows, page.nextCursor(), page.hasMore(), page.sort(), page.limit());
+    }
+
+    public AdminOrderEventQueryResponse adminOrderEvents(long orderId, int limit) {
+        requireOrderId(orderId);
+        requireTimelineLimit(limit);
+        var events = orderRepository.orderEvents(orderId, limit);
+        return new AdminOrderEventQueryResponse(events.size(), events);
+    }
+
+    public AdminMatchResultQueryResponse adminMatchResults(long orderId, int limit) {
+        requireOrderId(orderId);
+        requireTimelineLimit(limit);
+        var results = orderRepository.matchResults(orderId, limit);
+        return new AdminMatchResultQueryResponse(results.size(), results);
+    }
+
+    public AdminMatchTradeQueryResponse adminMatchTrades(Long userId, Long orderId, String symbol, int limit) {
+        return adminMatchTrades(userId, orderId, symbol, limit, null, null);
+    }
+
+    public AdminMatchTradeQueryResponse adminMatchTrades(Long userId,
+                                                         Long orderId,
+                                                         String symbol,
+                                                         int limit,
+                                                         String cursor,
+                                                         String sort) {
+        if (userId != null && userId <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        if (orderId != null && orderId <= 0) {
+            throw new IllegalArgumentException("orderId must be positive");
+        }
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
+        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
+        var page = orderRepository.matchTradePage(userId, orderId, normalizedSymbol, limit, cursor, sort);
+        return new AdminMatchTradeQueryResponse(page.items().size(), page.items(),
+                page.nextCursor(), page.hasMore(), page.sort(), page.limit());
+    }
+
+    public AdminOrderTimelineResponse adminOrderTimeline(long orderId) {
+        requireOrderId(orderId);
+        OrderResponse order = get(orderId);
+        return new AdminOrderTimelineResponse(
+                order,
+                orderRepository.orderEvents(orderId, 1000),
+                orderRepository.matchResults(orderId, 1000),
+                orderRepository.matchTrades(null, orderId, null, 1000));
+    }
+
+    @Transactional
+    public AdminCancelOrderResult adminCancelOrder(long orderId, String reason) {
+        requireOrderId(orderId);
+        OrderRecord order = orderRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new IllegalStateException("order not found: " + orderId));
+        return requestCancel(order, adminCancelReason(reason));
+    }
+
+    @Transactional
+    public AdminCancelOrdersResponse adminCancelOrders(AdminBatchCancelOrdersRequest request) {
+        Long userId = request == null ? null : request.userId();
+        if (userId != null && userId <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        String symbol = request == null || request.symbol() == null || request.symbol().isBlank()
+                ? null
+                : normalizeSymbol(request.symbol());
+        int limit = request == null || request.limit() == null ? 100 : request.limit();
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
+        String reason = adminCancelReason(request == null ? null : request.reason());
+        List<AdminCancelOrderResult> results = orderRepository.adminCancelableOrders(userId, symbol, limit)
+                .stream()
+                .map(order -> requestCancel(order, reason))
+                .toList();
+        int canceled = (int) results.stream().filter(AdminCancelOrderResult::cancelRequested).count();
+        return new AdminCancelOrdersResponse(results.size(), canceled, results.size() - canceled, results);
+    }
+
+    public AdminCancelOrdersPreviewResponse adminCancelPreview(Long userId, String symbol, int limit) {
+        if (userId != null && userId <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
+        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
+        var impact = orderRepository.adminCancelableImpact(userId, normalizedSymbol);
+        var sample = orderRepository.adminCancelableOrders(userId, normalizedSymbol, limit)
+                .stream()
+                .map(this::toResponse)
+                .toList();
+        return new AdminCancelOrdersPreviewResponse(
+                userId,
+                normalizedSymbol,
+                impact.matched(),
+                sample.size(),
+                impact.totalRemainingQuantitySteps(),
+                impact.buyOrders(),
+                impact.sellOrders(),
+                sample);
+    }
+
+    @Transactional
+    public AdminCancelOrdersResponse adminCancelBySymbol(AdminCancelBySymbolRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("request is required");
+        }
+        String symbol = normalizeSymbol(request.symbol());
+        return adminCancelOrders(new AdminBatchCancelOrdersRequest(null, symbol, request.limit(), request.reason()));
+    }
+
+    private AdminCancelOrderResult requestCancel(OrderRecord order, String reason) {
+        if (TERMINAL_STATUSES.contains(order.status()) || order.status() == OrderStatus.CANCEL_REQUESTED) {
+            return cancelResult(order, false, "order is already " + order.status().name());
+        }
+        Instant now = Instant.now();
+        String traceId = TraceContext.currentOrCreate();
+        boolean cancelRequested = orderRepository.requestCancel(order.orderId(), now);
+        OrderRecord updated = orderRepository.findByOrderId(order.orderId())
+                .orElseThrow(() -> new IllegalStateException("order disappeared after cancel update"));
+        if (!cancelRequested) {
+            return cancelResult(updated, false, "order was not cancelable");
+        }
+        enqueueOrderEvent(updated, OrderEventType.CANCEL_REQUESTED, reason, now, traceId);
+        enqueueCommand(updated, OrderCommandType.CANCEL, now, traceId);
+        return cancelResult(updated, true, "cancel requested");
+    }
+
+    private AdminCancelOrderResult cancelResult(OrderRecord order, boolean cancelRequested, String message) {
+        return new AdminCancelOrderResult(
+                order.orderId(),
+                order.userId(),
+                order.symbol(),
+                order.status(),
+                cancelRequested,
+                message,
+                toResponse(order));
+    }
+
+    private String adminCancelReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return "admin cancel";
+        }
+        String normalized = reason.trim();
+        if (normalized.length() > 500) {
+            normalized = normalized.substring(0, 500);
+        }
+        return "admin cancel: " + normalized;
     }
 
     private void enqueueCommand(OrderRecord order, OrderCommandType commandType, Instant now, String traceId) {
@@ -407,6 +589,18 @@ public class OrderService {
 
     private boolean hasClientOrderId(PlaceOrderRequest request) {
         return request.clientOrderId() != null && !request.clientOrderId().isBlank();
+    }
+
+    private void requireOrderId(long orderId) {
+        if (orderId <= 0) {
+            throw new IllegalArgumentException("orderId must be positive");
+        }
+    }
+
+    private void requireTimelineLimit(int limit) {
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
     }
 
     private String emptyToNull(String value) {

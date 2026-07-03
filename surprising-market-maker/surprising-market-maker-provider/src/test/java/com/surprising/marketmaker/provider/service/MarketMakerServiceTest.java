@@ -24,6 +24,14 @@ import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.marketmaker.api.model.MarketMakerRunRequest;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyStatus;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
+import com.surprising.marketmaker.provider.model.StrategyConfigOverride;
+import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository;
+import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.CursorPage;
+import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerPnlAttributionRecord;
+import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerPnlScope;
+import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventRecord;
+import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventWrite;
+import com.surprising.marketmaker.provider.repository.MarketMakerStrategyOverrideStore;
 import com.surprising.price.api.client.MarkPriceRpcApi;
 import com.surprising.price.api.model.MarkPriceQueryResponse;
 import com.surprising.price.api.model.MarkPriceResponse;
@@ -46,7 +54,10 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.zip.CRC32;
 import org.junit.jupiter.api.Test;
 
@@ -108,6 +119,123 @@ class MarketMakerServiceTest {
         assertThat(secondIds).allSatisfy(id -> assertThat(id).startsWith("mm-"));
     }
 
+    @Test
+    void adminMetricsReportsQuoteQualityAndAnomalies() {
+        Fixtures fixtures = new Fixtures(List.of());
+        MarketMakerService service = fixtures.service();
+
+        var metrics = service.adminMetrics(100);
+
+        assertThat(metrics.nodeId()).isEqualTo("mm-test");
+        assertThat(metrics.totals().strategyCount()).isEqualTo(1L);
+        assertThat(metrics.totals().metricRows()).isEqualTo(1L);
+        assertThat(metrics.totals().criticalAnomalies()).isEqualTo(1L);
+        assertThat(metrics.totals().warnAnomalies()).isEqualTo(1L);
+        assertThat(metrics.rows()).singleElement()
+                .satisfies(row -> {
+                    assertThat(row.strategyId()).isEqualTo("btc-usdt-mm-a");
+                    assertThat(row.symbol()).isEqualTo("BTC-USDT");
+                    assertThat(row.accountId()).isEqualTo(900001L);
+                    assertThat(row.qualityStatus()).isEqualTo("CRITICAL");
+                    assertThat(row.desiredQuoteCount()).isEqualTo(6L);
+                    assertThat(row.missingDesiredQuotes()).isEqualTo(6L);
+                    assertThat(row.ownedOpenOrders()).isZero();
+                    assertThat(row.quoteCoveragePpm()).isZero();
+                    assertThat(row.bestBidTicks()).isEqualTo(49_990L);
+                    assertThat(row.bestAskTicks()).isEqualTo(50_010L);
+                    assertThat(row.markPriceTicks()).isEqualTo(50_000L);
+                });
+        assertThat(metrics.anomalies())
+                .extracting(MarketMakerService.MarketMakerAnomaly::type)
+                .containsExactlyInAnyOrder("MISSING_DESIRED_QUOTES", "NO_LIVE_QUOTES");
+    }
+
+    @Test
+    void updateStrategyConfigAppliesPersistentOverridesToQuotePlanning() {
+        Fixtures fixtures = new Fixtures(List.of());
+        MarketMakerService service = fixtures.service();
+
+        var config = service.updateStrategyConfig("btc-usdt-mm-a",
+                new MarketMakerService.MarketMakerStrategyConfigUpdateRequest(
+                        true, 25L, "CROSS", 40L, 12L, 500L, 500_000L, 2, "quote tuning"),
+                "1001");
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(config.effective().baseQuantitySteps()).isEqualTo(25L);
+        assertThat(config.effective().orderLevels()).isEqualTo(2);
+        assertThat(config.override().updatedByAdminUserId()).isEqualTo("1001");
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(4);
+        assertThat(fixtures.orderRpc.placeRequests)
+                .allSatisfy(request -> assertThat(request.quantitySteps()).isEqualTo(25L));
+    }
+
+    @Test
+    void runOnceRecordsStrategyRunEvents() {
+        Fixtures fixtures = new Fixtures(List.of());
+        FakeAdminRepository adminRepository = new FakeAdminRepository();
+        MarketMakerService service = fixtures.service(adminRepository);
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(adminRepository.events)
+                .extracting(MarketMakerRunEventWrite::eventType)
+                .contains("QUOTE_RECONCILED", "CYCLE_SUCCESS");
+        assertThat(adminRepository.events)
+                .filteredOn(event -> "QUOTE_RECONCILED".equals(event.eventType()))
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.strategyId()).isEqualTo("btc-usdt-mm-a");
+                    assertThat(event.symbol()).isEqualTo("BTC-USDT");
+                    assertThat(event.accountId()).isEqualTo(900001L);
+                    assertThat(event.submittedOrders()).isEqualTo(6L);
+                    assertThat(event.traceId()).isNotBlank();
+                });
+    }
+
+    @Test
+    void runLogsWithCursorDelegatesNormalizedFiltersToRepository() {
+        Fixtures fixtures = new Fixtures(List.of());
+        FakeAdminRepository adminRepository = new FakeAdminRepository();
+        MarketMakerService service = fixtures.service(adminRepository);
+        Instant createdAt = Instant.parse("2026-07-03T00:00:00Z");
+        adminRepository.runEventPage = new CursorPage<>(List.of(new MarketMakerRunEventRecord(
+                77L, "btc-usdt-mm-a", "BTC-USDT", 900001L, "mm-test", 9L,
+                "QUOTE_RECONCILED", 2L, 1L, 0L, null, null, "trace-1", createdAt)),
+                "next", true, "createdAt.desc", 25);
+
+        var response = service.runLogs("btc-usdt-mm-a", "btc-usdt", 900001L,
+                "QUOTE_RECONCILED", 25, "cursor", "createdAt.desc");
+
+        assertThat(response.events()).singleElement()
+                .satisfies(event -> assertThat(event.eventId()).isEqualTo(77L));
+        assertThat(response.nextCursor()).isEqualTo("next");
+        assertThat(response.hasMore()).isTrue();
+        assertThat(response.sort()).isEqualTo("createdAt.desc");
+        assertThat(response.limit()).isEqualTo(25);
+        assertThat(adminRepository.lastRunEventsPageStrategyId).isEqualTo("BTC-USDT-MM-A");
+        assertThat(adminRepository.lastRunEventsPageSymbol).isEqualTo("BTC-USDT");
+        assertThat(adminRepository.lastRunEventsPageCursor).isEqualTo("cursor");
+        assertThat(adminRepository.lastRunEventsPageSort).isEqualTo("createdAt.desc");
+    }
+
+    @Test
+    void pnlAttributionUsesConfiguredStrategyScopesOnly() {
+        Fixtures fixtures = new Fixtures(List.of());
+        FakeAdminRepository adminRepository = new FakeAdminRepository();
+        MarketMakerService service = fixtures.service(adminRepository);
+
+        var response = service.pnlAttribution("btc-usdt-mm-a", "BTC-USDT", 900001L, 24, 10);
+
+        assertThat(response.totals().rowCount()).isEqualTo(1L);
+        assertThat(adminRepository.scopes).singleElement()
+                .satisfies(scope -> {
+                    assertThat(scope.strategyId()).isEqualTo("btc-usdt-mm-a");
+                    assertThat(scope.symbol()).isEqualTo("BTC-USDT");
+                    assertThat(scope.accountId()).isEqualTo(900001L);
+                    assertThat(scope.clientOrderPrefix()).startsWith("mm-").endsWith("-900001-");
+                });
+    }
+
     private static String accountPrefix(String strategyId, String symbol, long accountId) {
         CRC32 crc32 = new CRC32();
         crc32.update((strategyId + ":" + symbol).getBytes(StandardCharsets.UTF_8));
@@ -135,10 +263,14 @@ class MarketMakerServiceTest {
         }
 
         private MarketMakerService service() {
+            return service(new FakeAdminRepository());
+        }
+
+        private MarketMakerService service(MarketMakerAdminRepository adminRepository) {
             MarketMakerProperties properties = properties();
             return new MarketMakerService(properties, new FakeInstrumentRpc(), new FakeMarkPriceRpc(),
                     new FakeMarketDataRpc(), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
-                    (strategyId, symbol, ownerId, leaseDuration) -> true);
+                    (strategyId, symbol, ownerId, leaseDuration) -> true, new FakeOverrideStore(), adminRepository);
         }
 
         private MarketMakerProperties properties() {
@@ -159,6 +291,101 @@ class MarketMakerServiceTest {
             strategy.setMarginMode(MarginMode.CROSS);
             properties.setStrategies(List.of(strategy));
             return properties;
+        }
+    }
+
+    private static final class FakeOverrideStore implements MarketMakerStrategyOverrideStore {
+        private final Map<String, StrategyConfigOverride> overrides = new HashMap<>();
+
+        @Override
+        public List<StrategyConfigOverride> findAll() {
+            return List.copyOf(overrides.values());
+        }
+
+        @Override
+        public Optional<StrategyConfigOverride> find(String strategyId) {
+            return Optional.ofNullable(overrides.get(strategyId));
+        }
+
+        @Override
+        public StrategyConfigOverride save(StrategyConfigOverride override) {
+            long version = overrides.containsKey(override.strategyId())
+                    ? overrides.get(override.strategyId()).version() + 1L
+                    : 1L;
+            StrategyConfigOverride saved = new StrategyConfigOverride(
+                    override.strategyId(), override.enabled(), override.baseQuantitySteps(), override.marginMode(),
+                    override.spreadTicks(), override.levelSpacingTicks(), override.maxInventorySteps(),
+                    override.maxInventorySkewPpm(), override.orderLevels(), override.updatedByAdminUserId(),
+                    override.reason(), override.updatedAt(), version);
+            overrides.put(saved.strategyId(), saved);
+            return saved;
+        }
+
+        @Override
+        public void delete(String strategyId) {
+            overrides.remove(strategyId);
+        }
+    }
+
+    private static final class FakeAdminRepository implements MarketMakerAdminRepository {
+        private final List<MarketMakerRunEventWrite> events = new ArrayList<>();
+        private List<MarketMakerPnlScope> scopes = List.of();
+        private CursorPage<MarketMakerRunEventRecord> runEventPage =
+                new CursorPage<>(List.of(), null, false, "createdAt.desc", 100);
+        private String lastRunEventsPageStrategyId;
+        private String lastRunEventsPageSymbol;
+        private Long lastRunEventsPageAccountId;
+        private String lastRunEventsPageEventType;
+        private int lastRunEventsPageLimit;
+        private String lastRunEventsPageCursor;
+        private String lastRunEventsPageSort;
+
+        @Override
+        public void recordRunEvent(MarketMakerRunEventWrite event) {
+            events.add(event);
+        }
+
+        @Override
+        public List<MarketMakerRunEventRecord> runEvents(String strategyId,
+                                                         String symbol,
+                                                         Long accountId,
+                                                         String eventType,
+                                                         int limit) {
+            return List.of();
+        }
+
+        @Override
+        public CursorPage<MarketMakerRunEventRecord> runEventsPage(String strategyId,
+                                                                   String symbol,
+                                                                   Long accountId,
+                                                                   String eventType,
+                                                                   int limit,
+                                                                   String cursor,
+                                                                   String sort) {
+            lastRunEventsPageStrategyId = strategyId;
+            lastRunEventsPageSymbol = symbol;
+            lastRunEventsPageAccountId = accountId;
+            lastRunEventsPageEventType = eventType;
+            lastRunEventsPageLimit = limit;
+            lastRunEventsPageCursor = cursor;
+            lastRunEventsPageSort = sort;
+            return runEventPage;
+        }
+
+        @Override
+        public List<MarketMakerPnlAttributionRecord> pnlAttribution(List<MarketMakerPnlScope> scopes,
+                                                                    Instant since,
+                                                                    Instant until) {
+            this.scopes = List.copyOf(scopes);
+            return scopes.stream()
+                    .map(scope -> new MarketMakerPnlAttributionRecord(
+                            scope.strategyId(), scope.symbol(), scope.accountId(), scope.marginMode(),
+                            2L, 0L, 1L, 1L, 2L, 10L, 10L, 20L,
+                            "1000000", 12L, 2L, 50L, 0L,
+                            Instant.parse("2026-01-01T00:00:00Z"),
+                            Instant.parse("2026-01-01T00:00:01Z"),
+                            Instant.parse("2026-01-01T00:00:02Z")))
+                    .toList();
         }
     }
 

@@ -12,11 +12,20 @@ import com.surprising.marketmaker.api.model.MarketMakerStrategyStatus;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.model.DesiredQuote;
 import com.surprising.marketmaker.provider.model.QuotePlan;
+import com.surprising.marketmaker.provider.model.StrategyConfigOverride;
 import com.surprising.marketmaker.provider.model.StrategyRuntimeState;
+import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository;
+import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.CursorPage;
+import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerPnlAttributionRecord;
+import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerPnlScope;
+import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventRecord;
+import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventWrite;
+import com.surprising.marketmaker.provider.repository.MarketMakerStrategyOverrideStore;
 import com.surprising.price.api.client.MarkPriceRpcApi;
 import com.surprising.price.api.model.MarkPriceResponse;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.CancelOrderRequest;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
@@ -35,6 +44,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -44,6 +54,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.zip.CRC32;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -63,12 +74,30 @@ public class MarketMakerService {
     private final AccountRpcApi accountRpcApi;
     private final QuotePlanner quotePlanner;
     private final MarketMakerLeaseCoordinator leaseCoordinator;
+    private final MarketMakerStrategyOverrideStore overrideStore;
+    private final MarketMakerAdminRepository adminRepository;
     private final Map<String, StrategyRuntimeState> states = new ConcurrentHashMap<>();
     private final Map<String, Instant> lastTradeTimes = new ConcurrentHashMap<>();
     private final Map<String, OrderSide> lastTradeSides = new ConcurrentHashMap<>();
+    private volatile Map<String, StrategyConfigOverride> strategyOverrides = Map.of();
+    private volatile Instant strategyOverridesLoadedAt = Instant.EPOCH;
     private final String nodeId;
     private final String orderNonce;
 
+    MarketMakerService(MarketMakerProperties properties,
+                       InstrumentRpcApi instrumentRpcApi,
+                       MarkPriceRpcApi markPriceRpcApi,
+                       MarketDataRpcApi marketDataRpcApi,
+                       OrderRpcApi orderRpcApi,
+                       AccountRpcApi accountRpcApi,
+                       QuotePlanner quotePlanner,
+                       MarketMakerLeaseCoordinator leaseCoordinator,
+                       MarketMakerStrategyOverrideStore overrideStore) {
+        this(properties, instrumentRpcApi, markPriceRpcApi, marketDataRpcApi, orderRpcApi, accountRpcApi,
+                quotePlanner, leaseCoordinator, overrideStore, new NoopMarketMakerAdminRepository());
+    }
+
+    @Autowired
     public MarketMakerService(MarketMakerProperties properties,
                               InstrumentRpcApi instrumentRpcApi,
                               MarkPriceRpcApi markPriceRpcApi,
@@ -76,7 +105,9 @@ public class MarketMakerService {
                               OrderRpcApi orderRpcApi,
                               AccountRpcApi accountRpcApi,
                               QuotePlanner quotePlanner,
-                              MarketMakerLeaseCoordinator leaseCoordinator) {
+                              MarketMakerLeaseCoordinator leaseCoordinator,
+                              MarketMakerStrategyOverrideStore overrideStore,
+                              MarketMakerAdminRepository adminRepository) {
         this.properties = properties;
         this.instrumentRpcApi = instrumentRpcApi;
         this.markPriceRpcApi = markPriceRpcApi;
@@ -85,6 +116,8 @@ public class MarketMakerService {
         this.accountRpcApi = accountRpcApi;
         this.quotePlanner = quotePlanner;
         this.leaseCoordinator = leaseCoordinator;
+        this.overrideStore = overrideStore;
+        this.adminRepository = adminRepository;
         this.nodeId = resolveNodeId(properties.getEngine().getNodeId());
         this.orderNonce = Long.toUnsignedString(System.currentTimeMillis(), 36)
                 + "-" + UUID.randomUUID().toString().substring(0, 8);
@@ -99,7 +132,7 @@ public class MarketMakerService {
     }
 
     public MarketMakerStrategyQueryResponse strategies() {
-        List<MarketMakerStrategyResponse> responses = properties.getStrategies().stream()
+        List<MarketMakerStrategyResponse> responses = strategiesSnapshot().stream()
                 .map(this::response)
                 .toList();
         return new MarketMakerStrategyQueryResponse(responses.size(), responses);
@@ -121,12 +154,51 @@ public class MarketMakerService {
         return response(strategy);
     }
 
+    public MarketMakerStrategyConfigResponse strategyConfig(String strategyId) {
+        MarketMakerProperties.Strategy configured = findConfiguredStrategy(strategyId);
+        StrategyConfigOverride override = strategyOverrides().get(strategyKey(configured.getStrategyId()));
+        return configResponse(configured, override);
+    }
+
+    public MarketMakerStrategyConfigResponse updateStrategyConfig(String strategyId,
+                                                                  MarketMakerStrategyConfigUpdateRequest request,
+                                                                  String adminUserId) {
+        MarketMakerProperties.Strategy configured = findConfiguredStrategy(strategyId);
+        MarketMakerStrategyConfigUpdateRequest safeRequest = request == null
+                ? new MarketMakerStrategyConfigUpdateRequest(null, null, null, null, null, null, null, null, null)
+                : request;
+        String reason = normalizeReason(safeRequest.reason());
+        StrategyConfigOverride override = new StrategyConfigOverride(
+                configured.getStrategyId(),
+                safeRequest.enabled(),
+                positiveOrNull(safeRequest.baseQuantitySteps(), "baseQuantitySteps"),
+                parseMarginMode(safeRequest.marginMode()),
+                nonNegativeOrNull(safeRequest.spreadTicks(), "spreadTicks"),
+                nonNegativeOrNull(safeRequest.levelSpacingTicks(), "levelSpacingTicks"),
+                positiveOrNull(safeRequest.maxInventorySteps(), "maxInventorySteps"),
+                boundedLongOrNull(safeRequest.maxInventorySkewPpm(), 0L, 1_000_000L, "maxInventorySkewPpm"),
+                boundedIntOrNull(safeRequest.orderLevels(), 1, 20, "orderLevels"),
+                normalizeRequired(adminUserId, "adminUserId"),
+                reason,
+                Instant.now(),
+                0L);
+        StrategyConfigOverride saved = null;
+        if (override.hasParameterOverride()) {
+            saved = overrideStore.save(override);
+            putCachedOverride(saved);
+        } else {
+            overrideStore.delete(configured.getStrategyId());
+            removeCachedOverride(configured.getStrategyId());
+        }
+        return configResponse(configured, saved);
+    }
+
     public MarketMakerStrategyQueryResponse runOnce(MarketMakerRunRequest request) {
         String traceId = TraceContext.currentOrCreate();
         String requestedStrategyId = normalizeOptional(request == null ? null : request.strategyId());
         String requestedSymbol = normalizeOptional(request == null ? null : request.symbol());
         try {
-            for (MarketMakerProperties.Strategy strategy : properties.getStrategies()) {
+            for (MarketMakerProperties.Strategy strategy : strategiesSnapshot()) {
                 if (requestedStrategyId != null && !strategy.getStrategyId().equalsIgnoreCase(requestedStrategyId)) {
                     continue;
                 }
@@ -138,10 +210,341 @@ public class MarketMakerService {
         }
     }
 
+    public MarketMakerAdminMetricsResponse adminMetrics(int limit) {
+        int boundedLimit = Math.max(1, Math.min(limit, 500));
+        Instant now = Instant.now();
+        List<MarketMakerStrategyMetric> rows = new ArrayList<>();
+        List<MarketMakerAnomaly> anomalies = new ArrayList<>();
+        List<MarketMakerMetricWarning> warnings = new ArrayList<>();
+        for (MarketMakerProperties.Strategy strategy : strategiesSnapshot()) {
+            for (String configuredSymbol : strategy.getSymbols()) {
+                if (rows.size() >= boundedLimit) {
+                    break;
+                }
+                String symbol = normalizeSymbol(configuredSymbol);
+                for (long accountId : strategy.getAccountIds()) {
+                    if (rows.size() >= boundedLimit) {
+                        break;
+                    }
+                    rows.add(strategyMetric(strategy, symbol, accountId, now, anomalies, warnings));
+                }
+            }
+        }
+        return new MarketMakerAdminMetricsResponse(now, nodeId, totals(rows, anomalies), rows, anomalies, warnings);
+    }
+
+    public MarketMakerRunLogQueryResponse runLogs(String strategyId,
+                                                  String symbol,
+                                                  Long accountId,
+                                                  String eventType,
+                                                  int limit) {
+        return new MarketMakerRunLogQueryResponse(
+                Instant.now(),
+                adminRepository.runEvents(
+                        normalizeOptional(strategyId),
+                        symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol),
+                        accountId,
+                        normalizeOptional(eventType),
+                        limit));
+    }
+
+    public MarketMakerRunLogQueryResponse runLogs(String strategyId,
+                                                  String symbol,
+                                                  Long accountId,
+                                                  String eventType,
+                                                  int limit,
+                                                  String cursor,
+                                                  String sort) {
+        CursorPage<MarketMakerRunEventRecord> page = adminRepository.runEventsPage(
+                normalizeOptional(strategyId),
+                symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol),
+                accountId,
+                normalizeOptional(eventType),
+                limit,
+                cursor,
+                sort);
+        return new MarketMakerRunLogQueryResponse(Instant.now(), page.items(), page.nextCursor(),
+                page.hasMore(), page.sort(), page.limit());
+    }
+
+    public MarketMakerPnlAttributionResponse pnlAttribution(String strategyId,
+                                                            String symbol,
+                                                            Long accountId,
+                                                            int windowHours,
+                                                            int limit) {
+        int boundedWindowHours = Math.max(1, Math.min(windowHours, 24 * 31));
+        int boundedLimit = Math.max(1, Math.min(limit, 500));
+        Instant until = Instant.now();
+        Instant since = until.minus(Duration.ofHours(boundedWindowHours));
+        List<MarketMakerPnlScope> scopes = pnlScopes(strategyId, symbol, accountId, boundedLimit);
+        List<MarketMakerPnlAttributionRecord> rows = adminRepository.pnlAttribution(scopes, since, until);
+        long totalTrades = rows.stream().mapToLong(MarketMakerPnlAttributionRecord::totalTrades).sum();
+        long makerTrades = rows.stream().mapToLong(MarketMakerPnlAttributionRecord::makerTrades).sum();
+        long takerTrades = rows.stream().mapToLong(MarketMakerPnlAttributionRecord::takerTrades).sum();
+        long netFeeUnits = rows.stream().mapToLong(MarketMakerPnlAttributionRecord::netFeeUnits).sum();
+        long realizedPnlUnits = rows.stream().mapToLong(MarketMakerPnlAttributionRecord::currentRealizedPnlUnits).sum();
+        long signedInventorySteps = rows.stream().mapToLong(MarketMakerPnlAttributionRecord::signedInventorySteps).sum();
+        return new MarketMakerPnlAttributionResponse(
+                until,
+                since,
+                boundedWindowHours,
+                new MarketMakerPnlAttributionTotals(
+                        rows.size(),
+                        totalTrades,
+                        makerTrades,
+                        takerTrades,
+                        netFeeUnits,
+                        realizedPnlUnits,
+                        signedInventorySteps),
+                rows);
+    }
+
+    private MarketMakerStrategyMetric strategyMetric(MarketMakerProperties.Strategy strategy,
+                                                     String symbol,
+                                                     long accountId,
+                                                     Instant now,
+                                                     List<MarketMakerAnomaly> anomalies,
+                                                     List<MarketMakerMetricWarning> warnings) {
+        StrategyRuntimeState state = state(strategy);
+        MarketMakerStrategyStatus strategyStatus = status(strategy, state);
+        String strategyId = strategy.getStrategyId();
+        String accountPrefix = accountPrefix(strategy, symbol, accountId);
+        List<MarketMakerAnomaly> rowAnomalies = new ArrayList<>();
+        if (!strategy.isEnabled()) {
+            rowAnomalies.add(anomaly("INFO", "STRATEGY_DISABLED", strategyId, symbol, accountId,
+                    0, 1, "strategy is disabled by configuration"));
+        }
+        if (state.paused()) {
+            rowAnomalies.add(anomaly("INFO", "STRATEGY_PAUSED", strategyId, symbol, accountId,
+                    1, 0, "strategy is paused at runtime"));
+        }
+        if (state.lastError() != null) {
+            rowAnomalies.add(anomaly("CRITICAL", "LAST_CYCLE_FAILED", strategyId, symbol, accountId,
+                    1, 0, state.lastError()));
+        }
+        try {
+            PositionResponse position = accountRpcApi.position(accountId, symbol, strategy.getMarginMode().name(),
+                    PositionSide.NET.name());
+            List<OrderResponse> openOrders = openOrders(accountId, symbol);
+            List<OrderResponse> ownedLive = openOrders.stream()
+                    .filter(order -> ownsOrder(accountPrefix, order))
+                    .filter(this::isLive)
+                    .toList();
+            long staleOwned = ownedLive.stream().filter(order -> isStale(order, now)).count();
+            InstrumentResponse instrument = instrumentRpcApi.latest(symbol);
+            OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
+                    properties.getQuoting().getOrderBookDepth());
+            MarkPriceResponse markPrice = latestMarkPrice(symbol);
+            QuotePlan plan = instrument == null || instrument.status() != InstrumentStatus.TRADING
+                    ? new QuotePlan(0L, position.signedQuantitySteps(), List.of())
+                    : quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
+                    orderBook, markPrice, position.signedQuantitySteps());
+            int desiredQuotes = plan.quotes().size();
+            long matchedDesired = plan.quotes().stream()
+                    .filter(quote -> hasLiveQuote(ownedLive, quote, accountPrefix))
+                    .count();
+            long offTargetOwned = ownedLive.stream()
+                    .filter(order -> !isStale(order, now))
+                    .filter(order -> plan.quotes().stream().noneMatch(quote -> matchesQuote(order, quote, accountPrefix)))
+                    .count();
+            long missingDesired = Math.max(0, desiredQuotes - matchedDesired);
+            long maxInventory = effectiveMaxInventorySteps(strategy);
+            long absInventory = Math.abs(position.signedQuantitySteps());
+            long inventoryUsagePpm = maxInventory <= 0 ? 0 : Math.min(10_000_000L,
+                    Math.round(absInventory * 1_000_000.0d / maxInventory));
+            long bestBid = bestBid(orderBook);
+            long bestAsk = bestAsk(orderBook);
+            long spreadTicks = bestBid > 0 && bestAsk > 0 ? Math.max(0, bestAsk - bestBid) : 0;
+            long midTicks = midPriceTicks(orderBook);
+            long spreadPpm = midTicks <= 0 || spreadTicks <= 0 ? 0
+                    : Math.round(spreadTicks * 1_000_000.0d / midTicks);
+            long quoteCoveragePpm = desiredQuotes <= 0 ? 0
+                    : Math.round(matchedDesired * 1_000_000.0d / desiredQuotes);
+            long markTicks = markPriceTicks(instrument, markPrice);
+
+            if (inventoryUsagePpm >= 1_000_000L) {
+                rowAnomalies.add(anomaly("CRITICAL", "INVENTORY_LIMIT_REACHED", strategyId, symbol, accountId,
+                        absInventory, maxInventory, "signed inventory reached configured limit"));
+            } else if (inventoryUsagePpm >= Math.max(0L, effectiveInventorySkewPpm(strategy))) {
+                rowAnomalies.add(anomaly("WARN", "INVENTORY_SKEW_HIGH", strategyId, symbol, accountId,
+                        inventoryUsagePpm, effectiveInventorySkewPpm(strategy), "inventory usage exceeds skew threshold"));
+            }
+            if (desiredQuotes > 0 && missingDesired > 0) {
+                rowAnomalies.add(anomaly("WARN", "MISSING_DESIRED_QUOTES", strategyId, symbol, accountId,
+                        missingDesired, desiredQuotes, "some desired quote levels are not live"));
+            }
+            if (ownedLive.isEmpty() && strategy.isEnabled() && !state.paused()) {
+                rowAnomalies.add(anomaly("CRITICAL", "NO_LIVE_QUOTES", strategyId, symbol, accountId,
+                        0, desiredQuotes, "no owned live quotes are present"));
+            }
+            if (staleOwned > 0) {
+                rowAnomalies.add(anomaly("WARN", "STALE_QUOTES", strategyId, symbol, accountId,
+                        staleOwned, 0, "owned live quotes exceed stale age"));
+            }
+            if (offTargetOwned > 0) {
+                rowAnomalies.add(anomaly("WARN", "OFF_TARGET_QUOTES", strategyId, symbol, accountId,
+                        offTargetOwned, 0, "owned live quotes do not match target levels"));
+            }
+            if (instrument == null || instrument.status() != InstrumentStatus.TRADING) {
+                rowAnomalies.add(anomaly("CRITICAL", "INSTRUMENT_NOT_TRADING", strategyId, symbol, accountId,
+                        1, 0, "instrument is unavailable or not TRADING"));
+            }
+            anomalies.addAll(rowAnomalies);
+            return new MarketMakerStrategyMetric(
+                    strategyId, symbol, accountId, strategyStatus, qualityStatus(rowAnomalies),
+                    strategy.isEnabled(), state.paused(), state.cycleSequence(), state.submittedOrders(),
+                    state.canceledOrders(), state.rejectedOrders(), state.skippedCycles(),
+                    position.signedQuantitySteps(), absInventory, maxInventory, inventoryUsagePpm,
+                    position.realizedPnlUnits(), position.updatedAt(), ownedLive.size(),
+                    ownedLive.stream().filter(order -> order.side() == OrderSide.BUY).count(),
+                    ownedLive.stream().filter(order -> order.side() == OrderSide.SELL).count(),
+                    desiredQuotes,
+                    plan.quotes().stream().filter(quote -> quote.side() == OrderSide.BUY).count(),
+                    plan.quotes().stream().filter(quote -> quote.side() == OrderSide.SELL).count(),
+                    matchedDesired, missingDesired, staleOwned, offTargetOwned, bestBid, bestAsk,
+                    spreadTicks, spreadPpm, markTicks, quoteCoveragePpm, state.lastTraceId(),
+                    state.lastError(), state.lastCycleTime(), null);
+        } catch (RuntimeException ex) {
+            String message = ex.getMessage();
+            anomalies.add(anomaly("CRITICAL", "METRIC_COLLECTION_FAILED", strategyId, symbol, accountId,
+                    1, 0, message));
+            warnings.add(new MarketMakerMetricWarning(strategyId, symbol, accountId, message));
+            return new MarketMakerStrategyMetric(
+                    strategyId, symbol, accountId, strategyStatus, "CRITICAL", strategy.isEnabled(), state.paused(),
+                    state.cycleSequence(), state.submittedOrders(), state.canceledOrders(), state.rejectedOrders(),
+                    state.skippedCycles(), 0, 0, effectiveMaxInventorySteps(strategy), 0, 0, null,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    state.lastTraceId(), state.lastError(), state.lastCycleTime(), message);
+        }
+    }
+
+    private MarketMakerMetricsTotals totals(List<MarketMakerStrategyMetric> rows, List<MarketMakerAnomaly> anomalies) {
+        List<MarketMakerStrategyResponse> strategies = strategies().strategies();
+        return new MarketMakerMetricsTotals(
+                strategies.size(),
+                strategies.stream().filter(MarketMakerStrategyResponse::configuredEnabled).count(),
+                strategies.stream().filter(item -> item.status() == MarketMakerStrategyStatus.RUNNING).count(),
+                strategies.stream().filter(item -> item.status() == MarketMakerStrategyStatus.DEGRADED).count(),
+                strategies.stream().filter(item -> item.status() == MarketMakerStrategyStatus.PAUSED).count(),
+                strategies.stream().filter(item -> item.status() == MarketMakerStrategyStatus.DISABLED).count(),
+                rows.size(),
+                strategies.stream().mapToLong(MarketMakerStrategyResponse::submittedOrders).sum(),
+                strategies.stream().mapToLong(MarketMakerStrategyResponse::canceledOrders).sum(),
+                strategies.stream().mapToLong(MarketMakerStrategyResponse::rejectedOrders).sum(),
+                strategies.stream().mapToLong(MarketMakerStrategyResponse::skippedCycles).sum(),
+                anomalies.size(),
+                anomalies.stream().filter(item -> "CRITICAL".equals(item.severity())).count(),
+                anomalies.stream().filter(item -> "WARN".equals(item.severity())).count());
+    }
+
+    private List<MarketMakerPnlScope> pnlScopes(String strategyId, String symbol, Long accountId, int limit) {
+        String requestedStrategyId = normalizeOptional(strategyId);
+        String requestedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
+        List<MarketMakerPnlScope> scopes = new ArrayList<>();
+        for (MarketMakerProperties.Strategy strategy : strategiesSnapshot()) {
+            if (requestedStrategyId != null && !strategy.getStrategyId().equalsIgnoreCase(requestedStrategyId)) {
+                continue;
+            }
+            for (String configuredSymbol : strategy.getSymbols()) {
+                String normalizedSymbol = normalizeSymbol(configuredSymbol);
+                if (requestedSymbol != null && !normalizedSymbol.equals(requestedSymbol)) {
+                    continue;
+                }
+                for (long configuredAccountId : strategy.getAccountIds()) {
+                    if (accountId != null && configuredAccountId != accountId) {
+                        continue;
+                    }
+                    scopes.add(new MarketMakerPnlScope(
+                            strategy.getStrategyId(),
+                            normalizedSymbol,
+                            configuredAccountId,
+                            strategy.getMarginMode().name(),
+                            accountPrefix(strategy, normalizedSymbol, configuredAccountId)));
+                    if (scopes.size() >= limit) {
+                        return scopes;
+                    }
+                }
+            }
+        }
+        return scopes;
+    }
+
+    private long effectiveMaxInventorySteps(MarketMakerProperties.Strategy strategy) {
+        return strategy.getMaxInventorySteps() == null || strategy.getMaxInventorySteps() <= 0
+                ? properties.getRisk().getMaxInventorySteps()
+                : strategy.getMaxInventorySteps();
+    }
+
+    private long effectiveInventorySkewPpm(MarketMakerProperties.Strategy strategy) {
+        return strategy.getMaxInventorySkewPpm() == null
+                ? properties.getRisk().getMaxInventorySkewPpm()
+                : strategy.getMaxInventorySkewPpm();
+    }
+
+    private String qualityStatus(List<MarketMakerAnomaly> anomalies) {
+        if (anomalies.stream().anyMatch(item -> "CRITICAL".equals(item.severity()))) {
+            return "CRITICAL";
+        }
+        if (anomalies.stream().anyMatch(item -> "WARN".equals(item.severity()))) {
+            return "WARN";
+        }
+        if (anomalies.stream().anyMatch(item -> "INFO".equals(item.severity()))) {
+            return "INFO";
+        }
+        return "OK";
+    }
+
+    private MarketMakerAnomaly anomaly(String severity,
+                                       String type,
+                                       String strategyId,
+                                       String symbol,
+                                       long accountId,
+                                       long metricValue,
+                                       long threshold,
+                                       String summary) {
+        return new MarketMakerAnomaly(severity, type, strategyId, symbol, accountId, metricValue, threshold, summary);
+    }
+
+    private void recordRunEvent(MarketMakerProperties.Strategy strategy,
+                                String symbol,
+                                Long accountId,
+                                long cycleSequence,
+                                String eventType,
+                                long submittedOrders,
+                                long canceledOrders,
+                                long rejectedOrders,
+                                String skippedReason,
+                                String errorMessage,
+                                String traceId,
+                                Instant createdAt) {
+        try {
+            adminRepository.recordRunEvent(new MarketMakerRunEventWrite(
+                    strategy.getStrategyId(),
+                    symbol,
+                    accountId,
+                    nodeId,
+                    cycleSequence,
+                    eventType,
+                    Math.max(0L, submittedOrders),
+                    Math.max(0L, canceledOrders),
+                    Math.max(0L, rejectedOrders),
+                    skippedReason,
+                    errorMessage,
+                    traceId,
+                    createdAt));
+        } catch (RuntimeException ex) {
+            log.warn("Failed to record market-maker run event strategyId={} symbol={} eventType={} error={}",
+                    strategy.getStrategyId(), symbol, eventType, ex.getMessage());
+        }
+    }
+
     private void runStrategy(MarketMakerProperties.Strategy strategy, String requestedSymbol, String traceId) {
         StrategyRuntimeState state = state(strategy);
         if (!strategy.isEnabled() || state.paused()) {
             state.addSkipped(1L);
+            recordRunEvent(strategy, null, null, state.cycleSequence(), "SKIPPED",
+                    0, 0, 0, !strategy.isEnabled() ? "STRATEGY_DISABLED" : "STRATEGY_PAUSED",
+                    null, traceId, Instant.now());
             return;
         }
         long cycleSequence = state.nextCycleSequence();
@@ -163,6 +566,8 @@ public class MarketMakerService {
                 && !leaseCoordinator.tryAcquire(strategy.getStrategyId(), symbol, nodeId,
                 properties.getCoordination().getLeaseDuration())) {
             state.addSkipped(1L);
+            recordRunEvent(strategy, symbol, null, cycleSequence, "SKIPPED",
+                    0, 0, 0, "LEASE_NOT_ACQUIRED", null, traceId, Instant.now());
             return;
         }
         Instant now = Instant.now();
@@ -173,14 +578,19 @@ public class MarketMakerService {
                     properties.getQuoting().getOrderBookDepth());
             MarkPriceResponse markPrice = latestMarkPrice(symbol);
             for (long accountId : strategy.getAccountIds()) {
-                quoteAccount(strategy, state, cycleSequence, symbol, instrument, orderBook, markPrice, accountId, now);
+                quoteAccount(strategy, state, cycleSequence, symbol, instrument, orderBook, markPrice, accountId,
+                        now, traceId);
             }
-            maybeTrade(strategy, state, cycleSequence, symbol, instrument, markPrice, now);
+            maybeTrade(strategy, state, cycleSequence, symbol, instrument, markPrice, now, traceId);
             state.markSuccess(traceId, now);
+            recordRunEvent(strategy, symbol, null, cycleSequence, "CYCLE_SUCCESS",
+                    0, 0, 0, null, null, traceId, now);
         } catch (RuntimeException ex) {
             log.warn("Market-maker cycle failed strategyId={} symbol={} error={}",
                     strategy.getStrategyId(), symbol, ex.getMessage());
             state.markFailure(traceId, ex.getMessage(), now);
+            recordRunEvent(strategy, symbol, null, cycleSequence, "CYCLE_FAILED",
+                    0, 0, 0, null, ex.getMessage(), traceId, now);
         }
     }
 
@@ -192,7 +602,8 @@ public class MarketMakerService {
                               OrderBookSnapshotResponse orderBook,
                               MarkPriceResponse markPrice,
                               long accountId,
-                              Instant now) {
+                              Instant now,
+                              String traceId) {
         PositionResponse position = accountRpcApi.position(accountId, symbol, strategy.getMarginMode().name(),
                 PositionSide.NET.name());
         QuotePlan plan = quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
@@ -202,6 +613,8 @@ public class MarketMakerService {
         state.addCanceled(result.canceled());
         state.addSubmitted(result.submitted());
         state.addRejected(result.rejected());
+        recordRunEvent(strategy, symbol, accountId, cycleSequence, "QUOTE_RECONCILED",
+                result.submitted(), result.canceled(), result.rejected(), null, null, traceId, now);
     }
 
     private ReconcileResult reconcile(MarketMakerProperties.Strategy strategy,
@@ -305,7 +718,8 @@ public class MarketMakerService {
                             String symbol,
                             InstrumentResponse instrument,
                             MarkPriceResponse markPrice,
-                            Instant now) {
+                            Instant now,
+                            String traceId) {
         MarketMakerProperties.Trade trade = properties.getTrade();
         if (!trade.isEnabled()) {
             return;
@@ -343,10 +757,14 @@ public class MarketMakerService {
         OrderResponse response = orderRpcApi.place(request);
         if (response.status() == OrderStatus.REJECTED) {
             state.addRejected(1L);
+            recordRunEvent(strategy, symbol, accountId, cycleSequence, "TRADE_REJECTED",
+                    0, 0, 1, null, response.rejectReason(), traceId, now);
         } else {
             state.addSubmitted(1L);
             lastTradeTimes.put(tradeKey, now);
             lastTradeSides.put(tradeKey, side);
+            recordRunEvent(strategy, symbol, accountId, cycleSequence, "TRADE_SUBMITTED",
+                    1, 0, 0, null, null, traceId, now);
         }
     }
 
@@ -555,7 +973,107 @@ public class MarketMakerService {
         return Long.toUnsignedString(crc32.getValue(), 36);
     }
 
+    private List<MarketMakerProperties.Strategy> strategiesSnapshot() {
+        Map<String, StrategyConfigOverride> overrides = strategyOverrides();
+        return properties.getStrategies().stream()
+                .map(strategy -> applyOverride(strategy, overrides.get(strategyKey(strategy.getStrategyId()))))
+                .toList();
+    }
+
+    private Map<String, StrategyConfigOverride> strategyOverrides() {
+        Instant now = Instant.now();
+        if (strategyOverridesLoadedAt.plus(Duration.ofSeconds(1)).isAfter(now)) {
+            return strategyOverrides;
+        }
+        synchronized (this) {
+            if (strategyOverridesLoadedAt.plus(Duration.ofSeconds(1)).isAfter(now)) {
+                return strategyOverrides;
+            }
+            try {
+                Map<String, StrategyConfigOverride> next = new HashMap<>();
+                for (StrategyConfigOverride override : overrideStore.findAll()) {
+                    next.put(strategyKey(override.strategyId()), override);
+                }
+                strategyOverrides = Map.copyOf(next);
+            } catch (RuntimeException ex) {
+                log.warn("Failed to load market-maker strategy overrides: {}", ex.getMessage());
+            } finally {
+                strategyOverridesLoadedAt = now;
+            }
+            return strategyOverrides;
+        }
+    }
+
+    private void putCachedOverride(StrategyConfigOverride override) {
+        Map<String, StrategyConfigOverride> next = new HashMap<>(strategyOverrides());
+        next.put(strategyKey(override.strategyId()), override);
+        strategyOverrides = Map.copyOf(next);
+        strategyOverridesLoadedAt = Instant.now();
+    }
+
+    private void removeCachedOverride(String strategyId) {
+        Map<String, StrategyConfigOverride> next = new HashMap<>(strategyOverrides());
+        next.remove(strategyKey(strategyId));
+        strategyOverrides = Map.copyOf(next);
+        strategyOverridesLoadedAt = Instant.now();
+    }
+
+    private MarketMakerProperties.Strategy applyOverride(MarketMakerProperties.Strategy configured,
+                                                         StrategyConfigOverride override) {
+        MarketMakerProperties.Strategy effective = new MarketMakerProperties.Strategy();
+        effective.setStrategyId(configured.getStrategyId());
+        effective.setEnabled(override != null && override.enabled() != null ? override.enabled() : configured.isEnabled());
+        effective.setAccountIds(new ArrayList<>(configured.getAccountIds()));
+        effective.setSymbols(new ArrayList<>(configured.getSymbols()));
+        effective.setBaseQuantitySteps(override != null && override.baseQuantitySteps() != null
+                ? override.baseQuantitySteps()
+                : configured.getBaseQuantitySteps());
+        effective.setMarginMode(override != null && override.marginMode() != null
+                ? override.marginMode()
+                : configured.getMarginMode());
+        effective.setSpreadTicks(override != null && override.spreadTicks() != null
+                ? override.spreadTicks()
+                : configured.getSpreadTicks());
+        effective.setLevelSpacingTicks(override != null && override.levelSpacingTicks() != null
+                ? override.levelSpacingTicks()
+                : configured.getLevelSpacingTicks());
+        effective.setMaxInventorySteps(override != null && override.maxInventorySteps() != null
+                ? override.maxInventorySteps()
+                : configured.getMaxInventorySteps());
+        effective.setMaxInventorySkewPpm(override != null && override.maxInventorySkewPpm() != null
+                ? override.maxInventorySkewPpm()
+                : configured.getMaxInventorySkewPpm());
+        effective.setOrderLevels(override != null && override.orderLevels() != null
+                ? override.orderLevels()
+                : configured.getOrderLevels());
+        return effective;
+    }
+
+    private MarketMakerStrategyConfigResponse configResponse(MarketMakerProperties.Strategy configured,
+                                                             StrategyConfigOverride override) {
+        return new MarketMakerStrategyConfigResponse(
+                strategyConfig(configured),
+                strategyConfig(applyOverride(configured, override)),
+                override);
+    }
+
+    private MarketMakerStrategyConfig strategyConfig(MarketMakerProperties.Strategy strategy) {
+        return new MarketMakerStrategyConfig(strategy.getStrategyId(), strategy.isEnabled(),
+                List.copyOf(strategy.getAccountIds()), List.copyOf(strategy.getSymbols()),
+                strategy.getBaseQuantitySteps(), strategy.getMarginMode(), strategy.getSpreadTicks(),
+                strategy.getLevelSpacingTicks(), strategy.getMaxInventorySteps(), strategy.getMaxInventorySkewPpm(),
+                strategy.getOrderLevels());
+    }
+
     private MarketMakerProperties.Strategy findStrategy(String strategyId) {
+        String normalized = normalizeRequired(strategyId, "strategyId");
+        return strategiesSnapshot().stream()
+                .filter(strategy -> strategy.getStrategyId().equalsIgnoreCase(normalized))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("unknown market-maker strategy: " + strategyId));
+    }
+
+    private MarketMakerProperties.Strategy findConfiguredStrategy(String strategyId) {
         String normalized = normalizeRequired(strategyId, "strategyId");
         return properties.getStrategies().stream()
                 .filter(strategy -> strategy.getStrategyId().equalsIgnoreCase(normalized))
@@ -609,6 +1127,73 @@ public class MarketMakerService {
         return normalized;
     }
 
+    private String normalizeReason(String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("reason is required");
+        }
+        String normalized = value.trim();
+        if (normalized.length() > 500) {
+            throw new IllegalArgumentException("reason must be at most 500 characters");
+        }
+        return normalized;
+    }
+
+    private MarginMode parseMarginMode(String value) {
+        String normalized = normalizeOptional(value);
+        if (normalized == null) {
+            return null;
+        }
+        try {
+            return MarginMode.valueOf(normalized);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("invalid marginMode: " + value, ex);
+        }
+    }
+
+    private Long positiveOrNull(Long value, String field) {
+        if (value == null) {
+            return null;
+        }
+        if (value <= 0) {
+            throw new IllegalArgumentException(field + " must be positive");
+        }
+        return value;
+    }
+
+    private Long nonNegativeOrNull(Long value, String field) {
+        if (value == null) {
+            return null;
+        }
+        if (value < 0) {
+            throw new IllegalArgumentException(field + " must be non-negative");
+        }
+        return value;
+    }
+
+    private Long boundedLongOrNull(Long value, long min, long max, String field) {
+        if (value == null) {
+            return null;
+        }
+        if (value < min || value > max) {
+            throw new IllegalArgumentException(field + " must be between " + min + " and " + max);
+        }
+        return value;
+    }
+
+    private Integer boundedIntOrNull(Integer value, int min, int max, String field) {
+        if (value == null) {
+            return null;
+        }
+        if (value < min || value > max) {
+            throw new IllegalArgumentException(field + " must be between " + min + " and " + max);
+        }
+        return value;
+    }
+
+    private String strategyKey(String strategyId) {
+        return strategyId == null ? "" : strategyId.trim().toLowerCase(Locale.ROOT);
+    }
+
     private String resolveNodeId(String configuredNodeId) {
         if (configuredNodeId != null && !configuredNodeId.isBlank()) {
             return configuredNodeId.trim();
@@ -616,9 +1201,183 @@ public class MarketMakerService {
         return "market-maker-" + UUID.randomUUID();
     }
 
+    public record MarketMakerAdminMetricsResponse(Instant generatedAt,
+                                                  String nodeId,
+                                                  MarketMakerMetricsTotals totals,
+                                                  List<MarketMakerStrategyMetric> rows,
+                                                  List<MarketMakerAnomaly> anomalies,
+                                                  List<MarketMakerMetricWarning> warnings) {
+    }
+
+    public record MarketMakerRunLogQueryResponse(Instant generatedAt,
+                                                 List<MarketMakerRunEventRecord> events,
+                                                 String nextCursor,
+                                                 boolean hasMore,
+                                                 String sort,
+                                                 int limit) {
+
+        public MarketMakerRunLogQueryResponse(Instant generatedAt, List<MarketMakerRunEventRecord> events) {
+            this(generatedAt, events, null, false, null, events == null ? 0 : events.size());
+        }
+
+        public int count() {
+            return events == null ? 0 : events.size();
+        }
+    }
+
+    public record MarketMakerPnlAttributionResponse(Instant generatedAt,
+                                                    Instant since,
+                                                    int windowHours,
+                                                    MarketMakerPnlAttributionTotals totals,
+                                                    List<MarketMakerPnlAttributionRecord> rows) {
+    }
+
+    public record MarketMakerPnlAttributionTotals(long rowCount,
+                                                  long totalTrades,
+                                                  long makerTrades,
+                                                  long takerTrades,
+                                                  long netFeeUnits,
+                                                  long currentRealizedPnlUnits,
+                                                  long signedInventorySteps) {
+    }
+
+    public record MarketMakerStrategyConfigResponse(MarketMakerStrategyConfig configured,
+                                                    MarketMakerStrategyConfig effective,
+                                                    StrategyConfigOverride override) {
+    }
+
+    public record MarketMakerStrategyConfig(String strategyId,
+                                            boolean enabled,
+                                            List<Long> accountIds,
+                                            List<String> symbols,
+                                            long baseQuantitySteps,
+                                            MarginMode marginMode,
+                                            long spreadTicks,
+                                            long levelSpacingTicks,
+                                            Long maxInventorySteps,
+                                            Long maxInventorySkewPpm,
+                                            Integer orderLevels) {
+    }
+
+    public record MarketMakerStrategyConfigUpdateRequest(Boolean enabled,
+                                                         Long baseQuantitySteps,
+                                                         String marginMode,
+                                                         Long spreadTicks,
+                                                         Long levelSpacingTicks,
+                                                         Long maxInventorySteps,
+                                                         Long maxInventorySkewPpm,
+                                                         Integer orderLevels,
+                                                         String reason) {
+    }
+
+    public record MarketMakerMetricsTotals(long strategyCount,
+                                           long enabledStrategies,
+                                           long runningStrategies,
+                                           long degradedStrategies,
+                                           long pausedStrategies,
+                                           long disabledStrategies,
+                                           long metricRows,
+                                           long submittedOrders,
+                                           long canceledOrders,
+                                           long rejectedOrders,
+                                           long skippedCycles,
+                                           long anomalyCount,
+                                           long criticalAnomalies,
+                                           long warnAnomalies) {
+    }
+
+    public record MarketMakerStrategyMetric(String strategyId,
+                                            String symbol,
+                                            long accountId,
+                                            MarketMakerStrategyStatus strategyStatus,
+                                            String qualityStatus,
+                                            boolean configuredEnabled,
+                                            boolean runtimePaused,
+                                            long cycleSequence,
+                                            long submittedOrders,
+                                            long canceledOrders,
+                                            long rejectedOrders,
+                                            long skippedCycles,
+                                            long signedInventorySteps,
+                                            long absInventorySteps,
+                                            long maxInventorySteps,
+                                            long inventoryUsagePpm,
+                                            long realizedPnlUnits,
+                                            Instant positionUpdatedAt,
+                                            long ownedOpenOrders,
+                                            long ownedBidOrders,
+                                            long ownedAskOrders,
+                                            long desiredQuoteCount,
+                                            long desiredBidQuotes,
+                                            long desiredAskQuotes,
+                                            long matchedDesiredQuotes,
+                                            long missingDesiredQuotes,
+                                            long staleOwnedOrders,
+                                            long offTargetOwnedOrders,
+                                            long bestBidTicks,
+                                            long bestAskTicks,
+                                            long spreadTicks,
+                                            long spreadPpm,
+                                            long markPriceTicks,
+                                            long quoteCoveragePpm,
+                                            String lastTraceId,
+                                            String lastError,
+                                            Instant lastCycleTime,
+                                            String error) {
+    }
+
+    public record MarketMakerAnomaly(String severity,
+                                     String type,
+                                     String strategyId,
+                                     String symbol,
+                                     long accountId,
+                                     long metricValue,
+                                     long threshold,
+                                     String summary) {
+    }
+
+    public record MarketMakerMetricWarning(String strategyId,
+                                           String symbol,
+                                           long accountId,
+                                           String message) {
+    }
+
     private record ReconcileResult(long submitted, long canceled, long rejected) {
     }
 
     private record TradeTarget(long priceTicks, long availableQuantitySteps) {
+    }
+
+    private static final class NoopMarketMakerAdminRepository implements MarketMakerAdminRepository {
+        @Override
+        public void recordRunEvent(MarketMakerRunEventWrite event) {
+        }
+
+        @Override
+        public List<MarketMakerRunEventRecord> runEvents(String strategyId,
+                                                         String symbol,
+                                                         Long accountId,
+                                                         String eventType,
+                                                         int limit) {
+            return List.of();
+        }
+
+        @Override
+        public CursorPage<MarketMakerRunEventRecord> runEventsPage(String strategyId,
+                                                                   String symbol,
+                                                                   Long accountId,
+                                                                   String eventType,
+                                                                   int limit,
+                                                                   String cursor,
+                                                                   String sort) {
+            return new CursorPage<>(List.of(), null, false, sort, Math.max(1, limit));
+        }
+
+        @Override
+        public List<MarketMakerPnlAttributionRecord> pnlAttribution(List<MarketMakerPnlScope> scopes,
+                                                                    Instant since,
+                                                                    Instant until) {
+            return List.of();
+        }
     }
 }

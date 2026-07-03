@@ -1,5 +1,6 @@
 package com.surprising.trading.trigger.repository;
 
+import com.surprising.trading.api.model.AdminCursorPage;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
@@ -13,6 +14,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -123,11 +125,64 @@ public class TriggerOrderRepository {
                 SELECT *
                   FROM trading_trigger_orders
                  WHERE user_id = ?
-                   AND (? IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR symbol = ?)
                    AND status IN ('PENDING', 'TRIGGERING')
                  ORDER BY created_at DESC, trigger_order_id DESC
                  LIMIT ?
                 """, (rs, rowNum) -> toRecord(rs), userId, symbol, symbol, normalizedLimit);
+    }
+
+    public List<TriggerOrderRecord> adminOrders(Long userId,
+                                                String symbol,
+                                                TriggerOrderStatus status,
+                                                Long triggerOrderId,
+                                                int limit) {
+        return adminOrderPage(userId, symbol, status, triggerOrderId, limit, null, null).items();
+    }
+
+    public AdminCursorPage.CursorPage<TriggerOrderRecord> adminOrderPage(Long userId,
+                                                                         String symbol,
+                                                                         TriggerOrderStatus status,
+                                                                         Long triggerOrderId,
+                                                                         int limit,
+                                                                         String cursor,
+                                                                         String sort) {
+        String normalizedStatus = status == null ? null : status.name();
+        int normalizedLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", "trigger_order_id", true);
+        AdminCursorPage.SortSpec createdAtAsc = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", "trigger_order_id", false);
+        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(
+                sort, createdAtDesc, List.of(createdAtDesc, createdAtAsc));
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.add(userId);
+        args.add(symbol);
+        args.add(symbol);
+        args.add(normalizedStatus);
+        args.add(normalizedStatus);
+        args.add(triggerOrderId);
+        args.add(triggerOrderId);
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(normalizedLimit + 1);
+        List<TriggerOrderRecord> rows = jdbcTemplate.query("""
+                SELECT *
+                  FROM trading_trigger_orders
+                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR status = ?)
+                   AND (CAST(? AS text) IS NULL OR trigger_order_id = ?)
+                %s
+                 ORDER BY %s %s, %s %s
+                 LIMIT ?
+                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
+                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
+                (rs, rowNum) -> toRecord(rs),
+                args.toArray());
+        return AdminCursorPage.page(rows, normalizedLimit, sortSpec, TriggerOrderRecord::createdAt,
+                TriggerOrderRecord::triggerOrderId);
     }
 
     public Optional<TriggerOrderRecord> cancel(long userId, long triggerOrderId, Instant now) {

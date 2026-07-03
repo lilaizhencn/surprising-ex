@@ -83,6 +83,18 @@ curl 'http://localhost:9091/api/v1/adl/events?asset=USDT&limit=100'
 curl 'http://localhost:9091/api/v1/adl/events?userId=1001&limit=100'
 ```
 
+后台 ADL 查询必须通过 admin gateway 和管理员 token 访问：
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'http://localhost:8080/api/v1/admin/gateway/adl/admin/queue?asset=USDT&limit=100&sort=priorityScorePpm.desc'
+
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'http://localhost:8080/api/v1/admin/gateway/adl/admin/events?asset=USDT&limit=100&sort=createdAt.desc'
+```
+
+后台 ADL 队列支持按实时排名 `priorityScorePpm.desc` 游标分页；ADL 事件支持 `createdAt.desc`、`createdAt.asc`。响应保留 `positions/events/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。
+
 ## 数据库
 
 根目录 [init.sql](../init.sql) 创建：

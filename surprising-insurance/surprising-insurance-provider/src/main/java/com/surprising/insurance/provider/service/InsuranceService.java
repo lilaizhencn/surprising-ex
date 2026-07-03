@@ -59,19 +59,30 @@ public class InsuranceService {
     }
 
     public InsuranceLedgerQueryResponse ledger(String asset, int limit) {
-        int capped = Math.max(1, Math.min(1000, limit));
-        var rows = insuranceRepository.ledger(asset == null || asset.isBlank() ? null : normalizeAsset(asset), capped);
-        return new InsuranceLedgerQueryResponse(rows.size(), rows);
+        return ledger(asset, limit, null, null);
+    }
+
+    public InsuranceLedgerQueryResponse ledger(String asset, int limit, String cursor, String sort) {
+        int capped = normalizeLimit(limit);
+        var page = insuranceRepository.ledgerPage(asset == null || asset.isBlank() ? null : normalizeAsset(asset),
+                capped, cursor, sort);
+        return new InsuranceLedgerQueryResponse(page.items().size(), page.items(),
+                page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
     public InsuranceCoverageQueryResponse coverages(Long userId, String asset, int limit) {
+        return coverages(userId, asset, limit, null, null);
+    }
+
+    public InsuranceCoverageQueryResponse coverages(Long userId, String asset, int limit, String cursor, String sort) {
         if (userId != null && userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        int capped = Math.max(1, Math.min(1000, limit));
-        var rows = insuranceRepository.coverages(userId,
-                asset == null || asset.isBlank() ? null : normalizeAsset(asset), capped);
-        return new InsuranceCoverageQueryResponse(rows.size(), rows);
+        int capped = normalizeLimit(limit);
+        var page = insuranceRepository.coveragesPage(userId,
+                asset == null || asset.isBlank() ? null : normalizeAsset(asset), capped, cursor, sort);
+        return new InsuranceCoverageQueryResponse(page.items().size(), page.items(),
+                page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
     private String normalizeAsset(String asset) {
@@ -94,5 +105,12 @@ public class InsuranceService {
             throw new IllegalArgumentException("referenceId length must be <= 128");
         }
         return normalized;
+    }
+
+    private int normalizeLimit(int limit) {
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
+        return limit;
     }
 }

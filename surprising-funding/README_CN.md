@@ -66,6 +66,17 @@ curl 'http://localhost:9089/api/v1/funding/settlements/latest?symbol=BTC-USDT'
 curl 'http://localhost:9089/api/v1/funding/payments?userId=1001&symbol=BTC-USDT&limit=100'
 ```
 
+后台操作员应通过 gateway 使用 admin namespace：
+
+- `GET /api/v1/funding/admin/rates/latest`
+- `GET /api/v1/funding/admin/rates/history`
+- `GET /api/v1/funding/admin/settlements/latest`
+- `GET /api/v1/funding/admin/payments`
+- `GET /api/v1/funding/admin/runtime-config`
+- `POST /api/v1/funding/admin/runtime-config`
+
+其中 `/admin/rates/history` 和 `/admin/payments` 支持统一游标分页参数 `limit`、`cursor`、`sort`。资金费历史排序白名单为 `eventTime.desc`、`eventTime.asc`；资金费付款排序白名单为 `createdAt.desc`、`createdAt.asc`。响应保留 `rates/payments/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。
+
 ## 数据库
 
 根目录 [init.sql](../init.sql) 创建：

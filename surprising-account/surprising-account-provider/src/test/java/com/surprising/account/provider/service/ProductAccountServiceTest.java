@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.AdminBalanceAdjustmentRecord;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
 import com.surprising.account.api.model.ProductBalanceResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
@@ -51,6 +52,30 @@ class ProductAccountServiceTest {
     }
 
     @Test
+    void adminProductBalanceAdjustmentRecordsGatewayIdentity() {
+        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        AccountService service = new AccountService(repository, new PositionCalculator());
+
+        ProductBalanceResponse response = service.adminAdjustProductBalance(" 42 ", " risk-admin ",
+                new ProductBalanceAdjustmentRequest(1001L, AccountType.FUNDING, "usdt", 1_000L,
+                        " manual-credit-1 ", "MANUAL_CREDIT"));
+
+        assertThat(response.availableUnits()).isEqualTo(1_000L);
+        assertThat(repository.adminAdjustments).singleElement().satisfies(record -> {
+            assertThat(record.adjustmentKind()).isEqualTo("PRODUCT");
+            assertThat(record.adminUserId()).isEqualTo(42L);
+            assertThat(record.adminUsername()).isEqualTo("risk-admin");
+            assertThat(record.userId()).isEqualTo(1001L);
+            assertThat(record.accountType()).isEqualTo(AccountType.FUNDING);
+            assertThat(record.asset()).isEqualTo("USDT");
+            assertThat(record.amountUnits()).isEqualTo(1_000L);
+            assertThat(record.balanceAfterUnits()).isEqualTo(1_000L);
+            assertThat(record.referenceId()).isEqualTo("manual-credit-1");
+            assertThat(record.reason()).isEqualTo("MANUAL_CREDIT");
+        });
+    }
+
+    @Test
     void transferMovesAvailableUnitsBetweenIsolatedProductAccounts() {
         FakeProductAccountRepository repository = new FakeProductAccountRepository();
         repository.put(1001L, AccountType.FUNDING, "USDT", 2_000L);
@@ -83,6 +108,7 @@ class ProductAccountServiceTest {
     private static final class FakeProductAccountRepository extends AccountRepository {
         private final Map<Long, EnumMap<AccountType, Map<String, ProductBalanceResponse>>> balances = new HashMap<>();
         private final List<String> adjustmentReferences = new ArrayList<>();
+        private final List<AdminBalanceAdjustmentRecord> adminAdjustments = new ArrayList<>();
         private final List<String> transferReferences = new ArrayList<>();
         private long transferId;
 
@@ -123,6 +149,24 @@ class ProductAccountServiceTest {
                     Math.addExact(current.equityUnits(), amountUnits), Instant.now());
             put(next);
             return next;
+        }
+
+        @Override
+        public AdminBalanceAdjustmentRecord recordAdminBalanceAdjustment(String adjustmentKind,
+                                                                         long adminUserId,
+                                                                         String adminUsername,
+                                                                         long userId,
+                                                                         AccountType accountType,
+                                                                         String asset,
+                                                                         long amountUnits,
+                                                                         long balanceAfterUnits,
+                                                                         String referenceId,
+                                                                         String reason) {
+            AdminBalanceAdjustmentRecord record = new AdminBalanceAdjustmentRecord(adminAdjustments.size() + 1L,
+                    adjustmentKind, adminUserId, adminUsername, userId, accountType, asset, amountUnits,
+                    balanceAfterUnits, referenceId, reason, Instant.now());
+            adminAdjustments.add(record);
+            return record;
         }
 
         @Override

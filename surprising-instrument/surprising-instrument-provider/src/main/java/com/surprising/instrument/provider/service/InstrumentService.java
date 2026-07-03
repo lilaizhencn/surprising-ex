@@ -48,6 +48,18 @@ public class InstrumentService {
         return new InstrumentQueryResponse(rows.size(), rows);
     }
 
+    public InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status, int limit, String cursor, String sort) {
+        var page = instrumentRepository.listPage(type, status, limit, cursor, sort);
+        return new InstrumentQueryResponse(page.instruments().size(), page.instruments(), page.nextCursor(),
+                page.hasMore(), page.sort(), page.limit());
+    }
+
+    public InstrumentQueryResponse versions(String symbol, int limit, String cursor, String sort) {
+        var page = instrumentRepository.versionsPage(normalizeSymbol(symbol), limit, cursor, sort);
+        return new InstrumentQueryResponse(page.instruments().size(), page.instruments(), page.nextCursor(),
+                page.hasMore(), page.sort(), page.limit());
+    }
+
     @Transactional
     public InstrumentResponse upsert(InstrumentUpsertRequest request) {
         return upsert(request, InstrumentEventType.UPSERTED);

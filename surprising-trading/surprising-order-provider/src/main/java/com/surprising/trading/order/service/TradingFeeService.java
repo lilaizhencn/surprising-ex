@@ -74,6 +74,16 @@ public class TradingFeeService {
                 limit <= 0 ? DEFAULT_LIMIT : limit);
     }
 
+    public FeeScheduleQueryResponse querySchedules(long userId,
+                                                   String symbol,
+                                                   FeeScheduleStatus status,
+                                                   int limit,
+                                                   String cursor,
+                                                   String sort) {
+        return orderFeeRepository.querySchedulesPage(userId, normalizeOptionalSymbol(symbol), status,
+                limit <= 0 ? DEFAULT_LIMIT : limit, cursor, sort);
+    }
+
     private long currentVersion(String symbol) {
         InstrumentRule rule = instrumentRuleLookup.currentRule(symbol)
                 .orElseThrow(() -> new IllegalStateException("instrument not found: " + symbol));

@@ -114,6 +114,31 @@ Query liquidation candidates:
 curl 'http://localhost:9087/api/v1/risk/liquidation-candidates?status=NEW&limit=100'
 ```
 
+Admin risk operations must go through the admin gateway with an admin bearer token:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'http://localhost:8080/api/v1/admin/gateway/risk-admin/rules'
+
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'http://localhost:8080/api/v1/admin/gateway/risk-admin/high-risk-accounts?limit=100'
+
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'http://localhost:8080/api/v1/admin/gateway/risk-admin/liquidation-candidates?status=NEW&limit=100&sort=eventTime.asc'
+
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"warningMarginRatioPpm":800000,"liquidationMarginRatioPpm":1000000,"reason":"quarterly risk policy review"}' \
+  'http://localhost:8080/api/v1/admin/gateway/risk-admin/rules/GLOBAL_MARGIN_POLICY'
+```
+
+`GLOBAL_MARGIN_POLICY` persists warning/liquidation margin threshold overrides and immediately updates the
+current risk-provider runtime thresholds. `RISK_SCAN_CONTROL` persists scan enablement, scan delay, and batch
+size. High-risk account aggregation reads the latest account snapshot, positions from the same snapshot,
+active liquidation candidate counts, and the riskiest position for back-office tiering and alert workflows. Admin
+liquidation-candidate and high-risk account lists support `limit/cursor/sort` cursor paging with
+`eventTime.asc` and `eventTime.desc`; responses keep the original list fields plus `nextCursor`, `hasMore`,
+`sort`, and `limit`.
+
 ## Database
 
 Root [init.sql](../init.sql) creates:
@@ -125,6 +150,7 @@ Root [init.sql](../init.sql) creates:
 - `risk_account_snapshots`
 - `risk_position_snapshots`
 - `risk_liquidation_candidates`
+- `risk_admin_rule_overrides`
 - `risk_outbox_events`
 
 Core indexes:

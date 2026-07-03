@@ -103,6 +103,25 @@ curl 'http://localhost:9087/api/v1/risk/positions/latest?userId=1001'
 curl 'http://localhost:9087/api/v1/risk/liquidation-candidates?status=NEW&limit=100'
 ```
 
+后台风控运营接口必须通过 admin gateway 和管理员 token 访问：
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'http://localhost:8080/api/v1/admin/gateway/risk-admin/rules'
+
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'http://localhost:8080/api/v1/admin/gateway/risk-admin/high-risk-accounts?limit=100'
+
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'http://localhost:8080/api/v1/admin/gateway/risk-admin/liquidation-candidates?status=NEW&limit=100&sort=eventTime.asc'
+
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"warningMarginRatioPpm":800000,"liquidationMarginRatioPpm":1000000,"reason":"quarterly risk policy review"}' \
+  'http://localhost:8080/api/v1/admin/gateway/risk-admin/rules/GLOBAL_MARGIN_POLICY'
+```
+
+`GLOBAL_MARGIN_POLICY` 会持久化保证金预警/强平阈值覆盖，并即时更新当前 risk-provider 节点运行时阈值；`RISK_SCAN_CONTROL` 可持久化扫描启停、扫描间隔和批量大小。高风险账户聚合只读取最新账户风险快照、同快照仓位、活跃爆仓候选数量和最高风险仓位，供后台分层运营和告警联动。后台爆仓候选和高风险账户列表支持 `limit/cursor/sort` 游标分页，排序白名单为 `eventTime.asc`、`eventTime.desc`，响应保留原列表字段并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。
+
 ## 数据库
 
 根目录 [init.sql](../init.sql) 创建：
@@ -114,6 +133,7 @@ curl 'http://localhost:9087/api/v1/risk/liquidation-candidates?status=NEW&limit=
 - `risk_account_snapshots`
 - `risk_position_snapshots`
 - `risk_liquidation_candidates`
+- `risk_admin_rule_overrides`
 - `risk_outbox_events`
 
 核心索引：

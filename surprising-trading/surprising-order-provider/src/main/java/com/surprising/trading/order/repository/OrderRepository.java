@@ -1,7 +1,13 @@
 package com.surprising.trading.order.repository;
 
-import com.surprising.trading.api.model.OrderEvent;
+import com.surprising.trading.api.model.AdminMatchResultResponse;
+import com.surprising.trading.api.model.AdminMatchTradeResponse;
+import com.surprising.trading.api.model.AdminCursorPage;
+import com.surprising.trading.api.model.AdminOrderEventResponse;
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.OrderCommandType;
+import com.surprising.trading.api.model.OrderEvent;
+import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
@@ -9,6 +15,7 @@ import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.model.OrderRecord;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -153,12 +160,211 @@ public class OrderRepository {
                 SELECT *
                   FROM trading_orders
                  WHERE user_id = ?
-                   AND (? IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR symbol = ?)
                    AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                  ORDER BY created_at DESC
                  LIMIT ?
                 """;
         return jdbcTemplate.query(sql, (rs, rowNum) -> toRecord(rs), userId, normalizedSymbol, normalizedSymbol, limit);
+    }
+
+    public List<OrderRecord> adminOrders(Long userId,
+                                         String symbol,
+                                         OrderStatus status,
+                                         Long orderId,
+                                         int limit) {
+        return adminOrderPage(userId, symbol, status, orderId, limit, null, null).items();
+    }
+
+    public AdminCursorPage.CursorPage<OrderRecord> adminOrderPage(Long userId,
+                                                                  String symbol,
+                                                                  OrderStatus status,
+                                                                  Long orderId,
+                                                                  int limit,
+                                                                  String cursor,
+                                                                  String sort) {
+        String normalizedSymbol = emptyToNull(symbol);
+        String normalizedStatus = status == null ? null : status.name();
+        int safeLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", "order_id", true);
+        AdminCursorPage.SortSpec createdAtAsc = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", "order_id", false);
+        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(
+                sort, createdAtDesc, List.of(createdAtDesc, createdAtAsc));
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.add(userId);
+        args.add(normalizedSymbol);
+        args.add(normalizedSymbol);
+        args.add(normalizedStatus);
+        args.add(normalizedStatus);
+        args.add(orderId);
+        args.add(orderId);
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        List<OrderRecord> rows = jdbcTemplate.query("""
+                SELECT *
+                  FROM trading_orders
+                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR status = ?)
+                   AND (CAST(? AS text) IS NULL OR order_id = ?)
+                %s
+                 ORDER BY %s %s, %s %s
+                 LIMIT ?
+                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
+                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
+                (rs, rowNum) -> toRecord(rs),
+                args.toArray());
+        return AdminCursorPage.page(rows, safeLimit, sortSpec, OrderRecord::createdAt, OrderRecord::orderId);
+    }
+
+    public List<OrderRecord> adminCancelableOrders(Long userId, String symbol, int limit) {
+        String normalizedSymbol = emptyToNull(symbol);
+        int safeLimit = Math.max(1, Math.min(limit, 1000));
+        return jdbcTemplate.query("""
+                SELECT *
+                  FROM trading_orders
+                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED')
+                   AND remaining_quantity_steps > 0
+                 ORDER BY created_at ASC, order_id ASC
+                 LIMIT ?
+                """, (rs, rowNum) -> toRecord(rs), userId, userId, normalizedSymbol, normalizedSymbol, safeLimit);
+    }
+
+    public CancelableOrderImpact adminCancelableImpact(Long userId, String symbol) {
+        String normalizedSymbol = emptyToNull(symbol);
+        return jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)::int AS matched,
+                       COALESCE(SUM(remaining_quantity_steps), 0)::bigint AS total_remaining_quantity_steps,
+                       COUNT(*) FILTER (WHERE side = 'BUY')::int AS buy_orders,
+                       COUNT(*) FILTER (WHERE side = 'SELL')::int AS sell_orders
+                  FROM trading_orders
+                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED')
+                   AND remaining_quantity_steps > 0
+                """, (rs, rowNum) -> new CancelableOrderImpact(
+                rs.getInt("matched"),
+                rs.getLong("total_remaining_quantity_steps"),
+                rs.getInt("buy_orders"),
+                rs.getInt("sell_orders")), userId, userId, normalizedSymbol, normalizedSymbol);
+    }
+
+    public List<AdminOrderEventResponse> orderEvents(long orderId, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 1000));
+        return jdbcTemplate.query("""
+                SELECT event_id, order_id, user_id, symbol, event_type, status, reason, trace_id,
+                       event_time, created_at
+                  FROM trading_order_events
+                 WHERE order_id = ?
+                 ORDER BY event_time ASC, event_id ASC
+                 LIMIT ?
+                """, (rs, rowNum) -> new AdminOrderEventResponse(
+                rs.getLong("event_id"),
+                rs.getLong("order_id"),
+                rs.getLong("user_id"),
+                rs.getString("symbol"),
+                OrderEventType.valueOf(rs.getString("event_type")),
+                OrderStatus.valueOf(rs.getString("status")),
+                rs.getString("reason"),
+                rs.getString("trace_id"),
+                rs.getTimestamp("event_time").toInstant(),
+                rs.getTimestamp("created_at").toInstant()), orderId, safeLimit);
+    }
+
+    public List<AdminMatchResultResponse> matchResults(long orderId, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 1000));
+        return jdbcTemplate.query("""
+                SELECT command_id, order_id, user_id, symbol, instrument_version, command_type,
+                       result_code, filled_quantity_steps, order_status, trace_id, event_time, created_at
+                  FROM trading_match_results
+                 WHERE order_id = ?
+                 ORDER BY event_time ASC, command_id ASC
+                 LIMIT ?
+                """, (rs, rowNum) -> new AdminMatchResultResponse(
+                rs.getLong("command_id"),
+                rs.getLong("order_id"),
+                rs.getLong("user_id"),
+                rs.getString("symbol"),
+                rs.getLong("instrument_version"),
+                OrderCommandType.valueOf(rs.getString("command_type")),
+                rs.getString("result_code"),
+                rs.getLong("filled_quantity_steps"),
+                OrderStatus.valueOf(rs.getString("order_status")),
+                rs.getString("trace_id"),
+                rs.getTimestamp("event_time").toInstant(),
+                rs.getTimestamp("created_at").toInstant()), orderId, safeLimit);
+    }
+
+    public List<AdminMatchTradeResponse> matchTrades(Long userId, Long orderId, String symbol, int limit) {
+        return matchTradePage(userId, orderId, symbol, limit, null, null).items();
+    }
+
+    public AdminCursorPage.CursorPage<AdminMatchTradeResponse> matchTradePage(Long userId,
+                                                                              Long orderId,
+                                                                              String symbol,
+                                                                              int limit,
+                                                                              String cursor,
+                                                                              String sort) {
+        String normalizedSymbol = emptyToNull(symbol);
+        int safeLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec eventTimeDesc = new AdminCursorPage.SortSpec(
+                "eventTime", "event_time", "trade_id", true);
+        AdminCursorPage.SortSpec eventTimeAsc = new AdminCursorPage.SortSpec(
+                "eventTime", "event_time", "trade_id", false);
+        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(
+                sort, eventTimeDesc, List.of(eventTimeDesc, eventTimeAsc));
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.add(userId);
+        args.add(userId);
+        args.add(orderId);
+        args.add(orderId);
+        args.add(orderId);
+        args.add(normalizedSymbol);
+        args.add(normalizedSymbol);
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        List<AdminMatchTradeResponse> rows = jdbcTemplate.query("""
+                SELECT trade_id, command_id, symbol, taker_order_id, taker_user_id, taker_side,
+                       taker_margin_mode, maker_order_id, maker_user_id, maker_margin_mode,
+                       price_ticks, quantity_steps, taker_order_completed, maker_order_completed,
+                       trace_id, event_time, created_at
+                  FROM trading_match_trades
+                 WHERE (CAST(? AS text) IS NULL OR taker_user_id = ? OR maker_user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR taker_order_id = ? OR maker_order_id = ?)
+                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                %s
+                 ORDER BY %s %s, %s %s
+                 LIMIT ?
+                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
+                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
+                (rs, rowNum) -> new AdminMatchTradeResponse(
+                rs.getLong("trade_id"),
+                rs.getLong("command_id"),
+                rs.getString("symbol"),
+                rs.getLong("taker_order_id"),
+                rs.getLong("taker_user_id"),
+                OrderSide.valueOf(rs.getString("taker_side")),
+                MarginMode.fromNullableDbValue(rs.getString("taker_margin_mode")),
+                rs.getLong("maker_order_id"),
+                rs.getLong("maker_user_id"),
+                MarginMode.fromNullableDbValue(rs.getString("maker_margin_mode")),
+                rs.getLong("price_ticks"),
+                rs.getLong("quantity_steps"),
+                rs.getBoolean("taker_order_completed"),
+                rs.getBoolean("maker_order_completed"),
+                rs.getString("trace_id"),
+                rs.getTimestamp("event_time").toInstant(),
+                rs.getTimestamp("created_at").toInstant()), args.toArray());
+        return AdminCursorPage.page(rows, safeLimit, sortSpec, AdminMatchTradeResponse::eventTime,
+                AdminMatchTradeResponse::tradeId);
     }
 
     private OrderRecord toRecord(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -204,5 +410,12 @@ public class OrderRepository {
             throw new IllegalArgumentException("invalid trading sequence name: " + sequenceName);
         }
         return "public.trading_" + sequenceName.toLowerCase().replace('-', '_') + "_seq";
+    }
+
+    public record CancelableOrderImpact(
+            int matched,
+            long totalRemainingQuantitySteps,
+            int buyOrders,
+            int sellOrders) {
     }
 }

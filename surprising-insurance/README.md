@@ -97,6 +97,19 @@ curl 'http://localhost:9090/api/v1/insurance/ledger?asset=USDT&limit=100'
 curl 'http://localhost:9090/api/v1/insurance/coverages?userId=1001&asset=USDT&limit=100'
 ```
 
+Back-office operators should use the admin namespace through gateway:
+
+- `POST /api/v1/insurance/admin/fund-adjustments`
+- `GET /api/v1/insurance/admin/balances`
+- `GET /api/v1/insurance/admin/ledger`
+- `GET /api/v1/insurance/admin/coverages`
+- `GET /api/v1/insurance/admin/runtime-config`
+- `POST /api/v1/insurance/admin/runtime-config`
+
+`/admin/ledger` and `/admin/coverages` support the common cursor paging contract: `limit`,
+`cursor`, and `sort`. Supported sort values are `createdAt.desc` and `createdAt.asc`; responses keep
+`entries/coverages/count` and add `nextCursor`, `hasMore`, `sort`, and `limit`.
+
 ## Database
 
 Root [init.sql](../init.sql) creates:

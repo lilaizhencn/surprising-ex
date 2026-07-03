@@ -67,6 +67,20 @@ curl 'http://localhost:9089/api/v1/funding/settlements/latest?symbol=BTC-USDT'
 curl 'http://localhost:9089/api/v1/funding/payments?userId=1001&symbol=BTC-USDT&limit=100'
 ```
 
+Back-office operators should use the admin namespace through gateway:
+
+- `GET /api/v1/funding/admin/rates/latest`
+- `GET /api/v1/funding/admin/rates/history`
+- `GET /api/v1/funding/admin/settlements/latest`
+- `GET /api/v1/funding/admin/payments`
+- `GET /api/v1/funding/admin/runtime-config`
+- `POST /api/v1/funding/admin/runtime-config`
+
+`/admin/rates/history` and `/admin/payments` support the common cursor paging contract: `limit`,
+`cursor`, and `sort`. Funding-rate history supports `eventTime.desc` and `eventTime.asc`; funding
+payments support `createdAt.desc` and `createdAt.asc`. Responses keep `rates/payments/count` and
+add `nextCursor`, `hasMore`, `sort`, and `limit`.
+
 ## Database
 
 Root [init.sql](../init.sql) creates:

@@ -70,12 +70,34 @@ curl 'http://localhost:9088/api/v1/liquidations/orders?userId=1001&limit=100'
 curl 'http://localhost:9088/api/v1/liquidations/orders/by-candidate?candidateId=1'
 ```
 
+Admin operations must go through the admin gateway with an admin bearer token:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'http://localhost:8080/api/v1/admin/gateway/liquidation-admin/orders?limit=100&sort=createdAt.desc'
+
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'http://localhost:8080/api/v1/admin/gateway/liquidation-admin/candidates/1/timeline?limit=200'
+
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"reason":"risk snapshot recovered after manual review"}' \
+  'http://localhost:8080/api/v1/admin/gateway/liquidation-admin/candidates/1/cancel'
+```
+
+The admin liquidation-order list supports `limit/cursor/sort` cursor paging with `createdAt.desc` and
+`createdAt.asc`; responses keep `orders/count` and add `nextCursor`, `hasMore`, `sort`, and `limit`.
+The timeline aggregates the candidate, account risk snapshot, position risk snapshot, liquidation audit order,
+admin actions, order state, order events, match results, and trades for risk/support investigation. Candidate
+cancel is allowed only for `NEW`/`PROCESSING` candidates that have no `SUBMITTED`/`PARTIALLY_FILLED` liquidation
+order. The actor is read from the gateway-injected `X-Admin-User-Id`, and the reason is persisted for audit.
+
 ## Database
 
 Root [init.sql](../init.sql) creates:
 
 - `liquidation_sequences`
 - `liquidation_orders`
+- `liquidation_admin_actions`
 
 Liquidation orders are also written to:
 

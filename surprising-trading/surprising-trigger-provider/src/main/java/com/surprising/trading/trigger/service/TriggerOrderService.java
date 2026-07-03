@@ -2,6 +2,8 @@ package com.surprising.trading.trigger.service;
 
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.client.OrderRpcApi;
+import com.surprising.trading.api.model.AdminTriggerOrderTimelineEvent;
+import com.surprising.trading.api.model.AdminTriggerOrderTimelineResponse;
 import com.surprising.trading.api.model.CancelTriggerOrderRequest;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderResponse;
@@ -154,6 +156,53 @@ public class TriggerOrderService {
                 .map(this::toResponse)
                 .toList();
         return new TriggerOrderQueryResponse(orders.size(), orders);
+    }
+
+    public TriggerOrderQueryResponse adminOrders(Long userId,
+                                                 String symbol,
+                                                 String status,
+                                                 Long triggerOrderId,
+                                                 int limit) {
+        return adminOrders(userId, symbol, status, triggerOrderId, limit, null, null);
+    }
+
+    public TriggerOrderQueryResponse adminOrders(Long userId,
+                                                 String symbol,
+                                                 String status,
+                                                 Long triggerOrderId,
+                                                 int limit,
+                                                 String cursor,
+                                                 String sort) {
+        if (userId != null && userId <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        if (triggerOrderId != null && triggerOrderId <= 0) {
+            throw new IllegalArgumentException("triggerOrderId must be positive");
+        }
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
+        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
+        TriggerOrderStatus normalizedStatus = status == null || status.isBlank()
+                ? null
+                : TriggerOrderStatus.valueOf(status.trim().toUpperCase());
+        var page = triggerOrderRepository.adminOrderPage(
+                        userId, normalizedSymbol, normalizedStatus, triggerOrderId, limit, cursor, sort);
+        List<TriggerOrderResponse> orders = page.items()
+                .stream()
+                .map(this::toResponse)
+                .toList();
+        return new TriggerOrderQueryResponse(orders.size(), orders,
+                page.nextCursor(), page.hasMore(), page.sort(), page.limit());
+    }
+
+    public AdminTriggerOrderTimelineResponse adminTimeline(long triggerOrderId) {
+        if (triggerOrderId <= 0) {
+            throw new IllegalArgumentException("triggerOrderId must be positive");
+        }
+        TriggerOrderRecord order = triggerOrderRepository.findById(triggerOrderId)
+                .orElseThrow(() -> new IllegalStateException("trigger order not found: " + triggerOrderId));
+        return new AdminTriggerOrderTimelineResponse(toResponse(order), timelineEvents(order));
     }
 
     public void onMarkPrice(MarkTrigger markTrigger) {
@@ -314,6 +363,66 @@ public class TriggerOrderService {
                 order.triggeredAt(),
                 order.createdAt(),
                 order.updatedAt());
+    }
+
+    private List<AdminTriggerOrderTimelineEvent> timelineEvents(TriggerOrderRecord order) {
+        var events = new java.util.ArrayList<AdminTriggerOrderTimelineEvent>();
+        events.add(new AdminTriggerOrderTimelineEvent(
+                "CREATED",
+                TriggerOrderStatus.PENDING,
+                null,
+                null,
+                null,
+                null,
+                order.traceId(),
+                order.createdAt()));
+        if (order.expiresAt() != null && order.status() == TriggerOrderStatus.EXPIRED) {
+            events.add(new AdminTriggerOrderTimelineEvent(
+                    "EXPIRED",
+                    order.status(),
+                    null,
+                    null,
+                    null,
+                    "expiresAt reached",
+                    order.traceId(),
+                    order.updatedAt()));
+        }
+        if (order.status() == TriggerOrderStatus.CANCELED) {
+            events.add(new AdminTriggerOrderTimelineEvent(
+                    "CANCELED",
+                    order.status(),
+                    null,
+                    null,
+                    null,
+                    "trigger order canceled",
+                    order.traceId(),
+                    order.updatedAt()));
+        }
+        if (order.triggeredAt() != null) {
+            events.add(new AdminTriggerOrderTimelineEvent(
+                    "TRIGGERED_MARK",
+                    order.status(),
+                    order.triggerSequence(),
+                    order.triggeredPriceTicks(),
+                    null,
+                    null,
+                    order.traceId(),
+                    order.triggeredAt()));
+        }
+        if (order.placedOrderId() != null) {
+            events.add(new AdminTriggerOrderTimelineEvent(
+                    order.status() == TriggerOrderStatus.TRIGGER_FAILED ? "EXECUTION_REJECTED" : "EXECUTION_PLACED",
+                    order.status(),
+                    order.triggerSequence(),
+                    order.triggeredPriceTicks(),
+                    order.placedOrderId(),
+                    order.rejectReason(),
+                    order.traceId(),
+                    order.updatedAt()));
+        }
+        return events.stream()
+                .sorted(java.util.Comparator.comparing(AdminTriggerOrderTimelineEvent::eventTime))
+                .toList();
     }
 
     private String normalizeSymbol(String symbol) {

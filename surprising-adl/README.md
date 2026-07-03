@@ -83,6 +83,20 @@ curl 'http://localhost:9091/api/v1/adl/events?asset=USDT&limit=100'
 curl 'http://localhost:9091/api/v1/adl/events?userId=1001&limit=100'
 ```
 
+Admin ADL queries must go through the admin gateway with an admin bearer token:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'http://localhost:8080/api/v1/admin/gateway/adl/admin/queue?asset=USDT&limit=100&sort=priorityScorePpm.desc'
+
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'http://localhost:8080/api/v1/admin/gateway/adl/admin/events?asset=USDT&limit=100&sort=createdAt.desc'
+```
+
+The admin ADL queue supports live-ranking cursor paging with `priorityScorePpm.desc`; ADL events support
+`createdAt.desc` and `createdAt.asc`. Responses keep `positions/events/count` and add `nextCursor`,
+`hasMore`, `sort`, and `limit`.
+
 ## Database
 
 Root [init.sql](../init.sql) creates:

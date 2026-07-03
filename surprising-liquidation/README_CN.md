@@ -70,12 +70,29 @@ curl 'http://localhost:9088/api/v1/liquidations/orders?userId=1001&limit=100'
 curl 'http://localhost:9088/api/v1/liquidations/orders/by-candidate?candidateId=1'
 ```
 
+后台运营接口必须通过 admin gateway 和管理员 token 访问：
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'http://localhost:8080/api/v1/admin/gateway/liquidation-admin/orders?limit=100&sort=createdAt.desc'
+
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'http://localhost:8080/api/v1/admin/gateway/liquidation-admin/candidates/1/timeline?limit=200'
+
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"reason":"risk snapshot recovered after manual review"}' \
+  'http://localhost:8080/api/v1/admin/gateway/liquidation-admin/candidates/1/cancel'
+```
+
+后台强平订单列表支持 `limit/cursor/sort` 游标分页，排序白名单为 `createdAt.desc`、`createdAt.asc`，响应保留 `orders/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。`timeline` 聚合候选、账户风险快照、仓位风险快照、强平审计单、后台动作、订单状态、订单事件、撮合结果和成交，供风控/客服复盘。取消候选只允许命中 `NEW`/`PROCESSING` 且不存在 `SUBMITTED`/`PARTIALLY_FILLED` 强平单的候选；操作人来自 gateway 注入的 `X-Admin-User-Id`，原因会写入审计表。
+
 ## 数据库
 
 根目录 [init.sql](../init.sql) 创建：
 
 - `liquidation_sequences`
 - `liquidation_orders`
+- `liquidation_admin_actions`
 
 强平订单本身仍写入：
 

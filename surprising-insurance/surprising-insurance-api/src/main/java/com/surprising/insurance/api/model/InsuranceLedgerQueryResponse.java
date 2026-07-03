@@ -4,5 +4,13 @@ import java.util.List;
 
 public record InsuranceLedgerQueryResponse(
         int count,
-        List<InsuranceFundLedgerResponse> entries) {
+        List<InsuranceFundLedgerResponse> entries,
+        String nextCursor,
+        boolean hasMore,
+        String sort,
+        int limit) {
+
+    public InsuranceLedgerQueryResponse(int count, List<InsuranceFundLedgerResponse> entries) {
+        this(count, entries, null, false, "createdAt.desc", count);
+    }
 }

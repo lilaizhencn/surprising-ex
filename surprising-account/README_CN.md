@@ -102,7 +102,22 @@ curl -X POST 'http://localhost:9086/api/v1/accounts/admin/balance-adjustments' \
   -d '{"userId":1001,"asset":"USDT","amountUnits":100000000,"referenceId":"deposit-1001-1","reason":"INITIAL_DEPOSIT"}'
 ```
 
-生产中 admin API 必须只允许充值系统、清结算系统或受控后台调用。
+后台操作员应通过 gateway 使用 admin namespace：
+
+- `GET /api/v1/admin/accounts/balances`
+- `GET /api/v1/admin/accounts/product-balances`
+- `GET /api/v1/admin/accounts/positions`
+- `GET /api/v1/admin/accounts/ledger`
+- `GET /api/v1/admin/accounts/product-ledger`
+- `GET /api/v1/admin/accounts/transfers`
+- `POST /api/v1/admin/accounts/balance-adjustments`
+- `POST /api/v1/admin/accounts/product-balance-adjustments`
+- `GET /api/v1/admin/accounts/adjustments`
+
+其中 `ledger`、`product-ledger`、`transfers` 和 `adjustments` 支持生产后台统一游标分页参数 `limit`、`cursor`、`sort`。排序白名单为 `createdAt.desc` 和 `createdAt.asc`，响应保留原列表字段并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`，便于后台通过 gateway 做大账户历史明细翻页。
+
+admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Username`，并在余额变更同一事务中写入
+`account_admin_balance_adjustments`。生产中 admin API 必须只允许充值系统、清结算系统或受控后台调用。
 
 ## 数据库
 
@@ -112,6 +127,7 @@ curl -X POST 'http://localhost:9086/api/v1/accounts/admin/balance-adjustments' \
 - `account_balances`
 - `account_deficits`
 - `account_ledger_entries`
+- `account_admin_balance_adjustments`
 - `account_margin_reservations`
 - `account_position_margins`
 - `account_positions`

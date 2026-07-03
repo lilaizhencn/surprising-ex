@@ -2,6 +2,7 @@ package com.surprising.funding.provider.repository;
 
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.funding.api.model.AdminCursorPage;
 import com.surprising.funding.api.model.FundingPaymentResponse;
 import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.api.model.FundingSettlementResponse;
@@ -13,6 +14,7 @@ import com.surprising.trading.api.model.MarginMode;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -140,13 +142,32 @@ public class FundingRepository {
     }
 
     public List<FundingRateResponse> rateHistory(String symbol, int limit) {
-        return jdbcTemplate.query("""
+        return rateHistoryPage(symbol, limit, null, null).items();
+    }
+
+    public AdminCursorPage.CursorPage<FundingRateResponse> rateHistoryPage(String symbol,
+                                                                            int limit,
+                                                                            String cursor,
+                                                                            String sort) {
+        int safeLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec sortSpec = parseEventTimeSort(sort, "sequence");
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(symbol);
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        List<FundingRateResponse> rows = jdbcTemplate.query("""
                 SELECT *
                   FROM funding_rate_ticks
                  WHERE symbol = ?
-                 ORDER BY event_time DESC, sequence DESC
+                %s
+                 ORDER BY %s %s, %s %s
                  LIMIT ?
-                """, (rs, rowNum) -> toRate(rs), symbol, limit);
+                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
+                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
+                (rs, rowNum) -> toRate(rs), args.toArray());
+        return AdminCursorPage.page(rows, safeLimit, sortSpec, FundingRateResponse::eventTime,
+                FundingRateResponse::sequence);
     }
 
     public List<FundingRateResponse> dueRates(Instant now, int limit) {
@@ -310,15 +331,49 @@ public class FundingRepository {
     }
 
     public List<FundingPaymentResponse> payments(long userId, String symbol, int limit) {
+        return paymentsPage(userId, symbol, limit, null, null).items();
+    }
+
+    public AdminCursorPage.CursorPage<FundingPaymentResponse> paymentsPage(long userId,
+                                                                            String symbol,
+                                                                            int limit,
+                                                                            String cursor,
+                                                                            String sort) {
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : symbol.trim().toUpperCase();
-        return jdbcTemplate.query("""
+        int safeLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort, "payment_id");
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.add(normalizedSymbol);
+        args.add(normalizedSymbol);
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        List<FundingPaymentResponse> rows = jdbcTemplate.query("""
                 SELECT *
                   FROM funding_payments
                  WHERE user_id = ?
-                   AND (? IS NULL OR symbol = ?)
-                 ORDER BY created_at DESC
+                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                %s
+                 ORDER BY %s %s, %s %s
                  LIMIT ?
-                """, (rs, rowNum) -> toPayment(rs), userId, normalizedSymbol, normalizedSymbol, limit);
+                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
+                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
+                (rs, rowNum) -> toPayment(rs), args.toArray());
+        return AdminCursorPage.page(rows, safeLimit, sortSpec, FundingPaymentResponse::createdAt,
+                FundingPaymentResponse::paymentId);
+    }
+
+    private AdminCursorPage.SortSpec parseEventTimeSort(String sort, String idColumn) {
+        AdminCursorPage.SortSpec desc = new AdminCursorPage.SortSpec("eventTime", "event_time", idColumn, true);
+        AdminCursorPage.SortSpec asc = new AdminCursorPage.SortSpec("eventTime", "event_time", idColumn, false);
+        return AdminCursorPage.parseSort(sort, desc, List.of(desc, asc));
+    }
+
+    private AdminCursorPage.SortSpec parseCreatedAtSort(String sort, String idColumn) {
+        AdminCursorPage.SortSpec desc = new AdminCursorPage.SortSpec("createdAt", "created_at", idColumn, true);
+        AdminCursorPage.SortSpec asc = new AdminCursorPage.SortSpec("createdAt", "created_at", idColumn, false);
+        return AdminCursorPage.parseSort(sort, desc, List.of(desc, asc));
     }
 
     private long applyBalance(long userId,

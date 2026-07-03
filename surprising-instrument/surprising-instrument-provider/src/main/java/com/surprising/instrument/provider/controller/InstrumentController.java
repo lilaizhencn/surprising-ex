@@ -53,6 +53,42 @@ public class InstrumentController {
         return instrumentService.list(type, status);
     }
 
+    @GetMapping(InstrumentApiPaths.ADMIN_BASE_PATH + "/{symbol}")
+    public InstrumentResponse adminLatest(@PathVariable("symbol") String symbol) {
+        try {
+            return instrumentService.latest(symbol);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
+        }
+    }
+
+    @GetMapping(InstrumentApiPaths.ADMIN_BASE_PATH + "/list")
+    public InstrumentQueryResponse adminList(@RequestParam(value = "type", required = false) InstrumentType type,
+                                             @RequestParam(value = "status", required = false) InstrumentStatus status,
+                                             @RequestParam(value = "limit", defaultValue = "100") int limit,
+                                             @RequestParam(value = "cursor", required = false) String cursor,
+                                             @RequestParam(value = "sort", required = false) String sort) {
+        try {
+            return instrumentService.list(type, status, limit, cursor, sort);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
+    @GetMapping(InstrumentApiPaths.ADMIN_BASE_PATH + "/{symbol}/versions")
+    public InstrumentQueryResponse versions(@PathVariable("symbol") String symbol,
+                                            @RequestParam(value = "limit", defaultValue = "100") int limit,
+                                            @RequestParam(value = "cursor", required = false) String cursor,
+                                            @RequestParam(value = "sort", required = false) String sort) {
+        try {
+            return instrumentService.versions(symbol, limit, cursor, sort);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
     @PostMapping(InstrumentApiPaths.ADMIN_BASE_PATH + "/upsert")
     public InstrumentResponse upsert(@RequestBody InstrumentUpsertRequest request) {
         try {

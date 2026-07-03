@@ -3,6 +3,7 @@ package com.surprising.liquidation.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.liquidation.api.model.AdminCursorPage;
 import com.surprising.liquidation.api.model.LiquidationOrderResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderStatus;
 import com.surprising.liquidation.provider.config.LiquidationProperties;
@@ -13,6 +14,9 @@ import com.surprising.liquidation.provider.model.LiquidationPricingInput;
 import com.surprising.liquidation.provider.model.LiquidationSizingInput;
 import com.surprising.liquidation.provider.repository.LiquidationOrderRepository;
 import com.surprising.liquidation.provider.repository.LiquidationRepository;
+import com.surprising.liquidation.provider.repository.LiquidationRepository.CanceledCandidate;
+import com.surprising.liquidation.provider.repository.LiquidationRepository.LiquidationAdminAction;
+import com.surprising.liquidation.provider.repository.LiquidationRepository.LiquidationTimelineEvent;
 import com.surprising.liquidation.provider.repository.LiquidationSequenceRepository;
 import com.surprising.risk.api.model.LiquidationCandidateEvent;
 import com.surprising.risk.api.model.RiskStatus;
@@ -27,7 +31,9 @@ import com.surprising.trading.api.model.TimeInForce;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
@@ -209,6 +215,79 @@ class LiquidationServiceTest {
                 .containsExactly("7002:CANCELED:CANCELED");
     }
 
+    @Test
+    void returnsAdminTimelineWithCandidateOrdersAndEvents() {
+        FakeLiquidationRepository liquidationRepository = new FakeLiquidationRepository();
+        LiquidationOrderResponse order = new LiquidationOrderResponse(6001L, 9401L, 7001L, 2002L,
+                "BTC-USDT", MarginMode.CROSS, OrderSide.SELL, 5L, 80L, 80L,
+                5_000L, 3L, LiquidationOrderStatus.SUBMITTED, "PARTIAL_LIQUIDATION",
+                Instant.parse("2026-07-01T00:00:01Z"));
+        liquidationRepository.orders.add(order);
+        liquidationRepository.timelineEvents.add(new LiquidationTimelineEvent(
+                Instant.parse("2026-07-01T00:00:00Z"), "risk", "CANDIDATE_CREATED",
+                "9401", "NEW", Map.of("candidate_id", 9401L)));
+        liquidationRepository.timelineEvents.add(new LiquidationTimelineEvent(
+                Instant.parse("2026-07-01T00:00:01Z"), "liquidation", "LIQUIDATION_AUDIT",
+                "6001", "SUBMITTED", Map.of("order_id", 7001L)));
+        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
+                liquidationRepository, new FakeLiquidationOrderRepository(), new FakeSequenceRepository(),
+                new LiquidationSizingPolicy(), new LiquidationPriceCalculator());
+
+        LiquidationService.LiquidationTimelineResponse response = service.timeline(9401L, 100);
+
+        assertThat(response.candidateId()).isEqualTo(9401L);
+        assertThat(response.candidate()).containsEntry("candidate_id", 9401L);
+        assertThat(response.orders()).containsExactly(order);
+        assertThat(response.eventCount()).isEqualTo(2);
+        assertThat(response.timeline()).extracting(LiquidationTimelineEvent::eventType)
+                .containsExactly("CANDIDATE_CREATED", "LIQUIDATION_AUDIT");
+    }
+
+    @Test
+    void cancelCandidateRequiresAdminReasonAndPersistsAuditAction() {
+        FakeLiquidationRepository liquidationRepository = new FakeLiquidationRepository();
+        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
+                liquidationRepository, new FakeLiquidationOrderRepository(), new FakeSequenceRepository(),
+                new LiquidationSizingPolicy(), new LiquidationPriceCalculator());
+
+        LiquidationService.LiquidationAdminActionResponse response = service.cancelCandidate(9401L,
+                " admin-risk ", " margin recovered ");
+
+        assertThat(response.candidateId()).isEqualTo(9401L);
+        assertThat(response.status()).isEqualTo("CANCELED");
+        assertThat(response.actionType()).isEqualTo("CANCEL_CANDIDATE");
+        assertThat(response.adminUserId()).isEqualTo("admin-risk");
+        assertThat(response.reason()).isEqualTo("margin recovered");
+        assertThat(liquidationRepository.canceledCandidateIds).containsExactly(9401L);
+        assertThat(liquidationRepository.adminActions).hasSize(1);
+        assertThat(liquidationRepository.adminActions.get(0).adminUserId()).isEqualTo("admin-risk");
+        assertThat(liquidationRepository.adminActions.get(0).reason()).isEqualTo("margin recovered");
+    }
+
+    @Test
+    void adminOrdersExposeCursorMetadata() {
+        FakeLiquidationRepository liquidationRepository = new FakeLiquidationRepository();
+        LiquidationOrderResponse order = new LiquidationOrderResponse(6001L, 9401L, 7001L, 2002L,
+                "BTC-USDT", MarginMode.CROSS, OrderSide.SELL, 5L, 80L, 80L,
+                5_000L, 3L, LiquidationOrderStatus.SUBMITTED, "PARTIAL_LIQUIDATION",
+                Instant.parse("2026-07-01T00:00:01Z"));
+        liquidationRepository.orders.add(order);
+        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
+                liquidationRepository, new FakeLiquidationOrderRepository(), new FakeSequenceRepository(),
+                new LiquidationSizingPolicy(), new LiquidationPriceCalculator());
+
+        var response = service.orders(2002L, 50, "cursor-orders", "createdAt.desc");
+
+        assertThat(liquidationRepository.lastOrdersUserId).isEqualTo(2002L);
+        assertThat(liquidationRepository.lastOrdersLimit).isEqualTo(50);
+        assertThat(liquidationRepository.lastOrdersCursor).isEqualTo("cursor-orders");
+        assertThat(liquidationRepository.lastOrdersSort).isEqualTo("createdAt.desc");
+        assertThat(response.orders()).containsExactly(order);
+        assertThat(response.nextCursor()).isEqualTo("next-orders");
+        assertThat(response.hasMore()).isTrue();
+        assertThat(response.limit()).isEqualTo(50);
+    }
+
     private static final class FakeLiquidationRepository extends LiquidationRepository {
         private long pendingCloseSteps = 4L;
         private boolean insertAudit = true;
@@ -219,12 +298,55 @@ class LiquidationServiceTest {
         private final List<LiquidationOrderResponse> orders = new ArrayList<>();
         private final List<LiquidationSizingInput> sizingInputs = new ArrayList<>();
         private final List<String> lifecycleUpdates = new ArrayList<>();
+        private final List<LiquidationTimelineEvent> timelineEvents = new ArrayList<>();
+        private final List<Long> canceledCandidateIds = new ArrayList<>();
+        private final List<LiquidationAdminAction> adminActions = new ArrayList<>();
         private int claimAttempts;
         private int accountRiskChecks;
         private int positionRiskChecks;
+        private Long lastOrdersUserId;
+        private int lastOrdersLimit;
+        private String lastOrdersCursor;
+        private String lastOrdersSort;
 
         private FakeLiquidationRepository() {
             super(null);
+        }
+
+        @Override
+        public Optional<Map<String, Object>> candidate(long candidateId) {
+            Map<String, Object> candidate = new LinkedHashMap<>();
+            candidate.put("candidate_id", candidateId);
+            candidate.put("snapshot_id", 9301L);
+            candidate.put("user_id", 2002L);
+            candidate.put("symbol", "BTC-USDT");
+            candidate.put("margin_mode", "CROSS");
+            candidate.put("status", "NEW");
+            return Optional.of(candidate);
+        }
+
+        @Override
+        public List<LiquidationTimelineEvent> timeline(long candidateId, int limit) {
+            assertThat(candidateId).isEqualTo(9401L);
+            return timelineEvents.stream().limit(limit).toList();
+        }
+
+        @Override
+        public Optional<CanceledCandidate> cancelCandidateIfSafe(long candidateId, Instant now) {
+            canceledCandidateIds.add(candidateId);
+            return Optional.of(new CanceledCandidate(candidateId, "CANCELED", now));
+        }
+
+        @Override
+        public LiquidationAdminAction insertAdminAction(long candidateId,
+                                                       String actionType,
+                                                       String adminUserId,
+                                                       String reason,
+                                                       Instant now) {
+            LiquidationAdminAction action = new LiquidationAdminAction(5001L, candidateId, actionType,
+                    adminUserId, reason, now);
+            adminActions.add(action);
+            return action;
         }
 
         @Override
@@ -336,6 +458,25 @@ class LiquidationServiceTest {
                                                    String candidateStatus) {
             lifecycleUpdates.add(orderId + ":" + orderStatus + ":" + candidateStatus);
             return Optional.of(9401L);
+        }
+
+        @Override
+        public List<LiquidationOrderResponse> ordersByCandidate(long candidateId) {
+            assertThat(candidateId).isEqualTo(9401L);
+            return List.copyOf(orders);
+        }
+
+        @Override
+        public AdminCursorPage.CursorPage<LiquidationOrderResponse> ordersPage(Long userId,
+                                                                               int limit,
+                                                                               String cursor,
+                                                                               String sort) {
+            lastOrdersUserId = userId;
+            lastOrdersLimit = limit;
+            lastOrdersCursor = cursor;
+            lastOrdersSort = sort;
+            return new AdminCursorPage.CursorPage<>(List.copyOf(orders), "next-orders", true,
+                    "createdAt.desc", limit);
         }
 
         @Override

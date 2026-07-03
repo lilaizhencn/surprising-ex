@@ -1,12 +1,14 @@
 package com.surprising.insurance.provider.repository;
 
 import com.surprising.account.api.model.LiquidationFeeSettledEvent;
+import com.surprising.insurance.api.model.AdminCursorPage;
 import com.surprising.insurance.api.model.InsuranceCoverageResponse;
 import com.surprising.insurance.api.model.InsuranceFundBalanceResponse;
 import com.surprising.insurance.api.model.InsuranceFundLedgerResponse;
 import com.surprising.insurance.provider.service.InsuranceMath;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -144,7 +146,7 @@ public class InsuranceRepository {
         return jdbcTemplate.query("""
                 SELECT asset, balance_units, updated_at
                   FROM insurance_fund_balances
-                 WHERE (? IS NULL OR asset = ?)
+                 WHERE (CAST(? AS text) IS NULL OR asset = ?)
                  ORDER BY asset ASC
                 """, (rs, rowNum) -> new InsuranceFundBalanceResponse(
                 rs.getString("asset"),
@@ -157,26 +159,75 @@ public class InsuranceRepository {
     }
 
     public List<InsuranceFundLedgerResponse> ledger(String asset, int limit) {
+        return ledgerPage(asset, limit, null, null).items();
+    }
+
+    public AdminCursorPage.CursorPage<InsuranceFundLedgerResponse> ledgerPage(String asset,
+                                                                               int limit,
+                                                                               String cursor,
+                                                                               String sort) {
         String normalizedAsset = asset == null || asset.isBlank() ? null : asset;
-        return jdbcTemplate.query("""
+        int safeLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort, "entry_id");
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(normalizedAsset);
+        args.add(normalizedAsset);
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        List<InsuranceFundLedgerResponse> rows = jdbcTemplate.query("""
                 SELECT *
                   FROM insurance_fund_ledger
-                 WHERE (? IS NULL OR asset = ?)
-                 ORDER BY created_at DESC
+                 WHERE (CAST(? AS text) IS NULL OR asset = ?)
+                %s
+                 ORDER BY %s %s, %s %s
                  LIMIT ?
-                """, (rs, rowNum) -> toLedger(rs), normalizedAsset, normalizedAsset, limit);
+                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
+                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
+                (rs, rowNum) -> toLedger(rs), args.toArray());
+        return AdminCursorPage.page(rows, safeLimit, sortSpec, InsuranceFundLedgerResponse::createdAt,
+                InsuranceFundLedgerResponse::entryId);
     }
 
     public List<InsuranceCoverageResponse> coverages(Long userId, String asset, int limit) {
+        return coveragesPage(userId, asset, limit, null, null).items();
+    }
+
+    public AdminCursorPage.CursorPage<InsuranceCoverageResponse> coveragesPage(Long userId,
+                                                                                String asset,
+                                                                                int limit,
+                                                                                String cursor,
+                                                                                String sort) {
         String normalizedAsset = asset == null || asset.isBlank() ? null : asset;
-        return jdbcTemplate.query("""
+        int safeLimit = AdminCursorPage.limit(limit, 1000);
+        AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort, "coverage_id");
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.add(userId);
+        args.add(normalizedAsset);
+        args.add(normalizedAsset);
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        List<InsuranceCoverageResponse> rows = jdbcTemplate.query("""
                 SELECT *
                   FROM insurance_deficit_coverages
-                 WHERE (? IS NULL OR user_id = ?)
-                   AND (? IS NULL OR asset = ?)
-                 ORDER BY created_at DESC
+                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR asset = ?)
+                %s
+                 ORDER BY %s %s, %s %s
                  LIMIT ?
-                """, (rs, rowNum) -> toCoverage(rs), userId, userId, normalizedAsset, normalizedAsset, limit);
+                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
+                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
+                (rs, rowNum) -> toCoverage(rs), args.toArray());
+        return AdminCursorPage.page(rows, safeLimit, sortSpec, InsuranceCoverageResponse::createdAt,
+                InsuranceCoverageResponse::coverageId);
+    }
+
+    private AdminCursorPage.SortSpec parseCreatedAtSort(String sort, String idColumn) {
+        AdminCursorPage.SortSpec desc = new AdminCursorPage.SortSpec("createdAt", "created_at", idColumn, true);
+        AdminCursorPage.SortSpec asc = new AdminCursorPage.SortSpec("createdAt", "created_at", idColumn, false);
+        return AdminCursorPage.parseSort(sort, desc, List.of(desc, asc));
     }
 
     public boolean collectLiquidationFee(LiquidationFeeSettledEvent event) {
