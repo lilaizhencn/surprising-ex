@@ -12,7 +12,7 @@
 - 这套设计符合主流交易所的风险控制方向：Binance Futures 的价格过滤、market order 保护区间基于 mark price；OKX 使用价格区间和 mark price 降低异常成交/异常强平风险；Bybit 的强平以 mark price 为核心，且止损可能晚于强平触发。因此衍生品下单入口建议继续 fail closed。
 - 账户余额、订单和持仓的一致性不是靠撮合内存状态兜底，而是靠 PostgreSQL 事务、幂等键、行锁/advisory lock、guarded update、transactional outbox 和 Kafka replay 共同保证。
 - HEDGE 仓位侧已经补充到关键资金链路的回归验证：撮合成交事件、风控事件/强平候选、强平下单、资金费扣款和 ADL 审计都保留 `positionSide`。ADL 事件新增 `target_position_side`，避免审计里只看到 LONG/SHORT 方向而无法区分 NET/LONG/SHORT 仓位桶。
-- 已有压测包含真实 order/matching/account/websocket/gateway provider、PostgreSQL、Kafka、做市商铺单和普通用户 taker 流量。但现有压测仍不是生产级全链路压力测试：做市逻辑是本地静态盘口参数，不会实时订阅主流交易所盘口来校准滑点/深度/成交量；规模和持续时间也还不够。
+- 已有压测包含真实 provider、PostgreSQL、Kafka、做市商铺单和普通用户 taker 流量。2026-07-04 又补跑了一次全 provider real-config smoke，覆盖仓位模式、HEDGE LONG/SHORT、TP/SL OCO、逐仓保证金、重启恢复、资金费、强平、保险基金、ADL 和 WebSocket/accounting invariants。但现有压测仍不是生产级全链路压力测试：做市逻辑是本地静态盘口参数，不会实时订阅主流交易所盘口来校准滑点/深度/成交量；规模和持续时间也还不够。
 
 ## 标记价/指数价不可用时的下单限制
 
@@ -109,6 +109,15 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 - `docs/market-maker-matching-failover-report.md`
 - `docs/market-maker-observability-smoke-report.md`
 
+最新 full-stack real-config smoke：
+
+- 命令：`POSTGRES_PORT=55433 PAIR_COUNT=3 LOAD_CONCURRENCY=2 BOOK_DEPTH_LEVELS=5 RUN_FAILURE_SCENARIOS=true BUILD_SERVICES=auto KEEP_TMP=true WS_TIMEOUT=240 JAVA_HOME="$(/usr/libexec/java_home -v 21)" ./scripts/full-stack-real-config-smoke.sh`
+- 结果：2026-07-04 通过，日志在 `/tmp/surprising-full-stack-real-config.3qu3b9`。
+- 范围：真实 PostgreSQL/Kafka 和 instrument、candlestick、index-price、mark-price、order、matching、account、risk、liquidation、funding、insurance、ADL、websocket、trigger、gateway、market-maker provider。
+- 覆盖：持仓模式切换保护、HEDGE 同合约 LONG/SHORT、私有 `position`/`positionRisk` 的 `positionSide` 推送、币本位永续开平仓、现货结算、全成交、部分成交撤单、cancel-only/cancel-all、active reduce-only、TP/SL OCO、风控、matching 开放订单簿恢复、account 未结算成交重放、并发小负载、深盘口、资金费、逐仓风险恢复、强平、保险基金、ADL、market-maker run-once post-only 铺单、公开/私有 WebSocket 捕获和会计不变量。
+- 关键计数：depth events `48`，mark events `233`，funding events `228`；HEDGE 用户 `LONG` 和 `SHORT` 各收到 2 条 position 与 12 条 positionRisk 推送；ADL 事件表核对为 `1|NET`，即真实 ADL 场景写入了 `target_position_side`。
+- 运行说明：第一次使用默认 `5432` 时命中了本机 PostgreSQL/SSH 端口占用，导致 provider 连接到本机库并报 `role "surprising" does not exist`。改用 `POSTGRES_PORT=55433` 后通过，说明失败根因是本机端口冲突，不是业务 schema 或资金链路问题。
+
 代表性结果：
 
 - 单节点真实链路：4 个做市商账号，BTC/ETH 双 symbol，每侧 20 档初始深度，64 并发，1000 笔普通用户 IOC taker 订单全部成交结算。
@@ -145,7 +154,7 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 
 ## 本轮验证
 
-本轮未做全量重启或全量 package，只做与改动相关的定向验证：
+本轮未做不必要的全量 package。定向单元/集成测试只覆盖改动模块；需要真实 provider 证据时，full-stack smoke 使用 `BUILD_SERVICES=auto`，在 jar 未变化时跳过 Maven package：
 
 ```bash
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
@@ -158,6 +167,12 @@ JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   -Dtest=PostLiquidationFundingInsuranceAdlIntegrationTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
+POSTGRES_PORT=55433 \
+PAIR_COUNT=3 LOAD_CONCURRENCY=2 BOOK_DEPTH_LEVELS=5 RUN_FAILURE_SCENARIOS=true \
+BUILD_SERVICES=auto KEEP_TMP=true WS_TIMEOUT=240 \
+JAVA_HOME="$(/usr/libexec/java_home -v 21)" \
+  ./scripts/full-stack-real-config-smoke.sh
+
 npm run lint
 ```
 
@@ -165,4 +180,5 @@ npm run lint
 
 - risk/liquidation/funding/adl/matching/order/trigger 定向测试通过，覆盖 HEDGE 仓位侧透传、ADL `target_position_side`、TP/SL 多档触发和 mark price 不可用时 matching 拒绝。
 - `PostLiquidationFundingInsuranceAdlIntegrationTest` 通过，确认 ADL API 模型兼容性和强平后资金费/保险/ADL 集成链路未破坏。
+- full-stack real-config smoke 通过，确认真实进程下仓位模式、TP/SL、撮合/account 恢复、资金费、强平、保险基金、ADL、WebSocket 和会计不变量可跑通；该结果仍是短时 smoke，不等同生产级长时间压测。
 - Web 前端本轮没有改动；上一次 `npm run lint` 已在 2026-07-04 通过。

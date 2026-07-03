@@ -30,6 +30,8 @@
   预期：ADL 更新/释放对应 `positionSide` 的仓位和保证金，并在 `adl_events.target_position_side` 记录被减仓仓位桶。
 - [x] 撮合侧 mark price 不可用兜底。
   预期：order-provider 校验后到 matching 前 mark price 过期时，matching 返回 `MARK_PRICE_UNAVAILABLE`，不撮合、不生成成交。
+- [x] 真实 provider full-stack smoke。
+  预期：在真实 PostgreSQL/Kafka 和 instrument/candlestick/index-price/mark-price/order/matching/account/risk/liquidation/funding/insurance/ADL/websocket/trigger/gateway/market-maker provider 下，仓位模式切换、HEDGE LONG/SHORT 持仓、TP/SL OCO、逐仓保证金、部分成交撤单、撮合/account 重启恢复、资金费、强平、保险基金、ADL、公开/私有 WebSocket 推送和会计不变量全部通过。
 
 验证命令：
 
@@ -49,10 +51,16 @@ JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   -Dtest=PostLiquidationFundingInsuranceAdlIntegrationTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
+POSTGRES_PORT=55433 \
+PAIR_COUNT=3 LOAD_CONCURRENCY=2 BOOK_DEPTH_LEVELS=5 RUN_FAILURE_SCENARIOS=true \
+BUILD_SERVICES=auto KEEP_TMP=true WS_TIMEOUT=240 \
+JAVA_HOME="$(/usr/libexec/java_home -v 21)" \
+  ./scripts/full-stack-real-config-smoke.sh
+
 npm run lint
 ```
 
-结果：以上后端定向测试和 Web lint 均通过。
+结果：以上后端定向测试、真实 provider full-stack smoke 和 Web lint 均通过。full-stack smoke 日志保留在 `/tmp/surprising-full-stack-real-config.3qu3b9`；本机默认 `5432` 被本地 PostgreSQL/SSH 占用，所以该轮使用 `POSTGRES_PORT=55433` 隔离 Docker PostgreSQL。ADL 事件表核对结果为 `1|NET`，说明真实 ADL 场景写入了 `target_position_side`。
 
 ## 下单
 
@@ -94,6 +102,8 @@ npm run lint
   预期：普通订单、条件单、账户持仓已经支持 `LONG/SHORT` 字段传递和持久化。
 - [x] HEDGE 关键资金链路单元回归。
   预期：matching trade、risk event/candidate、liquidation order、funding payment、ADL event 都保留仓位侧。
+- [x] HEDGE 真实进程 smoke。
+  预期：full-stack smoke 中同一用户同一合约能同时打开 `LONG` 和 `SHORT`，私有 WebSocket `position`/`positionRisk` 推送分别包含 `LONG` 和 `SHORT`。
 - [ ] HEDGE 全链路生产级回归。
   预期：LONG 和 SHORT 同时存在时，order/matching/account/risk/funding/liquidation/insurance/ADL/WebSocket 全链路都按方向隔离计算。
 - [x] 持仓模式切换保护。
@@ -124,6 +134,8 @@ npm run lint
   预期：同一 `ocoGroupId` 内只 claim 一条触发单，其他 sibling 自动取消。
 - [x] 多档止盈/止损。
   预期：每个价格是一条独立 trigger order，每档有自己的 `quantitySteps`，满足条件时逐条触发。
+- [x] 真实进程 TP/SL OCO 触发执行。
+  预期：full-stack smoke 中 trigger-provider 经 gateway/order-provider 生成 reduce-only 平仓单，并完成撮合、账户结算和 WebSocket fanout。
 - [x] 前端多档位。
   预期：用户可以一次配置多行，前端逐条调用 trigger order API；提交后可查询和撤销。
 - [ ] 多档位总数量前置校验。
@@ -207,6 +219,8 @@ npm run lint
   预期：停掉一个 account 节点后剩余节点消费完 match trades，最终 lag 为 0。
 - [x] matching owner failover。
   预期：停止 symbol owner 后重启，开放订单恢复且可继续成交。
+- [x] 真实 provider full-stack smoke。
+  预期：不全量打包，`BUILD_SERVICES=auto` 在 jar 未变化时跳过 Maven package；脚本覆盖真实 provider 链路和做市商 run-once 铺单，最终 WebSocket/accounting invariants 通过。
 - [ ] 生产级长时间全链路压测。
   预期：高频做市持续运行、盘口参数跟随主流交易所、普通用户高并发下单、强平/ADL/资金费同时发生，并输出逐节点 p50/p95/p99 和数据库/Kafka/JVM 指标。
 
