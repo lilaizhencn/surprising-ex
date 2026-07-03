@@ -38,6 +38,8 @@ MARK_STOP_FILE="${TMP_DIR}/mark.stop"
 KAFKA_LAG_STOP_FILE="${TMP_DIR}/kafka-lag.stop"
 KAFKA_LAG_LOG="${TMP_DIR}/kafka-lag.log"
 KAFKA_LAG_INTERVAL_SECONDS="${KAFKA_LAG_INTERVAL_SECONDS:-1}"
+WS_CAPTURE_TIMEOUT="${WS_CAPTURE_TIMEOUT:-900}"
+WS_FANOUT_USER_COUNT="${WS_FANOUT_USER_COUNT:-1}"
 
 BTC_SYMBOL="BTC-USDT"
 ETH_SYMBOL="ETH-USDT"
@@ -680,7 +682,7 @@ start_ws_capture() {
   local output="$1"
   local url="$2"
   shift 2
-  local args=(python3 "${ROOT_DIR}/scripts/ws_capture.py" --url "${url}" --output "${output}" --stop-file "${WS_STOP_FILE}" --timeout 300)
+  local args=(python3 "${ROOT_DIR}/scripts/ws_capture.py" --url "${url}" --output "${output}" --stop-file "${WS_STOP_FILE}" --timeout "${WS_CAPTURE_TIMEOUT}")
   local subscription
   for subscription in "$@"; do
     args+=(--subscribe "${subscription}")
@@ -973,6 +975,53 @@ if count <= 0:
     raise SystemExit(f"no depth websocket events on {label}")
 print(f"{label}_depth={count}")
 PY
+}
+
+assert_ws_private_events() {
+  local file="$1"
+  local user_id="$2"
+  local label="$3"
+  python3 - "${file}" "${user_id}" "${label}" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+user_id = int(sys.argv[2])
+label = sys.argv[3]
+orders = 0
+positions = 0
+if path.exists():
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if message.get("op") != "event":
+            continue
+        if message.get("userId") != user_id:
+            raise SystemExit(f"{label} received event for wrong user {message.get('userId')}, expected {user_id}")
+        channel = message.get("channel")
+        if channel == "orders":
+            orders += 1
+        elif channel == "positions":
+            positions += 1
+if orders <= 0:
+    raise SystemExit(f"no private order websocket events on {label}")
+if positions <= 0:
+    raise SystemExit(f"no private position websocket events on {label}")
+print(f"{label}_orders={orders} {label}_positions={positions}")
+PY
+}
+
+assert_ws_private_fanout_events() {
+  local summaries=()
+  local index
+  for index in "${!WS_PRIVATE_FILES[@]}"; do
+    local user_id=$((TAKER_USER_START + index))
+    summaries+=("$(assert_ws_private_events "${WS_PRIVATE_FILES[$index]}" "${user_id}" "private_user_${index}")")
+  done
+  printf '%s' "${summaries[*]}"
 }
 
 sql_scalar() {
@@ -1430,6 +1479,8 @@ ${FAILURE_SCENARIO_SUMMARY}
 - 普通用户订单数：${taker_count}
 - 普通用户每单数量：${TAKER_QUANTITY_STEPS} steps
 - 并发度：${LOAD_CONCURRENCY}
+- WebSocket 私有 fanout 订阅用户数：${WS_FANOUT_USER_COUNT}
+- WebSocket 捕获窗口：${WS_CAPTURE_TIMEOUT}s
 - Consumer 并发：matching 每节点 ${MATCHING_CONSUMERS_PER_NODE}，account 每节点 ${ACCOUNT_CONSUMERS_PER_NODE}
 - Symbols：${BTC_SYMBOL}, ${ETH_SYMBOL}
 
@@ -1494,7 +1545,7 @@ ${provider_metrics_summary}
 - matching event-time 吞吐是完整服务链路中的撮合成交写入速度，不是 exchange-core 裸引擎基准。当前端到端主要受 order 入库/outbox、Kafka、本机 PostgreSQL 和 account 结算影响。
 - account processed trade 延迟明显高于 matching result 延迟，说明账户结算和 position/ledger/margin 写库是本轮最大后置瓶颈。account-provider 暴露 \`surprising.account.match_trade.processing\`、\`surprising.account.match_trade.event_lag\` 和 \`surprising.account.match_trade.events{outcome=...}\`，后续压测可以直接按 processed/duplicate/failed 拆分定位。
 - Provider Prometheus 摘要中的 HTTP、Hikari、CPU 和 heap 指标是压测进程运行期累计/采样值，用来辅助判断入口服务、数据库连接池或 JVM 是否先成为瓶颈；并发阶段 PostgreSQL delta 用来观察事务量、写放大、缓存命中和临时文件。
-- WebSocket 私有事件只订阅了第一个普通用户账号，用于验证多节点网关路径下的私有 orders/positions 推送可达；公网生产压测需要额外增加多用户长连接 fanout。
+- WebSocket 私有事件订阅前 ${WS_FANOUT_USER_COUNT} 个普通用户账号，并逐个断言 orders/positions 只推送给对应认证用户；公网生产压测仍应继续把该数值扩大到真实长连接规模。
 
 ## 一致性检查
 
@@ -1502,7 +1553,7 @@ ${provider_metrics_summary}
 - 成交全部被 account 消费，\`account_processed_trades(symbol, trade_id)\` 去重键生效
 - 压测用户余额未出现负 available/locked
 - 订单簿仍有双边深度
-- WebSocket 收到 BTC/ETH depth 事件和普通用户私有 orders/positions 事件
+- WebSocket 收到 BTC/ETH depth 事件，并且前 ${WS_FANOUT_USER_COUNT} 个普通用户都收到各自的私有 orders/positions 事件
 - \`trading_symbol_open_interest\` 由账户结算维护，表约束保证 open=max(long, short)
 
 ## 结论
@@ -1519,6 +1570,10 @@ require_command python3
 
 if ((MM_ACCOUNT_COUNT <= 0 || MM_DEPTH_LEVELS <= 0 || TAKER_ORDER_COUNT <= 0 || LOAD_CONCURRENCY <= 0)); then
   echo "stress parameters must be positive" >&2
+  exit 1
+fi
+if ((WS_CAPTURE_TIMEOUT <= 0 || WS_FANOUT_USER_COUNT <= 0)); then
+  echo "WS_CAPTURE_TIMEOUT and WS_FANOUT_USER_COUNT must be positive" >&2
   exit 1
 fi
 if ((MM_REFRESH_CYCLES <= 0 || MM_REFRESH_INTERVAL_SECONDS < 0)); then
@@ -1550,6 +1605,10 @@ if [[ "${MATCHING_NODE_FAILURE_AFTER_OPEN_BOOK}" == "true" && "${START_PROVIDERS
   exit 1
 fi
 TOTAL_TAKER_ORDER_COUNT=$((TAKER_ORDER_COUNT * MM_REFRESH_CYCLES))
+if ((WS_FANOUT_USER_COUNT > TOTAL_TAKER_ORDER_COUNT)); then
+  echo "WS_FANOUT_USER_COUNT cannot exceed total taker users (${TOTAL_TAKER_ORDER_COUNT})" >&2
+  exit 1
+fi
 
 if [[ "${START_INFRA}" == "true" ]]; then
   echo "Starting Docker infrastructure"
@@ -1598,19 +1657,26 @@ echo "Starting websocket captures"
 start_kafka_lag_sampler
 WS_BTC_DEPTH="${TMP_DIR}/ws-btc-depth.jsonl"
 WS_ETH_DEPTH="${TMP_DIR}/ws-eth-depth.jsonl"
-WS_PRIVATE="${TMP_DIR}/ws-private.jsonl"
+WS_PRIVATE_FILES=()
 WS_EXTRA_DEPTH="${TMP_DIR}/ws-extra-depth.jsonl"
 start_ws_capture "${WS_BTC_DEPTH}" "ws://localhost:9093/ws/v1" \
   "{\"op\":\"subscribe\",\"id\":\"btc-depth\",\"channel\":\"depth\",\"symbol\":\"${BTC_SYMBOL}\"}"
 start_ws_capture "${WS_ETH_DEPTH}" "ws://localhost:9093/ws/v1" \
   "{\"op\":\"subscribe\",\"id\":\"eth-depth\",\"channel\":\"depth\",\"symbol\":\"${ETH_SYMBOL}\"}"
-start_ws_capture "${WS_PRIVATE}" "ws://localhost:9093/ws/v1?userId=${TAKER_USER_START}" \
-  "{\"op\":\"subscribe\",\"id\":\"orders\",\"channel\":\"orders\"}" \
-  "{\"op\":\"subscribe\",\"id\":\"positions\",\"channel\":\"positions\"}"
 wait_ws_subscribed "${WS_BTC_DEPTH}" "depth" 1
 wait_ws_subscribed "${WS_ETH_DEPTH}" "depth" 1
-wait_ws_subscribed "${WS_PRIVATE}" "orders" 1
-wait_ws_subscribed "${WS_PRIVATE}" "positions" 1
+for ((i = 0; i < WS_FANOUT_USER_COUNT; i++)); do
+  private_file="${TMP_DIR}/ws-private-${i}.jsonl"
+  private_user=$((TAKER_USER_START + i))
+  WS_PRIVATE_FILES+=("${private_file}")
+  start_ws_capture "${private_file}" "ws://localhost:9093/ws/v1?userId=${private_user}" \
+    "{\"op\":\"subscribe\",\"id\":\"orders-${i}\",\"channel\":\"orders\"}" \
+    "{\"op\":\"subscribe\",\"id\":\"positions-${i}\",\"channel\":\"positions\"}"
+done
+for private_file in "${WS_PRIVATE_FILES[@]}"; do
+  wait_ws_subscribed "${private_file}" "orders" 1
+  wait_ws_subscribed "${private_file}" "positions" 1
+done
 if ((EXTRA_WEBSOCKET_NODES > 0)); then
   start_ws_capture "${WS_EXTRA_DEPTH}" "ws://localhost:9193/ws/v1" \
     "{\"op\":\"subscribe\",\"id\":\"extra-btc-depth\",\"channel\":\"depth\",\"symbol\":\"${BTC_SYMBOL}\"}"
@@ -1732,7 +1798,8 @@ wait_sql_equals "symbol OI constraint still true" \
 pg_stat_after="$(collect_pg_stat_snapshot)"
 
 sleep 3
-websocket_summary="$(assert_ws_events "${WS_BTC_DEPTH}" "${WS_ETH_DEPTH}" "${WS_PRIVATE}")"
+websocket_summary="$(assert_ws_events "${WS_BTC_DEPTH}" "${WS_ETH_DEPTH}" "${WS_PRIVATE_FILES[0]}")"
+websocket_summary="${websocket_summary} $(assert_ws_private_fanout_events)"
 if ((EXTRA_WEBSOCKET_NODES > 0)); then
   websocket_summary="${websocket_summary} $(assert_ws_depth_events "${WS_EXTRA_DEPTH}" "extra_websocket")"
 fi

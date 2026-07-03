@@ -13,7 +13,7 @@
 - 账户余额、订单和持仓的一致性不是靠撮合内存状态兜底，而是靠 PostgreSQL 事务、幂等键、行锁/advisory lock、guarded update、transactional outbox 和 Kafka replay 共同保证。
 - 止盈止损多档位已补放置时前置校验：锁定当前仓位后聚合 active reduce-only 平仓单和待触发 TP/SL 总待平量；同一 OCO 组合按最大 sibling 数量计入容量，避免止盈/止损双倍占用。
 - HEDGE 仓位侧已经补充到关键资金链路的回归验证：撮合成交事件、风控事件/强平候选、强平下单、资金费扣款和 ADL 审计都保留 `positionSide`。ADL 事件新增 `target_position_side`，避免审计里只看到 LONG/SHORT 方向而无法区分 NET/LONG/SHORT 仓位桶。
-- 已有压测包含真实 provider、PostgreSQL、Kafka、做市商铺单和普通用户 taker 流量。2026-07-04 又补跑了一次全 provider real-config smoke，覆盖仓位模式、HEDGE LONG/SHORT、TP/SL OCO、逐仓保证金、重启恢复、资金费、强平、保险基金、ADL 和 WebSocket/accounting invariants；同日又用 `MM_REFRESH_CYCLES=2` 记录了一次干净状态连续做市刷新 smoke，确认脚本可以连续跑 maker 刷新挂单和 taker 流量。当前又补了 market-maker provider 的可选 WebSocket 本地订单簿和 REST 参考盘口兜底：可以把 Binance/OKX/Bybit 风格深度消息映射成本地每档价格距离和数量。但现有压测仍不是生产级全链路压力测试：还没有执行启用流式参考盘口的长时间真实进程样本；规模和持续时间仍不够。
+- 已有压测包含真实 provider、PostgreSQL、Kafka、做市商铺单和普通用户 taker 流量。2026-07-04 又补跑了一次全 provider real-config smoke，覆盖仓位模式、HEDGE LONG/SHORT、TP/SL OCO、逐仓保证金、重启恢复、资金费、强平、保险基金、ADL 和 WebSocket/accounting invariants；同日又用 `MM_REFRESH_CYCLES=2` 记录了一次干净状态连续做市刷新 smoke，确认脚本可以连续跑 maker 刷新挂单和 taker 流量；随后补了 `WS_FANOUT_USER_COUNT=3` 的小规模多用户私有 WebSocket fanout smoke，确认多个 taker 用户同时订阅时 orders/positions 不串号。当前又补了 market-maker provider 的可选 WebSocket 本地订单簿和 REST 参考盘口兜底：可以把 Binance/OKX/Bybit 风格深度消息映射成本地每档价格距离和数量。但现有压测仍不是生产级全链路压力测试：还没有执行启用流式参考盘口的长时间真实进程样本；规模和持续时间仍不够。
 
 ## 标记价/指数价不可用时的下单限制
 
@@ -145,6 +145,14 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 - 关键计数：初始 maker 挂单 8 笔、连续刷新挂单 8 笔、普通用户 taker 订单 4 笔、撮合成交 4 笔、account 已结算 4 笔、account Kafka 最终 lag 为 `0`。
 - 运行说明：本轮使用 `RESET_STATE=true` 清空测试状态。早前用脏状态直接复跑时遇到旧开放挂单污染成交路径，因此连续压测要么使用干净 fixture，要么显式把已有开放订单、余额和持仓纳入测试前置条件，不能把未知状态下的旧流动性当作可靠基线。
 
+最新多用户 WebSocket fanout real-process smoke：
+
+- 命令：`START_INFRA=false RESET_STATE=true RESET_KAFKA_MODE=recreate START_PROVIDERS=true STOP_PROVIDERS=true BUILD_SERVICES=false KEEP_TMP=true MM_ACCOUNT_COUNT=1 MM_DEPTH_LEVELS=2 MM_REFRESH_LEVELS=1 MM_REFRESH_CYCLES=2 MM_REFRESH_INTERVAL_SECONDS=1 TAKER_ORDER_COUNT=3 LOAD_CONCURRENCY=2 WS_FANOUT_USER_COUNT=3 WS_CAPTURE_TIMEOUT=900 REPORT_FILE=docs/market-maker-fanout-smoke-report.md SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" ./scripts/market-maker-stress.sh`
+- 结果：2026-07-04 通过，报告为 `docs/market-maker-fanout-smoke-report.md`，日志在 `/tmp/surprising-mm-stress.9BkxPs`。
+- 范围：真实 order、matching、account、websocket、gateway provider；复用现有 Docker PostgreSQL/Kafka；`BUILD_SERVICES=false`，未重新打包 provider jar。
+- 关键计数：初始 maker 挂单 8 笔、连续刷新挂单 8 笔、普通用户 taker 订单 6 笔、撮合成交 6 笔、account 已结算 6 笔、account Kafka 最终 lag 为 `0`。WebSocket 捕获 BTC depth `11`、ETH depth `11`；前 3 个 taker 用户分别收到自己的 `orders=1` 和 `positions=1`，脚本会 fail fast 检查私有事件 `userId` 是否串号。
+- 运行说明：`scripts/market-maker-stress.sh` 新增 `WS_FANOUT_USER_COUNT` 和 `WS_CAPTURE_TIMEOUT`。默认仍订阅 1 个用户以保持现有快速 smoke；需要扩大 fanout 时只调参数，不需要改业务代码或重启无关模块。
+
 代表性结果：
 
 - 单节点真实链路：4 个做市商账号，BTC/ETH 双 symbol，每侧 20 档初始深度，64 并发，1000 笔普通用户 IOC taker 订单全部成交结算。
@@ -166,6 +174,7 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 - `scripts/market-maker-stress.sh` 仍使用静态配置：`MM_DEPTH_LEVELS`、`MM_LEVEL_QUANTITY_STEPS`、`MM_REFRESH_LEVELS`、`MM_REFRESH_QUANTITY_STEPS`。`surprising-market-maker-provider` 已新增可选 WebSocket 本地订单簿和 REST 参考盘口兜底；`scripts/full-stack-real-config-smoke.sh` 也已有 `MM_REFERENCE_MARKET_ENABLED` / `MM_REFERENCE_MARKET_WEBSOCKET_ENABLED` 开关，但还没有在长时间真实进程压测中启用并记录报告。
 - 做市程序有 provider 和 run-once smoke；压测脚本现在支持用 `MM_REFRESH_CYCLES` / `MM_REFRESH_INTERVAL_SECONDS` 连续执行多轮 maker 刷新和 taker 流量，并已有 2 轮短时干净状态样本，但还没有执行并记录生产级长时间样本。
 - 1000 笔 taker、单机 PostgreSQL/Kafka、本机 provider 规模太小，且持续时间短。
+- 已有小规模多用户私有 WebSocket fanout smoke，但还缺少大量长连接下的 fanout p50/p95/p99 延迟、断线清理和单连接故障隔离报告。
 - 还缺少从“用户 REST 下单 -> order DB -> Kafka -> matching -> DB result/trades -> account DB -> risk/liquidation/insurance/ADL -> WebSocket 私有推送”的逐节点 p50/p95/p99 时延链路追踪。
 - 强平、爆仓、ADL 在 full-stack smoke 中有功能覆盖，但还没有在高频做市和高并发用户流量持续运行时压测。
 
@@ -239,6 +248,17 @@ SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange \
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   ./scripts/market-maker-stress.sh
 
+START_INFRA=false RESET_STATE=true RESET_KAFKA_MODE=recreate \
+START_PROVIDERS=true STOP_PROVIDERS=true BUILD_SERVICES=false KEEP_TMP=true \
+MM_ACCOUNT_COUNT=1 MM_DEPTH_LEVELS=2 MM_REFRESH_LEVELS=1 \
+MM_REFRESH_CYCLES=2 MM_REFRESH_INTERVAL_SECONDS=1 \
+TAKER_ORDER_COUNT=3 LOAD_CONCURRENCY=2 \
+WS_FANOUT_USER_COUNT=3 WS_CAPTURE_TIMEOUT=900 \
+REPORT_FILE=docs/market-maker-fanout-smoke-report.md \
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange \
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  ./scripts/market-maker-stress.sh
+
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   mvn -q -pl :surprising-market-maker-provider -am \
   -Dtest=QuotePlannerTest,RestReferenceMarketProviderTest,MarketMakerServiceTest,MarketMakerApplicationYamlTest \
@@ -262,6 +282,7 @@ flutter test
 - 追加的最小 full-stack real-config smoke 通过，确认脚本在 provider jar 未变化时跳过 Maven package，并修正了持仓模式阻断用例对 TP/SL 可平仓位校验的前置条件，以及 `LOAD_CONCURRENCY=1` 的并发收尾边界。
 - 追加的 index source fail-closed full-stack real-config smoke 通过，确认 provider jar 未变化时跳过 Maven package；指数源不足会让 mark-price 停止刷新，普通下单拒绝 `mark price unavailable`，健康指数输入恢复后 mark price 恢复发布，最终 WebSocket/accounting invariants 通过。
 - 连续做市刷新 smoke 通过，确认真实 order/matching/account/websocket/gateway 进程在 2 轮 maker 刷新和 taker 流量下可以完成成交、account 结算、Kafka lag 清零和 WebSocket 事件接收；该结果仍是小规模短时样本。
+- 多用户 WebSocket fanout smoke 通过，确认真实 order/matching/account/websocket/gateway 进程下，前 3 个 taker 用户同时订阅私有 orders/positions 时都能收到各自事件且不会串号；该结果仍是小规模短时样本，不等同大量长连接压测。
 - market-maker provider 定向测试通过，确认参考盘口 WebSocket 本地订单簿、REST 快照兜底和报价规划可用：Binance/OKX/Bybit 风格 payload 可以转换成本地 ticks/steps，QuotePlanner 可按外部每档距离和数量生成本地 post-only 报价；配置默认关闭，未启用时保持原本本地报价模型。
 - Web 前端 `npm run lint` 通过，覆盖多档 TP/SL 和持仓模式 UI/API TypeScript 表面。
 - Flutter `flutter analyze` 和 `flutter test` 通过，覆盖 iOS/Android 共用客户端壳、移动端交易基础逻辑、持仓模式 UI/API，以及新增的多档 TP/SL 条件单模型、提交面板、开放条件单列表和撤销入口。第一次把 `flutter analyze` 与 `flutter test` 并行执行时，`flutter test` 因 iOS ephemeral 文件锁竞争失败；随后单独重跑通过，结论以单独重跑结果为准；移动端 TP/SL 补丁后已再次单独重跑 `flutter test` 和 `flutter analyze` 通过。

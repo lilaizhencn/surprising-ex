@@ -101,6 +101,17 @@ SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange \
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   ./scripts/market-maker-stress.sh
 
+START_INFRA=false RESET_STATE=true RESET_KAFKA_MODE=recreate \
+START_PROVIDERS=true STOP_PROVIDERS=true BUILD_SERVICES=false KEEP_TMP=true \
+MM_ACCOUNT_COUNT=1 MM_DEPTH_LEVELS=2 MM_REFRESH_LEVELS=1 \
+MM_REFRESH_CYCLES=2 MM_REFRESH_INTERVAL_SECONDS=1 \
+TAKER_ORDER_COUNT=3 LOAD_CONCURRENCY=2 \
+WS_FANOUT_USER_COUNT=3 WS_CAPTURE_TIMEOUT=900 \
+REPORT_FILE=docs/market-maker-fanout-smoke-report.md \
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange \
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  ./scripts/market-maker-stress.sh
+
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   mvn -q -pl :surprising-market-maker-provider -am \
   -Dtest=QuotePlannerTest,RestReferenceMarketProviderTest,MarketMakerServiceTest,MarketMakerApplicationYamlTest \
@@ -112,7 +123,7 @@ flutter analyze
 flutter test
 ```
 
-结果：以上后端定向测试、market-maker 参考盘口校准测试、真实 provider full-stack smoke、连续做市刷新 smoke、Web lint、Flutter analyze/test 均通过。full-stack smoke 日志保留在 `/tmp/surprising-full-stack-real-config.3qu3b9`；追加的最小真实配置回归也已通过，日志保留在 `/tmp/surprising-full-stack-real-config.xAFD0M`，该轮确认 provider jar 未变化时 `BUILD_SERVICES=auto` 会跳过 Maven package，并验证持仓模式 pending TP/SL 阻断用例和 `LOAD_CONCURRENCY=1` 收尾边界。2026-07-04 又补跑了开启 mark-price Kafka listener 的最小真实配置回归，日志保留在 `/tmp/surprising-full-stack-real-config.ENDSKF`，该轮同样跳过 Maven package，覆盖 index source 不足时 mark 停刷、普通下单 fail closed、健康指数输入恢复后 mark 重新发布，并通过最终 WebSocket/accounting invariants；最终捕获 depth events `122`、mark events `421`、funding events `428`。连续做市刷新 smoke 报告为 `docs/market-maker-continuous-smoke-report.md`，日志保留在 `/tmp/surprising-mm-stress.qiFDht`。本机默认 `5432` 被本地 PostgreSQL/SSH 占用，所以 full-stack 该轮使用 `POSTGRES_PORT=55433` 隔离 Docker PostgreSQL。ADL 事件表核对结果为 `1|NET`，说明真实 ADL 场景写入了 `target_position_side`。market-maker provider 新增的 Binance/OKX/Bybit WebSocket 本地订单簿解析和 REST 兜底也已由定向测试覆盖。full-stack smoke 现在可通过 `MM_REFERENCE_MARKET_ENABLED=true MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=true` 显式启用 market-maker provider 的流式参考盘口，但该开关还没有跑长时间真实进程压测报告。Flutter 第一次与 `flutter analyze` 并行跑 `flutter test` 时因 iOS ephemeral 文件锁竞争失败，随后单独重跑 `flutter test` 通过；移动端新增 TP/SL 多档条件单模型、API、提交面板、开放条件单列表和撤销入口后，`flutter analyze` 与 `flutter test` 再次通过。
+结果：以上后端定向测试、market-maker 参考盘口校准测试、真实 provider full-stack smoke、连续做市刷新 smoke、多用户 WebSocket fanout smoke、Web lint、Flutter analyze/test 均通过。full-stack smoke 日志保留在 `/tmp/surprising-full-stack-real-config.3qu3b9`；追加的最小真实配置回归也已通过，日志保留在 `/tmp/surprising-full-stack-real-config.xAFD0M`，该轮确认 provider jar 未变化时 `BUILD_SERVICES=auto` 会跳过 Maven package，并验证持仓模式 pending TP/SL 阻断用例和 `LOAD_CONCURRENCY=1` 收尾边界。2026-07-04 又补跑了开启 mark-price Kafka listener 的最小真实配置回归，日志保留在 `/tmp/surprising-full-stack-real-config.ENDSKF`，该轮同样跳过 Maven package，覆盖 index source 不足时 mark 停刷、普通下单 fail closed、健康指数输入恢复后 mark 重新发布，并通过最终 WebSocket/accounting invariants；最终捕获 depth events `122`、mark events `421`、funding events `428`。连续做市刷新 smoke 报告为 `docs/market-maker-continuous-smoke-report.md`，日志保留在 `/tmp/surprising-mm-stress.qiFDht`。多用户 WebSocket fanout smoke 报告为 `docs/market-maker-fanout-smoke-report.md`，日志保留在 `/tmp/surprising-mm-stress.9BkxPs`；该轮未重新打包 provider jar，覆盖 2 轮 maker 刷新、6 笔 taker 成交结算、Kafka lag 为 0，前 3 个 taker 用户分别收到自己的 orders/positions 私有事件且未串号。本机默认 `5432` 被本地 PostgreSQL/SSH 占用，所以 full-stack 该轮使用 `POSTGRES_PORT=55433` 隔离 Docker PostgreSQL。ADL 事件表核对结果为 `1|NET`，说明真实 ADL 场景写入了 `target_position_side`。market-maker provider 新增的 Binance/OKX/Bybit WebSocket 本地订单簿解析和 REST 兜底也已由定向测试覆盖。full-stack smoke 现在可通过 `MM_REFERENCE_MARKET_ENABLED=true MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=true` 显式启用 market-maker provider 的流式参考盘口，但该开关还没有跑长时间真实进程压测报告。Flutter 第一次与 `flutter analyze` 并行跑 `flutter test` 时因 iOS ephemeral 文件锁竞争失败，随后单独重跑 `flutter test` 通过；移动端新增 TP/SL 多档条件单模型、API、提交面板、开放条件单列表和撤销入口后，`flutter analyze` 与 `flutter test` 再次通过。
 
 ## 下单
 
@@ -260,7 +271,9 @@ flutter test
   预期：account 结算后收到 match/position 事件。
 - [x] 私有风险推送。
   预期：`accountRisk` / `positionRisk` 按用户隔离 fanout。
-- [ ] 多用户长连接 fanout 压测。
+- [x] 多用户私有 fanout 真实进程 smoke。
+  预期：`scripts/market-maker-stress.sh` 可通过 `WS_FANOUT_USER_COUNT` 同时订阅多个普通用户私有 orders/positions；每个连接只收到对应认证用户事件，不串号。
+- [ ] 生产级多用户长连接 fanout 压测。
   预期：大量用户订阅时私有推送无串号、延迟可观测、失败连接清理不影响其他连接。
 
 ## 性能与稳定性
@@ -273,6 +286,8 @@ flutter test
   预期：`scripts/market-maker-stress.sh` 可通过 `MM_REFRESH_CYCLES` 和 `MM_REFRESH_INTERVAL_SECONDS` 持续执行多轮 maker 刷新挂单 + taker 流量，并继续输出 PostgreSQL/Kafka/JVM/WebSocket/account 结算指标。
 - [x] 小规模连续做市刷新真实进程 smoke。
   预期：`MM_REFRESH_CYCLES=2` 的干净状态样本通过；报告记录连续 maker 刷新挂单 8 笔、普通用户 taker 订单 4 笔、撮合成交 4 笔、account 结算 4 笔、最终 Kafka lag 为 0。
+- [x] 小规模多用户 WebSocket fanout 真实进程 smoke。
+  预期：`WS_FANOUT_USER_COUNT=3` 的干净状态样本通过；报告记录 2 轮 maker 刷新、6 笔普通用户 taker 全部成交结算、Kafka lag 为 0，前 3 个 taker 用户均收到各自私有 orders/positions 推送。
 - [x] 做市商参考盘口 WebSocket 本地订单簿和 REST 兜底。
   预期：`surprising-market-maker-provider` 可选 `reference-market.enabled=true` 后，`websocket-enabled=true` 时优先维护 Binance depth stream、OKX books、Bybit V5 orderbook 本地订单簿；无新鲜流式盘口时回退 REST depth/books/orderbook 快照。外部每档价格距离和数量会转换成本地 ticks/steps，并继续受 post-only、价格偏离、数量和库存上限保护；默认关闭，不影响现有本地静态报价模型。
 - [x] matching/account/WebSocket 本机多节点 smoke。
