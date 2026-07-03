@@ -69,11 +69,14 @@ client / internal gateway
 默认值是 `CROSS`。`ISOLATED` 已经进入订单入口、撮合事件、账户保证金、持仓、风控快照、资金费和强平链路。
 全仓亏损、手续费和资金费可以使用全仓可用余额以及全仓持仓保证金兜底；逐仓只消耗同一 `userId + symbol + asset + marginMode`
 下的逐仓持仓保证金，不会动用其他 symbol 或全仓余额。用户手动追加/减少逐仓保证金由
-`surprising-account-provider` 的 `POST /api/v1/accounts/position-margin-adjustments` 处理。在单向净持仓模型下，同一用户同一 symbol
+`surprising-account-provider` 的 `POST /api/v1/accounts/position-margin-adjustments` 处理。同一用户同一 symbol
 要在 `CROSS` 和 `ISOLATED` 之间切换，必须先关闭该 symbol 已有持仓并取消普通开放订单和待触发条件单；order-provider 和
-trigger-provider 会用 `userId + symbol` 的 PostgreSQL transaction advisory lock 串行化这条检查。订单和条件单 API
-现在会识别 `positionSide`，但当前引擎只支持 `NET`；`LONG` 和 `SHORT` 会在入口被拒绝，避免客户端把 hedge-mode
-订单静默送入单向净持仓账户模型。订单和条件单响应也会返回 `positionSide = NET`，前端应按单向净仓展示。
+trigger-provider 会用 `userId + symbol` 的 PostgreSQL transaction advisory lock 串行化这条检查。
+
+持仓模式按用户维度配置，默认是 `ONE_WAY`。用户只能在无非零持仓、无活动挂单、无待触发条件单、无未结算撮合/账户状态时通过
+account 的 `position-mode` API 切换到 `HEDGE`。`ONE_WAY` 使用 `positionSide = NET`；`HEDGE` 下普通订单和条件单必须携带
+`positionSide = LONG` 或 `SHORT`，关闭所选仓位腿会被规范化为 reduce-only，并且 `positionSide` 会贯穿撮合、账户持仓/保证金、
+风控快照、强平、资金费、ADL 和 WebSocket 推送。
 
 ## 手续费
 

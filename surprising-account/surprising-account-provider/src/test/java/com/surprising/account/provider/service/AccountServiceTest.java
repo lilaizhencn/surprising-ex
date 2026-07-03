@@ -212,7 +212,7 @@ class AccountServiceTest {
     }
 
     @Test
-    void positionQueryAcceptsNetPositionSideAndRejectsHedgeSides() {
+    void positionQuerySupportsNetAndHedgePositionSides() {
         FakeAccountRepository repository = new FakeAccountRepository();
         repository.positions.put(new PositionKey(1001L, "BTC-USDT", MarginMode.CROSS),
                 new PositionState(3L, 1L, 600_000L, 0L));

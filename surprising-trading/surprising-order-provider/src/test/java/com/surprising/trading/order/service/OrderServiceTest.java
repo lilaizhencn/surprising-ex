@@ -24,6 +24,7 @@ import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
+import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
@@ -351,6 +352,81 @@ class OrderServiceTest {
         verify(orderRepository, never()).insert(any());
         verify(outboxRepository, never()).enqueue(anyString(), anyLong(), anyString(), anyString(), anyString(),
                 anyString(), any());
+    }
+
+    @Test
+    void hedgeOpeningOrderCarriesPositionSideAndReservesHedgeMargin() throws Exception {
+        OrderService service = service();
+        when(orderRepository.positionMode(1001L)).thenReturn(PositionMode.HEDGE);
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
+        when(orderRepository.nextSequence("order")).thenReturn(9002L);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L);
+        when(orderRepository.nextSequence("command")).thenReturn(9200L);
+        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
+                eq(PositionSide.LONG), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
+                anyLong()))
+                .thenReturn(Optional.of(new MarginRequirement("USDT", 100L)));
+        when(orderMarginRepository.reserve(eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq(9002L), eq("BTC-USDT"),
+                eq(MarginMode.CROSS), eq(PositionSide.LONG), eq(100L), any())).thenReturn(true);
+
+        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "hedge-open-long", "BTC-USDT", OrderSide.BUY,
+                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, MarginMode.CROSS, PositionSide.LONG,
+                false, false);
+
+        var response = service.place(request);
+
+        assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
+        assertThat(response.positionSide()).isEqualTo(PositionSide.LONG);
+        assertThat(response.reduceOnly()).isFalse();
+        ArgumentCaptor<OrderRecord> orderCaptor = ArgumentCaptor.forClass(OrderRecord.class);
+        verify(orderRepository).insert(orderCaptor.capture());
+        assertThat(orderCaptor.getValue().positionSide()).isEqualTo(PositionSide.LONG);
+        assertThat(orderCaptor.getValue().reduceOnly()).isFalse();
+        verify(orderMarginRepository).reserve(eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq(9002L),
+                eq("BTC-USDT"), eq(MarginMode.CROSS), eq(PositionSide.LONG), eq(100L), any());
+        ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
+        verify(outboxRepository, times(2)).enqueue(eq("ORDER"), eq(9002L), anyString(), eq("BTC-USDT"),
+                anyString(), payloadCaptor.capture(), any());
+        OrderCommandEvent command = new ObjectMapper().readValue(payloadCaptor.getAllValues().get(1),
+                OrderCommandEvent.class);
+        assertThat(command.positionSide()).isEqualTo(PositionSide.LONG);
+        assertThat(command.reduceOnly()).isFalse();
+    }
+
+    @Test
+    void hedgeClosingOrderIsNormalizedToReduceOnlyWithoutOpeningMarginReservation() {
+        OrderService service = service();
+        when(orderRepository.positionMode(1001L)).thenReturn(PositionMode.HEDGE);
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
+        when(orderRepository.nextSequence("order")).thenReturn(9002L);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L);
+        when(orderRepository.nextSequence("command")).thenReturn(9200L);
+        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+
+        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "hedge-close-long", "BTC-USDT", OrderSide.SELL,
+                OrderType.LIMIT, TimeInForce.IOC, 65_000L, 10L, MarginMode.CROSS, PositionSide.LONG,
+                false, false);
+
+        var response = service.place(request);
+
+        assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
+        assertThat(response.positionSide()).isEqualTo(PositionSide.LONG);
+        assertThat(response.reduceOnly()).isTrue();
+        ArgumentCaptor<OrderRecord> orderCaptor = ArgumentCaptor.forClass(OrderRecord.class);
+        verify(orderRepository).insert(orderCaptor.capture());
+        assertThat(orderCaptor.getValue().reduceOnly()).isTrue();
+        assertThat(orderCaptor.getValue().positionSide()).isEqualTo(PositionSide.LONG);
+        verify(reduceOnlyValidator).validate(any());
+        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
+                anyLong(), anyLong(), anyLong(), anyLong());
+        verify(orderMarginRepository, never()).reserve(anyLong(), anyString(), anyString(), anyLong(), anyString(),
+                any(), any(), anyLong(), any());
     }
 
     @Test

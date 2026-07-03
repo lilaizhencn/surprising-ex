@@ -566,9 +566,9 @@ userId + settleAsset
 2. 用户杠杆配置已经落在 `trading_leverage_settings`，按 `userId + symbol + marginMode` 生效。设置时先校验 instrument 最大杠杆，下单冻结保证金前再按订单 notional 和当前同保证金模式持仓 notional 匹配风险档位，超过该档最大杠杆会拒单。
 3. 逐仓已经具备基础隔离：逐仓亏损、手续费和资金费只消耗该 `userId + symbol + asset + ISOLATED` 的仓位保证金，亏穿后进入 deficit，不会动用全仓可用余额。
 4. 全仓仍按同一结算资产聚合：全仓风险使用 cross 可用余额、cross 仓位保证金和全仓未实现盈亏计算。
-5. 用户手动追加/减少逐仓保证金已经由 account-provider 提供；逐仓/全仓模式切换约束已经在普通订单和条件单入口按 `userId + symbol` 串行校验。订单和条件单 API 已经显式识别 `positionSide`，但当前只允许 `NET`，`LONG/SHORT` 会被拒绝，避免 hedge-mode 请求被静默当作单向净仓处理。强平订单审计已经固化破产价、接管价和预估强平费；强平成交后 account-provider 会按实际成交价和可收 collateral 封顶收取强平费，并通过 outbox 推送给 insurance-provider 入账。后续还需要真正增加双向持仓 `positionSide` 持久化和结算链路，以及更完整的异常保护模式。
+5. 用户手动追加/减少逐仓保证金已经由 account-provider 提供；逐仓/全仓模式切换约束已经在普通订单和条件单入口按 `userId + symbol` 串行校验。持仓模式默认 `ONE_WAY`，可在空仓、无活动订单、无待触发条件单、无未结算撮合/账户状态时切换到 `HEDGE`。订单和条件单 API 会显式校验 `positionSide`：`ONE_WAY` 只允许 `NET`，`HEDGE` 必须使用 `LONG/SHORT`，关闭所选仓位腿会被规范化为 reduce-only。强平订单审计已经固化破产价、接管价和预估强平费；强平成交后 account-provider 会按实际成交价和可收 collateral 封顶收取强平费，并通过 outbox 推送给 insurance-provider 入账。后续还需要更完整的异常保护模式和生产级长时间压测。
 
-当前项目不是组合保证金或双向持仓系统。它是“单向净持仓 + 可选全仓/逐仓”的合约基础模型，适合作为生产系统继续扩展，但还不能等同 Binance/OKX 的统一账户或 hedge mode。
+当前项目已经是“可切换单向净持仓/双向持仓 + 可选全仓/逐仓”的合约基础模型，适合作为生产系统继续扩展，但还不能等同 Binance/OKX 的统一账户或组合保证金系统。
 
 ## 19. 和主流交易所强平规则的差异
 
@@ -603,7 +603,7 @@ userId + settleAsset
 
 与 Binance/OKX 这类成熟交易所仍有差距的部分：
 
-- 逐仓/全仓已经在账户、风控、资金费和强平链路按 `marginMode` 分开，用户杠杆设置也已经接入下单保证金和风险档位校验；手动逐仓保证金调整和单向净持仓下的模式切换约束已接入。订单和条件单 API 已经拒绝 hedge-mode `positionSide=LONG/SHORT`，但还没有真正的双向持仓持久化、账户结算、风控、资金费和强平链路。
+- 逐仓/全仓已经在账户、风控、资金费和强平链路按 `marginMode` 分开，用户杠杆设置也已经接入下单保证金和风险档位校验；手动逐仓保证金调整、空仓切换 `ONE_WAY/HEDGE`、`positionSide` 贯穿订单/条件单/账户/风控/强平/资金费/ADL/WebSocket 已接入。生产前仍需要更长时间、多用户、多 symbol、多故障窗口的 HEDGE 链路压测。
 - 组合保证金、跨币种抵押折扣、统一账户风险抵扣还没有完整实现。
 - 破产价、接管价和预估强平费已经在 `liquidation_orders` 审计行中固化；强平费按实际成交和可收 collateral 收取，并通过 `surprising.account.liquidation-fee.events.v1` 进入保险基金。后续还需要继续细化不同产品/用户等级下的保险基金收入规则。
 - 强平撮合后的剩余亏损分摊链路已经有 insurance/ADL 模块，但还需要更大规模极端行情测试。

@@ -72,13 +72,17 @@ risk snapshots, funding, and liquidation. Cross-margin losses, trading fees, and
 available balance plus cross position margin as collateral. Isolated margin consumes only the exact
 `userId + symbol + asset + marginMode` position margin and does not touch other symbols or cross balance.
 Manual isolated margin add/remove is handled by `surprising-account-provider` through
-`POST /api/v1/accounts/position-margin-adjustments`. In the one-way net-position model, switching a
-symbol between `CROSS` and `ISOLATED` requires the user to close that symbol's existing position and
-cancel open normal or trigger orders first; order-provider and trigger-provider serialize this check
-with a PostgreSQL transaction advisory lock on `userId + symbol`. Order and trigger-order APIs now
-recognize `positionSide`, but the current engine supports only `NET`; `LONG` and `SHORT` are rejected
-at admission so clients cannot accidentally send hedge-mode orders into a net-position account model.
-Order and trigger-order responses return `positionSide = NET` for the same reason.
+`POST /api/v1/accounts/position-margin-adjustments`. Switching a symbol between `CROSS` and `ISOLATED`
+still requires the user to close that symbol's existing position and cancel open normal or trigger
+orders first; order-provider and trigger-provider serialize this check with a PostgreSQL transaction
+advisory lock on `userId + symbol`.
+
+Position mode is user-scoped and defaults to `ONE_WAY`. Users can switch to `HEDGE` through the
+account `position-mode` API only when they have no non-zero positions, no active orders, no pending
+trigger orders, and no unsettled matching/account state. `ONE_WAY` orders use `positionSide = NET`.
+`HEDGE` orders and trigger orders must carry `positionSide = LONG` or `SHORT`; closing the selected
+hedge leg is normalized to reduce-only and the position side is carried through matching, account
+positions/margins, risk snapshots, liquidation, funding, ADL, and WebSocket events.
 
 ## Trading Fees
 

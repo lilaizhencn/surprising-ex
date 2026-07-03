@@ -575,13 +575,13 @@ are not eligible for PnL, trading-fee, or funding-fee loss debits. When position
 collateral is consumed, the matching `account_position_margins` rows are reduced under `FOR UPDATE`
 so later position-margin releases cannot over-credit available balance.
 
-`account_positions` stores net perpetual exposure:
+`account_positions` stores perpetual exposure by position bucket:
 
-- `margin_mode`: `CROSS` or `ISOLATED`. Positions are netted by user, symbol, and margin mode. The
-  current project does not yet persist hedge-mode `positionSide`; long and short exposure still
-  collapse into one net position per margin bucket. Order and trigger-order APIs accept the
-  `positionSide` field only as `NET`; `LONG` and `SHORT` are rejected before persistence. Order,
-  trigger-order, and position-query responses return `positionSide = NET`.
+- `margin_mode`: `CROSS` or `ISOLATED`.
+- `position_side`: `NET`, `LONG`, or `SHORT`. `ONE_WAY` accounts use the single `NET` bucket. `HEDGE`
+  accounts keep independent `LONG` and `SHORT` buckets for the same user, symbol, and margin mode.
+  Position mode switching is user-scoped and is allowed only when the user has no non-zero positions,
+  no active orders, no pending trigger orders, and no unsettled matching/account state.
 - `instrument_version`: contract version for the current non-zero exposure. It is `NULL` when the position is flat.
 - `signed_quantity_steps`: positive for long, negative for short.
 - `entry_price_ticks`: average entry in exchange-core ticks.
