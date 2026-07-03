@@ -1,0 +1,161 @@
+# 撮合、账户一致性与端到端性能评估报告
+
+本文回答三个问题：
+
+- 指数价/标记价不可用时，下单是否有限制，以及建议策略。
+- 撮合中的账户余额、订单状态如何与数据库保持一致。
+- 当前是否已经做过真实全链路压力测试，瓶颈和缺口在哪里。
+
+## 结论摘要
+
+- 永续合约下单当前已经按“标记价不可用则拒绝”的思路做了保护。市价单需要新鲜 mark price；LIMIT 订单默认也启用 mark price 价格带保护。撮合侧对市价单再次读取新鲜 mark price，取不到会拒绝 `MARK_PRICE_UNAVAILABLE`。
+- 这套设计符合主流交易所的风险控制方向：Binance Futures 的价格过滤、market order 保护区间基于 mark price；OKX 使用价格区间和 mark price 降低异常成交/异常强平风险；Bybit 的强平以 mark price 为核心，且止损可能晚于强平触发。因此衍生品下单入口建议继续 fail closed。
+- 账户余额、订单和持仓的一致性不是靠撮合内存状态兜底，而是靠 PostgreSQL 事务、幂等键、行锁/advisory lock、guarded update、transactional outbox 和 Kafka replay 共同保证。
+- 已有压测包含真实 order/matching/account/websocket/gateway provider、PostgreSQL、Kafka、做市商铺单和普通用户 taker 流量。但现有压测仍不是生产级全链路压力测试：做市逻辑是本地静态盘口参数，不会实时订阅主流交易所盘口来校准滑点/深度/成交量；规模和持续时间也还不够。
+
+## 标记价/指数价不可用时的下单限制
+
+### 当前代码行为
+
+下单校验在 `OrderValidator` 中做了两层限制：
+
+- 市价单：`validateMarket` 调用 `markPriceLookup.latestMarkPriceTicks(...)`，取不到新鲜 mark price 时返回 `mark price unavailable`。
+- LIMIT 单：默认启用 `limit-price-protection-enabled`，`validateLimitPriceBand` 同样要求新鲜 mark price，并按方向限制价格带。
+
+价格新鲜度来自 `OrderMarkPriceRepository`：只读取 `price_mark_ticks.event_time >= now() - maxAgeMs` 的 mark price。也就是说，不是表里有旧价格就能继续下单。
+
+撮合侧也有二次保护：`MatchingService.effectivePriceTicks(...)` 对 MARKET order 读取新鲜 mark price，取不到会把撮合结果拒绝为 `MARK_PRICE_UNAVAILABLE`。这可以防止 order-provider 校验后到 matching 处理前 mark price 过期。
+
+触发单侧目前只支持 `MARK_PRICE` 触发，`TriggerOrderRepository.markPriceTicks(...)` 取不到价格时不会 claim 触发单。实际效果是：mark price 不可用时不会误触发止盈止损。
+
+### 主流交易所参考
+
+- Binance USDS-M Futures 的 mark price 接口同时返回 `markPrice` 和 `indexPrice`；mark price stream 以 1s 或 3s 推送 mark/funding/index 数据。Binance common definition 里，Futures 的 `PERCENT_PRICE` filter 基于 mark price，市价单 notional 也使用 mark price，`exchangeInfo` 还暴露 market order 相对 mark price 的最大价差字段。
+- OKX 永续文档说明，价格范围会基于现货市场和前一分钟期货价格动态调整，mark price 用于降低单笔异常成交导致的强平风险。
+- Bybit 文档说明强平在 mark price 到达强平价时触发；也说明极端情况下 mark price 可能先触发强平，而 stop loss 还没有按用户选择的触发价来源触发。
+
+参考链接：
+
+- [Binance Mark Price](https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Mark-Price)
+- [Binance USDS-M Common Definition](https://developers.binance.com/docs/derivatives/usds-margined-futures/common-definition)
+- [Binance Exchange Information](https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Exchange-Information)
+- [OKX Perpetual Futures Guide](https://www.okx.com/help/i-perpetual-swaps)
+- [Bybit Liquidation Price](https://www.bybit.com/help-center/article/Liquidation-Price-USDT-Contract)
+- [Bybit Liquidated Despite Stop Loss](https://www.bybit.com/help-center/article/Position-Liquidated-Despite-Having-Stop-Loss)
+
+### 建议策略
+
+衍生品交易应继续采用 fail closed：
+
+- 新开仓、市价平仓、普通 LIMIT 下单：mark price 或指数来源不可用/过期时拒绝。
+- 撤单：不依赖 mark price，必须保持可用。
+- 风险降低类操作：建议只在显式“应急交易模式”中允许受控 reduce-only LIMIT，下单价仍需要有保护价带或管理员确认的应急 mark source。不要默认放开。
+- 运营上需要给 symbol 增加 `CANCEL_ONLY` / `REDUCE_ONLY` / `HALT` 状态，行情不可用时由风控切到 cancel-only 或 reduce-only，而不是继续正常撮合。
+
+## 撮合、订单和账户如何保持一致
+
+### 下单入口
+
+`OrderService.place(...)` 在一个数据库事务中完成：
+
+- 规范化请求和 `clientOrderId` 幂等检查。
+- 锁用户持仓模式，再锁 `userId + symbol` 保证金模式作用域，防止跨保证金模式并发切换。
+- 订单校验、reduce-only 校验、手续费快照。
+- 插入 `trading_orders`，唯一约束为 `(user_id, client_order_id)`，重复请求返回第一笔订单。
+- 非 reduce-only 开仓单在同一事务里冻结保证金或现货资产。
+- 写订单事件 outbox 和撮合 command outbox。
+
+资金冻结使用 `SELECT ... FOR UPDATE` 锁余额行，并且 `UPDATE ... WHERE available_units >= ?`。如果可用余额不足或并发抢占，冻结失败，订单会被拒绝，不会出现负可用余额。
+
+### 撮合入口
+
+`MatchingService.process(...)` 是事务处理：
+
+- 先用 `commandResultExists(commandId)` 做 command 幂等。
+- 市价单在撮合侧重新读取新鲜 mark price；取不到拒绝。
+- 通过 exchange-core 内存撮合后，把 result/trades/orderbook/outbox 一起写入数据库。
+- 订单成交更新使用 guarded update：`remaining_quantity_steps >= fillQty`，并保持 `quantity_steps = executed + remaining`。
+- 撤单和终态订单释放保证金时，余额释放要求 `locked_units >= amount`，否则 fail fast，不会把不存在的冻结金额加回可用余额。
+
+这个设计的关键点是：exchange-core 负责快速撮合和订单簿状态，PostgreSQL 的 `trading_orders`、match result、match trades 和 outbox 是权威审计和重放来源。matching 重启时可以从数据库开放订单恢复订单簿。
+
+### 账户结算入口
+
+`AccountService.processTradeIfNew(...)` 先插入 `account_processed_trades(symbol, trade_id)`：
+
+- 插入成功才处理成交。
+- 同一 symbol + tradeId 重放时返回 false，不重复扣费、迁移保证金或更新持仓。
+
+每个成交侧会锁定持仓行：`accountRepository.lockPosition(... FOR UPDATE)`，然后按顺序结算：
+
+- 平仓已实现 PnL。
+- 开仓消费订单冻结保证金，按实际成交价迁移到持仓保证金。
+- 扣 maker/taker 手续费。
+- 平仓释放持仓保证金和未成交订单保证金。
+- 更新持仓、OI、reduce-only 挂单剪枝。
+- 写 position updated outbox，供 risk/WebSocket 后续消费。
+
+Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送失败会重试。账户数据库更新先提交，事件发布是可重试的异步副作用，因此不会因为 WebSocket 或下游短暂故障回滚资金结算。
+
+## 已有端到端压测证据
+
+已有真实进程压测见：
+
+- `docs/market-maker-stress-report.md`
+- `docs/market-maker-topology-observability-report.md`
+- `docs/market-maker-multinode-stress-report.md`
+- `docs/market-maker-account-failover-report.md`
+- `docs/market-maker-matching-failover-report.md`
+- `docs/market-maker-observability-smoke-report.md`
+
+代表性结果：
+
+- 单节点真实链路：4 个做市商账号，BTC/ETH 双 symbol，每侧 20 档初始深度，64 并发，1000 笔普通用户 IOC taker 订单全部成交结算。
+- 该轮客户端提交吞吐约 `68.12 orders/s`，matching event-time 吞吐约 `12.35 trades/s`。
+- account processed 平均 event lag 约 `42.7s`，最大约 `70.4s`。这说明全链路瓶颈主要在 order 入库/outbox/Kafka/account 结算/PostgreSQL 写放大，不是 exchange-core 裸撮合。
+- 裸撮合 benchmark 约 `20,597 trades/s`，但不包含 HTTP、PostgreSQL、Kafka、account 结算、WebSocket fanout，不能拿来代表交易系统吞吐。
+
+已发现并修复过的瓶颈：
+
+- 表计数器 `trading_sequences` 热点行导致高并发下单连接池耗尽，已改 PostgreSQL native sequence。
+- order/matching outbox 曾在事务内等待 Kafka ACK，已改为事务外发布。
+- account 热路径减少重复持仓行锁和不必要 deficit 写入。
+- market-maker stress 已新增 PostgreSQL delta、Provider Prometheus、HTTP/Hikari/CPU/heap、Kafka lag 和 account settlement 指标采集。
+
+## 当前压测不足
+
+当前还不能声称完成生产级真实全链路压力测试，原因：
+
+- 做市商盘口参数是脚本静态配置：`MM_DEPTH_LEVELS`、`MM_LEVEL_QUANTITY_STEPS`、`MM_REFRESH_LEVELS`、`MM_REFRESH_QUANTITY_STEPS`。没有实时订阅 Binance/OKX/Bybit 的 orderbook/depth/trades 来动态决定每档价格、相邻价格滑点和成交量。
+- 做市程序有 provider 和 run-once smoke，但当前长时间高频策略默认未开启，压测脚本主要是批量铺单和刷新挂单，不是持续运行的真实做市循环。
+- 1000 笔 taker、单机 PostgreSQL/Kafka、本机 provider 规模太小，且持续时间短。
+- 还缺少从“用户 REST 下单 -> order DB -> Kafka -> matching -> DB result/trades -> account DB -> risk/liquidation/insurance/ADL -> WebSocket 私有推送”的逐节点 p50/p95/p99 时延链路追踪。
+- 强平、爆仓、ADL 在 full-stack smoke 中有功能覆盖，但还没有在高频做市和高并发用户流量持续运行时压测。
+
+## 下一步压测方案
+
+建议新增一个生产前压测任务，要求如下：
+
+- 做市程序必须持续运行，不使用一次性 run-once 作为主要流量来源。
+- 做市深度、价差、每档量、刷新频率来自主流交易所订阅数据。最低实现：订阅 Binance/OKX/Bybit depth/trades，按中位 spread、每档累计量和成交量分位数生成本地盘口。
+- 每个阶段都输出延迟分布：REST 入参、order 入库、outbox 发布、matching 收到 command、matching result 落库、account 结算、risk 扫描、liquidation 下单、insurance/ADL、WebSocket fanout。
+- 指标必须包含：PostgreSQL CPU/IO/WAL/locks/Hikari pending、Kafka lag/rebalance、provider JVM CPU/heap/gc、HTTP p95/p99、account settlement event lag、WebSocket fanout 延迟。
+- 场景必须包含：普通下单、部分成交撤单、reduce-only、TP/SL 多档触发、mark price 过期、index source 断线、强平早于止损、account provider 重启、matching owner 重启、Kafka broker 故障。
+
+## 本轮验证
+
+本轮未做全量重启或全量 package，只做与改动相关的定向验证：
+
+```bash
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  mvn -q -pl surprising-trading/surprising-trigger-provider -am \
+  -Dtest=TriggerOrderServiceTest,TriggerOrderRepositoryTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
+npm run lint
+```
+
+结果：
+
+- trigger-provider TP/SL 定向测试通过。
+- 前端 TypeScript 编译检查通过。

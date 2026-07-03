@@ -3,6 +3,11 @@
 本文记录 Surprising Exchange 永续合约交易链路当前已有的验证证据。
 报告只把有测试、数据库 smoke 或构建门禁证明过的内容列为已验证。
 
+## 相关报告
+
+- [全链路功能测试用例清单](full-chain-test-plan_CN.md)：记录下单、撤单、仓位、逐仓/全仓、NET/LONG/SHORT、TP/SL、撮合、强平、ADL、WebSocket 和压测场景的验证状态。
+- [撮合、账户一致性与端到端性能评估报告](trading-consistency-and-performance-report_CN.md)：说明 mark/index 不可用时的下单保护、撮合/账户/订单和数据库一致性，以及当前端到端压测证据和缺口。
+
 ## 验证门禁
 
 在仓库根目录执行：
