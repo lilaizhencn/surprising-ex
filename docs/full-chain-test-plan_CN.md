@@ -38,6 +38,8 @@
   预期：order-provider 校验后到 matching 前 mark price 过期时，matching 返回 `MARK_PRICE_UNAVAILABLE`，不撮合、不生成成交。
 - [x] 真实 provider full-stack smoke。
   预期：在真实 PostgreSQL/Kafka 和 instrument/candlestick/index-price/mark-price/order/matching/account/risk/liquidation/funding/insurance/ADL/websocket/trigger/gateway/market-maker provider 下，仓位模式切换、HEDGE LONG/SHORT 持仓、TP/SL OCO、逐仓保证金、部分成交撤单、撮合/account 重启恢复、资金费、强平、保险基金、ADL、公开/私有 WebSocket 推送和会计不变量全部通过。
+- [x] 连续做市刷新真实进程 smoke。
+  预期：不重新打包 jar，复用现有 provider artifact，在干净测试状态下连续执行 2 轮 maker 刷新挂单和 taker 流量，最终成交全部被 account 结算，Kafka lag 为 0，无负余额、无非法 OI，WebSocket 公开/私有事件可达。
 
 验证命令：
 
@@ -68,10 +70,20 @@ BUILD_SERVICES=auto KEEP_TMP=true WS_TIMEOUT=240 \
 JAVA_HOME="$(/usr/libexec/java_home -v 21)" \
   ./scripts/full-stack-real-config-smoke.sh
 
+START_INFRA=false RESET_STATE=true RESET_KAFKA_MODE=recreate \
+START_PROVIDERS=true STOP_PROVIDERS=true BUILD_SERVICES=false KEEP_TMP=true \
+MM_ACCOUNT_COUNT=1 MM_DEPTH_LEVELS=2 MM_REFRESH_LEVELS=1 \
+MM_REFRESH_CYCLES=2 MM_REFRESH_INTERVAL_SECONDS=1 \
+TAKER_ORDER_COUNT=2 LOAD_CONCURRENCY=2 \
+REPORT_FILE=docs/market-maker-continuous-smoke-report.md \
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange \
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  ./scripts/market-maker-stress.sh
+
 npm run lint
 ```
 
-结果：以上后端定向测试、真实 provider full-stack smoke 和 Web lint 均通过。full-stack smoke 日志保留在 `/tmp/surprising-full-stack-real-config.3qu3b9`；本机默认 `5432` 被本地 PostgreSQL/SSH 占用，所以该轮使用 `POSTGRES_PORT=55433` 隔离 Docker PostgreSQL。ADL 事件表核对结果为 `1|NET`，说明真实 ADL 场景写入了 `target_position_side`。
+结果：以上后端定向测试、真实 provider full-stack smoke、连续做市刷新 smoke 和 Web lint 均通过。full-stack smoke 日志保留在 `/tmp/surprising-full-stack-real-config.3qu3b9`；连续做市刷新 smoke 报告为 `docs/market-maker-continuous-smoke-report.md`，日志保留在 `/tmp/surprising-mm-stress.qiFDht`。本机默认 `5432` 被本地 PostgreSQL/SSH 占用，所以 full-stack 该轮使用 `POSTGRES_PORT=55433` 隔离 Docker PostgreSQL。ADL 事件表核对结果为 `1|NET`，说明真实 ADL 场景写入了 `target_position_side`。
 
 ## 下单
 
@@ -228,6 +240,8 @@ npm run lint
   预期：订单全部成交结算，Kafka lag 最终为 0，无负余额，无非法 OI。
 - [x] 做市商压力脚本支持连续刷新轮次。
   预期：`scripts/market-maker-stress.sh` 可通过 `MM_REFRESH_CYCLES` 和 `MM_REFRESH_INTERVAL_SECONDS` 持续执行多轮 maker 刷新挂单 + taker 流量，并继续输出 PostgreSQL/Kafka/JVM/WebSocket/account 结算指标。
+- [x] 小规模连续做市刷新真实进程 smoke。
+  预期：`MM_REFRESH_CYCLES=2` 的干净状态样本通过；报告记录连续 maker 刷新挂单 8 笔、普通用户 taker 订单 4 笔、撮合成交 4 笔、account 结算 4 笔、最终 Kafka lag 为 0。
 - [x] matching/account/WebSocket 本机多节点 smoke。
   预期：consumer group 成员可识别，WebSocket 节点都收到 depth。
 - [x] account failover。

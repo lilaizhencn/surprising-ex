@@ -17,6 +17,8 @@ KEEP_TMP="${KEEP_TMP:-true}"
 EXTRA_MATCHING_NODES="${EXTRA_MATCHING_NODES:-0}"
 EXTRA_ACCOUNT_NODES="${EXTRA_ACCOUNT_NODES:-0}"
 EXTRA_WEBSOCKET_NODES="${EXTRA_WEBSOCKET_NODES:-0}"
+MATCHING_CONSUMERS_PER_NODE="${MATCHING_CONSUMERS_PER_NODE:-1}"
+ACCOUNT_CONSUMERS_PER_NODE="${ACCOUNT_CONSUMERS_PER_NODE:-2}"
 ACCOUNT_NODE_FAILURE_DURING_SETTLEMENT="${ACCOUNT_NODE_FAILURE_DURING_SETTLEMENT:-false}"
 MATCHING_NODE_FAILURE_AFTER_OPEN_BOOK="${MATCHING_NODE_FAILURE_AFTER_OPEN_BOOK:-false}"
 MM_ACCOUNT_COUNT="${MM_ACCOUNT_COUNT:-4}"
@@ -536,7 +538,8 @@ start_matching_provider() {
   node="$(matching_node_number "${name}")"
   start_provider "${name}" "$(matching_provider_port "${name}")" \
     "surprising-trading/surprising-matching-provider" "surprising-matching-provider" \
-    "--surprising.trading.matching.kafka.client-id=mm-stress-${RUN_ID}-matching-${node}"
+    "--surprising.trading.matching.kafka.client-id=mm-stress-${RUN_ID}-matching-${node}" \
+    "--surprising.trading.matching.kafka.concurrency=${MATCHING_CONSUMERS_PER_NODE}"
 }
 
 matching_provider_for_client_id() {
@@ -598,7 +601,8 @@ start_extra_nodes() {
   for ((i = 1; i <= EXTRA_ACCOUNT_NODES; i++)); do
     start_provider "account-$((i + 1))" "$((9086 + i * 100))" \
       "surprising-account/surprising-account-provider" "surprising-account-provider" \
-      "--surprising.account.kafka.client-id=mm-stress-${RUN_ID}-account-$((i + 1))"
+      "--surprising.account.kafka.client-id=mm-stress-${RUN_ID}-account-$((i + 1))" \
+      "--surprising.account.kafka.concurrency=${ACCOUNT_CONSUMERS_PER_NODE}"
   done
   for ((i = 1; i <= EXTRA_WEBSOCKET_NODES; i++)); do
     start_provider "websocket-$((i + 1))" "$((9093 + i * 100))" \
@@ -1426,6 +1430,7 @@ ${FAILURE_SCENARIO_SUMMARY}
 - 普通用户订单数：${taker_count}
 - 普通用户每单数量：${TAKER_QUANTITY_STEPS} steps
 - 并发度：${LOAD_CONCURRENCY}
+- Consumer 并发：matching 每节点 ${MATCHING_CONSUMERS_PER_NODE}，account 每节点 ${ACCOUNT_CONSUMERS_PER_NODE}
 - Symbols：${BTC_SYMBOL}, ${ETH_SYMBOL}
 
 ## 结果
@@ -1524,6 +1529,10 @@ if ((EXTRA_MATCHING_NODES < 0 || EXTRA_ACCOUNT_NODES < 0 || EXTRA_WEBSOCKET_NODE
   echo "extra node counts must be zero or positive" >&2
   exit 1
 fi
+if ((MATCHING_CONSUMERS_PER_NODE <= 0 || ACCOUNT_CONSUMERS_PER_NODE <= 0)); then
+  echo "MATCHING_CONSUMERS_PER_NODE and ACCOUNT_CONSUMERS_PER_NODE must be positive" >&2
+  exit 1
+fi
 if [[ "${ACCOUNT_NODE_FAILURE_DURING_SETTLEMENT}" == "true" ]] && ((EXTRA_ACCOUNT_NODES <= 0)); then
   echo "ACCOUNT_NODE_FAILURE_DURING_SETTLEMENT=true requires EXTRA_ACCOUNT_NODES > 0" >&2
   exit 1
@@ -1566,11 +1575,12 @@ if [[ "${START_PROVIDERS}" == "true" ]]; then
   package_services
   start_matching_provider "matching"
   start_provider "account" 9086 "surprising-account/surprising-account-provider" "surprising-account-provider" \
-    "--surprising.account.kafka.client-id=mm-stress-${RUN_ID}-account-1"
+    "--surprising.account.kafka.client-id=mm-stress-${RUN_ID}-account-1" \
+    "--surprising.account.kafka.concurrency=${ACCOUNT_CONSUMERS_PER_NODE}"
   start_provider "websocket" 9093 "surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider"
   start_extra_nodes
-  wait_consumer_members "surprising-matching-v1" "surprising.perp.order.commands.v1" $(((1 + EXTRA_MATCHING_NODES) * 2))
-  wait_consumer_members "surprising-account-v1" "surprising.perp.match.trades.v1" $(((1 + EXTRA_ACCOUNT_NODES) * 2))
+  wait_consumer_members "surprising-matching-v1" "surprising.perp.order.commands.v1" $(((1 + EXTRA_MATCHING_NODES) * MATCHING_CONSUMERS_PER_NODE))
+  wait_consumer_members "surprising-account-v1" "surprising.perp.match.trades.v1" $(((1 + EXTRA_ACCOUNT_NODES) * ACCOUNT_CONSUMERS_PER_NODE))
   for ((i = 1; i <= EXTRA_WEBSOCKET_NODES; i++)); do
     wait_consumer_members "surprising-websocket-mm-${RUN_ID}-$((i + 1))" "surprising.perp.orderbook.depth.v1" 1
   done
@@ -1707,7 +1717,7 @@ wait_sql_equals "ordinary user trades written" \
 if [[ "${ACCOUNT_NODE_FAILURE_DURING_SETTLEMENT}" == "true" ]]; then
   echo "Scenario: account node failure during settlement"
   stop_provider "account-2"
-  wait_consumer_members "surprising-account-v1" "surprising.perp.match.trades.v1" $((EXTRA_ACCOUNT_NODES * 2))
+  wait_consumer_members "surprising-account-v1" "surprising.perp.match.trades.v1" $((EXTRA_ACCOUNT_NODES * ACCOUNT_CONSUMERS_PER_NODE))
   add_failure_summary "- Account node failure during settlement：stopped account-2 after user trades were written; the account consumer group converged to the surviving node, final Kafka lag reached 0, and the database settled all taker trades."
 fi
 wait_sql_equals "ordinary user trades settled by account" \

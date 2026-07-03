@@ -13,7 +13,7 @@
 - 账户余额、订单和持仓的一致性不是靠撮合内存状态兜底，而是靠 PostgreSQL 事务、幂等键、行锁/advisory lock、guarded update、transactional outbox 和 Kafka replay 共同保证。
 - 止盈止损多档位已补放置时前置校验：锁定当前仓位后聚合 active reduce-only 平仓单和待触发 TP/SL 总待平量；同一 OCO 组合按最大 sibling 数量计入容量，避免止盈/止损双倍占用。
 - HEDGE 仓位侧已经补充到关键资金链路的回归验证：撮合成交事件、风控事件/强平候选、强平下单、资金费扣款和 ADL 审计都保留 `positionSide`。ADL 事件新增 `target_position_side`，避免审计里只看到 LONG/SHORT 方向而无法区分 NET/LONG/SHORT 仓位桶。
-- 已有压测包含真实 provider、PostgreSQL、Kafka、做市商铺单和普通用户 taker 流量。2026-07-04 又补跑了一次全 provider real-config smoke，覆盖仓位模式、HEDGE LONG/SHORT、TP/SL OCO、逐仓保证金、重启恢复、资金费、强平、保险基金、ADL 和 WebSocket/accounting invariants。但现有压测仍不是生产级全链路压力测试：做市逻辑是本地静态盘口参数，不会实时订阅主流交易所盘口来校准滑点/深度/成交量；规模和持续时间也还不够。
+- 已有压测包含真实 provider、PostgreSQL、Kafka、做市商铺单和普通用户 taker 流量。2026-07-04 又补跑了一次全 provider real-config smoke，覆盖仓位模式、HEDGE LONG/SHORT、TP/SL OCO、逐仓保证金、重启恢复、资金费、强平、保险基金、ADL 和 WebSocket/accounting invariants；同日又用 `MM_REFRESH_CYCLES=2` 记录了一次干净状态连续做市刷新 smoke，确认脚本可以连续跑 maker 刷新挂单和 taker 流量。但现有压测仍不是生产级全链路压力测试：做市逻辑是本地静态盘口参数，不会实时订阅主流交易所盘口来校准滑点/深度/成交量；规模和持续时间也还不够。
 
 ## 标记价/指数价不可用时的下单限制
 
@@ -109,6 +109,7 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 - `docs/market-maker-account-failover-report.md`
 - `docs/market-maker-matching-failover-report.md`
 - `docs/market-maker-observability-smoke-report.md`
+- `docs/market-maker-continuous-smoke-report.md`
 
 最新 full-stack real-config smoke：
 
@@ -118,6 +119,14 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 - 覆盖：持仓模式切换保护、HEDGE 同合约 LONG/SHORT、私有 `position`/`positionRisk` 的 `positionSide` 推送、币本位永续开平仓、现货结算、全成交、部分成交撤单、cancel-only/cancel-all、active reduce-only、TP/SL OCO、风控、matching 开放订单簿恢复、account 未结算成交重放、并发小负载、深盘口、资金费、逐仓风险恢复、强平、保险基金、ADL、market-maker run-once post-only 铺单、公开/私有 WebSocket 捕获和会计不变量。
 - 关键计数：depth events `48`，mark events `233`，funding events `228`；HEDGE 用户 `LONG` 和 `SHORT` 各收到 2 条 position 与 12 条 positionRisk 推送；ADL 事件表核对为 `1|NET`，即真实 ADL 场景写入了 `target_position_side`。
 - 运行说明：第一次使用默认 `5432` 时命中了本机 PostgreSQL/SSH 端口占用，导致 provider 连接到本机库并报 `role "surprising" does not exist`。改用 `POSTGRES_PORT=55433` 后通过，说明失败根因是本机端口冲突，不是业务 schema 或资金链路问题。
+
+最新连续做市刷新 real-process smoke：
+
+- 命令：`START_INFRA=false RESET_STATE=true RESET_KAFKA_MODE=recreate START_PROVIDERS=true STOP_PROVIDERS=true BUILD_SERVICES=false KEEP_TMP=true MM_ACCOUNT_COUNT=1 MM_DEPTH_LEVELS=2 MM_REFRESH_LEVELS=1 MM_REFRESH_CYCLES=2 MM_REFRESH_INTERVAL_SECONDS=1 TAKER_ORDER_COUNT=2 LOAD_CONCURRENCY=2 REPORT_FILE=docs/market-maker-continuous-smoke-report.md SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" ./scripts/market-maker-stress.sh`
+- 结果：2026-07-04 通过，报告为 `docs/market-maker-continuous-smoke-report.md`，日志在 `/tmp/surprising-mm-stress.qiFDht`。
+- 范围：真实 order、matching、account、websocket、gateway provider；复用现有 Docker PostgreSQL/Kafka；`BUILD_SERVICES=false`，未重新打包 provider jar。
+- 关键计数：初始 maker 挂单 8 笔、连续刷新挂单 8 笔、普通用户 taker 订单 4 笔、撮合成交 4 笔、account 已结算 4 笔、account Kafka 最终 lag 为 `0`。
+- 运行说明：本轮使用 `RESET_STATE=true` 清空测试状态。早前用脏状态直接复跑时遇到旧开放挂单污染成交路径，因此连续压测要么使用干净 fixture，要么显式把已有开放订单、余额和持仓纳入测试前置条件，不能把未知状态下的旧流动性当作可靠基线。
 
 代表性结果：
 
@@ -138,7 +147,7 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 当前还不能声称完成生产级真实全链路压力测试，原因：
 
 - 做市商盘口参数是脚本静态配置：`MM_DEPTH_LEVELS`、`MM_LEVEL_QUANTITY_STEPS`、`MM_REFRESH_LEVELS`、`MM_REFRESH_QUANTITY_STEPS`。没有实时订阅 Binance/OKX/Bybit 的 orderbook/depth/trades 来动态决定每档价格、相邻价格滑点和成交量。
-- 做市程序有 provider 和 run-once smoke；压测脚本现在支持用 `MM_REFRESH_CYCLES` / `MM_REFRESH_INTERVAL_SECONDS` 连续执行多轮 maker 刷新和 taker 流量，但还没有执行并记录生产级长时间样本。
+- 做市程序有 provider 和 run-once smoke；压测脚本现在支持用 `MM_REFRESH_CYCLES` / `MM_REFRESH_INTERVAL_SECONDS` 连续执行多轮 maker 刷新和 taker 流量，并已有 2 轮短时干净状态样本，但还没有执行并记录生产级长时间样本。
 - 1000 笔 taker、单机 PostgreSQL/Kafka、本机 provider 规模太小，且持续时间短。
 - 还缺少从“用户 REST 下单 -> order DB -> Kafka -> matching -> DB result/trades -> account DB -> risk/liquidation/insurance/ADL -> WebSocket 私有推送”的逐节点 p50/p95/p99 时延链路追踪。
 - 强平、爆仓、ADL 在 full-stack smoke 中有功能覆盖，但还没有在高频做市和高并发用户流量持续运行时压测。
@@ -179,6 +188,16 @@ BUILD_SERVICES=auto KEEP_TMP=true WS_TIMEOUT=240 \
 JAVA_HOME="$(/usr/libexec/java_home -v 21)" \
   ./scripts/full-stack-real-config-smoke.sh
 
+START_INFRA=false RESET_STATE=true RESET_KAFKA_MODE=recreate \
+START_PROVIDERS=true STOP_PROVIDERS=true BUILD_SERVICES=false KEEP_TMP=true \
+MM_ACCOUNT_COUNT=1 MM_DEPTH_LEVELS=2 MM_REFRESH_LEVELS=1 \
+MM_REFRESH_CYCLES=2 MM_REFRESH_INTERVAL_SECONDS=1 \
+TAKER_ORDER_COUNT=2 LOAD_CONCURRENCY=2 \
+REPORT_FILE=docs/market-maker-continuous-smoke-report.md \
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange \
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  ./scripts/market-maker-stress.sh
+
 npm run lint
 ```
 
@@ -189,4 +208,5 @@ npm run lint
 - account 定向测试通过，覆盖持仓模式切换全部前置条件：无非零持仓、无活动订单、无待触发条件单、无未结算成交、无活动保证金预占。
 - `PostLiquidationFundingInsuranceAdlIntegrationTest` 通过，确认 ADL API 模型兼容性和强平后资金费/保险/ADL 集成链路未破坏。
 - full-stack real-config smoke 通过，确认真实进程下仓位模式、TP/SL、撮合/account 恢复、资金费、强平、保险基金、ADL、WebSocket 和会计不变量可跑通；该结果仍是短时 smoke，不等同生产级长时间压测。
+- 连续做市刷新 smoke 通过，确认真实 order/matching/account/websocket/gateway 进程在 2 轮 maker 刷新和 taker 流量下可以完成成交、account 结算、Kafka lag 清零和 WebSocket 事件接收；该结果仍是小规模短时样本。
 - Web 前端本轮没有改动；上一次 `npm run lint` 已在 2026-07-04 通过。
