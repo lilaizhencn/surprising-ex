@@ -5,6 +5,7 @@ import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PerpBookTickerEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.api.model.PerpTradeEvent;
+import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.model.BasisWindow;
 import com.surprising.price.mark.repository.MarkPriceRepository;
@@ -172,7 +173,14 @@ public class MarkPriceService {
     }
 
     private boolean fresh(IndexPriceEvent event, Instant now) {
-        return event != null && event.indexPrice() != null && fresh(event.eventTime(), now);
+        return event != null
+                && event.indexPrice() != null
+                && usableIndexStatus(event.status())
+                && fresh(event.eventTime(), now);
+    }
+
+    private boolean usableIndexStatus(PriceStatus status) {
+        return status == PriceStatus.HEALTHY || status == PriceStatus.DEGRADED;
     }
 
     private boolean fresh(PerpBookTickerEvent event, Instant now) {

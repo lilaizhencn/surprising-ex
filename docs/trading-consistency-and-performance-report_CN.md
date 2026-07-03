@@ -8,7 +8,7 @@
 
 ## 结论摘要
 
-- 永续合约下单当前已经按“标记价不可用则拒绝”的思路做了保护。市价单需要新鲜 mark price；LIMIT 订单默认也启用 mark price 价格带保护。撮合侧对市价单再次读取新鲜 mark price，取不到会拒绝 `MARK_PRICE_UNAVAILABLE`。
+- 永续合约下单当前已经按“标记价不可用则拒绝”的思路做了保护。市价单需要新鲜 mark price；LIMIT 订单默认也启用 mark price 价格带保护。mark-price 只接受新鲜且状态可用的 `HEALTHY/DEGRADED` index event；指数有效源不足时会停止发布 mark price。撮合侧对市价单再次读取新鲜 mark price，取不到会拒绝 `MARK_PRICE_UNAVAILABLE`。
 - 这套设计符合主流交易所的风险控制方向：Binance Futures 的价格过滤、market order 保护区间基于 mark price；OKX 使用价格区间和 mark price 降低异常成交/异常强平风险；Bybit 的强平以 mark price 为核心，且止损可能晚于强平触发。因此衍生品下单入口建议继续 fail closed。
 - 账户余额、订单和持仓的一致性不是靠撮合内存状态兜底，而是靠 PostgreSQL 事务、幂等键、行锁/advisory lock、guarded update、transactional outbox 和 Kafka replay 共同保证。
 - 止盈止损多档位已补放置时前置校验：锁定当前仓位后聚合 active reduce-only 平仓单和待触发 TP/SL 总待平量；同一 OCO 组合按最大 sibling 数量计入容量，避免止盈/止损双倍占用。
@@ -26,11 +26,13 @@
 
 价格新鲜度来自 `OrderMarkPriceRepository`：只读取 `price_mark_ticks.event_time >= now() - maxAgeMs` 的 mark price。也就是说，不是表里有旧价格就能继续下单。
 
-指数价链路有 WebSocket 本地缓存和 REST 兜底，只有新鲜 source quote 才参与指数价计算。mark-price provider 必须拿到新鲜 index price 才会发布 mark price；book ticker 或 trade 不新鲜时可以用 index 合成兜底，但 index price 过期时不会继续发布 mark price。
+指数价链路有 WebSocket 本地缓存和 REST 兜底，只有新鲜 source quote 才参与指数价计算。有效源数量不足时，index-price provider 输出 `INSUFFICIENT_SOURCES` 且 `indexPrice=null`。mark-price provider 必须拿到新鲜、非空且状态为 `HEALTHY/DEGRADED` 的 index price 才会发布 mark price；book ticker 或 trade 不新鲜时可以用 index 合成兜底，但 index price 缺失、过期或状态不可用时不会继续发布 mark price。
 
 撮合侧也有二次保护：`MatchingService.effectivePriceTicks(...)` 对 MARKET order 读取新鲜 mark price，取不到会把撮合结果拒绝为 `MARK_PRICE_UNAVAILABLE`。这可以防止 order-provider 校验后到 matching 处理前 mark price 过期。
 
 触发单侧目前只支持 `MARK_PRICE` 触发，`TriggerOrderRepository.markPriceTicks(...)` 取不到价格时不会 claim 触发单。实际效果是：mark price 不可用时不会误触发止盈止损。
+
+2026-07-04 的最小真实配置回归专门验证了该链路：开启 mark-price Kafka listener 后，脚本只暂停 `index-price provider`，注入 `INSUFFICIENT_SOURCES` index event，并确认不再产生新鲜 mark price；随后普通市价单被 order-provider 拒绝为 `mark price unavailable`。再发布健康 index/book/trade 输入后，mark price 恢复发布，脚本继续跑完 TP/SL、强平、ADL 和 WebSocket/accounting invariants。
 
 ### 主流交易所参考
 
@@ -127,6 +129,14 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 - 范围：复用现有 Docker PostgreSQL/Kafka，只重启本次测试需要的 provider 进程；`BUILD_SERVICES=auto` 检测 provider jar 已是最新，因此跳过 Maven package。
 - 覆盖：持仓模式切换阻断场景现在会先真实开仓，再放置待触发 TP/SL 条件单，避免把“空仓不能挂减仓 TP/SL”的正确校验误判为 smoke 失败；同时覆盖 `LOAD_CONCURRENCY=1` 时 shell 数组为空的收尾边界。最终捕获 depth events `41`、mark events `175`、funding events `171`，WebSocket/accounting invariants 通过。
 
+补充 index source fail-closed 真实配置回归：
+
+- 命令：`START_INFRA=false POSTGRES_PORT=55433 PAIR_COUNT=1 LOAD_CONCURRENCY=1 BOOK_DEPTH_LEVELS=2 RUN_FAILURE_SCENARIOS=false BUILD_SERVICES=auto KEEP_TMP=true WS_TIMEOUT=900 FULL_STACK_MARK_PRICE_LISTENER_AUTO_STARTUP=true MM_REFERENCE_MARKET_ENABLED=false MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=false JAVA_HOME="$(/usr/libexec/java_home -v 21)" ./scripts/full-stack-real-config-smoke.sh`
+- 结果：2026-07-04 通过，日志在 `/tmp/surprising-full-stack-real-config.ENDSKF`。
+- 范围：复用现有 Docker PostgreSQL/Kafka，启动真实全 provider；`BUILD_SERVICES=auto` 检测 provider jar 已是最新，因此跳过 Maven package。
+- 覆盖：脚本只暂停 `index-price provider` 隔离指数源不足输入，确认 `INSUFFICIENT_SOURCES` 后 mark price 不再刷新、普通市价单拒绝 `mark price unavailable`、健康指数输入恢复后 mark price 重新发布；后续继续通过 TP/SL、风险、强平、保险基金、ADL、market-maker run-once 和 WebSocket/accounting invariants。最终捕获 depth events `122`、mark events `421`、funding events `428`。
+- 运行说明：完整链路耗时已经超过旧的 180 秒 WebSocket 捕获窗口，本轮把脚本默认 `WS_TIMEOUT` 提高到 900 秒，避免捕获进程提前结束造成最终推送断言误判。
+
 最新连续做市刷新 real-process smoke：
 
 - 命令：`START_INFRA=false RESET_STATE=true RESET_KAFKA_MODE=recreate START_PROVIDERS=true STOP_PROVIDERS=true BUILD_SERVICES=false KEEP_TMP=true MM_ACCOUNT_COUNT=1 MM_DEPTH_LEVELS=2 MM_REFRESH_LEVELS=1 MM_REFRESH_CYCLES=2 MM_REFRESH_INTERVAL_SECONDS=1 TAKER_ORDER_COUNT=2 LOAD_CONCURRENCY=2 REPORT_FILE=docs/market-maker-continuous-smoke-report.md SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" ./scripts/market-maker-stress.sh`
@@ -195,6 +205,11 @@ JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  mvn -q -pl :surprising-index-price-provider,:surprising-mark-price-provider -am \
+  -Dtest=IndexPriceCalculatorTest,MarkPriceCalculatorTest,MarkPriceServiceTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   mvn -q -pl :surprising-integration-test -am \
   -Dtest=PostLiquidationFundingInsuranceAdlIntegrationTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
@@ -202,6 +217,14 @@ JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
 POSTGRES_PORT=55433 \
 PAIR_COUNT=3 LOAD_CONCURRENCY=2 BOOK_DEPTH_LEVELS=5 RUN_FAILURE_SCENARIOS=true \
 BUILD_SERVICES=auto KEEP_TMP=true WS_TIMEOUT=240 \
+MM_REFERENCE_MARKET_ENABLED=false MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=false \
+JAVA_HOME="$(/usr/libexec/java_home -v 21)" \
+  ./scripts/full-stack-real-config-smoke.sh
+
+START_INFRA=false POSTGRES_PORT=55433 \
+PAIR_COUNT=1 LOAD_CONCURRENCY=1 BOOK_DEPTH_LEVELS=2 RUN_FAILURE_SCENARIOS=false \
+BUILD_SERVICES=auto KEEP_TMP=true WS_TIMEOUT=900 \
+FULL_STACK_MARK_PRICE_LISTENER_AUTO_STARTUP=true \
 MM_REFERENCE_MARKET_ENABLED=false MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=false \
 JAVA_HOME="$(/usr/libexec/java_home -v 21)" \
   ./scripts/full-stack-real-config-smoke.sh
@@ -233,9 +256,11 @@ flutter test
 - order/matching 定向测试通过，覆盖市价单缺少新鲜 mark price 拒绝、LIMIT 价格带缺少新鲜 mark price 拒绝，以及 matching 侧 `MARK_PRICE_UNAVAILABLE` 二次兜底。
 - account 定向测试通过，覆盖账户结算、交易幂等、仓位模式切换全部前置条件、Kafka key/payload 不一致拒绝和资金/持仓事务回归。
 - risk/liquidation/funding/adl/matching/order/trigger 定向测试通过，覆盖 HEDGE 仓位侧透传、ADL `target_position_side`、TP/SL 多档触发、TP/SL 在 mark price 不可用时不 claim、强平先清仓后 TP/SL 转 `TRIGGER_FAILED`，以及 mark price 不可用时 matching 拒绝。
+- price 定向测试通过，覆盖指数源不足时不输出 index price、mark-price 不接受无价格或不可用状态 index event、健康指数价恢复后重新发布 mark price。
 - `PostLiquidationFundingInsuranceAdlIntegrationTest` 通过，确认 ADL API 模型兼容性和强平后资金费/保险/ADL 集成链路未破坏。
 - full-stack real-config smoke 通过，确认真实进程下仓位模式、TP/SL、撮合/account 恢复、资金费、强平、保险基金、ADL、WebSocket 和会计不变量可跑通；该结果仍是短时 smoke，不等同生产级长时间压测。
 - 追加的最小 full-stack real-config smoke 通过，确认脚本在 provider jar 未变化时跳过 Maven package，并修正了持仓模式阻断用例对 TP/SL 可平仓位校验的前置条件，以及 `LOAD_CONCURRENCY=1` 的并发收尾边界。
+- 追加的 index source fail-closed full-stack real-config smoke 通过，确认 provider jar 未变化时跳过 Maven package；指数源不足会让 mark-price 停止刷新，普通下单拒绝 `mark price unavailable`，健康指数输入恢复后 mark price 恢复发布，最终 WebSocket/accounting invariants 通过。
 - 连续做市刷新 smoke 通过，确认真实 order/matching/account/websocket/gateway 进程在 2 轮 maker 刷新和 taker 流量下可以完成成交、account 结算、Kafka lag 清零和 WebSocket 事件接收；该结果仍是小规模短时样本。
 - market-maker provider 定向测试通过，确认参考盘口 WebSocket 本地订单簿、REST 快照兜底和报价规划可用：Binance/OKX/Bybit 风格 payload 可以转换成本地 ticks/steps，QuotePlanner 可按外部每档距离和数量生成本地 post-only 报价；配置默认关闭，未启用时保持原本本地报价模型。
 - Web 前端 `npm run lint` 通过，覆盖多档 TP/SL 和持仓模式 UI/API TypeScript 表面。

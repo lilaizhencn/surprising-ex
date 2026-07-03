@@ -37,8 +37,9 @@ START_PROVIDERS="${START_PROVIDERS:-true}"
 STOP_PROVIDERS="${STOP_PROVIDERS:-true}"
 RUN_FAILURE_SCENARIOS="${RUN_FAILURE_SCENARIOS:-true}"
 KEEP_TMP="${KEEP_TMP:-false}"
-WS_TIMEOUT="${WS_TIMEOUT:-360}"
+WS_TIMEOUT="${WS_TIMEOUT:-900}"
 FULL_STACK_EXTERNAL_INDEX_WS_ENABLED="${FULL_STACK_EXTERNAL_INDEX_WS_ENABLED:-false}"
+FULL_STACK_MARK_PRICE_LISTENER_AUTO_STARTUP="${FULL_STACK_MARK_PRICE_LISTENER_AUTO_STARTUP:-false}"
 MM_REFERENCE_MARKET_ENABLED="${MM_REFERENCE_MARKET_ENABLED:-false}"
 MM_REFERENCE_MARKET_WEBSOCKET_ENABLED="${MM_REFERENCE_MARKET_WEBSOCKET_ENABLED:-false}"
 TMP_DIR="$(mktemp -d /tmp/surprising-full-stack-real-config.XXXXXX)"
@@ -796,7 +797,7 @@ start_provider() {
   if [[ "${name}" == "index-price" && "${FULL_STACK_EXTERNAL_INDEX_WS_ENABLED}" != "true" ]]; then
     app_args+=("--surprising.price.index.web-socket.enabled=false")
   fi
-  if [[ "${name}" == "mark-price" ]]; then
+  if [[ "${name}" == "mark-price" && "${FULL_STACK_MARK_PRICE_LISTENER_AUTO_STARTUP}" != "true" ]]; then
     app_args+=("--spring.kafka.listener.auto-startup=false")
   fi
   if [[ "${name}" == "market-maker" ]]; then
@@ -1014,6 +1015,35 @@ publish_price_inputs() {
   pids+=("$!")
   produce_json "surprising.perp.trade.events.v1" "${symbol}" \
     "{\"symbol\":\"${symbol}\",\"tradeId\":\"price-input-${RUN_ID}-${sequence}\",\"sequence\":${sequence},\"tradeTime\":\"${event_time}\",\"price\":${price},\"quantity\":1.0,\"side\":\"BUY\"}" &
+  pids+=("$!")
+  local pid
+  for pid in "${pids[@]}"; do
+    wait "${pid}"
+  done
+}
+
+publish_insufficient_index_inputs() {
+  local symbol="$1"
+  local tick_units="$2"
+  local sequence="$3"
+  local price_ticks="$4"
+  local price
+  local bid
+  local ask
+  local event_time
+  price="$(decimal_price "${price_ticks}" "${tick_units}")"
+  bid="$(decimal_price "$((price_ticks - 1))" "${tick_units}")"
+  ask="$(decimal_price "$((price_ticks + 1))" "${tick_units}")"
+  event_time="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  local pids=()
+  produce_json "surprising.perp.index.price.v1" "${symbol}" \
+    "{\"symbol\":\"${symbol}\",\"indexPrice\":null,\"sequence\":${sequence},\"status\":\"INSUFFICIENT_SOURCES\",\"componentCount\":5,\"validComponentCount\":1,\"totalConfiguredWeight\":5.0,\"eventTime\":\"${event_time}\",\"components\":[]}" &
+  pids+=("$!")
+  produce_json "surprising.perp.book.ticker.v1" "${symbol}" \
+    "{\"symbol\":\"${symbol}\",\"bestBidPrice\":${bid},\"bestAskPrice\":${ask},\"sequence\":${sequence},\"eventTime\":\"${event_time}\"}" &
+  pids+=("$!")
+  produce_json "surprising.perp.trade.events.v1" "${symbol}" \
+    "{\"symbol\":\"${symbol}\",\"tradeId\":\"insufficient-index-${RUN_ID}-${sequence}\",\"sequence\":${sequence},\"tradeTime\":\"${event_time}\",\"price\":${price},\"quantity\":1.0,\"side\":\"BUY\"}" &
   pids+=("$!")
   local pid
   for pid in "${pids[@]}"; do
@@ -1318,6 +1348,46 @@ adjust_insurance_fund() {
       \"referenceId\": \"${reference_id}\",
       \"reason\": \"FULL_STACK_REAL_CONFIG_TEST\"
     }" >/dev/null
+}
+
+run_index_source_fail_closed_flow() {
+  if [[ "${FULL_STACK_MARK_PRICE_LISTENER_AUTO_STARTUP}" != "true" ]]; then
+    echo "Skipping index-source fail-closed scenario because mark-price Kafka listener auto-startup is disabled"
+    return
+  fi
+  if [[ "${START_PROVIDERS}" != "true" ]]; then
+    echo "Skipping index-source fail-closed scenario because reused providers cannot isolate index-price publishing"
+    return
+  fi
+  echo "Scenario: insufficient index source stops mark refresh and order entry fails closed"
+  echo "Pausing index-price provider to isolate the insufficient-source input"
+  stop_provider "index-price"
+  local insufficient_sequence=$((NEXT_MARK_SEQUENCE + 500000))
+  publish_insufficient_index_inputs "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${insufficient_sequence}" "${BTC_PRICE_TICKS}"
+  sleep 5
+  expire_mark_price "${BTC_SYMBOL}"
+  sleep 3
+  local fresh_marks
+  fresh_marks="$(query_value "SELECT count(*) FROM price_mark_ticks WHERE symbol = '${BTC_SYMBOL}' AND event_time >= now() - interval '2 seconds'")"
+  if [[ "${fresh_marks}" != "0" ]]; then
+    echo "Expected insufficient index source to stop fresh mark publication, got ${fresh_marks} fresh marks" >&2
+    query_value "SELECT sequence || '|' || status || '|' || event_time FROM price_mark_ticks WHERE symbol = '${BTC_SYMBOL}' ORDER BY event_time DESC, sequence DESC LIMIT 5" >&2 || true
+    exit 1
+  fi
+  local index_unavailable_order
+  index_unavailable_order="$(place_order "${FULL_TAKER_USER}" "real-index-unavailable-market-${RUN_ID}" "BUY" "MARKET" "IOC" 0 1 false false)"
+  wait_order_state "${index_unavailable_order}" "REJECTED" "0" "0"
+  wait_sql_equals "index unavailable market reject reason" \
+    "SELECT reject_reason FROM trading_orders WHERE order_id = ${index_unavailable_order}" \
+    "mark price unavailable"
+
+  local recover_sequence=$((insufficient_sequence + 1))
+  local recover_started_at
+  recover_started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  publish_price_inputs "${BTC_SYMBOL}" "${BTC_TICK_UNITS}" "${recover_sequence}" "${BTC_PRICE_TICKS}"
+  wait_sql_nonzero "mark price recovered after healthy index source" \
+    "SELECT count(*) FROM price_mark_ticks WHERE symbol = '${BTC_SYMBOL}' AND status IN ('HEALTHY', 'DEGRADED', 'CLAMPED') AND event_time >= '${recover_started_at}'::timestamptz"
+  start_provider "index-price"
 }
 
 run_market_maker_provider_smoke() {
@@ -2334,6 +2404,8 @@ done
 for order_id in "${all_cancel_orders[@]}"; do
   wait_order_state "${order_id}" "CANCELED" "0" "0"
 done
+
+run_index_source_fail_closed_flow
 
 echo "Scenario: active reduce-only close"
 expire_mark_price "${BTC_SYMBOL}"

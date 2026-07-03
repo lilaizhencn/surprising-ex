@@ -38,6 +38,26 @@ class IndexPriceCalculatorTest {
                 .isEqualTo(SourceStatus.OUTLIER);
     }
 
+    @Test
+    void returnsInsufficientSourcesWithoutIndexPriceWhenTooFewSourcesRemainHealthy() {
+        IndexPriceProperties properties = new IndexPriceProperties();
+        properties.getCalculation().setMinValidSources(3);
+        IndexPriceCalculator calculator = new IndexPriceCalculator(properties);
+        Instant now = Instant.parse("2026-06-30T10:00:00Z");
+
+        IndexPriceEvent event = calculator.calculate("BTC-USDT", 2, 3, List.of(
+                quote("A", "100.00", now),
+                quote("B", "100.10", now.minusSeconds(90)),
+                quote("C", "99.90", now.minusSeconds(90))
+        ), now);
+
+        assertThat(event.status()).isEqualTo(PriceStatus.INSUFFICIENT_SOURCES);
+        assertThat(event.indexPrice()).isNull();
+        assertThat(event.validComponentCount()).isEqualTo(1);
+        assertThat(event.components()).filteredOn(component -> component.status() == SourceStatus.STALE)
+                .hasSize(2);
+    }
+
     private SourceQuote quote(String source, String price, Instant now) {
         return new SourceQuote(source, "BTCUSDT", new BigDecimal(price), new BigDecimal(price), new BigDecimal(price),
                 BigDecimal.ONE, SourceStatus.HEALTHY, null, now, now, 1L);

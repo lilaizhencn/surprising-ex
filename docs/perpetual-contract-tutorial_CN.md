@@ -158,6 +158,8 @@ marginRatioPpm = maintenanceMarginUnits / equityUnits * 1_000_000
 
 同时支持 USD/USDT 稳定币换算、源超时剔除、最小有效源数量和权重折扣。
 
+如果有效指数源不足，index-price provider 会输出 `INSUFFICIENT_SOURCES`，并且不携带可用 `indexPrice`。这类事件不会被下游当作正常指数价使用。
+
 ### 5.3 标记价格
 
 标记价格用于计算未实现盈亏和爆仓，不直接等于最新成交价。
@@ -175,8 +177,10 @@ Binance 还会把资金费率、合约价、买一卖一、指数价放进保护
 本项目里：
 
 - index-price provider 生成 `surprising.perp.index.price.v1`。
-- mark-price provider 消费指数价、合约盘口最优价、资金费率，生成 `surprising.perp.mark.price.v1`。
+- mark-price provider 消费指数价、合约盘口最优价、资金费率，生成 `surprising.perp.mark.price.v1`。它只接受新鲜且状态为 `HEALTHY/DEGRADED` 的指数价；指数源不足、过期或无价格时停止发布新的标记价。
 - risk-provider 使用最新标记价计算未实现盈亏、维持保证金和强平状态。
+
+当标记价停止刷新后，普通下单会按 fail-closed 处理：市价单和默认启用价格带保护的限价单会被拒绝，止盈止损也不会因为旧价格被误触发。
 
 ## 6. 爆仓是怎么发生的
 
