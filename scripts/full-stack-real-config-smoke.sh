@@ -1846,9 +1846,11 @@ run_with_concurrency() {
     fi
   done
   local pid
-  for pid in "${active_pids[@]}"; do
-    wait "${pid}"
-  done
+  if ((${#active_pids[@]})); then
+    for pid in "${active_pids[@]}"; do
+      wait "${pid}"
+    done
+  fi
 }
 
 run_position_mode_flow() {
@@ -1872,6 +1874,19 @@ run_position_mode_flow() {
   update_position_mode "${POSITION_MODE_BLOCK_ORDER_USER}" "ONE_WAY" >/dev/null
   expect_position_mode "${POSITION_MODE_BLOCK_ORDER_USER}" "ONE_WAY"
 
+  refresh_mark_price "${POSITION_MODE_SYMBOL}" "${POSITION_MODE_TICK_UNITS}" "${BTC_PRICE_TICKS}"
+  local block_trigger_open_maker
+  local block_trigger_open_taker
+  block_trigger_open_maker="$(place_order_symbol "${POSITION_MODE_SYMBOL}" "${POSITION_MODE_LONG_MAKER_USER}" "real-pm-block-trigger-open-maker-${RUN_ID}" \
+    "SELL" "LIMIT" "GTC" "${BTC_PRICE_TICKS}" 1 false false)"
+  wait_order_result "${block_trigger_open_maker}" "SUCCESS"
+  block_trigger_open_taker="$(place_order_symbol "${POSITION_MODE_SYMBOL}" "${POSITION_MODE_BLOCK_TRIGGER_USER}" "real-pm-block-trigger-open-${RUN_ID}" \
+    "BUY" "LIMIT" "IOC" "${BTC_PRICE_TICKS}" 1 false false)"
+  wait_order_state "${block_trigger_open_maker}" "FILLED" "1" "0"
+  wait_order_state "${block_trigger_open_taker}" "FILLED" "1" "0"
+  wait_position_symbol "${POSITION_MODE_SYMBOL}" "${POSITION_MODE_BLOCK_TRIGGER_USER}" "1" "${BTC_PRICE_TICKS}"
+  wait_position_symbol "${POSITION_MODE_SYMBOL}" "${POSITION_MODE_LONG_MAKER_USER}" "-1" "${BTC_PRICE_TICKS}"
+
   local block_trigger
   block_trigger="$(place_trigger_order "${POSITION_MODE_BLOCK_TRIGGER_USER}" "real-pm-block-trigger-${RUN_ID}" \
     "SELL" "TAKE_PROFIT" "$((BTC_PRICE_TICKS + 500000))" "MARKET" "IOC" 0 1 "")"
@@ -1879,6 +1894,19 @@ run_position_mode_flow() {
   expect_position_mode_update_status "${POSITION_MODE_BLOCK_TRIGGER_USER}" "HEDGE" "409" "pending-trigger"
   cancel_trigger_order "${POSITION_MODE_BLOCK_TRIGGER_USER}" "${block_trigger}"
   wait_trigger_state "${block_trigger}" "CANCELED"
+
+  local block_trigger_close_maker
+  local block_trigger_close_taker
+  block_trigger_close_maker="$(place_order_symbol "${POSITION_MODE_SYMBOL}" "${POSITION_MODE_LONG_MAKER_USER}" "real-pm-block-trigger-close-maker-${RUN_ID}" \
+    "BUY" "LIMIT" "GTC" "${BTC_PRICE_TICKS}" 1 true false)"
+  wait_order_result "${block_trigger_close_maker}" "SUCCESS"
+  block_trigger_close_taker="$(place_order_symbol "${POSITION_MODE_SYMBOL}" "${POSITION_MODE_BLOCK_TRIGGER_USER}" "real-pm-block-trigger-close-${RUN_ID}" \
+    "SELL" "LIMIT" "IOC" "${BTC_PRICE_TICKS}" 1 true false)"
+  wait_order_state "${block_trigger_close_maker}" "FILLED" "1" "0"
+  wait_order_state "${block_trigger_close_taker}" "FILLED" "1" "0"
+  wait_position_symbol "${POSITION_MODE_SYMBOL}" "${POSITION_MODE_BLOCK_TRIGGER_USER}" "0" "0"
+  wait_position_symbol "${POSITION_MODE_SYMBOL}" "${POSITION_MODE_LONG_MAKER_USER}" "0" "0"
+
   update_position_mode "${POSITION_MODE_BLOCK_TRIGGER_USER}" "HEDGE" >/dev/null
   expect_position_mode "${POSITION_MODE_BLOCK_TRIGGER_USER}" "HEDGE"
   update_position_mode "${POSITION_MODE_BLOCK_TRIGGER_USER}" "ONE_WAY" >/dev/null
