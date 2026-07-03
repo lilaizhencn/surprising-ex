@@ -50,6 +50,16 @@ JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  mvn -q -pl :surprising-order-provider,:surprising-matching-provider -am \
+  -Dtest=OrderValidatorTest,OrderMarginMathTest,MatchingServiceTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  mvn -q -pl :surprising-account-provider -am \
+  -Dtest=AccountServiceTest,AccountRepositoryTest,MatchTradeConsumerTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   mvn -q -pl :surprising-risk-provider,:surprising-liquidation-provider,:surprising-funding-provider,:surprising-adl-provider,:surprising-matching-provider,:surprising-order-provider,:surprising-trigger-provider -am \
   -Dtest=RiskServiceTest,LiquidationServiceTest,FundingRepositoryTest,AdlRepositoryTest,MatchingServiceTest,OrderValidatorTest,TriggerOrderServiceTest,OrderServiceTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
@@ -57,11 +67,6 @@ JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   mvn -q -pl :surprising-integration-test -am \
   -Dtest=PostLiquidationFundingInsuranceAdlIntegrationTest \
-  -Dsurefire.failIfNoSpecifiedTests=false test
-
-JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
-  mvn -q -pl :surprising-account-provider -am \
-  -Dtest=AccountRepositoryTest,AccountServiceTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
 POSTGRES_PORT=55433 \
@@ -87,9 +92,12 @@ JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
 npm run lint
+
+flutter analyze
+flutter test
 ```
 
-结果：以上后端定向测试、market-maker 参考盘口校准测试、真实 provider full-stack smoke、连续做市刷新 smoke 和 Web lint 均通过。full-stack smoke 日志保留在 `/tmp/surprising-full-stack-real-config.3qu3b9`；追加的最小真实配置回归也已通过，日志保留在 `/tmp/surprising-full-stack-real-config.xAFD0M`，该轮确认 provider jar 未变化时 `BUILD_SERVICES=auto` 会跳过 Maven package，并验证持仓模式 pending TP/SL 阻断用例和 `LOAD_CONCURRENCY=1` 收尾边界。连续做市刷新 smoke 报告为 `docs/market-maker-continuous-smoke-report.md`，日志保留在 `/tmp/surprising-mm-stress.qiFDht`。本机默认 `5432` 被本地 PostgreSQL/SSH 占用，所以 full-stack 该轮使用 `POSTGRES_PORT=55433` 隔离 Docker PostgreSQL。ADL 事件表核对结果为 `1|NET`，说明真实 ADL 场景写入了 `target_position_side`。market-maker provider 新增的 Binance/OKX/Bybit WebSocket 本地订单簿解析和 REST 兜底也已由定向测试覆盖。full-stack smoke 现在可通过 `MM_REFERENCE_MARKET_ENABLED=true MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=true` 显式启用 market-maker provider 的流式参考盘口，但该开关还没有跑长时间真实进程压测报告。
+结果：以上后端定向测试、market-maker 参考盘口校准测试、真实 provider full-stack smoke、连续做市刷新 smoke、Web lint、Flutter analyze/test 均通过。full-stack smoke 日志保留在 `/tmp/surprising-full-stack-real-config.3qu3b9`；追加的最小真实配置回归也已通过，日志保留在 `/tmp/surprising-full-stack-real-config.xAFD0M`，该轮确认 provider jar 未变化时 `BUILD_SERVICES=auto` 会跳过 Maven package，并验证持仓模式 pending TP/SL 阻断用例和 `LOAD_CONCURRENCY=1` 收尾边界。连续做市刷新 smoke 报告为 `docs/market-maker-continuous-smoke-report.md`，日志保留在 `/tmp/surprising-mm-stress.qiFDht`。本机默认 `5432` 被本地 PostgreSQL/SSH 占用，所以 full-stack 该轮使用 `POSTGRES_PORT=55433` 隔离 Docker PostgreSQL。ADL 事件表核对结果为 `1|NET`，说明真实 ADL 场景写入了 `target_position_side`。market-maker provider 新增的 Binance/OKX/Bybit WebSocket 本地订单簿解析和 REST 兜底也已由定向测试覆盖。full-stack smoke 现在可通过 `MM_REFERENCE_MARKET_ENABLED=true MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=true` 显式启用 market-maker provider 的流式参考盘口，但该开关还没有跑长时间真实进程压测报告。Flutter 第一次与 `flutter analyze` 并行跑 `flutter test` 时因 iOS ephemeral 文件锁竞争失败，随后单独重跑 `flutter test` 通过。
 
 ## 下单
 

@@ -26,24 +26,24 @@
 
 价格新鲜度来自 `OrderMarkPriceRepository`：只读取 `price_mark_ticks.event_time >= now() - maxAgeMs` 的 mark price。也就是说，不是表里有旧价格就能继续下单。
 
+指数价链路有 WebSocket 本地缓存和 REST 兜底，只有新鲜 source quote 才参与指数价计算。mark-price provider 必须拿到新鲜 index price 才会发布 mark price；book ticker 或 trade 不新鲜时可以用 index 合成兜底，但 index price 过期时不会继续发布 mark price。
+
 撮合侧也有二次保护：`MatchingService.effectivePriceTicks(...)` 对 MARKET order 读取新鲜 mark price，取不到会把撮合结果拒绝为 `MARK_PRICE_UNAVAILABLE`。这可以防止 order-provider 校验后到 matching 处理前 mark price 过期。
 
 触发单侧目前只支持 `MARK_PRICE` 触发，`TriggerOrderRepository.markPriceTicks(...)` 取不到价格时不会 claim 触发单。实际效果是：mark price 不可用时不会误触发止盈止损。
 
 ### 主流交易所参考
 
-- Binance USDS-M Futures 的 mark price 接口同时返回 `markPrice` 和 `indexPrice`；mark price stream 以 1s 或 3s 推送 mark/funding/index 数据。Binance common definition 里，Futures 的 `PERCENT_PRICE` filter 基于 mark price，市价单 notional 也使用 mark price，`exchangeInfo` 还暴露 market order 相对 mark price 的最大价差字段。
-- OKX 永续文档说明，价格范围会基于现货市场和前一分钟期货价格动态调整，mark price 用于降低单笔异常成交导致的强平风险。
-- Bybit 文档说明强平在 mark price 到达强平价时触发；也说明极端情况下 mark price 可能先触发强平，而 stop loss 还没有按用户选择的触发价来源触发。
+- Binance Futures 的 `PERCENT_PRICE` 价格过滤基于 mark price，BUY 不能高于 `markPrice * multiplierUp`，SELL 不能低于 `markPrice * multiplierDown`。
+- OKX 的价格限制规则会实时计算最高/最低价格，超出价格范围的订单会被拒绝；API 可以选择自动改价策略。
+- Bybit 衍生品价格限制用于防操纵，开仓和平仓都适用，计算公式明确使用 mark price 和 index price；Bybit mark price 文档还说明，当某个指数来源异常或取不到数据时，可以使用平台 last traded price 作为兜底计算 mark price。
 
 参考链接：
 
-- [Binance Mark Price](https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Mark-Price)
-- [Binance USDS-M Common Definition](https://developers.binance.com/docs/derivatives/usds-margined-futures/common-definition)
-- [Binance Exchange Information](https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Exchange-Information)
-- [OKX Perpetual Futures Guide](https://www.okx.com/help/i-perpetual-swaps)
-- [Bybit Liquidation Price](https://www.bybit.com/help-center/article/Liquidation-Price-USDT-Contract)
-- [Bybit Liquidated Despite Stop Loss](https://www.bybit.com/help-center/article/Position-Liquidated-Despite-Having-Stop-Loss)
+- [Binance Futures Common Definition](https://developers.binance.com/docs/derivatives/coin-margined-futures/common-definition)
+- [OKX Price Limit Rules](https://www.okx.com/en-au/help/iii-price-limit-rules)
+- [Bybit Futures Trading Rules](https://www.bybit.com/en/help-center/article/Futures-Trading-Rules)
+- [Bybit Mark Price Calculation](https://www.bybit.kz/en-KAZ/help-center/article/Mark-Price-Calculation-Perpetual-Expiry-Contracts)
 
 ### 建议策略
 
@@ -180,6 +180,16 @@ JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  mvn -q -pl :surprising-order-provider,:surprising-matching-provider -am \
+  -Dtest=OrderValidatorTest,OrderMarginMathTest,MatchingServiceTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  mvn -q -pl :surprising-account-provider -am \
+  -Dtest=AccountServiceTest,AccountRepositoryTest,MatchTradeConsumerTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   mvn -q -pl :surprising-risk-provider,:surprising-liquidation-provider,:surprising-funding-provider,:surprising-adl-provider,:surprising-matching-provider,:surprising-order-provider,:surprising-trigger-provider -am \
   -Dtest=RiskServiceTest,LiquidationServiceTest,FundingRepositoryTest,AdlRepositoryTest,MatchingServiceTest,OrderValidatorTest,TriggerOrderServiceTest,OrderServiceTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
@@ -212,16 +222,21 @@ JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
 npm run lint
+
+flutter analyze
+flutter test
 ```
 
 结果：
 
 - trigger 定向测试通过，覆盖 TP/SL 放置时已有仓位、减仓方向、多档总待平量、active reduce-only 占用和 OCO 最大 sibling 容量校验。
+- order/matching 定向测试通过，覆盖市价单缺少新鲜 mark price 拒绝、LIMIT 价格带缺少新鲜 mark price 拒绝，以及 matching 侧 `MARK_PRICE_UNAVAILABLE` 二次兜底。
+- account 定向测试通过，覆盖账户结算、交易幂等、仓位模式切换全部前置条件、Kafka key/payload 不一致拒绝和资金/持仓事务回归。
 - risk/liquidation/funding/adl/matching/order/trigger 定向测试通过，覆盖 HEDGE 仓位侧透传、ADL `target_position_side`、TP/SL 多档触发、TP/SL 在 mark price 不可用时不 claim、强平先清仓后 TP/SL 转 `TRIGGER_FAILED`，以及 mark price 不可用时 matching 拒绝。
-- account 定向测试通过，覆盖持仓模式切换全部前置条件：无非零持仓、无活动订单、无待触发条件单、无未结算成交、无活动保证金预占。
 - `PostLiquidationFundingInsuranceAdlIntegrationTest` 通过，确认 ADL API 模型兼容性和强平后资金费/保险/ADL 集成链路未破坏。
 - full-stack real-config smoke 通过，确认真实进程下仓位模式、TP/SL、撮合/account 恢复、资金费、强平、保险基金、ADL、WebSocket 和会计不变量可跑通；该结果仍是短时 smoke，不等同生产级长时间压测。
 - 追加的最小 full-stack real-config smoke 通过，确认脚本在 provider jar 未变化时跳过 Maven package，并修正了持仓模式阻断用例对 TP/SL 可平仓位校验的前置条件，以及 `LOAD_CONCURRENCY=1` 的并发收尾边界。
 - 连续做市刷新 smoke 通过，确认真实 order/matching/account/websocket/gateway 进程在 2 轮 maker 刷新和 taker 流量下可以完成成交、account 结算、Kafka lag 清零和 WebSocket 事件接收；该结果仍是小规模短时样本。
 - market-maker provider 定向测试通过，确认参考盘口 WebSocket 本地订单簿、REST 快照兜底和报价规划可用：Binance/OKX/Bybit 风格 payload 可以转换成本地 ticks/steps，QuotePlanner 可按外部每档距离和数量生成本地 post-only 报价；配置默认关闭，未启用时保持原本本地报价模型。
-- Web 前端本轮没有改动；上一次 `npm run lint` 已在 2026-07-04 通过。
+- Web 前端 `npm run lint` 通过，覆盖多档 TP/SL 和持仓模式 UI/API TypeScript 表面。
+- Flutter `flutter analyze` 和 `flutter test` 通过，覆盖 iOS/Android 共用客户端壳和移动端交易基础逻辑。第一次把 `flutter analyze` 与 `flutter test` 并行执行时，`flutter test` 因 iOS ephemeral 文件锁竞争失败；随后单独重跑通过，结论以单独重跑结果为准。
