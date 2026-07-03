@@ -16,6 +16,10 @@
   预期：`positionSide=SHORT` 传到 order-provider，不落到 NET。
 - [x] TP/SL 多档位后端触发：同一 symbol 下两条满足条件的 trigger order 被 claim。
   预期：两档分别生成 `trigger-<triggerOrderId>` client order，每档使用自己的 `quantitySteps`。
+- [x] TP/SL mark price 不可用。
+  预期：trigger-provider 查不到触发事件对应的持久化 mark price 时，不 claim 条件单、不生成平仓单。
+- [x] 强平早于 TP/SL。
+  预期：如果强平已经清掉仓位，后续 TP/SL 触发时生成的 reduce-only 平仓单会被 order-provider 拒绝，条件单转 `TRIGGER_FAILED`，不会反向开仓。
 - [x] 前端多档位录入和打通。
   预期：交易面板可以新增多条 TP/SL，每档选择平多/平空、触发价、数量；提交后走 gateway `trading-trigger` 下单；底部账户面板展示并支持撤销。
 - [x] 撮合 HEDGE 仓位侧成交事件。
@@ -140,9 +144,9 @@ npm run lint
   预期：用户可以一次配置多行，前端逐条调用 trigger order API；提交后可查询和撤销。
 - [ ] 多档位总数量前置校验。
   预期：同一 symbol/side/positionSide 的开放 TP/SL 总待平量不应超过当前可平仓位。当前主要依赖 reduce-only 在触发执行时兜底，建议后续补前置聚合校验。
-- [ ] 强平早于 TP/SL。
+- [x] 强平早于 TP/SL。
   预期：如果 mark price 先触发强平，强平 reduce-only 订单优先进入风险处理；之后 TP/SL 触发时应因无可平仓位被拒绝或失败，不得重新开仓。
-- [ ] mark price 不可用时 TP/SL。
+- [x] mark price 不可用时 TP/SL。
   预期：不 claim 触发单，不生成平仓单；价格恢复后按最新 mark 判断。
 
 ## 撮合
