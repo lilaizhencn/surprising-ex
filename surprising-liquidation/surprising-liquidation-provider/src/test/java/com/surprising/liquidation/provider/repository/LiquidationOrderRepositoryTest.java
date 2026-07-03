@@ -11,7 +11,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.liquidation.provider.config.LiquidationProperties;
+import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
+import com.surprising.trading.api.model.PositionSide;
 import java.sql.ResultSet;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
@@ -84,6 +86,31 @@ class LiquidationOrderRepositoryTest {
         assertThat(sql.getValue()).doesNotContain("ON CONFLICT");
         verify(jdbcTemplate, never()).update(contains("INSERT INTO trading_order_events"), any(Object[].class));
         verify(jdbcTemplate, never()).update(contains("INSERT INTO trading_outbox_events"), any(Object[].class));
+    }
+
+    @Test
+    void createsLiquidationMarketOrderWithPositionSideAndFeeRates() {
+        LiquidationOrderRepository repository = repository();
+        givenFeeSnapshot();
+        when(sequenceRepository.nextTradingSequence("order")).thenReturn(7001L);
+        when(sequenceRepository.nextTradingSequence("event")).thenReturn(7002L);
+        when(sequenceRepository.nextTradingSequence("command")).thenReturn(7003L);
+        when(sequenceRepository.nextTradingSequence("outbox")).thenReturn(7004L, 7005L);
+        when(jdbcTemplate.update(contains("INSERT INTO trading_orders"), any(Object[].class))).thenReturn(1);
+        when(jdbcTemplate.update(contains("INSERT INTO trading_order_events"), any(Object[].class))).thenReturn(1);
+        when(jdbcTemplate.update(contains("INSERT INTO trading_outbox_events"), any(Object[].class))).thenReturn(1);
+
+        repository.createReduceOnlyMarketOrder(9401L, 2002L, "BTC-USDT", MarginMode.ISOLATED,
+                PositionSide.LONG, 8L, OrderSide.SELL, 3L, Instant.parse("2026-07-01T00:00:00Z"),
+                Object::toString);
+
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(contains("INSERT INTO trading_orders"), args.capture());
+        assertThat(args.getValue()).hasSize(14);
+        assertThat(args.getValue()[8]).isEqualTo("ISOLATED");
+        assertThat(args.getValue()[9]).isEqualTo("LONG");
+        assertThat(args.getValue()[10]).isEqualTo(200L);
+        assertThat(args.getValue()[11]).isEqualTo(500L);
     }
 
     @Test

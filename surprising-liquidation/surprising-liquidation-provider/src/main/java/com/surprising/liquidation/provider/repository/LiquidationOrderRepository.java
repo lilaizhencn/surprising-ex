@@ -56,7 +56,7 @@ public class LiquidationOrderRepository {
                     price_ticks, quantity_steps, executed_quantity_steps, remaining_quantity_steps,
                     margin_mode, position_side, maker_fee_rate_ppm, taker_fee_rate_ppm,
                     reduce_only, post_only, status, reject_reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'MARKET', 'IOC', 0, ?, 0, ?, ?, ?, ?,
+                ) VALUES (?, ?, ?, ?, ?, ?, 'MARKET', 'IOC', 0, ?, 0, ?, ?, ?, ?, ?,
                     TRUE, FALSE, 'ACCEPTED', NULL, ?, ?)
                 """, orderId, userId, clientOrderId, symbol, instrumentVersion, side.name(), quantitySteps, quantitySteps,
                 MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name(),
