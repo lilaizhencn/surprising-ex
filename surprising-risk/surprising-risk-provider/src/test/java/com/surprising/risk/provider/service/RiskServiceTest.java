@@ -80,9 +80,10 @@ class RiskServiceTest {
         riskRepository.positions = List.of(
                 new CalculatedPositionRisk(1001L, "BTC-USDT", 7L, "USDT",
                         10L, 65_000L, 65_000L, 650_000L, 0L, 100L),
-                new CalculatedPositionRisk(2002L, "ETH-USDT", 7L, "USDT",
-                        10L, 3_500L, 3_500L, 35_000L, 0L, 100L));
-        riskRepository.positionEventTarget = Optional.of(new PositionRiskTarget(2002L, "ETH-USDT", 7L, "USDT"));
+                new CalculatedPositionRisk(2002L, "ETH-USDT", MarginMode.CROSS, PositionSide.SHORT, 7L,
+                        "USDT", -10L, 3_500L, 3_500L, 35_000L, 0L, 100L, 0L));
+        riskRepository.positionEventTarget = Optional.of(new PositionRiskTarget(2002L, "ETH-USDT",
+                MarginMode.CROSS, PositionSide.SHORT, 7L, "USDT"));
         riskRepository.walletBalanceUnits = 1_000_000L;
         RiskProperties properties = new RiskProperties();
         properties.getCoordination().setEnabled(false);
@@ -91,20 +92,24 @@ class RiskServiceTest {
         RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
                 new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
 
-        service.scanPositionUpdate(2002L, "eth-usdt", MarginMode.CROSS, 7L, "trace-risk-1");
+        service.scanPositionUpdate(2002L, "eth-usdt", MarginMode.CROSS, PositionSide.SHORT, 7L,
+                "trace-risk-1");
 
         assertThat(riskRepository.positionEventResolveCalls).isEqualTo(1);
         assertThat(riskRepository.lastPositionEventUserId).isEqualTo(2002L);
         assertThat(riskRepository.lastPositionEventSymbol).isEqualTo("ETH-USDT");
-        assertThat(riskRepository.lastPositionEventPositionSide).isEqualTo(PositionSide.NET);
+        assertThat(riskRepository.lastPositionEventPositionSide).isEqualTo(PositionSide.SHORT);
         assertThat(riskRepository.lastPositionEventVersion).isEqualTo(7L);
         assertThat(riskRepository.riskGroupCalls).isZero();
         assertThat(riskRepository.calculateCalls).isEqualTo(1);
         assertThat(riskRepository.savedAccounts).isEqualTo(1);
         assertThat(riskRepository.savedPositions).isEqualTo(1);
+        assertThat(riskRepository.savedPositionSnapshots).singleElement()
+                .satisfies(position -> assertThat(position.positionSide()).isEqualTo(PositionSide.SHORT));
         assertThat(outboxRepository.eventTypes).containsExactly("RISK_ACCOUNT_UPDATED", "RISK_POSITION_UPDATED");
         assertThat(outboxRepository.payloads)
                 .allSatisfy(payload -> assertThat(payload).contains("\"traceId\":\"trace-risk-1\""));
+        assertThat(outboxRepository.payloads.get(1)).contains("\"positionSide\":\"SHORT\"");
         assertThat(transactionManager.commits).isEqualTo(1);
         assertThat(transactionManager.rollbacks).isZero();
     }
@@ -218,6 +223,9 @@ class RiskServiceTest {
     @Test
     void scanPublishesOutboxEventWhenCandidateIsInsertedAndReadable() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
+        riskRepository.positions = List.of(new CalculatedPositionRisk(1001L, "BTC-USDT",
+                MarginMode.CROSS, PositionSide.SHORT, 7L, "USDT", -10L, 65_000L, 60_000L,
+                600_000L, -100L, 100L, 0L));
         riskRepository.returnInsertedCandidate = true;
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
@@ -232,6 +240,7 @@ class RiskServiceTest {
         assertThat(outboxRepository.topic).isEqualTo("surprising.perp.liquidation.candidates.v1");
         assertThat(outboxRepository.eventKey).isEqualTo("BTC-USDT");
         assertThat(outboxRepository.eventType).isEqualTo("LIQUIDATION_CANDIDATE");
+        assertThat(outboxRepository.payloads.get(2)).contains("\"positionSide\":\"SHORT\"");
         assertThat(transactionManager.commits).isEqualTo(1);
         assertThat(transactionManager.rollbacks).isZero();
     }
@@ -596,8 +605,9 @@ class RiskServiceTest {
                 return Optional.empty();
             }
             return Optional.of(new LiquidationCandidateResponse(candidateId, 101L, position.userId(), position.symbol(),
-                    position.instrumentVersion(), position.settleAsset(), position.signedQuantitySteps(),
-                    position.markPriceTicks(), -100L, position.maintenanceMarginUnits(),
+                    position.marginMode(), position.positionSide(), position.instrumentVersion(),
+                    position.settleAsset(), position.signedQuantitySteps(), position.markPriceTicks(), -100L,
+                    position.maintenanceMarginUnits(),
                     RiskMath.INFINITE_MARGIN_RATIO, LiquidationCandidateStatus.NEW,
                     Instant.parse("2026-07-01T00:00:00Z")));
         }

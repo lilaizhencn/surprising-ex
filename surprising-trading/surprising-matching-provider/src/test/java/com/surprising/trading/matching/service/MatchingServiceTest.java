@@ -84,10 +84,12 @@ class MatchingServiceTest {
             assertThat(trade.takerUserId()).isEqualTo(2002L);
             assertThat(trade.takerSide()).isEqualTo(OrderSide.BUY);
             assertThat(trade.takerMarginMode()).isEqualTo(MarginMode.CROSS);
+            assertThat(trade.takerPositionSide()).isEqualTo(PositionSide.NET);
             assertThat(trade.makerOrderId()).isEqualTo(101L);
             assertThat(trade.makerInstrumentVersion()).isEqualTo(5L);
             assertThat(trade.makerUserId()).isEqualTo(1001L);
             assertThat(trade.makerMarginMode()).isEqualTo(MarginMode.CROSS);
+            assertThat(trade.makerPositionSide()).isEqualTo(PositionSide.NET);
             assertThat(trade.priceTicks()).isEqualTo(100L);
             assertThat(trade.quantitySteps()).isEqualTo(3L);
             assertThat(trade.traceId()).isEqualTo("trace-taker-502");
@@ -118,6 +120,82 @@ class MatchingServiceTest {
                 assertThat(level.quantitySteps()).isEqualTo(7L);
                 assertThat(level.orderCount()).isEqualTo(1L);
             });
+        } finally {
+            engine.stop();
+        }
+    }
+
+    @Test
+    void emitsHedgePositionSidesFromTakerCommandAndMakerLookup() throws Exception {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getEngine().setExchangeId("matching-service-hedge-position-side-test");
+        properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
+        properties.getProtection().setSelfTradePreventionEnabled(false);
+
+        MatchingSymbol matchingSymbol = new MatchingSymbol("BTC-USDT", 301, 11, 12);
+        InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
+        ExchangeCoreEngine engine = new ExchangeCoreEngine(properties,
+                new FakeMatchingSymbolRepository(instrument, matchingSymbol),
+                new FakeRecoveryRepository());
+        FakeResultRepository resultRepository = new FakeResultRepository();
+        MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
+                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository,
+                new FakeOutboxRepository());
+
+        try {
+            engine.start();
+
+            OrderCommandEvent maker = new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 1001L,
+                    "maker-short-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
+                    100L, 10L, MarginMode.CROSS, PositionSide.SHORT, false, false,
+                    Instant.parse("2026-07-01T00:00:00Z"), "trace-maker-short");
+            OrderCommandEvent taker = new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 2002L,
+                    "taker-long-202", "BTC-USDT", 7L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
+                    100L, 3L, MarginMode.CROSS, PositionSide.LONG, false, false,
+                    Instant.parse("2026-07-01T00:00:01Z"), "trace-taker-long");
+
+            service.process(maker);
+            resultRepository.orderPositionSides.put(101L, PositionSide.SHORT);
+            service.process(taker);
+
+            assertThat(resultRepository.trades).singleElement().satisfies(trade -> {
+                assertThat(trade.takerPositionSide()).isEqualTo(PositionSide.LONG);
+                assertThat(trade.makerPositionSide()).isEqualTo(PositionSide.SHORT);
+            });
+        } finally {
+            engine.stop();
+        }
+    }
+
+    @Test
+    void rejectsMarketOrderWhenMarkPriceUnavailableAtMatching() {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getEngine().setExchangeId("matching-service-mark-unavailable-test");
+        properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
+        properties.getProtection().setSelfTradePreventionEnabled(false);
+
+        MatchingSymbol matchingSymbol = new MatchingSymbol("BTC-USDT", 301, 11, 12);
+        InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
+        ExchangeCoreEngine engine = new ExchangeCoreEngine(properties,
+                new FakeMatchingSymbolRepository(instrument, matchingSymbol),
+                new FakeRecoveryRepository());
+        FakeResultRepository resultRepository = new FakeResultRepository();
+        MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
+                new FakeProtectionRepository(OptionalLong.empty()), new FakeSequenceRepository(), resultRepository,
+                new FakeOutboxRepository());
+
+        try {
+            engine.start();
+
+            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 1001L,
+                    "market-101", "BTC-USDT", 5L, OrderSide.BUY, OrderType.MARKET, TimeInForce.IOC,
+                    0L, 1L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
+
+            assertThat(resultRepository.results).singleElement().satisfies(result -> {
+                assertThat(result.orderStatus()).isEqualTo(OrderStatus.REJECTED);
+                assertThat(result.resultCode()).isEqualTo("MARK_PRICE_UNAVAILABLE");
+            });
+            assertThat(resultRepository.trades).isEmpty();
         } finally {
             engine.stop();
         }
@@ -305,20 +383,30 @@ class MatchingServiceTest {
 
     private static final class FakeProtectionRepository extends MatchingProtectionRepository {
         private final boolean wouldSelfTrade;
+        private final OptionalLong markPriceTicks;
         private int selfTradeChecks;
 
         private FakeProtectionRepository() {
-            this(false);
+            this(false, OptionalLong.of(100L));
         }
 
         private FakeProtectionRepository(boolean wouldSelfTrade) {
+            this(wouldSelfTrade, OptionalLong.of(100L));
+        }
+
+        private FakeProtectionRepository(OptionalLong markPriceTicks) {
+            this(false, markPriceTicks);
+        }
+
+        private FakeProtectionRepository(boolean wouldSelfTrade, OptionalLong markPriceTicks) {
             super(null);
             this.wouldSelfTrade = wouldSelfTrade;
+            this.markPriceTicks = markPriceTicks;
         }
 
         @Override
         public OptionalLong latestMarkPriceTicks(String symbol, long instrumentVersion, Duration maxAge) {
-            return OptionalLong.of(100L);
+            return markPriceTicks;
         }
 
         @Override
@@ -357,6 +445,7 @@ class MatchingServiceTest {
         private final List<MatchTradeEvent> trades = new ArrayList<>();
         private final Map<Long, Long> orderVersions = new HashMap<>();
         private final Map<Long, MarginMode> orderMarginModes = new HashMap<>();
+        private final Map<Long, PositionSide> orderPositionSides = new HashMap<>();
         private boolean rejectNextSaveResult;
         private boolean rejectNextSaveTrade;
         private int activeStatusUpdates;
@@ -387,7 +476,7 @@ class MatchingServiceTest {
 
         @Override
         public PositionSide orderPositionSide(long orderId) {
-            return PositionSide.NET;
+            return orderPositionSides.getOrDefault(orderId, PositionSide.NET);
         }
 
         @Override

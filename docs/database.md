@@ -362,6 +362,7 @@ CREATE INDEX insurance_coverages_user_time_idx
 
 - `deficit_user_id`: user whose `account_deficits` row is being covered.
 - `target_user_id`: profitable account whose position is reduced.
+- `target_position_side`: `NET`, `LONG`, or `SHORT`; records which position bucket was deleveraged.
 - `closed_quantity_steps`: reduced position size.
 - `realized_profit_units`: target-side profit realized by the ADL close.
 - `covered_units`: amount transferred to cover the deficit.

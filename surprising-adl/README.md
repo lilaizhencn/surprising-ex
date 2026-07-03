@@ -103,6 +103,7 @@ Root [init.sql](../init.sql) creates:
 
 - `adl_sequences`
 - `adl_events`
+  - `target_position_side` records the `NET`, `LONG`, or `SHORT` position bucket reduced by ADL.
 
 Core indexes:
 

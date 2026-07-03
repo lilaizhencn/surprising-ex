@@ -464,15 +464,15 @@ public class AdlRepository {
                                 Instant now) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO adl_events (
-                    event_id, deficit_user_id, target_user_id, asset, symbol, target_side,
+                    event_id, deficit_user_id, target_user_id, asset, symbol, target_side, target_position_side,
                     closed_quantity_steps, entry_price_ticks, mark_price_ticks, requested_deficit_units,
                     realized_profit_units, covered_units, remaining_deficit_units,
                     priority_score_ppm, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ADL_DEFICIT_COVERAGE', ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ADL_DEFICIT_COVERAGE', ?)
                 """, eventId, deficit.userId(), candidate.userId(), candidate.asset(), candidate.symbol(),
-                candidate.side().name(), closedSteps, candidate.entryPriceTicks(), candidate.markPriceTicks(),
-                deficit.deficitUnits(), realizedProfitUnits, coveredUnits, remainingDeficitUnits,
-                candidate.priorityScorePpm(), Timestamp.from(now));
+                candidate.side().name(), candidate.positionSide().name(), closedSteps, candidate.entryPriceTicks(),
+                candidate.markPriceTicks(), deficit.deficitUnits(), realizedProfitUnits, coveredUnits,
+                remainingDeficitUnits, candidate.priorityScorePpm(), Timestamp.from(now));
         requireSingleRow(rows, "ADL event insert");
     }
 
@@ -530,6 +530,7 @@ public class AdlRepository {
                 rs.getString("asset"),
                 rs.getString("symbol"),
                 AdlSide.valueOf(rs.getString("target_side")),
+                PositionSide.fromNullableDbValue(rs.getString("target_position_side")),
                 rs.getLong("closed_quantity_steps"),
                 rs.getLong("entry_price_ticks"),
                 rs.getLong("mark_price_ticks"),

@@ -101,6 +101,7 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 - `adl_sequences`
 - `adl_events`
+  - `target_position_side` 记录 ADL 减仓的是 `NET`、`LONG` 还是 `SHORT` 仓位桶。
 
 核心索引：
 

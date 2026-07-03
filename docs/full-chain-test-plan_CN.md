@@ -18,6 +18,18 @@
   预期：两档分别生成 `trigger-<triggerOrderId>` client order，每档使用自己的 `quantitySteps`。
 - [x] 前端多档位录入和打通。
   预期：交易面板可以新增多条 TP/SL，每档选择平多/平空、触发价、数量；提交后走 gateway `trading-trigger` 下单；底部账户面板展示并支持撤销。
+- [x] 撮合 HEDGE 仓位侧成交事件。
+  预期：taker 的 `positionSide` 来自 order command，maker 的 `positionSide` 从订单表读取，成交事件保留 `LONG/SHORT`。
+- [x] 风控 HEDGE 仓位侧扫描与强平候选事件。
+  预期：账户持仓事件触发扫描时按 `positionSide=SHORT` 定位仓位，风险事件和强平候选事件不退回 `NET`。
+- [x] 强平 HEDGE 仓位侧下单。
+  预期：SHORT 仓位强平时预撤同侧 reduce-only，生成 `BUY + reduceOnly + positionSide=SHORT` 的系统市价单，并写强平审计。
+- [x] 资金费 HEDGE 仓位侧扣款。
+  预期：资金费候选从 DB 映射 `positionSide`，扣款时只消耗对应 `LONG/SHORT` 仓位保证金，ledger reference 包含仓位侧。
+- [x] ADL HEDGE 仓位侧审计。
+  预期：ADL 更新/释放对应 `positionSide` 的仓位和保证金，并在 `adl_events.target_position_side` 记录被减仓仓位桶。
+- [x] 撮合侧 mark price 不可用兜底。
+  预期：order-provider 校验后到 matching 前 mark price 过期时，matching 返回 `MARK_PRICE_UNAVAILABLE`，不撮合、不生成成交。
 
 验证命令：
 
@@ -27,10 +39,20 @@ JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   -Dtest=TriggerOrderServiceTest,TriggerOrderRepositoryTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  mvn -q -pl :surprising-risk-provider,:surprising-liquidation-provider,:surprising-funding-provider,:surprising-adl-provider,:surprising-matching-provider,:surprising-order-provider,:surprising-trigger-provider -am \
+  -Dtest=RiskServiceTest,LiquidationServiceTest,FundingRepositoryTest,AdlRepositoryTest,MatchingServiceTest,OrderValidatorTest,TriggerOrderServiceTest,OrderServiceTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  mvn -q -pl :surprising-integration-test -am \
+  -Dtest=PostLiquidationFundingInsuranceAdlIntegrationTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
 npm run lint
 ```
 
-结果：两条命令均通过。
+结果：以上后端定向测试和 Web lint 均通过。
 
 ## 下单
 
@@ -70,6 +92,8 @@ npm run lint
   预期：同一合约同一保证金模式下只有 `positionSide=NET` 一行，买卖会增加、减少或翻转净仓。
 - [x] HEDGE 双向持仓链路的基本支持。
   预期：普通订单、条件单、账户持仓已经支持 `LONG/SHORT` 字段传递和持久化。
+- [x] HEDGE 关键资金链路单元回归。
+  预期：matching trade、risk event/candidate、liquidation order、funding payment、ADL event 都保留仓位侧。
 - [ ] HEDGE 全链路生产级回归。
   预期：LONG 和 SHORT 同时存在时，order/matching/account/risk/funding/liquidation/insurance/ADL/WebSocket 全链路都按方向隔离计算。
 - [x] 持仓模式切换保护。
@@ -152,7 +176,7 @@ npm run lint
 - [x] 保险基金覆盖亏损。
   预期：只减少显式 deficit，不增加用户 available。
 - [x] ADL。
-  预期：保险基金不足时按队列减少盈利方仓位并清除剩余 deficit。
+  预期：保险基金不足时按队列减少盈利方仓位并清除剩余 deficit，审计事件记录 `target_position_side`。
 - [ ] 高频做市和并发用户流量下强平/ADL。
   预期：强平、保险基金、ADL 与普通成交并发时不出现重复扣款、负余额、非法 OI。
 

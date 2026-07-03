@@ -1806,6 +1806,7 @@ CREATE TABLE IF NOT EXISTS adl_events (
     asset                       TEXT NOT NULL,
     symbol                      TEXT NOT NULL,
     target_side                 TEXT NOT NULL,
+    target_position_side        TEXT NOT NULL DEFAULT 'NET',
     closed_quantity_steps       BIGINT NOT NULL,
     entry_price_ticks           BIGINT NOT NULL,
     mark_price_ticks            BIGINT NOT NULL,
@@ -1821,6 +1822,7 @@ CREATE TABLE IF NOT EXISTS adl_events (
     CONSTRAINT adl_events_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT adl_events_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT adl_events_side_check CHECK (target_side IN ('LONG', 'SHORT')),
+    CONSTRAINT adl_events_position_side_check CHECK (target_position_side IN ('NET', 'LONG', 'SHORT')),
     CONSTRAINT adl_events_positive_values CHECK (
         closed_quantity_steps > 0
         AND entry_price_ticks > 0

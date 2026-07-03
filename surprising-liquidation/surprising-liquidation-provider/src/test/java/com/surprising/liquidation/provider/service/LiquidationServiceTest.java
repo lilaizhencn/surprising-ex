@@ -66,8 +66,9 @@ class LiquidationServiceTest {
         assertThat(command.orderType()).isEqualTo(OrderType.MARKET);
         assertThat(command.timeInForce()).isEqualTo(TimeInForce.IOC);
         assertThat(command.quantitySteps()).isEqualTo(5L);
+        assertThat(command.positionSide()).isEqualTo(PositionSide.NET);
         assertThat(command.reduceOnly()).isTrue();
-        assertThat(orderRepository.preemptions).containsExactly("2002:BTC-USDT:8:SELL");
+        assertThat(orderRepository.preemptions).containsExactly("2002:BTC-USDT:NET:8:SELL");
 
         assertThat(liquidationRepository.markedStatuses).isEmpty();
         assertThat(liquidationRepository.orders).hasSize(1);
@@ -82,6 +83,36 @@ class LiquidationServiceTest {
         assertThat(audit.reason()).isEqualTo("PARTIAL_LIQUIDATION");
         assertThat(liquidationRepository.sizingInputs).containsExactly(
                 new LiquidationSizingInput(10L, 10L, 40_000L, 400L, 0L));
+    }
+
+    @Test
+    void hedgeLiquidationUsesClaimedPositionSideForPreemptionSizingOrderAndAudit() {
+        FakeLiquidationRepository liquidationRepository = new FakeLiquidationRepository();
+        liquidationRepository.candidatePositionSide = PositionSide.SHORT;
+        liquidationRepository.candidateSignedQuantitySteps = -10L;
+        liquidationRepository.pricingSignedQuantitySteps = -10L;
+        FakeLiquidationOrderRepository orderRepository = new FakeLiquidationOrderRepository();
+        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
+                liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(),
+                new LiquidationPriceCalculator());
+
+        service.processCandidate(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT",
+                MarginMode.CROSS, PositionSide.SHORT, 8L, "USDT", -10L, 590_000L,
+                -200_000_000L, 88_500_000L, 1_100_000L,
+                Instant.parse("2026-07-01T00:00:00Z")));
+
+        assertThat(orderRepository.preemptions).containsExactly("2002:BTC-USDT:SHORT:8:BUY");
+        assertThat(orderRepository.commands).singleElement().satisfies(command -> {
+            assertThat(command.side()).isEqualTo(OrderSide.BUY);
+            assertThat(command.positionSide()).isEqualTo(PositionSide.SHORT);
+            assertThat(command.reduceOnly()).isTrue();
+        });
+        assertThat(liquidationRepository.sizingInputs).containsExactly(
+                new LiquidationSizingInput(10L, 10L, 40_000L, 400L, 0L));
+        assertThat(liquidationRepository.orders).singleElement().satisfies(order -> {
+            assertThat(order.side()).isEqualTo(OrderSide.BUY);
+            assertThat(order.quantitySteps()).isEqualTo(5L);
+        });
     }
 
     @Test
@@ -120,7 +151,7 @@ class LiquidationServiceTest {
                 "USDT", 10L, 590_000L, -200_000_000L, 88_500_000L, 1_100_000L,
                 Instant.parse("2026-07-01T00:00:00Z")));
 
-        assertThat(orderRepository.preemptions).containsExactly("2002:BTC-USDT:8:SELL");
+        assertThat(orderRepository.preemptions).containsExactly("2002:BTC-USDT:NET:8:SELL");
         assertThat(orderRepository.commands).hasSize(1);
         assertThat(orderRepository.commands.get(0).quantitySteps()).isEqualTo(5L);
         assertThat(liquidationRepository.markedStatuses).isEmpty();
@@ -293,6 +324,8 @@ class LiquidationServiceTest {
         private long pendingCloseSteps = 4L;
         private boolean insertAudit = true;
         private long pricingSignedQuantitySteps = 10L;
+        private long candidateSignedQuantitySteps = 10L;
+        private PositionSide candidatePositionSide = PositionSide.NET;
         private RiskStatus accountRiskStatus = RiskStatus.LIQUIDATION;
         private RiskStatus positionRiskStatus = RiskStatus.LIQUIDATION;
         private final List<String> markedStatuses = new ArrayList<>();
@@ -353,8 +386,9 @@ class LiquidationServiceTest {
         @Override
         public Optional<ClaimedCandidate> claimCandidate(long candidateId) {
             claimAttempts++;
-            return Optional.of(new ClaimedCandidate(candidateId, 9301L, 2002L, "BTC-USDT", 8L,
-                    "USDT", 10L, 590_000L, 1_000L, 500L, 1_100_000L));
+            return Optional.of(new ClaimedCandidate(candidateId, 9301L, 2002L, "BTC-USDT",
+                    MarginMode.CROSS, candidatePositionSide, 8L, "USDT", candidateSignedQuantitySteps,
+                    590_000L, 1_000L, 500L, 1_100_000L));
         }
 
         @Override
@@ -377,7 +411,7 @@ class LiquidationServiceTest {
             assertThat(maxSnapshotAge).isEqualTo(Duration.ofSeconds(5));
             assertThat(symbol).isEqualTo("BTC-USDT");
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(positionSide).isEqualTo(PositionSide.NET);
+            assertThat(positionSide).isEqualTo(candidatePositionSide);
             assertThat(instrumentVersion).isEqualTo(8L);
             return positionRiskStatus;
         }
@@ -405,8 +439,8 @@ class LiquidationServiceTest {
                                                              long instrumentVersion) {
             assertThat(instrumentVersion).isEqualTo(8L);
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(positionSide).isEqualTo(PositionSide.NET);
-            return Optional.of(new LiquidationCloseState(10L));
+            assertThat(positionSide).isEqualTo(candidatePositionSide);
+            return Optional.of(new LiquidationCloseState(candidateSignedQuantitySteps));
         }
 
         @Override
@@ -431,8 +465,8 @@ class LiquidationServiceTest {
                                             OrderSide closeSide) {
             assertThat(instrumentVersion).isEqualTo(8L);
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(positionSide).isEqualTo(PositionSide.NET);
-            assertThat(closeSide).isEqualTo(OrderSide.SELL);
+            assertThat(positionSide).isEqualTo(candidatePositionSide);
+            assertThat(closeSide).isEqualTo(LiquidationSideResolver.closeSide(candidateSignedQuantitySteps));
             return pendingCloseSteps;
         }
 
@@ -462,7 +496,7 @@ class LiquidationServiceTest {
                                                            long instrumentVersion,
                                                            long availableCloseSteps) {
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(positionSide).isEqualTo(PositionSide.NET);
+            assertThat(positionSide).isEqualTo(candidatePositionSide);
             LiquidationSizingInput input = new LiquidationSizingInput(10L, availableCloseSteps,
                     40_000L, 400L, 0L);
             sizingInputs.add(input);
@@ -489,7 +523,7 @@ class LiquidationServiceTest {
             assertThat(userId).isEqualTo(2002L);
             assertThat(symbol).isEqualTo("BTC-USDT");
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(positionSide).isEqualTo(PositionSide.NET);
+            assertThat(positionSide).isEqualTo(candidatePositionSide);
             assertThat(instrumentVersion).isEqualTo(8L);
             return Optional.of(new LiquidationPricingInput(
                     com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL,
@@ -587,7 +621,7 @@ class LiquidationServiceTest {
                 return false;
             }
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(positionSide).isEqualTo(PositionSide.NET);
+            assertThat(positionSide).isEqualTo(candidatePositionSide);
             LiquidationPricingDecision auditPricing = pricing == null ? LiquidationPricingDecision.empty() : pricing;
             orders.add(new LiquidationOrderResponse(liquidationOrderId, candidateId, orderId, userId,
                     symbol, marginMode, side, quantitySteps, auditPricing.bankruptcyPriceTicks(),
@@ -644,8 +678,7 @@ class LiquidationServiceTest {
                                                    Instant now,
                                                    Function<Object, String> serializer) {
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(positionSide).isEqualTo(PositionSide.NET);
-            preemptions.add(userId + ":" + symbol + ":" + instrumentVersion + ":" + closeSide);
+            preemptions.add(userId + ":" + symbol + ":" + positionSide + ":" + instrumentVersion + ":" + closeSide);
             return openReduceOnlyCloseOrders;
         }
 
@@ -686,10 +719,10 @@ class LiquidationServiceTest {
                                                              Instant now,
                                                              Function<Object, String> serializer) {
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(positionSide).isEqualTo(PositionSide.NET);
+            assertThat(positionSide).isNotNull();
             OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, 8001L, 7001L, userId,
                     "LIQ-" + candidateId, symbol, instrumentVersion, side, OrderType.MARKET,
-                    TimeInForce.IOC, 0L, quantitySteps, true, false, now);
+                    TimeInForce.IOC, 0L, quantitySteps, marginMode, positionSide, true, false, now, null);
             commands.add(command);
             return command;
         }

@@ -12,6 +12,8 @@ import static org.mockito.Mockito.when;
 import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.provider.model.FundingPaymentCandidate;
 import com.surprising.funding.provider.model.FundingRateInput;
+import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.PositionSide;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -79,6 +81,8 @@ class FundingRepositoryTest {
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getLong("user_id")).thenReturn(1001L);
                     when(rs.getString("symbol")).thenReturn("BTC-USDT");
+                    when(rs.getString("margin_mode")).thenReturn("ISOLATED");
+                    when(rs.getString("position_side")).thenReturn("SHORT");
                     when(rs.getString("asset")).thenReturn("BTC");
                     when(rs.getString("contract_type")).thenReturn("INVERSE_PERPETUAL");
                     when(rs.getLong("signed_quantity_steps")).thenReturn(-10L);
@@ -95,9 +99,64 @@ class FundingRepositoryTest {
                 fundingTime.minusSeconds(10)));
 
         assertThat(candidates).singleElement().satisfies(candidate -> {
+            assertThat(candidate.marginMode()).isEqualTo(MarginMode.ISOLATED);
+            assertThat(candidate.positionSide()).isEqualTo(PositionSide.SHORT);
             assertThat(candidate.notionalUnits()).isEqualTo(20_000L);
             assertThat(candidate.amountUnits()).isEqualTo(2_000L);
         });
+    }
+
+    @Test
+    void fundingChargeOnlyDebitsSelectedHedgePositionMargin() throws Exception {
+        FundingRepository repository = new FundingRepository(jdbcTemplate);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        FundingPaymentCandidate payment = new FundingPaymentCandidate(
+                1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.SHORT, "USDT",
+                -10L, 1_000L, 90_000L, -90L);
+
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO account_sequences"), eq(Long.class),
+                eq("ledger-entry"))).thenReturn(1L);
+        when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_position_margins"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_balances"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_deficits"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
+                eq(1001L), eq("USDT"), eq("CROSS"), eq("SHORT")))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getString("symbol")).thenReturn("BTC-USDT");
+                    when(rs.getString("asset")).thenReturn("USDT");
+                    when(rs.getString("margin_mode")).thenReturn("CROSS");
+                    when(rs.getString("position_side")).thenReturn("SHORT");
+                    when(rs.getLong("margin_units")).thenReturn(90L);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+        when(jdbcTemplate.queryForObject(contains("SELECT b.available_units"), anyRowMapper(),
+                eq(1001L), eq("USDT"))).thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("available_units")).thenReturn(0L);
+                    when(rs.getLong("locked_units")).thenReturn(100L);
+                    when(rs.getLong("deficit_units")).thenReturn(0L);
+                    return mapper.mapRow(rs, 0);
+                });
+
+        repository.applyPaymentToAccount(3001L, payment, now);
+
+        verify(jdbcTemplate).update(contains("UPDATE account_position_margins"),
+                eq(90L), any(Timestamp.class), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq("SHORT"),
+                eq(90L));
+        verify(jdbcTemplate).update(contains("UPDATE account_balances"),
+                eq(0L), eq(10L), any(Timestamp.class), eq(1001L), eq("USDT"));
+        verify(jdbcTemplate).update(contains("UPDATE account_ledger_entries"),
+                eq(10L), eq("3001:1001:BTC-USDT:CROSS:SHORT"), eq(1001L), eq("USDT"));
     }
 
     @Test

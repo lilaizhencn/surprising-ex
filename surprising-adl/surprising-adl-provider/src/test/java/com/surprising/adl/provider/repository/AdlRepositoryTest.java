@@ -13,6 +13,8 @@ import static org.mockito.Mockito.when;
 import com.surprising.adl.api.model.AdlSide;
 import com.surprising.adl.provider.model.AdlCandidate;
 import com.surprising.adl.provider.model.DeficitRow;
+import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.PositionSide;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -43,6 +45,8 @@ class AdlRepositoryTest {
                     when(rs.getLong("user_id")).thenReturn(1001L);
                     when(rs.getString("asset")).thenReturn("USDT");
                     when(rs.getString("symbol")).thenReturn("BTC-USDT");
+                    when(rs.getString("margin_mode")).thenReturn("CROSS");
+                    when(rs.getString("position_side")).thenReturn("LONG");
                     when(rs.getString("contract_type")).thenReturn("LINEAR_PERPETUAL");
                     when(rs.getLong("signed_quantity_steps")).thenReturn(10L);
                     when(rs.getLong("entry_price_ticks")).thenReturn(100L);
@@ -58,6 +62,8 @@ class AdlRepositoryTest {
         List<AdlCandidate> queue = repository.queue("USDT", 1, Duration.ofSeconds(5));
 
         assertThat(queue).singleElement().satisfies(candidate -> {
+            assertThat(candidate.marginMode()).isEqualTo(MarginMode.CROSS);
+            assertThat(candidate.positionSide()).isEqualTo(PositionSide.LONG);
             assertThat(candidate.absQuantitySteps()).isEqualTo(10L);
             assertThat(candidate.profitTicksPerStep()).isEqualTo(10L);
             assertThat(candidate.notionalUnits()).isEqualTo(110_000L);
@@ -107,12 +113,12 @@ class AdlRepositoryTest {
         when(jdbcTemplate.update(contains("UPDATE account_positions"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq("NET"))).thenAnswer(invocation -> {
+                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq("LONG"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getString("asset")).thenReturn("USDT");
                     when(rs.getString("margin_mode")).thenReturn("CROSS");
-                    when(rs.getString("position_side")).thenReturn("NET");
+                    when(rs.getString("position_side")).thenReturn("LONG");
                     when(rs.getLong("margin_units")).thenReturn(100L);
                     return List.of(mapper.mapRow(rs, 0));
                 });
@@ -134,7 +140,8 @@ class AdlRepositoryTest {
 
         long remaining = repository.executeAdl(
                 new DeficitRow(2002L, "USDT", 500L),
-                new AdlCandidate(1001L, "USDT", "BTC-USDT", AdlSide.LONG,
+                new AdlCandidate(1001L, "USDT", "BTC-USDT", MarginMode.CROSS, PositionSide.LONG,
+                        AdlSide.LONG,
                         10L, 10L, 100L, 200L, 100L,
                         2_000L, 1_000L, 100L,
                         500_000L, 20_000_000L, 10_000_000L),
@@ -143,11 +150,11 @@ class AdlRepositoryTest {
         assertThat(remaining).isZero();
         verify(jdbcTemplate).update(contains("UPDATE account_positions"),
                 eq(5L), eq(5L), eq(100L), eq(500L), any(Timestamp.class),
-                eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET"));
+                eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("LONG"));
         verify(jdbcTemplate).update(contains("locked_units = locked_units - ?"),
                 eq(50L), eq(50L), any(Timestamp.class), eq(1001L), eq("USDT"), eq(50L));
         verify(jdbcTemplate).update(contains("UPDATE account_position_margins"),
-                eq(50L), any(Timestamp.class), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq("NET"),
+                eq(50L), any(Timestamp.class), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq("LONG"),
                 eq(50L));
         verify(jdbcTemplate).update(contains("UPDATE account_balances"),
                 eq(550L), eq(50L), any(Timestamp.class), eq(1001L), eq("USDT"));
@@ -168,7 +175,7 @@ class AdlRepositoryTest {
                 eq("ADL_COVERAGE"), eq("301"), eq("ADL_DEFICIT_COVERAGE"),
                 any(Timestamp.class));
         verify(jdbcTemplate).update(contains("INSERT INTO adl_events"),
-                eq(301L), eq(2002L), eq(1001L), eq("USDT"), eq("BTC-USDT"), eq("LONG"),
+                eq(301L), eq(2002L), eq(1001L), eq("USDT"), eq("BTC-USDT"), eq("LONG"), eq("LONG"),
                 eq(5L), eq(100L), eq(200L), eq(500L), eq(500L), eq(500L), eq(0L),
                 eq(10_000_000L), any(Timestamp.class));
     }
