@@ -6,6 +6,13 @@ Exchange backend services for Surprising.
 
 This repository is the root reactor for exchange backend modules. Each business module keeps its own detailed README and deployment notes.
 
+## Project Deep Dive
+
+To understand the project architecture and implementation details, read the Surprising Ex perpetual contract exchange source code deep dive:
+
+- [English](https://tokdou.com/en/tutorials/surprising-ex-perpetual-contract-exchange-source-code-deep-dive)
+- [简体中文](https://tokdou.com/tutorials/surprising-ex-perpetual-contract-exchange-source-code-deep-dive)
+
 ## Modules
 
 - `surprising-dependencies`: centralized dependency versions copied from `surprising-wallet`.

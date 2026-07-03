@@ -6,6 +6,13 @@ Surprising 交易所后端服务。
 
 这个仓库是交易所后端模块的根聚合工程。每个业务模块维护自己的详细 README 和部署说明。
 
+## 项目解读
+
+如果想了解项目整体架构和实现细节，可以阅读 Surprising Ex 永续合约交易所源码深度解读文章：
+
+- [中文](https://tokdou.com/tutorials/surprising-ex-perpetual-contract-exchange-source-code-deep-dive)
+- [English](https://tokdou.com/en/tutorials/surprising-ex-perpetual-contract-exchange-source-code-deep-dive)
+
 ## 模块
 
 - `surprising-dependencies`：从 `surprising-wallet` 复制过来的统一依赖版本管理模块。

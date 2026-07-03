@@ -14,9 +14,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.core.task.SyncTaskExecutor;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.task.TaskExecutionAutoConfiguration;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -36,10 +36,11 @@ public class AdminQueryTaskService {
     public AdminQueryTaskService(AdminQueryTaskRepository repository,
                                  JdbcTemplate jdbcTemplate,
                                  ObjectMapper objectMapper,
-                                 ObjectProvider<TaskExecutor> taskExecutorProvider,
+                                 @Qualifier(TaskExecutionAutoConfiguration.APPLICATION_TASK_EXECUTOR_BEAN_NAME)
+                                 TaskExecutor taskExecutor,
                                  GatewayProperties gatewayProperties) {
         this(repository, jdbcTemplate, objectMapper,
-                taskExecutorProvider.getIfUnique(SyncTaskExecutor::new),
+                taskExecutor,
                 gatewayProperties == null ? new GatewayProperties().getQueryTasks() : gatewayProperties.getQueryTasks());
     }
 

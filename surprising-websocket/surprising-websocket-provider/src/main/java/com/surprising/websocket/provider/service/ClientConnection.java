@@ -6,6 +6,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,6 +29,7 @@ public class ClientConnection implements AutoCloseable {
     private final BlockingQueue<String> outbound;
     private final Duration sendTimeout;
     private final AtomicBoolean open = new AtomicBoolean(true);
+    private final ReentrantLock sendLock = new ReentrantLock();
     private final Thread writerThread;
 
     public ClientConnection(WebSocketSession session,
@@ -96,19 +98,19 @@ public class ClientConnection implements AutoCloseable {
             }
         });
         try {
-            synchronized (session) {
+            sendLock.lockInterruptibly();
+            try {
                 if (!session.isOpen()) {
                     return false;
                 }
                 session.sendMessage(new TextMessage(payload));
+            } finally {
+                sendLock.unlock();
             }
-            sent.set(true);
-            watchdog.interrupt();
             return true;
-        } catch (IOException ex) {
+        } finally {
             sent.set(true);
             watchdog.interrupt();
-            throw ex;
         }
     }
 

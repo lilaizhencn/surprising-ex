@@ -19,6 +19,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -29,16 +30,17 @@ public class ExternalSpotPriceClient {
     private final IndexPriceProperties properties;
     private final ObjectMapper objectMapper;
     private final ExecutorService executorService;
+    private final Semaphore requestPermits;
     private final HttpClient httpClient;
     private final Map<String, CachedConversionRate> conversionRateCache = new ConcurrentHashMap<>();
 
     public ExternalSpotPriceClient(IndexPriceProperties properties, ObjectMapper objectMapper) {
         this.properties = properties;
         this.objectMapper = objectMapper;
-        this.executorService = Executors.newFixedThreadPool(properties.getHttp().getMaxConcurrentRequests());
+        this.executorService = Executors.newVirtualThreadPerTaskExecutor();
+        this.requestPermits = new Semaphore(Math.max(1, properties.getHttp().getMaxConcurrentRequests()));
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(properties.getHttp().getConnectTimeout())
-                .executor(executorService)
                 .build();
     }
 
@@ -47,16 +49,7 @@ public class ExternalSpotPriceClient {
             return CompletableFuture.completedFuture(error(source, SourceStatus.DISABLED, "source disabled", Instant.now(), null));
         }
 
-        Instant start = Instant.now();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(source.getBaseUrl() + source.getPath()))
-                .timeout(properties.getHttp().getRequestTimeout())
-                .header("User-Agent", properties.getHttp().getUserAgent())
-                .GET()
-                .build();
-
-        return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                .thenApply(response -> parseResponse(source, response, start))
-                .exceptionally(ex -> error(source, SourceStatus.ERROR, ex.getMessage(), Instant.now(), elapsedMillis(start, Instant.now())));
+        return CompletableFuture.supplyAsync(() -> fetchBlocking(source), executorService);
     }
 
     public SourceQuote parsePayload(IndexPriceProperties.SourceConfig source, String payload,
@@ -80,22 +73,61 @@ public class ExternalSpotPriceClient {
     }
 
     public BigDecimal fetchTickerPrice(String baseUrl, String path, String parser) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + path))
-                .timeout(properties.getHttp().getRequestTimeout())
-                .header("User-Agent", properties.getHttp().getUserAgent())
-                .GET()
-                .build();
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IllegalArgumentException("ticker http status " + response.statusCode());
+        boolean acquired = false;
+        try {
+            requestPermits.acquire();
+            acquired = true;
+            HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + path))
+                    .timeout(properties.getHttp().getRequestTimeout())
+                    .header("User-Agent", properties.getHttp().getUserAgent())
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new IllegalArgumentException("ticker http status " + response.statusCode());
+            }
+            ParsedTicker ticker = parseTicker(parser, objectMapper.readTree(response.body()));
+            return ticker.price();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw ex;
+        } finally {
+            if (acquired) {
+                requestPermits.release();
+            }
         }
-        ParsedTicker ticker = parseTicker(parser, objectMapper.readTree(response.body()));
-        return ticker.price();
     }
 
     @PreDestroy
     public void close() {
         executorService.shutdownNow();
+    }
+
+    private SourceQuote fetchBlocking(IndexPriceProperties.SourceConfig source) {
+        Instant start = Instant.now();
+        boolean acquired = false;
+        try {
+            requestPermits.acquire();
+            acquired = true;
+            HttpRequest request = HttpRequest.newBuilder(URI.create(source.getBaseUrl() + source.getPath()))
+                    .timeout(properties.getHttp().getRequestTimeout())
+                    .header("User-Agent", properties.getHttp().getUserAgent())
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            return parseResponse(source, response, start);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return error(source, SourceStatus.ERROR, "request interrupted", Instant.now(),
+                    elapsedMillis(start, Instant.now()));
+        } catch (Exception ex) {
+            return error(source, SourceStatus.ERROR, ex.getMessage(), Instant.now(),
+                    elapsedMillis(start, Instant.now()));
+        } finally {
+            if (acquired) {
+                requestPermits.release();
+            }
+        }
     }
 
     private SourceQuote parseResponse(IndexPriceProperties.SourceConfig source, HttpResponse<String> response, Instant start) {

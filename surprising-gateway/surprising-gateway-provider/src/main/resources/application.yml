@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: surprising-gateway-provider
+  main:
+    keep-alive: true
+  threads:
+    virtual:
+      enabled: true
   datasource:
     url: jdbc:postgresql://localhost:5432/surprising_exchange
     username: surprising
