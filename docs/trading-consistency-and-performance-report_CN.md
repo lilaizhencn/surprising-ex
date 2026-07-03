@@ -179,6 +179,7 @@ npm run lint
 结果：
 
 - risk/liquidation/funding/adl/matching/order/trigger 定向测试通过，覆盖 HEDGE 仓位侧透传、ADL `target_position_side`、TP/SL 多档触发、TP/SL 在 mark price 不可用时不 claim、强平先清仓后 TP/SL 转 `TRIGGER_FAILED`，以及 mark price 不可用时 matching 拒绝。
+- account 定向测试通过，覆盖持仓模式切换全部前置条件：无非零持仓、无活动订单、无待触发条件单、无未结算成交、无活动保证金预占。
 - `PostLiquidationFundingInsuranceAdlIntegrationTest` 通过，确认 ADL API 模型兼容性和强平后资金费/保险/ADL 集成链路未破坏。
 - full-stack real-config smoke 通过，确认真实进程下仓位模式、TP/SL、撮合/account 恢复、资金费、强平、保险基金、ADL、WebSocket 和会计不变量可跑通；该结果仍是短时 smoke，不等同生产级长时间压测。
 - Web 前端本轮没有改动；上一次 `npm run lint` 已在 2026-07-04 通过。

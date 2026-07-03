@@ -136,22 +136,80 @@ class AccountRepositoryTest {
     void updatePositionModeRequiresNoActiveMarginReservations() {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
-        when(jdbcTemplate.query(contains("FROM account_position_modes"), anyRowMapper(), eq(1001L)))
-                .thenReturn(List.of());
-        when(jdbcTemplate.queryForObject(contains("FROM account_positions"), eq(Boolean.class), eq(1001L)))
-                .thenReturn(false);
-        when(jdbcTemplate.queryForObject(contains("FROM trading_orders"), eq(Boolean.class), eq(1001L)))
-                .thenReturn(false);
-        when(jdbcTemplate.queryForObject(contains("FROM trading_trigger_orders"), eq(Boolean.class), eq(1001L)))
-                .thenReturn(false);
-        when(jdbcTemplate.queryForObject(contains("FROM trading_match_trades"), eq(Boolean.class),
-                eq(1001L), eq(1001L))).thenReturn(false);
-        when(jdbcTemplate.queryForObject(contains("FROM account_margin_reservations"), eq(Boolean.class),
-                eq(1001L))).thenReturn(true);
+        stubMissingPositionMode(1001L);
+        stubPositionModeSwitchChecks(false, false, false, false, true);
 
         assertThatThrownBy(() -> repository.updatePositionMode(1001L, PositionMode.HEDGE, now))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("position mode switch requires no active margin reservations");
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO account_position_modes"), any(Object[].class));
+    }
+
+    @Test
+    void updatePositionModeSwitchesWhenAllGuardsAreClear() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        stubMissingPositionMode(1001L);
+        stubPositionModeSwitchChecks(false, false, false, false, false);
+        when(jdbcTemplate.update(contains("INSERT INTO account_position_modes"),
+                eq(1001L), eq("HEDGE"), any(Timestamp.class))).thenReturn(1);
+
+        var response = repository.updatePositionMode(1001L, PositionMode.HEDGE, now);
+
+        assertThat(response.positionMode()).isEqualTo(PositionMode.HEDGE);
+        verify(jdbcTemplate).update(contains("INSERT INTO account_position_modes"),
+                eq(1001L), eq("HEDGE"), any(Timestamp.class));
+    }
+
+    @Test
+    void updatePositionModeRequiresNoOpenPositions() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        stubMissingPositionMode(1001L);
+        stubPositionModeSwitchChecks(true, false, false, false, false);
+
+        assertThatThrownBy(() -> repository.updatePositionMode(1001L, PositionMode.HEDGE, now))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("position mode switch requires no open positions");
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO account_position_modes"), any(Object[].class));
+    }
+
+    @Test
+    void updatePositionModeRequiresNoActiveOrders() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        stubMissingPositionMode(1001L);
+        stubPositionModeSwitchChecks(false, true, false, false, false);
+
+        assertThatThrownBy(() -> repository.updatePositionMode(1001L, PositionMode.HEDGE, now))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("position mode switch requires no active orders");
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO account_position_modes"), any(Object[].class));
+    }
+
+    @Test
+    void updatePositionModeRequiresNoPendingTriggerOrders() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        stubMissingPositionMode(1001L);
+        stubPositionModeSwitchChecks(false, false, true, false, false);
+
+        assertThatThrownBy(() -> repository.updatePositionMode(1001L, PositionMode.HEDGE, now))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("position mode switch requires no pending trigger orders");
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO account_position_modes"), any(Object[].class));
+    }
+
+    @Test
+    void updatePositionModeRequiresAllMatchedTradesSettled() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        stubMissingPositionMode(1001L);
+        stubPositionModeSwitchChecks(false, false, false, true, false);
+
+        assertThatThrownBy(() -> repository.updatePositionMode(1001L, PositionMode.HEDGE, now))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("position mode switch requires all matched trades to be settled");
         verify(jdbcTemplate, never()).update(contains("INSERT INTO account_position_modes"), any(Object[].class));
     }
 
@@ -772,6 +830,28 @@ class AccountRepositoryTest {
     @SuppressWarnings("unchecked")
     private RowMapper<Object> anyRowMapper() {
         return any(RowMapper.class);
+    }
+
+    private void stubMissingPositionMode(long userId) {
+        when(jdbcTemplate.query(contains("FROM account_position_modes"), anyRowMapper(), eq(userId)))
+                .thenReturn(List.of());
+    }
+
+    private void stubPositionModeSwitchChecks(boolean hasOpenPositions,
+                                              boolean hasOpenOrders,
+                                              boolean hasPendingTriggers,
+                                              boolean hasUnsettledTrades,
+                                              boolean hasActiveReservations) {
+        when(jdbcTemplate.queryForObject(contains("FROM account_positions"), eq(Boolean.class), eq(1001L)))
+                .thenReturn(hasOpenPositions);
+        when(jdbcTemplate.queryForObject(contains("FROM trading_orders"), eq(Boolean.class), eq(1001L)))
+                .thenReturn(hasOpenOrders);
+        when(jdbcTemplate.queryForObject(contains("FROM trading_trigger_orders"), eq(Boolean.class), eq(1001L)))
+                .thenReturn(hasPendingTriggers);
+        when(jdbcTemplate.queryForObject(contains("FROM trading_match_trades"), eq(Boolean.class),
+                eq(1001L), eq(1001L))).thenReturn(hasUnsettledTrades);
+        when(jdbcTemplate.queryForObject(contains("FROM account_margin_reservations"), eq(Boolean.class),
+                eq(1001L))).thenReturn(hasActiveReservations);
     }
 
     private org.mockito.stubbing.Answer<List<Object>> positionTarget(String asset,

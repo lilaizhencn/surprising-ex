@@ -55,6 +55,11 @@ JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   -Dtest=PostLiquidationFundingInsuranceAdlIntegrationTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  mvn -q -pl :surprising-account-provider -am \
+  -Dtest=AccountRepositoryTest,AccountServiceTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
 POSTGRES_PORT=55433 \
 PAIR_COUNT=3 LOAD_CONCURRENCY=2 BOOK_DEPTH_LEVELS=5 RUN_FAILURE_SCENARIOS=true \
 BUILD_SERVICES=auto KEEP_TMP=true WS_TIMEOUT=240 \
@@ -112,6 +117,8 @@ npm run lint
   预期：LONG 和 SHORT 同时存在时，order/matching/account/risk/funding/liquidation/insurance/ADL/WebSocket 全链路都按方向隔离计算。
 - [x] 持仓模式切换保护。
   预期：有开放仓位、开放订单或开放条件单时，拒绝切换净仓/双向模式。
+- [x] 持仓模式切换全部前置条件。
+  预期：切换前必须无非零持仓、无活动订单、无待触发条件单、无未被 account 处理的 matched trade、无活动保证金预占；全部满足时才允许从 `ONE_WAY` 切到 `HEDGE` 或反向切换。
 
 ## 保证金模式
 
