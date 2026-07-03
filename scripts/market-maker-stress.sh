@@ -24,6 +24,8 @@ MM_DEPTH_LEVELS="${MM_DEPTH_LEVELS:-20}"
 MM_LEVEL_QUANTITY_STEPS="${MM_LEVEL_QUANTITY_STEPS:-50}"
 MM_REFRESH_LEVELS="${MM_REFRESH_LEVELS:-5}"
 MM_REFRESH_QUANTITY_STEPS="${MM_REFRESH_QUANTITY_STEPS:-20}"
+MM_REFRESH_CYCLES="${MM_REFRESH_CYCLES:-1}"
+MM_REFRESH_INTERVAL_SECONDS="${MM_REFRESH_INTERVAL_SECONDS:-0}"
 TAKER_ORDER_COUNT="${TAKER_ORDER_COUNT:-1000}"
 TAKER_QUANTITY_STEPS="${TAKER_QUANTITY_STEPS:-2}"
 LOAD_CONCURRENCY="${LOAD_CONCURRENCY:-64}"
@@ -1004,7 +1006,7 @@ run_matching_node_failure_after_open_book() {
     exit 1
   fi
 
-  local failover_user=$((TAKER_USER_START + TAKER_ORDER_COUNT + 50))
+  local failover_user=$((TAKER_USER_START + TOTAL_TAKER_ORDER_COUNT + 50))
   local client_order_id="stress-matching-failover-${RUN_ID}"
   local trace_id="mm-stress-${RUN_ID}-matching-failover"
   adjust_balance "${failover_user}" "mm-stress-${RUN_ID}-matching-failover-user"
@@ -1233,7 +1235,7 @@ SELECT '- 表行数：orders=' || (SELECT count(*) FROM trading_orders WHERE cli
     || ' positions=' || (
         SELECT count(*)
           FROM account_positions
-         WHERE user_id BETWEEN ${MM_USER_START} AND $((TAKER_USER_START + TAKER_ORDER_COUNT + 100))
+         WHERE user_id BETWEEN ${MM_USER_START} AND $((TAKER_USER_START + TOTAL_TAKER_ORDER_COUNT + 100))
        )
     || ' openTradingOutbox=' || (SELECT count(*) FROM trading_outbox_events WHERE published_at IS NULL)
     || ' openAccountOutbox=' || (SELECT count(*) FROM account_outbox_events WHERE published_at IS NULL);
@@ -1420,7 +1422,8 @@ ${FAILURE_SCENARIO_SUMMARY}
 - 做市商账号数：${MM_ACCOUNT_COUNT}
 - 做市商初始深度：每个 symbol、每侧 ${MM_DEPTH_LEVELS} 档，每档 ${MM_LEVEL_QUANTITY_STEPS} steps
 - 做市商刷新挂单：每个 symbol、每侧 ${MM_REFRESH_LEVELS} 档，每档 ${MM_REFRESH_QUANTITY_STEPS} steps
-- 普通用户订单数：${TAKER_ORDER_COUNT}
+- 做市商连续刷新轮数：${MM_REFRESH_CYCLES}，轮间隔 ${MM_REFRESH_INTERVAL_SECONDS}s
+- 普通用户订单数：${taker_count}
 - 普通用户每单数量：${TAKER_QUANTITY_STEPS} steps
 - 并发度：${LOAD_CONCURRENCY}
 - Symbols：${BTC_SYMBOL}, ${ETH_SYMBOL}
@@ -1513,6 +1516,10 @@ if ((MM_ACCOUNT_COUNT <= 0 || MM_DEPTH_LEVELS <= 0 || TAKER_ORDER_COUNT <= 0 || 
   echo "stress parameters must be positive" >&2
   exit 1
 fi
+if ((MM_REFRESH_CYCLES <= 0 || MM_REFRESH_INTERVAL_SECONDS < 0)); then
+  echo "MM_REFRESH_CYCLES must be positive and MM_REFRESH_INTERVAL_SECONDS must be zero or positive" >&2
+  exit 1
+fi
 if ((EXTRA_MATCHING_NODES < 0 || EXTRA_ACCOUNT_NODES < 0 || EXTRA_WEBSOCKET_NODES < 0)); then
   echo "extra node counts must be zero or positive" >&2
   exit 1
@@ -1533,6 +1540,7 @@ if [[ "${MATCHING_NODE_FAILURE_AFTER_OPEN_BOOK}" == "true" && "${START_PROVIDERS
   echo "MATCHING_NODE_FAILURE_AFTER_OPEN_BOOK=true requires START_PROVIDERS=true so the script can stop and restart matching nodes" >&2
   exit 1
 fi
+TOTAL_TAKER_ORDER_COUNT=$((TAKER_ORDER_COUNT * MM_REFRESH_CYCLES))
 
 if [[ "${START_INFRA}" == "true" ]]; then
   echo "Starting Docker infrastructure"
@@ -1606,7 +1614,7 @@ echo "Funding market-maker and ordinary user accounts"
 for ((i = 0; i < MM_ACCOUNT_COUNT; i++)); do
   adjust_balance "$((MM_USER_START + i))" "mm-stress-${RUN_ID}-mm-${i}"
 done
-for ((i = 0; i < TAKER_ORDER_COUNT; i++)); do
+for ((i = 0; i < TOTAL_TAKER_ORDER_COUNT; i++)); do
   adjust_balance "$((TAKER_USER_START + i))" "mm-stress-${RUN_ID}-user-${i}"
 done
 
@@ -1637,54 +1645,65 @@ if [[ "${MATCHING_NODE_FAILURE_AFTER_OPEN_BOOK}" == "true" ]]; then
 fi
 
 echo "Running concurrent market-maker refresh and ordinary user taker flow"
-load_commands=()
 refresh_count=0
-for symbol in "${BTC_SYMBOL}" "${ETH_SYMBOL}"; do
-  base_price="$(price_ticks_for "${symbol}")"
-  for ((account = 0; account < MM_ACCOUNT_COUNT; account++)); do
-    user_id=$((MM_USER_START + account))
-    for ((level = 1; level <= MM_REFRESH_LEVELS; level++)); do
-      load_commands+=("$(place_order_command "http://localhost:9084/api/v1/trading/orders" "${user_id}" "stress-refresh-${RUN_ID}-${symbol}-bid-${account}-${level}" "${symbol}" "BUY" "GTC" "$((base_price - MM_DEPTH_LEVELS - level))" "${MM_REFRESH_QUANTITY_STEPS}" "mm-stress-${RUN_ID}-refresh-bid-${symbol}-${account}-${level}")")
-      load_commands+=("$(place_order_command "http://localhost:9084/api/v1/trading/orders" "${user_id}" "stress-refresh-${RUN_ID}-${symbol}-ask-${account}-${level}" "${symbol}" "SELL" "GTC" "$((base_price + MM_DEPTH_LEVELS + level))" "${MM_REFRESH_QUANTITY_STEPS}" "mm-stress-${RUN_ID}-refresh-ask-${symbol}-${account}-${level}")")
-      refresh_count=$((refresh_count + 2))
-    done
-  done
-done
-
-for ((i = 0; i < TAKER_ORDER_COUNT; i++)); do
-  user_id=$((TAKER_USER_START + i))
-  if ((i % 2 == 0)); then
-    symbol="${BTC_SYMBOL}"
-  else
-    symbol="${ETH_SYMBOL}"
-  fi
-  base_price="$(price_ticks_for "${symbol}")"
-  if ((i % 4 < 2)); then
-    side="BUY"
-    price=$((base_price + MM_DEPTH_LEVELS))
-  else
-    side="SELL"
-    price=$((base_price - MM_DEPTH_LEVELS))
-  fi
-  load_commands+=("$(place_order_command "http://localhost:9094/api/v1/gateway/trading" "${user_id}" "stress-user-${RUN_ID}-${i}" "${symbol}" "${side}" "IOC" "${price}" "${TAKER_QUANTITY_STEPS}" "mm-stress-${RUN_ID}-user-${i}")")
-done
-
 seed_mark_prices
 pg_stat_before="$(collect_pg_stat_snapshot)"
 load_start_ns="$(date +%s%N)"
-run_with_concurrency "${LOAD_CONCURRENCY}" "${load_commands[@]}"
+for ((cycle = 1; cycle <= MM_REFRESH_CYCLES; cycle++)); do
+  echo "Running market-maker/taker cycle ${cycle}/${MM_REFRESH_CYCLES}"
+  load_commands=()
+  for symbol in "${BTC_SYMBOL}" "${ETH_SYMBOL}"; do
+    base_price="$(price_ticks_for "${symbol}")"
+    cycle_offset=$(((cycle - 1) * MM_REFRESH_LEVELS))
+    for ((account = 0; account < MM_ACCOUNT_COUNT; account++)); do
+      user_id=$((MM_USER_START + account))
+      for ((level = 1; level <= MM_REFRESH_LEVELS; level++)); do
+        load_commands+=("$(place_order_command "http://localhost:9084/api/v1/trading/orders" "${user_id}" "stress-refresh-${RUN_ID}-${cycle}-${symbol}-bid-${account}-${level}" "${symbol}" "BUY" "GTC" "$((base_price - MM_DEPTH_LEVELS - cycle_offset - level))" "${MM_REFRESH_QUANTITY_STEPS}" "mm-stress-${RUN_ID}-refresh-${cycle}-bid-${symbol}-${account}-${level}")")
+        load_commands+=("$(place_order_command "http://localhost:9084/api/v1/trading/orders" "${user_id}" "stress-refresh-${RUN_ID}-${cycle}-${symbol}-ask-${account}-${level}" "${symbol}" "SELL" "GTC" "$((base_price + MM_DEPTH_LEVELS + cycle_offset + level))" "${MM_REFRESH_QUANTITY_STEPS}" "mm-stress-${RUN_ID}-refresh-${cycle}-ask-${symbol}-${account}-${level}")")
+        refresh_count=$((refresh_count + 2))
+      done
+    done
+  done
+
+  cycle_taker_start=$(((cycle - 1) * TAKER_ORDER_COUNT))
+  for ((i = 0; i < TAKER_ORDER_COUNT; i++)); do
+    global_i=$((cycle_taker_start + i))
+    user_id=$((TAKER_USER_START + global_i))
+    if ((global_i % 2 == 0)); then
+      symbol="${BTC_SYMBOL}"
+    else
+      symbol="${ETH_SYMBOL}"
+    fi
+    base_price="$(price_ticks_for "${symbol}")"
+    taker_depth=$((MM_DEPTH_LEVELS + cycle * MM_REFRESH_LEVELS))
+    if ((global_i % 4 < 2)); then
+      side="BUY"
+      price=$((base_price + taker_depth))
+    else
+      side="SELL"
+      price=$((base_price - taker_depth))
+    fi
+    load_commands+=("$(place_order_command "http://localhost:9094/api/v1/gateway/trading" "${user_id}" "stress-user-${RUN_ID}-${global_i}" "${symbol}" "${side}" "IOC" "${price}" "${TAKER_QUANTITY_STEPS}" "mm-stress-${RUN_ID}-user-${global_i}")")
+  done
+
+  seed_mark_prices
+  run_with_concurrency "${LOAD_CONCURRENCY}" "${load_commands[@]}"
+  if ((RUN_FAILURES > 0)); then
+    echo "Concurrent load placement failed in cycle ${cycle}: ${RUN_FAILURES} requests" >&2
+    exit 1
+  fi
+  if ((cycle < MM_REFRESH_CYCLES && MM_REFRESH_INTERVAL_SECONDS > 0)); then
+    sleep "${MM_REFRESH_INTERVAL_SECONDS}"
+  fi
+done
 load_end_ns="$(date +%s%N)"
-if ((RUN_FAILURES > 0)); then
-  echo "Concurrent load placement failed: ${RUN_FAILURES} requests" >&2
-  exit 1
-fi
 
 wait_sql_equals "ordinary user taker orders filled" \
   "SELECT count(*) FROM trading_orders WHERE client_order_id LIKE 'stress-user-${RUN_ID}-%' AND status = 'FILLED'" \
-  "${TAKER_ORDER_COUNT}" 300
+  "${TOTAL_TAKER_ORDER_COUNT}" 300
 wait_sql_equals "ordinary user trades written" \
   "SELECT count(*) FROM trading_match_trades WHERE trace_id LIKE 'mm-stress-${RUN_ID}-user-%'" \
-  "${TAKER_ORDER_COUNT}" 300
+  "${TOTAL_TAKER_ORDER_COUNT}" 300
 if [[ "${ACCOUNT_NODE_FAILURE_DURING_SETTLEMENT}" == "true" ]]; then
   echo "Scenario: account node failure during settlement"
   stop_provider "account-2"
@@ -1693,9 +1712,9 @@ if [[ "${ACCOUNT_NODE_FAILURE_DURING_SETTLEMENT}" == "true" ]]; then
 fi
 wait_sql_equals "ordinary user trades settled by account" \
   "SELECT count(*) FROM account_processed_trades p JOIN trading_match_trades t ON t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.trace_id LIKE 'mm-stress-${RUN_ID}-user-%'" \
-  "${TAKER_ORDER_COUNT}" 300
+  "${TOTAL_TAKER_ORDER_COUNT}" 300
 wait_sql_equals "no negative stress balances" \
-  "SELECT count(*) FROM account_balances WHERE user_id BETWEEN ${MM_USER_START} AND $((TAKER_USER_START + TAKER_ORDER_COUNT + 100)) AND (available_units < 0 OR locked_units < 0)" \
+  "SELECT count(*) FROM account_balances WHERE user_id BETWEEN ${MM_USER_START} AND $((TAKER_USER_START + TOTAL_TAKER_ORDER_COUNT + 100)) AND (available_units < 0 OR locked_units < 0)" \
   "0" 60
 wait_sql_equals "symbol OI constraint still true" \
   "SELECT count(*) FROM trading_symbol_open_interest WHERE open_quantity_steps <> GREATEST(long_quantity_steps, short_quantity_steps) OR open_quantity_steps < 0" \
@@ -1713,7 +1732,7 @@ import sys
 print(round((int(sys.argv[2]) - int(sys.argv[1])) / 1_000_000, 3))
 PY
 )"
-submit_tps="$(python3 - "${TAKER_ORDER_COUNT}" "${submit_ms}" <<'PY'
+submit_tps="$(python3 - "${TOTAL_TAKER_ORDER_COUNT}" "${submit_ms}" <<'PY'
 import sys
 orders = int(sys.argv[1])
 ms = float(sys.argv[2])
@@ -1787,7 +1806,7 @@ java_version="$(java -version 2>&1 | head -n 1)"
 git_head="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 write_report "${submit_ms}" "${submit_tps}" "${initial_maker_count}" "${refresh_count}" \
-  "${TAKER_ORDER_COUNT}" "${trade_count}" "${matched_latency}" "${account_latency}" \
+  "${TOTAL_TAKER_ORDER_COUNT}" "${trade_count}" "${matched_latency}" "${account_latency}" \
   "${match_span_tps}" "${websocket_summary}" "${machine_cpu}" "${machine_mem}" \
   "${java_version}" "${git_head}" "${account_metrics}" "${kafka_lag_summary}" \
   "${provider_topology_summary}" "${settled_trade_count}" "${db_stat_delta}" \

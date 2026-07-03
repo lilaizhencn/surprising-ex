@@ -226,6 +226,8 @@ npm run lint
   预期：只代表内存撮合能力，不代表系统吞吐。
 - [x] 真实 order/matching/account/websocket/gateway 做市商压力 smoke。
   预期：订单全部成交结算，Kafka lag 最终为 0，无负余额，无非法 OI。
+- [x] 做市商压力脚本支持连续刷新轮次。
+  预期：`scripts/market-maker-stress.sh` 可通过 `MM_REFRESH_CYCLES` 和 `MM_REFRESH_INTERVAL_SECONDS` 持续执行多轮 maker 刷新挂单 + taker 流量，并继续输出 PostgreSQL/Kafka/JVM/WebSocket/account 结算指标。
 - [x] matching/account/WebSocket 本机多节点 smoke。
   预期：consumer group 成员可识别，WebSocket 节点都收到 depth。
 - [x] account failover。
@@ -235,7 +237,7 @@ npm run lint
 - [x] 真实 provider full-stack smoke。
   预期：不全量打包，`BUILD_SERVICES=auto` 在 jar 未变化时跳过 Maven package；脚本覆盖真实 provider 链路和做市商 run-once 铺单，最终 WebSocket/accounting invariants 通过。
 - [ ] 生产级长时间全链路压测。
-  预期：高频做市持续运行、盘口参数跟随主流交易所、普通用户高并发下单、强平/ADL/资金费同时发生，并输出逐节点 p50/p95/p99 和数据库/Kafka/JVM 指标。
+  预期：使用 `MM_REFRESH_CYCLES` 放大到长时间持续运行，盘口参数跟随主流交易所，普通用户高并发下单、强平/ADL/资金费同时发生，并输出逐节点 p50/p95/p99 和数据库/Kafka/JVM 指标。
 
 ## 当前设计限制
 

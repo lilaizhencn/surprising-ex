@@ -138,7 +138,7 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 当前还不能声称完成生产级真实全链路压力测试，原因：
 
 - 做市商盘口参数是脚本静态配置：`MM_DEPTH_LEVELS`、`MM_LEVEL_QUANTITY_STEPS`、`MM_REFRESH_LEVELS`、`MM_REFRESH_QUANTITY_STEPS`。没有实时订阅 Binance/OKX/Bybit 的 orderbook/depth/trades 来动态决定每档价格、相邻价格滑点和成交量。
-- 做市程序有 provider 和 run-once smoke，但当前长时间高频策略默认未开启，压测脚本主要是批量铺单和刷新挂单，不是持续运行的真实做市循环。
+- 做市程序有 provider 和 run-once smoke；压测脚本现在支持用 `MM_REFRESH_CYCLES` / `MM_REFRESH_INTERVAL_SECONDS` 连续执行多轮 maker 刷新和 taker 流量，但还没有执行并记录生产级长时间样本。
 - 1000 笔 taker、单机 PostgreSQL/Kafka、本机 provider 规模太小，且持续时间短。
 - 还缺少从“用户 REST 下单 -> order DB -> Kafka -> matching -> DB result/trades -> account DB -> risk/liquidation/insurance/ADL -> WebSocket 私有推送”的逐节点 p50/p95/p99 时延链路追踪。
 - 强平、爆仓、ADL 在 full-stack smoke 中有功能覆盖，但还没有在高频做市和高并发用户流量持续运行时压测。
@@ -147,7 +147,7 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 
 建议新增一个生产前压测任务，要求如下：
 
-- 做市程序必须持续运行，不使用一次性 run-once 作为主要流量来源。
+- 做市程序必须持续运行，不使用一次性 run-once 作为主要流量来源；本地脚本可先用 `MM_REFRESH_CYCLES` 放大为多轮连续流量。
 - 做市深度、价差、每档量、刷新频率来自主流交易所订阅数据。最低实现：订阅 Binance/OKX/Bybit depth/trades，按中位 spread、每档累计量和成交量分位数生成本地盘口。
 - 每个阶段都输出延迟分布：REST 入参、order 入库、outbox 发布、matching 收到 command、matching result 落库、account 结算、risk 扫描、liquidation 下单、insurance/ADL、WebSocket fanout。
 - 指标必须包含：PostgreSQL CPU/IO/WAL/locks/Hikari pending、Kafka lag/rebalance、provider JVM CPU/heap/gc、HTTP p95/p99、account settlement event lag、WebSocket fanout 延迟。
