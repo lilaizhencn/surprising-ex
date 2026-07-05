@@ -3,11 +3,12 @@
 Initialize a new PostgreSQL database from repository root:
 
 ```bash
+brew services start postgresql@18
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ```
 
-The local `docker-compose.yml` also mounts `init.sql` into PostgreSQL's init directory. It runs
-automatically only when the named PostgreSQL volume is created for the first time.
+Local integration tests use the Homebrew PostgreSQL instance on `localhost:5432`; see
+[local-homebrew-infra.md](local-homebrew-infra.md) for the service and tuning commands.
 
 ## Admin gateway tables
 

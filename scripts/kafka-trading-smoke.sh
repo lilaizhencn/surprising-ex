@@ -14,15 +14,16 @@ MAKER_USER=$((7000000000 + RUN_SEQ))
 TAKER_USER=$((8000000000 + RUN_SEQ))
 SYMBOL="${SYMBOL:-BTC-USDT}"
 PRICE_TICKS="${PRICE_TICKS:-600000}"
+TICK_UNITS="${TICK_UNITS:-10000000}"
 QUANTITY_STEPS="${QUANTITY_STEPS:-10}"
-START_INFRA="${START_INFRA:-true}"
+START_INFRA="${START_INFRA:-false}"
 STOP_INFRA="${STOP_INFRA:-false}"
 BUILD_SERVICES="${BUILD_SERVICES:-true}"
 KEEP_TMP="${KEEP_TMP:-false}"
 TMP_DIR="$(mktemp -d /tmp/surprising-kafka-smoke.XXXXXX)"
 COMPOSE_BIN=""
 COMPOSE_SUBCOMMAND=""
-INFRA_MODE=""
+INFRA_MODE="${INFRA_MODE:-local}"
 DOCKER_NETWORK="${DOCKER_NETWORK:-surprising-ex-net}"
 KAFKA_IMAGE="${KAFKA_IMAGE:-apache/kafka:3.7.0}"
 
@@ -91,9 +92,19 @@ compose() {
 }
 
 compose_exec() {
+  local service="$1"
+  shift
+  if [[ "${INFRA_MODE}" == "local" ]]; then
+    if [[ "${service}" == "kafka" && "$#" -gt 0 && "$1" == kafka-*.sh ]]; then
+      local kafka_cmd="${1%.sh}"
+      shift
+      "${kafka_cmd}" "$@"
+      return
+    fi
+    "$@"
+    return
+  fi
   if [[ "${INFRA_MODE}" == "docker" ]]; then
-    local service="$1"
-    shift
     if [[ "${service}" == "kafka" && "$#" -gt 0 && "$1" == kafka-*.sh ]]; then
       set -- "/opt/kafka/bin/$1" "${@:2}"
     fi
@@ -104,6 +115,14 @@ compose_exec() {
 }
 
 start_infra() {
+  if [[ "${INFRA_MODE}" == "local" ]]; then
+    if command -v brew >/dev/null 2>&1; then
+      brew services start postgresql@18 >/dev/null 2>&1 || true
+      brew services start kafka >/dev/null 2>&1 || true
+      brew services start redis >/dev/null 2>&1 || true
+    fi
+    return
+  fi
   if [[ "${INFRA_MODE}" == "compose" ]]; then
     compose up -d postgres kafka >/dev/null
     return
@@ -148,6 +167,9 @@ start_infra() {
 }
 
 stop_infra() {
+  if [[ "${INFRA_MODE}" == "local" ]]; then
+    return
+  fi
   if [[ "${INFRA_MODE}" == "compose" ]]; then
     compose down
     return
@@ -204,6 +226,56 @@ query_value() {
   psql_exec -At -c "${sql}"
 }
 
+decimal_price() {
+  local ticks="$1"
+  local tick_units="$2"
+  python3 - "${ticks}" "${tick_units}" <<'PY'
+import decimal
+import sys
+ticks = decimal.Decimal(sys.argv[1])
+tick_units = decimal.Decimal(sys.argv[2])
+price = ticks * tick_units / decimal.Decimal(100000000)
+print(price.quantize(decimal.Decimal("0.00000001")))
+PY
+}
+
+seed_mark_price() {
+  local sequence
+  local price
+  local bid
+  local ask
+  local units
+  sequence=$((($(date +%s%N) / 1000000) % 2000000000))
+  price="$(decimal_price "${PRICE_TICKS}" "${TICK_UNITS}")"
+  bid="$(decimal_price "$((PRICE_TICKS - 1))" "${TICK_UNITS}")"
+  ask="$(decimal_price "$((PRICE_TICKS + 1))" "${TICK_UNITS}")"
+  units=$((PRICE_TICKS * TICK_UNITS))
+  psql_exec <<SQL >/dev/null
+INSERT INTO price_index_ticks (
+    symbol, sequence, index_price, status, component_count, valid_component_count,
+    total_configured_weight, event_time
+) VALUES
+    ('${SYMBOL}', ${sequence}, ${price}, 'HEALTHY', 5, 5, 5.000000000000000000, now())
+ON CONFLICT (symbol, sequence) DO NOTHING;
+
+INSERT INTO price_mark_ticks (
+    symbol, sequence, mark_price, mark_price_units, index_price, price1, price2,
+    last_trade_price, best_bid_price, best_ask_price, funding_rate, next_funding_time,
+    time_until_funding_seconds, basis_average, basis_window_seconds, clamp_low, clamp_high,
+    status, event_time
+) VALUES
+    (
+        '${SYMBOL}', ${sequence}, ${price}, ${units}, ${price}, ${price}, ${price},
+        ${price}, ${bid}, ${ask}, 0.000000000000000000, now() + interval '8 hours',
+        28800, 0.000000000000000000, 60,
+        (${price} * 0.970000000000000000),
+        (${price} * 1.030000000000000000),
+        'HEALTHY', now()
+    )
+ON CONFLICT (symbol, sequence) DO NOTHING;
+SQL
+}
+
 wait_sql_equals() {
   local description="$1"
   local sql="$2"
@@ -230,6 +302,9 @@ create_topic_wrapper() {
 set -euo pipefail
 if [[ "${INFRA_MODE:-}" == "docker" ]]; then
   exec docker exec -i surprising-ex-kafka /opt/kafka/bin/kafka-topics.sh "$@"
+fi
+if [[ "${INFRA_MODE:-}" == "local" ]]; then
+  exec kafka-topics "$@"
 fi
 if [[ -n "${COMPOSE_SUBCOMMAND:-}" ]]; then
   exec "${COMPOSE_BIN}" "${COMPOSE_SUBCOMMAND}" -f "${COMPOSE_FILE}" exec -T kafka kafka-topics.sh "$@"
@@ -372,10 +447,19 @@ publish_duplicate_match_trade() {
 }
 
 require_command curl
-detect_compose
+require_command python3
+require_command psql
+require_command pg_isready
+require_command kafka-topics
+require_command kafka-console-producer
+require_command kafka-consumer-groups
+if [[ "${INFRA_MODE}" != "local" ]]; then
+  require_command docker
+  detect_compose
+fi
 
 if [[ "${START_INFRA}" == "true" ]]; then
-  echo "Starting Docker infrastructure"
+  echo "Starting ${INFRA_MODE} infrastructure"
   start_infra
 fi
 
@@ -387,6 +471,7 @@ ensure_smoke_database
 
 echo "Applying init.sql"
 psql_exec -f - < "${ROOT_DIR}/init.sql" >/dev/null
+seed_mark_price
 
 echo "Creating Kafka topics"
 export COMPOSE_FILE COMPOSE_BIN COMPOSE_SUBCOMMAND INFRA_MODE
@@ -401,6 +486,8 @@ start_provider "account" 9086 "surprising-account/surprising-account-provider" \
   "surprising-account-provider" "SURPRISING_ACCOUNT_KAFKA_BOOTSTRAP_SERVERS"
 start_provider "order" 9084 "surprising-trading/surprising-order-provider" \
   "surprising-order-provider" "SURPRISING_TRADING_ORDER_KAFKA_BOOTSTRAP_SERVERS"
+
+seed_mark_price
 
 echo "Funding smoke users maker=${MAKER_USER} taker=${TAKER_USER}"
 adjust_balance "${MAKER_USER}" "kafka-smoke-maker-${RUN_ID}"

@@ -1,5 +1,7 @@
 # 撮合、账户一致性与端到端性能评估报告
 
+> 2026-07-05 起，本地复跑统一使用 Homebrew PostgreSQL/Kafka/Redis：`localhost:5432`、`localhost:9092`、`localhost:6379`。下文历史命令中的 `POSTGRES_PORT=55432/55433` 或旧端口说明仅保留为当时执行证据，当前不要再为测试启动独立 Docker 中间件。
+
 本文回答三个问题：
 
 - 指数价/标记价不可用时，下单是否有限制，以及建议策略。
@@ -137,14 +139,14 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 
 - 命令：`START_INFRA=false POSTGRES_PORT=55433 PAIR_COUNT=1 LOAD_CONCURRENCY=1 BOOK_DEPTH_LEVELS=2 RUN_FAILURE_SCENARIOS=false BUILD_SERVICES=auto KEEP_TMP=true WS_TIMEOUT=180 MM_REFERENCE_MARKET_ENABLED=false MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=false JAVA_HOME="$(/usr/libexec/java_home -v 21)" ./scripts/full-stack-real-config-smoke.sh`
 - 结果：2026-07-04 通过，日志在 `/tmp/surprising-full-stack-real-config.xAFD0M`。
-- 范围：复用现有 Docker PostgreSQL/Kafka，只重启本次测试需要的 provider 进程；`BUILD_SERVICES=auto` 检测 provider jar 已是最新，因此跳过 Maven package。
+- 范围：复用当时已有 PostgreSQL/Kafka，只重启本次测试需要的 provider 进程；`BUILD_SERVICES=auto` 检测 provider jar 已是最新，因此跳过 Maven package。
 - 覆盖：持仓模式切换阻断场景现在会先真实开仓，再放置待触发 TP/SL 条件单，避免把“空仓不能挂减仓 TP/SL”的正确校验误判为 smoke 失败；同时覆盖 `LOAD_CONCURRENCY=1` 时 shell 数组为空的收尾边界。最终捕获 depth events `41`、mark events `175`、funding events `171`，WebSocket/accounting invariants 通过。
 
 补充 index source fail-closed 真实配置回归：
 
 - 命令：`START_INFRA=false POSTGRES_PORT=55433 PAIR_COUNT=1 LOAD_CONCURRENCY=1 BOOK_DEPTH_LEVELS=2 RUN_FAILURE_SCENARIOS=false BUILD_SERVICES=auto KEEP_TMP=true WS_TIMEOUT=900 FULL_STACK_MARK_PRICE_LISTENER_AUTO_STARTUP=true MM_REFERENCE_MARKET_ENABLED=false MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=false JAVA_HOME="$(/usr/libexec/java_home -v 21)" ./scripts/full-stack-real-config-smoke.sh`
 - 结果：2026-07-04 通过，日志在 `/tmp/surprising-full-stack-real-config.ENDSKF`。
-- 范围：复用现有 Docker PostgreSQL/Kafka，启动真实全 provider；`BUILD_SERVICES=auto` 检测 provider jar 已是最新，因此跳过 Maven package。
+- 范围：复用当时已有 PostgreSQL/Kafka，启动真实全 provider；`BUILD_SERVICES=auto` 检测 provider jar 已是最新，因此跳过 Maven package。
 - 覆盖：脚本只暂停 `index-price provider` 隔离指数源不足输入，确认 `INSUFFICIENT_SOURCES` 后 mark price 不再刷新、普通市价单拒绝 `mark price unavailable`、健康指数输入恢复后 mark price 重新发布；后续继续通过 TP/SL、风险、强平、保险基金、ADL、market-maker run-once 和 WebSocket/accounting invariants。最终捕获 depth events `122`、mark events `421`、funding events `428`。
 - 运行说明：完整链路耗时已经超过旧的 180 秒 WebSocket 捕获窗口，本轮把脚本默认 `WS_TIMEOUT` 提高到 900 秒，避免捕获进程提前结束造成最终推送断言误判。
 
@@ -202,7 +204,7 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 
 - 命令：`START_INFRA=false STOP_INFRA=false RESET_STATE=true START_PROVIDERS=true STOP_PROVIDERS=true RUN_FAILURE_SCENARIOS=false BUILD_SERVICES=false KEEP_TMP=true WS_TIMEOUT=900 PAIR_COUNT=2 LOAD_CONCURRENCY=2 BOOK_DEPTH_LEVELS=3 FULL_STACK_RISK_BACKGROUND_LOAD_ENABLED=true FULL_STACK_RISK_BACKGROUND_PAIR_COUNT=2 FULL_STACK_RISK_BACKGROUND_ROUNDS=4 FULL_STACK_RISK_BACKGROUND_CONCURRENCY=2 FULL_STACK_RISK_BACKGROUND_INTERVAL_SECONDS=1 FULL_STACK_MARK_PRICE_LISTENER_AUTO_STARTUP=false MM_REFERENCE_MARKET_ENABLED=false MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=false POSTGRES_PORT=55433 SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" ./scripts/full-stack-real-config-smoke.sh`
 - 结果：2026-07-04 通过，日志在 `/tmp/surprising-full-stack-real-config.ePIRXF`。
-- 范围：复用现有 Docker PostgreSQL/Kafka，只重启本轮真实 provider；`BUILD_SERVICES=false`，未重新 package 未改模块。
+- 范围：复用当时已有 PostgreSQL/Kafka，只重启本轮真实 provider；`BUILD_SERVICES=false`，未重新 package 未改模块。
 - 覆盖：在强平、保险基金和 ADL 场景运行期间，同时执行 8 组普通 maker/taker 成交；后台成交流完成后，脚本核对 `trading_match_trades` 的成交数量/成交量和 `account_processed_trades` 均为 8。最终捕获 depth events `141`、mark events `237`、funding events `234`，多个测试用户收到私有 orders/matches/positions/positionRisk/accountRisk 推送，WebSocket/accounting invariants 通过。
 - 发现并修复：首轮带后台成交流运行时，Kafka depth topic 出现同一 symbol 内序列 `65,67,66,68`，根因是 liquidation provider 的 trading outbox publisher 未按 aggregate_type 限制，抢占并发布了 matching-owned `ORDER_BOOK_DEPTH` 行。修复后 `LiquidationOrderRepository.lockPending(...)` 只认领 `ORDER`/`LIQUIDATION_ORDER`，并用 `DISTINCT ON (topic, event_key)` 和 advisory lock 保证同一 topic/key 的最早事件先发布；`LiquidationOrderRepositoryTest` 已覆盖该 SQL 约束。
 
@@ -210,7 +212,7 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 
 - 命令：`START_INFRA=false RESET_STATE=true RESET_KAFKA_MODE=recreate START_PROVIDERS=true STOP_PROVIDERS=true BUILD_SERVICES=false KEEP_TMP=true MM_ACCOUNT_COUNT=1 MM_DEPTH_LEVELS=2 MM_REFRESH_LEVELS=1 MM_REFRESH_CYCLES=2 MM_REFRESH_INTERVAL_SECONDS=1 TAKER_ORDER_COUNT=2 LOAD_CONCURRENCY=2 REPORT_FILE=docs/market-maker-continuous-smoke-report.md SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" ./scripts/market-maker-stress.sh`
 - 结果：2026-07-04 通过，报告为 `docs/market-maker-continuous-smoke-report.md`，日志在 `/tmp/surprising-mm-stress.qiFDht`。
-- 范围：真实 order、matching、account、websocket、gateway provider；复用现有 Docker PostgreSQL/Kafka；`BUILD_SERVICES=false`，未重新打包 provider jar。
+- 范围：真实 order、matching、account、websocket、gateway provider；复用当时已有 PostgreSQL/Kafka；`BUILD_SERVICES=false`，未重新打包 provider jar。
 - 关键计数：初始 maker 挂单 8 笔、连续刷新挂单 8 笔、普通用户 taker 订单 4 笔、撮合成交 4 笔、account 已结算 4 笔、account Kafka 最终 lag 为 `0`。
 - 运行说明：本轮使用 `RESET_STATE=true` 清空测试状态。早前用脏状态直接复跑时遇到旧开放挂单污染成交路径，因此连续压测要么使用干净 fixture，要么显式把已有开放订单、余额和持仓纳入测试前置条件，不能把未知状态下的旧流动性当作可靠基线。
 
@@ -260,7 +262,7 @@ Account outbox 用 `FOR UPDATE SKIP LOCKED` 认领待发布事件，Kafka 发送
 
 - 命令：`START_INFRA=false RESET_STATE=true RESET_KAFKA_MODE=recreate START_PROVIDERS=true STOP_PROVIDERS=true BUILD_SERVICES=false KEEP_TMP=true MM_ACCOUNT_COUNT=1 MM_DEPTH_LEVELS=2 MM_REFRESH_LEVELS=1 MM_REFRESH_CYCLES=2 MM_REFRESH_INTERVAL_SECONDS=1 TAKER_ORDER_COUNT=3 LOAD_CONCURRENCY=2 WS_FANOUT_USER_COUNT=3 WS_CAPTURE_TIMEOUT=900 REPORT_FILE=docs/market-maker-fanout-smoke-report.md SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" ./scripts/market-maker-stress.sh`
 - 结果：2026-07-04 通过，报告为 `docs/market-maker-fanout-smoke-report.md`，日志在 `/tmp/surprising-mm-stress.9BkxPs`。
-- 范围：真实 order、matching、account、websocket、gateway provider；复用现有 Docker PostgreSQL/Kafka；`BUILD_SERVICES=false`，未重新打包 provider jar。
+- 范围：真实 order、matching、account、websocket、gateway provider；复用当时已有 PostgreSQL/Kafka；`BUILD_SERVICES=false`，未重新打包 provider jar。
 - 关键计数：初始 maker 挂单 8 笔、连续刷新挂单 8 笔、普通用户 taker 订单 6 笔、撮合成交 6 笔、account 已结算 6 笔、account Kafka 最终 lag 为 `0`。WebSocket 捕获 BTC depth `11`、ETH depth `11`；前 3 个 taker 用户分别收到自己的 `orders=1` 和 `positions=1`，脚本会 fail fast 检查私有事件 `userId` 是否串号。
 - 运行说明：`scripts/market-maker-stress.sh` 新增 `WS_FANOUT_USER_COUNT` 和 `WS_CAPTURE_TIMEOUT`。默认仍订阅 1 个用户以保持现有快速 smoke；需要扩大 fanout 时只调参数，不需要改业务代码或重启无关模块。
 

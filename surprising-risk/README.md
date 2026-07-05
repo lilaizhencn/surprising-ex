@@ -187,7 +187,9 @@ Configuration:
 ## Local Run
 
 ```bash
-docker compose up -d postgres kafka
+brew services start postgresql@18
+brew services start kafka
+brew services start redis
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
 mvn -pl :surprising-risk-provider -am spring-boot:run

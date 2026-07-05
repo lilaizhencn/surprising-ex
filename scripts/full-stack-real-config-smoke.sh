@@ -36,7 +36,7 @@ RISK_BACKGROUND_ROUNDS="${FULL_STACK_RISK_BACKGROUND_ROUNDS:-3}"
 RISK_BACKGROUND_CONCURRENCY="${FULL_STACK_RISK_BACKGROUND_CONCURRENCY:-2}"
 RISK_BACKGROUND_INTERVAL_SECONDS="${FULL_STACK_RISK_BACKGROUND_INTERVAL_SECONDS:-1}"
 RISK_BACKGROUND_TOTAL_PAIRS=$((RISK_BACKGROUND_PAIR_COUNT * RISK_BACKGROUND_ROUNDS))
-START_INFRA="${START_INFRA:-true}"
+START_INFRA="${START_INFRA:-false}"
 STOP_INFRA="${STOP_INFRA:-false}"
 BUILD_SERVICES="${BUILD_SERVICES:-auto}"
 RESET_STATE="${RESET_STATE:-true}"
@@ -45,6 +45,7 @@ STOP_PROVIDERS="${STOP_PROVIDERS:-true}"
 RUN_FAILURE_SCENARIOS="${RUN_FAILURE_SCENARIOS:-true}"
 KEEP_TMP="${KEEP_TMP:-false}"
 WS_TIMEOUT="${WS_TIMEOUT:-900}"
+WEBSOCKET_PORT="${WEBSOCKET_PORT:-9097}"
 FULL_STACK_EXTERNAL_INDEX_WS_ENABLED="${FULL_STACK_EXTERNAL_INDEX_WS_ENABLED:-false}"
 FULL_STACK_MARK_PRICE_LISTENER_AUTO_STARTUP="${FULL_STACK_MARK_PRICE_LISTENER_AUTO_STARTUP:-false}"
 MM_REFERENCE_MARKET_ENABLED="${MM_REFERENCE_MARKET_ENABLED:-false}"
@@ -64,7 +65,7 @@ TMP_DIR="$(mktemp -d /tmp/surprising-full-stack-real-config.XXXXXX)"
 WS_STOP_FILE="${TMP_DIR}/ws.stop"
 COMPOSE_BIN=""
 COMPOSE_SUBCOMMAND=""
-INFRA_MODE=""
+INFRA_MODE="${INFRA_MODE:-local}"
 DOCKER_NETWORK="${DOCKER_NETWORK:-surprising-ex-net}"
 KAFKA_IMAGE="${KAFKA_IMAGE:-apache/kafka:3.7.0}"
 
@@ -266,9 +267,19 @@ compose() {
 }
 
 compose_exec() {
+  local service="$1"
+  shift
+  if [[ "${INFRA_MODE}" == "local" ]]; then
+    if [[ "${service}" == "kafka" && "$#" -gt 0 && "$1" == kafka-*.sh ]]; then
+      local kafka_cmd="${1%.sh}"
+      shift
+      "${kafka_cmd}" "$@"
+      return
+    fi
+    "$@"
+    return
+  fi
   if [[ "${INFRA_MODE}" == "docker" ]]; then
-    local service="$1"
-    shift
     if [[ "${service}" == "kafka" && "$#" -gt 0 && "$1" == kafka-*.sh ]]; then
       set -- "/opt/kafka/bin/$1" "${@:2}"
     fi
@@ -279,6 +290,14 @@ compose_exec() {
 }
 
 start_infra() {
+  if [[ "${INFRA_MODE}" == "local" ]]; then
+    if command -v brew >/dev/null 2>&1; then
+      brew services start postgresql@18 >/dev/null 2>&1 || true
+      brew services start kafka >/dev/null 2>&1 || true
+      brew services start redis >/dev/null 2>&1 || true
+    fi
+    return
+  fi
   if [[ "${INFRA_MODE}" == "compose" ]]; then
     compose up -d postgres kafka >/dev/null
     return
@@ -335,6 +354,9 @@ start_direct_kafka() {
 }
 
 stop_infra() {
+  if [[ "${INFRA_MODE}" == "local" ]]; then
+    return
+  fi
   if [[ "${INFRA_MODE}" == "compose" ]]; then
     compose down
     return
@@ -587,6 +609,9 @@ set -euo pipefail
 if [[ "${INFRA_MODE:-}" == "docker" ]]; then
   exec docker exec -i surprising-ex-kafka /opt/kafka/bin/kafka-topics.sh "$@"
 fi
+if [[ "${INFRA_MODE:-}" == "local" ]]; then
+  exec kafka-topics "$@"
+fi
 if [[ -n "${COMPOSE_SUBCOMMAND:-}" ]]; then
   exec "${COMPOSE_BIN}" "${COMPOSE_SUBCOMMAND}" -f "${COMPOSE_FILE}" exec -T kafka kafka-topics.sh "$@"
 fi
@@ -748,7 +773,7 @@ provider_port() {
     funding) echo 9089 ;;
     insurance) echo 9090 ;;
     adl) echo 9091 ;;
-    websocket) echo 9093 ;;
+    websocket) echo "${WEBSOCKET_PORT}" ;;
     gateway) echo 9094 ;;
     trigger) echo 9095 ;;
     market-maker) echo 9096 ;;
@@ -3277,15 +3302,22 @@ register_provider "liquidation" 9088 "surprising-liquidation/surprising-liquidat
 register_provider "funding" 9089 "surprising-funding/surprising-funding-provider" "surprising-funding-provider"
 register_provider "insurance" 9090 "surprising-insurance/surprising-insurance-provider" "surprising-insurance-provider"
 register_provider "adl" 9091 "surprising-adl/surprising-adl-provider" "surprising-adl-provider"
-register_provider "websocket" 9093 "surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider"
+register_provider "websocket" "${WEBSOCKET_PORT}" "surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider"
 register_provider "gateway" 9094 "surprising-gateway/surprising-gateway-provider" "surprising-gateway-provider"
 register_provider "trigger" 9095 "surprising-trading/surprising-trigger-provider" "surprising-trigger-provider"
 register_provider "market-maker" 9096 "surprising-market-maker/surprising-market-maker-provider" "surprising-market-maker-provider"
 
 require_command curl
 require_command python3
-require_command docker
-detect_compose
+require_command psql
+require_command pg_isready
+require_command kafka-topics
+require_command kafka-console-producer
+require_command kafka-consumer-groups
+if [[ "${INFRA_MODE}" != "local" ]]; then
+  require_command docker
+  detect_compose
+fi
 
 if [[ "${START_PROVIDERS}" != "true" && "${RESET_STATE}" == "true" ]]; then
   echo "START_PROVIDERS=false requires RESET_STATE=false; do not reset DB/Kafka while reusing live services" >&2
@@ -3298,7 +3330,7 @@ if [[ "${START_PROVIDERS}" != "true" && "${RUN_FAILURE_SCENARIOS}" == "true" ]];
 fi
 
 if [[ "${START_INFRA}" == "true" ]]; then
-  echo "Starting Docker infrastructure"
+  echo "Starting ${INFRA_MODE} infrastructure"
   start_infra
 fi
 
@@ -3342,44 +3374,44 @@ WS_ISOLATED_LOG="${TMP_DIR}/ws-isolated.jsonl"
 WS_POSITION_MODE_LOG="${TMP_DIR}/ws-position-mode.jsonl"
 WS_MARK_LOG="${TMP_DIR}/ws-mark.jsonl"
 WS_FUNDING_LOG="${TMP_DIR}/ws-funding.jsonl"
-start_ws_capture "${WS_DEPTH_LOG}" "ws://localhost:9093/ws/v1" \
+start_ws_capture "${WS_DEPTH_LOG}" "ws://localhost:${WEBSOCKET_PORT}/ws/v1" \
   "{\"op\":\"subscribe\",\"id\":\"depth\",\"channel\":\"depth\",\"symbol\":\"${BTC_SYMBOL}\"}"
-start_ws_capture "${WS_FULL_TAKER_LOG}" "ws://localhost:9093/ws/v1?userId=${FULL_TAKER_USER}" \
+start_ws_capture "${WS_FULL_TAKER_LOG}" "ws://localhost:${WEBSOCKET_PORT}/ws/v1?userId=${FULL_TAKER_USER}" \
   "{\"op\":\"subscribe\",\"id\":\"ft-orders\",\"channel\":\"orders\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"ft-matches\",\"channel\":\"matches\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"ft-execution-reports\",\"channel\":\"executionReports\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"ft-positions\",\"channel\":\"positions\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"ft-position-risk\",\"channel\":\"positionRisk\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"ft-account-risk\",\"channel\":\"accountRisk\"}"
-start_ws_capture "${WS_PARTIAL_MAKER_LOG}" "ws://localhost:9093/ws/v1?userId=${PARTIAL_MAKER_USER}" \
+start_ws_capture "${WS_PARTIAL_MAKER_LOG}" "ws://localhost:${WEBSOCKET_PORT}/ws/v1?userId=${PARTIAL_MAKER_USER}" \
   "{\"op\":\"subscribe\",\"id\":\"pm-orders\",\"channel\":\"orders\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"pm-matches\",\"channel\":\"matches\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"pm-execution-reports\",\"channel\":\"executionReports\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"pm-positions\",\"channel\":\"positions\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"pm-position-risk\",\"channel\":\"positionRisk\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"pm-account-risk\",\"channel\":\"accountRisk\"}"
-start_ws_capture "${WS_CANCEL_LOG}" "ws://localhost:9093/ws/v1?userId=${CANCEL_USER}" \
+start_ws_capture "${WS_CANCEL_LOG}" "ws://localhost:${WEBSOCKET_PORT}/ws/v1?userId=${CANCEL_USER}" \
   "{\"op\":\"subscribe\",\"id\":\"cu-orders\",\"channel\":\"orders\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"cu-matches\",\"channel\":\"matches\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"cu-execution-reports\",\"channel\":\"executionReports\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"cu-positions\",\"channel\":\"positions\",\"symbol\":\"${BTC_SYMBOL}\"}"
-start_ws_capture "${WS_ISOLATED_LOG}" "ws://localhost:9093/ws/v1?userId=${ISOLATED_USER}" \
+start_ws_capture "${WS_ISOLATED_LOG}" "ws://localhost:${WEBSOCKET_PORT}/ws/v1?userId=${ISOLATED_USER}" \
   "{\"op\":\"subscribe\",\"id\":\"iso-orders\",\"channel\":\"orders\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"iso-matches\",\"channel\":\"matches\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"iso-execution-reports\",\"channel\":\"executionReports\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"iso-positions\",\"channel\":\"positions\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"iso-position-risk\",\"channel\":\"positionRisk\",\"symbol\":\"${BTC_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"iso-account-risk\",\"channel\":\"accountRisk\"}"
-start_ws_capture "${WS_POSITION_MODE_LOG}" "ws://localhost:9093/ws/v1?userId=${POSITION_MODE_USER}" \
+start_ws_capture "${WS_POSITION_MODE_LOG}" "ws://localhost:${WEBSOCKET_PORT}/ws/v1?userId=${POSITION_MODE_USER}" \
   "{\"op\":\"subscribe\",\"id\":\"pmode-orders\",\"channel\":\"orders\",\"symbol\":\"${POSITION_MODE_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"pmode-matches\",\"channel\":\"matches\",\"symbol\":\"${POSITION_MODE_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"pmode-execution-reports\",\"channel\":\"executionReports\",\"symbol\":\"${POSITION_MODE_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"pmode-positions\",\"channel\":\"positions\",\"symbol\":\"${POSITION_MODE_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"pmode-position-risk\",\"channel\":\"positionRisk\",\"symbol\":\"${POSITION_MODE_SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"pmode-account-risk\",\"channel\":\"accountRisk\"}"
-start_ws_capture "${WS_MARK_LOG}" "ws://localhost:9093/ws/v1" \
+start_ws_capture "${WS_MARK_LOG}" "ws://localhost:${WEBSOCKET_PORT}/ws/v1" \
   "{\"op\":\"subscribe\",\"id\":\"mark\",\"channel\":\"mark\",\"symbol\":\"${BTC_SYMBOL}\"}"
-start_ws_capture "${WS_FUNDING_LOG}" "ws://localhost:9093/ws/v1" \
+start_ws_capture "${WS_FUNDING_LOG}" "ws://localhost:${WEBSOCKET_PORT}/ws/v1" \
   "{\"op\":\"subscribe\",\"id\":\"funding\",\"channel\":\"funding\",\"symbol\":\"${BTC_SYMBOL}\"}"
 
 wait_ws_subscribed "${WS_DEPTH_LOG}" "depth" 1

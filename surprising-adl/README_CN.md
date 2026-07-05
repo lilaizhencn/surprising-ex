@@ -112,7 +112,9 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 ## 本地运行
 
 ```bash
-docker compose up -d postgres kafka
+brew services start postgresql@18
+brew services start kafka
+brew services start redis
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 mvn -pl :surprising-adl-provider -am spring-boot:run
 ```

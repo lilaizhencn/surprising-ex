@@ -12,20 +12,22 @@ DB_NAME="${DB_NAME:-surprising_load_${RUN_SEQ}}"
 SPRING_DATASOURCE_URL="${SPRING_DATASOURCE_URL:-jdbc:postgresql://localhost:5432/${DB_NAME}}"
 SYMBOL="${SYMBOL:-BTC-USDT}"
 PRICE_TICKS="${PRICE_TICKS:-600000}"
+TICK_UNITS="${TICK_UNITS:-10000000}"
 QUANTITY_STEPS="${QUANTITY_STEPS:-10}"
 PAIR_COUNT="${PAIR_COUNT:-50}"
 LOAD_CONCURRENCY="${LOAD_CONCURRENCY:-16}"
-START_INFRA="${START_INFRA:-true}"
+START_INFRA="${START_INFRA:-false}"
 STOP_INFRA="${STOP_INFRA:-false}"
 BUILD_SERVICES="${BUILD_SERVICES:-true}"
 WS_TIMEOUT="${WS_TIMEOUT:-240}"
+WEBSOCKET_PORT="${WEBSOCKET_PORT:-9097}"
 KEEP_TMP="${KEEP_TMP:-false}"
 TMP_DIR="$(mktemp -d /tmp/surprising-kafka-load-smoke.XXXXXX)"
 WS_STOP_FILE="${TMP_DIR}/ws.stop"
 WEBSOCKET_GROUP_ID="surprising-websocket-load-${RUN_ID}"
 COMPOSE_BIN=""
 COMPOSE_SUBCOMMAND=""
-INFRA_MODE=""
+INFRA_MODE="${INFRA_MODE:-local}"
 DOCKER_NETWORK="${DOCKER_NETWORK:-surprising-ex-net}"
 KAFKA_IMAGE="${KAFKA_IMAGE:-apache/kafka:3.7.0}"
 
@@ -115,9 +117,19 @@ compose() {
 }
 
 compose_exec() {
+  local service="$1"
+  shift
+  if [[ "${INFRA_MODE}" == "local" ]]; then
+    if [[ "${service}" == "kafka" && "$#" -gt 0 && "$1" == kafka-*.sh ]]; then
+      local kafka_cmd="${1%.sh}"
+      shift
+      "${kafka_cmd}" "$@"
+      return
+    fi
+    "$@"
+    return
+  fi
   if [[ "${INFRA_MODE}" == "docker" ]]; then
-    local service="$1"
-    shift
     if [[ "${service}" == "kafka" && "$#" -gt 0 && "$1" == kafka-*.sh ]]; then
       set -- "/opt/kafka/bin/$1" "${@:2}"
     fi
@@ -128,6 +140,14 @@ compose_exec() {
 }
 
 start_infra() {
+  if [[ "${INFRA_MODE}" == "local" ]]; then
+    if command -v brew >/dev/null 2>&1; then
+      brew services start postgresql@18 >/dev/null 2>&1 || true
+      brew services start kafka >/dev/null 2>&1 || true
+      brew services start redis >/dev/null 2>&1 || true
+    fi
+    return
+  fi
   if [[ "${INFRA_MODE}" == "compose" ]]; then
     compose up -d postgres kafka >/dev/null
     return
@@ -172,6 +192,9 @@ start_infra() {
 }
 
 stop_infra() {
+  if [[ "${INFRA_MODE}" == "local" ]]; then
+    return
+  fi
   if [[ "${INFRA_MODE}" == "compose" ]]; then
     compose down
     return
@@ -228,6 +251,56 @@ query_value() {
   psql_exec -At -c "${sql}"
 }
 
+decimal_price() {
+  local ticks="$1"
+  local tick_units="$2"
+  python3 - "${ticks}" "${tick_units}" <<'PY'
+import decimal
+import sys
+ticks = decimal.Decimal(sys.argv[1])
+tick_units = decimal.Decimal(sys.argv[2])
+price = ticks * tick_units / decimal.Decimal(100000000)
+print(price.quantize(decimal.Decimal("0.00000001")))
+PY
+}
+
+seed_mark_price() {
+  local sequence
+  local price
+  local bid
+  local ask
+  local units
+  sequence=$((($(date +%s%N) / 1000000) % 2000000000))
+  price="$(decimal_price "${PRICE_TICKS}" "${TICK_UNITS}")"
+  bid="$(decimal_price "$((PRICE_TICKS - 1))" "${TICK_UNITS}")"
+  ask="$(decimal_price "$((PRICE_TICKS + 1))" "${TICK_UNITS}")"
+  units=$((PRICE_TICKS * TICK_UNITS))
+  psql_exec <<SQL >/dev/null
+INSERT INTO price_index_ticks (
+    symbol, sequence, index_price, status, component_count, valid_component_count,
+    total_configured_weight, event_time
+) VALUES
+    ('${SYMBOL}', ${sequence}, ${price}, 'HEALTHY', 5, 5, 5.000000000000000000, now())
+ON CONFLICT (symbol, sequence) DO NOTHING;
+
+INSERT INTO price_mark_ticks (
+    symbol, sequence, mark_price, mark_price_units, index_price, price1, price2,
+    last_trade_price, best_bid_price, best_ask_price, funding_rate, next_funding_time,
+    time_until_funding_seconds, basis_average, basis_window_seconds, clamp_low, clamp_high,
+    status, event_time
+) VALUES
+    (
+        '${SYMBOL}', ${sequence}, ${price}, ${units}, ${price}, ${price}, ${price},
+        ${price}, ${bid}, ${ask}, 0.000000000000000000, now() + interval '8 hours',
+        28800, 0.000000000000000000, 60,
+        (${price} * 0.970000000000000000),
+        (${price} * 1.030000000000000000),
+        'HEALTHY', now()
+    )
+ON CONFLICT (symbol, sequence) DO NOTHING;
+SQL
+}
+
 wait_sql_equals() {
   local description="$1"
   local sql="$2"
@@ -254,6 +327,9 @@ create_topic_wrapper() {
 set -euo pipefail
 if [[ "${INFRA_MODE:-}" == "docker" ]]; then
   exec docker exec -i surprising-ex-kafka /opt/kafka/bin/kafka-topics.sh "$@"
+fi
+if [[ "${INFRA_MODE:-}" == "local" ]]; then
+  exec kafka-topics "$@"
 fi
 if [[ -n "${COMPOSE_SUBCOMMAND:-}" ]]; then
   exec "${COMPOSE_BIN}" "${COMPOSE_SUBCOMMAND}" -f "${COMPOSE_FILE}" exec -T kafka kafka-topics.sh "$@"
@@ -629,7 +705,14 @@ run_with_concurrency() {
 
 require_command curl
 require_command python3
-detect_compose
+require_command psql
+require_command pg_isready
+require_command kafka-topics
+require_command kafka-consumer-groups
+if [[ "${INFRA_MODE}" != "local" ]]; then
+  require_command docker
+  detect_compose
+fi
 
 if [[ "${SYMBOL}" != "BTC-USDT" ]]; then
   echo "This smoke script currently expects init.sql seeded symbol BTC-USDT; got ${SYMBOL}" >&2
@@ -641,7 +724,7 @@ if (( PARTIAL_TAKER_QTY <= 0 )); then
 fi
 
 if [[ "${START_INFRA}" == "true" ]]; then
-  echo "Starting Docker infrastructure"
+  echo "Starting ${INFRA_MODE} infrastructure"
   start_infra
 fi
 
@@ -653,6 +736,7 @@ ensure_smoke_database
 
 echo "Applying init.sql"
 psql_exec -f - < "${ROOT_DIR}/init.sql" >/dev/null
+seed_mark_price
 
 echo "Creating Kafka topics"
 export COMPOSE_FILE COMPOSE_BIN COMPOSE_SUBCOMMAND INFRA_MODE
@@ -665,7 +749,7 @@ start_provider "matching" 9085 "surprising-trading/surprising-matching-provider"
   "surprising-matching-provider" "SURPRISING_TRADING_MATCHING_KAFKA_BOOTSTRAP_SERVERS"
 start_provider "account" 9086 "surprising-account/surprising-account-provider" \
   "surprising-account-provider" "SURPRISING_ACCOUNT_KAFKA_BOOTSTRAP_SERVERS"
-start_provider "websocket" 9093 "surprising-websocket/surprising-websocket-provider" \
+start_provider "websocket" "${WEBSOCKET_PORT}" "surprising-websocket/surprising-websocket-provider" \
   "surprising-websocket-provider" "SURPRISING_WEBSOCKET_KAFKA_BOOTSTRAP_SERVERS"
 start_provider "order" 9084 "surprising-trading/surprising-order-provider" \
   "surprising-order-provider" "SURPRISING_TRADING_ORDER_KAFKA_BOOTSTRAP_SERVERS"
@@ -675,17 +759,17 @@ WS_FULL_TAKER_LOG="${TMP_DIR}/ws-full-taker.jsonl"
 WS_PARTIAL_MAKER_LOG="${TMP_DIR}/ws-partial-maker.jsonl"
 WS_CANCEL_LOG="${TMP_DIR}/ws-cancel.jsonl"
 
-start_ws_capture "depth" "ws://localhost:9093/ws/v1" "${WS_DEPTH_LOG}" \
+start_ws_capture "depth" "ws://localhost:${WEBSOCKET_PORT}/ws/v1" "${WS_DEPTH_LOG}" \
   "{\"op\":\"subscribe\",\"id\":\"depth\",\"channel\":\"depth\",\"symbol\":\"${SYMBOL}\"}"
-start_ws_capture "full-taker" "ws://localhost:9093/ws/v1?userId=${FULL_TAKER_USER}" "${WS_FULL_TAKER_LOG}" \
+start_ws_capture "full-taker" "ws://localhost:${WEBSOCKET_PORT}/ws/v1?userId=${FULL_TAKER_USER}" "${WS_FULL_TAKER_LOG}" \
   "{\"op\":\"subscribe\",\"id\":\"ft-orders\",\"channel\":\"orders\",\"symbol\":\"${SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"ft-matches\",\"channel\":\"matches\",\"symbol\":\"${SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"ft-positions\",\"channel\":\"positions\",\"symbol\":\"${SYMBOL}\"}"
-start_ws_capture "partial-maker" "ws://localhost:9093/ws/v1?userId=${PARTIAL_MAKER_USER}" "${WS_PARTIAL_MAKER_LOG}" \
+start_ws_capture "partial-maker" "ws://localhost:${WEBSOCKET_PORT}/ws/v1?userId=${PARTIAL_MAKER_USER}" "${WS_PARTIAL_MAKER_LOG}" \
   "{\"op\":\"subscribe\",\"id\":\"pm-orders\",\"channel\":\"orders\",\"symbol\":\"${SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"pm-matches\",\"channel\":\"matches\",\"symbol\":\"${SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"pm-positions\",\"channel\":\"positions\",\"symbol\":\"${SYMBOL}\"}"
-start_ws_capture "cancel-user" "ws://localhost:9093/ws/v1?userId=${CANCEL_USER}" "${WS_CANCEL_LOG}" \
+start_ws_capture "cancel-user" "ws://localhost:${WEBSOCKET_PORT}/ws/v1?userId=${CANCEL_USER}" "${WS_CANCEL_LOG}" \
   "{\"op\":\"subscribe\",\"id\":\"cu-orders\",\"channel\":\"orders\",\"symbol\":\"${SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"cu-matches\",\"channel\":\"matches\",\"symbol\":\"${SYMBOL}\"}" \
   "{\"op\":\"subscribe\",\"id\":\"cu-positions\",\"channel\":\"positions\",\"symbol\":\"${SYMBOL}\"}"
@@ -697,10 +781,13 @@ wait_ws_subscribed "${WS_FULL_TAKER_LOG}" "positions" 1
 wait_ws_subscribed "${WS_PARTIAL_MAKER_LOG}" "orders" 1
 wait_ws_subscribed "${WS_CANCEL_LOG}" "orders" 1
 
+seed_mark_price
+
 echo "Funding users"
 fund_users
 
 echo "Scenario: full fill"
+seed_mark_price
 full_maker_order="$(place_order "${FULL_MAKER_USER}" "load-full-maker-${RUN_ID}" "SELL" "GTC" "${FULL_PRICE_TICKS}" "${QUANTITY_STEPS}")"
 wait_place_matched "${full_maker_order}"
 assert_order_book_ask "full maker REST book" "${FULL_PRICE_TICKS}" "${QUANTITY_STEPS}"
@@ -711,6 +798,7 @@ wait_position "${FULL_MAKER_USER}" "-${QUANTITY_STEPS}" "${FULL_PRICE_TICKS}"
 wait_position "${FULL_TAKER_USER}" "${QUANTITY_STEPS}" "${FULL_PRICE_TICKS}"
 
 echo "Scenario: partial fill then cancel"
+seed_mark_price
 partial_maker_order="$(place_order "${PARTIAL_MAKER_USER}" "load-partial-maker-${RUN_ID}" "SELL" "GTC" "${PARTIAL_PRICE_TICKS}" "${PARTIAL_MAKER_QTY}")"
 wait_place_matched "${partial_maker_order}"
 assert_order_book_ask "partial maker REST book" "${PARTIAL_PRICE_TICKS}" "${PARTIAL_MAKER_QTY}"
@@ -723,6 +811,7 @@ cancel_order "${PARTIAL_MAKER_USER}" "${partial_maker_order}"
 wait_order_state "${partial_maker_order}" "CANCELED" "${PARTIAL_TAKER_QTY}" "0"
 
 echo "Scenario: single open order cancel without fill"
+seed_mark_price
 cancel_order_id="$(place_order "${CANCEL_USER}" "load-cancel-only-${RUN_ID}" "SELL" "GTC" "${CANCEL_PRICE_TICKS}" "${QUANTITY_STEPS}")"
 wait_place_matched "${cancel_order_id}"
 cancel_order "${CANCEL_USER}" "${cancel_order_id}"
@@ -730,6 +819,7 @@ wait_order_state "${cancel_order_id}" "CANCELED" "0" "0"
 wait_position "${CANCEL_USER}" "0" "0"
 
 echo "Scenario: cancel all open orders"
+seed_mark_price
 all_cancel_orders=()
 all_cancel_orders+=("$(place_order "$((ALL_CANCEL_USER_START + 0))" "load-all-cancel-0-${RUN_ID}" "BUY" "GTC" "${ALL_CANCEL_BID_PRICE}" "${QUANTITY_STEPS}")")
 all_cancel_orders+=("$(place_order "$((ALL_CANCEL_USER_START + 1))" "load-all-cancel-1-${RUN_ID}" "BUY" "GTC" "$((ALL_CANCEL_BID_PRICE + 1))" "${QUANTITY_STEPS}")")
@@ -749,6 +839,7 @@ wait_sql_equals "all cancel leaves no open orders" \
   "0"
 
 echo "Scenario: concurrent load PAIR_COUNT=${PAIR_COUNT} LOAD_CONCURRENCY=${LOAD_CONCURRENCY}"
+seed_mark_price
 maker_commands=()
 taker_commands=()
 for ((i = 0; i < PAIR_COUNT; i++)); do

@@ -73,15 +73,19 @@ Provider packaging keeps the normal jar as a dependency artifact and attaches th
 ## Database Initialization
 
 ```bash
+brew services start postgresql@18
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ```
 
 This is a new project, so all initial schema is kept in root [init.sql](init.sql). Flyway is not used.
+Local integration tests use Homebrew PostgreSQL/Kafka/Redis on `localhost:5432`, `localhost:9092`, and `localhost:6379`; see [docs/local-homebrew-infra.md](docs/local-homebrew-infra.md).
 
 ## Local Startup Order
 
 ```bash
-docker compose up -d postgres kafka
+brew services start postgresql@18
+brew services start kafka
+brew services start redis
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
 mvn -pl :surprising-instrument-provider -am spring-boot:run
@@ -187,7 +191,7 @@ For a heavier process-level run that also starts WebSocket and checks full fill,
 PAIR_COUNT=50 LOAD_CONCURRENCY=16 ./scripts/kafka-trading-load-smoke.sh
 ```
 
-This script uses `docker compose`, `docker-compose`, or direct `docker run` when only the Docker daemon is available. `PAIR_COUNT` controls how many concurrent maker/taker user pairs are submitted in the load section. Set `KAFKA_IMAGE` to reuse a locally available Kafka image.
+The smoke/load scripts default to the local Homebrew middleware and do not start Docker middleware. `PAIR_COUNT` controls how many concurrent maker/taker user pairs are submitted in the load section.
 
 Market-depth clients should initialize from the public REST snapshot, then apply WebSocket deltas:
 

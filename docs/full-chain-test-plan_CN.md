@@ -8,6 +8,8 @@
 
 验收原则：功能完成必须优先以用户实际调用方式验证，也就是经 gateway HTTP/WebSocket、真实 provider、Kafka、PostgreSQL、matching、account、risk、funding、insurance、ADL 的全链路执行。单元测试只作为补充，用来定位和证明交易前后资金守恒、做市账号/用户账号余额、强平、保险基金和 ADL 等局部资金计算不出错；不能用单元测试替代全链路验收。
 
+本地复跑统一使用 Homebrew PostgreSQL/Kafka/Redis：`localhost:5432`、`localhost:9092`、`localhost:6379`。当前脚本默认 `START_INFRA=false`、`INFRA_MODE=local`，不要再为测试启动独立 Docker 中间件。
+
 ## 本轮新增验证
 
 - [x] TP close long：SELL TAKE_PROFIT，mark price >= trigger price 时生成 reduce-only 平仓单。
@@ -133,14 +135,13 @@ JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   -Dtest=PostLiquidationFundingInsuranceAdlIntegrationTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
-POSTGRES_PORT=55433 \
 PAIR_COUNT=3 LOAD_CONCURRENCY=2 BOOK_DEPTH_LEVELS=5 RUN_FAILURE_SCENARIOS=true \
 BUILD_SERVICES=auto KEEP_TMP=true WS_TIMEOUT=240 \
 MM_REFERENCE_MARKET_ENABLED=false MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=false \
 JAVA_HOME="$(/usr/libexec/java_home -v 21)" \
   ./scripts/full-stack-real-config-smoke.sh
 
-START_INFRA=false POSTGRES_PORT=55433 \
+START_INFRA=false \
 START_PROVIDERS=true STOP_PROVIDERS=true RESET_STATE=true RUN_FAILURE_SCENARIOS=false \
 BUILD_SERVICES=false KEEP_TMP=true WS_TIMEOUT=900 \
 PAIR_COUNT=2 LOAD_CONCURRENCY=2 BOOK_DEPTH_LEVELS=3 \
@@ -151,11 +152,10 @@ FULL_STACK_RISK_BACKGROUND_CONCURRENCY=2 \
 FULL_STACK_RISK_BACKGROUND_INTERVAL_SECONDS=1 \
 FULL_STACK_MARK_PRICE_LISTENER_AUTO_STARTUP=false \
 MM_REFERENCE_MARKET_ENABLED=false MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=false \
-SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange \
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   ./scripts/full-stack-real-config-smoke.sh
 
-START_INFRA=false POSTGRES_PORT=55433 \
+START_INFRA=false \
 PAIR_COUNT=1 LOAD_CONCURRENCY=1 BOOK_DEPTH_LEVELS=2 RUN_FAILURE_SCENARIOS=false \
 BUILD_SERVICES=auto KEEP_TMP=true WS_TIMEOUT=900 \
 FULL_STACK_MARK_PRICE_LISTENER_AUTO_STARTUP=true \
@@ -163,7 +163,7 @@ MM_REFERENCE_MARKET_ENABLED=false MM_REFERENCE_MARKET_WEBSOCKET_ENABLED=false \
 JAVA_HOME="$(/usr/libexec/java_home -v 21)" \
   ./scripts/full-stack-real-config-smoke.sh
 
-POSTGRES_PORT=55432 KEEP_TMP=true RUN_FAILURE_SCENARIOS=false \
+KEEP_TMP=true RUN_FAILURE_SCENARIOS=false \
 PAIR_COUNT=10 LOAD_CONCURRENCY=4 BOOK_DEPTH_LEVELS=20 \
   bash scripts/full-stack-real-config-smoke.sh
 
@@ -178,8 +178,6 @@ MM_TRADE_ENABLED=false \
 MM_PROVIDER_CONTINUOUS_SECONDS=8 \
 MM_PROVIDER_CONTINUOUS_INTERVAL_SECONDS=1 \
 MM_PROVIDER_CONTINUOUS_TAKER_ORDERS=2 \
-POSTGRES_PORT=55432 \
-SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55432/surprising_exchange \
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   ./scripts/full-stack-real-config-smoke.sh
 
@@ -195,8 +193,6 @@ MM_PROVIDER_CONTINUOUS_SECONDS=0 \
 MM_PROVIDER_ENGINE_SECONDS=60 \
 MM_PROVIDER_ENGINE_CYCLE_DELAY_MS=100 \
 MM_PROVIDER_ENGINE_TAKER_ORDERS=20 \
-POSTGRES_PORT=55432 \
-SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55432/surprising_exchange \
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   ./scripts/full-stack-real-config-smoke.sh
 
@@ -206,7 +202,6 @@ MM_ACCOUNT_COUNT=1 MM_DEPTH_LEVELS=2 MM_REFRESH_LEVELS=1 \
 MM_REFRESH_CYCLES=2 MM_REFRESH_INTERVAL_SECONDS=1 \
 TAKER_ORDER_COUNT=2 LOAD_CONCURRENCY=2 \
 REPORT_FILE=docs/market-maker-continuous-smoke-report.md \
-SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange \
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   ./scripts/market-maker-stress.sh
 
@@ -217,7 +212,6 @@ MM_REFRESH_CYCLES=2 MM_REFRESH_INTERVAL_SECONDS=1 \
 TAKER_ORDER_COUNT=3 LOAD_CONCURRENCY=2 \
 WS_FANOUT_USER_COUNT=3 WS_CAPTURE_TIMEOUT=900 \
 REPORT_FILE=docs/market-maker-fanout-smoke-report.md \
-SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/surprising_exchange \
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   ./scripts/market-maker-stress.sh
 
@@ -235,7 +229,6 @@ TAKER_FILL_WAIT_SECONDS=900 TAKER_TRADE_WAIT_SECONDS=900 \
 ACCOUNT_SETTLEMENT_WAIT_SECONDS=1200 \
 WS_FANOUT_USER_COUNT=3 WS_CAPTURE_TIMEOUT=1500 \
 REPORT_FILE=docs/market-maker-stress-report-tier3.md \
-SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55432/surprising_exchange \
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   ./scripts/market-maker-stress.sh
 
@@ -254,7 +247,6 @@ TAKER_FILL_WAIT_SECONDS=1200 TAKER_TRADE_WAIT_SECONDS=1200 \
 ACCOUNT_SETTLEMENT_WAIT_SECONDS=1800 \
 WS_FANOUT_USER_COUNT=5 WS_CAPTURE_TIMEOUT=2100 \
 REPORT_FILE=docs/market-maker-stress-report-tier4.md \
-SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55432/surprising_exchange \
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
   ./scripts/market-maker-stress.sh
 
@@ -272,7 +264,7 @@ flutter test
 
 结果：以上后端定向测试、market-maker 参考盘口校准测试、真实 provider full-stack smoke、连续做市刷新 smoke、market-maker provider 连续报价 smoke、market-maker provider scheduled engine smoke、多用户 WebSocket fanout smoke、Web 构建、Flutter analyze/test 均通过。关键日志和报告包括 `/tmp/surprising-full-stack-real-config.3qu3b9`、`/tmp/surprising-full-stack-real-config.DsxfGp`、`docs/market-maker-provider-engine-report.md`、`docs/market-maker-reference-market-sustained-report.md`、`docs/market-maker-fanout-smoke-report.md`、`docs/market-maker-stress-report-tier3.md` 和 `docs/market-maker-stress-report-tier4.md`。最新 L4 单节点真实接口压测完成 10000 笔 taker 成交/account 结算，Kafka lag 回到 0，资金、预占、deficit、OI 和 outbox 不变量通过，前 5 个 taker 用户私有 fanout 不串号。参考行情 WebSocket 做市已经有 30 秒、90 秒和 180 秒真实 provider 样本；仍未完成的是多节点、多 broker、长时间生产级压测报告。Web/Flutter 的多档 TP/SL、TWAP/Iceberg 入口和开放算法单列表也已通过构建或 analyze/test。
 
-2026-07-05 追加 TWAP / Iceberg 算法单 full-stack smoke 已通过，日志保留在 `/tmp/surprising-full-stack-real-config.DsxfGp`。该轮通过真实 gateway API 放置、查询和撤销算法单，TWAP 与 Iceberg 子单都经过普通 order-provider、exchange-core、matching、account、risk/WebSocket 链路；活动算法单阻断持仓模式切换，`cancel-open` 后切换成功。最终捕获 depth events `213`、mark events `399`、funding events `390`，余额、预占释放、trading/account/funding/risk outbox 不变量通过。本机默认 `5432` 端口仍与本地 PostgreSQL/SSH 转发冲突，本轮使用 `POSTGRES_PORT=55432` 隔离 Docker PostgreSQL。
+2026-07-05 追加 TWAP / Iceberg 算法单 full-stack smoke 已通过，日志保留在 `/tmp/surprising-full-stack-real-config.DsxfGp`。该轮通过真实 gateway API 放置、查询和撤销算法单，TWAP 与 Iceberg 子单都经过普通 order-provider、exchange-core、matching、account、risk/WebSocket 链路；活动算法单阻断持仓模式切换，`cancel-open` 后切换成功。最终捕获 depth events `213`、mark events `399`、funding events `390`，余额、预占释放、trading/account/funding/risk outbox 不变量通过。历史运行时曾使用隔离端口；当前本地 Homebrew PostgreSQL 已统一使用 `localhost:5432`。
 
 2026-07-05 追加 L3 单节点真实接口压测已通过，报告为 `docs/market-maker-stress-report-tier3.md`，日志保留在 `/tmp/surprising-mm-stress.6Z6Lu8`。该轮未重新打包 provider jar，启动真实 order/matching/account/websocket/gateway 进程，maker 初始 640 笔挂单、刷新 576 笔挂单、普通用户 taker 6000 笔全部经 gateway 进入；最终撮合成交 6000、account 结算 6000、account Kafka lag 回到 0、trading/account outbox 均为 0，无负余额、无非法 OI。第一次同参数尝试暴露 order-provider Hikari 连接池耗尽，脚本随后增加可配置连接池和等待窗口，复跑通过。
 

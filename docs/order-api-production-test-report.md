@@ -2,6 +2,8 @@
 
 日期：2026-07-05
 
+> 本地复跑统一使用 Homebrew PostgreSQL/Kafka/Redis：`localhost:5432`、`localhost:9092`、`localhost:6379`。历史命令中的 `POSTGRES_PORT=55432/55433` 只记录当时执行环境，当前测试不要再启动独立 Docker 中间件。
+
 ## 范围
 
 本报告记录本轮对标 Binance Futures 和 OKX V5 后完成的交易接口补齐、真实网关链路测试、做市压测分级结果，以及仍未完成的交易所级能力。

@@ -264,7 +264,9 @@ curl 'https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT'
 在仓库根目录执行：
 
 ```bash
-docker compose up -d postgres kafka
+brew services start postgresql@18
+brew services start kafka
+brew services start redis
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
 mvn -pl :surprising-index-price-provider -am spring-boot:run

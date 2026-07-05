@@ -7,7 +7,7 @@ DB_PASSWORD="${DB_PASSWORD:-surprising}"
 DB_NAME="surprising_exchange"
 RUN_ID="${RUN_ID:-$(date +%s%N)}"
 RUN_SEQ=$((RUN_ID % 1000000000))
-START_INFRA="${START_INFRA:-true}"
+START_INFRA="${START_INFRA:-false}"
 RESET_STATE="${RESET_STATE:-true}"
 RESET_KAFKA_MODE="${RESET_KAFKA_MODE:-recreate}"
 START_PROVIDERS="${START_PROVIDERS:-true}"
@@ -45,6 +45,7 @@ KAFKA_LAG_LOG="${TMP_DIR}/kafka-lag.log"
 KAFKA_LAG_INTERVAL_SECONDS="${KAFKA_LAG_INTERVAL_SECONDS:-1}"
 WS_CAPTURE_TIMEOUT="${WS_CAPTURE_TIMEOUT:-900}"
 WS_FANOUT_USER_COUNT="${WS_FANOUT_USER_COUNT:-1}"
+WEBSOCKET_PORT="${WEBSOCKET_PORT:-9097}"
 ORDER_HIKARI_MAX_POOL_SIZE="${ORDER_HIKARI_MAX_POOL_SIZE:-30}"
 ORDER_HIKARI_CONNECTION_TIMEOUT_MS="${ORDER_HIKARI_CONNECTION_TIMEOUT_MS:-3000}"
 MATCHING_HIKARI_MAX_POOL_SIZE="${MATCHING_HIKARI_MAX_POOL_SIZE:-20}"
@@ -56,6 +57,7 @@ GATEWAY_HIKARI_CONNECTION_TIMEOUT_MS="${GATEWAY_HIKARI_CONNECTION_TIMEOUT_MS:-30
 TAKER_FILL_WAIT_SECONDS="${TAKER_FILL_WAIT_SECONDS:-300}"
 TAKER_TRADE_WAIT_SECONDS="${TAKER_TRADE_WAIT_SECONDS:-300}"
 ACCOUNT_SETTLEMENT_WAIT_SECONDS="${ACCOUNT_SETTLEMENT_WAIT_SECONDS:-300}"
+INFRA_MODE="${INFRA_MODE:-local}"
 
 BTC_SYMBOL="BTC-USDT"
 ETH_SYMBOL="ETH-USDT"
@@ -123,6 +125,16 @@ require_command() {
 compose_exec() {
   local service="$1"
   shift
+  if [[ "${INFRA_MODE}" == "local" ]]; then
+    if [[ "${service}" == "kafka" && "$#" -gt 0 && "$1" == kafka-*.sh ]]; then
+      local kafka_cmd="${1%.sh}"
+      shift
+      "${kafka_cmd}" "$@"
+      return
+    fi
+    "$@"
+    return
+  fi
   if [[ "${service}" == "kafka" && "$#" -gt 0 && "$1" == kafka-*.sh ]]; then
     set -- "/opt/kafka/bin/$1" "${@:2}"
   fi
@@ -130,6 +142,14 @@ compose_exec() {
 }
 
 start_infra() {
+  if [[ "${INFRA_MODE}" == "local" ]]; then
+    if command -v brew >/dev/null 2>&1; then
+      brew services start postgresql@18 >/dev/null 2>&1 || true
+      brew services start kafka >/dev/null 2>&1 || true
+      brew services start redis >/dev/null 2>&1 || true
+    fi
+    return
+  fi
   if docker compose version >/dev/null 2>&1; then
     docker compose -f "${ROOT_DIR}/docker-compose.yml" up -d postgres kafka >/dev/null
     return
@@ -253,8 +273,11 @@ delete_surprising_topics() {
       return
     fi
     if ((SECONDS >= deadline)); then
-      echo "Timed out waiting for Kafka topics to be deleted; recreating local Kafka container" >&2
+      echo "Timed out waiting for Kafka topics to be deleted" >&2
       echo "${topics}" >&2
+      if [[ "${INFRA_MODE}" == "local" ]]; then
+        exit 1
+      fi
       recreate_kafka
       return
     fi
@@ -263,6 +286,10 @@ delete_surprising_topics() {
 }
 
 recreate_kafka() {
+  if [[ "${INFRA_MODE}" == "local" ]]; then
+    delete_surprising_topics
+    return
+  fi
   docker rm -f surprising-ex-kafka >/dev/null 2>&1 || true
   docker volume rm surprising-ex-kafka >/dev/null 2>&1 || true
   docker run -d --name surprising-ex-kafka \
@@ -287,9 +314,12 @@ recreate_kafka() {
 
 create_topics() {
   mkdir -p "${TMP_DIR}/bin"
-  cat > "${TMP_DIR}/bin/kafka-topics.sh" <<'EOF'
+cat > "${TMP_DIR}/bin/kafka-topics.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${INFRA_MODE:-}" == "local" ]]; then
+  exec kafka-topics "$@"
+fi
 exec docker exec -i surprising-ex-kafka /opt/kafka/bin/kafka-topics.sh "$@"
 EOF
   chmod +x "${TMP_DIR}/bin/kafka-topics.sh"
@@ -627,7 +657,7 @@ start_extra_nodes() {
       "--surprising.account.kafka.concurrency=${ACCOUNT_CONSUMERS_PER_NODE}"
   done
   for ((i = 1; i <= EXTRA_WEBSOCKET_NODES; i++)); do
-    start_provider "websocket-$((i + 1))" "$((9093 + i * 100))" \
+    start_provider "websocket-$((i + 1))" "$((WEBSOCKET_PORT + i * 100))" \
       "surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider" \
       "--surprising.websocket.kafka.group-id=surprising-websocket-mm-${RUN_ID}-$((i + 1))"
   done
@@ -1080,8 +1110,9 @@ collect_provider_topology_summary() {
   matching_clients="$(consumer_client_ids "surprising-matching-v1" "surprising.perp.order.commands.v1" || true)"
   account_clients="$(consumer_client_ids "surprising-account-v1" "surprising.perp.match.trades.v1" || true)"
   command_partitions="$(topic_partition_count "surprising.perp.order.commands.v1" || echo 0)"
-  cat <<EOF
+cat <<EOF
 - Provider nodes：matching=${matching_nodes}, account=${account_nodes}, websocket=${websocket_nodes}, order=1, gateway=1
+- WebSocket port：${WEBSOCKET_PORT}
 - Kafka group members：surprising-matching-v1/order.commands=${matching_members}, surprising-account-v1/match.trades=${account_members}
 - Kafka client ids：matching=${matching_clients:-n/a}, account=${account_clients:-n/a}
 EOF
@@ -1532,9 +1563,9 @@ collect_provider_metrics_summary() {
       targets+=("account-$((i + 1)):$((9086 + i * 100))")
     fi
   done
-  targets+=("websocket:9093")
+  targets+=("websocket:${WEBSOCKET_PORT}")
   for ((i = 1; i <= EXTRA_WEBSOCKET_NODES; i++)); do
-    targets+=("websocket-$((i + 1)):$((9093 + i * 100))")
+    targets+=("websocket-$((i + 1)):$((WEBSOCKET_PORT + i * 100))")
   done
   targets+=("gateway:9094")
 
@@ -1665,6 +1696,12 @@ write_report() {
   local db_stat_delta="${19}"
   local table_counts_summary="${20}"
   local provider_metrics_summary="${21}"
+  local infra_summary
+  if [[ "${INFRA_MODE}" == "local" ]]; then
+    infra_summary="Homebrew/local services: PostgreSQL localhost:5432, Kafka localhost:9092, Redis localhost:6379"
+  else
+    infra_summary="Docker Compose services via ${COMPOSE_FILE}"
+  fi
   mkdir -p "$(dirname "${REPORT_FILE}")"
   cat > "${REPORT_FILE}" <<EOF
 # 做市商模拟交易压测报告
@@ -1677,7 +1714,7 @@ write_report() {
 - CPU：${machine_cpu}
 - 内存：${machine_mem}
 - Java：${java_version}
-- PostgreSQL/Kafka：本机 Docker 容器 \`surprising-ex-postgres\`、\`surprising-ex-kafka\`
+- PostgreSQL/Kafka/Redis：${infra_summary}
 - Provider：order、matching、account、websocket、gateway 真实进程
 - 临时日志目录：\`${TMP_DIR}\`
 
@@ -1797,8 +1834,14 @@ EOF
 }
 
 require_command curl
-require_command docker
 require_command python3
+require_command psql
+require_command pg_isready
+require_command kafka-topics
+require_command kafka-consumer-groups
+if [[ "${INFRA_MODE}" != "local" ]]; then
+  require_command docker
+fi
 
 if ((MM_ACCOUNT_COUNT <= 0 || MM_DEPTH_LEVELS <= 0 || TAKER_ORDER_COUNT <= 0 || LOAD_CONCURRENCY <= 0)); then
   echo "stress parameters must be positive" >&2
@@ -1851,7 +1894,7 @@ if ((WS_FANOUT_USER_COUNT > TOTAL_TAKER_ORDER_COUNT)); then
 fi
 
 if [[ "${START_INFRA}" == "true" ]]; then
-  echo "Starting Docker infrastructure"
+  echo "Starting ${INFRA_MODE} infrastructure"
   start_infra
 fi
 wait_until "PostgreSQL" 120 compose_exec postgres pg_isready -U "${DB_USER}"
@@ -1878,7 +1921,7 @@ if [[ "${START_PROVIDERS}" == "true" ]]; then
     "--spring.datasource.hikari.connection-timeout=${ACCOUNT_HIKARI_CONNECTION_TIMEOUT_MS}" \
     "--surprising.account.kafka.client-id=mm-stress-${RUN_ID}-account-1" \
     "--surprising.account.kafka.concurrency=${ACCOUNT_CONSUMERS_PER_NODE}"
-  start_provider "websocket" 9093 "surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider"
+  start_provider "websocket" "${WEBSOCKET_PORT}" "surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider"
   start_extra_nodes
   wait_consumer_members "surprising-matching-v1" "surprising.perp.order.commands.v1" $(((1 + EXTRA_MATCHING_NODES) * MATCHING_CONSUMERS_PER_NODE))
   wait_consumer_members "surprising-account-v1" "surprising.perp.match.trades.v1" $(((1 + EXTRA_ACCOUNT_NODES) * ACCOUNT_CONSUMERS_PER_NODE))
@@ -1895,7 +1938,7 @@ if [[ "${START_PROVIDERS}" == "true" ]]; then
 else
   wait_http "matching" 9085
   wait_http "account" 9086
-  wait_http "websocket" 9093
+  wait_http "websocket" "${WEBSOCKET_PORT}"
   wait_http "order" 9084
   wait_http "gateway" 9094
 fi
@@ -1906,9 +1949,9 @@ WS_BTC_DEPTH="${TMP_DIR}/ws-btc-depth.jsonl"
 WS_ETH_DEPTH="${TMP_DIR}/ws-eth-depth.jsonl"
 WS_PRIVATE_FILES=()
 WS_EXTRA_DEPTH="${TMP_DIR}/ws-extra-depth.jsonl"
-start_ws_capture "${WS_BTC_DEPTH}" "ws://localhost:9093/ws/v1" \
+start_ws_capture "${WS_BTC_DEPTH}" "ws://localhost:${WEBSOCKET_PORT}/ws/v1" \
   "{\"op\":\"subscribe\",\"id\":\"btc-depth\",\"channel\":\"depth\",\"symbol\":\"${BTC_SYMBOL}\"}"
-start_ws_capture "${WS_ETH_DEPTH}" "ws://localhost:9093/ws/v1" \
+start_ws_capture "${WS_ETH_DEPTH}" "ws://localhost:${WEBSOCKET_PORT}/ws/v1" \
   "{\"op\":\"subscribe\",\"id\":\"eth-depth\",\"channel\":\"depth\",\"symbol\":\"${ETH_SYMBOL}\"}"
 wait_ws_subscribed "${WS_BTC_DEPTH}" "depth" 1
 wait_ws_subscribed "${WS_ETH_DEPTH}" "depth" 1
@@ -1916,7 +1959,7 @@ for ((i = 0; i < WS_FANOUT_USER_COUNT; i++)); do
   private_file="${TMP_DIR}/ws-private-${i}.jsonl"
   private_user=$((TAKER_USER_START + i))
   WS_PRIVATE_FILES+=("${private_file}")
-  start_ws_capture "${private_file}" "ws://localhost:9093/ws/v1?userId=${private_user}" \
+  start_ws_capture "${private_file}" "ws://localhost:${WEBSOCKET_PORT}/ws/v1?userId=${private_user}" \
     "{\"op\":\"subscribe\",\"id\":\"orders-${i}\",\"channel\":\"orders\"}" \
     "{\"op\":\"subscribe\",\"id\":\"execution-reports-${i}\",\"channel\":\"executionReports\"}" \
     "{\"op\":\"subscribe\",\"id\":\"positions-${i}\",\"channel\":\"positions\"}"
@@ -1927,7 +1970,7 @@ for private_file in "${WS_PRIVATE_FILES[@]}"; do
   wait_ws_subscribed "${private_file}" "positions" 1
 done
 if ((EXTRA_WEBSOCKET_NODES > 0)); then
-  start_ws_capture "${WS_EXTRA_DEPTH}" "ws://localhost:9193/ws/v1" \
+  start_ws_capture "${WS_EXTRA_DEPTH}" "ws://localhost:$((WEBSOCKET_PORT + 100))/ws/v1" \
     "{\"op\":\"subscribe\",\"id\":\"extra-btc-depth\",\"channel\":\"depth\",\"symbol\":\"${BTC_SYMBOL}\"}"
   wait_ws_subscribed "${WS_EXTRA_DEPTH}" "depth" 1
 fi

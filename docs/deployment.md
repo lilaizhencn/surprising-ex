@@ -253,7 +253,15 @@ Set `RUN_MAVEN=true` to run `mvn -q test` after the database checks. Set `PG_BIN
 
 ## Kafka Trading Smoke
 
-When Docker is available, run a real process-level order -> matching -> account smoke. The scripts use `docker compose`, `docker-compose`, or direct `docker run` when only the Docker daemon is available:
+Run the real process-level order -> matching -> account smoke against the local Homebrew PostgreSQL/Kafka/Redis instances:
+
+```bash
+brew services start postgresql@18
+brew services start kafka
+brew services start redis
+psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
+./scripts/create-topics.sh
+```
 
 ```bash
 ./scripts/kafka-trading-smoke.sh
@@ -269,8 +277,7 @@ This starts order, matching, account, and WebSocket providers, then verifies ful
 
 The basic script:
 
-- starts Docker PostgreSQL and Kafka unless `START_INFRA=false`;
-- uses `KAFKA_IMAGE` to choose the direct-Docker Kafka image when compose is unavailable;
+- uses local middleware by default and does not start Docker middleware;
 - creates an isolated database named `surprising_smoke_<run>` by default, then applies root `init.sql`;
 - creates all topics through `scripts/create-topics.sh`;
 - packages and starts order, matching, and account providers;

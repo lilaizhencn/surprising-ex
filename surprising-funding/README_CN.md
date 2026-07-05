@@ -98,7 +98,9 @@ curl 'http://localhost:9089/api/v1/funding/payments?userId=1001&symbol=BTC-USDT&
 ## 本地运行
 
 ```bash
-docker compose up -d postgres kafka
+brew services start postgresql@18
+brew services start kafka
+brew services start redis
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
 mvn -pl :surprising-funding-provider -am spring-boot:run

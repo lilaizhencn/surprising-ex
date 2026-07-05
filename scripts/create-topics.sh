@@ -11,6 +11,15 @@ MIN_PARTITIONS="${MIN_PARTITIONS:-24}"
 MAX_PARTITIONS="${MAX_PARTITIONS:-384}"
 PARTITION_STEP="${PARTITION_STEP:-12}"
 
+if command -v kafka-topics >/dev/null 2>&1; then
+  KAFKA_TOPICS_CMD=(kafka-topics)
+elif command -v kafka-topics.sh >/dev/null 2>&1; then
+  KAFKA_TOPICS_CMD=(kafka-topics.sh)
+else
+  echo "Missing Kafka topic command: install Kafka or add kafka-topics to PATH" >&2
+  exit 1
+fi
+
 ceil_div() {
   local dividend="$1"
   local divisor="$2"
@@ -51,115 +60,115 @@ if [[ "${DRY_RUN:-false}" == "true" ]]; then
   exit 0
 fi
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.instrument.events.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.perp.trade.events.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.perp.candle.events.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.perp.order.commands.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.perp.order.events.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.perp.match.results.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.perp.match.trades.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.perp.orderbook.depth.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.account.position.events.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.account.liquidation-fee.events.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.risk.account.events.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.risk.position.events.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.perp.liquidation.candidates.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.perp.index.price.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.perp.index.components.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.perp.book.ticker.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.perp.funding.rate.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.perp.mark.price.v1 \
   --partitions "${PARTITIONS}" \
   --replication-factor "${REPLICATION_FACTOR}"
 
-kafka-topics.sh --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+"${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
   --create --if-not-exists \
   --topic surprising.perp.mark.price.audit.v1 \
   --partitions "${PARTITIONS}" \
