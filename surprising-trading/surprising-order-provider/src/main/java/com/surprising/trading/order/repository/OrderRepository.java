@@ -15,6 +15,7 @@ import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.model.OrderRecord;
+import com.surprising.trading.order.model.ReduceOnlyPosition;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -110,9 +111,16 @@ public class OrderRepository {
                        AND t.symbol = ?
                        AND t.margin_mode <> ?
                        AND t.status IN ('PENDING', 'TRIGGERING')
+                    UNION ALL
+                    SELECT 1
+                      FROM trading_algo_orders a
+                     WHERE a.user_id = ?
+                       AND a.symbol = ?
+                       AND a.margin_mode <> ?
+                       AND a.status IN ('PENDING', 'RUNNING', 'CANCEL_REQUESTED')
                 )
                 """, Boolean.class, userId, symbol, normalizedMode, userId, symbol, normalizedMode,
-                userId, symbol, normalizedMode);
+                userId, symbol, normalizedMode, userId, symbol, normalizedMode);
         return Boolean.TRUE.equals(conflict);
     }
 
@@ -251,6 +259,24 @@ public class OrderRepository {
                  ORDER BY created_at ASC, order_id ASC
                  LIMIT ?
                 """, (rs, rowNum) -> toRecord(rs), userId, userId, normalizedSymbol, normalizedSymbol, safeLimit);
+    }
+
+    public Optional<ReduceOnlyPosition> lockedPosition(long userId,
+                                                       String symbol,
+                                                       MarginMode marginMode,
+                                                       PositionSide positionSide) {
+        return jdbcTemplate.query("""
+                SELECT signed_quantity_steps, instrument_version
+                  FROM account_positions
+                 WHERE user_id = ?
+                   AND symbol = ?
+                   AND margin_mode = ?
+                   AND position_side = ?
+                 FOR UPDATE
+                """, (rs, rowNum) -> new ReduceOnlyPosition(
+                rs.getLong("signed_quantity_steps"),
+                rs.getLong("instrument_version")), userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                PositionSide.defaultIfNull(positionSide).name()).stream().findFirst();
     }
 
     public CancelableOrderImpact adminCancelableImpact(Long userId, String symbol) {

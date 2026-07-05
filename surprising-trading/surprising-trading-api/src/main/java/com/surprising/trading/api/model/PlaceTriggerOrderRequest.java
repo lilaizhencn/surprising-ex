@@ -1,6 +1,7 @@
 package com.surprising.trading.api.model;
 
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -15,7 +16,9 @@ public record PlaceTriggerOrderRequest(
         @NotNull OrderSide side,
         @NotNull TriggerOrderType triggerType,
         TriggerPriceType triggerPriceType,
-        @Positive long triggerPriceTicks,
+        @Min(0) long triggerPriceTicks,
+        @Min(0) Long activationPriceTicks,
+        @Min(1000) @Max(100000) Long callbackRatePpm,
         @NotNull OrderType orderType,
         @NotNull TimeInForce timeInForce,
         @Min(0) long priceTicks,
@@ -45,7 +48,27 @@ public record PlaceTriggerOrderRequest(
                                     MarginMode marginMode,
                                     Instant expiresAt) {
         this(userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType, triggerPriceType,
-                triggerPriceTicks, orderType, timeInForce, priceTicks, quantitySteps, marginMode, PositionSide.NET,
-                expiresAt);
+                triggerPriceTicks, null, null, orderType, timeInForce, priceTicks, quantitySteps, marginMode,
+                PositionSide.NET, expiresAt);
+    }
+
+    public PlaceTriggerOrderRequest(long userId,
+                                    String clientTriggerOrderId,
+                                    String ocoGroupId,
+                                    String symbol,
+                                    OrderSide side,
+                                    TriggerOrderType triggerType,
+                                    TriggerPriceType triggerPriceType,
+                                    long triggerPriceTicks,
+                                    OrderType orderType,
+                                    TimeInForce timeInForce,
+                                    long priceTicks,
+                                    long quantitySteps,
+                                    MarginMode marginMode,
+                                    PositionSide positionSide,
+                                    Instant expiresAt) {
+        this(userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType, triggerPriceType,
+                triggerPriceTicks, null, null, orderType, timeInForce, priceTicks, quantitySteps, marginMode,
+                positionSide, expiresAt);
     }
 }

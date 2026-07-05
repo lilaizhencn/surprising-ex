@@ -51,8 +51,9 @@ public class OrderValidator {
         if (rule == null) {
             return ValidationResult.reject("unknown symbol");
         }
-        if (!"TRADING".equals(rule.status())) {
-            return ValidationResult.reject("instrument is not trading", rule.version(), rule.instrumentType());
+        ValidationResult tradingMode = validateInstrumentTradingMode(request, rule);
+        if (!tradingMode.accepted()) {
+            return tradingMode;
         }
         if (!rule.supportedOrderTypes().contains(request.orderType().name())) {
             return ValidationResult.reject("order type is not supported", rule.version(), rule.instrumentType());
@@ -86,6 +87,23 @@ public class OrderValidator {
             return validateMarket(request, rule);
         }
         return validateLimit(request, rule);
+    }
+
+    private ValidationResult validateInstrumentTradingMode(PlaceOrderRequest request, InstrumentRule rule) {
+        String status = rule.status();
+        if ("TRADING".equals(status)) {
+            return ValidationResult.ok(rule.version(), rule.instrumentType());
+        }
+        if ("SETTLING".equals(status)) {
+            if (request.reduceOnly()) {
+                return ValidationResult.ok(rule.version(), rule.instrumentType());
+            }
+            return ValidationResult.reject("instrument is reduce-only", rule.version(), rule.instrumentType());
+        }
+        if ("HALT".equals(status)) {
+            return ValidationResult.reject("instrument is cancel-only", rule.version(), rule.instrumentType());
+        }
+        return ValidationResult.reject("instrument is not trading", rule.version(), rule.instrumentType());
     }
 
     private ValidationResult validateMarket(PlaceOrderRequest request, InstrumentRule rule) {

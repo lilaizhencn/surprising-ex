@@ -125,10 +125,19 @@ public class OrderMarginRepository {
             long openInterestLimitRatePpm = rs.getLong("user_open_interest_limit_rate_ppm");
             long openInterestLimitFloorUnits = rs.getLong("user_open_interest_limit_floor_units");
             Long configuredLeveragePpm = nullableLong(rs, "leverage_ppm");
-            long effectivePriceTicks = OrderMarginMath.collateralPriceTicks(side, orderType, priceTicks,
-                    nullableMarkTicks, marketMaxSlippagePpm, contractType);
             long currentSignedQuantitySteps = rs.getLong("current_signed_quantity_steps");
             long pendingSameSideSteps = rs.getLong("pending_same_side_steps");
+            boolean protectAdverseFillPrice = mayOpenExposure(currentSignedQuantitySteps, side,
+                    pendingSameSideSteps, quantitySteps);
+            long effectivePriceTicks;
+            try {
+                effectivePriceTicks = OrderMarginMath.collateralPriceTicks(side, orderType, priceTicks,
+                        nullableMarkTicks, marketMaxSlippagePpm, contractType, protectAdverseFillPrice);
+            } catch (IllegalArgumentException ex) {
+                return new MarginRequirement(accountType, rs.getString("asset"), 0L, ex.getMessage(),
+                        configuredLeveragePpm == null ? 0L : configuredLeveragePpm, instrumentMaxLeveragePpm,
+                        instrumentInitialMarginRatePpm);
+            }
             long projectedPositionNotionalUnits = projectedPositionNotionalUnits(contractType,
                     currentSignedQuantitySteps, side, Math.addExact(pendingSameSideSteps, quantitySteps),
                     effectivePriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
@@ -165,18 +174,25 @@ public class OrderMarginRepository {
                     OrderLeverageMath.initialMarginRateFromLeveragePpm(selectedLeveragePpm);
             long effectiveInitialMarginRatePpm =
                     Math.max(leverageInitialMarginRatePpm, bracket.initialMarginRatePpm());
-            long initialMarginUnits = OrderMarginMath.initialMarginUnits(
-                    contractType,
-                    side,
-                    orderType,
-                    priceTicks,
-                    quantitySteps,
-                    nullableMarkTicks,
-                    marketMaxSlippagePpm,
-                    notionalMultiplierUnits,
-                    priceTickUnits,
-                    settleScaleUnits,
-                    effectiveInitialMarginRatePpm);
+            long initialMarginUnits;
+            try {
+                initialMarginUnits = OrderMarginMath.initialMarginUnits(
+                        contractType,
+                        side,
+                        orderType,
+                        priceTicks,
+                        quantitySteps,
+                        nullableMarkTicks,
+                        marketMaxSlippagePpm,
+                        notionalMultiplierUnits,
+                        priceTickUnits,
+                        settleScaleUnits,
+                        effectiveInitialMarginRatePpm,
+                        protectAdverseFillPrice);
+            } catch (IllegalArgumentException ex) {
+                return new MarginRequirement(accountType, rs.getString("asset"), 0L, ex.getMessage(),
+                        selectedLeveragePpm, bracket.maxLeveragePpm(), effectiveInitialMarginRatePpm);
+            }
             return new MarginRequirement(accountType, rs.getString("asset"), initialMarginUnits, null,
                     selectedLeveragePpm, bracket.maxLeveragePpm(), effectiveInitialMarginRatePpm);
         }, userId, normalizedMarginMode.name(), userId, normalizedMarginMode.name(), normalizedPositionSide.name(),
@@ -212,6 +228,23 @@ public class OrderMarginRepository {
         }
         return OrderMarginMath.notionalUnits(contractType, projectedAbsSteps, effectivePriceTicks,
                 notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
+    }
+
+    private boolean mayOpenExposure(long currentSignedQuantitySteps,
+                                    OrderSide side,
+                                    long pendingSameSideSteps,
+                                    long orderQuantitySteps) {
+        long sameSideSteps = Math.addExact(pendingSameSideSteps, orderQuantitySteps);
+        if (side == OrderSide.BUY) {
+            if (currentSignedQuantitySteps >= 0) {
+                return true;
+            }
+            return sameSideSteps > Math.absExact(currentSignedQuantitySteps);
+        }
+        if (currentSignedQuantitySteps <= 0) {
+            return true;
+        }
+        return sameSideSteps > currentSignedQuantitySteps;
     }
 
     private long dynamicPositionLimitUnits(ContractType contractType,

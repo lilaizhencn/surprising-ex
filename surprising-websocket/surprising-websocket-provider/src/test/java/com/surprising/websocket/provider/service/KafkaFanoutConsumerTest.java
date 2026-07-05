@@ -17,10 +17,13 @@ import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
 import com.surprising.risk.api.model.RiskPositionUpdatedEvent;
 import com.surprising.risk.api.model.RiskStatus;
+import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.MatchTradeEvent;
+import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
+import com.surprising.websocket.api.model.ExecutionReportEvent;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import java.math.BigDecimal;
@@ -48,19 +51,19 @@ class KafkaFanoutConsumerTest {
         ObjectMapper objectMapper = new ObjectMapper();
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
-        OrderBookDepthEvent event = new OrderBookDepthEvent("BTC-USDT", 7L, 6L,
+        OrderBookDepthEvent event = new OrderBookDepthEvent("BTC-USDT-SPOT", 7L, 6L,
                 OrderBookDepthUpdateType.DELTA, 50,
                 List.of(new OrderBookLevel(99L, 5L, 1L)),
                 List.of(new OrderBookLevel(101L, 8L, 2L)), eventTime);
 
         consumer.onOrderBookDepth(new ConsumerRecord<>("surprising.perp.orderbook.depth.v1", 0, 0L,
-                "BTC-USDT", objectMapper.writeValueAsString(event)));
+                "BTC-USDT-SPOT", objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
         verify(registry).publish(topic.capture(), payload.capture(), eq(eventTime));
         assertThat(topic.getValue().channel()).isEqualTo(WsChannel.ORDER_BOOK_DEPTH);
-        assertThat(topic.getValue().symbol()).isEqualTo("BTC-USDT");
+        assertThat(topic.getValue().symbol()).isEqualTo("BTC-USDT-SPOT");
         assertThat(payload.getValue()).isEqualTo(event);
     }
 
@@ -97,14 +100,34 @@ class KafkaFanoutConsumerTest {
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
-        verify(registry, org.mockito.Mockito.times(3)).publish(topic.capture(), payload.capture(), eq(eventTime));
+        verify(registry, org.mockito.Mockito.times(5)).publish(topic.capture(), payload.capture(), eq(eventTime));
         assertThat(topic.getAllValues().get(0).channel()).isEqualTo(WsChannel.TRADES);
         assertThat(topic.getAllValues().get(0).userId()).isNull();
         assertThat(topic.getAllValues().get(1).channel()).isEqualTo(WsChannel.MATCHES);
         assertThat(topic.getAllValues().get(1).userId()).isEqualTo(2002L);
         assertThat(topic.getAllValues().get(2).channel()).isEqualTo(WsChannel.MATCHES);
         assertThat(topic.getAllValues().get(2).userId()).isEqualTo(1001L);
-        assertThat(payload.getAllValues()).containsOnly(event);
+        assertThat(topic.getAllValues().get(3).channel()).isEqualTo(WsChannel.EXECUTION_REPORTS);
+        assertThat(topic.getAllValues().get(3).userId()).isEqualTo(2002L);
+        assertThat(topic.getAllValues().get(4).channel()).isEqualTo(WsChannel.EXECUTION_REPORTS);
+        assertThat(topic.getAllValues().get(4).userId()).isEqualTo(1001L);
+        assertThat(payload.getAllValues().subList(0, 3)).containsOnly(event);
+        ExecutionReportEvent takerReport = (ExecutionReportEvent) payload.getAllValues().get(3);
+        ExecutionReportEvent makerReport = (ExecutionReportEvent) payload.getAllValues().get(4);
+        assertThat(takerReport.reportType()).isEqualTo("TRADE");
+        assertThat(takerReport.liquidityRole()).isEqualTo("TAKER");
+        assertThat(takerReport.side()).isEqualTo("BUY");
+        assertThat(takerReport.orderId()).isEqualTo(202L);
+        assertThat(takerReport.counterpartyOrderId()).isEqualTo(101L);
+        assertThat(takerReport.orderCompleted()).isTrue();
+        assertThat(makerReport.reportType()).isEqualTo("TRADE");
+        assertThat(makerReport.liquidityRole()).isEqualTo("MAKER");
+        assertThat(makerReport.side()).isEqualTo("SELL");
+        assertThat(makerReport.orderId()).isEqualTo(101L);
+        assertThat(makerReport.counterpartyOrderId()).isEqualTo(202L);
+        assertThat(makerReport.orderCompleted()).isFalse();
+        assertThat(makerReport.priceTicks()).isEqualTo(600_000L);
+        assertThat(makerReport.quantitySteps()).isEqualTo(3L);
     }
 
     @Test
@@ -121,11 +144,54 @@ class KafkaFanoutConsumerTest {
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
-        verify(registry).publish(topic.capture(), payload.capture(), eq(eventTime));
-        assertThat(topic.getValue().channel()).isEqualTo(WsChannel.ORDERS);
-        assertThat(topic.getValue().symbol()).isEqualTo(SubscriptionTopic.WILDCARD);
-        assertThat(topic.getValue().userId()).isEqualTo(1001L);
-        assertThat(payload.getValue()).isEqualTo(event);
+        verify(registry, org.mockito.Mockito.times(2)).publish(topic.capture(), payload.capture(), eq(eventTime));
+        assertThat(topic.getAllValues().get(0).channel()).isEqualTo(WsChannel.ORDERS);
+        assertThat(topic.getAllValues().get(0).symbol()).isEqualTo(SubscriptionTopic.WILDCARD);
+        assertThat(topic.getAllValues().get(0).userId()).isEqualTo(1001L);
+        assertThat(payload.getAllValues().get(0)).isEqualTo(event);
+        assertThat(topic.getAllValues().get(1).channel()).isEqualTo(WsChannel.EXECUTION_REPORTS);
+        assertThat(topic.getAllValues().get(1).symbol()).isEqualTo(SubscriptionTopic.WILDCARD);
+        assertThat(topic.getAllValues().get(1).userId()).isEqualTo(1001L);
+        ExecutionReportEvent report = (ExecutionReportEvent) payload.getAllValues().get(1);
+        assertThat(report.reportType()).isEqualTo("ORDER_EVENT");
+        assertThat(report.orderId()).isEqualTo(11L);
+        assertThat(report.orderEventType()).isEqualTo("CANCEL_REQUESTED");
+        assertThat(report.orderStatus()).isEqualTo("CANCEL_REQUESTED");
+        assertThat(report.reason()).isEqualTo("reduce-only-pruned");
+        assertThat(report.traceId()).isEqualTo("trace-1");
+    }
+
+    @Test
+    void fansOutMatchResultAsExecutionReport() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        MatchResultEvent event = new MatchResultEvent(71L, 202L, 2002L, "BTC-USDT", 7L,
+                OrderCommandType.PLACE, "SUCCESS", 3L, OrderStatus.FILLED, eventTime, List.of(),
+                "trace-result-1");
+
+        consumer.onMatchResult(new ConsumerRecord<>("surprising.perp.match.results.v1", 0, 0L,
+                "BTC-USDT", objectMapper.writeValueAsString(event)));
+
+        ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
+        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+        verify(registry, org.mockito.Mockito.times(2)).publish(topic.capture(), payload.capture(), eq(eventTime));
+        assertThat(topic.getAllValues().get(0).channel()).isEqualTo(WsChannel.MATCHES);
+        assertThat(topic.getAllValues().get(0).userId()).isEqualTo(2002L);
+        assertThat(payload.getAllValues().get(0)).isEqualTo(event);
+        assertThat(topic.getAllValues().get(1).channel()).isEqualTo(WsChannel.EXECUTION_REPORTS);
+        assertThat(topic.getAllValues().get(1).symbol()).isEqualTo("BTC-USDT");
+        assertThat(topic.getAllValues().get(1).userId()).isEqualTo(2002L);
+        ExecutionReportEvent report = (ExecutionReportEvent) payload.getAllValues().get(1);
+        assertThat(report.reportType()).isEqualTo("MATCH_RESULT");
+        assertThat(report.commandId()).isEqualTo(71L);
+        assertThat(report.orderId()).isEqualTo(202L);
+        assertThat(report.instrumentVersion()).isEqualTo(7L);
+        assertThat(report.commandType()).isEqualTo("PLACE");
+        assertThat(report.orderStatus()).isEqualTo("FILLED");
+        assertThat(report.resultCode()).isEqualTo("SUCCESS");
+        assertThat(report.filledQuantitySteps()).isEqualTo(3L);
+        assertThat(report.traceId()).isEqualTo("trace-result-1");
     }
 
     @Test

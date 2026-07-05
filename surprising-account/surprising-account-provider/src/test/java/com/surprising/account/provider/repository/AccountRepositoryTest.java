@@ -137,7 +137,7 @@ class AccountRepositoryTest {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         stubMissingPositionMode(1001L);
-        stubPositionModeSwitchChecks(false, false, false, false, true);
+        stubPositionModeSwitchChecks(false, false, false, false, false, true);
 
         assertThatThrownBy(() -> repository.updatePositionMode(1001L, PositionMode.HEDGE, now))
                 .isInstanceOf(IllegalStateException.class)
@@ -150,7 +150,7 @@ class AccountRepositoryTest {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         stubMissingPositionMode(1001L);
-        stubPositionModeSwitchChecks(false, false, false, false, false);
+        stubPositionModeSwitchChecks(false, false, false, false, false, false);
         when(jdbcTemplate.update(contains("INSERT INTO account_position_modes"),
                 eq(1001L), eq("HEDGE"), any(Timestamp.class))).thenReturn(1);
 
@@ -166,7 +166,7 @@ class AccountRepositoryTest {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         stubMissingPositionMode(1001L);
-        stubPositionModeSwitchChecks(true, false, false, false, false);
+        stubPositionModeSwitchChecks(true, false, false, false, false, false);
 
         assertThatThrownBy(() -> repository.updatePositionMode(1001L, PositionMode.HEDGE, now))
                 .isInstanceOf(IllegalStateException.class)
@@ -179,7 +179,7 @@ class AccountRepositoryTest {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         stubMissingPositionMode(1001L);
-        stubPositionModeSwitchChecks(false, true, false, false, false);
+        stubPositionModeSwitchChecks(false, true, false, false, false, false);
 
         assertThatThrownBy(() -> repository.updatePositionMode(1001L, PositionMode.HEDGE, now))
                 .isInstanceOf(IllegalStateException.class)
@@ -192,7 +192,7 @@ class AccountRepositoryTest {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         stubMissingPositionMode(1001L);
-        stubPositionModeSwitchChecks(false, false, true, false, false);
+        stubPositionModeSwitchChecks(false, false, true, false, false, false);
 
         assertThatThrownBy(() -> repository.updatePositionMode(1001L, PositionMode.HEDGE, now))
                 .isInstanceOf(IllegalStateException.class)
@@ -205,11 +205,24 @@ class AccountRepositoryTest {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         stubMissingPositionMode(1001L);
-        stubPositionModeSwitchChecks(false, false, false, true, false);
+        stubPositionModeSwitchChecks(false, false, false, false, true, false);
 
         assertThatThrownBy(() -> repository.updatePositionMode(1001L, PositionMode.HEDGE, now))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("position mode switch requires all matched trades to be settled");
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO account_position_modes"), any(Object[].class));
+    }
+
+    @Test
+    void updatePositionModeRequiresNoActiveAlgoOrders() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        stubMissingPositionMode(1001L);
+        stubPositionModeSwitchChecks(false, false, false, true, false, false);
+
+        assertThatThrownBy(() -> repository.updatePositionMode(1001L, PositionMode.HEDGE, now))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("position mode switch requires no active algo orders");
         verify(jdbcTemplate, never()).update(contains("INSERT INTO account_position_modes"), any(Object[].class));
     }
 
@@ -624,6 +637,33 @@ class AccountRepositoryTest {
     }
 
     @Test
+    void tradeFeeUsesAvailableBalanceFastPathWhenCrossMarginCanCoverDebit() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+
+        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(1L);
+        when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.query(contains("UPDATE account_balances b"), anyRowMapper(),
+                eq(-25L), any(Timestamp.class), eq(1001L), eq("USDT"), eq(-25L)))
+                .thenAnswer(balanceAfterUnits(75L));
+
+        repository.settleTradeFee(1001L, "USDT", 5001L, 9001L, -25L,
+                "TAKER_FEE", 500L, "BTC-USDT", MarginMode.CROSS, now);
+
+        verify(jdbcTemplate).query(contains("UPDATE account_balances b"), anyRowMapper(),
+                eq(-25L), any(Timestamp.class), eq(1001L), eq("USDT"), eq(-25L));
+        verify(jdbcTemplate).update(contains("UPDATE account_ledger_entries"),
+                eq(75L), eq("9001:5001"), eq(1001L), eq("USDT"));
+        verify(jdbcTemplate, never()).query(contains("FROM account_position_margins"), anyRowMapper(),
+                any(Object[].class));
+        verify(jdbcTemplate, never()).queryForObject(contains("SELECT b.available_units"), anyRowMapper(),
+                any(Object[].class));
+    }
+
+    @Test
     void coinPerpetualTradeFeeSettlesProductBalanceWithoutLegacyBalanceMutation() throws Exception {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
@@ -659,6 +699,34 @@ class AccountRepositoryTest {
                 eq(75L), eq("TRADE_FEE"), eq("9001:5001"), eq(1001L), eq("COIN_PERPETUAL"), eq("BTC"));
         verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
         verify(jdbcTemplate, never()).update(contains("INSERT INTO account_ledger_entries"), any(Object[].class));
+    }
+
+    @Test
+    void coinPerpetualTradeFeeUsesProductAvailableBalanceFastPath() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+
+        when(sequenceRepository.nextSequence("product-ledger-entry")).thenReturn(7001L);
+        when(jdbcTemplate.update(contains("INSERT INTO account_product_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_product_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.query(contains("UPDATE account_product_balances b"), anyRowMapper(),
+                eq(-25L), any(Timestamp.class), eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"), eq(-25L)))
+                .thenAnswer(balanceAfterUnits(75L));
+
+        repository.settleTradeFee(AccountType.COIN_PERPETUAL, 1001L, "BTC", 5001L, 9001L, -25L,
+                "TAKER_FEE", 500L, "BTC-USD", MarginMode.CROSS, now);
+
+        verify(jdbcTemplate).query(contains("UPDATE account_product_balances b"), anyRowMapper(),
+                eq(-25L), any(Timestamp.class), eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"), eq(-25L));
+        verify(jdbcTemplate).update(contains("UPDATE account_product_ledger_entries"),
+                eq(75L), eq("TRADE_FEE"), eq("9001:5001"), eq(1001L), eq("COIN_PERPETUAL"), eq("BTC"));
+        verify(jdbcTemplate, never()).query(contains("FROM account_position_margins"), anyRowMapper(),
+                any(Object[].class));
+        verify(jdbcTemplate, never()).queryForObject(contains("FROM account_product_balances b"), anyRowMapper(),
+                any(Object[].class));
+        verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
     }
 
     @Test
@@ -840,6 +908,7 @@ class AccountRepositoryTest {
     private void stubPositionModeSwitchChecks(boolean hasOpenPositions,
                                               boolean hasOpenOrders,
                                               boolean hasPendingTriggers,
+                                              boolean hasActiveAlgoOrders,
                                               boolean hasUnsettledTrades,
                                               boolean hasActiveReservations) {
         when(jdbcTemplate.queryForObject(contains("FROM account_positions"), eq(Boolean.class), eq(1001L)))
@@ -848,6 +917,8 @@ class AccountRepositoryTest {
                 .thenReturn(hasOpenOrders);
         when(jdbcTemplate.queryForObject(contains("FROM trading_trigger_orders"), eq(Boolean.class), eq(1001L)))
                 .thenReturn(hasPendingTriggers);
+        when(jdbcTemplate.queryForObject(contains("FROM trading_algo_orders"), eq(Boolean.class), eq(1001L)))
+                .thenReturn(hasActiveAlgoOrders);
         when(jdbcTemplate.queryForObject(contains("FROM trading_match_trades"), eq(Boolean.class),
                 eq(1001L), eq(1001L))).thenReturn(hasUnsettledTrades);
         when(jdbcTemplate.queryForObject(contains("FROM account_margin_reservations"), eq(Boolean.class),
@@ -890,6 +961,15 @@ class AccountRepositoryTest {
             when(rs.getLong("maintenance_margin_units")).thenReturn(maintenanceMarginUnits);
             when(rs.getString("status")).thenReturn(status);
             when(rs.getTimestamp("event_time")).thenReturn(Timestamp.from(Instant.parse("2026-07-01T00:00:00Z")));
+            return List.of(mapper.mapRow(rs, 0));
+        };
+    }
+
+    private org.mockito.stubbing.Answer<List<Object>> balanceAfterUnits(long balanceAfterUnits) {
+        return invocation -> {
+            RowMapper<?> mapper = invocation.getArgument(1);
+            ResultSet rs = mock(ResultSet.class);
+            when(rs.getLong("balance_after_units")).thenReturn(balanceAfterUnits);
             return List.of(mapper.mapRow(rs, 0));
         };
     }

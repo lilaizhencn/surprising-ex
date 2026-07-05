@@ -10,6 +10,7 @@ public class TradingOrderProperties {
     private Outbox outbox = new Outbox();
     private Risk risk = new Risk();
     private FeeTier feeTier = new FeeTier();
+    private Algo algo = new Algo();
 
     public Kafka getKafka() {
         return kafka;
@@ -41,6 +42,14 @@ public class TradingOrderProperties {
 
     public void setFeeTier(FeeTier feeTier) {
         this.feeTier = feeTier;
+    }
+
+    public Algo getAlgo() {
+        return algo;
+    }
+
+    public void setAlgo(Algo algo) {
+        this.algo = algo;
     }
 
     public static class Kafka {
@@ -196,6 +205,72 @@ public class TradingOrderProperties {
 
         public void setLookbackDays(long lookbackDays) {
             this.lookbackDays = lookbackDays;
+        }
+    }
+
+    public static class Algo {
+        private boolean enabled = true;
+        private int claimBatchSize = 100;
+        private long scanDelayMs = 250L;
+        private long minIntervalSeconds = 1L;
+        private long maxIntervalSeconds = 86_400L;
+        private long minDurationSeconds = 5L;
+        private long maxDurationSeconds = 86_400L;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getClaimBatchSize() {
+            return claimBatchSize;
+        }
+
+        public void setClaimBatchSize(int claimBatchSize) {
+            this.claimBatchSize = claimBatchSize;
+        }
+
+        public long getScanDelayMs() {
+            return scanDelayMs;
+        }
+
+        public void setScanDelayMs(long scanDelayMs) {
+            this.scanDelayMs = scanDelayMs;
+        }
+
+        public long getMinIntervalSeconds() {
+            return minIntervalSeconds;
+        }
+
+        public void setMinIntervalSeconds(long minIntervalSeconds) {
+            this.minIntervalSeconds = minIntervalSeconds;
+        }
+
+        public long getMaxIntervalSeconds() {
+            return maxIntervalSeconds;
+        }
+
+        public void setMaxIntervalSeconds(long maxIntervalSeconds) {
+            this.maxIntervalSeconds = maxIntervalSeconds;
+        }
+
+        public long getMinDurationSeconds() {
+            return minDurationSeconds;
+        }
+
+        public void setMinDurationSeconds(long minDurationSeconds) {
+            this.minDurationSeconds = minDurationSeconds;
+        }
+
+        public long getMaxDurationSeconds() {
+            return maxDurationSeconds;
+        }
+
+        public void setMaxDurationSeconds(long maxDurationSeconds) {
+            this.maxDurationSeconds = maxDurationSeconds;
         }
     }
 }

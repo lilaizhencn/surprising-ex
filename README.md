@@ -34,6 +34,13 @@ To understand the project architecture and implementation details, read the Surp
 
 ## Module Documentation
 
+- [Order API completion and full-chain stress report](docs/order-api-production-test-report.md)
+- [Market-maker provider continuous full-stack smoke](docs/market-maker-provider-continuous-report.md)
+- [Market-maker provider scheduled engine smoke](docs/market-maker-provider-engine-report.md)
+- [Market-maker scheduled engine account-restart fault smoke](docs/market-maker-provider-engine-fault-report.md)
+- [Market-maker reference-market WebSocket smoke](docs/market-maker-reference-market-report.md)
+- [Market-maker reference-market account-restart fault smoke](docs/market-maker-reference-market-fault-report.md)
+- [Market-maker reference-market 180s sustained smoke](docs/market-maker-reference-market-sustained-report.md)
 - [surprising-candlestick](surprising-candlestick/README.md)
 - [surprising-instrument](surprising-instrument/README.md)
 - [surprising-price](surprising-price/README.md)
@@ -199,7 +206,9 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Matching also exits on decoded command processing failure, so Kafka replay happens after DB order-book recovery instead of retrying against a possibly mutated in-memory book.
 - Matching requires sufficient `locked_units` when releasing reserved order margin; insufficient locked balance fails fast and triggers recovery instead of silently crediting available balance.
 - Market orders use fresh mark-price execution-band notional checks at order entry, then matching submits the side-specific protected price to exchange-core. Linear contracts reserve market-order initial margin at the upper band for both BUY and SELL so a market SELL can safely execute against higher resting bids. Matching rejects self-trading taker orders.
-- Take-profit and stop-loss are conditional trigger orders. They stay in `trading_trigger_orders` until a mark-price event crosses the trigger price; then `surprising-trigger-provider` submits an idempotent `reduceOnly=true` close order through order-provider with `clientOrderId=trigger-<triggerOrderId>`.
+- Ordinary order amend uses order-provider cancel-replace semantics for open LIMIT orders; replacement orders get a new `newClientOrderId` and run the same validation/fund reservation path while original-order release follows cancel matching/account settlement.
+- TWAP and Iceberg algo orders are order-provider parent orders outside the live book. Their scheduled child orders are ordinary order-provider orders, so fills still pass through exchange-core matching, account settlement, risk, liquidation checks, and WebSocket fanout. Active algo orders block margin-mode and position-mode switches until canceled or completed.
+- Take-profit, stop-loss, and trailing stop are conditional trigger orders. They stay in `trading_trigger_orders` until the configured `MARK_PRICE`, `INDEX_PRICE`, or `LAST_PRICE` source crosses the trigger rule; then `surprising-trigger-provider` submits an idempotent `reduceOnly=true` close order through order-provider with `clientOrderId=trigger-<triggerOrderId>`. Trailing stop uses integer `callbackRatePpm` (`1000` = `0.1%`, `100000` = `10%`) plus optional `activationPriceTicks`, tracks the post-activation high/low watermark, and triggers only after the callback is reached. `LAST_PRICE` comes from real match trades and should be treated as more manipulation-sensitive than mark/index in thin books.
 - Paired TP/SL can share `ocoGroupId`; when one pending trigger in the same user/symbol/margin group is claimed, pending siblings are canceled in the same database statement before the generated close order is submitted.
 - Account consumes matching trades, updates long-based net positions idempotently by `tradeId`, migrates filled opening margin into position margin, and settles realized PnL into balances.
 - `CROSS` and `ISOLATED` margin modes are carried from order entry through matching, account, risk, funding, and liquidation. Cross losses may use cross available balance and cross position collateral; isolated losses only use that symbol's isolated position collateral before recording a deficit.
@@ -230,7 +239,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Order entry reserves initial margin; account processing moves filled opening margin into position margin and releases old position margin on closing trades.
 - User-initiated close orders are protected by reduce-only validation before entering the matching command path.
 - Risk detects liquidation candidates; liquidation converts candidates into staged reduce-only close orders and is not blocked by existing user reduce-only orders.
-- Insurance absorbs `account_deficits`; ADL handles residual deficits when insurance is depleted. Production rollout still needs stress testing, monitoring thresholds, real-cluster kill-switch drills, and multi-process Kafka evidence.
+- Insurance absorbs `account_deficits`; ADL handles residual deficits when insurance is depleted. The latest local evidence includes an L4 single-node real-chain stress that filled and account-settled 10000 gateway taker orders with 4 maker accounts, 5 refresh cycles, and private fanout checks for 5 users, a 180-second reference-market scheduled-engine smoke with 1333 submitted quotes, 30/30 taker trades settled, strict runtime outbox drainage, and monotonic WebSocket depth, a reference-market WebSocket account-restart smoke with Binance/OKX/Bybit streaming samples and 10/10 outage-window taker trades account-settled, a 60-second market-maker-provider scheduled-engine smoke with 400 submitted quotes and 20/20 taker trades settled, a scheduled-engine account-provider restart smoke with 5/5 outage-window taker trades settled after restart and no bad funds, and a run-once continuous smoke with 160 submitted quotes. Production rollout still needs longer multi-node/multi-broker stress testing, monitoring thresholds, real-cluster kill-switch drills, and multi-process Kafka evidence.
 - WebSocket fanout should be a separate service consuming Kafka output topics, not part of the calculators.
 - Every WebSocket node uses a unique Kafka consumer group so public market data reaches all nodes for local client fanout; do not share one WebSocket group across pods.
 - Account position pushes are emitted from the account transactional outbox after settlement, then consumed by WebSocket and filtered by authenticated user subscription.

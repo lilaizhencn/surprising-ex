@@ -527,6 +527,7 @@ CREATE SEQUENCE IF NOT EXISTS trading_orderbook_depth_seq AS BIGINT START WITH 1
 CREATE SEQUENCE IF NOT EXISTS trading_matching_symbol_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 CREATE SEQUENCE IF NOT EXISTS trading_matching_asset_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 CREATE SEQUENCE IF NOT EXISTS trading_trigger_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
+CREATE SEQUENCE IF NOT EXISTS trading_algo_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 
 CREATE TABLE IF NOT EXISTS trading_fee_schedules (
     fee_schedule_id     BIGINT PRIMARY KEY,
@@ -764,6 +765,144 @@ CREATE INDEX IF NOT EXISTS trading_orders_recovery_idx
       AND time_in_force IN ('GTC', 'GTX')
       AND remaining_quantity_steps > 0;
 
+CREATE TABLE IF NOT EXISTS trading_cancel_all_after (
+    user_id                         BIGINT NOT NULL,
+    symbol_scope                    TEXT NOT NULL,
+    countdown_ms                    BIGINT NOT NULL,
+    status                          TEXT NOT NULL,
+    trigger_at                      TIMESTAMPTZ,
+    last_heartbeat_at               TIMESTAMPTZ NOT NULL,
+    triggered_at                    TIMESTAMPTZ,
+    canceled_order_count            INTEGER NOT NULL DEFAULT 0,
+    canceled_trigger_order_count    INTEGER NOT NULL DEFAULT 0,
+    trace_id                        TEXT,
+    last_error                      TEXT,
+    created_at                      TIMESTAMPTZ NOT NULL,
+    updated_at                      TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (user_id, symbol_scope),
+    CONSTRAINT trading_cancel_all_after_user_positive CHECK (user_id > 0),
+    CONSTRAINT trading_cancel_all_after_scope_check CHECK (
+        symbol_scope = '*' OR symbol_scope ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'
+    ),
+    CONSTRAINT trading_cancel_all_after_countdown_check CHECK (countdown_ms BETWEEN 0 AND 120000),
+    CONSTRAINT trading_cancel_all_after_status_check CHECK (
+        status IN ('ACTIVE', 'TRIGGERING', 'TRIGGERED', 'DISABLED')
+    ),
+    CONSTRAINT trading_cancel_all_after_trigger_check CHECK (
+        (status IN ('ACTIVE', 'TRIGGERING') AND trigger_at IS NOT NULL AND countdown_ms > 0)
+        OR (status IN ('TRIGGERED', 'DISABLED'))
+    ),
+    CONSTRAINT trading_cancel_all_after_counts_non_negative CHECK (
+        canceled_order_count >= 0 AND canceled_trigger_order_count >= 0
+    )
+);
+
+CREATE INDEX IF NOT EXISTS trading_cancel_all_after_due_idx
+    ON trading_cancel_all_after (trigger_at, user_id, symbol_scope)
+    WHERE status = 'ACTIVE';
+
+CREATE TABLE IF NOT EXISTS trading_algo_orders (
+    algo_order_id              BIGINT PRIMARY KEY,
+    user_id                    BIGINT NOT NULL,
+    client_algo_order_id       TEXT,
+    symbol                     TEXT NOT NULL,
+    algo_type                  TEXT NOT NULL,
+    side                       TEXT NOT NULL,
+    price_ticks                BIGINT NOT NULL,
+    quantity_steps             BIGINT NOT NULL,
+    child_quantity_steps       BIGINT NOT NULL,
+    interval_seconds           BIGINT NOT NULL,
+    duration_seconds           BIGINT NOT NULL,
+    margin_mode                TEXT NOT NULL DEFAULT 'CROSS',
+    position_side              TEXT NOT NULL DEFAULT 'NET',
+    reduce_only                BOOLEAN NOT NULL DEFAULT FALSE,
+    post_only                  BOOLEAN NOT NULL DEFAULT FALSE,
+    time_in_force              TEXT NOT NULL,
+    status                     TEXT NOT NULL,
+    current_order_id           BIGINT,
+    reject_reason              TEXT,
+    trace_id                   TEXT,
+    start_at                   TIMESTAMPTZ NOT NULL,
+    next_slice_at              TIMESTAMPTZ,
+    completed_at               TIMESTAMPTZ,
+    created_at                 TIMESTAMPTZ NOT NULL,
+    updated_at                 TIMESTAMPTZ NOT NULL,
+    CONSTRAINT trading_algo_orders_user_positive CHECK (user_id > 0),
+    CONSTRAINT trading_algo_orders_client_id_length CHECK (
+        client_algo_order_id IS NULL OR length(client_algo_order_id) <= 64
+    ),
+    CONSTRAINT trading_algo_orders_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT trading_algo_orders_symbol_fk
+        FOREIGN KEY (symbol) REFERENCES instrument_current_versions(symbol),
+    CONSTRAINT trading_algo_orders_type_check CHECK (algo_type IN ('TWAP', 'ICEBERG')),
+    CONSTRAINT trading_algo_orders_side_check CHECK (side IN ('BUY', 'SELL')),
+    CONSTRAINT trading_algo_orders_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
+    CONSTRAINT trading_algo_orders_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
+    CONSTRAINT trading_algo_orders_tif_check CHECK (time_in_force IN ('GTC', 'IOC', 'GTX')),
+    CONSTRAINT trading_algo_orders_status_check CHECK (
+        status IN ('PENDING', 'RUNNING', 'CANCEL_REQUESTED', 'CANCELED', 'COMPLETED', 'FAILED')
+    ),
+    CONSTRAINT trading_algo_orders_long_values CHECK (
+        price_ticks >= 0
+        AND quantity_steps > 0
+        AND child_quantity_steps > 0
+        AND child_quantity_steps <= quantity_steps
+        AND interval_seconds > 0
+        AND duration_seconds > 0
+    ),
+    CONSTRAINT trading_algo_orders_algo_rules CHECK (
+        (algo_type = 'TWAP' AND time_in_force = 'IOC' AND post_only = FALSE)
+        OR (algo_type = 'ICEBERG' AND price_ticks > 0 AND time_in_force IN ('GTC', 'GTX'))
+    ),
+    CONSTRAINT trading_algo_orders_current_order_fk
+        FOREIGN KEY (current_order_id) REFERENCES trading_orders(order_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS trading_algo_orders_user_client_uidx
+    ON trading_algo_orders (user_id, client_algo_order_id)
+    WHERE client_algo_order_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS trading_algo_orders_due_idx
+    ON trading_algo_orders (next_slice_at, algo_order_id)
+    WHERE status IN ('PENDING', 'RUNNING');
+
+CREATE INDEX IF NOT EXISTS trading_algo_orders_user_status_idx
+    ON trading_algo_orders (user_id, status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS trading_algo_order_children (
+    algo_order_id              BIGINT NOT NULL,
+    slice_index                INTEGER NOT NULL,
+    order_id                   BIGINT NOT NULL,
+    client_order_id            TEXT NOT NULL,
+    quantity_steps             BIGINT NOT NULL,
+    price_ticks                BIGINT NOT NULL,
+    order_type                 TEXT NOT NULL,
+    time_in_force              TEXT NOT NULL,
+    status                     TEXT NOT NULL,
+    created_at                 TIMESTAMPTZ NOT NULL,
+    updated_at                 TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (algo_order_id, slice_index),
+    CONSTRAINT trading_algo_order_children_algo_fk
+        FOREIGN KEY (algo_order_id) REFERENCES trading_algo_orders(algo_order_id),
+    CONSTRAINT trading_algo_order_children_order_fk
+        FOREIGN KEY (order_id) REFERENCES trading_orders(order_id),
+    CONSTRAINT trading_algo_order_children_client_id_unique UNIQUE (client_order_id),
+    CONSTRAINT trading_algo_order_children_values CHECK (
+        slice_index > 0
+        AND order_id > 0
+        AND quantity_steps > 0
+        AND price_ticks >= 0
+    ),
+    CONSTRAINT trading_algo_order_children_type_check CHECK (order_type IN ('LIMIT', 'MARKET')),
+    CONSTRAINT trading_algo_order_children_tif_check CHECK (time_in_force IN ('GTC', 'IOC', 'GTX')),
+    CONSTRAINT trading_algo_order_children_status_check CHECK (
+        status IN ('ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED', 'CANCELED', 'PARTIALLY_FILLED', 'FILLED')
+    )
+);
+
+CREATE INDEX IF NOT EXISTS trading_algo_order_children_order_idx
+    ON trading_algo_order_children (order_id);
+
 CREATE TABLE IF NOT EXISTS trading_symbol_open_interest (
     symbol                  TEXT PRIMARY KEY,
     long_quantity_steps     BIGINT NOT NULL DEFAULT 0,
@@ -791,6 +930,11 @@ CREATE TABLE IF NOT EXISTS trading_trigger_orders (
     trigger_price_type         TEXT NOT NULL,
     trigger_condition          TEXT NOT NULL,
     trigger_price_ticks        BIGINT NOT NULL,
+    activation_price_ticks     BIGINT,
+    callback_rate_ppm          BIGINT,
+    highest_price_ticks        BIGINT,
+    lowest_price_ticks         BIGINT,
+    activated_at               TIMESTAMPTZ,
     order_type                 TEXT NOT NULL,
     time_in_force              TEXT NOT NULL,
     price_ticks                BIGINT NOT NULL,
@@ -821,8 +965,10 @@ CREATE TABLE IF NOT EXISTS trading_trigger_orders (
         FOREIGN KEY (placed_order_id) REFERENCES trading_orders(order_id),
     CONSTRAINT trading_trigger_orders_side_check CHECK (side IN ('BUY', 'SELL')),
     CONSTRAINT trading_trigger_orders_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
-    CONSTRAINT trading_trigger_orders_type_check CHECK (trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')),
-    CONSTRAINT trading_trigger_orders_price_type_check CHECK (trigger_price_type IN ('MARK_PRICE')),
+    CONSTRAINT trading_trigger_orders_type_check CHECK (
+        trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS', 'TRAILING_STOP')
+    ),
+    CONSTRAINT trading_trigger_orders_price_type_check CHECK (trigger_price_type IN ('MARK_PRICE', 'INDEX_PRICE', 'LAST_PRICE')),
     CONSTRAINT trading_trigger_orders_condition_check CHECK (
         trigger_condition IN ('GREATER_OR_EQUAL', 'LESS_OR_EQUAL')
     ),
@@ -833,11 +979,33 @@ CREATE TABLE IF NOT EXISTS trading_trigger_orders (
         status IN ('PENDING', 'TRIGGERING', 'TRIGGERED', 'TRIGGER_FAILED', 'CANCELED', 'EXPIRED')
     ),
     CONSTRAINT trading_trigger_orders_long_values CHECK (
-        trigger_price_ticks > 0
+        (
+            (trigger_type = 'TRAILING_STOP' AND trigger_price_ticks >= 0)
+            OR (trigger_type <> 'TRAILING_STOP' AND trigger_price_ticks > 0)
+        )
+        AND (activation_price_ticks IS NULL OR activation_price_ticks >= 0)
+        AND (callback_rate_ppm IS NULL OR callback_rate_ppm BETWEEN 1000 AND 100000)
+        AND (highest_price_ticks IS NULL OR highest_price_ticks > 0)
+        AND (lowest_price_ticks IS NULL OR lowest_price_ticks > 0)
         AND price_ticks >= 0
         AND quantity_steps > 0
         AND (trigger_sequence IS NULL OR trigger_sequence > 0)
         AND (triggered_price_ticks IS NULL OR triggered_price_ticks > 0)
+    ),
+    CONSTRAINT trading_trigger_orders_trailing_check CHECK (
+        (
+            trigger_type = 'TRAILING_STOP'
+            AND callback_rate_ppm IS NOT NULL
+            AND order_type = 'MARKET'
+        )
+        OR (
+            trigger_type <> 'TRAILING_STOP'
+            AND activation_price_ticks IS NULL
+            AND callback_rate_ppm IS NULL
+            AND highest_price_ticks IS NULL
+            AND lowest_price_ticks IS NULL
+            AND activated_at IS NULL
+        )
     ),
     CONSTRAINT trading_trigger_orders_market_price_zero CHECK (
         order_type <> 'MARKET' OR price_ticks = 0
@@ -862,14 +1030,21 @@ CREATE INDEX IF NOT EXISTS trading_trigger_orders_user_oco_idx
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_symbol_gte_idx
     ON trading_trigger_orders (symbol, trigger_price_ticks, trigger_order_id)
     WHERE status = 'PENDING'
-      AND trigger_price_type = 'MARK_PRICE'
+      AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
+      AND trigger_price_type IN ('MARK_PRICE', 'INDEX_PRICE', 'LAST_PRICE')
       AND trigger_condition = 'GREATER_OR_EQUAL';
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_symbol_lte_idx
     ON trading_trigger_orders (symbol, trigger_price_ticks DESC, trigger_order_id)
     WHERE status = 'PENDING'
-      AND trigger_price_type = 'MARK_PRICE'
+      AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
+      AND trigger_price_type IN ('MARK_PRICE', 'INDEX_PRICE', 'LAST_PRICE')
       AND trigger_condition = 'LESS_OR_EQUAL';
+
+CREATE INDEX IF NOT EXISTS trading_trigger_orders_trailing_pending_idx
+    ON trading_trigger_orders (symbol, trigger_price_type, trigger_order_id)
+    WHERE status = 'PENDING'
+      AND trigger_type = 'TRAILING_STOP';
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_expiry_idx
     ON trading_trigger_orders (expires_at, trigger_order_id)
@@ -1935,6 +2110,45 @@ CREATE INDEX IF NOT EXISTS market_maker_run_events_account_time_idx
 CREATE INDEX IF NOT EXISTS market_maker_run_events_trace_idx
     ON market_maker_strategy_run_events (trace_id)
     WHERE trace_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS market_maker_reference_samples (
+    sample_id                   BIGSERIAL PRIMARY KEY,
+    strategy_id                 TEXT NOT NULL,
+    symbol                      TEXT NOT NULL,
+    node_id                     TEXT NOT NULL,
+    cycle_sequence              BIGINT NOT NULL DEFAULT 0,
+    source_name                 TEXT NOT NULL,
+    transport                   TEXT NOT NULL,
+    bid_levels                  INTEGER NOT NULL,
+    ask_levels                  INTEGER NOT NULL,
+    best_bid_ticks              BIGINT NOT NULL,
+    best_ask_ticks              BIGINT NOT NULL,
+    mid_price_ticks             BIGINT NOT NULL,
+    spread_ticks                BIGINT NOT NULL,
+    received_at                 TIMESTAMPTZ NOT NULL,
+    trace_id                    TEXT,
+    sampled_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT market_maker_reference_samples_strategy_format CHECK (strategy_id ~ '^[A-Za-z0-9_.:-]{1,64}$'),
+    CONSTRAINT market_maker_reference_samples_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT market_maker_reference_samples_node_present CHECK (length(node_id) > 0),
+    CONSTRAINT market_maker_reference_samples_cycle_non_negative CHECK (cycle_sequence >= 0),
+    CONSTRAINT market_maker_reference_samples_source_present CHECK (length(source_name) > 0),
+    CONSTRAINT market_maker_reference_samples_transport_check CHECK (transport IN ('REST', 'WEBSOCKET', 'UNKNOWN')),
+    CONSTRAINT market_maker_reference_samples_depth_positive CHECK (bid_levels > 0 AND ask_levels > 0),
+    CONSTRAINT market_maker_reference_samples_prices_valid CHECK (
+        best_bid_ticks > 0 AND best_ask_ticks > best_bid_ticks
+        AND mid_price_ticks > 0 AND spread_ticks > 0
+    )
+);
+
+CREATE INDEX IF NOT EXISTS market_maker_reference_samples_strategy_time_idx
+    ON market_maker_reference_samples (strategy_id, sampled_at DESC);
+
+CREATE INDEX IF NOT EXISTS market_maker_reference_samples_symbol_time_idx
+    ON market_maker_reference_samples (symbol, sampled_at DESC);
+
+CREATE INDEX IF NOT EXISTS market_maker_reference_samples_transport_time_idx
+    ON market_maker_reference_samples (transport, sampled_at DESC);
 
 CREATE TABLE IF NOT EXISTS gateway_users (
     user_id             BIGSERIAL PRIMARY KEY,

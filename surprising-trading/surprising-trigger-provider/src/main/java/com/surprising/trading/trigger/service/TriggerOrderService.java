@@ -4,6 +4,9 @@ import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.client.OrderRpcApi;
 import com.surprising.trading.api.model.AdminTriggerOrderTimelineEvent;
 import com.surprising.trading.api.model.AdminTriggerOrderTimelineResponse;
+import com.surprising.trading.api.model.BatchCancelTriggerOrdersRequest;
+import com.surprising.trading.api.model.BatchPlaceTriggerOrderRequest;
+import com.surprising.trading.api.model.CancelOpenTriggerOrdersRequest;
 import com.surprising.trading.api.model.CancelTriggerOrderRequest;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderResponse;
@@ -16,6 +19,8 @@ import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.TriggerCondition;
+import com.surprising.trading.api.model.TriggerOrderBatchItemResponse;
+import com.surprising.trading.api.model.TriggerOrderBatchResponse;
 import com.surprising.trading.api.model.TriggerOrderQueryResponse;
 import com.surprising.trading.api.model.TriggerOrderResponse;
 import com.surprising.trading.api.model.TriggerOrderStatus;
@@ -24,10 +29,12 @@ import com.surprising.trading.api.model.TriggerPriceType;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import com.surprising.trading.trigger.config.TriggerTraceContext;
 import com.surprising.trading.trigger.model.MarkTrigger;
+import com.surprising.trading.trigger.model.LastPriceTrigger;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import com.surprising.trading.trigger.model.TriggerPosition;
 import com.surprising.trading.trigger.repository.TriggerOrderRepository;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalLong;
 import org.slf4j.Logger;
@@ -39,7 +46,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Owns the TP/SL trigger-order state machine.
  *
- * <p>Trigger rows are passive until a mark-price event crosses the configured level. Execution is
+ * <p>Trigger rows are passive until a configured price stream crosses the configured level. Execution is
  * delegated back to order-provider as a reduce-only close order, so account and position state still
  * changes only through the normal order, matching, and settlement pipeline.</p>
  */
@@ -48,6 +55,8 @@ public class TriggerOrderService {
 
     private static final Logger log = LoggerFactory.getLogger(TriggerOrderService.class);
     private static final String TRIGGER_ORDER_SEQUENCE = "trigger-order";
+    private static final long MIN_TRAILING_CALLBACK_RATE_PPM = 1_000L;
+    private static final long MAX_TRAILING_CALLBACK_RATE_PPM = 100_000L;
 
     private final TriggerOrderRepository triggerOrderRepository;
     private final OrderRpcApi orderRpcApi;
@@ -97,6 +106,11 @@ public class TriggerOrderService {
                 normalized.triggerPriceType(),
                 triggerCondition(normalized.side(), normalized.triggerType()),
                 normalized.triggerPriceTicks(),
+                normalized.activationPriceTicks(),
+                normalized.callbackRatePpm(),
+                null,
+                null,
+                null,
                 normalized.orderType(),
                 normalized.timeInForce(),
                 normalized.priceTicks(),
@@ -126,6 +140,43 @@ public class TriggerOrderService {
         return toResponse(order);
     }
 
+    @Transactional
+    public TriggerOrderBatchResponse placeBatch(BatchPlaceTriggerOrderRequest request) {
+        List<PlaceTriggerOrderRequest> orders = request == null ? List.of() : request.orders();
+        requireBatchSize(orders.size(), 20, "orders");
+        if (request != null && Boolean.TRUE.equals(request.atomic())) {
+            return placeAtomicBatch(orders);
+        }
+        List<TriggerOrderBatchItemResponse> results = new ArrayList<>();
+        for (int i = 0; i < orders.size(); i++) {
+            try {
+                TriggerOrderResponse order = place(orders.get(i));
+                results.add(new TriggerOrderBatchItemResponse(i, true, "completed", order));
+            } catch (IllegalArgumentException | IllegalStateException ex) {
+                results.add(new TriggerOrderBatchItemResponse(i, false, ex.getMessage(), null));
+            }
+        }
+        return triggerBatchResponse(results);
+    }
+
+    private TriggerOrderBatchResponse placeAtomicBatch(List<PlaceTriggerOrderRequest> orders) {
+        List<TriggerOrderBatchItemResponse> results = new ArrayList<>();
+        try {
+            for (int i = 0; i < orders.size(); i++) {
+                TriggerOrderResponse order = place(orders.get(i));
+                results.add(new TriggerOrderBatchItemResponse(i, true, "completed", order));
+            }
+            return triggerBatchResponse(results);
+        } catch (IllegalArgumentException | IllegalStateException ex) {
+            List<TriggerOrderBatchItemResponse> rejected = new ArrayList<>();
+            String message = "atomic batch rejected: " + ex.getMessage();
+            for (int i = 0; i < orders.size(); i++) {
+                rejected.add(new TriggerOrderBatchItemResponse(i, false, message, null));
+            }
+            throw new AtomicTriggerBatchRejectedException(triggerBatchResponse(rejected), ex);
+        }
+    }
+
     public TriggerOrderResponse get(long triggerOrderId) {
         if (triggerOrderId <= 0) {
             throw new IllegalArgumentException("triggerOrderId must be positive");
@@ -151,6 +202,52 @@ public class TriggerOrderService {
         return triggerOrderRepository.cancel(request.userId(), request.triggerOrderId(), Instant.now())
                 .map(this::toResponse)
                 .orElseThrow(() -> new IllegalStateException("trigger order disappeared after cancel"));
+    }
+
+    @Transactional
+    public TriggerOrderBatchResponse cancelBatch(BatchCancelTriggerOrdersRequest request) {
+        List<CancelTriggerOrderRequest> orders = request == null ? List.of() : request.orders();
+        requireBatchSize(orders.size(), 50, "orders");
+        List<TriggerOrderBatchItemResponse> results = new ArrayList<>();
+        for (int i = 0; i < orders.size(); i++) {
+            try {
+                TriggerOrderResponse order = cancel(orders.get(i));
+                results.add(new TriggerOrderBatchItemResponse(i, true, "completed", order));
+            } catch (IllegalArgumentException | IllegalStateException ex) {
+                results.add(new TriggerOrderBatchItemResponse(i, false, ex.getMessage(), null));
+            }
+        }
+        return triggerBatchResponse(results);
+    }
+
+    @Transactional
+    public TriggerOrderBatchResponse cancelOpenOrders(CancelOpenTriggerOrdersRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("cancel open trigger orders request is required");
+        }
+        if (request.userId() <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        int limit = request.limit() == null ? 1000 : request.limit();
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
+        String symbol = request.symbol() == null || request.symbol().isBlank()
+                ? null
+                : normalizeSymbol(request.symbol());
+        List<TriggerOrderRecord> orders = triggerOrderRepository.pendingCancelableOrders(
+                request.userId(), symbol, limit);
+        List<TriggerOrderBatchItemResponse> results = new ArrayList<>();
+        for (int i = 0; i < orders.size(); i++) {
+            try {
+                TriggerOrderResponse order = cancel(new CancelTriggerOrderRequest(
+                        request.userId(), orders.get(i).triggerOrderId()));
+                results.add(new TriggerOrderBatchItemResponse(i, true, "completed", order));
+            } catch (IllegalArgumentException | IllegalStateException ex) {
+                results.add(new TriggerOrderBatchItemResponse(i, false, ex.getMessage(), null));
+            }
+        }
+        return triggerBatchResponse(results);
     }
 
     public TriggerOrderQueryResponse openOrders(long userId, String symbol, int limit) {
@@ -215,13 +312,41 @@ public class TriggerOrderService {
     public void onMarkPrice(MarkTrigger markTrigger) {
         OptionalLong markPriceTicks = triggerOrderRepository.markPriceTicks(markTrigger.symbol(), markTrigger.sequence());
         if (markPriceTicks.isEmpty()) {
+            if (!triggerOrderRepository.hasPendingOrdersForPriceType(markTrigger.symbol(), TriggerPriceType.MARK_PRICE)) {
+                return;
+            }
             throw new IllegalStateException("mark price ticks unavailable: " + markTrigger.symbol()
                     + " sequence=" + markTrigger.sequence());
         }
+        onTriggerPrice(TriggerPriceType.MARK_PRICE, markTrigger, markPriceTicks.getAsLong());
+    }
+
+    public void onIndexPrice(MarkTrigger indexTrigger) {
+        OptionalLong indexPriceTicks = triggerOrderRepository.indexPriceTicks(indexTrigger.symbol(),
+                indexTrigger.sequence());
+        if (indexPriceTicks.isEmpty()) {
+            if (!triggerOrderRepository.hasPendingOrdersForPriceType(indexTrigger.symbol(), TriggerPriceType.INDEX_PRICE)) {
+                return;
+            }
+            throw new IllegalStateException("index price ticks unavailable: " + indexTrigger.symbol()
+                    + " sequence=" + indexTrigger.sequence());
+        }
+        onTriggerPrice(TriggerPriceType.INDEX_PRICE, indexTrigger, indexPriceTicks.getAsLong());
+    }
+
+    public void onLastPrice(LastPriceTrigger lastTrigger) {
+        onTriggerPrice(TriggerPriceType.LAST_PRICE, new MarkTrigger(lastTrigger.symbol(), lastTrigger.sequence(),
+                lastTrigger.eventTime()), lastTrigger.priceTicks());
+    }
+
+    private void onTriggerPrice(TriggerPriceType triggerPriceType, MarkTrigger priceTrigger, long triggerPriceTicks) {
         Instant now = Instant.now();
-        List<TriggerOrderRecord> orders = triggerOrderRepository.claimTriggered(markTrigger.symbol(),
-                markPriceTicks.getAsLong(), markTrigger.sequence(), markTrigger.eventTime(),
-                properties.getExecution().getTriggerBatchSize(), now);
+        List<TriggerOrderRecord> orders = new ArrayList<>(triggerOrderRepository.claimTriggered(priceTrigger.symbol(),
+                triggerPriceType, triggerPriceTicks, priceTrigger.sequence(), priceTrigger.eventTime(),
+                properties.getExecution().getTriggerBatchSize(), now));
+        orders.addAll(triggerOrderRepository.claimTrailingTriggered(priceTrigger.symbol(), triggerPriceType,
+                triggerPriceTicks, priceTrigger.sequence(), priceTrigger.eventTime(),
+                properties.getExecution().getTriggerBatchSize(), now));
         for (TriggerOrderRecord order : orders) {
             executeTriggeredOrder(order);
         }
@@ -279,12 +404,15 @@ public class TriggerOrderService {
                 || request.timeInForce() == null) {
             throw new IllegalArgumentException("side, triggerType, orderType and timeInForce are required");
         }
-        if (request.triggerPriceType() != TriggerPriceType.MARK_PRICE) {
-            throw new IllegalArgumentException("only MARK_PRICE trigger is supported");
+        if (request.triggerPriceType() != TriggerPriceType.MARK_PRICE
+                && request.triggerPriceType() != TriggerPriceType.INDEX_PRICE
+                && request.triggerPriceType() != TriggerPriceType.LAST_PRICE) {
+            throw new IllegalArgumentException("only MARK_PRICE, INDEX_PRICE and LAST_PRICE triggers are supported");
         }
-        if (request.triggerPriceTicks() <= 0 || request.quantitySteps() <= 0) {
-            throw new IllegalArgumentException("triggerPriceTicks and quantitySteps must be positive");
+        if (request.quantitySteps() <= 0) {
+            throw new IllegalArgumentException("quantitySteps must be positive");
         }
+        validateTriggerPriceFields(request);
         validateExecutionOrder(request.orderType(), request.timeInForce(), request.priceTicks());
         String clientTriggerOrderId = emptyToNull(request.clientTriggerOrderId());
         if (clientTriggerOrderId != null && clientTriggerOrderId.length() > 64) {
@@ -303,6 +431,8 @@ public class TriggerOrderService {
                 request.triggerType(),
                 request.triggerPriceType(),
                 request.triggerPriceTicks(),
+                request.activationPriceTicks(),
+                request.callbackRatePpm(),
                 request.orderType(),
                 request.timeInForce(),
                 request.priceTicks(),
@@ -377,6 +507,34 @@ public class TriggerOrderService {
         }
     }
 
+    private void validateTriggerPriceFields(PlaceTriggerOrderRequest request) {
+        if (request.triggerType() == TriggerOrderType.TRAILING_STOP) {
+            if (request.orderType() != OrderType.MARKET) {
+                throw new IllegalArgumentException("trailing stop execution requires MARKET");
+            }
+            if (request.triggerPriceTicks() < 0) {
+                throw new IllegalArgumentException("trailing stop triggerPriceTicks must be zero or positive");
+            }
+            if (request.activationPriceTicks() != null && request.activationPriceTicks() < 0) {
+                throw new IllegalArgumentException("activationPriceTicks must be zero or positive");
+            }
+            if (request.callbackRatePpm() == null) {
+                throw new IllegalArgumentException("callbackRatePpm is required for trailing stop");
+            }
+            if (request.callbackRatePpm() < MIN_TRAILING_CALLBACK_RATE_PPM
+                    || request.callbackRatePpm() > MAX_TRAILING_CALLBACK_RATE_PPM) {
+                throw new IllegalArgumentException("callbackRatePpm must be in [1000, 100000]");
+            }
+            return;
+        }
+        if (request.triggerPriceTicks() <= 0) {
+            throw new IllegalArgumentException("triggerPriceTicks must be positive");
+        }
+        if (request.activationPriceTicks() != null || request.callbackRatePpm() != null) {
+            throw new IllegalArgumentException("activationPriceTicks and callbackRatePpm require TRAILING_STOP");
+        }
+    }
+
     private TriggerCondition triggerCondition(OrderSide side, TriggerOrderType triggerType) {
         if (triggerType == TriggerOrderType.TAKE_PROFIT) {
             return side == OrderSide.SELL ? TriggerCondition.GREATER_OR_EQUAL : TriggerCondition.LESS_OR_EQUAL;
@@ -386,6 +544,17 @@ public class TriggerOrderService {
 
     private String triggeredClientOrderId(long triggerOrderId) {
         return "trigger-" + triggerOrderId;
+    }
+
+    private void requireBatchSize(int size, int max, String field) {
+        if (size < 1 || size > max) {
+            throw new IllegalArgumentException(field + " size must be in [1, " + max + "]");
+        }
+    }
+
+    private TriggerOrderBatchResponse triggerBatchResponse(List<TriggerOrderBatchItemResponse> results) {
+        int completed = (int) results.stream().filter(TriggerOrderBatchItemResponse::success).count();
+        return new TriggerOrderBatchResponse(results.size(), completed, results.size() - completed, results);
     }
 
     private TriggerOrderResponse toResponse(TriggerOrderRecord order) {
@@ -400,6 +569,11 @@ public class TriggerOrderService {
                 order.triggerPriceType(),
                 order.triggerCondition(),
                 order.triggerPriceTicks(),
+                order.activationPriceTicks(),
+                order.callbackRatePpm(),
+                order.highestPriceTicks(),
+                order.lowestPriceTicks(),
+                order.activatedAt(),
                 order.orderType(),
                 order.timeInForce(),
                 order.priceTicks(),
@@ -453,7 +627,7 @@ public class TriggerOrderService {
         }
         if (order.triggeredAt() != null) {
             events.add(new AdminTriggerOrderTimelineEvent(
-                    "TRIGGERED_MARK",
+                    triggeredTimelineEvent(order),
                     order.status(),
                     order.triggerSequence(),
                     order.triggeredPriceTicks(),
@@ -476,6 +650,14 @@ public class TriggerOrderService {
         return events.stream()
                 .sorted(java.util.Comparator.comparing(AdminTriggerOrderTimelineEvent::eventTime))
                 .toList();
+    }
+
+    private String triggeredTimelineEvent(TriggerOrderRecord order) {
+        return switch (order.triggerPriceType()) {
+            case INDEX_PRICE -> "TRIGGERED_INDEX";
+            case LAST_PRICE -> "TRIGGERED_LAST";
+            case MARK_PRICE -> "TRIGGERED_MARK";
+        };
     }
 
     private String normalizeSymbol(String symbol) {

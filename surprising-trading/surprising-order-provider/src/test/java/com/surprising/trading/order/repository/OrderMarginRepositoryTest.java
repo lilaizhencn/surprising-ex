@@ -158,7 +158,7 @@ class OrderMarginRepositoryTest {
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
                 eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
                 eq(1001L), eq("CROSS"), eq("NET"),
-                eq("BUY"), eq(5_000L),
+                eq("SELL"), eq(5_000L),
                 eq("BTC-USD"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -174,7 +174,7 @@ class OrderMarginRepositoryTest {
                 });
 
         var requirement = repository.requirement("BTC-USD", 1L, 1001L, MarginMode.CROSS,
-                OrderSide.BUY, OrderType.LIMIT, 100_000L, 1L, 10_000L, 5_000L);
+                OrderSide.SELL, OrderType.LIMIT, 100_000L, 1L, 10_000L, 5_000L);
 
         assertThat(requirement).isPresent();
         assertThat(requirement.get().accepted()).isTrue();

@@ -9,7 +9,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
 /**
- * Consumes mark-price ticks as the sole trigger clock for TP/SL orders.
+ * Consumes mark-price ticks for trigger orders using MARK_PRICE as their trigger source.
  *
  * <p>The Kafka key must match the payload symbol; otherwise one symbol's trigger stream could lose
  * ordering guarantees by landing on the wrong partition.</p>

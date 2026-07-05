@@ -13,6 +13,8 @@ import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.OrderBookDepthEvent;
 import com.surprising.trading.api.model.OrderEvent;
+import com.surprising.trading.api.model.OrderSide;
+import com.surprising.websocket.api.model.ExecutionReportEvent;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -151,6 +153,7 @@ public class KafkaFanoutConsumer {
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "order event");
             registry.publish(new SubscriptionTopic(WsChannel.ORDERS, event.symbol(), null, event.userId()),
                     event, event.eventTime());
+            publishExecutionReport(fromOrderEvent(event));
         } catch (Exception ex) {
             log.error("Failed to fanout order event: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout order event", ex);
@@ -167,6 +170,7 @@ public class KafkaFanoutConsumer {
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "match result");
             registry.publish(new SubscriptionTopic(WsChannel.MATCHES, event.symbol(), null, event.userId()),
                     event, event.eventTime());
+            publishExecutionReport(fromMatchResult(event));
         } catch (Exception ex) {
             log.error("Failed to fanout match result: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout match result", ex);
@@ -187,6 +191,8 @@ public class KafkaFanoutConsumer {
                     event, event.eventTime());
             registry.publish(new SubscriptionTopic(WsChannel.MATCHES, event.symbol(), null, event.makerUserId()),
                     event, event.eventTime());
+            publishExecutionReport(fromTakerTrade(event));
+            publishExecutionReport(fromMakerTrade(event));
         } catch (Exception ex) {
             log.error("Failed to fanout match trade: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout match trade", ex);
@@ -247,5 +253,136 @@ public class KafkaFanoutConsumer {
             throw new IllegalArgumentException("account risk key mismatch: expected=" + expected
                     + ", actual=" + recordKey);
         }
+    }
+
+    private void publishExecutionReport(ExecutionReportEvent report) {
+        registry.publish(new SubscriptionTopic(WsChannel.EXECUTION_REPORTS, report.symbol(), null, report.userId()),
+                report, report.eventTime());
+    }
+
+    private ExecutionReportEvent fromOrderEvent(OrderEvent event) {
+        return new ExecutionReportEvent(
+                "ORDER_EVENT",
+                event.userId(),
+                event.symbol(),
+                event.orderId(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                name(event.eventType()),
+                null,
+                name(event.status()),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                event.reason(),
+                event.traceId(),
+                event.eventTime());
+    }
+
+    private ExecutionReportEvent fromMatchResult(MatchResultEvent event) {
+        return new ExecutionReportEvent(
+                "MATCH_RESULT",
+                event.userId(),
+                event.symbol(),
+                event.orderId(),
+                event.commandId(),
+                null,
+                null,
+                null,
+                event.instrumentVersion(),
+                null,
+                name(event.commandType()),
+                name(event.orderStatus()),
+                event.resultCode(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                event.filledQuantitySteps(),
+                null,
+                null,
+                event.traceId(),
+                event.eventTime());
+    }
+
+    private ExecutionReportEvent fromTakerTrade(MatchTradeEvent event) {
+        return new ExecutionReportEvent(
+                "TRADE",
+                event.takerUserId(),
+                event.symbol(),
+                event.takerOrderId(),
+                event.commandId(),
+                event.tradeId(),
+                event.makerOrderId(),
+                event.makerUserId(),
+                event.takerInstrumentVersion(),
+                null,
+                null,
+                null,
+                null,
+                "TAKER",
+                name(event.takerSide()),
+                name(event.takerMarginMode()),
+                name(event.takerPositionSide()),
+                event.priceTicks(),
+                event.quantitySteps(),
+                event.quantitySteps(),
+                event.takerOrderCompleted(),
+                null,
+                event.traceId(),
+                event.eventTime());
+    }
+
+    private ExecutionReportEvent fromMakerTrade(MatchTradeEvent event) {
+        return new ExecutionReportEvent(
+                "TRADE",
+                event.makerUserId(),
+                event.symbol(),
+                event.makerOrderId(),
+                event.commandId(),
+                event.tradeId(),
+                event.takerOrderId(),
+                event.takerUserId(),
+                event.makerInstrumentVersion(),
+                null,
+                null,
+                null,
+                null,
+                "MAKER",
+                name(opposite(event.takerSide())),
+                name(event.makerMarginMode()),
+                name(event.makerPositionSide()),
+                event.priceTicks(),
+                event.quantitySteps(),
+                event.quantitySteps(),
+                event.makerOrderCompleted(),
+                null,
+                event.traceId(),
+                event.eventTime());
+    }
+
+    private OrderSide opposite(OrderSide side) {
+        if (side == OrderSide.BUY) {
+            return OrderSide.SELL;
+        }
+        if (side == OrderSide.SELL) {
+            return OrderSide.BUY;
+        }
+        throw new IllegalArgumentException("unsupported order side: " + side);
+    }
+
+    private String name(Enum<?> value) {
+        return value == null ? null : value.name();
     }
 }

@@ -13,14 +13,19 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.api.TraceContext;
-import com.surprising.trading.api.model.AdminCursorPage;
+import com.surprising.trading.api.model.AmendOrderRequest;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
 import com.surprising.trading.api.model.AdminCancelBySymbolRequest;
+import com.surprising.trading.api.model.AdminCursorPage;
+import com.surprising.trading.api.model.BatchAmendOrdersRequest;
+import com.surprising.trading.api.model.BatchPlaceOrderRequest;
+import com.surprising.trading.api.model.CancelOpenOrdersRequest;
+import com.surprising.trading.api.model.ClosePositionRequest;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderCommandEvent;
-import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderEvent;
 import com.surprising.trading.api.model.OrderEventType;
+import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
@@ -31,6 +36,7 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.MarginRequirement;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.OrderRecord;
+import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.model.ValidationResult;
 import com.surprising.trading.order.repository.OrderFeeRepository;
@@ -39,6 +45,7 @@ import com.surprising.trading.order.repository.OrderRepository;
 import com.surprising.trading.order.repository.OutboxRepository;
 import com.surprising.trading.order.repository.SpotOrderReservationRepository;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -451,6 +458,203 @@ class OrderServiceTest {
         verify(orderRepository).lockUserSymbolMarginScope(1001L, "BTC-USDT");
         verify(orderRepository, never()).hasActiveMarginModeConflict(anyLong(), anyString(), any());
         verify(orderRepository).nextSequence("command");
+    }
+
+    @Test
+    void testOrderDryRunDoesNotPersistReserveOrPublish() {
+        OrderService service = service();
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
+        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
+                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
+                anyLong()))
+                .thenReturn(Optional.of(new MarginRequirement("USDT", 100L)));
+
+        var response = service.test(request("dry-run-1"));
+
+        assertThat(response.accepted()).isTrue();
+        assertThat(response.validationStage()).isEqualTo("ACCEPTED");
+        assertThat(response.accountType()).isEqualTo("USDT_PERPETUAL");
+        assertThat(response.asset()).isEqualTo("USDT");
+        assertThat(response.estimatedReserveUnits()).isEqualTo(100L);
+        verify(orderRepository, never()).nextSequence("order");
+        verify(orderRepository, never()).insert(any());
+        verify(orderMarginRepository, never()).reserve(anyLong(), anyString(), anyString(), anyLong(), anyString(),
+                any(), any(), anyLong(), any());
+        verify(outboxRepository, never()).enqueue(anyString(), anyLong(), anyString(), anyString(), anyString(),
+                anyString(), any());
+    }
+
+    @Test
+    void placeBatchKeepsItemFailuresIsolatedFromValidOrders() {
+        OrderService service = service();
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
+        when(orderRepository.nextSequence("order")).thenReturn(9002L);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L);
+        when(orderRepository.nextSequence("command")).thenReturn(9200L);
+        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+        PlaceOrderRequest invalid = new PlaceOrderRequest(0L, "bad", "BTC-USDT", OrderSide.BUY,
+                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, false, false);
+        PlaceOrderRequest validReduceOnly = new PlaceOrderRequest(1001L, "batch-ok", "BTC-USDT", OrderSide.SELL,
+                OrderType.LIMIT, TimeInForce.IOC, 65_000L, 10L, true, false);
+
+        var response = service.placeBatch(new BatchPlaceOrderRequest(List.of(invalid, validReduceOnly)));
+
+        assertThat(response.requested()).isEqualTo(2);
+        assertThat(response.completed()).isEqualTo(1);
+        assertThat(response.failed()).isEqualTo(1);
+        assertThat(response.results().get(0).success()).isFalse();
+        assertThat(response.results().get(0).message()).isEqualTo("userId must be positive");
+        assertThat(response.results().get(1).success()).isTrue();
+        assertThat(response.results().get(1).order().status()).isEqualTo(OrderStatus.ACCEPTED);
+        verify(orderRepository).insert(any(OrderRecord.class));
+        verify(orderMarginRepository, never()).reserve(anyLong(), anyString(), anyString(), anyLong(), anyString(),
+                any(), any(), anyLong(), any());
+    }
+
+    @Test
+    void amendOrderRequestsCancelAndPlacesReplacementOrder() {
+        TraceContext.set("trace-amend-1");
+        OrderService service = service();
+        OrderRecord original = order(9001L, "orig-1", OrderStatus.ACCEPTED, null);
+        OrderRecord cancelRequested = order(9001L, "orig-1", OrderStatus.CANCEL_REQUESTED, null);
+        when(orderRepository.findByClientOrderId(1001L, "amend-1"))
+                .thenReturn(Optional.empty(), Optional.empty());
+        when(orderRepository.findByOrderId(9001L))
+                .thenReturn(Optional.of(original), Optional.of(cancelRequested));
+        when(orderRepository.requestCancel(eq(9001L), any())).thenReturn(true);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L, 9101L);
+        when(orderRepository.nextSequence("command")).thenReturn(9200L, 9201L);
+        when(orderRepository.nextSequence("order")).thenReturn(9002L);
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
+        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
+                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(66_000L), eq(5L), anyLong(),
+                anyLong()))
+                .thenReturn(Optional.of(new MarginRequirement("USDT_PERPETUAL", "USDT", 100L)));
+        when(orderMarginRepository.reserve(eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq(9002L),
+                eq("BTC-USDT"), eq(MarginMode.CROSS), eq(PositionSide.NET), eq(100L), any())).thenReturn(true);
+        ArgumentCaptor<OrderRecord> replacementCaptor = ArgumentCaptor.forClass(OrderRecord.class);
+
+        var response = service.amend(new AmendOrderRequest(1001L, 9001L, "amend-1",
+                66_000L, 5L, TimeInForce.GTC, true));
+
+        assertThat(response.cancelRequested()).isTrue();
+        assertThat(response.originalOrder().status()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
+        assertThat(response.replacementOrder().clientOrderId()).isEqualTo("amend-1");
+        assertThat(response.replacementOrder().priceTicks()).isEqualTo(66_000L);
+        assertThat(response.replacementOrder().quantitySteps()).isEqualTo(5L);
+        assertThat(response.replacementOrder().postOnly()).isTrue();
+        verify(orderRepository).requestCancel(eq(9001L), any());
+        verify(orderRepository).insert(replacementCaptor.capture());
+        assertThat(replacementCaptor.getValue().clientOrderId()).isEqualTo("amend-1");
+        verify(outboxRepository, times(4)).enqueue(eq("ORDER"), anyLong(), anyString(), eq("BTC-USDT"),
+                anyString(), anyString(), any());
+    }
+
+    @Test
+    void batchAmendKeepsItemFailuresIsolatedFromValidOrders() {
+        OrderService service = service();
+        OrderRecord original = order(9001L, "batch-orig-1", OrderStatus.ACCEPTED, null);
+        OrderRecord cancelRequested = order(9001L, "batch-orig-1", OrderStatus.CANCEL_REQUESTED, null);
+        when(orderRepository.findByClientOrderId(1001L, "batch-amend-1"))
+                .thenReturn(Optional.empty(), Optional.empty());
+        when(orderRepository.findByOrderId(9001L))
+                .thenReturn(Optional.of(original), Optional.of(cancelRequested));
+        when(orderRepository.requestCancel(eq(9001L), any())).thenReturn(true);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L, 9101L);
+        when(orderRepository.nextSequence("command")).thenReturn(9200L, 9201L);
+        when(orderRepository.nextSequence("order")).thenReturn(9002L);
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
+        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
+                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(66_000L), eq(4L), anyLong(),
+                anyLong()))
+                .thenReturn(Optional.of(new MarginRequirement("USDT_PERPETUAL", "USDT", 100L)));
+        when(orderMarginRepository.reserve(eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq(9002L),
+                eq("BTC-USDT"), eq(MarginMode.CROSS), eq(PositionSide.NET), eq(100L), any())).thenReturn(true);
+        AmendOrderRequest valid = new AmendOrderRequest(1001L, 9001L, "batch-amend-1",
+                66_000L, 4L, null, null);
+        AmendOrderRequest invalid = new AmendOrderRequest(1001L, 0L, "batch-amend-bad",
+                67_000L, null, null, null);
+
+        var response = service.amendBatch(new BatchAmendOrdersRequest(List.of(valid, invalid)));
+
+        assertThat(response.requested()).isEqualTo(2);
+        assertThat(response.completed()).isEqualTo(1);
+        assertThat(response.failed()).isEqualTo(1);
+        assertThat(response.results().get(0).success()).isTrue();
+        assertThat(response.results().get(0).amend().replacementOrder().clientOrderId()).isEqualTo("batch-amend-1");
+        assertThat(response.results().get(1).success()).isFalse();
+        assertThat(response.results().get(1).message()).isEqualTo("userId and orderId must be positive");
+        verify(orderRepository).requestCancel(eq(9001L), any());
+    }
+
+    @Test
+    void closePositionPlacesReduceOnlyMarketIocForLockedLongPosition() {
+        OrderService service = service();
+        when(orderRepository.lockedPosition(1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET))
+                .thenReturn(Optional.of(new ReduceOnlyPosition(12L, 7L)));
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
+        when(orderRepository.nextSequence("order")).thenReturn(9002L);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L);
+        when(orderRepository.nextSequence("command")).thenReturn(9200L);
+        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+
+        var response = service.closePosition(new ClosePositionRequest(1001L, "close-long", "btc-usdt",
+                MarginMode.CROSS, PositionSide.NET));
+
+        assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
+        assertThat(response.side()).isEqualTo(OrderSide.SELL);
+        assertThat(response.orderType()).isEqualTo(OrderType.MARKET);
+        assertThat(response.timeInForce()).isEqualTo(TimeInForce.IOC);
+        assertThat(response.quantitySteps()).isEqualTo(12L);
+        assertThat(response.reduceOnly()).isTrue();
+        ArgumentCaptor<OrderRecord> orderCaptor = ArgumentCaptor.forClass(OrderRecord.class);
+        verify(orderRepository).insert(orderCaptor.capture());
+        assertThat(orderCaptor.getValue().clientOrderId()).isEqualTo("close-long");
+        assertThat(orderCaptor.getValue().priceTicks()).isZero();
+        verify(orderMarginRepository, never()).reserve(anyLong(), anyString(), anyString(), anyLong(), anyString(),
+                any(), any(), anyLong(), any());
+    }
+
+    @Test
+    void cancelOpenOrdersRequestsCancelOnlyForRepositorySelectedUserOrders() {
+        OrderService service = service();
+        OrderRecord first = order(9001L, "open-1", OrderStatus.ACCEPTED, null);
+        OrderRecord second = order(9002L, "open-2", OrderStatus.PARTIALLY_FILLED, null);
+        OrderRecord firstCancelRequested = order(9001L, "open-1", OrderStatus.CANCEL_REQUESTED, null);
+        OrderRecord secondCancelRequested = order(9002L, "open-2", OrderStatus.CANCEL_REQUESTED, null);
+        when(orderRepository.adminCancelableOrders(1001L, "BTC-USDT", 2)).thenReturn(List.of(first, second));
+        when(orderRepository.requestCancel(eq(9001L), any())).thenReturn(true);
+        when(orderRepository.requestCancel(eq(9002L), any())).thenReturn(true);
+        when(orderRepository.findByOrderId(9001L)).thenReturn(Optional.of(firstCancelRequested));
+        when(orderRepository.findByOrderId(9002L)).thenReturn(Optional.of(secondCancelRequested));
+        when(orderRepository.nextSequence("event")).thenReturn(9100L, 9101L);
+        when(orderRepository.nextSequence("command")).thenReturn(9200L, 9201L);
+
+        var response = service.cancelOpenOrders(new CancelOpenOrdersRequest(1001L, "btc-usdt", 2));
+
+        assertThat(response.requested()).isEqualTo(2);
+        assertThat(response.completed()).isEqualTo(2);
+        assertThat(response.failed()).isZero();
+        assertThat(response.results()).extracting("order.orderId").containsExactly(9001L, 9002L);
+        verify(orderRepository).adminCancelableOrders(1001L, "BTC-USDT", 2);
+        verify(orderRepository).requestCancel(eq(9001L), any());
+        verify(orderRepository).requestCancel(eq(9002L), any());
+        verify(outboxRepository, times(4)).enqueue(eq("ORDER"), anyLong(), anyString(), eq("BTC-USDT"),
+                anyString(), anyString(), any());
     }
 
     @Test

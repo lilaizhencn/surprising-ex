@@ -27,7 +27,7 @@ public class MatchingSymbolRepository {
                   FROM instruments i
                   JOIN instrument_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
-                 WHERE i.status = 'TRADING'
+                 WHERE i.status IN ('TRADING', 'HALT', 'SETTLING')
                  ORDER BY i.symbol ASC
                 """, (rs, rowNum) -> new InstrumentSymbol(
                 rs.getString("symbol"),
@@ -42,7 +42,7 @@ public class MatchingSymbolRepository {
                   FROM instruments i
                   JOIN instrument_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
-                 WHERE i.symbol = ? AND i.status = 'TRADING'
+                 WHERE i.symbol = ? AND i.status IN ('TRADING', 'HALT', 'SETTLING')
                 """, (rs, rowNum) -> new InstrumentSymbol(
                 rs.getString("symbol"),
                 rs.getString("base_asset"),

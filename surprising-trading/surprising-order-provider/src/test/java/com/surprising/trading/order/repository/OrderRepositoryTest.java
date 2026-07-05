@@ -76,13 +76,17 @@ class OrderRepositoryTest {
         when(jdbcTemplate.queryForObject(contains("account_positions"), eq(Boolean.class),
                 eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
                 eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
+                eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
                 eq(1001L), eq("BTC-USDT"), eq("ISOLATED")))
                 .thenReturn(true);
 
         boolean conflict = repository.hasActiveMarginModeConflict(1001L, "BTC-USDT", MarginMode.ISOLATED);
 
         assertThat(conflict).isTrue();
-        verify(jdbcTemplate).queryForObject(contains("trading_trigger_orders"), eq(Boolean.class),
+        verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.argThat(sql ->
+                        sql.contains("trading_trigger_orders") && sql.contains("trading_algo_orders")),
+                eq(Boolean.class),
+                eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
                 eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
                 eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
                 eq(1001L), eq("BTC-USDT"), eq("ISOLATED"));

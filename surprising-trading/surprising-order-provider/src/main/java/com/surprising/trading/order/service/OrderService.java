@@ -1,6 +1,10 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.trading.api.TraceContext;
+import com.surprising.trading.api.model.AmendOrderBatchItemResponse;
+import com.surprising.trading.api.model.AmendOrderBatchResponse;
+import com.surprising.trading.api.model.AmendOrderRequest;
+import com.surprising.trading.api.model.AmendOrderResponse;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
 import com.surprising.trading.api.model.AdminCancelBySymbolRequest;
 import com.surprising.trading.api.model.AdminCancelOrderResult;
@@ -10,8 +14,15 @@ import com.surprising.trading.api.model.AdminMatchResultQueryResponse;
 import com.surprising.trading.api.model.AdminMatchTradeQueryResponse;
 import com.surprising.trading.api.model.AdminOrderEventQueryResponse;
 import com.surprising.trading.api.model.AdminOrderTimelineResponse;
+import com.surprising.trading.api.model.BatchCancelOrdersRequest;
+import com.surprising.trading.api.model.BatchAmendOrdersRequest;
+import com.surprising.trading.api.model.BatchPlaceOrderRequest;
 import com.surprising.trading.api.model.CancelOrderRequest;
+import com.surprising.trading.api.model.CancelOpenOrdersRequest;
+import com.surprising.trading.api.model.ClosePositionRequest;
 import com.surprising.instrument.api.model.InstrumentType;
+import com.surprising.trading.api.model.OrderBatchItemResponse;
+import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.OrderCommandEvent;
 import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderEvent;
@@ -19,13 +30,20 @@ import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
+import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
+import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
+import com.surprising.trading.api.model.TestOrderResponse;
+import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
+import com.surprising.trading.order.model.MarginRequirement;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.OrderRecord;
+import com.surprising.trading.order.model.ReduceOnlyPosition;
+import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.model.ValidationResult;
 import com.surprising.trading.order.repository.OrderFeeRepository;
 import com.surprising.trading.order.repository.OrderMarginRepository;
@@ -33,6 +51,7 @@ import com.surprising.trading.order.repository.OrderRepository;
 import com.surprising.trading.order.repository.OutboxRepository;
 import com.surprising.trading.order.repository.SpotOrderReservationRepository;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import org.springframework.stereotype.Service;
@@ -169,6 +188,172 @@ public class OrderService {
         return toResponse(order);
     }
 
+    @Transactional
+    public OrderBatchResponse placeBatch(BatchPlaceOrderRequest request) {
+        List<PlaceOrderRequest> orders = request == null ? List.of() : request.orders();
+        requireBatchSize(orders.size(), 20, "orders");
+        List<OrderBatchItemResponse> results = new ArrayList<>();
+        for (int i = 0; i < orders.size(); i++) {
+            try {
+                OrderResponse order = place(orders.get(i));
+                results.add(new OrderBatchItemResponse(i, true, "completed", order));
+            } catch (IllegalArgumentException | IllegalStateException ex) {
+                results.add(new OrderBatchItemResponse(i, false, ex.getMessage(), null));
+            }
+        }
+        return orderBatchResponse(results);
+    }
+
+    @Transactional
+    public TestOrderResponse test(PlaceOrderRequest request) {
+        PlaceOrderRequest normalized = normalize(request);
+        orderRepository.lockUserPositionMode(normalized.userId());
+        PositionMode positionMode = orderRepository.positionMode(normalized.userId());
+        normalized = normalizePositionMode(normalized, positionMode);
+        orderRepository.lockUserSymbolMarginScope(normalized.userId(), normalized.symbol());
+        ValidationResult validation = validateMarginMode(normalized);
+        if (!validation.accepted()) {
+            return testRejected(validation, "MARGIN_MODE");
+        }
+        validation = orderValidator.validate(normalized);
+        if (!validation.accepted()) {
+            return testRejected(validation, "ORDER_RULES");
+        }
+        if (normalized.reduceOnly()) {
+            ValidationResult reduceOnlyValidation = reduceOnlyValidator.validate(normalized);
+            if (!reduceOnlyValidation.accepted()) {
+                return testRejected(reduceOnlyValidation, "REDUCE_ONLY");
+            }
+            validation = ValidationResult.ok(reduceOnlyValidation.instrumentVersion());
+        }
+        var resolvedFeeSnapshot = orderFeeRepository.snapshot(normalized.userId(), normalized.symbol(),
+                validation.instrumentVersion(), Instant.now());
+        if (resolvedFeeSnapshot.isEmpty()) {
+            return new TestOrderResponse(false, "fee schedule unavailable", validation.instrumentVersion(),
+                    "FEE", null, null, 0L);
+        }
+        if (normalized.reduceOnly()) {
+            return new TestOrderResponse(true, null, validation.instrumentVersion(), "ACCEPTED",
+                    null, null, 0L);
+        }
+        return dryRunOpeningFunds(normalized, validation, resolvedFeeSnapshot.get());
+    }
+
+    @Transactional
+    public AmendOrderResponse amend(AmendOrderRequest request) {
+        AmendOrderRequest normalized = normalizeAmend(request);
+        var existingReplacement = orderRepository.findByClientOrderId(
+                normalized.userId(), normalized.newClientOrderId());
+        OrderRecord original = orderRepository.findByOrderId(normalized.orderId())
+                .orElseThrow(() -> new IllegalStateException("order not found: " + normalized.orderId()));
+        if (original.userId() != normalized.userId()) {
+            throw new IllegalArgumentException("order does not belong to user");
+        }
+        if (existingReplacement.isPresent()) {
+            return new AmendOrderResponse(toResponse(original), toResponse(existingReplacement.get()),
+                    false, "replacement order already exists");
+        }
+        if (original.orderType() != OrderType.LIMIT) {
+            throw new IllegalArgumentException("only LIMIT orders can be amended");
+        }
+        if (original.status() != OrderStatus.ACCEPTED && original.status() != OrderStatus.PARTIALLY_FILLED) {
+            throw new IllegalStateException("order is not amendable: " + original.status().name());
+        }
+        if (original.remainingQuantitySteps() <= 0) {
+            throw new IllegalStateException("order has no open quantity to amend");
+        }
+
+        orderRepository.lockUserPositionMode(original.userId());
+        orderRepository.lockUserSymbolMarginScope(original.userId(), original.symbol());
+        long replacementPriceTicks = normalized.priceTicks() == null ? original.priceTicks() : normalized.priceTicks();
+        long replacementQuantitySteps = normalized.quantitySteps() == null
+                ? original.remainingQuantitySteps()
+                : normalized.quantitySteps();
+        TimeInForce replacementTif = normalized.timeInForce() == null
+                ? original.timeInForce()
+                : normalized.timeInForce();
+        boolean replacementPostOnly = normalized.postOnly() == null ? original.postOnly() : normalized.postOnly();
+        PlaceOrderRequest replacement = new PlaceOrderRequest(
+                original.userId(),
+                normalized.newClientOrderId(),
+                original.symbol(),
+                original.side(),
+                original.orderType(),
+                replacementTif,
+                replacementPriceTicks,
+                replacementQuantitySteps,
+                original.marginMode(),
+                original.positionSide(),
+                original.reduceOnly(),
+                replacementPostOnly);
+
+        AdminCancelOrderResult cancelResult = requestCancel(original, "order amend replace");
+        if (!cancelResult.cancelRequested()) {
+            throw new IllegalStateException(cancelResult.message());
+        }
+        OrderResponse replacementOrder = place(replacement);
+        String message = replacementOrder.status() == OrderStatus.REJECTED
+                ? "cancel requested; replacement rejected: " + replacementOrder.rejectReason()
+                : "cancel requested; replacement submitted";
+        return new AmendOrderResponse(cancelResult.order(), replacementOrder, true, message);
+    }
+
+    @Transactional
+    public AmendOrderBatchResponse amendBatch(BatchAmendOrdersRequest request) {
+        List<AmendOrderRequest> orders = request == null ? List.of() : request.orders();
+        requireBatchSize(orders.size(), 20, "orders");
+        List<AmendOrderBatchItemResponse> results = new ArrayList<>();
+        for (int i = 0; i < orders.size(); i++) {
+            try {
+                AmendOrderResponse amend = amend(orders.get(i));
+                results.add(new AmendOrderBatchItemResponse(i, true, amend.message(), amend));
+            } catch (IllegalArgumentException | IllegalStateException ex) {
+                results.add(new AmendOrderBatchItemResponse(i, false, ex.getMessage(), null));
+            }
+        }
+        return amendBatchResponse(results);
+    }
+
+    @Transactional
+    public OrderResponse closePosition(ClosePositionRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("close position request is required");
+        }
+        if (request.userId() <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        String symbol = normalizeSymbol(request.symbol());
+        MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
+        PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
+        orderRepository.lockUserPositionMode(request.userId());
+        PositionMode positionMode = orderRepository.positionMode(request.userId());
+        if (PositionMode.defaultIfNull(positionMode) == PositionMode.HEDGE && !positionSide.isHedgeSide()) {
+            throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
+        }
+        orderRepository.lockUserSymbolMarginScope(request.userId(), symbol);
+        ReduceOnlyPosition position = orderRepository.lockedPosition(request.userId(), symbol, marginMode,
+                        positionSide)
+                .orElseThrow(() -> new IllegalStateException("open position not found"));
+        if (position.signedQuantitySteps() == 0L) {
+            throw new IllegalStateException("open position not found");
+        }
+        OrderSide closeSide = position.signedQuantitySteps() > 0L ? OrderSide.SELL : OrderSide.BUY;
+        PlaceOrderRequest closeOrder = new PlaceOrderRequest(
+                request.userId(),
+                emptyToNull(request.clientOrderId()),
+                symbol,
+                closeSide,
+                OrderType.MARKET,
+                TimeInForce.IOC,
+                0L,
+                Math.absExact(position.signedQuantitySteps()),
+                marginMode,
+                positionSide,
+                true,
+                false);
+        return place(closeOrder);
+    }
+
     private ValidationResult reserveOpeningFunds(PlaceOrderRequest request,
                                                  long orderId,
                                                  ValidationResult validation,
@@ -228,6 +413,48 @@ public class OrderService {
                 : ValidationResult.reject("insufficient available margin", instrumentVersion);
     }
 
+    private TestOrderResponse dryRunOpeningFunds(PlaceOrderRequest request,
+                                                 ValidationResult validation,
+                                                 OrderFeeSnapshot feeSnapshot) {
+        if (validation.instrumentType() == InstrumentType.SPOT) {
+            var requirement = spotOrderReservationRepository.requirement(
+                    request.symbol(), validation.instrumentVersion(), request.side(), request.orderType(),
+                    request.priceTicks(), request.quantitySteps(), properties.getRisk().getMarketMaxSlippagePpm(),
+                    properties.getRisk().getMarketMaxMarkAgeMs(), feeSnapshot);
+            if (requirement.isEmpty()) {
+                return new TestOrderResponse(false, "spot reservation requirement unavailable",
+                        validation.instrumentVersion(), "RESERVE_REQUIREMENT", "SPOT", null, 0L);
+            }
+            SpotReservationRequirement value = requirement.get();
+            if (!value.accepted()) {
+                return new TestOrderResponse(false, value.rejectReason(), validation.instrumentVersion(),
+                        "RESERVE_REQUIREMENT", "SPOT", value.asset(), value.reservedUnits());
+            }
+            return new TestOrderResponse(true, null, validation.instrumentVersion(), "ACCEPTED",
+                    "SPOT", value.asset(), value.reservedUnits());
+        }
+        var requirement = orderMarginRepository.requirement(
+                request.symbol(), validation.instrumentVersion(), request.userId(), request.marginMode(),
+                request.positionSide(), request.side(), request.orderType(), request.priceTicks(),
+                request.quantitySteps(), properties.getRisk().getMarketMaxSlippagePpm(),
+                properties.getRisk().getMarketMaxMarkAgeMs());
+        if (requirement.isEmpty()) {
+            return new TestOrderResponse(false, "margin requirement unavailable", validation.instrumentVersion(),
+                    "RESERVE_REQUIREMENT", null, null, 0L);
+        }
+        MarginRequirement value = requirement.get();
+        if (!value.accepted()) {
+            return new TestOrderResponse(false, value.rejectReason(), validation.instrumentVersion(),
+                    "RESERVE_REQUIREMENT", value.accountType(), value.asset(), value.initialMarginUnits());
+        }
+        if (value.initialMarginUnits() <= 0) {
+            return new TestOrderResponse(false, "invalid margin requirement", validation.instrumentVersion(),
+                    "RESERVE_REQUIREMENT", value.accountType(), value.asset(), value.initialMarginUnits());
+        }
+        return new TestOrderResponse(true, null, validation.instrumentVersion(), "ACCEPTED",
+                value.accountType(), value.asset(), value.initialMarginUnits());
+    }
+
     private ValidationResult validateMarginMode(PlaceOrderRequest request) {
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         if (!request.reduceOnly()
@@ -256,6 +483,50 @@ public class OrderService {
         }
 
         return requestCancel(order, null).order();
+    }
+
+    @Transactional
+    public OrderBatchResponse cancelBatch(BatchCancelOrdersRequest request) {
+        List<CancelOrderRequest> orders = request == null ? List.of() : request.orders();
+        requireBatchSize(orders.size(), 50, "orders");
+        List<OrderBatchItemResponse> results = new ArrayList<>();
+        for (int i = 0; i < orders.size(); i++) {
+            try {
+                OrderResponse order = cancel(orders.get(i));
+                results.add(new OrderBatchItemResponse(i, true, "completed", order));
+            } catch (IllegalArgumentException | IllegalStateException ex) {
+                results.add(new OrderBatchItemResponse(i, false, ex.getMessage(), null));
+            }
+        }
+        return orderBatchResponse(results);
+    }
+
+    @Transactional
+    public OrderBatchResponse cancelOpenOrders(CancelOpenOrdersRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("cancel open orders request is required");
+        }
+        if (request.userId() <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        int limit = request.limit() == null ? 1000 : request.limit();
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
+        String symbol = request.symbol() == null || request.symbol().isBlank()
+                ? null
+                : normalizeSymbol(request.symbol());
+        List<OrderRecord> orders = orderRepository.adminCancelableOrders(request.userId(), symbol, limit);
+        List<OrderBatchItemResponse> results = new ArrayList<>();
+        for (int i = 0; i < orders.size(); i++) {
+            try {
+                AdminCancelOrderResult result = requestCancel(orders.get(i), "user cancel open orders");
+                results.add(new OrderBatchItemResponse(i, true, result.message(), result.order()));
+            } catch (IllegalArgumentException | IllegalStateException ex) {
+                results.add(new OrderBatchItemResponse(i, false, ex.getMessage(), null));
+            }
+        }
+        return orderBatchResponse(results);
     }
 
     public OrderResponse get(long orderId) {
@@ -471,6 +742,27 @@ public class OrderService {
         return "admin cancel: " + normalized;
     }
 
+    private TestOrderResponse testRejected(ValidationResult validation, String stage) {
+        return new TestOrderResponse(false, validation.rejectReason(), validation.instrumentVersion(),
+                stage, null, null, 0L);
+    }
+
+    private void requireBatchSize(int size, int max, String field) {
+        if (size < 1 || size > max) {
+            throw new IllegalArgumentException(field + " size must be in [1, " + max + "]");
+        }
+    }
+
+    private OrderBatchResponse orderBatchResponse(List<OrderBatchItemResponse> results) {
+        int completed = (int) results.stream().filter(OrderBatchItemResponse::success).count();
+        return new OrderBatchResponse(results.size(), completed, results.size() - completed, results);
+    }
+
+    private AmendOrderBatchResponse amendBatchResponse(List<AmendOrderBatchItemResponse> results) {
+        int completed = (int) results.stream().filter(AmendOrderBatchItemResponse::success).count();
+        return new AmendOrderBatchResponse(results.size(), completed, results.size() - completed, results);
+    }
+
     private void enqueueCommand(OrderRecord order, OrderCommandType commandType, Instant now, String traceId) {
         long commandId = orderRepository.nextSequence("command");
         // The future exchange-core matching provider should treat commandId/orderId as its idempotency keys.
@@ -556,10 +848,23 @@ public class OrderService {
         if (request == null) {
             throw new IllegalArgumentException("order request is required");
         }
+        if (request.userId() <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        if (request.side() == null || request.orderType() == null || request.timeInForce() == null) {
+            throw new IllegalArgumentException("side, orderType and timeInForce are required");
+        }
+        if (request.priceTicks() < 0 || request.quantitySteps() <= 0) {
+            throw new IllegalArgumentException("priceTicks must be non-negative and quantitySteps must be positive");
+        }
+        String clientOrderId = emptyToNull(request.clientOrderId());
+        if (clientOrderId != null && clientOrderId.length() > 64) {
+            throw new IllegalArgumentException("clientOrderId length must be <= 64");
+        }
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
         return new PlaceOrderRequest(
                 request.userId(),
-                emptyToNull(request.clientOrderId()),
+                clientOrderId,
                 normalizeSymbol(request.symbol()),
                 request.side(),
                 request.orderType(),
@@ -570,6 +875,31 @@ public class OrderService {
                 positionSide,
                 request.reduceOnly(),
                 request.postOnly());
+    }
+
+    private AmendOrderRequest normalizeAmend(AmendOrderRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("amend order request is required");
+        }
+        if (request.userId() <= 0 || request.orderId() <= 0) {
+            throw new IllegalArgumentException("userId and orderId must be positive");
+        }
+        String newClientOrderId = normalizeClientOrderId(request.newClientOrderId());
+        if (request.priceTicks() != null && request.priceTicks() <= 0) {
+            throw new IllegalArgumentException("priceTicks must be positive for amend");
+        }
+        if (request.quantitySteps() != null && request.quantitySteps() <= 0) {
+            throw new IllegalArgumentException("quantitySteps must be positive for amend");
+        }
+        if (request.priceTicks() == null && request.quantitySteps() == null
+                && request.timeInForce() == null && request.postOnly() == null) {
+            throw new IllegalArgumentException("amend request must change price, quantity, timeInForce or postOnly");
+        }
+        if (request.timeInForce() == TimeInForce.IOC || request.timeInForce() == TimeInForce.FOK) {
+            throw new IllegalArgumentException("amended resting order requires GTC or GTX");
+        }
+        return new AmendOrderRequest(request.userId(), request.orderId(), newClientOrderId,
+                request.priceTicks(), request.quantitySteps(), request.timeInForce(), request.postOnly());
     }
 
     private PlaceOrderRequest normalizePositionMode(PlaceOrderRequest request, PositionMode positionMode) {

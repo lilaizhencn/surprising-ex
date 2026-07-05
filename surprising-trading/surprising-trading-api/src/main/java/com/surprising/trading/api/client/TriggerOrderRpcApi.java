@@ -1,8 +1,12 @@
 package com.surprising.trading.api.client;
 
 import com.surprising.trading.api.TradingApiPaths;
+import com.surprising.trading.api.model.BatchCancelTriggerOrdersRequest;
+import com.surprising.trading.api.model.BatchPlaceTriggerOrderRequest;
+import com.surprising.trading.api.model.CancelOpenTriggerOrdersRequest;
 import com.surprising.trading.api.model.CancelTriggerOrderRequest;
 import com.surprising.trading.api.model.PlaceTriggerOrderRequest;
+import com.surprising.trading.api.model.TriggerOrderBatchResponse;
 import com.surprising.trading.api.model.TriggerOrderQueryResponse;
 import com.surprising.trading.api.model.TriggerOrderResponse;
 import jakarta.validation.Valid;
@@ -26,8 +30,17 @@ public interface TriggerOrderRpcApi {
     @PostMapping
     TriggerOrderResponse place(@Valid @RequestBody PlaceTriggerOrderRequest request);
 
+    @PostMapping("/batch")
+    TriggerOrderBatchResponse placeBatch(@Valid @RequestBody BatchPlaceTriggerOrderRequest request);
+
     @PostMapping("/cancel")
     TriggerOrderResponse cancel(@Valid @RequestBody CancelTriggerOrderRequest request);
+
+    @PostMapping("/batch-cancel")
+    TriggerOrderBatchResponse cancelBatch(@Valid @RequestBody BatchCancelTriggerOrdersRequest request);
+
+    @PostMapping("/cancel-open")
+    TriggerOrderBatchResponse cancelOpen(@Valid @RequestBody CancelOpenTriggerOrdersRequest request);
 
     @GetMapping("/{triggerOrderId}")
     TriggerOrderResponse get(@PathVariable("triggerOrderId") @Positive long triggerOrderId);

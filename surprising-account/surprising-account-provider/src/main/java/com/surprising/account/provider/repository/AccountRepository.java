@@ -747,6 +747,17 @@ public class AccountRepository {
         if (Boolean.TRUE.equals(hasTriggerOrders)) {
             throw new IllegalStateException("position mode switch requires no pending trigger orders");
         }
+        Boolean hasAlgoOrders = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM trading_algo_orders
+                     WHERE user_id = ?
+                       AND status IN ('PENDING', 'RUNNING', 'CANCEL_REQUESTED')
+                )
+                """, Boolean.class, userId);
+        if (Boolean.TRUE.equals(hasAlgoOrders)) {
+            throw new IllegalStateException("position mode switch requires no active algo orders");
+        }
         Boolean hasUnsettledTrades = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
@@ -1940,6 +1951,11 @@ public class AccountRepository {
                 ON CONFLICT (user_id, asset) DO NOTHING
                 """, userId, asset, Timestamp.from(now));
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        Optional<Long> availableDebitFastPath = tryApplyLegacyAvailableDebitFastPath(
+                userId, asset, normalizedMarginMode, amountUnits, now);
+        if (availableDebitFastPath.isPresent()) {
+            return availableDebitFastPath.get();
+        }
         List<PositionMargin> lockedMargins = amountUnits < 0
                 ? lockPositionMargins(userId, asset, symbol, normalizedMarginMode)
                 : List.of();
@@ -1998,6 +2014,11 @@ public class AccountRepository {
                 ON CONFLICT (account_type, user_id, asset) DO NOTHING
                 """, accountType.name(), userId, asset, Timestamp.from(now));
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        Optional<Long> availableDebitFastPath = tryApplyProductAvailableDebitFastPath(
+                accountType, userId, asset, normalizedMarginMode, amountUnits, now);
+        if (availableDebitFastPath.isPresent()) {
+            return availableDebitFastPath.get();
+        }
         List<PositionMargin> lockedMargins = amountUnits < 0
                 ? lockPositionMargins(userId, asset, symbol, normalizedMarginMode)
                 : List.of();
@@ -2179,6 +2200,61 @@ public class AccountRepository {
                 "product liquidation fee deficit update");
         return new BalanceDebitResult(collectibleUnits,
                 PnlSettlementMath.netEquityUnits(next.availableUnits(), next.lockedUnits(), next.deficitUnits()));
+    }
+
+    private Optional<Long> tryApplyLegacyAvailableDebitFastPath(long userId,
+                                                                String asset,
+                                                                MarginMode marginMode,
+                                                                long amountUnits,
+                                                                Instant now) {
+        if (amountUnits >= 0 || marginMode != MarginMode.CROSS) {
+            return Optional.empty();
+        }
+        List<Long> rows = jdbcTemplate.query("""
+                UPDATE account_balances b
+                   SET available_units = b.available_units + ?,
+                       updated_at = ?
+                 WHERE b.user_id = ?
+                   AND b.asset = ?
+                   AND b.available_units + ? >= 0
+                 RETURNING b.available_units + b.locked_units - COALESCE((
+                       SELECT d.deficit_units
+                         FROM account_deficits d
+                        WHERE d.user_id = b.user_id
+                          AND d.asset = b.asset
+                   ), 0) AS balance_after_units
+                """, (rs, rowNum) -> rs.getLong("balance_after_units"),
+                amountUnits, Timestamp.from(now), userId, asset, amountUnits);
+        return rows == null ? Optional.empty() : rows.stream().findFirst();
+    }
+
+    private Optional<Long> tryApplyProductAvailableDebitFastPath(AccountType accountType,
+                                                                 long userId,
+                                                                 String asset,
+                                                                 MarginMode marginMode,
+                                                                 long amountUnits,
+                                                                 Instant now) {
+        if (amountUnits >= 0 || marginMode != MarginMode.CROSS) {
+            return Optional.empty();
+        }
+        List<Long> rows = jdbcTemplate.query("""
+                UPDATE account_product_balances b
+                   SET available_units = b.available_units + ?,
+                       updated_at = ?
+                 WHERE b.account_type = ?
+                   AND b.user_id = ?
+                   AND b.asset = ?
+                   AND b.available_units + ? >= 0
+                RETURNING b.available_units + b.locked_units - COALESCE((
+                       SELECT d.deficit_units
+                         FROM account_product_deficits d
+                        WHERE d.account_type = b.account_type
+                          AND d.user_id = b.user_id
+                          AND d.asset = b.asset
+                   ), 0) AS balance_after_units
+                """, (rs, rowNum) -> rs.getLong("balance_after_units"),
+                amountUnits, Timestamp.from(now), accountType.name(), userId, asset, amountUnits);
+        return rows == null ? Optional.empty() : rows.stream().findFirst();
     }
 
     private void updateDeficitIfChanged(long userId,

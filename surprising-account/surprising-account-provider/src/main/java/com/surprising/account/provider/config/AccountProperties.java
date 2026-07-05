@@ -168,7 +168,10 @@ public class AccountProperties {
 
     public static class Cache {
         private int contractSpecMaxEntries = 4096;
+        private int instrumentTypeMaxEntries = 4096;
+        private int spotInstrumentSpecMaxEntries = 4096;
         private int orderFeeSnapshotMaxEntries = 200_000;
+        private int liquidationFeeContextMaxEntries = 200_000;
 
         public int getContractSpecMaxEntries() {
             return contractSpecMaxEntries;
@@ -178,12 +181,36 @@ public class AccountProperties {
             this.contractSpecMaxEntries = contractSpecMaxEntries;
         }
 
+        public int getInstrumentTypeMaxEntries() {
+            return instrumentTypeMaxEntries;
+        }
+
+        public void setInstrumentTypeMaxEntries(int instrumentTypeMaxEntries) {
+            this.instrumentTypeMaxEntries = instrumentTypeMaxEntries;
+        }
+
+        public int getSpotInstrumentSpecMaxEntries() {
+            return spotInstrumentSpecMaxEntries;
+        }
+
+        public void setSpotInstrumentSpecMaxEntries(int spotInstrumentSpecMaxEntries) {
+            this.spotInstrumentSpecMaxEntries = spotInstrumentSpecMaxEntries;
+        }
+
         public int getOrderFeeSnapshotMaxEntries() {
             return orderFeeSnapshotMaxEntries;
         }
 
         public void setOrderFeeSnapshotMaxEntries(int orderFeeSnapshotMaxEntries) {
             this.orderFeeSnapshotMaxEntries = orderFeeSnapshotMaxEntries;
+        }
+
+        public int getLiquidationFeeContextMaxEntries() {
+            return liquidationFeeContextMaxEntries;
+        }
+
+        public void setLiquidationFeeContextMaxEntries(int liquidationFeeContextMaxEntries) {
+            this.liquidationFeeContextMaxEntries = liquidationFeeContextMaxEntries;
         }
     }
 

@@ -26,11 +26,14 @@ import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.marketmaker.api.model.MarketMakerRunRequest;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyStatus;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
+import com.surprising.marketmaker.provider.model.ReferenceOrderBookLevel;
+import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
 import com.surprising.marketmaker.provider.model.StrategyConfigOverride;
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository;
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.CursorPage;
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerPnlAttributionRecord;
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerPnlScope;
+import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerReferenceSampleWrite;
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventRecord;
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventWrite;
 import com.surprising.marketmaker.provider.repository.MarketMakerStrategyOverrideStore;
@@ -38,18 +41,36 @@ import com.surprising.price.api.client.MarkPriceRpcApi;
 import com.surprising.price.api.model.MarkPriceQueryResponse;
 import com.surprising.price.api.model.MarkPriceResponse;
 import com.surprising.price.api.model.PriceStatus;
+import com.surprising.trading.api.model.AmendOrderBatchResponse;
+import com.surprising.trading.api.model.AmendOrderRequest;
+import com.surprising.trading.api.model.AmendOrderResponse;
+import com.surprising.trading.api.model.AlgoOrderBatchResponse;
+import com.surprising.trading.api.model.AlgoOrderQueryResponse;
+import com.surprising.trading.api.model.AlgoOrderResponse;
+import com.surprising.trading.api.model.BatchAmendOrdersRequest;
+import com.surprising.trading.api.model.BatchCancelOrdersRequest;
+import com.surprising.trading.api.model.BatchPlaceOrderRequest;
+import com.surprising.trading.api.model.CancelAllAfterRequest;
+import com.surprising.trading.api.model.CancelAllAfterResponse;
+import com.surprising.trading.api.model.CancelAlgoOrderRequest;
 import com.surprising.trading.api.model.CancelOrderRequest;
+import com.surprising.trading.api.model.CancelOpenAlgoOrdersRequest;
+import com.surprising.trading.api.model.CancelOpenOrdersRequest;
+import com.surprising.trading.api.model.ClosePositionRequest;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
+import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.PlaceAlgoOrderRequest;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
+import com.surprising.trading.api.model.TestOrderResponse;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.client.MarketDataRpcApi;
 import com.surprising.trading.api.client.OrderRpcApi;
@@ -85,6 +106,30 @@ class MarketMakerServiceTest {
                     assertThat(request.postOnly()).isTrue();
                     assertThat(request.orderType()).isEqualTo(OrderType.LIMIT);
                     assertThat(request.userId()).isEqualTo(900001L);
+                });
+    }
+
+    @Test
+    void runOnceRecordsReferenceMarketSampleWhenSnapshotIsAvailable() {
+        Fixtures fixtures = new Fixtures(List.of());
+        FakeAdminRepository adminRepository = new FakeAdminRepository();
+        ReferenceOrderBookSnapshot snapshot = new ReferenceOrderBookSnapshot("BINANCE_USDM", "WEBSOCKET", "BTC-USDT",
+                List.of(new ReferenceOrderBookLevel(49_990L, 3L)),
+                List.of(new ReferenceOrderBookLevel(50_020L, 7L)),
+                Instant.parse("2026-01-01T00:00:01Z"));
+        MarketMakerService service = fixtures.service(adminRepository, (symbol, instrument) -> snapshot);
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(adminRepository.referenceSamples).singleElement()
+                .satisfies(sample -> {
+                    assertThat(sample.strategyId()).isEqualTo("btc-usdt-mm-a");
+                    assertThat(sample.symbol()).isEqualTo("BTC-USDT");
+                    assertThat(sample.sourceName()).isEqualTo("BINANCE_USDM");
+                    assertThat(sample.transport()).isEqualTo("WEBSOCKET");
+                    assertThat(sample.bidLevels()).isEqualTo(1);
+                    assertThat(sample.askLevels()).isEqualTo(1);
+                    assertThat(sample.spreadTicks()).isEqualTo(30L);
                 });
     }
 
@@ -270,10 +315,16 @@ class MarketMakerServiceTest {
         }
 
         private MarketMakerService service(MarketMakerAdminRepository adminRepository) {
+            return service(adminRepository, ReferenceMarketProvider.disabled());
+        }
+
+        private MarketMakerService service(MarketMakerAdminRepository adminRepository,
+                                           ReferenceMarketProvider referenceMarketProvider) {
             MarketMakerProperties properties = properties();
             return new MarketMakerService(properties, new FakeInstrumentRpc(), new FakeMarkPriceRpc(),
                     new FakeMarketDataRpc(), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
-                    (strategyId, symbol, ownerId, leaseDuration) -> true, new FakeOverrideStore(), adminRepository);
+                    referenceMarketProvider, (strategyId, symbol, ownerId, leaseDuration) -> true,
+                    new FakeOverrideStore(), adminRepository);
         }
 
         private MarketMakerProperties properties() {
@@ -332,6 +383,7 @@ class MarketMakerServiceTest {
 
     private static final class FakeAdminRepository implements MarketMakerAdminRepository {
         private final List<MarketMakerRunEventWrite> events = new ArrayList<>();
+        private final List<MarketMakerReferenceSampleWrite> referenceSamples = new ArrayList<>();
         private List<MarketMakerPnlScope> scopes = List.of();
         private CursorPage<MarketMakerRunEventRecord> runEventPage =
                 new CursorPage<>(List.of(), null, false, "createdAt.desc", 100);
@@ -346,6 +398,11 @@ class MarketMakerServiceTest {
         @Override
         public void recordRunEvent(MarketMakerRunEventWrite event) {
             events.add(event);
+        }
+
+        @Override
+        public void recordReferenceSample(MarketMakerReferenceSampleWrite sample) {
+            referenceSamples.add(sample);
         }
 
         @Override
@@ -409,10 +466,75 @@ class MarketMakerServiceTest {
         }
 
         @Override
+        public OrderBatchResponse placeBatch(BatchPlaceOrderRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public TestOrderResponse test(PlaceOrderRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AmendOrderResponse amend(AmendOrderRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AmendOrderBatchResponse amendBatch(BatchAmendOrdersRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public OrderResponse closePosition(ClosePositionRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public OrderResponse cancel(CancelOrderRequest request) {
             cancelRequests.add(request);
             return order(request.orderId(), request.userId(), "canceled", OrderSide.BUY,
                     1L, 0L, OrderStatus.CANCELED);
+        }
+
+        @Override
+        public OrderBatchResponse cancelBatch(BatchCancelOrdersRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public OrderBatchResponse cancelOpen(CancelOpenOrdersRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CancelAllAfterResponse cancelAllAfter(CancelAllAfterRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AlgoOrderResponse placeAlgo(PlaceAlgoOrderRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AlgoOrderResponse cancelAlgo(CancelAlgoOrderRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AlgoOrderBatchResponse cancelOpenAlgo(CancelOpenAlgoOrdersRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AlgoOrderResponse getAlgo(long algoOrderId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AlgoOrderQueryResponse openAlgoOrders(long userId, String symbol, int limit) {
+            throw new UnsupportedOperationException();
         }
 
         @Override

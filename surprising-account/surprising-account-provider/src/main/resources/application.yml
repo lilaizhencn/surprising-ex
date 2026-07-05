@@ -37,7 +37,10 @@ surprising:
       send-timeout: 3s
     cache:
       contract-spec-max-entries: 4096
+      instrument-type-max-entries: 4096
+      spot-instrument-spec-max-entries: 4096
       order-fee-snapshot-max-entries: 200000
+      liquidation-fee-context-max-entries: 200000
     position-margin:
       max-risk-snapshot-age: 10s
       removal-buffer-ppm: 50000

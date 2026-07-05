@@ -52,18 +52,22 @@ public class TriggerOrderRepository {
         return jdbcTemplate.update("""
                 INSERT INTO trading_trigger_orders (
                     trigger_order_id, user_id, client_trigger_order_id, oco_group_id, symbol, side, trigger_type,
-                    trigger_price_type, trigger_condition, trigger_price_ticks, order_type, time_in_force,
-                    price_ticks, quantity_steps, margin_mode, position_side, status, placed_order_id, trigger_sequence,
-                    triggered_price_ticks, reject_reason, trace_id, expires_at, triggered_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    trigger_price_type, trigger_condition, trigger_price_ticks, activation_price_ticks,
+                    callback_rate_ppm, highest_price_ticks, lowest_price_ticks, activated_at, order_type,
+                    time_in_force, price_ticks, quantity_steps, margin_mode, position_side, status, placed_order_id,
+                    trigger_sequence, triggered_price_ticks, reject_reason, trace_id, expires_at, triggered_at,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT DO NOTHING
                 """, order.triggerOrderId(), order.userId(), order.clientTriggerOrderId(), order.ocoGroupId(),
                 order.symbol(),
                 order.side().name(), order.triggerType().name(), order.triggerPriceType().name(),
-                order.triggerCondition().name(), order.triggerPriceTicks(), order.orderType().name(),
-                order.timeInForce().name(), order.priceTicks(), order.quantitySteps(), order.marginMode().name(),
-                PositionSide.defaultIfNull(order.positionSide()).name(), order.status().name(), order.placedOrderId(),
-                order.triggerSequence(), order.triggeredPriceTicks(),
+                order.triggerCondition().name(), order.triggerPriceTicks(), order.activationPriceTicks(),
+                order.callbackRatePpm(), order.highestPriceTicks(), order.lowestPriceTicks(),
+                timestampOrNull(order.activatedAt()), order.orderType().name(), order.timeInForce().name(),
+                order.priceTicks(), order.quantitySteps(), order.marginMode().name(),
+                PositionSide.defaultIfNull(order.positionSide()).name(), order.status().name(),
+                order.placedOrderId(), order.triggerSequence(), order.triggeredPriceTicks(),
                 order.rejectReason(), order.traceId(), timestampOrNull(order.expiresAt()),
                 timestampOrNull(order.triggeredAt()), Timestamp.from(order.createdAt()),
                 Timestamp.from(order.updatedAt())) == 1;
@@ -243,6 +247,19 @@ public class TriggerOrderRepository {
                 """, (rs, rowNum) -> toRecord(rs), userId, symbol, symbol, normalizedLimit);
     }
 
+    public List<TriggerOrderRecord> pendingCancelableOrders(long userId, String symbol, int limit) {
+        int normalizedLimit = Math.max(1, Math.min(limit, 1000));
+        return jdbcTemplate.query("""
+                SELECT *
+                  FROM trading_trigger_orders
+                 WHERE user_id = ?
+                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND status = 'PENDING'
+                 ORDER BY created_at ASC, trigger_order_id ASC
+                 LIMIT ?
+                """, (rs, rowNum) -> toRecord(rs), userId, symbol, symbol, normalizedLimit);
+    }
+
     public List<TriggerOrderRecord> adminOrders(Long userId,
                                                 String symbol,
                                                 TriggerOrderStatus status,
@@ -325,13 +342,50 @@ public class TriggerOrderRepository {
                 .findFirst();
     }
 
+    public OptionalLong indexPriceTicks(String symbol, long sequence) {
+        return jdbcTemplate.query("""
+                SELECT ((CAST(round(p.index_price * qs.scale_units) AS BIGINT) + i.price_tick_units / 2)
+                        / i.price_tick_units) AS index_ticks
+                  FROM price_index_ticks p
+                  JOIN instrument_current_versions c
+                    ON c.symbol = p.symbol
+                  JOIN instruments i
+                    ON i.symbol = c.symbol AND i.version = c.version
+                  JOIN account_asset_scales qs
+                    ON qs.asset = i.quote_asset
+                 WHERE p.symbol = ?
+                   AND p.sequence = ?
+                   AND p.index_price IS NOT NULL
+                   AND p.status IN ('HEALTHY', 'DEGRADED', 'CLAMPED')
+                """, (rs, rowNum) -> rs.getLong("index_ticks"), symbol, sequence)
+                .stream()
+                .mapToLong(Long::longValue)
+                .filter(value -> value > 0)
+                .findFirst();
+    }
+
+    public boolean hasPendingOrdersForPriceType(String symbol, TriggerPriceType triggerPriceType) {
+        Boolean result = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM trading_trigger_orders
+                     WHERE symbol = ?
+                       AND status = 'PENDING'
+                       AND trigger_price_type = ?
+                )
+                """, Boolean.class, symbol, triggerPriceType.name());
+        return Boolean.TRUE.equals(result);
+    }
+
     public List<TriggerOrderRecord> claimTriggered(String symbol,
-                                                   long markPriceTicks,
+                                                   TriggerPriceType triggerPriceType,
+                                                   long triggerPriceTicks,
                                                    long triggerSequence,
                                                    Instant triggeredAt,
                                                    int limit,
                                                    Instant now) {
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
+        Instant eventVisibleAt = triggeredAt.plusSeconds(1);
         return jdbcTemplate.query("""
                 -- Claim first, then update, so concurrent trigger nodes skip rows already owned by peers.
                 WITH due AS (
@@ -343,7 +397,9 @@ public class TriggerOrderRepository {
                       FROM trading_trigger_orders
                      WHERE symbol = ?
                        AND status = 'PENDING'
-                       AND trigger_price_type = 'MARK_PRICE'
+                       AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
+                       AND trigger_price_type = ?
+                       AND created_at <= ?
                        AND (expires_at IS NULL OR expires_at > ?)
                        AND (
                            (trigger_condition = 'GREATER_OR_EQUAL' AND trigger_price_ticks <= ?)
@@ -391,9 +447,159 @@ public class TriggerOrderRepository {
                  RETURNING sibling.trigger_order_id
                 )
                 SELECT * FROM claimed
-                """, (rs, rowNum) -> toRecord(rs), symbol, Timestamp.from(now), markPriceTicks,
-                markPriceTicks, normalizedLimit, triggerSequence, markPriceTicks, Timestamp.from(triggeredAt),
+                """, (rs, rowNum) -> toRecord(rs), symbol, triggerPriceType.name(),
+                Timestamp.from(eventVisibleAt), Timestamp.from(now),
+                triggerPriceTicks, triggerPriceTicks, normalizedLimit, triggerSequence, triggerPriceTicks,
+                Timestamp.from(triggeredAt),
                 Timestamp.from(now), Timestamp.from(now));
+    }
+
+    public List<TriggerOrderRecord> claimTrailingTriggered(String symbol,
+                                                           TriggerPriceType triggerPriceType,
+                                                           long priceTicks,
+                                                           long triggerSequence,
+                                                           Instant triggeredAt,
+                                                           int limit,
+                                                           Instant now) {
+        int normalizedLimit = Math.max(1, Math.min(limit, 1000));
+        Instant eventVisibleAt = triggeredAt.plusSeconds(1);
+        return jdbcTemplate.query("""
+                WITH locked AS (
+                    SELECT *,
+                           CASE
+                               WHEN activated_at IS NOT NULL THEN TRUE
+                               WHEN activation_price_ticks IS NULL OR activation_price_ticks <= 0 THEN TRUE
+                               WHEN side = 'SELL' THEN ? >= activation_price_ticks
+                               ELSE ? <= activation_price_ticks
+                           END AS next_activated
+                      FROM trading_trigger_orders
+                     WHERE symbol = ?
+                       AND status = 'PENDING'
+                       AND trigger_type = 'TRAILING_STOP'
+                       AND trigger_price_type = ?
+                       AND created_at <= ?
+                       AND (expires_at IS NULL OR expires_at > ?)
+                     ORDER BY trigger_order_id ASC
+                     LIMIT ?
+                     FOR UPDATE SKIP LOCKED
+                ),
+                tracked AS (
+                    SELECT *,
+                           CASE
+                               WHEN next_activated AND side = 'SELL'
+                                   THEN GREATEST(COALESCE(highest_price_ticks, ?), ?)
+                               ELSE highest_price_ticks
+                           END AS next_highest_price_ticks,
+                           CASE
+                               WHEN next_activated AND side = 'BUY'
+                                   THEN LEAST(COALESCE(lowest_price_ticks, ?), ?)
+                               ELSE lowest_price_ticks
+                           END AS next_lowest_price_ticks
+                      FROM locked
+                ),
+                computed AS (
+                    SELECT *,
+                           CASE
+                               WHEN next_activated AND side = 'SELL'
+                                   THEN ? <= FLOOR(
+                                       (next_highest_price_ticks::numeric * (1000000 - callback_rate_ppm))
+                                       / 1000000
+                                   )::bigint
+                               WHEN next_activated AND side = 'BUY'
+                                   THEN ? >= CEIL(
+                                       (next_lowest_price_ticks::numeric * (1000000 + callback_rate_ppm))
+                                       / 1000000
+                                   )::bigint
+                               ELSE FALSE
+                           END AS should_trigger,
+                           CASE
+                               WHEN oco_group_id IS NULL THEN 'order:' || trigger_order_id::text
+                               ELSE 'oco:' || user_id::text || ':' || symbol || ':' || margin_mode || ':'
+                                   || oco_group_id
+                           END AS claim_group_key
+                      FROM tracked
+                ),
+                tracking_update AS (
+                    UPDATE trading_trigger_orders o
+                       SET highest_price_ticks = c.next_highest_price_ticks,
+                           lowest_price_ticks = c.next_lowest_price_ticks,
+                           activated_at = CASE
+                               WHEN o.activated_at IS NULL AND c.next_activated THEN ?
+                               ELSE o.activated_at
+                           END,
+                           updated_at = ?
+                      FROM computed c
+                     WHERE o.trigger_order_id = c.trigger_order_id
+                       AND c.next_activated
+                       AND NOT c.should_trigger
+                 RETURNING o.trigger_order_id
+                ),
+                due AS (
+                    SELECT trigger_order_id,
+                           claim_group_key,
+                           next_highest_price_ticks,
+                           next_lowest_price_ticks,
+                           next_activated
+                      FROM computed
+                     WHERE should_trigger
+                ),
+                candidates AS (
+                    SELECT trigger_order_id,
+                           next_highest_price_ticks,
+                           next_lowest_price_ticks,
+                           next_activated
+                      FROM (
+                          SELECT trigger_order_id,
+                                 next_highest_price_ticks,
+                                 next_lowest_price_ticks,
+                                 next_activated,
+                                 row_number() OVER (
+                                     PARTITION BY claim_group_key
+                                     ORDER BY trigger_order_id ASC
+                                 ) AS group_rank
+                            FROM due
+                      ) ranked
+                     WHERE group_rank = 1
+                ),
+                claimed AS (
+                    UPDATE trading_trigger_orders o
+                       SET status = 'TRIGGERING',
+                           trigger_sequence = ?,
+                           triggered_price_ticks = ?,
+                           triggered_at = ?,
+                           highest_price_ticks = c.next_highest_price_ticks,
+                           lowest_price_ticks = c.next_lowest_price_ticks,
+                           activated_at = CASE
+                               WHEN o.activated_at IS NULL AND c.next_activated THEN ?
+                               ELSE o.activated_at
+                           END,
+                           updated_at = ?
+                      FROM candidates c
+                     WHERE o.trigger_order_id = c.trigger_order_id
+                 RETURNING o.*
+                ),
+                canceled_oco AS (
+                    UPDATE trading_trigger_orders sibling
+                       SET status = 'CANCELED',
+                           updated_at = ?
+                      FROM claimed c
+                     WHERE c.oco_group_id IS NOT NULL
+                       AND sibling.user_id = c.user_id
+                       AND sibling.symbol = c.symbol
+                       AND sibling.margin_mode = c.margin_mode
+                       AND sibling.oco_group_id = c.oco_group_id
+                       AND sibling.trigger_order_id <> c.trigger_order_id
+                       AND sibling.status = 'PENDING'
+                 RETURNING sibling.trigger_order_id
+                )
+                SELECT * FROM claimed
+                """, (rs, rowNum) -> toRecord(rs),
+                priceTicks, priceTicks, symbol, triggerPriceType.name(), Timestamp.from(eventVisibleAt),
+                Timestamp.from(now), normalizedLimit,
+                priceTicks, priceTicks, priceTicks, priceTicks, priceTicks, priceTicks,
+                Timestamp.from(triggeredAt), Timestamp.from(now), triggerSequence, priceTicks,
+                Timestamp.from(triggeredAt), Timestamp.from(triggeredAt), Timestamp.from(now),
+                Timestamp.from(now));
     }
 
     public void markTriggered(long triggerOrderId, long placedOrderId, Instant now) {
@@ -476,6 +682,11 @@ public class TriggerOrderRepository {
                 TriggerPriceType.valueOf(rs.getString("trigger_price_type")),
                 TriggerCondition.valueOf(rs.getString("trigger_condition")),
                 rs.getLong("trigger_price_ticks"),
+                longOrNull(rs, "activation_price_ticks"),
+                longOrNull(rs, "callback_rate_ppm"),
+                longOrNull(rs, "highest_price_ticks"),
+                longOrNull(rs, "lowest_price_ticks"),
+                instantOrNull(rs, "activated_at"),
                 OrderType.valueOf(rs.getString("order_type")),
                 TimeInForce.valueOf(rs.getString("time_in_force")),
                 rs.getLong("price_ticks"),

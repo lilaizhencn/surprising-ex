@@ -30,13 +30,30 @@ public final class OrderMarginMath {
                                           long priceTickUnits,
                                           long settleScaleUnits,
                                           long initialMarginRatePpm) {
+        return initialMarginUnits(contractType, side, orderType, priceTicks, quantitySteps, markPriceTicks,
+                marketMaxSlippagePpm, notionalMultiplierUnits, priceTickUnits, settleScaleUnits,
+                initialMarginRatePpm, true);
+    }
+
+    public static long initialMarginUnits(ContractType contractType,
+                                          OrderSide side,
+                                          OrderType orderType,
+                                          long priceTicks,
+                                          long quantitySteps,
+                                          Long markPriceTicks,
+                                          long marketMaxSlippagePpm,
+                                          long notionalMultiplierUnits,
+                                          long priceTickUnits,
+                                          long settleScaleUnits,
+                                          long initialMarginRatePpm,
+                                          boolean protectAdverseFillPrice) {
         requirePositive(quantitySteps, "quantitySteps");
         requirePositive(notionalMultiplierUnits, "notionalMultiplierUnits");
         requirePositive(priceTickUnits, "priceTickUnits");
         requirePositive(settleScaleUnits, "settleScaleUnits");
         requirePositive(initialMarginRatePpm, "initialMarginRatePpm");
         long effectivePriceTicks = collateralPriceTicks(side, orderType, priceTicks, markPriceTicks,
-                marketMaxSlippagePpm, contractType);
+                marketMaxSlippagePpm, contractType, protectAdverseFillPrice);
         BigInteger margin = contractType == ContractType.INVERSE_PERPETUAL
                 ? inverseInitialMargin(quantitySteps, notionalMultiplierUnits, settleScaleUnits,
                 effectivePriceTicks, priceTickUnits, initialMarginRatePpm)
@@ -83,6 +100,17 @@ public final class OrderMarginMath {
                                             Long markPriceTicks,
                                             long marketMaxSlippagePpm,
                                             ContractType contractType) {
+        return collateralPriceTicks(side, orderType, priceTicks, markPriceTicks, marketMaxSlippagePpm,
+                contractType, true);
+    }
+
+    public static long collateralPriceTicks(OrderSide side,
+                                            OrderType orderType,
+                                            long priceTicks,
+                                            Long markPriceTicks,
+                                            long marketMaxSlippagePpm,
+                                            ContractType contractType,
+                                            boolean protectAdverseFillPrice) {
         if (orderType == OrderType.MARKET) {
             if (contractType == ContractType.INVERSE_PERPETUAL) {
                 return lowerBoundPriceTicks(orderType, priceTicks, markPriceTicks, marketMaxSlippagePpm);
@@ -90,7 +118,7 @@ public final class OrderMarginMath {
             return upperBoundPriceTicks(orderType, priceTicks, markPriceTicks, marketMaxSlippagePpm);
         }
         requirePositive(priceTicks, "priceTicks");
-        if (markPriceTicks == null || markPriceTicks <= 0) {
+        if (!protectAdverseFillPrice) {
             return priceTicks;
         }
         if (contractType == ContractType.INVERSE_PERPETUAL && side == OrderSide.BUY) {
@@ -189,7 +217,7 @@ public final class OrderMarginMath {
 
     private static void requireFreshMarkTicks(Long markPriceTicks) {
         if (markPriceTicks == null || markPriceTicks <= 0) {
-            throw new IllegalArgumentException("fresh mark price ticks are required for market orders");
+            throw new IllegalArgumentException("fresh mark price ticks are required");
         }
     }
 

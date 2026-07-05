@@ -35,6 +35,13 @@ Surprising 交易所后端服务。
 ## 模块文档
 
 - [永续合约交易教程和系统实现说明](docs/perpetual-contract-tutorial_CN.md)
+- [交易接口补齐与全链路压测报告](docs/order-api-production-test-report.md)
+- [market-maker provider 持续做市全链路 smoke](docs/market-maker-provider-continuous-report.md)
+- [market-maker provider scheduled engine 全链路 smoke](docs/market-maker-provider-engine-report.md)
+- [market-maker scheduled engine 账户服务重启故障 smoke](docs/market-maker-provider-engine-fault-report.md)
+- [market-maker 参考行情 WebSocket 全链路 smoke](docs/market-maker-reference-market-report.md)
+- [market-maker 参考行情账户服务重启故障 smoke](docs/market-maker-reference-market-fault-report.md)
+- [market-maker 参考行情 180 秒持续全链路 smoke](docs/market-maker-reference-market-sustained-report.md)
 - [surprising-candlestick](surprising-candlestick/README_CN.md)
 - [surprising-instrument](surprising-instrument/README_CN.md)
 - [surprising-price](surprising-price/README_CN.md)
@@ -200,7 +207,9 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Matching 在 command 已解析但处理失败时也会退出，让 Kafka 重放发生在 DB 订单簿恢复之后，而不是在可能已被修改的内存订单簿上重试。
 - Matching 释放订单冻结保证金时要求 `locked_units` 足额；不足会失败并触发重启恢复，不能把异常冻结余额静默释放成可用余额。
 - 市价单在订单入口使用新鲜 mark price 的可成交区间校验 notional，matching 再按买卖方向保护价提交 exchange-core；线性合约市价单无论 BUY/SELL 都按上边界冻结初始保证金，保证 SELL 市价单吃到高买价时不会抵押不足。matching 会拒绝会自成交的 taker 订单。
-- 止盈止损是条件单，触发前只保存在 `trading_trigger_orders`，不进入 exchange-core 订单簿；mark price 穿越触发价后，`surprising-trigger-provider` 通过 order-provider 提交幂等的 `reduceOnly=true` 平仓单，`clientOrderId=trigger-<triggerOrderId>`。
+- 普通订单改单由 order-provider 对开放 LIMIT 订单执行 cancel-replace；替换单使用新的 `newClientOrderId`，重新走普通订单校验和资金预占，原单释放仍由撤单撮合结果和 account 结算完成。
+- TWAP 和 Iceberg 算法单是 order-provider 里的父单，不进入实时订单簿。调度出的子单仍是普通 order-provider 订单，所以成交继续经过 exchange-core 撮合、账户结算、风控、强平检查和 WebSocket fanout。活动算法单会阻断保证金模式和持仓模式切换，直到取消或完成。
+- 止盈、止损和追踪止损都是条件单，触发前只保存在 `trading_trigger_orders`，不进入 exchange-core 订单簿；配置的 `MARK_PRICE`、`INDEX_PRICE` 或 `LAST_PRICE` 触发源满足触发规则后，`surprising-trigger-provider` 通过 order-provider 提交幂等的 `reduceOnly=true` 平仓单，`clientOrderId=trigger-<triggerOrderId>`。追踪止损使用整数 `callbackRatePpm`（`1000` = `0.1%`，`100000` = `10%`）和可选 `activationPriceTicks`，激活后维护最高/最低水位，达到回调幅度才触发。`LAST_PRICE` 来自真实撮合成交，薄盘口下比 mark/index 更容易受短时冲击影响。
 - 成对 TP/SL 可以使用同一个 `ocoGroupId`；同一用户、symbol、保证金模式组里任意一条 pending 触发单被抢占后，其它 pending sibling 会在同一条数据库语句里先置为 `CANCELED`，然后再提交生成的平仓单。
 - Account 消费撮合成交，按 `tradeId` 幂等更新 long-based 净持仓，把开仓成交保证金迁移到持仓保证金，并把已实现盈亏结算进余额。
 - `CROSS` 和 `ISOLATED` 保证金模式会从下单一路传到撮合、账户、风控、资金费和强平。全仓亏损可以使用全仓可用余额和全仓持仓保证金；逐仓亏损只使用该 symbol 的逐仓持仓保证金，亏穿后记录 deficit。
@@ -231,7 +240,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - 订单入口已冻结初始保证金；账户成交处理会把开仓成交保证金迁移到持仓保证金，并在平仓时释放旧持仓保证金。
 - 用户主动平仓订单在进入撮合 command 前会经过 reduce-only 校验。
 - Risk 发现爆仓候选；liquidation 会把候选转成分阶段 reduce-only 平仓订单，强平不会被用户已有 reduce-only 挂单阻塞。
-- Insurance 吸收 `account_deficits`；保险基金耗尽后的剩余亏损由 ADL 处理。生产上线前还需要压测、监控阈值、真实集群熔断演练和多进程 Kafka 证据。
+- Insurance 吸收 `account_deficits`；保险基金耗尽后的剩余亏损由 ADL 处理。最新本机证据包括 L4 单节点真实链路压测完成 4 个 maker、5 轮刷新、10000 笔 gateway taker 成交/account 结算，并验证前 5 个用户私有 fanout 不串号；180 秒参考行情 scheduled-engine smoke 提交 1333 笔报价、完成 30/30 笔 taker 成交/account 结算、运行期严格 outbox 清空且 WebSocket depth 单调递增；参考行情 WebSocket 账户重启 smoke 使用 Binance/OKX/Bybit 流式样本并完成故障窗口 10/10 笔 taker 成交/account 结算；60 秒 market-maker provider scheduled-engine smoke 提交 400 笔报价并完成 20/20 笔 taker 成交/account 结算；scheduled-engine 账户服务重启 smoke 在故障窗口完成 5/5 笔 taker 成交且重启后 account 全部结算并保持资金不变量；run-once 连续 smoke 提交 160 笔报价。生产上线前仍需要更长时间的多节点、多 broker 压测、监控阈值、真实集群熔断演练和多进程 Kafka 证据。
 - WebSocket 推送服务应独立消费 Kafka 输出 topic，不要放进 K 线或价格计算服务里。
 - 每个 WebSocket 节点必须使用唯一 Kafka consumer group，让公共行情事件到达所有节点做本地 fanout；不要让所有 WebSocket pod 共用一个 group。
 - 用户持仓推送从 account 结算事务后的 outbox 产生，再由 WebSocket 消费并按已认证用户订阅过滤。

@@ -101,7 +101,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             if (bids.isEmpty() || asks.isEmpty()) {
                 return null;
             }
-            return new ReferenceOrderBookSnapshot(source.getName(), symbol, bids, asks, receivedAt);
+            return new ReferenceOrderBookSnapshot(source.getName(), "REST", symbol, bids, asks, receivedAt);
         } catch (Exception ex) {
             throw new IllegalArgumentException("invalid reference order book payload: " + ex.getMessage(), ex);
         }
@@ -491,7 +491,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             if (bidLevels.isEmpty() || askLevels.isEmpty()) {
                 return null;
             }
-            return new ReferenceOrderBookSnapshot(source, symbol, bidLevels, askLevels, receivedAt);
+            return new ReferenceOrderBookSnapshot(source, "WEBSOCKET", symbol, bidLevels, askLevels, receivedAt);
         }
 
         private void putAll(NavigableMap<Long, Long> side, List<ReferenceOrderBookLevel> levels) {

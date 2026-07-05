@@ -108,19 +108,56 @@ Admin order-audit APIs use the `/api/v1/admin/trading` prefix and are reached th
 - Order margin reservation then selects the matching `instrument_risk_brackets` row from the order notional plus the current same-`marginMode` position notional. If the user setting exceeds that bracket's `max_leverage_ppm`, the order is rejected.
 - Effective initial-margin rate = `max(leverage-derived margin rate, risk-bracket initial_margin_rate_ppm)`. When no user setting exists, order entry uses the current risk bracket's max leverage / initial margin rate.
 
-## Take-Profit And Stop-Loss
+## Order Amend
+
+- Ordinary order amend uses cancel-replace semantics through order-provider; exchange-core is not modified.
+- Only open `LIMIT` orders in `ACCEPTED` or `PARTIALLY_FILLED` state can be amended.
+- Amend can change `priceTicks`, remaining `quantitySteps`, resting `timeInForce` (`GTC`/`GTX`), and `postOnly`.
+- Amend cannot change `side`, `symbol`, `orderType`, `marginMode`, `positionSide`, or `reduceOnly`.
+- The replacement order must use a new `newClientOrderId` for idempotency. Opening replacement orders run the same validation and fund reservation path as normal orders; original-order release still follows cancel matching result and account settlement.
+- REST endpoints: `POST /api/v1/trading/orders/amend` and `POST /api/v1/trading/orders/batch-amend`.
+
+## Cancel All After
+
+`POST /api/v1/trading/orders/cancel-all-after` implements a dead-man switch for API clients:
+
+- `countdownMs=0` disables the timer.
+- A positive `countdownMs` refreshes the timer for the user and optional `symbol`; omitting `symbol` applies to all symbols.
+- When the timer expires, order-provider cancels the user's open ordinary orders through the existing `cancel-open` path and calls trigger-provider to cancel pending TP/SL orders.
+- The timer state is stored in `trading_cancel_all_after`; the latest execution records ordinary-order and trigger-order cancellation counts.
+
+## Algo Orders
+
+TWAP and Iceberg are implemented as an order-provider algo layer before exchange-core. The parent algo order never enters the live order book; scheduled child orders are ordinary order-provider orders and continue through matching, account settlement, risk, liquidation checks, and WebSocket fanout.
+
+- `TWAP` validates `durationSeconds >= intervalSeconds` and that `childQuantitySteps` can finish the target quantity inside the configured duration. Child orders are IOC; `priceTicks=0` creates MARKET IOC children, while a positive price creates LIMIT IOC children.
+- `ICEBERG` requires a positive limit price and `GTC` or `GTX`. It keeps only one visible child active at a time, then places the next slice after the previous child fills or is canceled.
+- Active algo orders block margin-mode and position-mode switches because future child orders would otherwise be emitted under stale mode assumptions.
+- Canceling a parent algo order also cancels any active child orders. `cancel-open` supports user-level and optional symbol-level bulk cancellation.
+
+REST endpoints:
+
+- `POST /api/v1/trading/orders/algo`
+- `POST /api/v1/trading/orders/algo/cancel`
+- `POST /api/v1/trading/orders/algo/cancel-open`
+- `GET /api/v1/trading/orders/algo/{algoOrderId}`
+- `GET /api/v1/trading/orders/algo/open`
+
+## Take-Profit, Stop-Loss, And Trailing Stop
 
 Large exchanges implement TP/SL as conditional orders outside the live order book. This module follows that model:
 
 - A trigger order is stored in `trading_trigger_orders` with `PENDING` status. It does not enter exchange-core and does not reserve new margin.
-- Only `MARK_PRICE` triggers are supported. This avoids last-trade manipulation and keeps liquidation/risk trigger semantics aligned with the mark-price stream.
-- Direction is derived from close side and trigger type: long TP is `SELL + TAKE_PROFIT` and triggers when mark is greater than or equal to the trigger; long SL is `SELL + STOP_LOSS` and triggers when mark is less than or equal to the trigger. Short closes use the inverse conditions with `BUY`.
-- The trigger provider consumes `surprising.perp.mark.price.v1`, validates Kafka key = payload `symbol`, converts the persisted `price_mark_ticks.mark_price_units` to current instrument ticks, and claims due rows with PostgreSQL `FOR UPDATE SKIP LOCKED`.
+- `MARK_PRICE`, `INDEX_PRICE`, and `LAST_PRICE` trigger sources are supported. `LAST_PRICE` consumes the real match-trade stream and is available for user TP/SL/trailing orders, but it remains riskier than mark/index in thin books and is not used for liquidation.
+- Direction is derived from close side and trigger type: long TP is `SELL + TAKE_PROFIT` and triggers when the selected trigger source is greater than or equal to the trigger; long SL is `SELL + STOP_LOSS` and triggers when the selected source is less than or equal to the trigger. Short closes use the inverse conditions with `BUY`.
+- `TRAILING_STOP` requires `MARKET` execution, `callbackRatePpm` in `[1000, 100000]` (`0.1%` to `10%`), and optional `activationPriceTicks`. A SELL trailing stop activates when the source reaches the activation price, tracks the highest post-activation price, and triggers when the source falls by the callback. A BUY trailing stop tracks the lowest price and triggers after an upward callback.
+- The trigger provider consumes `surprising.perp.mark.price.v1` for `MARK_PRICE`, `surprising.perp.index.price.v1` for `INDEX_PRICE`, and `surprising.perp.match.trades.v1` for `LAST_PRICE`; it validates Kafka key = payload `symbol`, converts persisted mark/index rows to current instrument ticks, and claims due rows with PostgreSQL `FOR UPDATE SKIP LOCKED`.
 - Multiple trigger-provider nodes can run at the same time. Only one node can claim a due trigger row, and stale `TRIGGERING` rows are reset after `surprising.trading.trigger.execution.stale-triggering-after` so downstream failures retry on later mark events.
 - When triggered, it calls order-provider with `reduceOnly=true`, `postOnly=false`, and `clientOrderId=trigger-<triggerOrderId>`. The order-provider idempotency key protects retries from creating duplicate close orders.
 - Triggered orders go through the same order, matching, account, fee, PnL, risk, liquidation, and WebSocket flow as user-submitted close orders. The trigger service never mutates balances or positions directly.
-- `MARKET` trigger execution requires `priceTicks=0` and `IOC` or `FOK`. `LIMIT` trigger execution requires a positive `priceTicks`; `GTX` is rejected for trigger execution.
-- Optional `ocoGroupId` supports paired TP/SL. When any pending order in the same `userId + symbol + marginMode + ocoGroupId` group is claimed by a mark-price event, the database claim statement also moves the other pending siblings to `CANCELED` before the generated reduce-only order is submitted.
+- `MARKET` trigger execution requires `priceTicks=0` and `IOC` or `FOK`. Static TP/SL can also use `LIMIT` execution with a positive `priceTicks`; `GTX` is rejected for trigger execution.
+- Optional `ocoGroupId` supports paired TP/SL. When any pending order in the same `userId + symbol + marginMode + ocoGroupId` group is claimed by its configured price-source event, the database claim statement also moves the other pending siblings to `CANCELED` before the generated reduce-only order is submitted.
+- Batch trigger placement accepts `atomic=true` for composite TP/SL submissions. In atomic mode any validation failure rejects the whole batch, rolls back all inserted trigger rows, and returns per-item failed results; default batch mode still keeps item failures isolated.
 - Because OCO siblings are canceled at claim time, a later downstream execution failure leaves the group consumed. This avoids duplicate close attempts under multi-node trigger-provider concurrency; clients can place a fresh TP/SL pair if execution fails.
 
 REST endpoints:
@@ -152,6 +189,13 @@ curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders/cancel' \
 curl 'http://localhost:9095/api/v1/trading/trigger-orders/open?userId=1001&symbol=BTC-USDT&limit=100'
 curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symbol=BTC-USDT&limit=100' -H 'X-User-Id: 1001'
 ```
+
+Trigger-order user endpoints are also available through the gateway:
+`/api/v1/gateway/trading-trigger` maps to direct `/api/v1/trading/trigger-orders`.
+
+- `POST /api/v1/trading/trigger-orders/batch`: place up to 20 TP/SL trigger orders; set `atomic=true` when a multi-leg TP/SL group must be all-or-nothing.
+- `POST /api/v1/trading/trigger-orders/batch-cancel`: cancel up to 50 trigger orders.
+- `POST /api/v1/trading/trigger-orders/cancel-open`: cancel the user's `PENDING` trigger orders, optionally filtered by `symbol`, up to 1000 rows per call. Rows already in `TRIGGERING` are not canceled here to avoid racing trigger execution.
 
 ## Trace Id
 
@@ -360,6 +404,21 @@ curl -X POST 'http://localhost:9084/api/v1/trading/orders' \
     "postOnly": false
   }'
 ```
+
+Frontend and BFF traffic should normally use the gateway route. `POST /api/v1/gateway/trading`
+maps to direct `POST /api/v1/trading/orders`, and child paths are preserved, for example
+`/api/v1/gateway/trading/test`, `/batch`, `/close-position`, and `/cancel-open`.
+
+User order endpoints:
+
+- `POST /api/v1/trading/orders`: place a normal order. `clientOrderId` is idempotent per user.
+- `POST /api/v1/trading/orders/test`: dry-run an order. It validates request fields, instrument rules, reduce-only safety, fee snapshot availability, and opening-reserve requirements; it does not insert `trading_orders`, reserve balances, or publish Kafka commands.
+- `POST /api/v1/trading/orders/batch`: place up to 20 orders and return per-item results. A business-rejected item still returns its order response.
+- `POST /api/v1/trading/orders/close-position`: one-click close the current position. The service locks the current `account_positions` row and creates a `reduceOnly=true`, `MARKET + IOC` close order from the live position side and quantity.
+- `POST /api/v1/trading/orders/cancel`: cancel by `orderId`.
+- `POST /api/v1/trading/orders/batch-cancel`: cancel up to 50 orders.
+- `POST /api/v1/trading/orders/cancel-open`: cancel a user's open normal orders, optionally filtered by `symbol`, up to 1000 rows per call.
+- `GET /api/v1/trading/orders/{orderId}`, `GET /api/v1/trading/orders/by-client-order-id`, and `GET /api/v1/trading/orders/open`: query orders.
 
 Cancel:
 

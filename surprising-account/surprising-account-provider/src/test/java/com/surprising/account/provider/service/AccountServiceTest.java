@@ -79,6 +79,37 @@ class AccountServiceTest {
     }
 
     @Test
+    void openingTradeDoesNotRunReduceOnlyPruner() {
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 5L));
+        repository.feeSnapshots.put(9001L, new OrderFeeSnapshot(2L, 5L));
+        RecordingReduceOnlyOrderPruner pruner = new RecordingReduceOnlyOrderPruner();
+        AccountService service = new AccountService(repository, new PositionCalculator(), pruner,
+                new AccountProperties(), null);
+
+        MatchTradeEvent trade = new MatchTradeEvent(
+                9206L,
+                9106L,
+                "BTC-USDT",
+                9002L,
+                1L,
+                2002L,
+                OrderSide.BUY,
+                9001L,
+                1L,
+                1001L,
+                600_000L,
+                3L,
+                true,
+                false,
+                EVENT_TIME);
+
+        service.processTrade(trade);
+
+        assertThat(pruner.calls).isEmpty();
+    }
+
+    @Test
     void tradeFeesUseOrderSnapshotRatesInsteadOfInstrumentDefaults() {
         FakeAccountRepository repository = new FakeAccountRepository();
         repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 1_000L));
@@ -158,10 +189,12 @@ class AccountServiceTest {
         assertThat(repository.pnlByUser).isEmpty();
         assertThat(repository.feeByUser).isEmpty();
         assertThat(outboxRepository.calls).isEmpty();
+        assertThat(repository.instrumentTypeLoads).containsEntry("BTC-USDT-SPOT:3", 1);
+        assertThat(repository.spotSpecLoads).containsEntry("BTC-USDT-SPOT:3", 1);
     }
 
     @Test
-    void cachesImmutableContractSpecsAndOrderFeeSnapshotsAcrossTrades() {
+    void cachesImmutableInstrumentMetadataContractSpecsAndOrderFeeSnapshotsAcrossTrades() {
         FakeAccountRepository repository = new FakeAccountRepository();
         repository.feeSnapshots.put(9001L, new OrderFeeSnapshot(2L, 5L));
         repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 5L));
@@ -204,6 +237,7 @@ class AccountServiceTest {
         service.processTrade(first);
         service.processTrade(second);
 
+        assertThat(repository.instrumentTypeLoads).containsEntry("BTC-USDT:1", 1);
         assertThat(repository.contractSpecLoads).containsEntry("BTC-USDT:1", 1);
         assertThat(repository.feeSnapshotLoads)
                 .containsEntry(9001L, 1)
@@ -432,6 +466,101 @@ class AccountServiceTest {
     }
 
     @Test
+    void closingTradeRunsReduceOnlyPrunerAfterPositionUpdate() {
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.feeSnapshots.put(9012L, new OrderFeeSnapshot(2L, 5L));
+        repository.feeSnapshots.put(9013L, new OrderFeeSnapshot(2L, 5L));
+        repository.positions.put(new PositionKey(2002L, "BTC-USDT", MarginMode.CROSS),
+                new PositionState(3L, 1L, 600_000L, 0L));
+        repository.positions.put(new PositionKey(1001L, "BTC-USDT", MarginMode.CROSS),
+                new PositionState(-3L, 1L, 600_000L, 0L));
+        RecordingReduceOnlyOrderPruner pruner = new RecordingReduceOnlyOrderPruner();
+        AccountService service = new AccountService(repository, new PositionCalculator(), pruner,
+                new AccountProperties(), null);
+
+        MatchTradeEvent close = new MatchTradeEvent(
+                9207L,
+                9107L,
+                "BTC-USDT",
+                9012L,
+                1L,
+                2002L,
+                OrderSide.SELL,
+                9013L,
+                1L,
+                1001L,
+                610_000L,
+                2L,
+                true,
+                true,
+                EVENT_TIME.plusSeconds(1),
+                "trace-prune");
+
+        service.processTrade(close);
+
+        assertThat(pruner.calls).hasSize(2);
+        assertThat(pruner.calls)
+                .extracting(PruneCall::userId)
+                .containsExactly(2002L, 1001L);
+        assertThat(pruner.calls)
+                .extracting(call -> call.position().signedQuantitySteps())
+                .containsExactly(1L, -1L);
+        assertThat(pruner.calls)
+                .extracting(PruneCall::traceId)
+                .containsExactly("trace-prune", "trace-prune");
+    }
+
+    @Test
+    void cachesMissingLiquidationFeeContextAcrossPartialClosingFills() {
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.feeSnapshots.put(9014L, new OrderFeeSnapshot(2L, 5L));
+        repository.feeSnapshots.put(9015L, new OrderFeeSnapshot(2L, 5L));
+        repository.feeSnapshots.put(9016L, new OrderFeeSnapshot(2L, 5L));
+        repository.positions.put(new PositionKey(2002L, "BTC-USDT", MarginMode.CROSS),
+                new PositionState(5L, 1L, 600_000L, 0L));
+        AccountService service = new AccountService(repository, new PositionCalculator());
+
+        MatchTradeEvent firstFill = new MatchTradeEvent(
+                9214L,
+                9114L,
+                "BTC-USDT",
+                9014L,
+                1L,
+                2002L,
+                OrderSide.SELL,
+                9015L,
+                1L,
+                1001L,
+                610_000L,
+                2L,
+                false,
+                true,
+                EVENT_TIME.plusSeconds(1));
+        MatchTradeEvent secondFill = new MatchTradeEvent(
+                9215L,
+                9115L,
+                "BTC-USDT",
+                9014L,
+                1L,
+                2002L,
+                OrderSide.SELL,
+                9016L,
+                1L,
+                1003L,
+                611_000L,
+                1L,
+                true,
+                true,
+                EVENT_TIME.plusSeconds(2));
+
+        service.processTrade(firstFill);
+        service.processTrade(secondFill);
+
+        assertThat(repository.liquidationFeeContextLoads).containsEntry(9014L, 1);
+        assertThat(repository.liquidationFeeContextLoads).doesNotContainKeys(9015L, 9016L);
+    }
+
+    @Test
     void liquidationCloseCollectsActualFeeAndEnqueuesInsuranceEvent() {
         FakeAccountRepository repository = new FakeAccountRepository();
         repository.feeSnapshots.put(9010L, new OrderFeeSnapshot(0L, 0L));
@@ -536,8 +665,11 @@ class AccountServiceTest {
         private final Map<Long, Long> pnlByUser = new HashMap<>();
         private final Map<Long, Long> feeByUser = new HashMap<>();
         private final Map<Long, LiquidationFeeContext> liquidationFeeContexts = new HashMap<>();
+        private final Map<Long, Integer> liquidationFeeContextLoads = new HashMap<>();
         private final Map<Long, Long> liquidationFeeByUser = new HashMap<>();
         private final Map<String, Integer> contractSpecLoads = new HashMap<>();
+        private final Map<String, Integer> instrumentTypeLoads = new HashMap<>();
+        private final Map<String, Integer> spotSpecLoads = new HashMap<>();
         private final Map<Long, Integer> feeSnapshotLoads = new HashMap<>();
         private final Map<String, InstrumentType> instrumentTypes = new HashMap<>();
         private final Map<String, SpotInstrumentSpec> spotSpecs = new HashMap<>();
@@ -561,11 +693,13 @@ class AccountServiceTest {
 
         @Override
         public InstrumentType instrumentType(String symbol, long instrumentVersion) {
+            instrumentTypeLoads.merge(symbol + ":" + instrumentVersion, 1, Integer::sum);
             return instrumentTypes.getOrDefault(symbol + ":" + instrumentVersion, InstrumentType.PERPETUAL);
         }
 
         @Override
         public SpotInstrumentSpec spotInstrumentSpec(String symbol, long instrumentVersion) {
+            spotSpecLoads.merge(symbol + ":" + instrumentVersion, 1, Integer::sum);
             return Optional.ofNullable(spotSpecs.get(symbol + ":" + instrumentVersion))
                     .orElseThrow(() -> new IllegalStateException("missing spot spec " + symbol));
         }
@@ -579,6 +713,7 @@ class AccountServiceTest {
 
         @Override
         public Optional<LiquidationFeeContext> liquidationFeeContext(long orderId, long userId, String symbol) {
+            liquidationFeeContextLoads.merge(orderId, 1, Integer::sum);
             return Optional.ofNullable(liquidationFeeContexts.get(orderId));
         }
 
@@ -760,7 +895,7 @@ class AccountServiceTest {
                     : snapshot.makerFeeRatePpm());
             feeByUser.merge(userId, feeDeltaUnits, Long::sum);
             if (orderId == 9002L || orderId == 9003L || orderId == 9005L
-                    || orderId == 9007L || orderId == 9010L) {
+                    || orderId == 9007L || orderId == 9010L || orderId == 9012L || orderId == 9014L) {
                 assertThat(reason).isEqualTo("TAKER_FEE");
             } else {
                 assertThat(reason).isEqualTo("MAKER_FEE");
@@ -896,6 +1031,21 @@ class AccountServiceTest {
         }
     }
 
+    private static final class RecordingReduceOnlyOrderPruner extends ReduceOnlyOrderPruner {
+
+        private final List<PruneCall> calls = new ArrayList<>();
+
+        private RecordingReduceOnlyOrderPruner() {
+            super(null, null, null);
+        }
+
+        @Override
+        public void prune(long userId, String symbol, PositionSide positionSide, PositionState position, Instant now,
+                          String traceId) {
+            calls.add(new PruneCall(userId, symbol, positionSide, position, now, traceId));
+        }
+    }
+
     private static final class FakeOutboxRepository extends AccountOutboxRepository {
 
         private final List<PositionUpdatedCall> calls = new ArrayList<>();
@@ -973,6 +1123,14 @@ class AccountServiceTest {
                                       String feeReason,
                                       boolean orderCompleted,
                                       Instant eventTime) {
+    }
+
+    private record PruneCall(long userId,
+                             String symbol,
+                             PositionSide positionSide,
+                             PositionState position,
+                             Instant eventTime,
+                             String traceId) {
     }
 
     private record PositionKey(long userId, String symbol, MarginMode marginMode, PositionSide positionSide) {

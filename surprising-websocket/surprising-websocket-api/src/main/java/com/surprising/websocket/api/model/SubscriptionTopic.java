@@ -52,7 +52,7 @@ public record SubscriptionTopic(
         if (!channel.isPublicChannel() && WILDCARD.equals(normalized)) {
             return WILDCARD;
         }
-        if (!normalized.matches("[A-Z0-9]{2,20}-[A-Z0-9]{2,20}")) {
+        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
             throw new IllegalArgumentException("invalid symbol: " + symbol);
         }
         return normalized;

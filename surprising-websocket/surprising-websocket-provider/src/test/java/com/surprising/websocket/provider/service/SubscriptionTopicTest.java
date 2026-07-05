@@ -35,6 +35,18 @@ class SubscriptionTopicTest {
     }
 
     @Test
+    void publicDepthSubscriptionAllowsSpotSymbolSuffix() {
+        SubscriptionTopic topic = SubscriptionTopic.fromCommand(
+                new WsClientCommand("subscribe", "req-spot-depth", "depth", "btc-usdt-spot", null, null),
+                null);
+
+        assertThat(topic.channel()).isEqualTo(WsChannel.ORDER_BOOK_DEPTH);
+        assertThat(topic.symbol()).isEqualTo("BTC-USDT-SPOT");
+        assertThat(topic.period()).isNull();
+        assertThat(topic.userId()).isNull();
+    }
+
+    @Test
     void privateChannelUsesAuthenticatedUserAndAllowsWildcardSymbol() {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(
                 new WsClientCommand("subscribe", "req-2", "positions", null, null, null),
@@ -60,6 +72,17 @@ class SubscriptionTopicTest {
         assertThat(positionRisk.channel()).isEqualTo(WsChannel.POSITION_RISK);
         assertThat(positionRisk.symbol()).isEqualTo("BTC-USDT");
         assertThat(positionRisk.userId()).isEqualTo(42L);
+    }
+
+    @Test
+    void privateExecutionReportsChannelUsesAuthenticatedUser() {
+        SubscriptionTopic topic = SubscriptionTopic.fromCommand(
+                new WsClientCommand("subscribe", "req-exec", "executionReports", "btc-usdt", null, null),
+                42L);
+
+        assertThat(topic.channel()).isEqualTo(WsChannel.EXECUTION_REPORTS);
+        assertThat(topic.symbol()).isEqualTo("BTC-USDT");
+        assertThat(topic.userId()).isEqualTo(42L);
     }
 
     @Test

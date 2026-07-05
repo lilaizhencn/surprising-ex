@@ -112,6 +112,8 @@ class AdlRepositoryTest {
                 eq("ledger-entry"))).thenReturn(401L, 402L, 403L);
         when(jdbcTemplate.update(contains("UPDATE account_positions"), any(Object[].class)))
                 .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE trading_symbol_open_interest"), any(Object[].class)))
+                .thenReturn(1);
         when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
                 eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq("LONG"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -151,6 +153,10 @@ class AdlRepositoryTest {
         verify(jdbcTemplate).update(contains("UPDATE account_positions"),
                 eq(5L), eq(5L), eq(100L), eq(500L), any(Timestamp.class),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("LONG"));
+        verify(jdbcTemplate).update(contains("INSERT INTO trading_symbol_open_interest"),
+                eq("BTC-USDT"), any(Timestamp.class));
+        verify(jdbcTemplate).update(contains("UPDATE trading_symbol_open_interest"),
+                eq(-5L), eq(0L), eq(-5L), eq(0L), any(Timestamp.class), eq("BTC-USDT"), eq(-5L), eq(0L));
         verify(jdbcTemplate).update(contains("locked_units = locked_units - ?"),
                 eq(50L), eq(50L), any(Timestamp.class), eq(1001L), eq("USDT"), eq(50L));
         verify(jdbcTemplate).update(contains("UPDATE account_position_margins"),
@@ -206,12 +212,42 @@ class AdlRepositoryTest {
     }
 
     @Test
+    void executeAdlFailsWhenOpenInterestUpdateIsSkipped() {
+        when(jdbcTemplate.query(contains("SELECT balance_units"), anyRowMapper(), eq("USDT")))
+                .thenReturn(List.of(0L));
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO adl_sequences"), eq(Long.class),
+                eq("adl-event"))).thenReturn(301L);
+        when(jdbcTemplate.update(contains("UPDATE account_positions"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE trading_symbol_open_interest"), any(Object[].class)))
+                .thenReturn(0);
+        AdlRepository repository = new AdlRepository(jdbcTemplate);
+
+        assertThatThrownBy(() -> repository.executeAdl(
+                new DeficitRow(2002L, "USDT", 500L),
+                new AdlCandidate(1001L, "USDT", "BTC-USDT", AdlSide.LONG,
+                        10L, 10L, 50_000L, 60_000L, 10_000L,
+                        600_000L, 1_000L, 100_000L,
+                        1_666L, 6_000_000L, 9_996L),
+                500L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("ADL symbol open interest update");
+
+        verify(jdbcTemplate, never()).query(contains("FROM account_position_margins"), anyRowMapper(),
+                any(Object[].class));
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO account_ledger_entries"), any(Object[].class));
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO adl_events"), any(Object[].class));
+    }
+
+    @Test
     void executeAdlFailsWhenTargetMarginReleaseIsSkipped() throws Exception {
         when(jdbcTemplate.query(contains("SELECT balance_units"), anyRowMapper(), eq("USDT")))
                 .thenReturn(List.of(0L));
         when(jdbcTemplate.queryForObject(contains("INSERT INTO adl_sequences"), eq(Long.class),
                 eq("adl-event"))).thenReturn(301L);
         when(jdbcTemplate.update(contains("UPDATE account_positions"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE trading_symbol_open_interest"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
                 eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq("NET"))).thenAnswer(invocation -> {

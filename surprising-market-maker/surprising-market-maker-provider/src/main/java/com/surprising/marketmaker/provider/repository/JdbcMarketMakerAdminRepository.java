@@ -52,6 +52,32 @@ public class JdbcMarketMakerAdminRepository implements MarketMakerAdminRepositor
     }
 
     @Override
+    public void recordReferenceSample(MarketMakerReferenceSampleWrite sample) {
+        jdbcTemplate.update("""
+                INSERT INTO market_maker_reference_samples (
+                    strategy_id, symbol, node_id, cycle_sequence, source_name, transport,
+                    bid_levels, ask_levels, best_bid_ticks, best_ask_ticks, mid_price_ticks,
+                    spread_ticks, received_at, trace_id, sampled_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                sample.strategyId(),
+                sample.symbol(),
+                sample.nodeId(),
+                sample.cycleSequence(),
+                truncate(sample.sourceName(), 64),
+                truncate(sample.transport(), 32),
+                sample.bidLevels(),
+                sample.askLevels(),
+                sample.bestBidTicks(),
+                sample.bestAskTicks(),
+                sample.midPriceTicks(),
+                sample.spreadTicks(),
+                Timestamp.from(sample.receivedAt() == null ? Instant.now() : sample.receivedAt()),
+                truncate(sample.traceId(), 128),
+                Timestamp.from(sample.sampledAt() == null ? Instant.now() : sample.sampledAt()));
+    }
+
+    @Override
     public List<MarketMakerRunEventRecord> runEvents(String strategyId,
                                                      String symbol,
                                                      Long accountId,

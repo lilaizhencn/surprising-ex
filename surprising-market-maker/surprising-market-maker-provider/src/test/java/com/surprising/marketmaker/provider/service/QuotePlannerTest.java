@@ -88,6 +88,20 @@ class QuotePlannerTest {
         assertThat(plan.quotes().get(3).quantitySteps()).isEqualTo(8L);
     }
 
+    @Test
+    void capsReferenceMarketQuantityAtStrategyBaseQuantity() {
+        ReferenceOrderBookSnapshot reference = new ReferenceOrderBookSnapshot("BINANCE", "WEBSOCKET", "BTC-USDT",
+                List.of(new ReferenceOrderBookLevel(49_990L, 40L)),
+                List.of(new ReferenceOrderBookLevel(50_020L, 70L)),
+                Instant.parse("2026-01-01T00:00:00Z"));
+
+        QuotePlan plan = quotePlanner.plan(strategy(), quoting(), risk(), instrument(),
+                orderBook(49_900L, 50_100L), mark(5_000_000L), 0L, reference);
+
+        assertThat(plan.quotes().get(0).quantitySteps()).isEqualTo(10L);
+        assertThat(plan.quotes().get(1).quantitySteps()).isEqualTo(10L);
+    }
+
     private MarketMakerProperties.Strategy strategy() {
         MarketMakerProperties.Strategy strategy = new MarketMakerProperties.Strategy();
         strategy.setStrategyId("btc-usdt-mm-a");

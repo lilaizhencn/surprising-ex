@@ -105,19 +105,56 @@ account 的 `position-mode` API 切换到 `HEDGE`。`ONE_WAY` 使用 `positionSi
 - 下单冻结保证金时还会按订单名义价值和当前同 `marginMode` 持仓名义价值选择 `instrument_risk_brackets` 档位；如果用户设置杠杆超过该档 `max_leverage_ppm`，订单会拒绝。
 - 有效初始保证金率 = `max(用户杠杆换算出的保证金率, 风险档位 initial_margin_rate_ppm)`。未设置用户杠杆时，按当前风险档位最大杠杆/初始保证金率冻结。
 
-## 止盈止损
+## 普通订单改单
+
+- 普通订单改单在 order-provider 中使用 cancel-replace 语义，不修改 exchange-core。
+- 只允许改单开放的 `LIMIT` 订单，订单状态必须是 `ACCEPTED` 或 `PARTIALLY_FILLED`。
+- 可修改 `priceTicks`、未成交 `quantitySteps`、挂单 `timeInForce`（`GTC`/`GTX`）和 `postOnly`。
+- 不允许修改 `side`、`symbol`、`orderType`、`marginMode`、`positionSide` 或 `reduceOnly`。
+- 替换单必须使用新的 `newClientOrderId` 保持幂等。开仓替换单会重新走普通订单校验和资金预占；原单释放仍由撤单撮合结果和 account 结算链路完成。
+- REST 接口：`POST /api/v1/trading/orders/amend`、`POST /api/v1/trading/orders/batch-amend`。
+
+## Cancel All After
+
+`POST /api/v1/trading/orders/cancel-all-after` 为 API 客户端提供 dead-man switch：
+
+- `countdownMs=0` 关闭倒计时。
+- 正数 `countdownMs` 会刷新用户级倒计时；传 `symbol` 时只作用于该交易对，不传则作用于全部 symbol。
+- 倒计时到期后，order-provider 复用现有 `cancel-open` 路径撤用户开放普通单，并调用 trigger-provider 撤 pending TP/SL 条件单。
+- timer 状态保存在 `trading_cancel_all_after`；最近一次执行会记录普通单和条件单撤单数量。
+
+## 算法单
+
+`TWAP` 和 `ICEBERG` 在 order-provider 中作为 exchange-core 之前的算法单层实现。父算法单不会进入实时订单簿；被调度出来的子单是普通 order-provider 订单，继续走撮合、账户结算、风控、强平检查和 WebSocket fanout。
+
+- `TWAP` 要求 `durationSeconds >= intervalSeconds`，并校验 `childQuantitySteps` 能在配置时间内完成目标数量。子单使用 IOC；`priceTicks=0` 会生成 MARKET IOC 子单，正数价格会生成 LIMIT IOC 子单。
+- `ICEBERG` 要求正数限价，`timeInForce` 必须为 `GTC` 或 `GTX`。它同一时间只保留一笔可见子单，前一片成交或取消后再放出下一片。
+- 活动算法单会阻断保证金模式和持仓模式切换，避免未来子单按旧模式假设继续发出。
+- 取消父算法单会同时取消活动子单；`cancel-open` 支持用户级和可选 symbol 级批量取消。
+
+REST 接口：
+
+- `POST /api/v1/trading/orders/algo`
+- `POST /api/v1/trading/orders/algo/cancel`
+- `POST /api/v1/trading/orders/algo/cancel-open`
+- `GET /api/v1/trading/orders/algo/{algoOrderId}`
+- `GET /api/v1/trading/orders/algo/open`
+
+## 止盈、止损和追踪止损
 
 大型交易所的 TP/SL 通常是活跃订单簿外的条件单。本模块按这个模型实现：
 
 - 条件单先以 `PENDING` 状态保存在 `trading_trigger_orders`，触发前不进入 exchange-core，也不冻结新增保证金。
-- 当前只支持 `MARK_PRICE` 触发，避免最新成交价被短时冲击操纵，并和风控/强平使用的标记价格保持一致。
-- 触发方向由平仓方向和条件单类型自动推导：多仓止盈是 `SELL + TAKE_PROFIT`，mark price 大于等于触发价时触发；多仓止损是 `SELL + STOP_LOSS`，mark price 小于等于触发价时触发。空仓平仓用 `BUY`，方向相反。
-- trigger provider 消费 `surprising.perp.mark.price.v1`，校验 Kafka key 等于 payload `symbol`，再把已落库的 `price_mark_ticks.mark_price_units` 按当前 instrument tick size 转为 ticks，用 PostgreSQL `FOR UPDATE SKIP LOCKED` 抢占到期条件单。
+- 当前支持 `MARK_PRICE`、`INDEX_PRICE` 和 `LAST_PRICE` 触发源。`LAST_PRICE` 消费真实撮合成交流，可用于用户 TP/SL/追踪止损条件单；但薄盘口下按最新成交价触发更容易被短时冲击操纵，强平仍只依赖 mark price。
+- 触发方向由平仓方向和条件单类型自动推导：多仓止盈是 `SELL + TAKE_PROFIT`，所选触发价源大于等于触发价时触发；多仓止损是 `SELL + STOP_LOSS`，所选触发价源小于等于触发价时触发。空仓平仓用 `BUY`，方向相反。
+- `TRAILING_STOP` 要求执行单为 `MARKET`，`callbackRatePpm` 在 `[1000, 100000]`（`0.1%` 到 `10%`），`activationPriceTicks` 可选。SELL 追踪止损激活后维护最高价，价格从最高价回撤达到回调比例时触发；BUY 追踪止损维护最低价，反弹达到回调比例时触发。
+- trigger provider 对 `MARK_PRICE` 消费 `surprising.perp.mark.price.v1`，对 `INDEX_PRICE` 消费 `surprising.perp.index.price.v1`，对 `LAST_PRICE` 消费 `surprising.perp.match.trades.v1`；校验 Kafka key 等于 payload `symbol`，再把 mark/index 已落库价格行按当前 instrument tick size 转为 ticks，用 PostgreSQL `FOR UPDATE SKIP LOCKED` 抢占到期条件单。
 - 多个 trigger-provider 节点可以同时运行。每条到期条件单只能被一个节点抢到；如果下游 order-provider 故障，`TRIGGERING` 状态超过 `surprising.trading.trigger.execution.stale-triggering-after` 后会重置，等待后续 mark 事件重试。
 - 触发后通过 order-provider 提交 `reduceOnly=true`、`postOnly=false` 的平仓单，`clientOrderId=trigger-<triggerOrderId>`。order-provider 的幂等键会保护重试不会创建重复平仓单。
 - 触发后的真实订单继续走普通订单、撮合、账户、手续费、PnL、风控、强平和 WebSocket 链路。trigger 服务不直接修改余额或持仓。
-- `MARKET` 触发执行要求 `priceTicks=0` 且 `timeInForce` 为 `IOC` 或 `FOK`。`LIMIT` 触发执行要求 `priceTicks > 0`；触发执行不支持 `GTX`。
-- 可选 `ocoGroupId` 支持成对 TP/SL 互撤。同一个 `userId + symbol + marginMode + ocoGroupId` 组里任意一条 pending 条件单被 mark price 抢占触发时，同一条数据库 claim 语句会先把其它 pending sibling 置为 `CANCELED`，再提交生成的 reduce-only 平仓单。
+- `MARKET` 触发执行要求 `priceTicks=0` 且 `timeInForce` 为 `IOC` 或 `FOK`。静态 TP/SL 也可用 `LIMIT` 执行且要求 `priceTicks > 0`；触发执行不支持 `GTX`。
+- 可选 `ocoGroupId` 支持成对 TP/SL 互撤。同一个 `userId + symbol + marginMode + ocoGroupId` 组里任意一条 pending 条件单被配置的触发价源事件抢占触发时，同一条数据库 claim 语句会先把其它 pending sibling 置为 `CANCELED`，再提交生成的 reduce-only 平仓单。
+- 批量条件单放置支持 `atomic=true`，用于组合 TP/SL 的全成全撤语义。原子模式下任一条校验失败会拒绝整组、回滚已插入条件单，并返回逐项失败结果；默认批量模式仍保持逐条隔离成功/失败。
 - OCO sibling 在 claim 阶段就会取消；如果后续 order-provider 执行失败，该 OCO 组也已经被消费。这个取舍可以避免多节点 trigger-provider 并发下重复平仓，执行失败后客户端可以重新挂一组 TP/SL。
 
 REST 接口：
@@ -149,6 +186,13 @@ curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders/cancel' \
 curl 'http://localhost:9095/api/v1/trading/trigger-orders/open?userId=1001&symbol=BTC-USDT&limit=100'
 curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symbol=BTC-USDT&limit=100' -H 'X-User-Id: 1001'
 ```
+
+条件单用户接口也可通过 gateway 访问：`/api/v1/gateway/trading-trigger` 对应直连
+`/api/v1/trading/trigger-orders`。
+
+- `POST /api/v1/trading/trigger-orders/batch`：批量提交 TP/SL 条件单，最多 20 条；需要多腿 TP/SL 组合全成全撤时传 `atomic=true`。
+- `POST /api/v1/trading/trigger-orders/batch-cancel`：批量撤销条件单，最多 50 条。
+- `POST /api/v1/trading/trigger-orders/cancel-open`：撤销用户所有 `PENDING` 条件单，可按 `symbol` 过滤，单次最多 1000 条；已经进入 `TRIGGERING` 的条件单不在这里撤销，避免和触发执行抢状态。
 
 ## TraceId 链路追踪
 
@@ -357,6 +401,21 @@ curl -X POST 'http://localhost:9084/api/v1/trading/orders' \
     "postOnly": false
   }'
 ```
+
+前端/BFF 应通过 gateway 调用同一订单服务：`POST /api/v1/gateway/trading` 对应直连
+`POST /api/v1/trading/orders`，其余子路径保持一致，例如
+`/api/v1/gateway/trading/test`、`/batch`、`/close-position`、`/cancel-open`。
+
+订单用户接口：
+
+- `POST /api/v1/trading/orders`：提交普通订单。`clientOrderId` 在同一用户内幂等。
+- `POST /api/v1/trading/orders/test`：测单。只执行基础字段、产品规则、reduce-only、手续费快照和开仓冻结需求测算；不写 `trading_orders`，不冻结余额，不发布 Kafka command。
+- `POST /api/v1/trading/orders/batch`：批量下单，最多 20 条。响应逐项返回成功/失败；单项业务拒单仍会返回对应订单响应。
+- `POST /api/v1/trading/orders/close-position`：一键平当前仓位。服务端锁定当前 `account_positions` 行，按仓位方向生成 `reduceOnly=true`、`MARKET + IOC` 平仓单；不会冻结新增保证金。
+- `POST /api/v1/trading/orders/cancel`：按 `orderId` 撤单。
+- `POST /api/v1/trading/orders/batch-cancel`：批量撤单，最多 50 条。
+- `POST /api/v1/trading/orders/cancel-open`：撤销用户普通开放订单，可按 `symbol` 过滤，单次最多 1000 条。
+- `GET /api/v1/trading/orders/{orderId}`、`GET /api/v1/trading/orders/by-client-order-id`、`GET /api/v1/trading/orders/open`：订单查询。
 
 撤单：
 

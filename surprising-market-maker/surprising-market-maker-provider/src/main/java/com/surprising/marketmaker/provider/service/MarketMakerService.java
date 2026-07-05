@@ -19,6 +19,7 @@ import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.CursorPage;
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerPnlAttributionRecord;
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerPnlScope;
+import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerReferenceSampleWrite;
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventRecord;
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventWrite;
 import com.surprising.marketmaker.provider.repository.MarketMakerStrategyOverrideStore;
@@ -558,6 +559,38 @@ public class MarketMakerService {
         }
     }
 
+    private void recordReferenceSample(MarketMakerProperties.Strategy strategy,
+                                       String symbol,
+                                       long cycleSequence,
+                                       ReferenceOrderBookSnapshot snapshot,
+                                       String traceId,
+                                       Instant sampledAt) {
+        if (snapshot == null || !snapshot.hasTwoSidedDepth()) {
+            return;
+        }
+        try {
+            adminRepository.recordReferenceSample(new MarketMakerReferenceSampleWrite(
+                    strategy.getStrategyId(),
+                    symbol,
+                    nodeId,
+                    cycleSequence,
+                    snapshot.source(),
+                    snapshot.transport(),
+                    snapshot.bids().size(),
+                    snapshot.asks().size(),
+                    snapshot.bestBidTicks(),
+                    snapshot.bestAskTicks(),
+                    snapshot.midPriceTicks(),
+                    snapshot.spreadTicks(),
+                    snapshot.receivedAt(),
+                    traceId,
+                    sampledAt));
+        } catch (RuntimeException ex) {
+            log.warn("Failed to record market-maker reference sample strategyId={} symbol={} error={}",
+                    strategy.getStrategyId(), symbol, ex.getMessage());
+        }
+    }
+
     private void runStrategy(MarketMakerProperties.Strategy strategy, String requestedSymbol, String traceId) {
         StrategyRuntimeState state = state(strategy);
         if (!strategy.isEnabled() || state.paused()) {
@@ -598,6 +631,7 @@ public class MarketMakerService {
                     properties.getQuoting().getOrderBookDepth());
             MarkPriceResponse markPrice = latestMarkPrice(symbol);
             ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol, instrument);
+            recordReferenceSample(strategy, symbol, cycleSequence, referenceOrderBook, traceId, now);
             for (long accountId : strategy.getAccountIds()) {
                 quoteAccount(strategy, state, cycleSequence, symbol, instrument, orderBook, markPrice,
                         referenceOrderBook, accountId, now, traceId);
@@ -1373,6 +1407,10 @@ public class MarketMakerService {
     private static final class NoopMarketMakerAdminRepository implements MarketMakerAdminRepository {
         @Override
         public void recordRunEvent(MarketMakerRunEventWrite event) {
+        }
+
+        @Override
+        public void recordReferenceSample(MarketMakerReferenceSampleWrite sample) {
         }
 
         @Override

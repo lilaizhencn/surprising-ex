@@ -13,6 +13,15 @@ import org.springframework.kafka.listener.ContainerProperties;
 class TriggerKafkaConfigurationTest {
 
     @Test
+    void propertiesExposeAllSupportedTriggerSourceTopics() {
+        TriggerProperties properties = new TriggerProperties();
+
+        assertThat(properties.getKafka().getMarkPriceTopic()).isEqualTo("surprising.perp.mark.price.v1");
+        assertThat(properties.getKafka().getIndexPriceTopic()).isEqualTo("surprising.perp.index.price.v1");
+        assertThat(properties.getKafka().getLastPriceTopic()).isEqualTo("surprising.perp.match.trades.v1");
+    }
+
+    @Test
     void consumerUsesReplaySafeRecordAckSettings() {
         TriggerProperties properties = new TriggerProperties();
         properties.getKafka().setBootstrapServers("kafka-t:9092");

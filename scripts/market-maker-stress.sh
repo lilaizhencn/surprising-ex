@@ -28,9 +28,14 @@ MM_REFRESH_LEVELS="${MM_REFRESH_LEVELS:-5}"
 MM_REFRESH_QUANTITY_STEPS="${MM_REFRESH_QUANTITY_STEPS:-20}"
 MM_REFRESH_CYCLES="${MM_REFRESH_CYCLES:-1}"
 MM_REFRESH_INTERVAL_SECONDS="${MM_REFRESH_INTERVAL_SECONDS:-0}"
+MAKER_BATCH_SIZE="${MAKER_BATCH_SIZE:-5}"
+MAKER_LOAD_CONCURRENCY="${MAKER_LOAD_CONCURRENCY:-8}"
 TAKER_ORDER_COUNT="${TAKER_ORDER_COUNT:-1000}"
 TAKER_QUANTITY_STEPS="${TAKER_QUANTITY_STEPS:-2}"
 LOAD_CONCURRENCY="${LOAD_CONCURRENCY:-64}"
+ORDER_HTTP_RETRIES="${ORDER_HTTP_RETRIES:-3}"
+ORDER_HTTP_RETRY_DELAY_SECONDS="${ORDER_HTTP_RETRY_DELAY_SECONDS:-1}"
+ORDER_HTTP_RETRY_MAX_SECONDS="${ORDER_HTTP_RETRY_MAX_SECONDS:-45}"
 REPORT_FILE="${REPORT_FILE:-${ROOT_DIR}/docs/market-maker-stress-report.md}"
 TMP_DIR="$(mktemp -d /tmp/surprising-mm-stress.XXXXXX)"
 WS_STOP_FILE="${TMP_DIR}/ws.stop"
@@ -40,6 +45,17 @@ KAFKA_LAG_LOG="${TMP_DIR}/kafka-lag.log"
 KAFKA_LAG_INTERVAL_SECONDS="${KAFKA_LAG_INTERVAL_SECONDS:-1}"
 WS_CAPTURE_TIMEOUT="${WS_CAPTURE_TIMEOUT:-900}"
 WS_FANOUT_USER_COUNT="${WS_FANOUT_USER_COUNT:-1}"
+ORDER_HIKARI_MAX_POOL_SIZE="${ORDER_HIKARI_MAX_POOL_SIZE:-30}"
+ORDER_HIKARI_CONNECTION_TIMEOUT_MS="${ORDER_HIKARI_CONNECTION_TIMEOUT_MS:-3000}"
+MATCHING_HIKARI_MAX_POOL_SIZE="${MATCHING_HIKARI_MAX_POOL_SIZE:-20}"
+MATCHING_HIKARI_CONNECTION_TIMEOUT_MS="${MATCHING_HIKARI_CONNECTION_TIMEOUT_MS:-3000}"
+ACCOUNT_HIKARI_MAX_POOL_SIZE="${ACCOUNT_HIKARI_MAX_POOL_SIZE:-20}"
+ACCOUNT_HIKARI_CONNECTION_TIMEOUT_MS="${ACCOUNT_HIKARI_CONNECTION_TIMEOUT_MS:-3000}"
+GATEWAY_HIKARI_MAX_POOL_SIZE="${GATEWAY_HIKARI_MAX_POOL_SIZE:-10}"
+GATEWAY_HIKARI_CONNECTION_TIMEOUT_MS="${GATEWAY_HIKARI_CONNECTION_TIMEOUT_MS:-3000}"
+TAKER_FILL_WAIT_SECONDS="${TAKER_FILL_WAIT_SECONDS:-300}"
+TAKER_TRADE_WAIT_SECONDS="${TAKER_TRADE_WAIT_SECONDS:-300}"
+ACCOUNT_SETTLEMENT_WAIT_SECONDS="${ACCOUNT_SETTLEMENT_WAIT_SECONDS:-300}"
 
 BTC_SYMBOL="BTC-USDT"
 ETH_SYMBOL="ETH-USDT"
@@ -540,6 +556,8 @@ start_matching_provider() {
   node="$(matching_node_number "${name}")"
   start_provider "${name}" "$(matching_provider_port "${name}")" \
     "surprising-trading/surprising-matching-provider" "surprising-matching-provider" \
+    "--spring.datasource.hikari.maximum-pool-size=${MATCHING_HIKARI_MAX_POOL_SIZE}" \
+    "--spring.datasource.hikari.connection-timeout=${MATCHING_HIKARI_CONNECTION_TIMEOUT_MS}" \
     "--surprising.trading.matching.kafka.client-id=mm-stress-${RUN_ID}-matching-${node}" \
     "--surprising.trading.matching.kafka.concurrency=${MATCHING_CONSUMERS_PER_NODE}"
 }
@@ -603,6 +621,8 @@ start_extra_nodes() {
   for ((i = 1; i <= EXTRA_ACCOUNT_NODES; i++)); do
     start_provider "account-$((i + 1))" "$((9086 + i * 100))" \
       "surprising-account/surprising-account-provider" "surprising-account-provider" \
+      "--spring.datasource.hikari.maximum-pool-size=${ACCOUNT_HIKARI_MAX_POOL_SIZE}" \
+      "--spring.datasource.hikari.connection-timeout=${ACCOUNT_HIKARI_CONNECTION_TIMEOUT_MS}" \
       "--surprising.account.kafka.client-id=mm-stress-${RUN_ID}-account-$((i + 1))" \
       "--surprising.account.kafka.concurrency=${ACCOUNT_CONSUMERS_PER_NODE}"
   done
@@ -627,6 +647,84 @@ adjust_balance() {
     }" >/dev/null
 }
 
+fund_stress_accounts() {
+  psql_exec <<SQL >/dev/null
+WITH requested AS (
+    SELECT (${MM_USER_START} + gs)::bigint AS user_id,
+           ('mm-stress-${RUN_ID}-mm-' || gs)::text AS reference_id
+      FROM generate_series(0, ${MM_ACCOUNT_COUNT} - 1) AS gs
+    UNION ALL
+    SELECT (${TAKER_USER_START} + gs)::bigint AS user_id,
+           ('mm-stress-${RUN_ID}-user-' || gs)::text AS reference_id
+      FROM generate_series(0, ${TOTAL_TAKER_ORDER_COUNT} - 1) AS gs
+),
+counted AS (
+    SELECT count(*)::bigint AS row_count FROM requested
+),
+seq AS (
+    INSERT INTO account_sequences (sequence_name, sequence_value, updated_at)
+    SELECT 'ledger-entry', row_count, now() FROM counted
+    ON CONFLICT (sequence_name) DO UPDATE SET
+        sequence_value = account_sequences.sequence_value + EXCLUDED.sequence_value,
+        updated_at = now()
+    RETURNING sequence_value
+),
+numbered AS (
+    SELECT r.user_id,
+           r.reference_id,
+           row_number() OVER (ORDER BY r.user_id) AS rn
+      FROM requested r
+),
+ledger_rows AS (
+    INSERT INTO account_ledger_entries (
+        entry_id, user_id, asset, amount_units, balance_after_units,
+        reference_type, reference_id, reason, created_at
+    )
+    SELECT (seq.sequence_value - counted.row_count + numbered.rn)::bigint,
+           numbered.user_id,
+           'USDT',
+           100000000000000,
+           100000000000000,
+           'BALANCE_ADJUSTMENT',
+           numbered.reference_id,
+           'MARKET_MAKER_STRESS_DEPOSIT',
+           now()
+      FROM numbered
+      CROSS JOIN seq
+      CROSS JOIN counted
+    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
+    RETURNING user_id, reference_id
+),
+balance_rows AS (
+    INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
+    SELECT user_id, 'USDT', 100000000000000, 0, now()
+      FROM ledger_rows
+    ON CONFLICT (user_id, asset) DO UPDATE SET
+        available_units = account_balances.available_units + EXCLUDED.available_units,
+        updated_at = EXCLUDED.updated_at
+    RETURNING user_id, asset
+)
+INSERT INTO account_admin_balance_adjustments (
+    reference_key, adjustment_kind, admin_user_id, admin_username, user_id, account_type,
+    asset, amount_units, balance_after_units, reference_id, reason, created_at
+)
+SELECT 'BASIC|' || user_id || '||USDT|' || reference_id,
+       'BASIC',
+       1,
+       'market-maker-stress',
+       user_id,
+       NULL,
+       'USDT',
+       100000000000000,
+       100000000000000,
+       reference_id,
+       'MARKET_MAKER_STRESS_DEPOSIT',
+       now()
+  FROM ledger_rows
+ON CONFLICT (reference_key) DO NOTHING;
+SQL
+}
+
 price_ticks_for() {
   case "$1" in
     "${BTC_SYMBOL}") echo "${BTC_PRICE_TICKS}" ;;
@@ -649,8 +747,99 @@ place_order_command() {
   if [[ "${url}" == *"/gateway/"* ]]; then
     extra_header="-H 'X-User-Id: ${user_id}'"
   fi
-  printf "curl -fsS -X POST '%s' -H 'Content-Type: application/json' %s -H 'X-Trace-Id: %s' -d '{\"userId\": %s, \"clientOrderId\": \"%s\", \"symbol\": \"%s\", \"side\": \"%s\", \"orderType\": \"LIMIT\", \"timeInForce\": \"%s\", \"priceTicks\": %s, \"quantitySteps\": %s, \"reduceOnly\": false, \"postOnly\": false}' >/dev/null" \
+  printf "curl --retry %s --retry-delay %s --retry-max-time %s --retry-all-errors -fsS -X POST '%s' -H 'Content-Type: application/json' %s -H 'X-Trace-Id: %s' -d '{\"userId\": %s, \"clientOrderId\": \"%s\", \"symbol\": \"%s\", \"side\": \"%s\", \"orderType\": \"LIMIT\", \"timeInForce\": \"%s\", \"priceTicks\": %s, \"quantitySteps\": %s, \"reduceOnly\": false, \"postOnly\": false}' >/dev/null" \
+    "${ORDER_HTTP_RETRIES}" "${ORDER_HTTP_RETRY_DELAY_SECONDS}" "${ORDER_HTTP_RETRY_MAX_SECONDS}" \
     "${url}" "${extra_header}" "${trace}" "${user_id}" "${client_order_id}" "${symbol}" "${side}" "${tif}" "${price_ticks}" "${quantity_steps}"
+}
+
+order_payload() {
+  local user_id="$1"
+  local client_order_id="$2"
+  local symbol="$3"
+  local side="$4"
+  local tif="$5"
+  local price_ticks="$6"
+  local quantity_steps="$7"
+  printf "{\"userId\":%s,\"clientOrderId\":\"%s\",\"symbol\":\"%s\",\"side\":\"%s\",\"orderType\":\"LIMIT\",\"timeInForce\":\"%s\",\"priceTicks\":%s,\"quantitySteps\":%s,\"reduceOnly\":false,\"postOnly\":false}" \
+    "${user_id}" "${client_order_id}" "${symbol}" "${side}" "${tif}" "${price_ticks}" "${quantity_steps}"
+}
+
+place_order_batch_command() {
+  local url="$1"
+  local user_id="$2"
+  local trace="$3"
+  local items="$4"
+  local extra_header=""
+  if [[ "${url}" == *"/gateway/"* ]]; then
+    extra_header="-H 'X-User-Id: ${user_id}'"
+  fi
+  printf "curl --retry %s --retry-delay %s --retry-max-time %s --retry-all-errors -fsS -X POST '%s/batch' -H 'Content-Type: application/json' %s -H 'X-Trace-Id: %s' -d '{\"orders\":[%s]}' >/dev/null\n" \
+    "${ORDER_HTTP_RETRIES}" "${ORDER_HTTP_RETRY_DELAY_SECONDS}" "${ORDER_HTTP_RETRY_MAX_SECONDS}" \
+    "${url}" "${extra_header}" "${trace}" "${items}"
+}
+
+emit_maker_batch_commands() {
+  local client_prefix="$1"
+  local trace_prefix="$2"
+  local quantity_steps="$3"
+  local outer_price_offset="$4"
+  local level_count="$5"
+  local url="http://localhost:9094/api/v1/gateway/trading"
+  local symbols=("${BTC_SYMBOL}" "${ETH_SYMBOL}")
+  local symbol
+  local base_price
+  local account
+  local user_id
+  local side
+  local side_label
+  local direction
+  local level
+  local price_ticks
+  local payload
+  local batch_items
+  local batch_count
+  local batch_index
+
+  for symbol in "${symbols[@]}"; do
+    base_price="$(price_ticks_for "${symbol}")"
+    for ((account = 0; account < MM_ACCOUNT_COUNT; account++)); do
+      user_id=$((MM_USER_START + account))
+      for side in BUY SELL; do
+        if [[ "${side}" == "BUY" ]]; then
+          side_label="bid"
+          direction=-1
+        else
+          side_label="ask"
+          direction=1
+        fi
+        batch_items=""
+        batch_count=0
+        batch_index=1
+        for ((level = 1; level <= level_count; level++)); do
+          price_ticks=$((base_price + direction * (outer_price_offset + level)))
+          payload="$(order_payload "${user_id}" "${client_prefix}-${symbol}-${side_label}-${account}-${level}" \
+            "${symbol}" "${side}" "GTC" "${price_ticks}" "${quantity_steps}")"
+          if [[ -n "${batch_items}" ]]; then
+            batch_items="${batch_items},${payload}"
+          else
+            batch_items="${payload}"
+          fi
+          batch_count=$((batch_count + 1))
+          if ((batch_count >= MAKER_BATCH_SIZE)); then
+            place_order_batch_command "${url}" "${user_id}" \
+              "${trace_prefix}-${side_label}-${symbol}-${account}-batch-${batch_index}" "${batch_items}"
+            batch_items=""
+            batch_count=0
+            batch_index=$((batch_index + 1))
+          fi
+        done
+        if [[ -n "${batch_items}" ]]; then
+          place_order_batch_command "${url}" "${user_id}" \
+            "${trace_prefix}-${side_label}-${symbol}-${account}-batch-${batch_index}" "${batch_items}"
+        fi
+      done
+    done
+  done
 }
 
 run_with_concurrency() {
@@ -669,12 +858,14 @@ run_with_concurrency() {
       active_pids=("${active_pids[@]:1}")
     fi
   done
-  local pid
-  for pid in "${active_pids[@]}"; do
-    if ! wait "${pid}"; then
-      failures=$((failures + 1))
-    fi
-  done
+  if ((${#active_pids[@]} > 0)); then
+    local pid
+    for pid in "${active_pids[@]}"; do
+      if ! wait "${pid}"; then
+        failures=$((failures + 1))
+      fi
+    done
+  fi
   RUN_FAILURES="${failures}"
 }
 
@@ -896,13 +1087,26 @@ collect_provider_topology_summary() {
 EOF
   if [[ "${command_partitions}" =~ ^[0-9]+$ ]] && ((command_partitions > 0)); then
     local symbol
+    local active_matching_clients=","
+    local active_matching_client_count=0
+    local active_symbol_count=0
     for symbol in "${BTC_SYMBOL}" "${ETH_SYMBOL}"; do
       local partition
       local client
       partition="$(kafka_key_partition "${symbol}" "${command_partitions}")"
       client="$(consumer_client_for_partition "surprising-matching-v1" "surprising.perp.order.commands.v1" "${partition}")"
       echo "- Matching owner：symbol=${symbol} order.commands.partition=${partition} clientId=${client:-n/a}"
+      active_symbol_count=$((active_symbol_count + 1))
+      if [[ -n "${client}" && "${active_matching_clients}" != *",${client},"* ]]; then
+        active_matching_clients="${active_matching_clients}${client},"
+        active_matching_client_count=$((active_matching_client_count + 1))
+      fi
     done
+    local active_split="false"
+    if ((active_matching_client_count > 1)); then
+      active_split="true"
+    fi
+    echo "- Matching active symbol consumers：uniqueClients=${active_matching_client_count}/${active_symbol_count} split=${active_split}"
   fi
   local i
   for ((i = 1; i <= EXTRA_WEBSOCKET_NODES; i++)); do
@@ -940,6 +1144,7 @@ btc_depth = events(sys.argv[1], "depth")
 eth_depth = events(sys.argv[2], "depth")
 orders = events(sys.argv[3], "orders")
 positions = events(sys.argv[3], "positions")
+execution_reports = events(sys.argv[3], "executionReports")
 if not btc_depth:
     raise SystemExit("no BTC depth websocket events")
 if not eth_depth:
@@ -948,7 +1153,11 @@ if not orders:
     raise SystemExit("no private order websocket events")
 if not positions:
     raise SystemExit("no private position websocket events")
-print(f"btc_depth={len(btc_depth)} eth_depth={len(eth_depth)} private_orders={len(orders)} private_positions={len(positions)}")
+if not execution_reports:
+    raise SystemExit("no private executionReports websocket events")
+if not any((event.get("data") or {}).get("reportType") == "TRADE" for event in execution_reports):
+    raise SystemExit("no private TRADE execution report websocket events")
+print(f"btc_depth={len(btc_depth)} eth_depth={len(eth_depth)} private_orders={len(orders)} private_positions={len(positions)} private_executionReports={len(execution_reports)}")
 PY
 }
 
@@ -991,6 +1200,8 @@ user_id = int(sys.argv[2])
 label = sys.argv[3]
 orders = 0
 positions = 0
+execution_reports = 0
+trade_reports = 0
 if path.exists():
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
@@ -1006,11 +1217,19 @@ if path.exists():
             orders += 1
         elif channel == "positions":
             positions += 1
+        elif channel == "executionReports":
+            execution_reports += 1
+            if (message.get("data") or {}).get("reportType") == "TRADE":
+                trade_reports += 1
 if orders <= 0:
     raise SystemExit(f"no private order websocket events on {label}")
 if positions <= 0:
     raise SystemExit(f"no private position websocket events on {label}")
-print(f"{label}_orders={orders} {label}_positions={positions}")
+if execution_reports <= 0:
+    raise SystemExit(f"no private executionReports websocket events on {label}")
+if trade_reports <= 0:
+    raise SystemExit(f"no private TRADE execution report websocket events on {label}")
+print(f"{label}_orders={orders} {label}_positions={positions} {label}_executionReports={execution_reports}")
 PY
 }
 
@@ -1476,12 +1695,15 @@ ${FAILURE_SCENARIO_SUMMARY}
 - 做市商初始深度：每个 symbol、每侧 ${MM_DEPTH_LEVELS} 档，每档 ${MM_LEVEL_QUANTITY_STEPS} steps
 - 做市商刷新挂单：每个 symbol、每侧 ${MM_REFRESH_LEVELS} 档，每档 ${MM_REFRESH_QUANTITY_STEPS} steps
 - 做市商连续刷新轮数：${MM_REFRESH_CYCLES}，轮间隔 ${MM_REFRESH_INTERVAL_SECONDS}s
+- 做市商入口：gateway \`/trading/batch\`，batchSize=${MAKER_BATCH_SIZE}，makerConcurrency=${MAKER_LOAD_CONCURRENCY}
 - 普通用户订单数：${taker_count}
 - 普通用户每单数量：${TAKER_QUANTITY_STEPS} steps
 - 并发度：${LOAD_CONCURRENCY}
 - WebSocket 私有 fanout 订阅用户数：${WS_FANOUT_USER_COUNT}
 - WebSocket 捕获窗口：${WS_CAPTURE_TIMEOUT}s
 - Consumer 并发：matching 每节点 ${MATCHING_CONSUMERS_PER_NODE}，account 每节点 ${ACCOUNT_CONSUMERS_PER_NODE}
+- Hikari：order ${ORDER_HIKARI_MAX_POOL_SIZE}/${ORDER_HIKARI_CONNECTION_TIMEOUT_MS}ms，matching ${MATCHING_HIKARI_MAX_POOL_SIZE}/${MATCHING_HIKARI_CONNECTION_TIMEOUT_MS}ms，account ${ACCOUNT_HIKARI_MAX_POOL_SIZE}/${ACCOUNT_HIKARI_CONNECTION_TIMEOUT_MS}ms，gateway ${GATEWAY_HIKARI_MAX_POOL_SIZE}/${GATEWAY_HIKARI_CONNECTION_TIMEOUT_MS}ms
+- 等待窗口：takerFilled=${TAKER_FILL_WAIT_SECONDS}s，tradesWritten=${TAKER_TRADE_WAIT_SECONDS}s，accountSettled=${ACCOUNT_SETTLEMENT_WAIT_SECONDS}s
 - Symbols：${BTC_SYMBOL}, ${ETH_SYMBOL}
 
 ## 结果
@@ -1504,6 +1726,13 @@ ${FAILURE_SCENARIO_SUMMARY}
 - 当前 account-provider 持仓更新路径会复用成交结算时已经锁定的旧持仓数量，避免每个成交侧额外一次 \`SELECT ... FOR UPDATE\` 和一次更新后持仓回查。
 - 当前 account-provider match-trade listener 使用 Kafka batch delivery 和 \`AckMode.BATCH\` 降低 per-record offset commit 开销；批次内每条成交仍独立走事务和 \`account_processed_trades(symbol, trade_id)\` 幂等。
 - 当前 account-provider 余额结算只在 \`deficit_units\` 发生变化时写 \`account_deficits\`，普通开仓手续费、未穿仓平仓和强平费封顶扣款会跳过无变化 deficit 更新，减少成交热路径 SQL 写放大。
+- 当前 account-provider 只在成交实际减少旧仓位时执行 reduce-only 开放平仓单剪枝，普通开仓/加仓成交不再额外查询 \`trading_orders ... reduce_only\`。
+- 当前 account-provider 对 \`liquidation_orders\` 强平费上下文按订单维度做有界 JVM 缓存，并缓存普通订单的空结果；缓存只覆盖订单元数据/负查询，不作为余额、持仓或 deficit 的事实源。
+- 当前 account-provider 对 instrument type、spot instrument spec、contract spec 和 order fee snapshot 使用 symbol/version 或 order 维度有界 JVM 缓存，减少每笔成交固定元数据读；缓存不覆盖余额、持仓、保证金或 deficit。
+- 当前 account-provider 跨仓普通负向资金变动会先尝试 guarded available-balance fast path：可用余额足够时直接扣 \`available_units\` 并返回最新 equity，不再查询/锁 \`account_position_margins\`；余额不足、逐仓、穿仓或强平费封顶场景仍回落到完整锁持仓保证金和 deficit 结算路径。
+- 本轮把 maker 与 taker 都切到 gateway 后，压测暴露出线性 SELL 限价开空在缺 fresh mark 时可能只按委托价预占保证金；已改为只有可能开仓/翻仓且成交价改善会增加保证金需求时，才强制 fresh mark 并按保护价预占，否则作为业务拒单返回。
+- 高一档压测把 maker 初始深度提升到 30 档、taker 并发提升到 96 时，逐笔并发 maker 挂单会再次打满 order-provider 连接池。脚本已改为 maker 经 gateway 批量下单并使用独立 maker 并发上限；普通 taker 仍按真实用户逐笔经 gateway 进入，所有 POST 继续使用 \`clientOrderId\` 幂等重试。
+- L4 10000 用户压测首次运行暴露 fixture 入金瓶颈：逐用户调用 admin balance-adjustment HTTP 使准备阶段耗时数分钟，且这不是交易链路瓶颈。脚本已把初始 maker/taker 资金准备改为一次批量 SQL，同时写入 \`account_balances\`、\`account_ledger_entries\` 和 \`account_admin_balance_adjustments\`；用户下单、maker batch、taker 单笔、撮合、account 结算仍全部走真实 gateway/Kafka/PostgreSQL 链路。
 
 ## 延迟
 
@@ -1535,7 +1764,7 @@ ${provider_metrics_summary}
 
 ## 相关验证入口
 
-- 本报告只覆盖做市商和普通用户 taker 的真实 order/matching/account/websocket/gateway 进程链路。
+- 本报告覆盖做市商挂单、做市商刷新挂单和普通用户 taker 全部经 gateway 入口进入的真实 order/matching/account/websocket 链路；maker 多档报价走 gateway 批量接口，taker 用户订单走 gateway 单笔接口。
 - 全 provider 链路、资金费、爆仓、保险基金和 ADL 结果见 \`docs/integration-report.md\` / \`docs/integration-report_CN.md\`。
 - exchange-core 裸撮合封装层性能用 \`./scripts/matching-engine-benchmark.sh\` 单独测量，不应与本报告的端到端吞吐直接比较。
 
@@ -1543,18 +1772,21 @@ ${provider_metrics_summary}
 
 - 客户端并发提交耗时包含 ${refresh_count} 笔 maker 刷新挂单和 ${taker_count} 笔普通用户 IOC 吃单；吞吐按普通用户 taker 订单数计算。
 - matching event-time 吞吐是完整服务链路中的撮合成交写入速度，不是 exchange-core 裸引擎基准。当前端到端主要受 order 入库/outbox、Kafka、本机 PostgreSQL 和 account 结算影响。
+- Provider 拓扑中的 \`Matching active symbol consumers\` 用来判断本轮热 symbol 是否真的被分散到多个 matching consumer；如果 \`split=false\`，单纯提高 listener concurrency 不会让这些 symbol 并行撮合。
 - account processed trade 延迟明显高于 matching result 延迟，说明账户结算和 position/ledger/margin 写库是本轮最大后置瓶颈。account-provider 暴露 \`surprising.account.match_trade.processing\`、\`surprising.account.match_trade.event_lag\` 和 \`surprising.account.match_trade.events{outcome=...}\`，后续压测可以直接按 processed/duplicate/failed 拆分定位。
 - Provider Prometheus 摘要中的 HTTP、Hikari、CPU 和 heap 指标是压测进程运行期累计/采样值，用来辅助判断入口服务、数据库连接池或 JVM 是否先成为瓶颈；并发阶段 PostgreSQL delta 用来观察事务量、写放大、缓存命中和临时文件。
-- WebSocket 私有事件订阅前 ${WS_FANOUT_USER_COUNT} 个普通用户账号，并逐个断言 orders/positions 只推送给对应认证用户；公网生产压测仍应继续把该数值扩大到真实长连接规模。
+- WebSocket 私有事件订阅前 ${WS_FANOUT_USER_COUNT} 个普通用户账号，并逐个断言 orders/positions/executionReports 只推送给对应认证用户；公网生产压测仍应继续把该数值扩大到真实长连接规模。
 
 ## 一致性检查
 
 - 普通用户订单全部 \`FILLED\`
 - 成交全部被 account 消费，\`account_processed_trades(symbol, trade_id)\` 去重键生效
 - 压测用户余额未出现负 available/locked
+- 产品账户、仓位保证金、预占释放、account/product deficit 均无异常
+- trading/account outbox 均清空
 - 订单簿仍有双边深度
-- WebSocket 收到 BTC/ETH depth 事件，并且前 ${WS_FANOUT_USER_COUNT} 个普通用户都收到各自的私有 orders/positions 事件
-- \`trading_symbol_open_interest\` 由账户结算维护，表约束保证 open=max(long, short)
+- WebSocket 收到 BTC/ETH depth 事件，并且前 ${WS_FANOUT_USER_COUNT} 个普通用户都收到各自的私有 orders/positions/executionReports 事件
+- \`trading_symbol_open_interest\` 由账户结算维护；压测会从 \`account_positions\` 重算 long/short/open interest 并对账
 
 ## 结论
 
@@ -1578,6 +1810,14 @@ if ((WS_CAPTURE_TIMEOUT <= 0 || WS_FANOUT_USER_COUNT <= 0)); then
 fi
 if ((MM_REFRESH_CYCLES <= 0 || MM_REFRESH_INTERVAL_SECONDS < 0)); then
   echo "MM_REFRESH_CYCLES must be positive and MM_REFRESH_INTERVAL_SECONDS must be zero or positive" >&2
+  exit 1
+fi
+if ((MAKER_BATCH_SIZE <= 0 || MAKER_BATCH_SIZE > 20)); then
+  echo "MAKER_BATCH_SIZE must be in [1, 20]" >&2
+  exit 1
+fi
+if ((MAKER_LOAD_CONCURRENCY <= 0)); then
+  echo "MAKER_LOAD_CONCURRENCY must be positive" >&2
   exit 1
 fi
 if ((EXTRA_MATCHING_NODES < 0 || EXTRA_ACCOUNT_NODES < 0 || EXTRA_WEBSOCKET_NODES < 0)); then
@@ -1634,6 +1874,8 @@ if [[ "${START_PROVIDERS}" == "true" ]]; then
   package_services
   start_matching_provider "matching"
   start_provider "account" 9086 "surprising-account/surprising-account-provider" "surprising-account-provider" \
+    "--spring.datasource.hikari.maximum-pool-size=${ACCOUNT_HIKARI_MAX_POOL_SIZE}" \
+    "--spring.datasource.hikari.connection-timeout=${ACCOUNT_HIKARI_CONNECTION_TIMEOUT_MS}" \
     "--surprising.account.kafka.client-id=mm-stress-${RUN_ID}-account-1" \
     "--surprising.account.kafka.concurrency=${ACCOUNT_CONSUMERS_PER_NODE}"
   start_provider "websocket" 9093 "surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider"
@@ -1643,8 +1885,13 @@ if [[ "${START_PROVIDERS}" == "true" ]]; then
   for ((i = 1; i <= EXTRA_WEBSOCKET_NODES; i++)); do
     wait_consumer_members "surprising-websocket-mm-${RUN_ID}-$((i + 1))" "surprising.perp.orderbook.depth.v1" 1
   done
-  start_provider "order" 9084 "surprising-trading/surprising-order-provider" "surprising-order-provider"
-  start_provider "gateway" 9094 "surprising-gateway/surprising-gateway-provider" "surprising-gateway-provider"
+  start_provider "order" 9084 "surprising-trading/surprising-order-provider" "surprising-order-provider" \
+    "--spring.datasource.hikari.maximum-pool-size=${ORDER_HIKARI_MAX_POOL_SIZE}" \
+    "--spring.datasource.hikari.connection-timeout=${ORDER_HIKARI_CONNECTION_TIMEOUT_MS}" \
+    "--surprising.trading.order.risk.market-max-mark-age-ms=15000"
+  start_provider "gateway" 9094 "surprising-gateway/surprising-gateway-provider" "surprising-gateway-provider" \
+    "--spring.datasource.hikari.maximum-pool-size=${GATEWAY_HIKARI_MAX_POOL_SIZE}" \
+    "--spring.datasource.hikari.connection-timeout=${GATEWAY_HIKARI_CONNECTION_TIMEOUT_MS}"
 else
   wait_http "matching" 9085
   wait_http "account" 9086
@@ -1671,10 +1918,12 @@ for ((i = 0; i < WS_FANOUT_USER_COUNT; i++)); do
   WS_PRIVATE_FILES+=("${private_file}")
   start_ws_capture "${private_file}" "ws://localhost:9093/ws/v1?userId=${private_user}" \
     "{\"op\":\"subscribe\",\"id\":\"orders-${i}\",\"channel\":\"orders\"}" \
+    "{\"op\":\"subscribe\",\"id\":\"execution-reports-${i}\",\"channel\":\"executionReports\"}" \
     "{\"op\":\"subscribe\",\"id\":\"positions-${i}\",\"channel\":\"positions\"}"
 done
 for private_file in "${WS_PRIVATE_FILES[@]}"; do
   wait_ws_subscribed "${private_file}" "orders" 1
+  wait_ws_subscribed "${private_file}" "executionReports" 1
   wait_ws_subscribed "${private_file}" "positions" 1
 done
 if ((EXTRA_WEBSOCKET_NODES > 0)); then
@@ -1687,31 +1936,24 @@ seed_mark_prices
 start_mark_refresher
 
 echo "Funding market-maker and ordinary user accounts"
-for ((i = 0; i < MM_ACCOUNT_COUNT; i++)); do
-  adjust_balance "$((MM_USER_START + i))" "mm-stress-${RUN_ID}-mm-${i}"
-done
-for ((i = 0; i < TOTAL_TAKER_ORDER_COUNT; i++)); do
-  adjust_balance "$((TAKER_USER_START + i))" "mm-stress-${RUN_ID}-user-${i}"
-done
+fund_stress_accounts
 
 echo "Placing initial market-maker book"
 maker_commands=()
-for symbol in "${BTC_SYMBOL}" "${ETH_SYMBOL}"; do
-  base_price="$(price_ticks_for "${symbol}")"
-  for ((account = 0; account < MM_ACCOUNT_COUNT; account++)); do
-    user_id=$((MM_USER_START + account))
-    for ((level = 1; level <= MM_DEPTH_LEVELS; level++)); do
-      maker_commands+=("$(place_order_command "http://localhost:9084/api/v1/trading/orders" "${user_id}" "stress-mm-${RUN_ID}-${symbol}-bid-${account}-${level}" "${symbol}" "BUY" "GTC" "$((base_price - level))" "${MM_LEVEL_QUANTITY_STEPS}" "mm-stress-${RUN_ID}-mm-bid-${symbol}-${account}-${level}")")
-      maker_commands+=("$(place_order_command "http://localhost:9084/api/v1/trading/orders" "${user_id}" "stress-mm-${RUN_ID}-${symbol}-ask-${account}-${level}" "${symbol}" "SELL" "GTC" "$((base_price + level))" "${MM_LEVEL_QUANTITY_STEPS}" "mm-stress-${RUN_ID}-mm-ask-${symbol}-${account}-${level}")")
-    done
-  done
-done
-run_with_concurrency "${LOAD_CONCURRENCY}" "${maker_commands[@]}"
-if ((RUN_FAILURES > 0)); then
-  echo "Initial market-maker order placement failed: ${RUN_FAILURES} requests" >&2
+while IFS= read -r command; do
+  maker_commands+=("${command}")
+done < <(emit_maker_batch_commands "stress-mm-${RUN_ID}" "mm-stress-${RUN_ID}-mm" \
+  "${MM_LEVEL_QUANTITY_STEPS}" 0 "${MM_DEPTH_LEVELS}")
+if ((${#maker_commands[@]} == 0)); then
+  echo "Initial market-maker batch command generation produced no requests" >&2
   exit 1
 fi
-initial_maker_count="${#maker_commands[@]}"
+run_with_concurrency "${MAKER_LOAD_CONCURRENCY}" "${maker_commands[@]}"
+if ((RUN_FAILURES > 0)); then
+  echo "Initial market-maker order placement failed: ${RUN_FAILURES} batch requests" >&2
+  exit 1
+fi
+initial_maker_count=$((MM_ACCOUNT_COUNT * 2 * 2 * MM_DEPTH_LEVELS))
 wait_sql_equals "initial market-maker orders accepted" \
   "SELECT count(*) FROM trading_orders WHERE client_order_id LIKE 'stress-mm-${RUN_ID}-%' AND status = 'ACCEPTED'" \
   "${initial_maker_count}"
@@ -1727,19 +1969,19 @@ pg_stat_before="$(collect_pg_stat_snapshot)"
 load_start_ns="$(date +%s%N)"
 for ((cycle = 1; cycle <= MM_REFRESH_CYCLES; cycle++)); do
   echo "Running market-maker/taker cycle ${cycle}/${MM_REFRESH_CYCLES}"
-  load_commands=()
-  for symbol in "${BTC_SYMBOL}" "${ETH_SYMBOL}"; do
-    base_price="$(price_ticks_for "${symbol}")"
-    cycle_offset=$(((cycle - 1) * MM_REFRESH_LEVELS))
-    for ((account = 0; account < MM_ACCOUNT_COUNT; account++)); do
-      user_id=$((MM_USER_START + account))
-      for ((level = 1; level <= MM_REFRESH_LEVELS; level++)); do
-        load_commands+=("$(place_order_command "http://localhost:9084/api/v1/trading/orders" "${user_id}" "stress-refresh-${RUN_ID}-${cycle}-${symbol}-bid-${account}-${level}" "${symbol}" "BUY" "GTC" "$((base_price - MM_DEPTH_LEVELS - cycle_offset - level))" "${MM_REFRESH_QUANTITY_STEPS}" "mm-stress-${RUN_ID}-refresh-${cycle}-bid-${symbol}-${account}-${level}")")
-        load_commands+=("$(place_order_command "http://localhost:9084/api/v1/trading/orders" "${user_id}" "stress-refresh-${RUN_ID}-${cycle}-${symbol}-ask-${account}-${level}" "${symbol}" "SELL" "GTC" "$((base_price + MM_DEPTH_LEVELS + cycle_offset + level))" "${MM_REFRESH_QUANTITY_STEPS}" "mm-stress-${RUN_ID}-refresh-${cycle}-ask-${symbol}-${account}-${level}")")
-        refresh_count=$((refresh_count + 2))
-      done
-    done
-  done
+  maker_refresh_commands=()
+  taker_commands=()
+  cycle_offset=$(((cycle - 1) * MM_REFRESH_LEVELS))
+  while IFS= read -r command; do
+    maker_refresh_commands+=("${command}")
+  done < <(emit_maker_batch_commands "stress-refresh-${RUN_ID}-${cycle}" \
+    "mm-stress-${RUN_ID}-refresh-${cycle}" "${MM_REFRESH_QUANTITY_STEPS}" \
+    "$((MM_DEPTH_LEVELS + cycle_offset))" "${MM_REFRESH_LEVELS}")
+  if ((${#maker_refresh_commands[@]} == 0)); then
+    echo "Market-maker refresh batch command generation produced no requests in cycle ${cycle}" >&2
+    exit 1
+  fi
+  refresh_count=$((refresh_count + MM_ACCOUNT_COUNT * 2 * 2 * MM_REFRESH_LEVELS))
 
   cycle_taker_start=$(((cycle - 1) * TAKER_ORDER_COUNT))
   for ((i = 0; i < TAKER_ORDER_COUNT; i++)); do
@@ -1759,11 +2001,22 @@ for ((cycle = 1; cycle <= MM_REFRESH_CYCLES; cycle++)); do
       side="SELL"
       price=$((base_price - taker_depth))
     fi
-    load_commands+=("$(place_order_command "http://localhost:9094/api/v1/gateway/trading" "${user_id}" "stress-user-${RUN_ID}-${global_i}" "${symbol}" "${side}" "IOC" "${price}" "${TAKER_QUANTITY_STEPS}" "mm-stress-${RUN_ID}-user-${global_i}")")
+    taker_commands+=("$(place_order_command "http://localhost:9094/api/v1/gateway/trading" "${user_id}" "stress-user-${RUN_ID}-${global_i}" "${symbol}" "${side}" "IOC" "${price}" "${TAKER_QUANTITY_STEPS}" "mm-stress-${RUN_ID}-user-${global_i}")")
   done
 
   seed_mark_prices
-  run_with_concurrency "${LOAD_CONCURRENCY}" "${load_commands[@]}"
+  (
+    run_with_concurrency "${MAKER_LOAD_CONCURRENCY}" "${maker_refresh_commands[@]}"
+    exit "${RUN_FAILURES}"
+  ) &
+  maker_refresh_pid="$!"
+  run_with_concurrency "${LOAD_CONCURRENCY}" "${taker_commands[@]}"
+  taker_failures="${RUN_FAILURES}"
+  set +e
+  wait "${maker_refresh_pid}"
+  maker_failures="$?"
+  set -e
+  RUN_FAILURES=$((taker_failures + maker_failures))
   if ((RUN_FAILURES > 0)); then
     echo "Concurrent load placement failed in cycle ${cycle}: ${RUN_FAILURES} requests" >&2
     exit 1
@@ -1776,10 +2029,10 @@ load_end_ns="$(date +%s%N)"
 
 wait_sql_equals "ordinary user taker orders filled" \
   "SELECT count(*) FROM trading_orders WHERE client_order_id LIKE 'stress-user-${RUN_ID}-%' AND status = 'FILLED'" \
-  "${TOTAL_TAKER_ORDER_COUNT}" 300
+  "${TOTAL_TAKER_ORDER_COUNT}" "${TAKER_FILL_WAIT_SECONDS}"
 wait_sql_equals "ordinary user trades written" \
   "SELECT count(*) FROM trading_match_trades WHERE trace_id LIKE 'mm-stress-${RUN_ID}-user-%'" \
-  "${TOTAL_TAKER_ORDER_COUNT}" 300
+  "${TOTAL_TAKER_ORDER_COUNT}" "${TAKER_TRADE_WAIT_SECONDS}"
 if [[ "${ACCOUNT_NODE_FAILURE_DURING_SETTLEMENT}" == "true" ]]; then
   echo "Scenario: account node failure during settlement"
   stop_provider "account-2"
@@ -1788,13 +2041,40 @@ if [[ "${ACCOUNT_NODE_FAILURE_DURING_SETTLEMENT}" == "true" ]]; then
 fi
 wait_sql_equals "ordinary user trades settled by account" \
   "SELECT count(*) FROM account_processed_trades p JOIN trading_match_trades t ON t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.trace_id LIKE 'mm-stress-${RUN_ID}-user-%'" \
-  "${TOTAL_TAKER_ORDER_COUNT}" 300
+  "${TOTAL_TAKER_ORDER_COUNT}" "${ACCOUNT_SETTLEMENT_WAIT_SECONDS}"
 wait_sql_equals "no negative stress balances" \
   "SELECT count(*) FROM account_balances WHERE user_id BETWEEN ${MM_USER_START} AND $((TAKER_USER_START + TOTAL_TAKER_ORDER_COUNT + 100)) AND (available_units < 0 OR locked_units < 0)" \
   "0" 60
-wait_sql_equals "symbol OI constraint still true" \
+wait_sql_equals "no negative product balances" \
+  "SELECT count(*) FROM account_product_balances WHERE available_units < 0 OR locked_units < 0" \
+  "0" 60
+wait_sql_equals "no negative position margins" \
+  "SELECT count(*) FROM account_position_margins WHERE margin_units < 0" \
+  "0" 60
+wait_sql_equals "no over-released margin reservations" \
+  "SELECT count(*) FROM account_margin_reservations WHERE released_units + position_margin_units > reserved_units" \
+  "0" 60
+wait_sql_equals "no over-released spot reservations" \
+  "SELECT count(*) FROM account_spot_order_reservations WHERE settled_units + released_units > reserved_units" \
+  "0" 60
+wait_sql_equals "no account deficits remain" \
+  "SELECT count(*) FROM account_deficits WHERE deficit_units <> 0" \
+  "0" 60
+wait_sql_equals "no product deficits remain" \
+  "SELECT count(*) FROM account_product_deficits WHERE deficit_units <> 0" \
+  "0" 60
+wait_sql_equals "symbol OI table constraint still true" \
   "SELECT count(*) FROM trading_symbol_open_interest WHERE open_quantity_steps <> GREATEST(long_quantity_steps, short_quantity_steps) OR open_quantity_steps < 0" \
   "0" 60
+wait_sql_equals "symbol OI matches account positions" \
+  "WITH position_oi AS (SELECT symbol, COALESCE(SUM(GREATEST(signed_quantity_steps, 0)), 0) AS long_quantity_steps, COALESCE(SUM(GREATEST(-signed_quantity_steps, 0)), 0) AS short_quantity_steps FROM account_positions GROUP BY symbol), oi_compare AS (SELECT COALESCE(o.symbol, p.symbol) AS symbol, COALESCE(o.long_quantity_steps, 0) AS oi_long, COALESCE(p.long_quantity_steps, 0) AS pos_long, COALESCE(o.short_quantity_steps, 0) AS oi_short, COALESCE(p.short_quantity_steps, 0) AS pos_short, COALESCE(o.open_quantity_steps, 0) AS oi_open FROM trading_symbol_open_interest o FULL OUTER JOIN position_oi p ON p.symbol = o.symbol) SELECT count(*) FROM oi_compare WHERE oi_long <> pos_long OR oi_short <> pos_short OR oi_open <> GREATEST(pos_long, pos_short)" \
+  "0" 60
+wait_sql_equals "trading outbox drained" \
+  "SELECT count(*) FROM trading_outbox_events WHERE published_at IS NULL" \
+  "0" "${ACCOUNT_SETTLEMENT_WAIT_SECONDS}"
+wait_sql_equals "account outbox drained" \
+  "SELECT count(*) FROM account_outbox_events WHERE published_at IS NULL" \
+  "0" "${ACCOUNT_SETTLEMENT_WAIT_SECONDS}"
 pg_stat_after="$(collect_pg_stat_snapshot)"
 
 sleep 3

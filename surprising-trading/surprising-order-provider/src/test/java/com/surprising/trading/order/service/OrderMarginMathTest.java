@@ -28,6 +28,30 @@ class OrderMarginMathTest {
     }
 
     @Test
+    void linearSellLimitMarginRequiresFreshMarkForProtectedCollateralPrice() {
+        assertThatThrownBy(() -> OrderMarginMath.collateralPriceTicks(OrderSide.SELL, OrderType.LIMIT,
+                99L, null, 10_000L, ContractType.LINEAR_PERPETUAL))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("fresh mark price ticks");
+    }
+
+    @Test
+    void linearBuyLimitMarginDoesNotRequireFreshMarkBecauseFillCannotNeedMoreCollateral() {
+        long effectivePrice = OrderMarginMath.collateralPriceTicks(OrderSide.BUY, OrderType.LIMIT,
+                101L, null, 10_000L, ContractType.LINEAR_PERPETUAL);
+
+        assertThat(effectivePrice).isEqualTo(101L);
+    }
+
+    @Test
+    void protectedLinearSellLimitCanSkipFreshMarkWhenCallerKnowsFillOnlyReducesExposure() {
+        long effectivePrice = OrderMarginMath.collateralPriceTicks(OrderSide.SELL, OrderType.LIMIT,
+                99L, null, 10_000L, ContractType.LINEAR_PERPETUAL, false);
+
+        assertThat(effectivePrice).isEqualTo(99L);
+    }
+
+    @Test
     void linearMarketMarginUsesUpperBoundForBothSides() {
         long buyMargin = OrderMarginMath.initialMarginUnits(ContractType.LINEAR_PERPETUAL, OrderSide.BUY,
                 OrderType.MARKET, 0L, 6L, 100L, 10_000L,
@@ -43,7 +67,7 @@ class OrderMarginMathTest {
     @Test
     void calculatesInverseLimitMarginWithCeilingRounding() {
         long margin = OrderMarginMath.initialMarginUnits(ContractType.INVERSE_PERPETUAL, OrderSide.BUY,
-                OrderType.LIMIT, 5L, 10L, null, 0L,
+                OrderType.LIMIT, 5L, 10L, 5L, 0L,
                 100L, 1L, 100L, 100_000L);
 
         assertThat(margin).isEqualTo(2_000L);
@@ -63,6 +87,14 @@ class OrderMarginMathTest {
                 101L, 100L, 10_000L, ContractType.INVERSE_PERPETUAL);
 
         assertThat(effectivePrice).isEqualTo(99L);
+    }
+
+    @Test
+    void inverseBuyLimitMarginRequiresFreshMarkForProtectedCollateralPrice() {
+        assertThatThrownBy(() -> OrderMarginMath.collateralPriceTicks(OrderSide.BUY, OrderType.LIMIT,
+                101L, null, 10_000L, ContractType.INVERSE_PERPETUAL))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("fresh mark price ticks");
     }
 
     @Test

@@ -100,7 +100,8 @@ public class QuotePlanner {
                                   OrderSide side,
                                   long signedPositionSteps,
                                   long referenceQuantitySteps) {
-        long base = referenceQuantitySteps > 0 ? referenceQuantitySteps : Math.max(1L, strategy.getBaseQuantitySteps());
+        long configuredBase = Math.max(1L, strategy.getBaseQuantitySteps());
+        long base = referenceQuantitySteps > 0 ? Math.min(referenceQuantitySteps, configuredBase) : configuredBase;
         long maxInventory = maxInventory(strategy, risk);
         long skewPpm = Math.min(maxSkewPpm(strategy, risk),
                 multiplyDiv(Math.abs(signedPositionSteps), ONE_PPM, maxInventory));

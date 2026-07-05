@@ -41,3 +41,11 @@ surprising:
         refresh-delay-ms: 3600000
         batch-size: 1000
         lookback-days: 30
+      algo:
+        enabled: true
+        claim-batch-size: 100
+        scan-delay-ms: 250
+        min-interval-seconds: 1
+        max-interval-seconds: 86400
+        min-duration-seconds: 5
+        max-duration-seconds: 86400

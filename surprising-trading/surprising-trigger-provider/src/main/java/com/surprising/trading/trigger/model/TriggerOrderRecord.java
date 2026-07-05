@@ -22,6 +22,11 @@ public record TriggerOrderRecord(
         TriggerPriceType triggerPriceType,
         TriggerCondition triggerCondition,
         long triggerPriceTicks,
+        Long activationPriceTicks,
+        Long callbackRatePpm,
+        Long highestPriceTicks,
+        Long lowestPriceTicks,
+        Instant activatedAt,
         OrderType orderType,
         TimeInForce timeInForce,
         long priceTicks,
@@ -70,8 +75,40 @@ public record TriggerOrderRecord(
                               Instant createdAt,
                               Instant updatedAt) {
         this(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType, triggerPriceType,
-                triggerCondition, triggerPriceTicks, orderType, timeInForce, priceTicks, quantitySteps, marginMode,
-                PositionSide.NET, status, placedOrderId, triggerSequence, triggeredPriceTicks, rejectReason, traceId,
-                expiresAt, triggeredAt, createdAt, updatedAt);
+                triggerCondition, triggerPriceTicks, null, null, null, null, null, orderType, timeInForce,
+                priceTicks, quantitySteps, marginMode, PositionSide.NET, status, placedOrderId, triggerSequence,
+                triggeredPriceTicks, rejectReason, traceId, expiresAt, triggeredAt, createdAt, updatedAt);
+    }
+
+    public TriggerOrderRecord(long triggerOrderId,
+                              long userId,
+                              String clientTriggerOrderId,
+                              String ocoGroupId,
+                              String symbol,
+                              OrderSide side,
+                              TriggerOrderType triggerType,
+                              TriggerPriceType triggerPriceType,
+                              TriggerCondition triggerCondition,
+                              long triggerPriceTicks,
+                              OrderType orderType,
+                              TimeInForce timeInForce,
+                              long priceTicks,
+                              long quantitySteps,
+                              MarginMode marginMode,
+                              PositionSide positionSide,
+                              TriggerOrderStatus status,
+                              Long placedOrderId,
+                              Long triggerSequence,
+                              Long triggeredPriceTicks,
+                              String rejectReason,
+                              String traceId,
+                              Instant expiresAt,
+                              Instant triggeredAt,
+                              Instant createdAt,
+                              Instant updatedAt) {
+        this(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType, triggerPriceType,
+                triggerCondition, triggerPriceTicks, null, null, null, null, null, orderType, timeInForce,
+                priceTicks, quantitySteps, marginMode, positionSide, status, placedOrderId, triggerSequence,
+                triggeredPriceTicks, rejectReason, traceId, expiresAt, triggeredAt, createdAt, updatedAt);
     }
 }

@@ -400,20 +400,74 @@ CREATE INDEX adl_events_asset_symbol_time_idx
 - `trading_orders_stp_open_idx` supports self-trade prevention checks by user, symbol, side, and price.
 - `trading_orders_recovery_idx` supports startup order-book recovery by scanning open `LIMIT` + `GTC/GTX` orders in maker-priority order.
 
-`trading_trigger_orders` stores take-profit and stop-loss conditional orders before they enter the live
+`trading_cancel_all_after` stores the user dead-man switch timers used by `POST /trading/orders/cancel-all-after`:
+
+- `(user_id, symbol_scope)` is the primary key. `symbol_scope='*'` means account-wide; otherwise it is a concrete symbol.
+- `countdown_ms=0` with `DISABLED` turns the timer off. Positive countdowns set `ACTIVE` with `trigger_at`.
+- The order provider claims due `ACTIVE` rows through `trading_cancel_all_after_due_idx`, moves them to
+  `TRIGGERING`, cancels open ordinary orders through the same `cancel-open` path, calls trigger-provider
+  `cancel-open` for pending TP/SL, then marks the timer `TRIGGERED`.
+- `canceled_order_count` and `canceled_trigger_order_count` record how many cancellation requests were issued in
+  the latest trigger execution; they are reset whenever the timer is refreshed or disabled.
+
+`trading_algo_orders` stores parent TWAP/Iceberg instructions before their child orders enter the live order path:
+
+- `client_algo_order_id` is scoped by `user_id` for idempotent placement.
+- `algo_type` is `TWAP` or `ICEBERG`; `status` moves through `PENDING/RUNNING/CANCEL_REQUESTED` and terminal
+  `CANCELED/COMPLETED/FAILED`.
+- TWAP uses IOC child orders. If `price_ticks=0`, the child is a MARKET IOC order; otherwise it is a LIMIT IOC
+  order at `price_ticks`.
+- Iceberg requires `price_ticks > 0` and uses LIMIT `GTC` or `GTX` child orders. Only one visible child order is
+  active at a time; after that child fills or is canceled, the scheduler places the next slice.
+- `quantity_steps` is the total target and `child_quantity_steps` is the per-slice visible quantity. `interval_seconds`
+  and `duration_seconds` bound TWAP scheduling validation.
+- `current_order_id` points at the latest child `trading_orders` row. `trace_id` is forwarded to child orders so
+  the parent request can be followed through matching, account settlement, risk, and WebSocket events.
+- Active algo rows are included in margin-mode and position-mode switch blockers, so a user cannot switch mode while
+  future child orders may still be emitted.
+
+`trading_algo_order_children` links each parent slice to the ordinary order that actually enters matching:
+
+- `(algo_order_id, slice_index)` is unique, and `order_id` references `trading_orders(order_id)`.
+- `status` mirrors the child order status; the order-provider refreshes it from `trading_orders` before scheduling
+  the next slice or returning parent progress.
+- Progress is derived from child `executed_quantity_steps` plus active child remaining quantity; balances and
+  positions are never updated directly from the algo tables.
+
+Core algo indexes:
+
+```sql
+CREATE UNIQUE INDEX trading_algo_orders_user_client_uidx
+    ON trading_algo_orders (user_id, client_algo_order_id)
+    WHERE client_algo_order_id IS NOT NULL;
+
+CREATE INDEX trading_algo_orders_due_idx
+    ON trading_algo_orders (next_slice_at, algo_order_id)
+    WHERE status IN ('PENDING', 'RUNNING');
+
+CREATE INDEX trading_algo_orders_user_status_idx
+    ON trading_algo_orders (user_id, symbol, status, created_at DESC);
+
+CREATE UNIQUE INDEX trading_algo_order_children_client_uidx
+    ON trading_algo_order_children (client_order_id);
+```
+
+`trading_trigger_orders` stores take-profit, stop-loss, and trailing-stop conditional orders before they enter the live
 order path:
 
 - `client_trigger_order_id` is scoped by `user_id` for idempotent placement.
 - `oco_group_id` is optional and scoped by `user_id + symbol + margin_mode`. Pending siblings in the same
   OCO group are canceled when one row is claimed for execution.
-- `trigger_price_type` is currently `MARK_PRICE`, and `trigger_condition` is derived from close side and
-  TP/SL type.
+- `trigger_price_type` is `MARK_PRICE`, `INDEX_PRICE`, or `LAST_PRICE`, and `trigger_condition` is derived from close side
+  and trigger type.
 - `trigger_price_ticks`, `price_ticks`, and `quantity_steps` stay in the same long tick/step model as
-  regular orders.
+  regular orders. Static TP/SL requires a positive `trigger_price_ticks`; trailing stop allows `0` and uses
+  `activation_price_ticks`, `callback_rate_ppm`, `highest_price_ticks`, `lowest_price_ticks`, and `activated_at`
+  to track activation and callback state.
 - `status` moves through `PENDING -> TRIGGERING -> TRIGGERED` or `TRIGGER_FAILED`; user cancellation moves
   only `PENDING` rows to `CANCELED`, and expiry moves due rows to `EXPIRED`.
 - `placed_order_id` links the generated reduce-only close order in `trading_orders`.
-- `trigger_sequence` and `triggered_price_ticks` record which mark-price event triggered the row.
+- `trigger_sequence` and `triggered_price_ticks` record which configured price-source event triggered the row.
 - `trace_id` is forwarded to the generated order request so private WebSocket order/match/position pushes can
   be traced back to the original TP/SL placement.
 
@@ -431,20 +485,28 @@ CREATE INDEX trading_trigger_orders_user_oco_idx
 CREATE INDEX trading_trigger_orders_symbol_gte_idx
     ON trading_trigger_orders (symbol, trigger_price_ticks, trigger_order_id)
     WHERE status = 'PENDING'
-      AND trigger_price_type = 'MARK_PRICE'
+      AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
+      AND trigger_price_type IN ('MARK_PRICE', 'INDEX_PRICE', 'LAST_PRICE')
       AND trigger_condition = 'GREATER_OR_EQUAL';
 
 CREATE INDEX trading_trigger_orders_symbol_lte_idx
     ON trading_trigger_orders (symbol, trigger_price_ticks DESC, trigger_order_id)
     WHERE status = 'PENDING'
-      AND trigger_price_type = 'MARK_PRICE'
+      AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
+      AND trigger_price_type IN ('MARK_PRICE', 'INDEX_PRICE', 'LAST_PRICE')
       AND trigger_condition = 'LESS_OR_EQUAL';
+
+CREATE INDEX trading_trigger_orders_trailing_pending_idx
+    ON trading_trigger_orders (symbol, trigger_price_type, trigger_order_id)
+    WHERE status = 'PENDING'
+      AND trigger_type = 'TRAILING_STOP';
 ```
 
 The trigger provider claims due rows with `FOR UPDATE SKIP LOCKED`, so active-active nodes can consume the
-same mark-price stream without executing the same trigger twice. The claim statement partitions candidates by
-OCO group, selects one pending row per group, sets that row to `TRIGGERING`, and cancels pending siblings in
-the same statement. The expiry and `TRIGGERING` indexes support scheduled expiry and stale execution retry.
+same configured price-source stream without executing the same trigger twice. The claim statement filters by
+`trigger_price_type`, partitions candidates by OCO group, selects one pending row per group, sets that row to
+`TRIGGERING`, and cancels pending siblings in the same statement. The expiry and `TRIGGERING` indexes support
+scheduled expiry and stale execution retry.
 
 `trading_fee_schedules` stores user-level fee overrides:
 
@@ -488,6 +550,15 @@ the same statement. The expiry and `TRIGGERING` indexes support scheduled expiry
   `/api/v1/admin/market-maker/pnl-attribution` derives financial attribution from configured market-maker scopes,
   market-maker `clientOrderId` prefixes, `trading_match_trades`, `account_ledger_entries` fee rows, and current
   `account_positions`.
+
+`market_maker_reference_samples` stores one best-effort reference-market sample per strategy symbol cycle when an
+external order book snapshot is available:
+
+- `source_name` and `transport` identify whether the quote plan used REST fallback or a WebSocket-maintained local book.
+- `bid_levels`, `ask_levels`, best bid/ask, mid, and spread ticks allow production tests to prove the maker was
+  calibrated from Binance/OKX/Bybit-style depth rather than static local parameters.
+- The table is observability only. Balances, positions, order reservations, and deficits still use the account/trading
+  transactional tables as the source of truth.
 
 `trading_user_fee_tiers` stores the current calculated fee tier per user:
 

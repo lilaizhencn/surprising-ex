@@ -38,6 +38,7 @@ import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,7 +54,10 @@ public class AccountService {
     private final AccountProperties properties;
     private final AccountOutboxRepository outboxRepository;
     private final BoundedLocalCache<ContractSpecKey, ContractSpec> contractSpecCache;
+    private final BoundedLocalCache<ContractSpecKey, InstrumentType> instrumentTypeCache;
+    private final BoundedLocalCache<ContractSpecKey, SpotInstrumentSpec> spotInstrumentSpecCache;
     private final BoundedLocalCache<OrderFeeSnapshotKey, OrderFeeSnapshot> orderFeeSnapshotCache;
+    private final BoundedLocalCache<OrderFeeSnapshotKey, Optional<LiquidationFeeContext>> liquidationFeeContextCache;
 
     public AccountService(AccountRepository accountRepository, PositionCalculator positionCalculator) {
         this(accountRepository, positionCalculator, null, new AccountProperties(), null);
@@ -74,7 +78,11 @@ public class AccountService {
                 ? new AccountProperties.Cache()
                 : properties.getCache();
         this.contractSpecCache = new BoundedLocalCache<>(cacheProperties.getContractSpecMaxEntries());
+        this.instrumentTypeCache = new BoundedLocalCache<>(cacheProperties.getInstrumentTypeMaxEntries());
+        this.spotInstrumentSpecCache = new BoundedLocalCache<>(cacheProperties.getSpotInstrumentSpecMaxEntries());
         this.orderFeeSnapshotCache = new BoundedLocalCache<>(cacheProperties.getOrderFeeSnapshotMaxEntries());
+        this.liquidationFeeContextCache = new BoundedLocalCache<>(
+                cacheProperties.getLiquidationFeeContextMaxEntries());
     }
 
     @Transactional
@@ -347,10 +355,10 @@ public class AccountService {
             return false;
         }
         String traceId = trade.traceId();
-        InstrumentType takerInstrumentType = accountRepository.instrumentType(trade.symbol(),
-                trade.takerInstrumentVersion());
-        InstrumentType makerInstrumentType = accountRepository.instrumentType(trade.symbol(),
-                trade.makerInstrumentVersion());
+        InstrumentType takerInstrumentType = instrumentType(trade.symbol(), trade.takerInstrumentVersion());
+        InstrumentType makerInstrumentType = trade.takerInstrumentVersion() == trade.makerInstrumentVersion()
+                ? takerInstrumentType
+                : instrumentType(trade.symbol(), trade.makerInstrumentVersion());
         if (takerInstrumentType != makerInstrumentType) {
             throw new IllegalStateException("matched orders use different instrument types for " + trade.symbol());
         }
@@ -385,7 +393,7 @@ public class AccountService {
                                     boolean orderCompleted,
                                     boolean taker,
                                     Instant eventTime) {
-        SpotInstrumentSpec spec = accountRepository.spotInstrumentSpec(symbol, instrumentVersion);
+        SpotInstrumentSpec spec = spotInstrumentSpec(symbol, instrumentVersion);
         OrderFeeSnapshot feeSnapshot = orderFeeSnapshot(orderId, userId, symbol);
         long feeRatePpm = taker ? feeSnapshot.takerFeeRatePpm() : feeSnapshot.makerFeeRatePpm();
         accountRepository.settleSpotTradeSide(userId, orderId, tradeId, symbol, side, priceTicks,
@@ -447,7 +455,7 @@ public class AccountService {
         PositionResponse updated = accountRepository.updatePosition(userId, symbol, normalizedMarginMode,
                 normalizedPositionSide,
                 change.next(), current.signedQuantitySteps(), eventTime);
-        if (reduceOnlyOrderPruner != null) {
+        if (closeSteps > 0 && reduceOnlyOrderPruner != null) {
             reduceOnlyOrderPruner.prune(userId, symbol, normalizedPositionSide, change.next(), eventTime, traceId);
         }
         if (outboxRepository != null) {
@@ -467,7 +475,7 @@ public class AccountService {
                                               long quantitySteps,
                                               Instant eventTime,
                                               String traceId) {
-        accountRepository.liquidationFeeContext(orderId, userId, symbol).ifPresent(context -> {
+        liquidationFeeContext(orderId, userId, symbol).ifPresent(context -> {
             long requestedFeeUnits = liquidationFeeUnits(fillSpec, priceTicks, quantitySteps, context);
             accountRepository.settleLiquidationFee(perpetualAccountType(fillSpec), userId, fillSpec.settleAsset(),
                     orderId, tradeId, symbol, marginMode, requestedFeeUnits, context, eventTime)
@@ -509,9 +517,24 @@ public class AccountService {
                 key -> accountRepository.contractSpec(key.symbol(), key.instrumentVersion()));
     }
 
+    private InstrumentType instrumentType(String symbol, long instrumentVersion) {
+        return instrumentTypeCache.get(new ContractSpecKey(symbol, instrumentVersion),
+                key -> accountRepository.instrumentType(key.symbol(), key.instrumentVersion()));
+    }
+
+    private SpotInstrumentSpec spotInstrumentSpec(String symbol, long instrumentVersion) {
+        return spotInstrumentSpecCache.get(new ContractSpecKey(symbol, instrumentVersion),
+                key -> accountRepository.spotInstrumentSpec(key.symbol(), key.instrumentVersion()));
+    }
+
     private OrderFeeSnapshot orderFeeSnapshot(long orderId, long userId, String symbol) {
         return orderFeeSnapshotCache.get(new OrderFeeSnapshotKey(orderId, userId, symbol),
                 key -> accountRepository.orderFeeSnapshot(key.orderId(), key.userId(), key.symbol()));
+    }
+
+    private Optional<LiquidationFeeContext> liquidationFeeContext(long orderId, long userId, String symbol) {
+        return liquidationFeeContextCache.get(new OrderFeeSnapshotKey(orderId, userId, symbol),
+                key -> accountRepository.liquidationFeeContext(key.orderId(), key.userId(), key.symbol()));
     }
 
     private AccountType perpetualAccountType(ContractSpec spec) {

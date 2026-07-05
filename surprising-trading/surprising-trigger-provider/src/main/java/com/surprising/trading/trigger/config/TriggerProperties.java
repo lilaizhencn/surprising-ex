@@ -29,6 +29,8 @@ public class TriggerProperties {
         private String bootstrapServers = "localhost:9092";
         private String groupId = "surprising-trigger-v1";
         private String markPriceTopic = "surprising.perp.mark.price.v1";
+        private String indexPriceTopic = "surprising.perp.index.price.v1";
+        private String lastPriceTopic = "surprising.perp.match.trades.v1";
         private int concurrency = 2;
         private int maxPollRecords = 500;
 
@@ -54,6 +56,22 @@ public class TriggerProperties {
 
         public void setMarkPriceTopic(String markPriceTopic) {
             this.markPriceTopic = markPriceTopic;
+        }
+
+        public String getIndexPriceTopic() {
+            return indexPriceTopic;
+        }
+
+        public void setIndexPriceTopic(String indexPriceTopic) {
+            this.indexPriceTopic = indexPriceTopic;
+        }
+
+        public String getLastPriceTopic() {
+            return lastPriceTopic;
+        }
+
+        public void setLastPriceTopic(String lastPriceTopic) {
+            this.lastPriceTopic = lastPriceTopic;
         }
 
         public int getConcurrency() {

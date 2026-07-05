@@ -286,6 +286,46 @@ public class AdlRepository {
                 """, nextSignedQuantity, nextSignedQuantity, nextEntryPrice, realizedPnlUnits, Timestamp.from(now),
                 candidate.userId(), candidate.symbol(), candidate.marginMode().name(), candidate.positionSide().name());
         requireSingleRow(rows, "ADL target position update");
+        updateSymbolOpenInterest(candidate.symbol(), candidate.signedQuantitySteps(), nextSignedQuantity, now);
+    }
+
+    private void updateSymbolOpenInterest(String symbol,
+                                          long previousSignedQuantitySteps,
+                                          long nextSignedQuantitySteps,
+                                          Instant now) {
+        long longDelta = Math.subtractExact(longQuantitySteps(nextSignedQuantitySteps),
+                longQuantitySteps(previousSignedQuantitySteps));
+        long shortDelta = Math.subtractExact(shortQuantitySteps(nextSignedQuantitySteps),
+                shortQuantitySteps(previousSignedQuantitySteps));
+        if (longDelta == 0L && shortDelta == 0L) {
+            return;
+        }
+        jdbcTemplate.update("""
+                INSERT INTO trading_symbol_open_interest (
+                    symbol, long_quantity_steps, short_quantity_steps, open_quantity_steps, updated_at
+                ) VALUES (?, 0, 0, 0, ?)
+                ON CONFLICT (symbol) DO NOTHING
+                """, symbol, Timestamp.from(now));
+        int rows = jdbcTemplate.update("""
+                UPDATE trading_symbol_open_interest
+                   SET long_quantity_steps = long_quantity_steps + ?,
+                       short_quantity_steps = short_quantity_steps + ?,
+                       open_quantity_steps = GREATEST(long_quantity_steps + ?, short_quantity_steps + ?),
+                       updated_at = ?
+                 WHERE symbol = ?
+                   AND long_quantity_steps + ? >= 0
+                   AND short_quantity_steps + ? >= 0
+                """, longDelta, shortDelta, longDelta, shortDelta, Timestamp.from(now), symbol,
+                longDelta, shortDelta);
+        requireSingleRow(rows, "ADL symbol open interest update");
+    }
+
+    private long longQuantitySteps(long signedQuantitySteps) {
+        return signedQuantitySteps > 0 ? signedQuantitySteps : 0L;
+    }
+
+    private long shortQuantitySteps(long signedQuantitySteps) {
+        return signedQuantitySteps < 0 ? Math.negateExact(signedQuantitySteps) : 0L;
     }
 
     private void releaseTargetMargin(AdlCandidate candidate, long closeSteps, Instant now) {

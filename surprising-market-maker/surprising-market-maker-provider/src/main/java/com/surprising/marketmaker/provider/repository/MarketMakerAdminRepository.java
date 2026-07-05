@@ -7,6 +7,8 @@ public interface MarketMakerAdminRepository {
 
     void recordRunEvent(MarketMakerRunEventWrite event);
 
+    void recordReferenceSample(MarketMakerReferenceSampleWrite sample);
+
     List<MarketMakerRunEventRecord> runEvents(String strategyId,
                                               String symbol,
                                               Long accountId,
@@ -39,6 +41,24 @@ public interface MarketMakerAdminRepository {
             String errorMessage,
             String traceId,
             Instant createdAt) {
+    }
+
+    record MarketMakerReferenceSampleWrite(
+            String strategyId,
+            String symbol,
+            String nodeId,
+            long cycleSequence,
+            String sourceName,
+            String transport,
+            int bidLevels,
+            int askLevels,
+            long bestBidTicks,
+            long bestAskTicks,
+            long midPriceTicks,
+            long spreadTicks,
+            Instant receivedAt,
+            String traceId,
+            Instant sampledAt) {
     }
 
     record MarketMakerRunEventRecord(

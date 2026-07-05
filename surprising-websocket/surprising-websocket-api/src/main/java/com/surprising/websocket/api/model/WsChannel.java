@@ -11,6 +11,7 @@ public enum WsChannel {
     FUNDING_RATE("funding", true),
     ORDERS("orders", false),
     MATCHES("matches", false),
+    EXECUTION_REPORTS("executionReports", false),
     POSITIONS("positions", false),
     ACCOUNT_RISK("accountRisk", false),
     POSITION_RISK("positionRisk", false);

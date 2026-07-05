@@ -244,15 +244,44 @@ class OrderValidatorTest {
 
     @Test
     void rejectsHaltedInstrument() {
-        OrderValidator validator = new OrderValidator(lookup(new InstrumentRule(
-                "BTC-USDT", 1L, "HALT", ContractType.LINEAR_PERPETUAL, Set.of("LIMIT", "MARKET"),
-                Set.of("GTC", "IOC", "FOK", "GTX"), true, true, true,
-                1L, 100_000L, 50_000L, 100_000_000_000L, 1L, 100_000_000L, 10_000L)));
+        OrderValidator validator = new OrderValidator(lookup(ruleWithStatus("HALT")));
 
         var result = validator.validate(limit(300_000L, 2L));
 
         assertThat(result.accepted()).isFalse();
-        assertThat(result.rejectReason()).isEqualTo("instrument is not trading");
+        assertThat(result.rejectReason()).isEqualTo("instrument is cancel-only");
+    }
+
+    @Test
+    void rejectsReduceOnlyOrderWhenInstrumentIsHalted() {
+        OrderValidator validator = new OrderValidator(lookup(ruleWithStatus("HALT")));
+        var request = reduceOnlyLimit(OrderSide.SELL, 300_000L, 2L);
+
+        var result = validator.validate(request);
+
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.rejectReason()).isEqualTo("instrument is cancel-only");
+    }
+
+    @Test
+    void rejectsOpeningOrderWhenInstrumentIsSettling() {
+        OrderValidator validator = new OrderValidator(lookup(ruleWithStatus("SETTLING")));
+
+        var result = validator.validate(limit(300_000L, 2L));
+
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.rejectReason()).isEqualTo("instrument is reduce-only");
+    }
+
+    @Test
+    void acceptsReduceOnlyOrderWhenInstrumentIsSettling() {
+        OrderValidator validator = new OrderValidator(lookup(ruleWithStatus("SETTLING")));
+        var request = reduceOnlyLimit(OrderSide.SELL, 300_000L, 2L);
+
+        var result = validator.validate(request);
+
+        assertThat(result.accepted()).isTrue();
+        assertThat(result.rejectReason()).isNull();
     }
 
     private PlaceOrderRequest limit(long priceTicks, long quantitySteps) {
@@ -273,11 +302,20 @@ class OrderValidatorTest {
                 OrderType.MARKET, TimeInForce.IOC, 0L, quantitySteps, false, false);
     }
 
+    private PlaceOrderRequest reduceOnlyLimit(OrderSide side, long priceTicks, long quantitySteps) {
+        return new PlaceOrderRequest(1001L, "c1", "BTC-USDT", side,
+                OrderType.LIMIT, TimeInForce.GTC, priceTicks, quantitySteps, true, false);
+    }
+
     private InstrumentRule tradingRule() {
+        return ruleWithStatus("TRADING");
+    }
+
+    private InstrumentRule ruleWithStatus(String status) {
         return new InstrumentRule(
                 "BTC-USDT",
                 1L,
-                "TRADING",
+                status,
                 ContractType.LINEAR_PERPETUAL,
                 Set.of("LIMIT", "MARKET"),
                 Set.of("GTC", "IOC", "FOK", "GTX"),
