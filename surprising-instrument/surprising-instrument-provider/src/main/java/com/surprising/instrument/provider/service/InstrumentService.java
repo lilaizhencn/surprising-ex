@@ -94,7 +94,9 @@ public class InstrumentService {
                 current.userOpenInterestLimitRatePpm(), current.userOpenInterestLimitFloorUnits(),
                 current.fundingIntervalHours(),
                 current.interestRatePpm(), current.fundingRateCapPpm(), current.fundingRateFloorPpm(),
-                current.impactNotionalUnits(), current.minValidIndexSources(), status, Instant.now(),
+                current.impactNotionalUnits(), current.minValidIndexSources(), current.expiryTime(),
+                current.deliveryTime(), current.underlyingSymbol(), current.strikePriceUnits(),
+                current.optionType(), current.optionExerciseStyle(), current.settlementMethod(), status, Instant.now(),
                 current.riskLimitBrackets(), current.indexSources());
         return upsert(request, InstrumentEventType.STATUS_CHANGED);
     }

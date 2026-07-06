@@ -31,20 +31,15 @@ public class InstrumentValidator {
         requireNonNegative("userOpenInterestLimitRatePpm", request.userOpenInterestLimitRatePpm());
         requirePositive("userOpenInterestLimitFloorUnits", request.userOpenInterestLimitFloorUnits());
         requirePositive("impactNotionalUnits", request.impactNotionalUnits());
-        if (request.fundingIntervalHours() <= 0) {
-            throw new IllegalArgumentException("fundingIntervalHours must be positive");
-        }
-        if (request.fundingRateCapPpm() < request.fundingRateFloorPpm()) {
-            throw new IllegalArgumentException("fundingRateCap must be greater than or equal to fundingRateFloor");
-        }
         if (request.minValidIndexSources() <= 0) {
             throw new IllegalArgumentException("minValidIndexSources must be positive");
         }
-        if (request.instrumentType() == InstrumentType.PERPETUAL) {
-            validateBrackets(request.riskLimitBrackets());
-            validateIndexSources(request.indexSources(), request.minValidIndexSources());
-        } else {
-            validateSpotRules(request);
+        validateFundingRules(request);
+        switch (request.instrumentType()) {
+            case SPOT -> validateSpotRules(request);
+            case PERPETUAL -> validatePerpetualRules(request);
+            case DELIVERY -> validateDeliveryRules(request);
+            case OPTION -> validateOptionRules(request);
         }
     }
 
@@ -61,14 +56,100 @@ public class InstrumentValidator {
         if (instrumentType == InstrumentType.PERPETUAL && !contractType.isPerpetual()) {
             throw new IllegalArgumentException("PERPETUAL instruments must use a perpetual contractType");
         }
+        if (instrumentType == InstrumentType.DELIVERY && !contractType.isDelivery()) {
+            throw new IllegalArgumentException("DELIVERY instruments must use a delivery contractType");
+        }
+        if (instrumentType == InstrumentType.OPTION && !contractType.isOption()) {
+            throw new IllegalArgumentException("OPTION instruments must use an option contractType");
+        }
     }
 
     private void validateSpotRules(InstrumentUpsertRequest request) {
         if (request.reduceOnlyEnabled()) {
             throw new IllegalArgumentException("spot instruments cannot enable reduce-only");
         }
+        validateNonExpiringRules(request, "spot");
         if (request.riskLimitBrackets() != null && !request.riskLimitBrackets().isEmpty()) {
             throw new IllegalArgumentException("spot instruments must not define risk limit brackets");
+        }
+    }
+
+    private void validatePerpetualRules(InstrumentUpsertRequest request) {
+        validateNonExpiringRules(request, "perpetual");
+        validateDerivativeRules(request);
+    }
+
+    private void validateDeliveryRules(InstrumentUpsertRequest request) {
+        validateExpiringRules(request, "DELIVERY");
+        validateDerivativeRules(request);
+        if (request.strikePriceUnits() != null || request.optionType() != null
+                || request.optionExerciseStyle() != null) {
+            throw new IllegalArgumentException("delivery instruments must not define option metadata");
+        }
+    }
+
+    private void validateOptionRules(InstrumentUpsertRequest request) {
+        validateExpiringRules(request, "OPTION");
+        validateDerivativeRules(request);
+        if (request.underlyingSymbol() == null || request.underlyingSymbol().isBlank()) {
+            throw new IllegalArgumentException("option instruments require underlyingSymbol");
+        }
+        requireSymbol(request.underlyingSymbol().trim().toUpperCase());
+        requirePositive("strikePriceUnits", request.strikePriceUnits());
+        if (request.optionType() == null) {
+            throw new IllegalArgumentException("option instruments require optionType");
+        }
+        if (request.optionExerciseStyle() == null) {
+            throw new IllegalArgumentException("option instruments require optionExerciseStyle");
+        }
+    }
+
+    private void validateDerivativeRules(InstrumentUpsertRequest request) {
+        validateBrackets(request.riskLimitBrackets());
+        validateIndexSources(request.indexSources(), request.minValidIndexSources());
+    }
+
+    private void validateExpiringRules(InstrumentUpsertRequest request, String name) {
+        if (request.expiryTime() == null) {
+            throw new IllegalArgumentException(name + " instruments require expiryTime");
+        }
+        if (request.deliveryTime() == null) {
+            throw new IllegalArgumentException(name + " instruments require deliveryTime");
+        }
+        if (request.deliveryTime().isBefore(request.expiryTime())) {
+            throw new IllegalArgumentException("deliveryTime must be greater than or equal to expiryTime");
+        }
+        if (request.settlementMethod() == null) {
+            throw new IllegalArgumentException(name + " instruments require settlementMethod");
+        }
+    }
+
+    private void validateNonExpiringRules(InstrumentUpsertRequest request, String name) {
+        if (request.expiryTime() != null || request.deliveryTime() != null || request.settlementMethod() != null) {
+            throw new IllegalArgumentException(name + " instruments must not define expiry or settlement metadata");
+        }
+        if (request.underlyingSymbol() != null && !request.underlyingSymbol().isBlank()) {
+            throw new IllegalArgumentException(name + " instruments must not define underlyingSymbol");
+        }
+        if (request.strikePriceUnits() != null || request.optionType() != null
+                || request.optionExerciseStyle() != null) {
+            throw new IllegalArgumentException(name + " instruments must not define option metadata");
+        }
+    }
+
+    private void validateFundingRules(InstrumentUpsertRequest request) {
+        if (request.instrumentType() == InstrumentType.PERPETUAL) {
+            if (request.fundingIntervalHours() <= 0) {
+                throw new IllegalArgumentException("fundingIntervalHours must be positive");
+            }
+            if (request.fundingRateCapPpm() < request.fundingRateFloorPpm()) {
+                throw new IllegalArgumentException("fundingRateCap must be greater than or equal to fundingRateFloor");
+            }
+            return;
+        }
+        if (request.fundingIntervalHours() != 0 || request.interestRatePpm() != 0
+                || request.fundingRateCapPpm() != 0 || request.fundingRateFloorPpm() != 0) {
+            throw new IllegalArgumentException("non-perpetual instruments must not define funding settings");
         }
     }
 
@@ -141,6 +222,12 @@ public class InstrumentValidator {
 
     private void requirePositive(String name, long value) {
         if (value <= 0) {
+            throw new IllegalArgumentException(name + " must be positive");
+        }
+    }
+
+    private void requirePositive(String name, Long value) {
+        if (value == null || value <= 0) {
             throw new IllegalArgumentException(name + " must be positive");
         }
     }

@@ -1,11 +1,14 @@
 package com.surprising.instrument.provider.repository;
 
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.ContractSettlementMethod;
 import com.surprising.instrument.api.model.IndexSourceConfig;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
+import com.surprising.instrument.api.model.OptionExerciseStyle;
+import com.surprising.instrument.api.model.OptionType;
 import com.surprising.instrument.api.model.RiskLimitBracket;
 import java.nio.charset.StandardCharsets;
 import java.sql.PreparedStatement;
@@ -36,8 +39,11 @@ public class InstrumentRepository {
                 maker_fee_rate_ppm, taker_fee_rate_ppm, max_position_notional_units,
                 user_open_interest_limit_rate_ppm, user_open_interest_limit_floor_units,
                 funding_interval_hours, interest_rate_ppm, funding_rate_cap_ppm, funding_rate_floor_ppm,
-                impact_notional_units, min_valid_index_sources, status, effective_time, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                impact_notional_units, min_valid_index_sources,
+                expiry_time, delivery_time, underlying_symbol, strike_price_units,
+                option_type, option_exercise_style, settlement_method,
+                status, effective_time, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     private static final String INSERT_BRACKET_SQL = """
@@ -107,6 +113,10 @@ public class InstrumentRepository {
                 request.userOpenInterestLimitRatePpm(), request.userOpenInterestLimitFloorUnits(),
                 request.fundingIntervalHours(), request.interestRatePpm(), request.fundingRateCapPpm(),
                 request.fundingRateFloorPpm(), request.impactNotionalUnits(), request.minValidIndexSources(),
+                timestampOrNull(request.expiryTime()), timestampOrNull(request.deliveryTime()),
+                symbolOrNull(request.underlyingSymbol()), request.strikePriceUnits(),
+                enumName(request.optionType()), enumName(request.optionExerciseStyle()),
+                enumName(request.settlementMethod()),
                 request.status().name(), Timestamp.from(effectiveTime), Timestamp.from(now), Timestamp.from(now));
         insertBrackets(symbol, version, request.riskLimitBrackets());
         insertSources(symbol, version, request.indexSources());
@@ -316,6 +326,13 @@ public class InstrumentRepository {
                 rs.getLong("funding_rate_floor_ppm"),
                 rs.getLong("impact_notional_units"),
                 rs.getInt("min_valid_index_sources"),
+                instantOrNull(rs, "expiry_time"),
+                instantOrNull(rs, "delivery_time"),
+                rs.getString("underlying_symbol"),
+                longOrNull(rs, "strike_price_units"),
+                enumOrNull(rs, "option_type", OptionType.class),
+                enumOrNull(rs, "option_exercise_style", OptionExerciseStyle.class),
+                enumOrNull(rs, "settlement_method", ContractSettlementMethod.class),
                 InstrumentStatus.valueOf(rs.getString("status")),
                 rs.getTimestamp("effective_time").toInstant(),
                 rs.getTimestamp("created_at").toInstant(),
@@ -498,6 +515,34 @@ public class InstrumentRepository {
 
     private String asset(String value) {
         return value == null ? null : value.trim().toUpperCase();
+    }
+
+    private String symbolOrNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim().toUpperCase();
+    }
+
+    private Timestamp timestampOrNull(Instant value) {
+        return value == null ? null : Timestamp.from(value);
+    }
+
+    private String enumName(Enum<?> value) {
+        return value == null ? null : value.name();
+    }
+
+    private Instant instantOrNull(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
+        Timestamp timestamp = rs.getTimestamp(column);
+        return timestamp == null ? null : timestamp.toInstant();
+    }
+
+    private Long longOrNull(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
+        long value = rs.getLong(column);
+        return rs.wasNull() ? null : value;
+    }
+
+    private <T extends Enum<T>> T enumOrNull(java.sql.ResultSet rs, String column, Class<T> type)
+            throws java.sql.SQLException {
+        String value = rs.getString(column);
+        return value == null ? null : Enum.valueOf(type, value);
     }
 
     private String defaultText(String value, String fallback) {

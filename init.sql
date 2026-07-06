@@ -39,6 +39,13 @@ CREATE TABLE IF NOT EXISTS instruments (
     funding_rate_floor_ppm      BIGINT NOT NULL,
     impact_notional_units       BIGINT NOT NULL,
     min_valid_index_sources     INTEGER NOT NULL DEFAULT 3,
+    expiry_time                 TIMESTAMPTZ,
+    delivery_time               TIMESTAMPTZ,
+    underlying_symbol           TEXT,
+    strike_price_units          BIGINT,
+    option_type                 TEXT,
+    option_exercise_style       TEXT,
+    settlement_method           TEXT,
     status                      TEXT NOT NULL,
     effective_time              TIMESTAMPTZ NOT NULL,
     created_at                  TIMESTAMPTZ NOT NULL,
@@ -55,6 +62,39 @@ CREATE TABLE IF NOT EXISTS instruments (
         OR (instrument_type = 'PERPETUAL' AND contract_type IN ('LINEAR_PERPETUAL', 'INVERSE_PERPETUAL'))
         OR (instrument_type = 'DELIVERY' AND contract_type IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY'))
         OR (instrument_type = 'OPTION' AND contract_type = 'VANILLA_OPTION')
+    ),
+    CONSTRAINT instruments_underlying_symbol_check CHECK (
+        underlying_symbol IS NULL OR underlying_symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'
+    ),
+    CONSTRAINT instruments_expiry_metadata_check CHECK (
+        (
+            instrument_type IN ('SPOT', 'PERPETUAL')
+            AND expiry_time IS NULL
+            AND delivery_time IS NULL
+            AND settlement_method IS NULL
+        )
+        OR (
+            instrument_type IN ('DELIVERY', 'OPTION')
+            AND expiry_time IS NOT NULL
+            AND delivery_time IS NOT NULL
+            AND delivery_time >= expiry_time
+            AND settlement_method IN ('CASH', 'PHYSICAL')
+        )
+    ),
+    CONSTRAINT instruments_option_metadata_check CHECK (
+        (
+            instrument_type <> 'OPTION'
+            AND strike_price_units IS NULL
+            AND option_type IS NULL
+            AND option_exercise_style IS NULL
+        )
+        OR (
+            instrument_type = 'OPTION'
+            AND underlying_symbol IS NOT NULL
+            AND strike_price_units > 0
+            AND option_type IN ('CALL', 'PUT')
+            AND option_exercise_style IN ('EUROPEAN', 'AMERICAN')
+        )
     ),
     CONSTRAINT instruments_status_check CHECK (status IN ('PRE_TRADING', 'TRADING', 'HALT', 'SETTLING', 'CLOSED')),
     CONSTRAINT instruments_positive_values CHECK (
@@ -74,7 +114,8 @@ CREATE TABLE IF NOT EXISTS instruments (
         AND max_position_notional_units > 0
         AND user_open_interest_limit_rate_ppm >= 0
         AND user_open_interest_limit_floor_units > 0
-        AND funding_interval_hours > 0
+        AND funding_interval_hours >= 0
+        AND (instrument_type <> 'PERPETUAL' OR funding_interval_hours > 0)
         AND funding_rate_cap_ppm >= funding_rate_floor_ppm
         AND impact_notional_units > 0
         AND min_valid_index_sources > 0
@@ -93,6 +134,14 @@ CREATE INDEX IF NOT EXISTS instruments_created_page_idx
 DO $$
 BEGIN
     IF to_regclass('public.instruments') IS NOT NULL THEN
+        ALTER TABLE instruments ADD COLUMN IF NOT EXISTS expiry_time TIMESTAMPTZ;
+        ALTER TABLE instruments ADD COLUMN IF NOT EXISTS delivery_time TIMESTAMPTZ;
+        ALTER TABLE instruments ADD COLUMN IF NOT EXISTS underlying_symbol TEXT;
+        ALTER TABLE instruments ADD COLUMN IF NOT EXISTS strike_price_units BIGINT;
+        ALTER TABLE instruments ADD COLUMN IF NOT EXISTS option_type TEXT;
+        ALTER TABLE instruments ADD COLUMN IF NOT EXISTS option_exercise_style TEXT;
+        ALTER TABLE instruments ADD COLUMN IF NOT EXISTS settlement_method TEXT;
+
         ALTER TABLE instruments DROP CONSTRAINT IF EXISTS instruments_type_check;
         ALTER TABLE instruments
             ADD CONSTRAINT instruments_type_check CHECK (
@@ -113,6 +162,74 @@ BEGIN
                 OR (instrument_type = 'PERPETUAL' AND contract_type IN ('LINEAR_PERPETUAL', 'INVERSE_PERPETUAL'))
                 OR (instrument_type = 'DELIVERY' AND contract_type IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY'))
                 OR (instrument_type = 'OPTION' AND contract_type = 'VANILLA_OPTION')
+            );
+
+        ALTER TABLE instruments DROP CONSTRAINT IF EXISTS instruments_underlying_symbol_check;
+        ALTER TABLE instruments
+            ADD CONSTRAINT instruments_underlying_symbol_check CHECK (
+                underlying_symbol IS NULL OR underlying_symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'
+            );
+
+        ALTER TABLE instruments DROP CONSTRAINT IF EXISTS instruments_expiry_metadata_check;
+        ALTER TABLE instruments
+            ADD CONSTRAINT instruments_expiry_metadata_check CHECK (
+                (
+                    instrument_type IN ('SPOT', 'PERPETUAL')
+                    AND expiry_time IS NULL
+                    AND delivery_time IS NULL
+                    AND settlement_method IS NULL
+                )
+                OR (
+                    instrument_type IN ('DELIVERY', 'OPTION')
+                    AND expiry_time IS NOT NULL
+                    AND delivery_time IS NOT NULL
+                    AND delivery_time >= expiry_time
+                    AND settlement_method IN ('CASH', 'PHYSICAL')
+                )
+            );
+
+        ALTER TABLE instruments DROP CONSTRAINT IF EXISTS instruments_option_metadata_check;
+        ALTER TABLE instruments
+            ADD CONSTRAINT instruments_option_metadata_check CHECK (
+                (
+                    instrument_type <> 'OPTION'
+                    AND strike_price_units IS NULL
+                    AND option_type IS NULL
+                    AND option_exercise_style IS NULL
+                )
+                OR (
+                    instrument_type = 'OPTION'
+                    AND underlying_symbol IS NOT NULL
+                    AND strike_price_units > 0
+                    AND option_type IN ('CALL', 'PUT')
+                    AND option_exercise_style IN ('EUROPEAN', 'AMERICAN')
+                )
+            );
+
+        ALTER TABLE instruments DROP CONSTRAINT IF EXISTS instruments_positive_values;
+        ALTER TABLE instruments
+            ADD CONSTRAINT instruments_positive_values CHECK (
+                contract_multiplier_ppm > 0
+                AND price_tick_units > 0
+                AND quantity_step_units > 0
+                AND min_quantity_steps > 0
+                AND max_quantity_steps >= min_quantity_steps
+                AND min_notional_units > 0
+                AND max_notional_units >= min_notional_units
+                AND notional_multiplier_units > 0
+                AND max_leverage_ppm > 0
+                AND initial_margin_rate_ppm > 0
+                AND maintenance_margin_rate_ppm > 0
+                AND maker_fee_rate_ppm BETWEEN -1000000 AND 1000000
+                AND taker_fee_rate_ppm BETWEEN -1000000 AND 1000000
+                AND max_position_notional_units > 0
+                AND user_open_interest_limit_rate_ppm >= 0
+                AND user_open_interest_limit_floor_units > 0
+                AND funding_interval_hours >= 0
+                AND (instrument_type <> 'PERPETUAL' OR funding_interval_hours > 0)
+                AND funding_rate_cap_ppm >= funding_rate_floor_ppm
+                AND impact_notional_units > 0
+                AND min_valid_index_sources > 0
             );
     END IF;
 END $$;
@@ -201,18 +318,21 @@ INSERT INTO instruments (
     maker_fee_rate_ppm, taker_fee_rate_ppm, max_position_notional_units,
     user_open_interest_limit_rate_ppm, user_open_interest_limit_floor_units,
     funding_interval_hours, interest_rate_ppm, funding_rate_cap_ppm, funding_rate_floor_ppm,
-    impact_notional_units, min_valid_index_sources, status, effective_time, created_at, updated_at
+    impact_notional_units, min_valid_index_sources,
+    expiry_time, delivery_time, underlying_symbol, strike_price_units,
+    option_type, option_exercise_style, settlement_method,
+    status, effective_time, created_at, updated_at
 ) VALUES
 ('BTC-USDT', 1, 'PERPETUAL', 'LINEAR_PERPETUAL', 'BTC', 'USDT', 'USDT',
  1000000, 'USDT', 10000000, 100000, 1, 100000, 500000000, 1000000000000000, 10000, 1, 3,
  'LIMIT,MARKET', 'GTC,IOC,FOK,GTX', TRUE, TRUE, TRUE,
  100000000, 10000, 5000, 200, 500, 1000000000000000000, 1000000, 1000000000000000000, 8, 100, 3000, -3000,
- 1000000000000, 3, 'TRADING', now(), now(), now()),
+ 1000000000000, 3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'TRADING', now(), now(), now()),
 ('ETH-USDT', 1, 'PERPETUAL', 'LINEAR_PERPETUAL', 'ETH', 'USDT', 'USDT',
  1000000, 'USDT', 1000000, 10000000000000000, 1, 500000, 500000000, 1000000000000000, 10000, 2, 2,
  'LIMIT,MARKET', 'GTC,IOC,FOK,GTX', TRUE, TRUE, TRUE,
  100000000, 10000, 5000, 200, 500, 1000000000000000000, 1000000, 1000000000000000000, 8, 100, 3000, -3000,
- 1000000000000, 3, 'TRADING', now(), now(), now())
+ 1000000000000, 3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'TRADING', now(), now(), now())
 ON CONFLICT (symbol, version) DO NOTHING;
 
 INSERT INTO instrument_current_versions (symbol, version, updated_at)
