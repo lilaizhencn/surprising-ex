@@ -2,6 +2,7 @@ package com.surprising.account.provider.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
@@ -65,5 +66,34 @@ class AccountKafkaConfigurationTest {
         assertThat(config).containsEntry(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         assertThat(config).containsEntry(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
         assertThat(config).containsEntry(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
+    }
+
+    @Test
+    void defaultsToLegacyPerpTopicsUntilProductTopicsAreEnabled() {
+        AccountProperties properties = new AccountProperties();
+
+        assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-account-v1");
+        assertThat(properties.getKafka().getMatchTradesTopic())
+                .isEqualTo("surprising.perp.match.trades.v1");
+        assertThat(properties.getKafka().getOrderCommandsTopic())
+                .isEqualTo("surprising.perp.order.commands.v1");
+        assertThat(properties.getKafka().getOrderEventsTopic())
+                .isEqualTo("surprising.perp.order.events.v1");
+    }
+
+    @Test
+    void canResolveSettlementTopicsAndGroupFromProductLine() {
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+
+        assertThat(properties.getKafka().getGroupId())
+                .isEqualTo("surprising-linear-perp-account-v1");
+        assertThat(properties.getKafka().getMatchTradesTopic())
+                .isEqualTo("surprising.linear-perp.match.trades.v1");
+        assertThat(properties.getKafka().getOrderCommandsTopic())
+                .isEqualTo("surprising.linear-perp.order.commands.v1");
+        assertThat(properties.getKafka().getOrderEventsTopic())
+                .isEqualTo("surprising.linear-perp.order.events.v1");
     }
 }

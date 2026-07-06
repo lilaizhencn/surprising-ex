@@ -1,5 +1,7 @@
 package com.surprising.account.provider.config;
 
+import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -45,6 +47,8 @@ public class AccountProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        private boolean productTopicsEnabled;
         private String groupId = "surprising-account-v1";
         private String clientId = "surprising-account";
         private String matchTradesTopic = "surprising.perp.match.trades.v1";
@@ -63,8 +67,24 @@ public class AccountProperties {
             this.bootstrapServers = bootstrapServers;
         }
 
+        public ProductLine getProductLine() {
+            return productLine;
+        }
+
+        public void setProductLine(ProductLine productLine) {
+            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        }
+
+        public boolean isProductTopicsEnabled() {
+            return productTopicsEnabled;
+        }
+
+        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
+            this.productTopicsEnabled = productTopicsEnabled;
+        }
+
         public String getGroupId() {
-            return groupId;
+            return productTopicsEnabled ? productTopics().consumerGroup("account") : groupId;
         }
 
         public void setGroupId(String groupId) {
@@ -80,7 +100,7 @@ public class AccountProperties {
         }
 
         public String getMatchTradesTopic() {
-            return matchTradesTopic;
+            return productTopicsEnabled ? productTopics().matchTradesTopic() : matchTradesTopic;
         }
 
         public void setMatchTradesTopic(String matchTradesTopic) {
@@ -88,7 +108,7 @@ public class AccountProperties {
         }
 
         public String getOrderCommandsTopic() {
-            return orderCommandsTopic;
+            return productTopicsEnabled ? productTopics().orderCommandsTopic() : orderCommandsTopic;
         }
 
         public void setOrderCommandsTopic(String orderCommandsTopic) {
@@ -96,7 +116,7 @@ public class AccountProperties {
         }
 
         public String getOrderEventsTopic() {
-            return orderEventsTopic;
+            return productTopicsEnabled ? productTopics().orderEventsTopic() : orderEventsTopic;
         }
 
         public void setOrderEventsTopic(String orderEventsTopic) {
@@ -133,6 +153,10 @@ public class AccountProperties {
 
         public void setMaxPollRecords(int maxPollRecords) {
             this.maxPollRecords = maxPollRecords;
+        }
+
+        private ProductTopicNames productTopics() {
+            return ProductTopicNames.of(productLine);
         }
     }
 

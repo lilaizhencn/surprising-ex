@@ -1,5 +1,6 @@
 package com.surprising.account.provider.service;
 
+import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.trading.api.KafkaSymbolKeyValidator;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import java.util.List;
@@ -19,23 +20,32 @@ public class MatchTradeConsumer {
     private final ObjectMapper objectMapper;
     private final AccountService accountService;
     private final AccountSettlementMetrics settlementMetrics;
+    private final AccountProperties properties;
 
     public MatchTradeConsumer(ObjectMapper objectMapper, AccountService accountService) {
         this(objectMapper, accountService, AccountSettlementMetrics.noop());
     }
 
-    @Autowired
     public MatchTradeConsumer(ObjectMapper objectMapper,
                               AccountService accountService,
                               AccountSettlementMetrics settlementMetrics) {
+        this(objectMapper, accountService, settlementMetrics, new AccountProperties());
+    }
+
+    @Autowired
+    public MatchTradeConsumer(ObjectMapper objectMapper,
+                              AccountService accountService,
+                              AccountSettlementMetrics settlementMetrics,
+                              AccountProperties properties) {
         this.objectMapper = objectMapper;
         this.accountService = accountService;
         this.settlementMetrics = settlementMetrics;
+        this.properties = properties;
     }
 
     @KafkaListener(
-            topics = "${surprising.account.kafka.match-trades-topic}",
-            groupId = "${surprising.account.kafka.group-id}",
+            topics = "#{__listener.matchTradesTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "accountKafkaListenerContainerFactory")
     public void onTrades(List<ConsumerRecord<String, String>> records) {
         for (ConsumerRecord<String, String> record : records) {
@@ -56,5 +66,13 @@ public class MatchTradeConsumer {
             log.error("Failed to process match trade: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to process match trade", ex);
         }
+    }
+
+    public String matchTradesTopic() {
+        return properties.getKafka().getMatchTradesTopic();
+    }
+
+    public String groupId() {
+        return properties.getKafka().getGroupId();
     }
 }

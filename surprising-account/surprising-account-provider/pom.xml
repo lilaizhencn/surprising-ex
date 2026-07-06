@@ -17,6 +17,11 @@
     <dependencies>
         <dependency>
             <groupId>com.surprising</groupId>
+            <artifactId>surprising-product-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
             <artifactId>surprising-account-api</artifactId>
         </dependency>
         <dependency>

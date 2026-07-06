@@ -3,6 +3,8 @@ package com.surprising.account.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.OrderSide;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -135,6 +137,18 @@ class MatchTradeConsumerTest {
                 .tag("outcome", "duplicate")
                 .counter()
                 .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void exposesResolvedListenerTopicAndGroupFromProperties() {
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+        MatchTradeConsumer consumer = new MatchTradeConsumer(new ObjectMapper(), new RecordingAccountService(),
+                AccountSettlementMetrics.noop(), properties);
+
+        assertThat(consumer.matchTradesTopic()).isEqualTo("surprising.inverse-perp.match.trades.v1");
+        assertThat(consumer.groupId()).isEqualTo("surprising-inverse-perp-account-v1");
     }
 
     private static final class RecordingAccountService extends AccountService {

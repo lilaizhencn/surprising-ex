@@ -22,6 +22,8 @@ surprising:
   account:
     kafka:
       bootstrap-servers: localhost:9092
+      product-line: LINEAR_PERPETUAL
+      product-topics-enabled: false
       group-id: surprising-account-v1
       client-id: surprising-account-${HOSTNAME:${random.uuid}}
       match-trades-topic: surprising.perp.match.trades.v1
