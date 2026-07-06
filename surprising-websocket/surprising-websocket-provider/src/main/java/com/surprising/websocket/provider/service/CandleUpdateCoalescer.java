@@ -2,6 +2,7 @@ package com.surprising.websocket.provider.service;
 
 import com.surprising.candlestick.api.model.CandleStatus;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
+import com.surprising.product.api.ProductLine;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import com.surprising.websocket.provider.config.WebSocketProperties;
@@ -30,7 +31,12 @@ public class CandleUpdateCoalescer {
     }
 
     public void publish(CandleUpdatedEvent event) {
-        SubscriptionTopic topic = new SubscriptionTopic(WsChannel.CANDLES, event.symbol(), event.period(), null);
+        publish(event, null);
+    }
+
+    public void publish(CandleUpdatedEvent event, ProductLine productLine) {
+        SubscriptionTopic topic = new SubscriptionTopic(
+                WsChannel.CANDLES, event.symbol(), event.period(), null, productLine);
         if (event.status() == CandleStatus.CLOSED) {
             latestPartial.remove(topic);
             registry.publish(topic, event, event.eventTime());

@@ -1,14 +1,20 @@
 package com.surprising.websocket.api.model;
 
+import com.surprising.product.api.ProductLine;
 import java.util.Locale;
 
 public record SubscriptionTopic(
         WsChannel channel,
         String symbol,
         String period,
-        Long userId) {
+        Long userId,
+        ProductLine productLine) {
 
     public static final String WILDCARD = "*";
+
+    public SubscriptionTopic(WsChannel channel, String symbol, String period, Long userId) {
+        this(channel, symbol, period, userId, null);
+    }
 
     public SubscriptionTopic {
         if (channel == null) {
@@ -24,11 +30,20 @@ public record SubscriptionTopic(
     public static SubscriptionTopic fromCommand(WsClientCommand command, Long authenticatedUserId) {
         WsChannel channel = WsChannel.fromCode(command.channel());
         Long userId = channel.isPublicChannel() ? null : privateUserId(command.userId(), authenticatedUserId);
-        return new SubscriptionTopic(channel, command.symbol(), command.period(), userId);
+        return new SubscriptionTopic(channel, command.symbol(), command.period(), userId,
+                parseProductLine(command.productLine()));
     }
 
     public SubscriptionTopic withUserId(long userId) {
-        return new SubscriptionTopic(channel, symbol, period, userId);
+        return new SubscriptionTopic(channel, symbol, period, userId, productLine);
+    }
+
+    public SubscriptionTopic withSymbol(String symbol) {
+        return new SubscriptionTopic(channel, symbol, period, userId, productLine);
+    }
+
+    public SubscriptionTopic withProductLine(ProductLine productLine) {
+        return new SubscriptionTopic(channel, symbol, period, userId, productLine);
     }
 
     private static Long privateUserId(Long requestedUserId, Long authenticatedUserId) {
@@ -56,6 +71,28 @@ public record SubscriptionTopic(
             throw new IllegalArgumentException("invalid symbol: " + symbol);
         }
         return normalized;
+    }
+
+    private static ProductLine parseProductLine(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        ProductLine byAccountType = ProductLine.fromAccountTypeCode(normalized).orElse(null);
+        if (byAccountType != null) {
+            return byAccountType;
+        }
+        ProductLine byContractType = ProductLine.fromContractTypeCode(normalized).orElse(null);
+        if (byContractType != null) {
+            return byContractType;
+        }
+        String enumName = normalized.replace('-', '_');
+        for (ProductLine productLine : ProductLine.values()) {
+            if (productLine.name().equals(enumName) || productLine.topicSegment().equalsIgnoreCase(value.trim())) {
+                return productLine;
+            }
+        }
+        throw new IllegalArgumentException("unsupported productLine: " + value);
     }
 
     private static String normalizePeriod(String period, WsChannel channel) {

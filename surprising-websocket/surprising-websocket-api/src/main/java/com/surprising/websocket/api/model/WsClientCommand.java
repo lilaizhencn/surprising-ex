@@ -8,5 +8,15 @@ public record WsClientCommand(
         @Size(max = 32) String channel,
         @Size(max = 64) String symbol,
         @Size(max = 16) String period,
-        Long userId) {
+        Long userId,
+        @Size(max = 32) String productLine) {
+
+    public WsClientCommand(String op,
+                           String id,
+                           String channel,
+                           String symbol,
+                           String period,
+                           Long userId) {
+        this(op, id, channel, symbol, period, userId, null);
+    }
 }

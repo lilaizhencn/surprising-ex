@@ -3,6 +3,7 @@ package com.surprising.websocket.provider.service;
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.candlestick.api.model.TradeEvent;
+import com.surprising.product.api.ProductLine;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
@@ -68,7 +69,7 @@ public class KafkaFanoutConsumer {
         try {
             CandleUpdatedEvent event = objectMapper.readValue(record.value(), CandleUpdatedEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "candle update");
-            candleUpdateCoalescer.publish(event);
+            candleUpdateCoalescer.publish(event, fanoutProductLine());
         } catch (Exception ex) {
             log.error("Failed to fanout candle update: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout candle update", ex);
@@ -83,8 +84,7 @@ public class KafkaFanoutConsumer {
         try {
             TradeEvent event = objectMapper.readValue(record.value(), TradeEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "public trade");
-            registry.publish(new SubscriptionTopic(WsChannel.TRADES, event.symbol(), null, null),
-                    event, event.tradeTime());
+            registry.publish(topic(WsChannel.TRADES, event.symbol(), null), event, event.tradeTime());
         } catch (Exception ex) {
             log.error("Failed to fanout public trade: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout public trade", ex);
@@ -99,8 +99,7 @@ public class KafkaFanoutConsumer {
         try {
             OrderBookDepthEvent event = objectMapper.readValue(record.value(), OrderBookDepthEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "order book depth");
-            registry.publish(new SubscriptionTopic(WsChannel.ORDER_BOOK_DEPTH, event.symbol(), null, null),
-                    event, event.eventTime());
+            registry.publish(topic(WsChannel.ORDER_BOOK_DEPTH, event.symbol(), null), event, event.eventTime());
         } catch (Exception ex) {
             log.error("Failed to fanout order book depth: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout order book depth", ex);
@@ -115,8 +114,7 @@ public class KafkaFanoutConsumer {
         try {
             IndexPriceEvent event = objectMapper.readValue(record.value(), IndexPriceEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "index price");
-            registry.publish(new SubscriptionTopic(WsChannel.INDEX_PRICE, event.symbol(), null, null),
-                    event, event.eventTime());
+            registry.publish(topic(WsChannel.INDEX_PRICE, event.symbol(), null), event, event.eventTime());
         } catch (Exception ex) {
             log.error("Failed to fanout index price: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout index price", ex);
@@ -131,8 +129,7 @@ public class KafkaFanoutConsumer {
         try {
             MarkPriceEvent event = objectMapper.readValue(record.value(), MarkPriceEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "mark price");
-            registry.publish(new SubscriptionTopic(WsChannel.MARK_PRICE, event.symbol(), null, null),
-                    event, event.eventTime());
+            registry.publish(topic(WsChannel.MARK_PRICE, event.symbol(), null), event, event.eventTime());
         } catch (Exception ex) {
             log.error("Failed to fanout mark price: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout mark price", ex);
@@ -148,8 +145,7 @@ public class KafkaFanoutConsumer {
         try {
             PerpFundingRateEvent event = objectMapper.readValue(record.value(), PerpFundingRateEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "funding rate");
-            registry.publish(new SubscriptionTopic(WsChannel.FUNDING_RATE, event.symbol(), null, null),
-                    event, event.eventTime());
+            registry.publish(topic(WsChannel.FUNDING_RATE, event.symbol(), null), event, event.eventTime());
         } catch (Exception ex) {
             log.error("Failed to fanout funding rate: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout funding rate", ex);
@@ -164,8 +160,7 @@ public class KafkaFanoutConsumer {
         try {
             OrderEvent event = objectMapper.readValue(record.value(), OrderEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "order event");
-            registry.publish(new SubscriptionTopic(WsChannel.ORDERS, event.symbol(), null, event.userId()),
-                    event, event.eventTime());
+            registry.publish(topic(WsChannel.ORDERS, event.symbol(), event.userId()), event, event.eventTime());
             publishExecutionReport(fromOrderEvent(event));
         } catch (Exception ex) {
             log.error("Failed to fanout order event: {}", ex.getMessage(), ex);
@@ -181,8 +176,7 @@ public class KafkaFanoutConsumer {
         try {
             MatchResultEvent event = objectMapper.readValue(record.value(), MatchResultEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "match result");
-            registry.publish(new SubscriptionTopic(WsChannel.MATCHES, event.symbol(), null, event.userId()),
-                    event, event.eventTime());
+            registry.publish(topic(WsChannel.MATCHES, event.symbol(), event.userId()), event, event.eventTime());
             publishExecutionReport(fromMatchResult(event));
         } catch (Exception ex) {
             log.error("Failed to fanout match result: {}", ex.getMessage(), ex);
@@ -198,12 +192,9 @@ public class KafkaFanoutConsumer {
         try {
             MatchTradeEvent event = objectMapper.readValue(record.value(), MatchTradeEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "match trade");
-            registry.publish(new SubscriptionTopic(WsChannel.TRADES, event.symbol(), null, null),
-                    event, event.eventTime());
-            registry.publish(new SubscriptionTopic(WsChannel.MATCHES, event.symbol(), null, event.takerUserId()),
-                    event, event.eventTime());
-            registry.publish(new SubscriptionTopic(WsChannel.MATCHES, event.symbol(), null, event.makerUserId()),
-                    event, event.eventTime());
+            registry.publish(topic(WsChannel.TRADES, event.symbol(), null), event, event.eventTime());
+            registry.publish(topic(WsChannel.MATCHES, event.symbol(), event.takerUserId()), event, event.eventTime());
+            registry.publish(topic(WsChannel.MATCHES, event.symbol(), event.makerUserId()), event, event.eventTime());
             publishExecutionReport(fromTakerTrade(event));
             publishExecutionReport(fromMakerTrade(event));
         } catch (Exception ex) {
@@ -220,8 +211,7 @@ public class KafkaFanoutConsumer {
         try {
             PositionUpdatedEvent event = objectMapper.readValue(record.value(), PositionUpdatedEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "position update");
-            registry.publish(new SubscriptionTopic(WsChannel.POSITIONS, event.symbol(), null, event.userId()),
-                    event, event.eventTime());
+            registry.publish(topic(WsChannel.POSITIONS, event.symbol(), event.userId()), event, event.eventTime());
         } catch (Exception ex) {
             log.error("Failed to fanout position update: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout position update", ex);
@@ -236,8 +226,8 @@ public class KafkaFanoutConsumer {
         try {
             RiskAccountUpdatedEvent event = objectMapper.readValue(record.value(), RiskAccountUpdatedEvent.class);
             requireMatchingAccountRiskKey(record.key(), event);
-            registry.publish(new SubscriptionTopic(WsChannel.ACCOUNT_RISK, SubscriptionTopic.WILDCARD, null,
-                    event.userId()), event, event.eventTime());
+            registry.publish(topic(WsChannel.ACCOUNT_RISK, SubscriptionTopic.WILDCARD, event.userId()),
+                    event, event.eventTime());
         } catch (Exception ex) {
             log.error("Failed to fanout account risk update: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout account risk update", ex);
@@ -252,8 +242,7 @@ public class KafkaFanoutConsumer {
         try {
             RiskPositionUpdatedEvent event = objectMapper.readValue(record.value(), RiskPositionUpdatedEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "position risk update");
-            registry.publish(new SubscriptionTopic(WsChannel.POSITION_RISK, event.symbol(), null, event.userId()),
-                    event, event.eventTime());
+            registry.publish(topic(WsChannel.POSITION_RISK, event.symbol(), event.userId()), event, event.eventTime());
         } catch (Exception ex) {
             log.error("Failed to fanout position risk update: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout position risk update", ex);
@@ -327,8 +316,16 @@ public class KafkaFanoutConsumer {
     }
 
     private void publishExecutionReport(ExecutionReportEvent report) {
-        registry.publish(new SubscriptionTopic(WsChannel.EXECUTION_REPORTS, report.symbol(), null, report.userId()),
+        registry.publish(topic(WsChannel.EXECUTION_REPORTS, report.symbol(), report.userId()),
                 report, report.eventTime());
+    }
+
+    private SubscriptionTopic topic(WsChannel channel, String symbol, Long userId) {
+        return new SubscriptionTopic(channel, symbol, null, userId, fanoutProductLine());
+    }
+
+    private ProductLine fanoutProductLine() {
+        return properties.getKafka().isProductTopicsEnabled() ? properties.getKafka().getProductLine() : null;
     }
 
     private ExecutionReportEvent fromOrderEvent(OrderEvent event) {

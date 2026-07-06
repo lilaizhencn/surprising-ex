@@ -3,6 +3,7 @@ package com.surprising.websocket.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import com.surprising.websocket.api.model.WsClientCommand;
@@ -44,6 +45,16 @@ class SubscriptionTopicTest {
         assertThat(topic.symbol()).isEqualTo("BTC-USDT-SPOT");
         assertThat(topic.period()).isNull();
         assertThat(topic.userId()).isNull();
+    }
+
+    @Test
+    void subscriptionCarriesProductLineFromCommand() {
+        SubscriptionTopic topic = SubscriptionTopic.fromCommand(
+                new WsClientCommand("subscribe", "req-product", "depth", "btc-usdt", null, null,
+                        "linear-delivery"),
+                null);
+
+        assertThat(topic.productLine()).isEqualTo(ProductLine.LINEAR_DELIVERY);
     }
 
     @Test

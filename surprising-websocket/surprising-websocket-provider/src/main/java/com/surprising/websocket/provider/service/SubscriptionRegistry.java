@@ -1,5 +1,6 @@
 package com.surprising.websocket.provider.service;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import com.surprising.websocket.api.model.WsServerMessage;
@@ -93,10 +94,9 @@ public class SubscriptionRegistry {
     }
 
     public void publish(SubscriptionTopic topic, Object payload, Instant eventTime) {
-        send(topic, payload, eventTime);
+        sendIncludingLegacyProductSubscribers(topic, payload, eventTime);
         if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.symbol())) {
-            send(new SubscriptionTopic(topic.channel(), SubscriptionTopic.WILDCARD, topic.period(), topic.userId()),
-                    payload, eventTime);
+            sendIncludingLegacyProductSubscribers(topic.withSymbol(SubscriptionTopic.WILDCARD), payload, eventTime);
         }
     }
 
@@ -179,6 +179,16 @@ public class SubscriptionRegistry {
 
     public SubscriptionTopic publicTopic(WsChannel channel, String symbol) {
         return new SubscriptionTopic(channel, symbol, null, null);
+    }
+
+    private void sendIncludingLegacyProductSubscribers(SubscriptionTopic topic, Object payload, Instant eventTime) {
+        send(topic, payload, eventTime);
+        if (topic.productLine() != null) {
+            return;
+        }
+        for (ProductLine productLine : ProductLine.values()) {
+            send(topic.withProductLine(productLine), payload, eventTime);
+        }
     }
 
     private static final class ChannelAccumulator {

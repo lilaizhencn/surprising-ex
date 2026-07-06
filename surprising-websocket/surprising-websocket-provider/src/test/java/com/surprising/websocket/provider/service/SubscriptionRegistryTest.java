@@ -7,6 +7,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.OrderEvent;
 import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.OrderStatus;
@@ -69,6 +70,22 @@ class SubscriptionRegistryTest {
         verify(failed).close();
         verify(healthy).send(anyString());
         assertThat(registry.subscriberCount(topic)).isEqualTo(1);
+    }
+
+    @Test
+    void legacyTopicPublishesToProductLineSubscribersDuringMigration() {
+        SubscriptionRegistry registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
+        ClientConnection productSubscriber = connection("s-product");
+        registry.add(productSubscriber);
+        registry.subscribe(productSubscriber,
+                new SubscriptionTopic(WsChannel.TRADES, "BTC-USDT", null, null, ProductLine.LINEAR_DELIVERY));
+
+        registry.publish(new SubscriptionTopic(WsChannel.TRADES, "BTC-USDT", null, null),
+                "payload", Instant.parse("2026-07-01T00:00:00Z"));
+
+        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
+        verify(productSubscriber).send(payload.capture());
+        assertThat(payload.getValue()).contains("\"productLine\":\"LINEAR_DELIVERY\"");
     }
 
     @Test

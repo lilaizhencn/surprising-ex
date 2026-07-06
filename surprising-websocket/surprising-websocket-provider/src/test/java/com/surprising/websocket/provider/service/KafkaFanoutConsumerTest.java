@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.OrderEvent;
 import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.OrderStatus;
@@ -26,6 +27,7 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.websocket.api.model.ExecutionReportEvent;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
+import com.surprising.websocket.provider.config.WebSocketProperties;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -65,6 +67,28 @@ class KafkaFanoutConsumerTest {
         assertThat(topic.getValue().channel()).isEqualTo(WsChannel.ORDER_BOOK_DEPTH);
         assertThat(topic.getValue().symbol()).isEqualTo("BTC-USDT-SPOT");
         assertThat(payload.getValue()).isEqualTo(event);
+    }
+
+    @Test
+    void productTopicFanoutPublishesCurrentProductLine() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        WebSocketProperties properties = new WebSocketProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer,
+                properties);
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        OrderBookDepthEvent event = new OrderBookDepthEvent("BTC-USDT-260925", 7L, 6L,
+                OrderBookDepthUpdateType.DELTA, 50,
+                List.of(new OrderBookLevel(99L, 5L, 1L)),
+                List.of(new OrderBookLevel(101L, 8L, 2L)), eventTime);
+
+        consumer.onOrderBookDepth(new ConsumerRecord<>("surprising.linear-delivery.orderbook.depth.v1", 0, 0L,
+                "BTC-USDT-260925", objectMapper.writeValueAsString(event)));
+
+        ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
+        verify(registry).publish(topic.capture(), org.mockito.ArgumentMatchers.eq(event), eq(eventTime));
+        assertThat(topic.getValue().productLine()).isEqualTo(ProductLine.LINEAR_DELIVERY);
     }
 
     @Test
