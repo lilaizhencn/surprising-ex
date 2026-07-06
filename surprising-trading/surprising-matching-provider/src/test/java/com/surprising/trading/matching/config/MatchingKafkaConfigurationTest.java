@@ -3,6 +3,7 @@ package com.surprising.trading.matching.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.matching.service.MatchingPartitionAssignmentGuard;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -68,5 +69,38 @@ class MatchingKafkaConfigurationTest {
                 .isEqualTo(ContainerProperties.AckMode.RECORD);
         assertThat(listenerFactory.getContainerProperties().getConsumerRebalanceListener())
                 .isInstanceOf(MatchingPartitionAssignmentGuard.class);
+    }
+
+    @Test
+    void defaultsToLegacyPerpTopicsUntilProductTopicsAreEnabled() {
+        MatchingProperties properties = new MatchingProperties();
+
+        assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-matching-v1");
+        assertThat(properties.getKafka().getOrderCommandsTopic())
+                .isEqualTo("surprising.perp.order.commands.v1");
+        assertThat(properties.getKafka().getMatchResultsTopic())
+                .isEqualTo("surprising.perp.match.results.v1");
+        assertThat(properties.getKafka().getMatchTradesTopic())
+                .isEqualTo("surprising.perp.match.trades.v1");
+        assertThat(properties.getKafka().getOrderBookDepthTopic())
+                .isEqualTo("surprising.perp.orderbook.depth.v1");
+    }
+
+    @Test
+    void canResolveMatchingTopicsAndGroupFromProductLine() {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+
+        assertThat(properties.getKafka().getGroupId())
+                .isEqualTo("surprising-inverse-perp-matching-v1");
+        assertThat(properties.getKafka().getOrderCommandsTopic())
+                .isEqualTo("surprising.inverse-perp.order.commands.v1");
+        assertThat(properties.getKafka().getMatchResultsTopic())
+                .isEqualTo("surprising.inverse-perp.match.results.v1");
+        assertThat(properties.getKafka().getMatchTradesTopic())
+                .isEqualTo("surprising.inverse-perp.match.trades.v1");
+        assertThat(properties.getKafka().getOrderBookDepthTopic())
+                .isEqualTo("surprising.inverse-perp.orderbook.depth.v1");
     }
 }

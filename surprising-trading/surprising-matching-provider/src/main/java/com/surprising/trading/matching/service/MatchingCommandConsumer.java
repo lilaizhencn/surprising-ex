@@ -3,9 +3,11 @@ package com.surprising.trading.matching.service;
 import com.surprising.trading.api.KafkaSymbolKeyValidator;
 import com.surprising.trading.api.KafkaSymbolKeyValidator.SymbolKeyMismatchException;
 import com.surprising.trading.api.model.OrderCommandEvent;
+import com.surprising.trading.matching.config.MatchingProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -21,22 +23,32 @@ public class MatchingCommandConsumer {
     private final ObjectMapper objectMapper;
     private final MatchingService matchingService;
     private final MatchingPartitionAssignmentGuard partitionAssignmentGuard;
+    private final MatchingProperties properties;
     private final ReentrantLock[] symbolLocks = new ReentrantLock[SYMBOL_LOCK_STRIPES];
 
     public MatchingCommandConsumer(ObjectMapper objectMapper,
                                    MatchingService matchingService,
                                    MatchingPartitionAssignmentGuard partitionAssignmentGuard) {
+        this(objectMapper, matchingService, partitionAssignmentGuard, new MatchingProperties());
+    }
+
+    @Autowired
+    public MatchingCommandConsumer(ObjectMapper objectMapper,
+                                   MatchingService matchingService,
+                                   MatchingPartitionAssignmentGuard partitionAssignmentGuard,
+                                   MatchingProperties properties) {
         this.objectMapper = objectMapper;
         this.matchingService = matchingService;
         this.partitionAssignmentGuard = partitionAssignmentGuard;
+        this.properties = properties;
         for (int i = 0; i < symbolLocks.length; i++) {
             symbolLocks[i] = new ReentrantLock();
         }
     }
 
     @KafkaListener(
-            topics = "${surprising.trading.matching.kafka.order-commands-topic}",
-            groupId = "${surprising.trading.matching.kafka.group-id}",
+            topics = "#{__listener.orderCommandsTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "matchingKafkaListenerContainerFactory")
     public void onCommand(ConsumerRecord<String, String> record) {
         OrderCommandEvent command = null;
@@ -72,5 +84,13 @@ public class MatchingCommandConsumer {
 
     private ReentrantLock symbolLock(String symbol) {
         return symbolLocks[Math.floorMod(symbol.hashCode(), symbolLocks.length)];
+    }
+
+    public String orderCommandsTopic() {
+        return properties.getKafka().getOrderCommandsTopic();
+    }
+
+    public String groupId() {
+        return properties.getKafka().getGroupId();
     }
 }

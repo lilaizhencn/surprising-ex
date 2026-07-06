@@ -1,5 +1,7 @@
 package com.surprising.trading.matching.config;
 
+import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -56,6 +58,8 @@ public class MatchingProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        private boolean productTopicsEnabled;
         private String groupId = "surprising-matching-v1";
         private String clientId = "surprising-matching";
         private String orderCommandsTopic = "surprising.perp.order.commands.v1";
@@ -75,8 +79,24 @@ public class MatchingProperties {
             this.bootstrapServers = bootstrapServers;
         }
 
+        public ProductLine getProductLine() {
+            return productLine;
+        }
+
+        public void setProductLine(ProductLine productLine) {
+            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        }
+
+        public boolean isProductTopicsEnabled() {
+            return productTopicsEnabled;
+        }
+
+        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
+            this.productTopicsEnabled = productTopicsEnabled;
+        }
+
         public String getGroupId() {
-            return groupId;
+            return productTopicsEnabled ? productTopics().consumerGroup("matching") : groupId;
         }
 
         public void setGroupId(String groupId) {
@@ -92,7 +112,7 @@ public class MatchingProperties {
         }
 
         public String getOrderCommandsTopic() {
-            return orderCommandsTopic;
+            return productTopicsEnabled ? productTopics().orderCommandsTopic() : orderCommandsTopic;
         }
 
         public void setOrderCommandsTopic(String orderCommandsTopic) {
@@ -100,7 +120,7 @@ public class MatchingProperties {
         }
 
         public String getMatchResultsTopic() {
-            return matchResultsTopic;
+            return productTopicsEnabled ? productTopics().matchResultsTopic() : matchResultsTopic;
         }
 
         public void setMatchResultsTopic(String matchResultsTopic) {
@@ -108,7 +128,7 @@ public class MatchingProperties {
         }
 
         public String getMatchTradesTopic() {
-            return matchTradesTopic;
+            return productTopicsEnabled ? productTopics().matchTradesTopic() : matchTradesTopic;
         }
 
         public void setMatchTradesTopic(String matchTradesTopic) {
@@ -116,7 +136,7 @@ public class MatchingProperties {
         }
 
         public String getOrderBookDepthTopic() {
-            return orderBookDepthTopic;
+            return productTopicsEnabled ? productTopics().orderBookDepthTopic() : orderBookDepthTopic;
         }
 
         public void setOrderBookDepthTopic(String orderBookDepthTopic) {
@@ -153,6 +173,10 @@ public class MatchingProperties {
 
         public void setPartitionAssignmentStartupGraceMs(long partitionAssignmentStartupGraceMs) {
             this.partitionAssignmentStartupGraceMs = partitionAssignmentStartupGraceMs;
+        }
+
+        private ProductTopicNames productTopics() {
+            return ProductTopicNames.of(productLine);
         }
     }
 

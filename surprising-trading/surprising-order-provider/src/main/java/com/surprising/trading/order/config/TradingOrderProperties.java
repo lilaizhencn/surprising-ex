@@ -1,5 +1,7 @@
 package com.surprising.trading.order.config;
 
+import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -54,6 +56,8 @@ public class TradingOrderProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        private boolean productTopicsEnabled;
         private String orderCommandsTopic = "surprising.perp.order.commands.v1";
         private String orderEventsTopic = "surprising.perp.order.events.v1";
 
@@ -65,8 +69,24 @@ public class TradingOrderProperties {
             this.bootstrapServers = bootstrapServers;
         }
 
+        public ProductLine getProductLine() {
+            return productLine;
+        }
+
+        public void setProductLine(ProductLine productLine) {
+            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        }
+
+        public boolean isProductTopicsEnabled() {
+            return productTopicsEnabled;
+        }
+
+        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
+            this.productTopicsEnabled = productTopicsEnabled;
+        }
+
         public String getOrderCommandsTopic() {
-            return orderCommandsTopic;
+            return productTopicsEnabled ? productTopics().orderCommandsTopic() : orderCommandsTopic;
         }
 
         public void setOrderCommandsTopic(String orderCommandsTopic) {
@@ -74,11 +94,15 @@ public class TradingOrderProperties {
         }
 
         public String getOrderEventsTopic() {
-            return orderEventsTopic;
+            return productTopicsEnabled ? productTopics().orderEventsTopic() : orderEventsTopic;
         }
 
         public void setOrderEventsTopic(String orderEventsTopic) {
             this.orderEventsTopic = orderEventsTopic;
+        }
+
+        private ProductTopicNames productTopics() {
+            return ProductTopicNames.of(productLine);
         }
     }
 

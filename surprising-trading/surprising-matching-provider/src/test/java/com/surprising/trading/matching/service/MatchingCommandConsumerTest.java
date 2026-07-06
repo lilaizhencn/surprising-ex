@@ -8,6 +8,7 @@ import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.TimeInForce;
+import com.surprising.trading.matching.config.MatchingProperties;
 import java.time.Instant;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
@@ -73,6 +74,18 @@ class MatchingCommandConsumerTest {
         assertThat(matchingService.processed).isNull();
         assertThat(guard.processedPartition).isEqualTo(-1);
         assertThat(guard.restartReason).isNull();
+    }
+
+    @Test
+    void exposesResolvedListenerTopicAndGroupFromProperties() {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductLine(com.surprising.product.api.ProductLine.SPOT);
+        properties.getKafka().setProductTopicsEnabled(true);
+        MatchingCommandConsumer consumer = new MatchingCommandConsumer(new ObjectMapper(),
+                new FailingMatchingService(), new RecordingPartitionGuard(), properties);
+
+        assertThat(consumer.orderCommandsTopic()).isEqualTo("surprising.spot.order.commands.v1");
+        assertThat(consumer.groupId()).isEqualTo("surprising-spot-matching-v1");
     }
 
     private static final class FailingMatchingService extends MatchingService {
