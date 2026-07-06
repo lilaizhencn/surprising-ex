@@ -68,3 +68,19 @@ option-order-provider -> option-matching-provider -> option-exercise-settlement
 5. 加交割合约 instrument 字段、只减仓窗口和交割结算任务。
 6. 加期权 instrument 字段、premium/保证金冻结和自动行权结算。
 7. 同步用户 Web、Flutter、后台 Web 的产品线筛选、下单面板、持仓/订单/结算展示。
+
+## Topic 初始化
+
+`scripts/create-topics.sh` 默认保留现有 `surprising.perp.*` topic，并额外创建各产品线 topic。轻量校验可以使用：
+
+```bash
+DRY_RUN=true ./scripts/create-topics.sh
+```
+
+临时只创建部分产品线时可以覆盖：
+
+```bash
+PRODUCT_TOPIC_LINES="spot linear-perp inverse-perp" ./scripts/create-topics.sh
+```
+
+provider 第一阶段仍默认使用 legacy topic；要启动独立产品线实例时，设置对应 provider 的 `product-line`，并打开 `product-topics-enabled=true`。
