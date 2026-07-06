@@ -2,10 +2,13 @@ package com.surprising.trading.matching.repository;
 
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.TimeInForce;
+import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.RecoveredOrderBookOrder;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -13,15 +16,21 @@ import org.springframework.stereotype.Repository;
 public class MatchingOrderBookRecoveryRepository {
 
     private final JdbcTemplate jdbcTemplate;
+    private final MatchingProperties properties;
 
     public MatchingOrderBookRecoveryRepository(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, new MatchingProperties());
+    }
+
+    public MatchingOrderBookRecoveryRepository(JdbcTemplate jdbcTemplate, MatchingProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
+        this.properties = properties;
     }
 
     public List<RecoveredOrderBookOrder> recoverableOpenOrdersAfter(Instant lastCreatedAt,
                                                                     long lastOrderId,
                                                                     int limit) {
-        return jdbcTemplate.query("""
+        StringBuilder sql = new StringBuilder("""
                 SELECT o.order_id, o.user_id, o.symbol, o.side, o.time_in_force,
                        o.price_ticks, o.remaining_quantity_steps, o.created_at
                   FROM trading_orders o
@@ -32,6 +41,13 @@ public class MatchingOrderBookRecoveryRepository {
                    AND o.order_type = 'LIMIT'
                    AND o.time_in_force IN ('GTC', 'GTX')
                    AND o.remaining_quantity_steps > 0
+                """);
+        List<Object> args = new ArrayList<>();
+        productContractTypeFilter().ifPresent(contractType -> {
+            sql.append("   AND i.contract_type = ?\n");
+            args.add(contractType);
+        });
+        sql.append("""
                    AND EXISTS (
                        SELECT 1
                          FROM trading_match_results r
@@ -45,7 +61,12 @@ public class MatchingOrderBookRecoveryRepository {
                    )
                  ORDER BY o.created_at ASC, o.order_id ASC
                  LIMIT ?
-                """, (rs, rowNum) -> new RecoveredOrderBookOrder(
+                """);
+        args.add(Timestamp.from(lastCreatedAt));
+        args.add(Timestamp.from(lastCreatedAt));
+        args.add(lastOrderId);
+        args.add(Math.max(1, limit));
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new RecoveredOrderBookOrder(
                 rs.getLong("order_id"),
                 rs.getLong("user_id"),
                 rs.getString("symbol"),
@@ -54,6 +75,13 @@ public class MatchingOrderBookRecoveryRepository {
                 rs.getLong("price_ticks"),
                 rs.getLong("remaining_quantity_steps"),
                 rs.getTimestamp("created_at").toInstant()),
-                Timestamp.from(lastCreatedAt), Timestamp.from(lastCreatedAt), lastOrderId, Math.max(1, limit));
+                args.toArray());
+    }
+
+    private Optional<String> productContractTypeFilter() {
+        MatchingProperties.Kafka kafka = properties.getKafka();
+        return kafka.isProductTopicsEnabled()
+                ? Optional.of(kafka.getProductLine().contractTypeCode())
+                : Optional.empty();
     }
 }

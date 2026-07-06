@@ -18,6 +18,17 @@ class ProductLineTest {
     }
 
     @Test
+    void mapsContractTypesToProductLines() {
+        assertThat(ProductLine.requireContractTypeCode("SPOT")).isEqualTo(ProductLine.SPOT);
+        assertThat(ProductLine.requireContractTypeCode("linear_perpetual")).isEqualTo(ProductLine.LINEAR_PERPETUAL);
+        assertThat(ProductLine.requireContractTypeCode("INVERSE_PERPETUAL")).isEqualTo(ProductLine.INVERSE_PERPETUAL);
+        assertThat(ProductLine.requireContractTypeCode("LINEAR_DELIVERY")).isEqualTo(ProductLine.LINEAR_DELIVERY);
+        assertThat(ProductLine.requireContractTypeCode("INVERSE_DELIVERY")).isEqualTo(ProductLine.INVERSE_DELIVERY);
+        assertThat(ProductLine.requireContractTypeCode("VANILLA_OPTION")).isEqualTo(ProductLine.OPTION);
+        assertThat(ProductLine.OPTION.contractTypeCode()).isEqualTo("VANILLA_OPTION");
+    }
+
+    @Test
     void exposesProductCapabilities() {
         assertThat(ProductLine.SPOT.isDerivative()).isFalse();
         assertThat(ProductLine.LINEAR_PERPETUAL.isFundingProduct()).isTrue();
@@ -31,5 +42,12 @@ class ProductLineTest {
         assertThatThrownBy(() -> ProductLine.requireAccountTypeCode("MARGIN"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("unsupported product account type");
+    }
+
+    @Test
+    void rejectsUnknownContractType() {
+        assertThatThrownBy(() -> ProductLine.requireContractTypeCode("QUANTO"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unsupported product contract type");
     }
 }

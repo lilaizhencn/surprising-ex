@@ -2,11 +2,14 @@ package com.surprising.trading.matching.repository;
 
 import com.surprising.trading.matching.model.InstrumentSymbol;
 import com.surprising.trading.matching.model.MatchingSymbol;
+import com.surprising.trading.matching.config.MatchingProperties;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,39 +18,52 @@ public class MatchingSymbolRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final MatchingSequenceRepository sequenceRepository;
+    private final MatchingProperties properties;
 
     public MatchingSymbolRepository(JdbcTemplate jdbcTemplate, MatchingSequenceRepository sequenceRepository) {
+        this(jdbcTemplate, sequenceRepository, new MatchingProperties());
+    }
+
+    public MatchingSymbolRepository(JdbcTemplate jdbcTemplate,
+                                    MatchingSequenceRepository sequenceRepository,
+                                    MatchingProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
+        this.properties = properties;
     }
 
     public List<InstrumentSymbol> currentTradingSymbols() {
-        return jdbcTemplate.query("""
+        StringBuilder sql = new StringBuilder("""
                 SELECT i.symbol, i.base_asset, i.quote_asset, i.settle_asset
                   FROM instruments i
                   JOIN instrument_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
                  WHERE i.status IN ('TRADING', 'HALT', 'SETTLING')
-                 ORDER BY i.symbol ASC
-                """, (rs, rowNum) -> new InstrumentSymbol(
-                rs.getString("symbol"),
-                rs.getString("base_asset"),
-                rs.getString("quote_asset"),
-                rs.getString("settle_asset")));
+                """);
+        List<Object> args = new ArrayList<>();
+        productContractTypeFilter().ifPresent(contractType -> {
+            sql.append("   AND i.contract_type = ?\n");
+            args.add(contractType);
+        });
+        sql.append(" ORDER BY i.symbol ASC");
+        return jdbcTemplate.query(sql.toString(), instrumentMapper(), args.toArray());
     }
 
     public Optional<InstrumentSymbol> currentTradingSymbol(String symbol) {
-        return jdbcTemplate.query("""
+        StringBuilder sql = new StringBuilder("""
                 SELECT i.symbol, i.base_asset, i.quote_asset, i.settle_asset
                   FROM instruments i
                   JOIN instrument_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
                  WHERE i.symbol = ? AND i.status IN ('TRADING', 'HALT', 'SETTLING')
-                """, (rs, rowNum) -> new InstrumentSymbol(
-                rs.getString("symbol"),
-                rs.getString("base_asset"),
-                rs.getString("quote_asset"),
-                rs.getString("settle_asset")), symbol).stream().findFirst();
+                """);
+        List<Object> args = new ArrayList<>();
+        args.add(symbol);
+        productContractTypeFilter().ifPresent(contractType -> {
+            sql.append("   AND i.contract_type = ?\n");
+            args.add(contractType);
+        });
+        return jdbcTemplate.query(sql.toString(), instrumentMapper(), args.toArray()).stream().findFirst();
     }
 
     @Transactional
@@ -104,5 +120,20 @@ public class MatchingSymbolRepository {
                 """, (rs, rowNum) -> rs.getInt("asset_id"), asset).stream()
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("failed to ensure matching asset " + asset));
+    }
+
+    private Optional<String> productContractTypeFilter() {
+        MatchingProperties.Kafka kafka = properties.getKafka();
+        return kafka.isProductTopicsEnabled()
+                ? Optional.of(kafka.getProductLine().contractTypeCode())
+                : Optional.empty();
+    }
+
+    private RowMapper<InstrumentSymbol> instrumentMapper() {
+        return (rs, rowNum) -> new InstrumentSymbol(
+                rs.getString("symbol"),
+                rs.getString("base_asset"),
+                rs.getString("quote_asset"),
+                rs.getString("settle_asset"));
     }
 }

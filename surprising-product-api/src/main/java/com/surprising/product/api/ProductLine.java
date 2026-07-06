@@ -40,6 +40,17 @@ public enum ProductLine {
         return accountTypeCode;
     }
 
+    public String contractTypeCode() {
+        return switch (this) {
+            case SPOT -> "SPOT";
+            case LINEAR_PERPETUAL -> "LINEAR_PERPETUAL";
+            case INVERSE_PERPETUAL -> "INVERSE_PERPETUAL";
+            case LINEAR_DELIVERY -> "LINEAR_DELIVERY";
+            case INVERSE_DELIVERY -> "INVERSE_DELIVERY";
+            case OPTION -> "VANILLA_OPTION";
+        };
+    }
+
     public boolean isDerivative() {
         return this != SPOT;
     }
@@ -70,9 +81,24 @@ public enum ProductLine {
         return Optional.empty();
     }
 
+    public static Optional<ProductLine> fromContractTypeCode(String contractTypeCode) {
+        String normalized = normalize(contractTypeCode);
+        for (ProductLine productLine : values()) {
+            if (productLine.contractTypeCode().equals(normalized)) {
+                return Optional.of(productLine);
+            }
+        }
+        return Optional.empty();
+    }
+
     public static ProductLine requireAccountTypeCode(String accountTypeCode) {
         return fromAccountTypeCode(accountTypeCode)
                 .orElseThrow(() -> new IllegalArgumentException("unsupported product account type: " + accountTypeCode));
+    }
+
+    public static ProductLine requireContractTypeCode(String contractTypeCode) {
+        return fromContractTypeCode(contractTypeCode)
+                .orElseThrow(() -> new IllegalArgumentException("unsupported product contract type: " + contractTypeCode));
     }
 
     private static String normalize(String value) {
