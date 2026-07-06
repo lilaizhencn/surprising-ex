@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.config;
 
+import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -332,6 +334,8 @@ public class GatewayProperties {
         private boolean enabled = false;
         private String bootstrapServers = "localhost:9092";
         private String clientId = "surprising-gateway-admin-monitor";
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        private boolean productTopicsEnabled;
         private Duration requestTimeout = Duration.ofSeconds(3);
         private int maxPartitionsPerGroup = 200;
         private List<KafkaConsumerGroup> consumerGroups = defaultKafkaConsumerGroups();
@@ -364,6 +368,22 @@ public class GatewayProperties {
                     : clientId;
         }
 
+        public ProductLine getProductLine() {
+            return productLine;
+        }
+
+        public void setProductLine(ProductLine productLine) {
+            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        }
+
+        public boolean isProductTopicsEnabled() {
+            return productTopicsEnabled;
+        }
+
+        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
+            this.productTopicsEnabled = productTopicsEnabled;
+        }
+
         public Duration getRequestTimeout() {
             return requestTimeout;
         }
@@ -383,7 +403,7 @@ public class GatewayProperties {
         }
 
         public List<KafkaConsumerGroup> getConsumerGroups() {
-            return consumerGroups;
+            return productTopicsEnabled ? productKafkaConsumerGroups(productLine) : consumerGroups;
         }
 
         public void setConsumerGroups(List<KafkaConsumerGroup> consumerGroups) {
@@ -406,6 +426,26 @@ public class GatewayProperties {
                             "surprising.perp.funding.rate.v1")),
                     new KafkaConsumerGroup("surprising-insurance-v1", List.of(
                             "surprising.account.liquidation-fee.events.v1")));
+        }
+
+        private static List<KafkaConsumerGroup> productKafkaConsumerGroups(ProductLine productLine) {
+            ProductTopicNames topics = ProductTopicNames.of(productLine);
+            return List.of(
+                    new KafkaConsumerGroup(topics.consumerGroup("matching"),
+                            List.of(topics.orderCommandsTopic())),
+                    new KafkaConsumerGroup(topics.consumerGroup("account"),
+                            List.of(topics.matchTradesTopic())),
+                    new KafkaConsumerGroup(topics.consumerGroup("risk"),
+                            List.of(topics.accountPositionEventsTopic())),
+                    new KafkaConsumerGroup(topics.consumerGroup("liquidation"),
+                            List.of(topics.liquidationCandidatesTopic(), topics.matchResultsTopic())),
+                    new KafkaConsumerGroup(topics.consumerGroup("trigger"),
+                            List.of(topics.markPriceTopic(), topics.indexPriceTopic(), topics.matchTradesTopic())),
+                    new KafkaConsumerGroup(topics.consumerGroup("mark-price"),
+                            List.of(topics.indexPriceTopic(), topics.bookTickerTopic(),
+                                    topics.publicTradesTopic(), topics.fundingRateTopic())),
+                    new KafkaConsumerGroup(topics.consumerGroup("candlestick"),
+                            List.of(topics.matchTradesTopic())));
         }
     }
 

@@ -223,6 +223,8 @@ surprising:
         enabled: ${ADMIN_KAFKA_LAG_ENABLED:false}
         bootstrap-servers: ${ADMIN_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
         client-id: surprising-gateway-admin-monitor
+        product-line: LINEAR_PERPETUAL
+        product-topics-enabled: false
         request-timeout: 3s
         max-partitions-per-group: 200
         consumer-groups:
