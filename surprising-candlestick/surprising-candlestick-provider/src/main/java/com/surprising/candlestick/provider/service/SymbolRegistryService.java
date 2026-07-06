@@ -67,13 +67,16 @@ public class SymbolRegistryService {
         if ("CANDLESTICK_SYMBOLS".equalsIgnoreCase(source)) {
             return "SELECT symbol FROM candlestick_symbols WHERE enabled = TRUE";
         }
+        String productFilter = properties.getKafka().isProductTopicsEnabled()
+                ? "i.contract_type = '" + properties.getKafka().getProductLine().contractTypeCode() + "'"
+                : "i.instrument_type = 'PERPETUAL'";
         return """
                 SELECT i.symbol
                   FROM instruments i
                   JOIN instrument_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
-                 WHERE i.instrument_type = 'PERPETUAL'
+                 WHERE %s
                    AND i.status IN ('PRE_TRADING', 'TRADING', 'HALT')
-                """;
+                """.formatted(productFilter);
     }
 }

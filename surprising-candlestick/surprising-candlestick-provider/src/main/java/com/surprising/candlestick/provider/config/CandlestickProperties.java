@@ -1,5 +1,7 @@
 package com.surprising.candlestick.provider.config;
 
+import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -75,6 +77,8 @@ public class CandlestickProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        private boolean productTopicsEnabled;
         private String tradeTopic = "surprising.perp.match.trades.v1";
         private String candleTopic = "surprising.perp.candle.events.v1";
         private String applicationId = "surprising-candlestick-v1";
@@ -87,8 +91,24 @@ public class CandlestickProperties {
             this.bootstrapServers = bootstrapServers;
         }
 
+        public ProductLine getProductLine() {
+            return productLine;
+        }
+
+        public void setProductLine(ProductLine productLine) {
+            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        }
+
+        public boolean isProductTopicsEnabled() {
+            return productTopicsEnabled;
+        }
+
+        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
+            this.productTopicsEnabled = productTopicsEnabled;
+        }
+
         public String getTradeTopic() {
-            return tradeTopic;
+            return productTopicsEnabled ? productTopics().matchTradesTopic() : tradeTopic;
         }
 
         public void setTradeTopic(String tradeTopic) {
@@ -96,7 +116,7 @@ public class CandlestickProperties {
         }
 
         public String getCandleTopic() {
-            return candleTopic;
+            return productTopicsEnabled ? productTopics().candleEventsTopic() : candleTopic;
         }
 
         public void setCandleTopic(String candleTopic) {
@@ -104,11 +124,15 @@ public class CandlestickProperties {
         }
 
         public String getApplicationId() {
-            return applicationId;
+            return productTopicsEnabled ? productTopics().consumerGroup("candlestick") : applicationId;
         }
 
         public void setApplicationId(String applicationId) {
             this.applicationId = applicationId;
+        }
+
+        private ProductTopicNames productTopics() {
+            return ProductTopicNames.of(productLine);
         }
     }
 
