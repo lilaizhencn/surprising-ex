@@ -141,7 +141,7 @@ public class RiskRepository {
                            pm.mark_price_ticks,
                            COALESCE(position_margin.margin_units, 0) AS position_margin_units,
                            CASE
-                               WHEN i.contract_type = 'INVERSE_PERPETUAL' THEN
+                               WHEN i.contract_type IN ('INVERSE_PERPETUAL', 'INVERSE_DELIVERY') THEN
                                    ROUND((abs(p.signed_quantity_steps)::numeric
                                       * i.notional_multiplier_units::numeric
                                       * ss.scale_units::numeric)
@@ -238,7 +238,7 @@ public class RiskRepository {
                            pm.mark_price_ticks,
                            COALESCE(position_margin.margin_units, 0) AS position_margin_units,
                            CASE
-                               WHEN i.contract_type = 'INVERSE_PERPETUAL' THEN
+                               WHEN i.contract_type IN ('INVERSE_PERPETUAL', 'INVERSE_DELIVERY') THEN
                                    ROUND((abs(p.signed_quantity_steps)::numeric
                                       * i.notional_multiplier_units::numeric
                                       * ss.scale_units::numeric)
@@ -358,20 +358,31 @@ public class RiskRepository {
     public long walletBalanceUnits(long userId, String settleAsset) {
         return jdbcTemplate.query("""
                 WITH account_context AS (
-                    SELECT CASE
-                               WHEN EXISTS (
-                                   SELECT 1
-                                     FROM account_positions p
-                                     JOIN instruments i
-                                       ON i.symbol = p.symbol
-                                      AND i.version = p.instrument_version
-                                    WHERE p.user_id = ?
-                                      AND i.settle_asset = ?
-                                      AND i.contract_type = 'INVERSE_PERPETUAL'
-                                      AND p.signed_quantity_steps <> 0
-                               ) THEN 'COIN_PERPETUAL'
-                               ELSE 'USDT_PERPETUAL'
-                           END AS account_type
+                    SELECT COALESCE((
+                               SELECT CASE i.contract_type
+                                          WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
+                                          WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
+                                          WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
+                                          WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                                          ELSE 'USDT_PERPETUAL'
+                                      END
+                                 FROM account_positions p
+                                 JOIN instruments i
+                                   ON i.symbol = p.symbol
+                                  AND i.version = p.instrument_version
+                                WHERE p.user_id = ?
+                                  AND i.settle_asset = ?
+                                  AND p.signed_quantity_steps <> 0
+                                ORDER BY CASE i.contract_type
+                                             WHEN 'INVERSE_PERPETUAL' THEN 1
+                                             WHEN 'LINEAR_PERPETUAL' THEN 2
+                                             WHEN 'INVERSE_DELIVERY' THEN 3
+                                             WHEN 'LINEAR_DELIVERY' THEN 4
+                                             WHEN 'VANILLA_OPTION' THEN 5
+                                             ELSE 6
+                                         END
+                                LIMIT 1
+                           ), 'USDT_PERPETUAL') AS account_type
                 ),
                 isolated_position_locks AS (
                     SELECT COALESCE(SUM(m.margin_units), 0) AS units
@@ -392,16 +403,16 @@ public class RiskRepository {
                        AND r.status IN ('ACTIVE', 'PARTIALLY_RELEASED', 'PARTIALLY_CONSUMED')
                 )
                 SELECT CASE
-                           WHEN ctx.account_type = 'COIN_PERPETUAL' THEN COALESCE(
-                               pb.available_units + pb.locked_units
-                               - isolated_position_locks.units
-                               - isolated_order_locks.units
-                               - COALESCE(pd.deficit_units, 0), 0)
-                           ELSE COALESCE(
+                           WHEN ctx.account_type = 'USDT_PERPETUAL' THEN COALESCE(
                                b.available_units + b.locked_units
                                - isolated_position_locks.units
                                - isolated_order_locks.units
                                - COALESCE(d.deficit_units, 0), 0)
+                           ELSE COALESCE(
+                               pb.available_units + pb.locked_units
+                               - isolated_position_locks.units
+                               - isolated_order_locks.units
+                               - COALESCE(pd.deficit_units, 0), 0)
                        END
                   FROM account_context ctx
                   CROSS JOIN isolated_position_locks

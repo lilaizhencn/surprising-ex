@@ -74,6 +74,28 @@ class PositionCalculatorTest {
     }
 
     @Test
+    void deliveryContractsReuseLinearAndInversePositionRules() {
+        var linearChange = calculator.apply(new PositionState(10L, 4L, 100L, 0L),
+                OrderSide.SELL, 130L, 4L, linearDelivery(), linearDelivery());
+        var inverseChange = calculator.apply(new PositionState(1L, 5L, 50_000L, 0L),
+                OrderSide.BUY, 100_000L, 1L, inverseDelivery(), inverseDelivery());
+
+        assertThat(linearChange.realizedPnlDeltaUnits()).isEqualTo(120L);
+        assertThat(inverseChange.next()).isEqualTo(new PositionState(2L, 5L, 66_667L, 0L));
+    }
+
+    @Test
+    void rejectsUnsupportedContractTypesForPositions() {
+        ContractSpec option = new ContractSpec(4L, ContractType.VANILLA_OPTION, "USDT", 1L,
+                100_000_000L, 100_000_000L, 0L, 0L);
+
+        assertThatThrownBy(() -> calculator.apply(new PositionState(0L, 0L, 0L, 0L),
+                OrderSide.BUY, 120L, 1L, option, option))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unsupported position contract type");
+    }
+
+    @Test
     void flipUsesFillInstrumentVersionForNewExposure() {
         ContractSpec nextVersion = new ContractSpec(3L, ContractType.LINEAR_PERPETUAL,
                 "USDT", 1L, 100_000_000L, 100_000_000L, 0L, 0L);
@@ -116,6 +138,16 @@ class PositionCalculatorTest {
 
     private ContractSpec inverse() {
         return new ContractSpec(2L, ContractType.INVERSE_PERPETUAL, "BTC",
+                10_000_000_000L, 100_000_000L, 100_000_000L, 0L, 0L);
+    }
+
+    private ContractSpec linearDelivery() {
+        return new ContractSpec(4L, ContractType.LINEAR_DELIVERY, "USDT", 1L,
+                100_000_000L, 100_000_000L, 0L, 0L);
+    }
+
+    private ContractSpec inverseDelivery() {
+        return new ContractSpec(5L, ContractType.INVERSE_DELIVERY, "BTC",
                 10_000_000_000L, 100_000_000L, 100_000_000L, 0L, 0L);
     }
 }

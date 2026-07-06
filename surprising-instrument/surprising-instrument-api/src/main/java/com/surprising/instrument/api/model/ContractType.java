@@ -22,6 +22,14 @@ public enum ContractType {
         return this == VANILLA_OPTION;
     }
 
+    public boolean isLinear() {
+        return this == LINEAR_PERPETUAL || this == LINEAR_DELIVERY;
+    }
+
+    public boolean isInverse() {
+        return this == INVERSE_PERPETUAL || this == INVERSE_DELIVERY;
+    }
+
     public ProductLine productLine() {
         return switch (this) {
             case SPOT -> ProductLine.SPOT;

@@ -20,10 +20,11 @@ public final class PerpetualContractMath {
                                      long notionalMultiplierUnits,
                                      long priceTickUnits,
                                      long settleScaleUnits) {
+        requireLinearOrInverse(contractType);
         validatePositionInputs(signedQuantitySteps, markPriceTicks, markPriceTicks, notionalMultiplierUnits,
                 priceTickUnits, settleScaleUnits);
         BigInteger quantity = big(signedQuantitySteps).abs();
-        if (contractType == ContractType.INVERSE_PERPETUAL) {
+        if (contractType.isInverse()) {
             BigInteger numerator = quantity.multiply(big(notionalMultiplierUnits)).multiply(big(settleScaleUnits));
             BigInteger denominator = big(markPriceTicks).multiply(big(priceTickUnits));
             return toLongRounded(numerator, denominator);
@@ -36,11 +37,12 @@ public final class PerpetualContractMath {
                                             long notionalMultiplierUnits,
                                             long priceTickUnits,
                                             long settleScaleUnits) {
+        requireLinearOrInverse(contractType);
         requirePositive(markPriceTicks, "markPriceTicks");
         requirePositive(notionalMultiplierUnits, "notionalMultiplierUnits");
         requirePositive(priceTickUnits, "priceTickUnits");
         requirePositive(settleScaleUnits, "settleScaleUnits");
-        if (contractType == ContractType.INVERSE_PERPETUAL) {
+        if (contractType.isInverse()) {
             BigInteger numerator = big(notionalMultiplierUnits).multiply(big(settleScaleUnits));
             BigInteger denominator = big(markPriceTicks).multiply(big(priceTickUnits));
             return toLongRounded(numerator, denominator);
@@ -55,10 +57,11 @@ public final class PerpetualContractMath {
                                           long notionalMultiplierUnits,
                                           long priceTickUnits,
                                           long settleScaleUnits) {
+        requireLinearOrInverse(contractType);
         validatePositionInputs(signedQuantitySteps, entryPriceTicks, markPriceTicks, notionalMultiplierUnits,
                 priceTickUnits, settleScaleUnits);
         BigInteger priceDiff = big(Math.subtractExact(markPriceTicks, entryPriceTicks));
-        if (contractType == ContractType.INVERSE_PERPETUAL) {
+        if (contractType.isInverse()) {
             BigInteger numerator = big(signedQuantitySteps)
                     .multiply(big(notionalMultiplierUnits))
                     .multiply(big(settleScaleUnits))
@@ -103,13 +106,14 @@ public final class PerpetualContractMath {
                                     long priceTickUnits,
                                     long settleScaleUnits,
                                     long marginRatePpm) {
+        requireLinearOrInverse(contractType);
         validatePositionInputs(signedQuantitySteps, markPriceTicks, markPriceTicks, notionalMultiplierUnits,
                 priceTickUnits, settleScaleUnits);
         requirePositive(marginRatePpm, "marginRatePpm");
         BigInteger quantity = big(signedQuantitySteps).abs();
         BigInteger numerator;
         BigInteger denominator;
-        if (contractType == ContractType.INVERSE_PERPETUAL) {
+        if (contractType.isInverse()) {
             numerator = quantity
                     .multiply(big(notionalMultiplierUnits))
                     .multiply(big(settleScaleUnits))
@@ -123,6 +127,12 @@ public final class PerpetualContractMath {
             denominator = PPM;
         }
         return divideCeiling(numerator, denominator);
+    }
+
+    private static void requireLinearOrInverse(ContractType contractType) {
+        if (contractType == null || (!contractType.isLinear() && !contractType.isInverse())) {
+            throw new IllegalArgumentException("unsupported contract type: " + contractType);
+        }
     }
 
     private static void validatePositionInputs(long signedQuantitySteps,

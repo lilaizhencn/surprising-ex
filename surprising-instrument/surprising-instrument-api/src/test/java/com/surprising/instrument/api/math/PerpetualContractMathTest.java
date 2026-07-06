@@ -37,6 +37,30 @@ class PerpetualContractMathTest {
     }
 
     @Test
+    void deliveryContractsReuseLinearAndInverseFormulas() {
+        assertThat(PerpetualContractMath.notionalUnits(ContractType.LINEAR_DELIVERY, 6L, 100L,
+                100L, 1L, 100_000_000L)).isEqualTo(60_000L);
+        assertThat(PerpetualContractMath.unrealizedPnlUnits(ContractType.LINEAR_DELIVERY, 6L,
+                100L, 90L, 100L, 1L, 100_000_000L)).isEqualTo(-6_000L);
+        assertThat(PerpetualContractMath.notionalUnits(ContractType.INVERSE_DELIVERY, 10L, 5L,
+                100L, 1L, 100L)).isEqualTo(20_000L);
+        assertThat(PerpetualContractMath.initialMarginUnits(ContractType.INVERSE_DELIVERY, 10L,
+                5L, 100L, 1L, 100L, 100_000L)).isEqualTo(2_000L);
+    }
+
+    @Test
+    void rejectsSpotAndOptionContracts() {
+        assertThatThrownBy(() -> PerpetualContractMath.notionalUnits(ContractType.SPOT,
+                1L, 100L, 1L, 1L, 1L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unsupported contract type");
+        assertThatThrownBy(() -> PerpetualContractMath.notionalUnits(ContractType.VANILLA_OPTION,
+                1L, 100L, 1L, 1L, 1L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unsupported contract type");
+    }
+
+    @Test
     void rejectsOverflowInsteadOfWrapping() {
         assertThatThrownBy(() -> PerpetualContractMath.notionalUnits(ContractType.LINEAR_PERPETUAL,
                 Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE, 1L, 1L))

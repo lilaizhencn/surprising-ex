@@ -22,6 +22,8 @@ class ContractTypeProductLineTest {
         assertThat(ContractType.LINEAR_PERPETUAL.isPerpetual()).isTrue();
         assertThat(ContractType.LINEAR_DELIVERY.isDelivery()).isTrue();
         assertThat(ContractType.VANILLA_OPTION.isOption()).isTrue();
+        assertThat(ContractType.LINEAR_DELIVERY.isLinear()).isTrue();
+        assertThat(ContractType.INVERSE_DELIVERY.isInverse()).isTrue();
         assertThat(ContractType.INVERSE_DELIVERY.usesPriceQuantityNotional()).isFalse();
     }
 }

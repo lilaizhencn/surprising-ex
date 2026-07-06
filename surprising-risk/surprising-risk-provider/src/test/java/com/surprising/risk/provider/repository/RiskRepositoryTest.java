@@ -190,9 +190,11 @@ class RiskRepositoryTest {
                 eq(1001L), eq("BTC"), eq(1001L), eq("BTC"), eq(1001L), eq("BTC"),
                 eq(1001L), eq("BTC"), eq(1001L), eq("BTC"));
         assertThat(sql.getValue())
-                .contains("i.contract_type = 'INVERSE_PERPETUAL'")
-                .contains("THEN 'COIN_PERPETUAL'")
+                .contains("WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'")
+                .contains("WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'")
+                .contains("WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'")
                 .contains("r.account_type = ctx.account_type")
+                .contains("WHEN ctx.account_type = 'USDT_PERPETUAL'")
                 .contains("LEFT JOIN account_product_balances pb")
                 .contains("LEFT JOIN account_product_deficits pd");
     }
@@ -211,7 +213,8 @@ class RiskRepositoryTest {
                 .contains("b.notional_floor_units <= pi.bracket_notional_units")
                 .contains("ORDER BY b.notional_floor_units DESC")
                 .contains("COALESCE(br.maintenance_margin_rate_ppm")
-                .contains("pi.base_maintenance_margin_rate_ppm");
+                .contains("pi.base_maintenance_margin_rate_ppm")
+                .contains("i.contract_type IN ('INVERSE_PERPETUAL', 'INVERSE_DELIVERY')");
     }
 
     @Test
@@ -232,7 +235,8 @@ class RiskRepositoryTest {
                 .contains("AND i.settle_asset = ?")
                 .contains("CROSS JOIN group_freshness gf")
                 .contains("AND gf.all_marks_fresh")
-                .contains("instrument_risk_brackets");
+                .contains("instrument_risk_brackets")
+                .contains("i.contract_type IN ('INVERSE_PERPETUAL', 'INVERSE_DELIVERY')");
     }
 
     @SuppressWarnings("unchecked")

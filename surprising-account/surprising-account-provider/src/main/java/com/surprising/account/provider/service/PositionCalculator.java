@@ -23,6 +23,8 @@ public class PositionCalculator {
         if (positionSpec == null || fillSpec == null) {
             throw new IllegalArgumentException("contract specs are required");
         }
+        requireLinearOrInverse(positionSpec.contractType());
+        requireLinearOrInverse(fillSpec.contractType());
         long signedDelta = side == OrderSide.BUY ? quantitySteps : -quantitySteps;
         if (current.signedQuantitySteps() == 0) {
             return new PositionChange(new PositionState(signedDelta, fillSpec.version(), priceTicks,
@@ -61,7 +63,8 @@ public class PositionCalculator {
                                         long oldEntryPriceTicks,
                                         long addAbs,
                                         long addPriceTicks) {
-        if (contractType == ContractType.LINEAR_PERPETUAL) {
+        requireLinearOrInverse(contractType);
+        if (contractType.isLinear()) {
             return Math.addExact(
                     Math.multiplyExact(oldAbs, oldEntryPriceTicks),
                     Math.multiplyExact(addAbs, addPriceTicks)) / Math.addExact(oldAbs, addAbs);
@@ -80,7 +83,9 @@ public class PositionCalculator {
                                   long exitPriceTicks,
                                   long closeQty,
                                   ContractSpec contractSpec) {
-        if (contractSpec.contractType() == ContractType.LINEAR_PERPETUAL) {
+        ContractType contractType = contractSpec.contractType();
+        requireLinearOrInverse(contractType);
+        if (contractType.isLinear()) {
             long priceDiff = currentSignedQty > 0
                     ? Math.subtractExact(exitPriceTicks, entryPriceTicks)
                     : Math.subtractExact(entryPriceTicks, exitPriceTicks);
@@ -96,6 +101,12 @@ public class PositionCalculator {
                 .multiply(big(exitPriceTicks))
                 .multiply(big(contractSpec.priceTickUnits()));
         return toLongRounded(numerator, denominator);
+    }
+
+    private void requireLinearOrInverse(ContractType contractType) {
+        if (contractType == null || (!contractType.isLinear() && !contractType.isInverse())) {
+            throw new IllegalArgumentException("unsupported position contract type: " + contractType);
+        }
     }
 
     private BigInteger big(long value) {

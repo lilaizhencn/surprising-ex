@@ -74,6 +74,18 @@ class OrderMarginMathTest {
     }
 
     @Test
+    void deliveryContractsReuseLinearAndInverseMarginRules() {
+        assertThat(OrderMarginMath.initialMarginUnits(ContractType.LINEAR_DELIVERY, OrderSide.BUY,
+                OrderType.LIMIT, 100L, 6L, null, 0L,
+                100L, 1L, 100_000_000L, 10_000L)).isEqualTo(600L);
+        assertThat(OrderMarginMath.initialMarginUnits(ContractType.INVERSE_DELIVERY, OrderSide.BUY,
+                OrderType.LIMIT, 5L, 10L, 5L, 0L,
+                100L, 1L, 100L, 100_000L)).isEqualTo(2_000L);
+        assertThat(OrderMarginMath.collateralPriceTicks(OrderSide.BUY, OrderType.LIMIT,
+                101L, 100L, 10_000L, ContractType.INVERSE_DELIVERY)).isEqualTo(99L);
+    }
+
+    @Test
     void inverseMarketUsesLowerEffectivePriceForCollateralProtection() {
         long effectivePrice = OrderMarginMath.collateralPriceTicks(OrderSide.BUY, OrderType.MARKET,
                 0L, 100L, 10_000L, ContractType.INVERSE_PERPETUAL);
@@ -115,6 +127,19 @@ class OrderMarginMathTest {
     void calculatesLinearOrderNotionalUnits() {
         assertThat(OrderMarginMath.notionalUnits(ContractType.LINEAR_PERPETUAL, 6L, 100L,
                 100L, 1L, 100_000_000L)).isEqualTo(60_000L);
+    }
+
+    @Test
+    void rejectsSpotAndOptionMarginFormulas() {
+        assertThatThrownBy(() -> OrderMarginMath.notionalUnits(ContractType.SPOT, 1L, 100L,
+                1L, 1L, 1L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unsupported contract type");
+        assertThatThrownBy(() -> OrderMarginMath.initialMarginUnits(ContractType.VANILLA_OPTION,
+                OrderSide.BUY, OrderType.LIMIT, 100L, 1L, null, 0L,
+                1L, 1L, 1L, 1L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unsupported contract type");
     }
 
     @Test

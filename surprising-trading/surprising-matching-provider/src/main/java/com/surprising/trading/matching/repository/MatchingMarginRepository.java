@@ -1,5 +1,6 @@
 package com.surprising.trading.matching.repository;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.matching.service.MarginReleaseMath;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -10,7 +11,6 @@ import org.springframework.stereotype.Repository;
 public class MatchingMarginRepository {
 
     private static final String USDT_PERPETUAL = "USDT_PERPETUAL";
-    private static final String COIN_PERPETUAL = "COIN_PERPETUAL";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -96,7 +96,7 @@ public class MatchingMarginRepository {
                    AND status NOT IN ('RELEASED', 'CONSUMED')
                  FOR UPDATE
                 """, (rs, rowNum) -> new Reservation(
-                normalizePerpetualAccountType(rs.getString("account_type")),
+                normalizeMarginAccountType(rs.getString("account_type")),
                 rs.getLong("user_id"),
                 rs.getString("asset"),
                 rs.getLong("reserved_units"),
@@ -145,7 +145,7 @@ public class MatchingMarginRepository {
         if (amountUnits <= 0) {
             return;
         }
-        releaseBalanceLock(normalizePerpetualAccountType(accountType), userId, asset, amountUnits, now);
+        releaseBalanceLock(normalizeMarginAccountType(accountType), userId, asset, amountUnits, now);
         int rows = jdbcTemplate.update("""
                 UPDATE account_margin_reservations
                    SET released_units = released_units + ?,
@@ -201,7 +201,7 @@ public class MatchingMarginRepository {
     }
 
     private void releaseBalanceLock(String accountType, long userId, String asset, long amountUnits, Instant now) {
-        if (COIN_PERPETUAL.equals(accountType)) {
+        if (usesProductMarginBalance(accountType)) {
             int rows = jdbcTemplate.update("""
                     UPDATE account_product_balances
                        SET locked_units = locked_units - ?,
@@ -231,15 +231,20 @@ public class MatchingMarginRepository {
         }
     }
 
-    private String normalizePerpetualAccountType(String accountType) {
+    private String normalizeMarginAccountType(String accountType) {
         if (accountType == null || accountType.isBlank()) {
             return USDT_PERPETUAL;
         }
         String normalized = accountType.trim().toUpperCase();
-        if (!USDT_PERPETUAL.equals(normalized) && !COIN_PERPETUAL.equals(normalized)) {
+        ProductLine productLine = ProductLine.requireAccountTypeCode(normalized);
+        if (!productLine.isMarginProduct()) {
             throw new IllegalStateException("invalid margin reservation account type " + accountType);
         }
         return normalized;
+    }
+
+    private boolean usesProductMarginBalance(String normalizedAccountType) {
+        return !USDT_PERPETUAL.equals(normalizedAccountType);
     }
 
     private record Reservation(String accountType,

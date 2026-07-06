@@ -195,7 +195,7 @@ public class OrderValidator {
     }
 
     private long notionalUnits(PlaceOrderRequest request, InstrumentRule rule, long effectivePriceTicks) {
-        if (rule.contractType() == ContractType.INVERSE_PERPETUAL) {
+        if (rule.contractType().isInverse()) {
             return Math.multiplyExact(request.quantitySteps(), rule.notionalMultiplierUnits());
         }
         return Math.multiplyExact(Math.multiplyExact(effectivePriceTicks, request.quantitySteps()),

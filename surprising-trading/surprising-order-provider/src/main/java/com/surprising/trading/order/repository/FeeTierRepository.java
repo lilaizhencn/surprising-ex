@@ -156,7 +156,7 @@ public class FeeTierRepository {
                 ),
                 filled_notional AS (
                     SELECT CASE
-                               WHEN i.contract_type IN ('LINEAR_PERPETUAL', 'SPOT')
+                               WHEN i.contract_type IN ('LINEAR_PERPETUAL', 'LINEAR_DELIVERY', 'SPOT')
                                THEN t.price_ticks::numeric * t.quantity_steps::numeric
                                     * i.notional_multiplier_units::numeric
                                ELSE t.quantity_steps::numeric * i.notional_multiplier_units::numeric

@@ -139,6 +139,42 @@ class AccountServiceTest {
     }
 
     @Test
+    void deliveryTradeSettlesFeesAndRealizedPnlToDeliveryAccount() {
+        String symbol = "BTC-USDT-DELIVERY";
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.contractSpecs.put(symbol + ":4", new ContractSpec(4L, ContractType.LINEAR_DELIVERY,
+                "USDT", 1L, 100_000_000L, 100_000_000L, 10_000L, 2L, 5L));
+        repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
+                new PositionState(3L, 4L, 500_000L, 0L));
+        repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 5L));
+        repository.feeSnapshots.put(9001L, new OrderFeeSnapshot(2L, 5L));
+        AccountService service = new AccountService(repository, new PositionCalculator());
+
+        MatchTradeEvent trade = new MatchTradeEvent(
+                9601L,
+                9401L,
+                symbol,
+                9002L,
+                4L,
+                2002L,
+                OrderSide.SELL,
+                9001L,
+                4L,
+                1001L,
+                600_000L,
+                2L,
+                true,
+                false,
+                EVENT_TIME.plusSeconds(10));
+
+        service.processTrade(trade);
+
+        assertThat(repository.pnlAccountTypes).containsExactly(AccountType.USDT_DELIVERY);
+        assertThat(repository.feeAccountTypes).containsExactly(AccountType.USDT_DELIVERY, AccountType.USDT_DELIVERY);
+        assertThat(repository.pnlByUser).containsEntry(2002L, 200_000L);
+    }
+
+    @Test
     void spotTradeSettlesProductAccountsWithoutPerpetualPositionUpdates() {
         FakeAccountRepository repository = new FakeAccountRepository();
         repository.instrumentTypes.put("BTC-USDT-SPOT:3", InstrumentType.SPOT);
@@ -667,12 +703,16 @@ class AccountServiceTest {
         private final Map<Long, LiquidationFeeContext> liquidationFeeContexts = new HashMap<>();
         private final Map<Long, Integer> liquidationFeeContextLoads = new HashMap<>();
         private final Map<Long, Long> liquidationFeeByUser = new HashMap<>();
+        private final Map<String, ContractSpec> contractSpecs = new HashMap<>();
         private final Map<String, Integer> contractSpecLoads = new HashMap<>();
         private final Map<String, Integer> instrumentTypeLoads = new HashMap<>();
         private final Map<String, Integer> spotSpecLoads = new HashMap<>();
         private final Map<Long, Integer> feeSnapshotLoads = new HashMap<>();
         private final Map<String, InstrumentType> instrumentTypes = new HashMap<>();
         private final Map<String, SpotInstrumentSpec> spotSpecs = new HashMap<>();
+        private final List<AccountType> pnlAccountTypes = new ArrayList<>();
+        private final List<AccountType> feeAccountTypes = new ArrayList<>();
+        private final List<AccountType> liquidationFeeAccountTypes = new ArrayList<>();
         private final List<SpotSettlementCall> spotSettlements = new ArrayList<>();
         private final Set<ProcessedTradeKey> processedTradeIds = new HashSet<>();
         private int tradeProcessingAttempts;
@@ -685,10 +725,11 @@ class AccountServiceTest {
 
         @Override
         public ContractSpec contractSpec(String symbol, long instrumentVersion) {
-            assertThat(symbol).isIn("BTC-USDT", "ETH-USDT");
+            assertThat(symbol).isIn("BTC-USDT", "ETH-USDT", "BTC-USDT-DELIVERY");
             contractSpecLoads.merge(symbol + ":" + instrumentVersion, 1, Integer::sum);
-            return new ContractSpec(instrumentVersion, ContractType.LINEAR_PERPETUAL,
-                    "USDT", 1L, 100_000_000L, 100_000_000L, 10_000L, 2L, 5L);
+            return Optional.ofNullable(contractSpecs.get(symbol + ":" + instrumentVersion))
+                    .orElseGet(() -> new ContractSpec(instrumentVersion, ContractType.LINEAR_PERPETUAL,
+                            "USDT", 1L, 100_000_000L, 100_000_000L, 10_000L, 2L, 5L));
         }
 
         @Override
@@ -856,7 +897,7 @@ class AccountServiceTest {
                                       long realizedPnlDeltaUnits,
                                       Instant now) {
             assertThat(asset).isEqualTo("USDT");
-            assertThat(symbol).isIn("BTC-USDT", "ETH-USDT");
+            assertThat(symbol).isIn("BTC-USDT", "ETH-USDT", "BTC-USDT-DELIVERY");
             assertThat(marginMode).isIn(MarginMode.CROSS, MarginMode.ISOLATED);
             pnlByUser.merge(userId, realizedPnlDeltaUnits, Long::sum);
         }
@@ -871,7 +912,7 @@ class AccountServiceTest {
                                       MarginMode marginMode,
                                       long realizedPnlDeltaUnits,
                                       Instant now) {
-            assertThat(accountType).isEqualTo(AccountType.USDT_PERPETUAL);
+            pnlAccountTypes.add(accountType);
             settleRealizedPnl(userId, asset, orderId, tradeId, symbol, marginMode, realizedPnlDeltaUnits, now);
         }
 
@@ -887,7 +928,7 @@ class AccountServiceTest {
                                    MarginMode marginMode,
                                    Instant now) {
             assertThat(asset).isEqualTo("USDT");
-            assertThat(symbol).isIn("BTC-USDT", "ETH-USDT");
+            assertThat(symbol).isIn("BTC-USDT", "ETH-USDT", "BTC-USDT-DELIVERY");
             assertThat(marginMode).isIn(MarginMode.CROSS, MarginMode.ISOLATED);
             OrderFeeSnapshot snapshot = feeSnapshots.get(orderId);
             assertThat(feeRatePpm).isEqualTo("TAKER_FEE".equals(reason)
@@ -914,7 +955,7 @@ class AccountServiceTest {
                                    String symbol,
                                    MarginMode marginMode,
                                    Instant now) {
-            assertThat(accountType).isEqualTo(AccountType.USDT_PERPETUAL);
+            feeAccountTypes.add(accountType);
             settleTradeFee(userId, asset, orderId, tradeId, feeDeltaUnits, reason, feeRatePpm, symbol,
                     marginMode, now);
         }
@@ -965,7 +1006,7 @@ class AccountServiceTest {
                                                                        long requestedFeeUnits,
                                                                        LiquidationFeeContext context,
                                                                        Instant now) {
-            assertThat(accountType).isEqualTo(AccountType.USDT_PERPETUAL);
+            liquidationFeeAccountTypes.add(accountType);
             return settleLiquidationFee(userId, asset, orderId, tradeId, symbol, marginMode, requestedFeeUnits,
                     context, now);
         }

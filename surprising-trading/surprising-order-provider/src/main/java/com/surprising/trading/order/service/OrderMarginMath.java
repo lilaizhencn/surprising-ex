@@ -47,6 +47,7 @@ public final class OrderMarginMath {
                                           long settleScaleUnits,
                                           long initialMarginRatePpm,
                                           boolean protectAdverseFillPrice) {
+        requireLinearOrInverse(contractType);
         requirePositive(quantitySteps, "quantitySteps");
         requirePositive(notionalMultiplierUnits, "notionalMultiplierUnits");
         requirePositive(priceTickUnits, "priceTickUnits");
@@ -54,7 +55,7 @@ public final class OrderMarginMath {
         requirePositive(initialMarginRatePpm, "initialMarginRatePpm");
         long effectivePriceTicks = collateralPriceTicks(side, orderType, priceTicks, markPriceTicks,
                 marketMaxSlippagePpm, contractType, protectAdverseFillPrice);
-        BigInteger margin = contractType == ContractType.INVERSE_PERPETUAL
+        BigInteger margin = contractType.isInverse()
                 ? inverseInitialMargin(quantitySteps, notionalMultiplierUnits, settleScaleUnits,
                 effectivePriceTicks, priceTickUnits, initialMarginRatePpm)
                 : linearInitialMargin(quantitySteps, effectivePriceTicks, notionalMultiplierUnits,
@@ -68,12 +69,13 @@ public final class OrderMarginMath {
                                      long notionalMultiplierUnits,
                                      long priceTickUnits,
                                      long settleScaleUnits) {
+        requireLinearOrInverse(contractType);
         requirePositive(quantitySteps, "quantitySteps");
         requirePositive(effectivePriceTicks, "effectivePriceTicks");
         requirePositive(notionalMultiplierUnits, "notionalMultiplierUnits");
         requirePositive(priceTickUnits, "priceTickUnits");
         requirePositive(settleScaleUnits, "settleScaleUnits");
-        if (contractType == ContractType.INVERSE_PERPETUAL) {
+        if (contractType.isInverse()) {
             BigInteger numerator = big(quantitySteps)
                     .multiply(big(notionalMultiplierUnits))
                     .multiply(big(settleScaleUnits));
@@ -111,8 +113,9 @@ public final class OrderMarginMath {
                                             long marketMaxSlippagePpm,
                                             ContractType contractType,
                                             boolean protectAdverseFillPrice) {
+        requireLinearOrInverse(contractType);
         if (orderType == OrderType.MARKET) {
-            if (contractType == ContractType.INVERSE_PERPETUAL) {
+            if (contractType.isInverse()) {
                 return lowerBoundPriceTicks(orderType, priceTicks, markPriceTicks, marketMaxSlippagePpm);
             }
             return upperBoundPriceTicks(orderType, priceTicks, markPriceTicks, marketMaxSlippagePpm);
@@ -121,11 +124,11 @@ public final class OrderMarginMath {
         if (!protectAdverseFillPrice) {
             return priceTicks;
         }
-        if (contractType == ContractType.INVERSE_PERPETUAL && side == OrderSide.BUY) {
+        if (contractType.isInverse() && side == OrderSide.BUY) {
             return Math.min(priceTicks, lowerBoundPriceTicks(OrderType.MARKET, 0L, markPriceTicks,
                     marketMaxSlippagePpm));
         }
-        if (contractType != ContractType.INVERSE_PERPETUAL && side == OrderSide.SELL) {
+        if (contractType.isLinear() && side == OrderSide.SELL) {
             return Math.max(priceTicks, upperBoundPriceTicks(OrderType.MARKET, 0L, markPriceTicks,
                     marketMaxSlippagePpm));
         }
@@ -198,6 +201,12 @@ public final class OrderMarginMath {
         return quotientAndRemainder[1].signum() == 0
                 ? quotientAndRemainder[0]
                 : quotientAndRemainder[0].add(BigInteger.ONE);
+    }
+
+    private static void requireLinearOrInverse(ContractType contractType) {
+        if (contractType == null || (!contractType.isLinear() && !contractType.isInverse())) {
+            throw new IllegalArgumentException("unsupported contract type: " + contractType);
+        }
     }
 
     private static long divideFloor(BigInteger numerator, BigInteger denominator) {

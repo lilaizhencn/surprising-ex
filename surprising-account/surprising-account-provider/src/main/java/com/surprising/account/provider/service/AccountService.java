@@ -30,6 +30,7 @@ import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRepository;
+import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.MatchTradeEvent;
@@ -427,7 +428,7 @@ public class AccountService {
         PositionChange change = positionCalculator.apply(current, side, priceTicks, quantitySteps,
                 positionSpec, fillSpec);
         if (closeSteps > 0) {
-            accountRepository.settleRealizedPnl(perpetualAccountType(positionSpec), userId,
+            accountRepository.settleRealizedPnl(derivativeAccountType(positionSpec), userId,
                     positionSpec.settleAsset(), orderId, tradeId, symbol, normalizedMarginMode,
                     change.realizedPnlDeltaUnits(), eventTime);
         }
@@ -439,7 +440,7 @@ public class AccountService {
         OrderFeeSnapshot feeSnapshot = orderFeeSnapshot(orderId, userId, symbol);
         long feeRatePpm = taker ? feeSnapshot.takerFeeRatePpm() : feeSnapshot.makerFeeRatePpm();
         long feeDeltaUnits = TradeFeeMath.feeDeltaUnits(fillSpec, priceTicks, quantitySteps, feeRatePpm);
-        accountRepository.settleTradeFee(perpetualAccountType(fillSpec), userId, fillSpec.settleAsset(),
+        accountRepository.settleTradeFee(derivativeAccountType(fillSpec), userId, fillSpec.settleAsset(),
                 orderId, tradeId, feeDeltaUnits, taker ? "TAKER_FEE" : "MAKER_FEE", feeRatePpm, symbol,
                 normalizedMarginMode, eventTime);
         if (closeSteps > 0) {
@@ -477,7 +478,7 @@ public class AccountService {
                                               String traceId) {
         liquidationFeeContext(orderId, userId, symbol).ifPresent(context -> {
             long requestedFeeUnits = liquidationFeeUnits(fillSpec, priceTicks, quantitySteps, context);
-            accountRepository.settleLiquidationFee(perpetualAccountType(fillSpec), userId, fillSpec.settleAsset(),
+            accountRepository.settleLiquidationFee(derivativeAccountType(fillSpec), userId, fillSpec.settleAsset(),
                     orderId, tradeId, symbol, marginMode, requestedFeeUnits, context, eventTime)
                     .ifPresent(settlement -> enqueueLiquidationFeeEvent(tradeId, orderId, userId, symbol,
                             marginMode, fillSpec.settleAsset(), settlement, eventTime, traceId));
@@ -537,10 +538,12 @@ public class AccountService {
                 key -> accountRepository.liquidationFeeContext(key.orderId(), key.userId(), key.symbol()));
     }
 
-    private AccountType perpetualAccountType(ContractSpec spec) {
-        return spec.contractType() == com.surprising.instrument.api.model.ContractType.INVERSE_PERPETUAL
-                ? AccountType.COIN_PERPETUAL
-                : AccountType.USDT_PERPETUAL;
+    private AccountType derivativeAccountType(ContractSpec spec) {
+        ContractType contractType = spec.contractType();
+        if (contractType == ContractType.SPOT || contractType.isOption()) {
+            throw new IllegalArgumentException("unsupported derivative settlement contract type: " + contractType);
+        }
+        return AccountType.valueOf(contractType.productLine().accountTypeCode());
     }
 
     private OrderSide opposite(OrderSide side) {

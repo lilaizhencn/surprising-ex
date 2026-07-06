@@ -1769,8 +1769,11 @@ public class AccountRepository {
                        m.margin_mode,
                        m.position_side,
                        m.margin_units,
-                       CASE
-                           WHEN i.contract_type = 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
+                       CASE i.contract_type
+                           WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
+                           WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
+                           WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
+                           WHEN 'VANILLA_OPTION' THEN 'OPTION'
                            ELSE 'USDT_PERPETUAL'
                        END AS account_type
                   FROM account_position_margins m

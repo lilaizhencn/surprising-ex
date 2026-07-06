@@ -73,6 +73,26 @@ class OrderValidatorTest {
     }
 
     @Test
+    void acceptsInverseDeliveryLimitOrderByContractFaceValue() {
+        OrderValidator validator = new OrderValidator(lookup(deliveryRule(ContractType.INVERSE_DELIVERY)));
+
+        var result = validator.validate(limit(1_000_000L, 10L));
+
+        assertThat(result.accepted()).isTrue();
+        assertThat(result.rejectReason()).isNull();
+    }
+
+    @Test
+    void linearDeliveryLimitOrderUsesPriceQuantityNotional() {
+        OrderValidator validator = new OrderValidator(lookup(deliveryRule(ContractType.LINEAR_DELIVERY)));
+
+        var result = validator.validate(limit(1_000_000L, 10L));
+
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.rejectReason()).isEqualTo("notional is above maximum limit");
+    }
+
+    @Test
     void acceptsSpotLimitOrderWithLinearQuoteNotionalAndProductType() {
         OrderValidator validator = new OrderValidator(lookup(spotRule()));
 
@@ -337,6 +357,26 @@ class OrderValidatorTest {
                 2L,
                 "TRADING",
                 ContractType.INVERSE_PERPETUAL,
+                Set.of("LIMIT", "MARKET"),
+                Set.of("GTC", "IOC", "FOK", "GTX"),
+                true,
+                true,
+                true,
+                1L,
+                100_000L,
+                1_000L,
+                10_000L,
+                100L,
+                100_000_000L,
+                10_000L);
+    }
+
+    private InstrumentRule deliveryRule(ContractType contractType) {
+        return new InstrumentRule(
+                "BTC-USD-DELIVERY",
+                4L,
+                "TRADING",
+                contractType,
                 Set.of("LIMIT", "MARKET"),
                 Set.of("GTC", "IOC", "FOK", "GTX"),
                 true,

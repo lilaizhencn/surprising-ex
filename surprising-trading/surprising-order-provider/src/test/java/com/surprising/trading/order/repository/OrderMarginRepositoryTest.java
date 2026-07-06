@@ -6,12 +6,15 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import java.sql.ResultSet;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -183,6 +186,66 @@ class OrderMarginRepositoryTest {
     }
 
     @Test
+    void linearDeliveryRequirementUsesUsdtDeliveryAccount() throws Exception {
+        OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
+        when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
+                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
+                eq(1001L), eq("CROSS"), eq("NET"),
+                eq("BUY"), eq(5_000L),
+                eq("BTC-USDT-240927"), eq(1L), eq("LIMIT")))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    return List.of(mapper.mapRow(instrumentRequirementRow(
+                            0L, 0L, 100_000L, 300_000L, 50_000L, 0L,
+                            "LINEAR_DELIVERY", "USDT"), 0));
+                });
+        when(jdbcTemplate.query(contains("FROM instrument_risk_brackets"), anyRowMapper(),
+                eq("BTC-USDT-240927"), eq(1L), eq(4_000L)))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    return List.of(mapper.mapRow(riskBracketRow(100_000L), 0));
+                });
+
+        var requirement = repository.requirement("BTC-USDT-240927", 1L, 1001L, MarginMode.CROSS,
+                OrderSide.BUY, OrderType.LIMIT, 100L, 4L, 10_000L, 5_000L);
+
+        assertThat(requirement).isPresent();
+        assertThat(requirement.get().accepted()).isTrue();
+        assertThat(requirement.get().accountType()).isEqualTo("USDT_DELIVERY");
+        assertThat(requirement.get().asset()).isEqualTo("USDT");
+    }
+
+    @Test
+    void inverseDeliveryRequirementUsesCoinDeliveryAccount() throws Exception {
+        OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
+        when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
+                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
+                eq(1001L), eq("CROSS"), eq("NET"),
+                eq("SELL"), eq(5_000L),
+                eq("BTC-USD-240927"), eq(1L), eq("LIMIT")))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    return List.of(mapper.mapRow(instrumentRequirementRow(
+                            0L, 0L, 100_000L, 300_000L, 50_000L, 0L,
+                            "INVERSE_DELIVERY", "BTC"), 0));
+                });
+        when(jdbcTemplate.query(contains("FROM instrument_risk_brackets"), anyRowMapper(),
+                eq("BTC-USD-240927"), eq(1L), eq(10_000L)))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    return List.of(mapper.mapRow(riskBracketRow(100_000L), 0));
+                });
+
+        var requirement = repository.requirement("BTC-USD-240927", 1L, 1001L, MarginMode.CROSS,
+                OrderSide.SELL, OrderType.LIMIT, 100_000L, 1L, 10_000L, 5_000L);
+
+        assertThat(requirement).isPresent();
+        assertThat(requirement.get().accepted()).isTrue();
+        assertThat(requirement.get().accountType()).isEqualTo("COIN_DELIVERY");
+        assertThat(requirement.get().asset()).isEqualTo("BTC");
+    }
+
+    @Test
     void reserveFailsFastWhenGuardedBalanceUpdateDoesNotApply() throws Exception {
         OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
         when(jdbcTemplate.query(contains("FROM account_balances"), anyRowMapper(), eq(1001L), eq("USDT")))
@@ -203,6 +266,34 @@ class OrderMarginRepositoryTest {
                 MarginMode.CROSS, 500L, Instant.parse("2026-07-01T00:00:00Z")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("reserve order margin");
+    }
+
+    @Test
+    void reserveUsesProductBalanceForDeliveryMarginAccount() throws Exception {
+        OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        when(jdbcTemplate.query(contains("FROM account_product_balances"), anyRowMapper(),
+                eq("USDT_DELIVERY"), eq(1001L), eq("USDT")))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("available_units")).thenReturn(1_000L);
+                    when(rs.getLong("locked_units")).thenReturn(0L);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+        when(orderRepository.nextSequence("margin-reservation")).thenReturn(77L);
+        when(jdbcTemplate.update(contains("INSERT INTO account_margin_reservations"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_product_balances"), any(Object[].class)))
+                .thenReturn(1);
+
+        boolean reserved = repository.reserve(1001L, "USDT_DELIVERY", "USDT", 9002L, "BTC-USDT-240927",
+                MarginMode.CROSS, 500L, now);
+
+        assertThat(reserved).isTrue();
+        verify(jdbcTemplate).update(contains("UPDATE account_product_balances"),
+                eq(500L), eq(500L), any(Timestamp.class), eq("USDT_DELIVERY"), eq(1001L), eq("USDT"), eq(500L));
+        verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
     }
 
     private ResultSet instrumentRequirementRow(long currentSignedQuantitySteps,

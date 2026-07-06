@@ -1,6 +1,7 @@
 package com.surprising.trading.order.repository;
 
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
@@ -19,7 +20,6 @@ public class OrderMarginRepository {
 
     private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);
     private static final String USDT_PERPETUAL = "USDT_PERPETUAL";
-    private static final String COIN_PERPETUAL = "COIN_PERPETUAL";
 
     private final JdbcTemplate jdbcTemplate;
     private final OrderRepository orderRepository;
@@ -303,8 +303,8 @@ public class OrderMarginRepository {
         if (amountUnits <= 0) {
             return true;
         }
-        String normalizedAccountType = normalizePerpetualAccountType(accountType);
-        if (COIN_PERPETUAL.equals(normalizedAccountType)) {
+        String normalizedAccountType = normalizeMarginAccountType(accountType);
+        if (usesProductMarginBalance(normalizedAccountType)) {
             return reserveProductMargin(userId, normalizedAccountType, asset, orderId, symbol, marginMode,
                     positionSide, amountUnits, now);
         }
@@ -420,18 +420,23 @@ public class OrderMarginRepository {
     }
 
     private String accountType(ContractType contractType) {
-        return contractType == ContractType.INVERSE_PERPETUAL ? COIN_PERPETUAL : USDT_PERPETUAL;
+        return contractType.productLine().accountTypeCode();
     }
 
-    private String normalizePerpetualAccountType(String accountType) {
+    private String normalizeMarginAccountType(String accountType) {
         if (accountType == null || accountType.isBlank()) {
             return USDT_PERPETUAL;
         }
         String normalized = accountType.trim().toUpperCase();
-        if (!USDT_PERPETUAL.equals(normalized) && !COIN_PERPETUAL.equals(normalized)) {
-            throw new IllegalArgumentException("invalid perpetual account type: " + accountType);
+        ProductLine productLine = ProductLine.requireAccountTypeCode(normalized);
+        if (!productLine.isMarginProduct()) {
+            throw new IllegalArgumentException("invalid margin account type: " + accountType);
         }
         return normalized;
+    }
+
+    private boolean usesProductMarginBalance(String normalizedAccountType) {
+        return !USDT_PERPETUAL.equals(normalizedAccountType);
     }
 
     private Optional<RiskBracket> riskBracket(String symbol, long instrumentVersion, long notionalUnits) {
