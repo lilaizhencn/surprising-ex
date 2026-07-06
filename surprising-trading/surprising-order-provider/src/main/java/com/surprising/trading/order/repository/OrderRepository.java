@@ -171,6 +171,24 @@ public class OrderRepository {
                 (rs, rowNum) -> toRecord(rs), orderId).stream().findFirst();
     }
 
+    public boolean orderMatchesContractType(long orderId, String contractType) {
+        String normalizedContractType = emptyToNull(contractType);
+        if (normalizedContractType == null) {
+            return true;
+        }
+        Boolean matched = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM trading_orders o
+                      JOIN instruments i
+                        ON i.symbol = o.symbol AND i.version = o.instrument_version
+                     WHERE o.order_id = ?
+                       AND i.contract_type = ?
+                )
+                """, Boolean.class, orderId, normalizedContractType);
+        return Boolean.TRUE.equals(matched);
+    }
+
     public Optional<OrderRecord> findByClientOrderId(long userId, String clientOrderId) {
         return jdbcTemplate.query("""
                 SELECT *
@@ -208,8 +226,20 @@ public class OrderRepository {
                                                                   int limit,
                                                                   String cursor,
                                                                   String sort) {
+        return adminOrderPage(userId, symbol, status, orderId, limit, null, cursor, sort);
+    }
+
+    public AdminCursorPage.CursorPage<OrderRecord> adminOrderPage(Long userId,
+                                                                  String symbol,
+                                                                  OrderStatus status,
+                                                                  Long orderId,
+                                                                  int limit,
+                                                                  String contractType,
+                                                                  String cursor,
+                                                                  String sort) {
         String normalizedSymbol = emptyToNull(symbol);
         String normalizedStatus = status == null ? null : status.name();
+        String normalizedContractType = emptyToNull(contractType);
         int safeLimit = AdminCursorPage.limit(limit, 1000);
         AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
                 "createdAt", "created_at", "order_id", true);
@@ -227,6 +257,8 @@ public class OrderRepository {
         args.add(normalizedStatus);
         args.add(orderId);
         args.add(orderId);
+        args.add(normalizedContractType);
+        args.add(normalizedContractType);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(safeLimit + 1);
         List<OrderRecord> rows = jdbcTemplate.query("""
@@ -236,6 +268,13 @@ public class OrderRepository {
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
                    AND (CAST(? AS text) IS NULL OR status = ?)
                    AND (CAST(? AS text) IS NULL OR order_id = ?)
+                   AND (CAST(? AS text) IS NULL OR EXISTS (
+                        SELECT 1
+                          FROM instruments i
+                         WHERE i.symbol = trading_orders.symbol
+                           AND i.version = trading_orders.instrument_version
+                           AND i.contract_type = ?
+                   ))
                 %s
                  ORDER BY %s %s, %s %s
                  LIMIT ?
@@ -247,18 +286,32 @@ public class OrderRepository {
     }
 
     public List<OrderRecord> adminCancelableOrders(Long userId, String symbol, int limit) {
+        return adminCancelableOrders(userId, symbol, null, limit);
+    }
+
+    public List<OrderRecord> adminCancelableOrders(Long userId, String symbol, String contractType, int limit) {
         String normalizedSymbol = emptyToNull(symbol);
+        String normalizedContractType = emptyToNull(contractType);
         int safeLimit = Math.max(1, Math.min(limit, 1000));
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_orders
                  WHERE (CAST(? AS text) IS NULL OR user_id = ?)
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR EXISTS (
+                        SELECT 1
+                          FROM instruments i
+                         WHERE i.symbol = trading_orders.symbol
+                           AND i.version = trading_orders.instrument_version
+                           AND i.contract_type = ?
+                   ))
                    AND status IN ('ACCEPTED', 'PARTIALLY_FILLED')
                    AND remaining_quantity_steps > 0
                  ORDER BY created_at ASC, order_id ASC
                  LIMIT ?
-                """, (rs, rowNum) -> toRecord(rs), userId, userId, normalizedSymbol, normalizedSymbol, safeLimit);
+                """, (rs, rowNum) -> toRecord(rs),
+                userId, userId, normalizedSymbol, normalizedSymbol,
+                normalizedContractType, normalizedContractType, safeLimit);
     }
 
     public Optional<ReduceOnlyPosition> lockedPosition(long userId,
@@ -280,7 +333,12 @@ public class OrderRepository {
     }
 
     public CancelableOrderImpact adminCancelableImpact(Long userId, String symbol) {
+        return adminCancelableImpact(userId, symbol, null);
+    }
+
+    public CancelableOrderImpact adminCancelableImpact(Long userId, String symbol, String contractType) {
         String normalizedSymbol = emptyToNull(symbol);
+        String normalizedContractType = emptyToNull(contractType);
         return jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)::int AS matched,
                        COALESCE(SUM(remaining_quantity_steps), 0)::bigint AS total_remaining_quantity_steps,
@@ -289,13 +347,21 @@ public class OrderRepository {
                   FROM trading_orders
                  WHERE (CAST(? AS text) IS NULL OR user_id = ?)
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR EXISTS (
+                        SELECT 1
+                          FROM instruments i
+                         WHERE i.symbol = trading_orders.symbol
+                           AND i.version = trading_orders.instrument_version
+                           AND i.contract_type = ?
+                   ))
                    AND status IN ('ACCEPTED', 'PARTIALLY_FILLED')
                    AND remaining_quantity_steps > 0
                 """, (rs, rowNum) -> new CancelableOrderImpact(
                 rs.getInt("matched"),
                 rs.getLong("total_remaining_quantity_steps"),
                 rs.getInt("buy_orders"),
-                rs.getInt("sell_orders")), userId, userId, normalizedSymbol, normalizedSymbol);
+                rs.getInt("sell_orders")), userId, userId, normalizedSymbol, normalizedSymbol,
+                normalizedContractType, normalizedContractType);
     }
 
     public List<AdminOrderEventResponse> orderEvents(long orderId, int limit) {
@@ -348,13 +414,29 @@ public class OrderRepository {
         return matchTradePage(userId, orderId, symbol, limit, null, null).items();
     }
 
+    public List<AdminMatchTradeResponse> matchTrades(
+            Long userId, Long orderId, String symbol, String contractType, int limit) {
+        return matchTradePage(userId, orderId, symbol, limit, contractType, null, null).items();
+    }
+
     public AdminCursorPage.CursorPage<AdminMatchTradeResponse> matchTradePage(Long userId,
                                                                               Long orderId,
                                                                               String symbol,
                                                                               int limit,
                                                                               String cursor,
                                                                               String sort) {
+        return matchTradePage(userId, orderId, symbol, limit, null, cursor, sort);
+    }
+
+    public AdminCursorPage.CursorPage<AdminMatchTradeResponse> matchTradePage(Long userId,
+                                                                              Long orderId,
+                                                                              String symbol,
+                                                                              int limit,
+                                                                              String contractType,
+                                                                              String cursor,
+                                                                              String sort) {
         String normalizedSymbol = emptyToNull(symbol);
+        String normalizedContractType = emptyToNull(contractType);
         int safeLimit = AdminCursorPage.limit(limit, 1000);
         AdminCursorPage.SortSpec eventTimeDesc = new AdminCursorPage.SortSpec(
                 "eventTime", "event_time", "trade_id", true);
@@ -372,6 +454,8 @@ public class OrderRepository {
         args.add(orderId);
         args.add(normalizedSymbol);
         args.add(normalizedSymbol);
+        args.add(normalizedContractType);
+        args.add(normalizedContractType);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(safeLimit + 1);
         List<AdminMatchTradeResponse> rows = jdbcTemplate.query("""
@@ -384,6 +468,15 @@ public class OrderRepository {
                  WHERE (CAST(? AS text) IS NULL OR taker_user_id = ? OR maker_user_id = ?)
                    AND (CAST(? AS text) IS NULL OR taker_order_id = ? OR maker_order_id = ?)
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR EXISTS (
+                        SELECT 1
+                          FROM trading_orders o
+                          JOIN instruments i
+                            ON i.symbol = o.symbol AND i.version = o.instrument_version
+                         WHERE (o.order_id = trading_match_trades.taker_order_id
+                                OR o.order_id = trading_match_trades.maker_order_id)
+                           AND i.contract_type = ?
+                   ))
                 %s
                  ORDER BY %s %s, %s %s
                  LIMIT ?

@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.AmendOrderRequest;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
@@ -791,6 +792,23 @@ class OrderServiceTest {
     }
 
     @Test
+    void adminOrdersDelegatesProductLineAsContractType() {
+        OrderService service = service();
+        OrderRecord row = order(9001L, "admin-product-line", OrderStatus.ACCEPTED, null);
+        when(orderRepository.adminOrderPage(1001L, "BTC-USDT", OrderStatus.ACCEPTED, 9001L, 25,
+                "LINEAR_DELIVERY", "cursor-1", "createdAt.asc"))
+                .thenReturn(new AdminCursorPage.CursorPage<>(java.util.List.of(row),
+                        "cursor-2", true, "createdAt.asc", 25));
+
+        var response = service.adminOrders(1001L, "btc-usdt", "accepted", 9001L, 25,
+                "cursor-1", "createdAt.asc", ProductLine.LINEAR_DELIVERY);
+
+        assertThat(response.orders()).extracting("orderId").containsExactly(9001L);
+        verify(orderRepository).adminOrderPage(1001L, "BTC-USDT", OrderStatus.ACCEPTED, 9001L, 25,
+                "LINEAR_DELIVERY", "cursor-1", "createdAt.asc");
+    }
+
+    @Test
     void adminMatchTradesDelegatesCursorAndSort() {
         OrderService service = service();
         var trade = new com.surprising.trading.api.model.AdminMatchTradeResponse(
@@ -813,6 +831,20 @@ class OrderServiceTest {
         assertThat(response.limit()).isEqualTo(25);
         verify(orderRepository).matchTradePage(1001L, 9001L, "BTC-USDT", 25,
                 "cursor-1", "eventTime.asc");
+    }
+
+    @Test
+    void adminCancelOrderRejectsMismatchedProductLine() {
+        OrderService service = service();
+        OrderRecord accepted = order(9001L, "cancel-wrong-product", OrderStatus.ACCEPTED, null);
+        when(orderRepository.findByOrderId(9001L)).thenReturn(Optional.of(accepted));
+        when(orderRepository.orderMatchesContractType(9001L, "LINEAR_DELIVERY")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.adminCancelOrder(9001L, "risk operation", ProductLine.LINEAR_DELIVERY))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("order not found: 9001");
+
+        verify(orderRepository, never()).requestCancel(eq(9001L), any());
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.surprising.trading.order.controller;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
 import com.surprising.trading.api.model.AdminCancelBySymbolRequest;
 import com.surprising.trading.api.model.AdminCancelOrderRequest;
@@ -13,6 +14,7 @@ import com.surprising.trading.api.model.AdminOrderTimelineResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.order.service.OrderService;
 import jakarta.validation.Valid;
+import java.util.Locale;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -36,6 +38,8 @@ public class AdminOrderController {
 
     @GetMapping("/orders")
     public OrderQueryResponse orders(@RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
+                                     @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
+                                     @RequestParam(value = "productLine", required = false) String productLineValue,
                                      @RequestParam(value = "userId", required = false) Long userId,
                                      @RequestParam(value = "symbol", required = false) String symbol,
                                      @RequestParam(value = "status", required = false) String status,
@@ -45,7 +49,8 @@ public class AdminOrderController {
                                      @RequestParam(value = "sort", required = false) String sort) {
         requireAdmin(adminUserId);
         try {
-            return orderService.adminOrders(userId, symbol, status, orderId, limit, cursor, sort);
+            ProductLine productLine = productLine(productLineValue, productLineHeader);
+            return orderService.adminOrders(userId, symbol, status, orderId, limit, cursor, sort, productLine);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -80,10 +85,13 @@ public class AdminOrderController {
     @GetMapping("/orders/{orderId}/timeline")
     public AdminOrderTimelineResponse timeline(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
+            @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
+            @RequestParam(value = "productLine", required = false) String productLineValue,
             @PathVariable("orderId") long orderId) {
         requireAdmin(adminUserId);
         try {
-            return orderService.adminOrderTimeline(orderId);
+            ProductLine productLine = productLine(productLineValue, productLineHeader);
+            return orderService.adminOrderTimeline(orderId, productLine);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -94,6 +102,8 @@ public class AdminOrderController {
     @GetMapping("/orders/trades")
     public AdminMatchTradeQueryResponse trades(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
+            @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
+            @RequestParam(value = "productLine", required = false) String productLineValue,
             @RequestParam(value = "userId", required = false) Long userId,
             @RequestParam(value = "orderId", required = false) Long orderId,
             @RequestParam(value = "symbol", required = false) String symbol,
@@ -102,7 +112,8 @@ public class AdminOrderController {
             @RequestParam(value = "sort", required = false) String sort) {
         requireAdmin(adminUserId);
         try {
-            return orderService.adminMatchTrades(userId, orderId, symbol, limit, cursor, sort);
+            ProductLine productLine = productLine(productLineValue, productLineHeader);
+            return orderService.adminMatchTrades(userId, orderId, symbol, limit, cursor, sort, productLine);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -111,11 +122,14 @@ public class AdminOrderController {
     @PostMapping("/orders/{orderId}/cancel")
     public AdminCancelOrderResult cancelOrder(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
+            @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
+            @RequestParam(value = "productLine", required = false) String productLineValue,
             @PathVariable("orderId") long orderId,
             @Valid @RequestBody(required = false) AdminCancelOrderRequest request) {
         requireAdmin(adminUserId);
         try {
-            return orderService.adminCancelOrder(orderId, request == null ? null : request.reason());
+            ProductLine productLine = productLine(productLineValue, productLineHeader);
+            return orderService.adminCancelOrder(orderId, request == null ? null : request.reason(), productLine);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -126,12 +140,15 @@ public class AdminOrderController {
     @GetMapping("/orders/cancel-preview")
     public AdminCancelOrdersPreviewResponse cancelPreview(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
+            @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
+            @RequestParam(value = "productLine", required = false) String productLineValue,
             @RequestParam(value = "userId", required = false) Long userId,
             @RequestParam(value = "symbol", required = false) String symbol,
             @RequestParam(value = "limit", defaultValue = "100") int limit) {
         requireAdmin(adminUserId);
         try {
-            return orderService.adminCancelPreview(userId, symbol, limit);
+            ProductLine productLine = productLine(productLineValue, productLineHeader);
+            return orderService.adminCancelPreview(userId, symbol, limit, productLine);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -140,10 +157,13 @@ public class AdminOrderController {
     @PostMapping("/orders/cancel")
     public AdminCancelOrdersResponse cancelOrders(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
+            @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
+            @RequestParam(value = "productLine", required = false) String productLineValue,
             @Valid @RequestBody(required = false) AdminBatchCancelOrdersRequest request) {
         requireAdmin(adminUserId);
         try {
-            return orderService.adminCancelOrders(request);
+            ProductLine productLine = productLine(productLineValue, productLineHeader);
+            return orderService.adminCancelOrders(request, productLine);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -152,10 +172,13 @@ public class AdminOrderController {
     @PostMapping("/orders/cancel-by-symbol")
     public AdminCancelOrdersResponse cancelBySymbol(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
+            @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
+            @RequestParam(value = "productLine", required = false) String productLineValue,
             @Valid @RequestBody AdminCancelBySymbolRequest request) {
         requireAdmin(adminUserId);
         try {
-            return orderService.adminCancelBySymbol(request);
+            ProductLine productLine = productLine(productLineValue, productLineHeader);
+            return orderService.adminCancelBySymbol(request, productLine);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -165,5 +188,28 @@ public class AdminOrderController {
         if (adminUserId == null || adminUserId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "admin gateway header is required");
         }
+    }
+
+    private ProductLine productLine(String queryValue, String headerValue) {
+        String value = queryValue == null || queryValue.isBlank() ? headerValue : queryValue;
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        ProductLine byAccountType = ProductLine.fromAccountTypeCode(normalized).orElse(null);
+        if (byAccountType != null) {
+            return byAccountType;
+        }
+        ProductLine byContractType = ProductLine.fromContractTypeCode(normalized).orElse(null);
+        if (byContractType != null) {
+            return byContractType;
+        }
+        String enumName = normalized.replace('-', '_');
+        for (ProductLine productLine : ProductLine.values()) {
+            if (productLine.name().equals(enumName) || productLine.topicSegment().equalsIgnoreCase(value.trim())) {
+                return productLine;
+            }
+        }
+        throw new IllegalArgumentException("unsupported productLine: " + value);
     }
 }

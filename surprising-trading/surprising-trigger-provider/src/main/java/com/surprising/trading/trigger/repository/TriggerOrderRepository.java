@@ -225,6 +225,24 @@ public class TriggerOrderRepository {
                 """, (rs, rowNum) -> toRecord(rs), triggerOrderId).stream().findFirst();
     }
 
+    public boolean triggerOrderMatchesContractType(long triggerOrderId, String contractType) {
+        String normalizedContractType = emptyToNull(contractType);
+        if (normalizedContractType == null) {
+            return true;
+        }
+        Boolean matched = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM trading_trigger_orders o
+                      JOIN instruments i
+                        ON i.symbol = o.symbol
+                     WHERE o.trigger_order_id = ?
+                       AND i.contract_type = ?
+                )
+                """, Boolean.class, triggerOrderId, normalizedContractType);
+        return Boolean.TRUE.equals(matched);
+    }
+
     public Optional<TriggerOrderRecord> findByClientTriggerOrderId(long userId, String clientTriggerOrderId) {
         return jdbcTemplate.query("""
                 SELECT *
@@ -275,7 +293,19 @@ public class TriggerOrderRepository {
                                                                          int limit,
                                                                          String cursor,
                                                                          String sort) {
+        return adminOrderPage(userId, symbol, status, triggerOrderId, limit, null, cursor, sort);
+    }
+
+    public AdminCursorPage.CursorPage<TriggerOrderRecord> adminOrderPage(Long userId,
+                                                                         String symbol,
+                                                                         TriggerOrderStatus status,
+                                                                         Long triggerOrderId,
+                                                                         int limit,
+                                                                         String contractType,
+                                                                         String cursor,
+                                                                         String sort) {
         String normalizedStatus = status == null ? null : status.name();
+        String normalizedContractType = emptyToNull(contractType);
         int normalizedLimit = AdminCursorPage.limit(limit, 1000);
         AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
                 "createdAt", "created_at", "trigger_order_id", true);
@@ -293,6 +323,8 @@ public class TriggerOrderRepository {
         args.add(normalizedStatus);
         args.add(triggerOrderId);
         args.add(triggerOrderId);
+        args.add(normalizedContractType);
+        args.add(normalizedContractType);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(normalizedLimit + 1);
         List<TriggerOrderRecord> rows = jdbcTemplate.query("""
@@ -302,6 +334,12 @@ public class TriggerOrderRepository {
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
                    AND (CAST(? AS text) IS NULL OR status = ?)
                    AND (CAST(? AS text) IS NULL OR trigger_order_id = ?)
+                   AND (CAST(? AS text) IS NULL OR EXISTS (
+                        SELECT 1
+                          FROM instruments i
+                         WHERE i.symbol = trading_trigger_orders.symbol
+                           AND i.contract_type = ?
+                   ))
                 %s
                  ORDER BY %s %s, %s %s
                  LIMIT ?
@@ -728,6 +766,10 @@ public class TriggerOrderRepository {
     private static Long longOrNull(ResultSet rs, String column) throws SQLException {
         long value = rs.getLong(column);
         return rs.wasNull() ? null : value;
+    }
+
+    private static String emptyToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private static String truncate(String value, int limit) {

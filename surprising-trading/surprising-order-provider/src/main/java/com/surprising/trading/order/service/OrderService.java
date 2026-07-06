@@ -1,5 +1,6 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.AmendOrderBatchItemResponse;
 import com.surprising.trading.api.model.AmendOrderBatchResponse;
@@ -569,7 +570,7 @@ public class OrderService {
     }
 
     public OrderQueryResponse adminOrders(Long userId, String symbol, String status, Long orderId, int limit) {
-        return adminOrders(userId, symbol, status, orderId, limit, null, null);
+        return adminOrders(userId, symbol, status, orderId, limit, null, null, null);
     }
 
     public OrderQueryResponse adminOrders(Long userId,
@@ -579,6 +580,17 @@ public class OrderService {
                                           int limit,
                                           String cursor,
                                           String sort) {
+        return adminOrders(userId, symbol, status, orderId, limit, cursor, sort, null);
+    }
+
+    public OrderQueryResponse adminOrders(Long userId,
+                                          String symbol,
+                                          String status,
+                                          Long orderId,
+                                          int limit,
+                                          String cursor,
+                                          String sort,
+                                          ProductLine productLine) {
         if (userId != null && userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
@@ -592,7 +604,11 @@ public class OrderService {
         OrderStatus normalizedStatus = status == null || status.isBlank()
                 ? null
                 : OrderStatus.valueOf(status.trim().toUpperCase());
-        var page = orderRepository.adminOrderPage(userId, normalizedSymbol, normalizedStatus, orderId, limit, cursor, sort);
+        String contractType = contractType(productLine);
+        var page = contractType == null
+                ? orderRepository.adminOrderPage(userId, normalizedSymbol, normalizedStatus, orderId, limit, cursor, sort)
+                : orderRepository.adminOrderPage(
+                        userId, normalizedSymbol, normalizedStatus, orderId, limit, contractType, cursor, sort);
         List<OrderResponse> rows = page.items()
                 .stream()
                 .map(this::toResponse)
@@ -615,7 +631,7 @@ public class OrderService {
     }
 
     public AdminMatchTradeQueryResponse adminMatchTrades(Long userId, Long orderId, String symbol, int limit) {
-        return adminMatchTrades(userId, orderId, symbol, limit, null, null);
+        return adminMatchTrades(userId, orderId, symbol, limit, null, null, null);
     }
 
     public AdminMatchTradeQueryResponse adminMatchTrades(Long userId,
@@ -624,6 +640,16 @@ public class OrderService {
                                                          int limit,
                                                          String cursor,
                                                          String sort) {
+        return adminMatchTrades(userId, orderId, symbol, limit, cursor, sort, null);
+    }
+
+    public AdminMatchTradeQueryResponse adminMatchTrades(Long userId,
+                                                         Long orderId,
+                                                         String symbol,
+                                                         int limit,
+                                                         String cursor,
+                                                         String sort,
+                                                         ProductLine productLine) {
         if (userId != null && userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
@@ -634,31 +660,54 @@ public class OrderService {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
-        var page = orderRepository.matchTradePage(userId, orderId, normalizedSymbol, limit, cursor, sort);
+        String contractType = contractType(productLine);
+        var page = contractType == null
+                ? orderRepository.matchTradePage(userId, orderId, normalizedSymbol, limit, cursor, sort)
+                : orderRepository.matchTradePage(userId, orderId, normalizedSymbol, limit, contractType, cursor, sort);
         return new AdminMatchTradeQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
     public AdminOrderTimelineResponse adminOrderTimeline(long orderId) {
+        return adminOrderTimeline(orderId, null);
+    }
+
+    public AdminOrderTimelineResponse adminOrderTimeline(long orderId, ProductLine productLine) {
         requireOrderId(orderId);
-        OrderResponse order = get(orderId);
+        OrderRecord order = orderRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new IllegalStateException("order not found: " + orderId));
+        requireOrderProductLine(order, productLine);
+        String contractType = contractType(productLine);
         return new AdminOrderTimelineResponse(
-                order,
+                toResponse(order),
                 orderRepository.orderEvents(orderId, 1000),
                 orderRepository.matchResults(orderId, 1000),
-                orderRepository.matchTrades(null, orderId, null, 1000));
+                contractType == null
+                        ? orderRepository.matchTrades(null, orderId, null, 1000)
+                        : orderRepository.matchTrades(null, orderId, null, contractType, 1000));
     }
 
     @Transactional
     public AdminCancelOrderResult adminCancelOrder(long orderId, String reason) {
+        return adminCancelOrder(orderId, reason, null);
+    }
+
+    @Transactional
+    public AdminCancelOrderResult adminCancelOrder(long orderId, String reason, ProductLine productLine) {
         requireOrderId(orderId);
         OrderRecord order = orderRepository.findByOrderId(orderId)
                 .orElseThrow(() -> new IllegalStateException("order not found: " + orderId));
+        requireOrderProductLine(order, productLine);
         return requestCancel(order, adminCancelReason(reason));
     }
 
     @Transactional
     public AdminCancelOrdersResponse adminCancelOrders(AdminBatchCancelOrdersRequest request) {
+        return adminCancelOrders(request, null);
+    }
+
+    @Transactional
+    public AdminCancelOrdersResponse adminCancelOrders(AdminBatchCancelOrdersRequest request, ProductLine productLine) {
         Long userId = request == null ? null : request.userId();
         if (userId != null && userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
@@ -671,7 +720,11 @@ public class OrderService {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
         String reason = adminCancelReason(request == null ? null : request.reason());
-        List<AdminCancelOrderResult> results = orderRepository.adminCancelableOrders(userId, symbol, limit)
+        String contractType = contractType(productLine);
+        List<OrderRecord> orders = contractType == null
+                ? orderRepository.adminCancelableOrders(userId, symbol, limit)
+                : orderRepository.adminCancelableOrders(userId, symbol, contractType, limit);
+        List<AdminCancelOrderResult> results = orders
                 .stream()
                 .map(order -> requestCancel(order, reason))
                 .toList();
@@ -680,6 +733,11 @@ public class OrderService {
     }
 
     public AdminCancelOrdersPreviewResponse adminCancelPreview(Long userId, String symbol, int limit) {
+        return adminCancelPreview(userId, symbol, limit, null);
+    }
+
+    public AdminCancelOrdersPreviewResponse adminCancelPreview(
+            Long userId, String symbol, int limit, ProductLine productLine) {
         if (userId != null && userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
@@ -687,8 +745,13 @@ public class OrderService {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
-        var impact = orderRepository.adminCancelableImpact(userId, normalizedSymbol);
-        var sample = orderRepository.adminCancelableOrders(userId, normalizedSymbol, limit)
+        String contractType = contractType(productLine);
+        var impact = contractType == null
+                ? orderRepository.adminCancelableImpact(userId, normalizedSymbol)
+                : orderRepository.adminCancelableImpact(userId, normalizedSymbol, contractType);
+        var sample = (contractType == null
+                ? orderRepository.adminCancelableOrders(userId, normalizedSymbol, limit)
+                : orderRepository.adminCancelableOrders(userId, normalizedSymbol, contractType, limit))
                 .stream()
                 .map(this::toResponse)
                 .toList();
@@ -705,11 +768,17 @@ public class OrderService {
 
     @Transactional
     public AdminCancelOrdersResponse adminCancelBySymbol(AdminCancelBySymbolRequest request) {
+        return adminCancelBySymbol(request, null);
+    }
+
+    @Transactional
+    public AdminCancelOrdersResponse adminCancelBySymbol(AdminCancelBySymbolRequest request, ProductLine productLine) {
         if (request == null) {
             throw new IllegalArgumentException("request is required");
         }
         String symbol = normalizeSymbol(request.symbol());
-        return adminCancelOrders(new AdminBatchCancelOrdersRequest(null, symbol, request.limit(), request.reason()));
+        return adminCancelOrders(new AdminBatchCancelOrdersRequest(null, symbol, request.limit(), request.reason()),
+                productLine);
     }
 
     private AdminCancelOrderResult requestCancel(OrderRecord order, String reason) {
@@ -738,6 +807,20 @@ public class OrderService {
                 cancelRequested,
                 message,
                 toResponse(order));
+    }
+
+    private void requireOrderProductLine(OrderRecord order, ProductLine productLine) {
+        String contractType = contractType(productLine);
+        if (contractType == null) {
+            return;
+        }
+        if (!orderRepository.orderMatchesContractType(order.orderId(), contractType)) {
+            throw new IllegalStateException("order not found: " + order.orderId());
+        }
+    }
+
+    private String contractType(ProductLine productLine) {
+        return productLine == null ? null : productLine.contractTypeCode();
     }
 
     private String adminCancelReason(String reason) {

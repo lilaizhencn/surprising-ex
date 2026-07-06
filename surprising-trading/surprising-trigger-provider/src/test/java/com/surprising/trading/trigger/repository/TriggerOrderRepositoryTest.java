@@ -12,11 +12,13 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TriggerPriceType;
+import com.surprising.trading.api.model.TriggerOrderStatus;
 import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.List;
 import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -161,6 +163,25 @@ class TriggerOrderRepositoryTest {
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"));
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void adminOrderPageFiltersByContractTypeWhenProvided() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(List.of());
+
+        repository.adminOrderPage(1001L, "BTC-USDT", TriggerOrderStatus.PENDING, 501L, 25,
+                "LINEAR_DELIVERY", null, "createdAt.asc");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), any(Object[].class));
+        assertThat(sql.getValue())
+                .contains("FROM instruments i")
+                .contains("i.symbol = trading_trigger_orders.symbol")
+                .contains("i.contract_type = ?");
     }
 
     @Test

@@ -12,6 +12,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.client.OrderRpcApi;
 import com.surprising.trading.api.model.AdminCursorPage;
@@ -710,6 +711,39 @@ class TriggerOrderServiceTest {
         assertThat(response.limit()).isEqualTo(50);
         verify(repository).adminOrderPage(1001L, "BTC-USDT", TriggerOrderStatus.PENDING, 501L, 50,
                 "cursor-1", "createdAt.asc");
+    }
+
+    @Test
+    void adminOrdersDelegatesProductLineAsContractType() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties());
+        TriggerOrderRecord row = record(501L, TriggerOrderStatus.PENDING);
+        when(repository.adminOrderPage(1001L, "BTC-USDT", TriggerOrderStatus.PENDING, 501L, 50,
+                "VANILLA_OPTION", "cursor-1", "createdAt.asc"))
+                .thenReturn(new AdminCursorPage.CursorPage<>(List.of(row),
+                        "cursor-2", true, "createdAt.asc", 50));
+
+        var response = service.adminOrders(1001L, "btc-usdt", "pending", 501L, 50,
+                "cursor-1", "createdAt.asc", ProductLine.OPTION);
+
+        assertThat(response.orders()).extracting("triggerOrderId").containsExactly(501L);
+        verify(repository).adminOrderPage(1001L, "BTC-USDT", TriggerOrderStatus.PENDING, 501L, 50,
+                "VANILLA_OPTION", "cursor-1", "createdAt.asc");
+    }
+
+    @Test
+    void adminTimelineRejectsMismatchedProductLine() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties());
+        TriggerOrderRecord row = record(501L, TriggerOrderStatus.PENDING);
+        when(repository.findById(501L)).thenReturn(Optional.of(row));
+        when(repository.triggerOrderMatchesContractType(501L, "LINEAR_DELIVERY")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.adminTimeline(501L, ProductLine.LINEAR_DELIVERY))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("trigger order not found: 501");
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.surprising.trading.trigger.service;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.client.OrderRpcApi;
 import com.surprising.trading.api.model.AdminTriggerOrderTimelineEvent;
@@ -178,11 +179,18 @@ public class TriggerOrderService {
     }
 
     public TriggerOrderResponse get(long triggerOrderId) {
+        return get(triggerOrderId, null);
+    }
+
+    public TriggerOrderResponse get(long triggerOrderId, ProductLine productLine) {
         if (triggerOrderId <= 0) {
             throw new IllegalArgumentException("triggerOrderId must be positive");
         }
         return triggerOrderRepository.findById(triggerOrderId)
-                .map(this::toResponse)
+                .map(order -> {
+                    requireTriggerOrderProductLine(order, productLine);
+                    return toResponse(order);
+                })
                 .orElseThrow(() -> new IllegalStateException("trigger order not found: " + triggerOrderId));
     }
 
@@ -267,7 +275,7 @@ public class TriggerOrderService {
                                                  String status,
                                                  Long triggerOrderId,
                                                  int limit) {
-        return adminOrders(userId, symbol, status, triggerOrderId, limit, null, null);
+        return adminOrders(userId, symbol, status, triggerOrderId, limit, null, null, null);
     }
 
     public TriggerOrderQueryResponse adminOrders(Long userId,
@@ -277,6 +285,17 @@ public class TriggerOrderService {
                                                  int limit,
                                                  String cursor,
                                                  String sort) {
+        return adminOrders(userId, symbol, status, triggerOrderId, limit, cursor, sort, null);
+    }
+
+    public TriggerOrderQueryResponse adminOrders(Long userId,
+                                                 String symbol,
+                                                 String status,
+                                                 Long triggerOrderId,
+                                                 int limit,
+                                                 String cursor,
+                                                 String sort,
+                                                 ProductLine productLine) {
         if (userId != null && userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
@@ -290,8 +309,12 @@ public class TriggerOrderService {
         TriggerOrderStatus normalizedStatus = status == null || status.isBlank()
                 ? null
                 : TriggerOrderStatus.valueOf(status.trim().toUpperCase());
-        var page = triggerOrderRepository.adminOrderPage(
-                        userId, normalizedSymbol, normalizedStatus, triggerOrderId, limit, cursor, sort);
+        String contractType = contractType(productLine);
+        var page = contractType == null
+                ? triggerOrderRepository.adminOrderPage(
+                        userId, normalizedSymbol, normalizedStatus, triggerOrderId, limit, cursor, sort)
+                : triggerOrderRepository.adminOrderPage(
+                        userId, normalizedSymbol, normalizedStatus, triggerOrderId, limit, contractType, cursor, sort);
         List<TriggerOrderResponse> orders = page.items()
                 .stream()
                 .map(this::toResponse)
@@ -301,11 +324,16 @@ public class TriggerOrderService {
     }
 
     public AdminTriggerOrderTimelineResponse adminTimeline(long triggerOrderId) {
+        return adminTimeline(triggerOrderId, null);
+    }
+
+    public AdminTriggerOrderTimelineResponse adminTimeline(long triggerOrderId, ProductLine productLine) {
         if (triggerOrderId <= 0) {
             throw new IllegalArgumentException("triggerOrderId must be positive");
         }
         TriggerOrderRecord order = triggerOrderRepository.findById(triggerOrderId)
                 .orElseThrow(() -> new IllegalStateException("trigger order not found: " + triggerOrderId));
+        requireTriggerOrderProductLine(order, productLine);
         return new AdminTriggerOrderTimelineResponse(toResponse(order), timelineEvents(order));
     }
 
@@ -555,6 +583,20 @@ public class TriggerOrderService {
     private TriggerOrderBatchResponse triggerBatchResponse(List<TriggerOrderBatchItemResponse> results) {
         int completed = (int) results.stream().filter(TriggerOrderBatchItemResponse::success).count();
         return new TriggerOrderBatchResponse(results.size(), completed, results.size() - completed, results);
+    }
+
+    private void requireTriggerOrderProductLine(TriggerOrderRecord order, ProductLine productLine) {
+        String contractType = contractType(productLine);
+        if (contractType == null) {
+            return;
+        }
+        if (!triggerOrderRepository.triggerOrderMatchesContractType(order.triggerOrderId(), contractType)) {
+            throw new IllegalStateException("trigger order not found: " + order.triggerOrderId());
+        }
+    }
+
+    private String contractType(ProductLine productLine) {
+        return productLine == null ? null : productLine.contractTypeCode();
     }
 
     private TriggerOrderResponse toResponse(TriggerOrderRecord order) {
