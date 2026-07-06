@@ -832,6 +832,7 @@ public class GatewayProperties {
         private boolean privateRoute;
         private String basicAuthUsername;
         private String basicAuthPassword;
+        private Map<ProductLine, ProductRoute> productRoutes = new LinkedHashMap<>();
 
         public BackendRoute() {
         }
@@ -885,6 +886,90 @@ public class GatewayProperties {
         public boolean hasBasicAuth() {
             return basicAuthUsername != null && !basicAuthUsername.isBlank()
                     && basicAuthPassword != null && !basicAuthPassword.isBlank();
+        }
+
+        public Map<ProductLine, ProductRoute> getProductRoutes() {
+            return productRoutes;
+        }
+
+        public void setProductRoutes(Map<ProductLine, ProductRoute> productRoutes) {
+            this.productRoutes = productRoutes == null ? Map.of() : Map.copyOf(productRoutes);
+        }
+
+        public boolean hasProductRoutes() {
+            return productRoutes != null && !productRoutes.isEmpty();
+        }
+
+        public BackendRoute resolve(ProductLine productLine) {
+            if (productLine == null || !hasProductRoutes()) {
+                return this;
+            }
+            ProductRoute productRoute = productRoutes.get(productLine);
+            if (productRoute == null) {
+                return null;
+            }
+            BackendRoute resolved = new BackendRoute(
+                    productRoute.getBaseUrl() == null || productRoute.getBaseUrl().isBlank()
+                            ? baseUrl
+                            : productRoute.getBaseUrl(),
+                    productRoute.getTargetPrefix() == null || productRoute.getTargetPrefix().isBlank()
+                            ? targetPrefix
+                            : productRoute.getTargetPrefix(),
+                    privateRoute);
+            resolved.setBasicAuthUsername(productRoute.getBasicAuthUsername() == null
+                    ? basicAuthUsername
+                    : productRoute.getBasicAuthUsername());
+            resolved.setBasicAuthPassword(productRoute.getBasicAuthPassword() == null
+                    ? basicAuthPassword
+                    : productRoute.getBasicAuthPassword());
+            return resolved;
+        }
+    }
+
+    public static class ProductRoute {
+        private String baseUrl;
+        private String targetPrefix;
+        private String basicAuthUsername;
+        private String basicAuthPassword;
+
+        public ProductRoute() {
+        }
+
+        public ProductRoute(String baseUrl, String targetPrefix) {
+            this.baseUrl = baseUrl;
+            this.targetPrefix = targetPrefix;
+        }
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public String getTargetPrefix() {
+            return targetPrefix;
+        }
+
+        public void setTargetPrefix(String targetPrefix) {
+            this.targetPrefix = targetPrefix;
+        }
+
+        public String getBasicAuthUsername() {
+            return basicAuthUsername;
+        }
+
+        public void setBasicAuthUsername(String basicAuthUsername) {
+            this.basicAuthUsername = basicAuthUsername;
+        }
+
+        public String getBasicAuthPassword() {
+            return basicAuthPassword;
+        }
+
+        public void setBasicAuthPassword(String basicAuthPassword) {
+            this.basicAuthPassword = basicAuthPassword;
         }
     }
 }

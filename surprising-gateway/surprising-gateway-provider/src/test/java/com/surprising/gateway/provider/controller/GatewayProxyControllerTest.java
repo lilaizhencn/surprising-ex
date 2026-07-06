@@ -8,6 +8,7 @@ import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.auth.AdminApprovalRepository;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.AuthService;
+import com.surprising.product.api.ProductLine;
 import java.net.URI;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -246,6 +247,88 @@ class GatewayProxyControllerTest {
     }
 
     @Test
+    void productLineQueryRoutesTradingRequestToProductBackend() {
+        GatewayProperties properties = properties();
+        properties.getRoutes().get("trading").getProductRoutes().put(ProductLine.LINEAR_DELIVERY,
+                new GatewayProperties.ProductRoute("http://order-linear-delivery:9184",
+                        "/api/v1/trading/orders"));
+        CapturingRestTemplate restTemplate = new CapturingRestTemplate();
+        GatewayProxyController controller = new GatewayProxyController(properties, restTemplate,
+                userAuthService("NORMAL"));
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/api/v1/gateway/trading");
+        request.setQueryString("productLine=LINEAR_DELIVERY");
+        request.addParameter("productLine", "LINEAR_DELIVERY");
+        request.addHeader("Authorization", "Bearer user");
+
+        controller.proxy("trading", HttpMethod.POST, request, "{}".getBytes());
+
+        assertThat(restTemplate.url.toString())
+                .isEqualTo("http://order-linear-delivery:9184/api/v1/trading/orders?productLine=LINEAR_DELIVERY");
+    }
+
+    @Test
+    void productLineBodyRoutesTradingRequestToProductBackend() {
+        GatewayProperties properties = properties();
+        properties.getRoutes().get("trading").getProductRoutes().put(ProductLine.OPTION,
+                new GatewayProperties.ProductRoute("http://order-option:9284",
+                        "/api/v1/trading/orders"));
+        CapturingRestTemplate restTemplate = new CapturingRestTemplate();
+        GatewayProxyController controller = new GatewayProxyController(properties, restTemplate,
+                userAuthService("NORMAL"));
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/api/v1/gateway/trading");
+        request.addHeader("Authorization", "Bearer user");
+        byte[] body = "{\"productLine\":\"option\",\"symbol\":\"BTC-USDT-260925-70000-C\"}".getBytes();
+
+        controller.proxy("trading", HttpMethod.POST, request, body);
+
+        assertThat(restTemplate.url.toString())
+                .isEqualTo("http://order-option:9284/api/v1/trading/orders");
+        assertThat(restTemplate.requestEntity.getBody()).isEqualTo(body);
+    }
+
+    @Test
+    void productLineHeaderCanUseAccountTypeCode() {
+        GatewayProperties properties = properties();
+        properties.getRoutes().get("trading-market").getProductRoutes().put(ProductLine.INVERSE_DELIVERY,
+                new GatewayProperties.ProductRoute("http://matching-inverse-delivery:9185",
+                        "/api/v1/trading/market"));
+        CapturingRestTemplate restTemplate = new CapturingRestTemplate();
+        GatewayProxyController controller = new GatewayProxyController(properties, restTemplate);
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET", "/api/v1/gateway/trading-market/orderbook");
+        request.addHeader("X-Account-Type", "COIN_DELIVERY");
+        request.setQueryString("symbol=BTC-USD-260925&depth=50");
+
+        controller.proxy("trading-market", HttpMethod.GET, request, null);
+
+        assertThat(restTemplate.url.toString())
+                .isEqualTo("http://matching-inverse-delivery:9185/api/v1/trading/market/orderbook?symbol=BTC-USD-260925&depth=50");
+    }
+
+    @Test
+    void configuredProductRouteMissingForRequestedLineFailsClosed() {
+        GatewayProperties properties = properties();
+        properties.getRoutes().get("trading").getProductRoutes().put(ProductLine.LINEAR_DELIVERY,
+                new GatewayProperties.ProductRoute("http://order-linear-delivery:9184",
+                        "/api/v1/trading/orders"));
+        GatewayProxyController controller = new GatewayProxyController(properties, new RestTemplate(),
+                userAuthService("NORMAL"));
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/api/v1/gateway/trading");
+        request.setQueryString("productLine=OPTION");
+        request.addParameter("productLine", "OPTION");
+        request.addHeader("Authorization", "Bearer user");
+
+        assertThatThrownBy(() -> controller.proxy("trading", HttpMethod.POST, request, "{}".getBytes()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
+                        .isEqualTo(HttpStatus.NOT_FOUND))
+                .hasMessageContaining("product route is not configured: OPTION");
+    }
+
+    @Test
     void withdrawDisabledUserCannotCallWalletWithdraw() {
         AuthService authService = userAuthService("WITHDRAW_DISABLED");
         GatewayProxyController controller = new GatewayProxyController(properties(), new RestTemplate(), authService);
@@ -382,6 +465,7 @@ class GatewayProxyControllerTest {
     }
 
     private static final class CapturingRestTemplate extends RestTemplate {
+        private URI url;
         private HttpEntity<?> requestEntity;
 
         @Override
@@ -389,6 +473,7 @@ class GatewayProxyControllerTest {
                                               HttpMethod method,
                                               HttpEntity<?> requestEntity,
                                               Class<T> responseType) {
+            this.url = url;
             this.requestEntity = requestEntity;
             return ResponseEntity.ok(responseType.cast(new byte[0]));
         }

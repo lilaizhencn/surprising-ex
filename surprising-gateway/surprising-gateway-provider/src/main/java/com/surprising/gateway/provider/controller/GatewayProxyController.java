@@ -7,6 +7,7 @@ import com.surprising.gateway.provider.auth.AdminAuditRepository;
 import com.surprising.gateway.provider.auth.AdminAuditRepository.AdminOperationRecord;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.AuthService;
+import com.surprising.product.api.ProductLine;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.security.MessageDigest;
@@ -14,6 +15,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -28,6 +30,8 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Minimal allowlisted REST gateway for frontend/BFF traffic.
@@ -53,6 +57,7 @@ public class GatewayProxyController {
     private final AuthService authService;
     private final AdminAuditRepository adminAuditRepository;
     private final AdminApprovalRepository adminApprovalRepository;
+    private final ObjectMapper objectMapper;
 
     public GatewayProxyController(GatewayProperties properties, RestTemplate restTemplate) {
         this(properties, restTemplate, null, null, null);
@@ -62,17 +67,27 @@ public class GatewayProxyController {
         this(properties, restTemplate, authService, null, null);
     }
 
-    @Autowired
     public GatewayProxyController(GatewayProperties properties,
                                   RestTemplate restTemplate,
                                   AuthService authService,
                                   AdminAuditRepository adminAuditRepository,
                                   AdminApprovalRepository adminApprovalRepository) {
+        this(properties, restTemplate, authService, adminAuditRepository, adminApprovalRepository, new ObjectMapper());
+    }
+
+    @Autowired
+    public GatewayProxyController(GatewayProperties properties,
+                                  RestTemplate restTemplate,
+                                  AuthService authService,
+                                  AdminAuditRepository adminAuditRepository,
+                                  AdminApprovalRepository adminApprovalRepository,
+                                  ObjectMapper objectMapper) {
         this.properties = properties;
         this.restTemplate = restTemplate;
         this.authService = authService;
         this.adminAuditRepository = adminAuditRepository;
         this.adminApprovalRepository = adminApprovalRepository;
+        this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
     }
 
     @RequestMapping(path = {
@@ -85,7 +100,7 @@ public class GatewayProxyController {
         @RequestBody(required = false) byte[] body) {
         long startedNanos = System.nanoTime();
         boolean adminRequest = isAdminRequest(request);
-        GatewayProperties.BackendRoute route = route(service, adminRequest);
+        GatewayProperties.BackendRoute route = resolveProductRoute(route(service, adminRequest), request, body);
         GatewayIdentity identity = adminRequest ? enforceAdminIdentity(request) : enforceIdentity(route, request);
         if (adminRequest) {
             enforceAdminPermission(service, method, identity);
@@ -157,6 +172,108 @@ public class GatewayProxyController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown " + routeType + ": " + service);
         }
         return route;
+    }
+
+    private GatewayProperties.BackendRoute resolveProductRoute(GatewayProperties.BackendRoute route,
+                                                               HttpServletRequest request,
+                                                               byte[] body) {
+        if (route == null || !route.hasProductRoutes()) {
+            return route;
+        }
+        ProductLine productLine = productLine(request, body);
+        if (productLine == null) {
+            return route;
+        }
+        GatewayProperties.BackendRoute resolved = route.resolve(productLine);
+        if (resolved == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "product route is not configured: " + productLine.name());
+        }
+        return resolved;
+    }
+
+    private ProductLine productLine(HttpServletRequest request, byte[] body) {
+        String value = firstNonBlank(
+                request.getHeader("X-Product-Line"),
+                request.getHeader("X-Account-Type"),
+                request.getHeader("X-Contract-Type"),
+                request.getParameter("productLine"),
+                request.getParameter("product-line"),
+                request.getParameter("product_line"),
+                request.getParameter("accountType"),
+                request.getParameter("account-type"),
+                request.getParameter("account_type"),
+                request.getParameter("contractType"),
+                request.getParameter("contract-type"),
+                request.getParameter("contract_type"),
+                bodyProductLine(body));
+        if (value == null) {
+            return null;
+        }
+        return parseProductLine(value);
+    }
+
+    @SuppressWarnings("unchecked")
+    private String bodyProductLine(byte[] body) {
+        if (body == null || body.length == 0) {
+            return null;
+        }
+        try {
+            Map<String, Object> payload = objectMapper.readValue(body, Map.class);
+            return firstNonBlank(
+                    stringValue(payload.get("productLine")),
+                    stringValue(payload.get("product-line")),
+                    stringValue(payload.get("product_line")),
+                    stringValue(payload.get("accountType")),
+                    stringValue(payload.get("account-type")),
+                    stringValue(payload.get("account_type")),
+                    stringValue(payload.get("contractType")),
+                    stringValue(payload.get("contract-type")),
+                    stringValue(payload.get("contract_type")));
+        } catch (JacksonException | IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    private ProductLine parseProductLine(String value) {
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        ProductLine byAccountType = ProductLine.fromAccountTypeCode(normalized).orElse(null);
+        if (byAccountType != null) {
+            return byAccountType;
+        }
+        ProductLine byContractType = ProductLine.fromContractTypeCode(normalized).orElse(null);
+        if (byContractType != null) {
+            return byContractType;
+        }
+        String enumName = normalized.toUpperCase(Locale.ROOT)
+                .replace('-', '_')
+                .replace('.', '_');
+        for (ProductLine productLine : ProductLine.values()) {
+            if (productLine.name().equals(enumName)
+                    || productLine.topicSegment().equalsIgnoreCase(normalized)) {
+                return productLine;
+            }
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "unsupported product line: " + value);
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
     }
 
     private GatewayIdentity enforceIdentity(GatewayProperties.BackendRoute route, HttpServletRequest request) {
