@@ -222,6 +222,36 @@ public class InstrumentRepository {
         return page(fetchedRows, safeLimit, sortSpec.token(), row -> encodeVersionCursor(row.version()));
     }
 
+    public List<InstrumentResponse> expiringContractsDue(Instant now, int limit) {
+        return jdbcTemplate.query("""
+                SELECT i.*
+                  FROM instruments i
+                  JOIN instrument_current_versions c
+                    ON c.symbol = i.symbol AND c.version = i.version
+                 WHERE i.instrument_type IN ('DELIVERY', 'OPTION')
+                   AND i.status IN ('PRE_TRADING', 'TRADING', 'HALT')
+                   AND i.expiry_time IS NOT NULL
+                   AND i.expiry_time <= ?
+                 ORDER BY i.expiry_time ASC, i.symbol ASC
+                 LIMIT ?
+                """, (rs, rowNum) -> toResponse(rs), Timestamp.from(now), limit(limit));
+    }
+
+    public List<InstrumentResponse> settlingContractsDue(Instant now, int limit) {
+        return jdbcTemplate.query("""
+                SELECT i.*
+                  FROM instruments i
+                  JOIN instrument_current_versions c
+                    ON c.symbol = i.symbol AND c.version = i.version
+                 WHERE i.instrument_type IN ('DELIVERY', 'OPTION')
+                   AND i.status = 'SETTLING'
+                   AND i.delivery_time IS NOT NULL
+                   AND i.delivery_time <= ?
+                 ORDER BY i.delivery_time ASC, i.symbol ASC
+                 LIMIT ?
+                """, (rs, rowNum) -> toResponse(rs), Timestamp.from(now), limit(limit));
+    }
+
     private void insertBrackets(String symbol, long version, List<RiskLimitBracket> brackets) {
         if (brackets == null || brackets.isEmpty()) {
             return;

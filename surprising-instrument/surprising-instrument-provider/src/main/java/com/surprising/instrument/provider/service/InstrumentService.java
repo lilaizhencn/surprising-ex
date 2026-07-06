@@ -7,8 +7,11 @@ import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
+import com.surprising.instrument.api.model.DeliverySettlementEvent;
+import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.instrument.provider.config.InstrumentProperties;
 import com.surprising.instrument.provider.repository.InstrumentRepository;
+import com.surprising.product.api.ProductTopicNames;
 import java.time.Instant;
 import java.util.Optional;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -105,6 +108,54 @@ public class InstrumentService {
         InstrumentEvent event = new InstrumentEvent(response.symbol(), response.version(), response.status(),
                 eventType, Instant.now(), response);
         kafkaTemplate.send(properties.getKafka().getEventsTopic(), response.symbol(), event);
+    }
+
+    public void publishProductLifecycleEvent(InstrumentResponse response) {
+        Instant eventTime = Instant.now();
+        if (response.instrumentType() == InstrumentType.DELIVERY) {
+            kafkaTemplate.send(deliverySettlementsTopic(response), response.symbol(), new DeliverySettlementEvent(
+                    response.symbol(),
+                    response.version(),
+                    response.contractType(),
+                    response.expiryTime(),
+                    response.deliveryTime(),
+                    response.settlementMethod(),
+                    response.status(),
+                    eventTime,
+                    response));
+            return;
+        }
+        if (response.instrumentType() == InstrumentType.OPTION) {
+            kafkaTemplate.send(optionExercisesTopic(response), response.symbol(), new OptionExerciseEvent(
+                    response.symbol(),
+                    response.version(),
+                    response.underlyingSymbol(),
+                    response.strikePriceUnits(),
+                    response.optionType(),
+                    response.optionExerciseStyle(),
+                    response.expiryTime(),
+                    response.deliveryTime(),
+                    response.settlementMethod(),
+                    response.status(),
+                    eventTime,
+                    response));
+        }
+    }
+
+    private String deliverySettlementsTopic(InstrumentResponse response) {
+        String override = properties.getKafka().getDeliverySettlementsTopic();
+        if (override != null && !override.isBlank()) {
+            return override;
+        }
+        return ProductTopicNames.of(response.contractType().productLine()).deliverySettlementsTopic();
+    }
+
+    private String optionExercisesTopic(InstrumentResponse response) {
+        String override = properties.getKafka().getOptionExercisesTopic();
+        if (override != null && !override.isBlank()) {
+            return override;
+        }
+        return ProductTopicNames.of(response.contractType().productLine()).optionExercisesTopic();
     }
 
     private String normalizeSymbol(String symbol) {

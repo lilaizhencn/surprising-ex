@@ -23,3 +23,7 @@ surprising:
     kafka:
       bootstrap-servers: localhost:9092
       events-topic: surprising.instrument.events.v1
+    lifecycle:
+      enabled: true
+      poll-delay-ms: 1000
+      batch-size: 100

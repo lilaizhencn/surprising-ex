@@ -88,6 +88,42 @@ class InstrumentRepositoryTest {
                 .hasMessageContaining("unsupported sort");
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    @Test
+    void expiringContractsDueScansCurrentDeliveryAndOptionInstruments() {
+        Instant now = Instant.parse("2026-03-27T08:00:00Z");
+
+        repository.expiringContractsDue(now, 25);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("instrument_current_versions")
+                .contains("i.instrument_type IN ('DELIVERY', 'OPTION')")
+                .contains("i.status IN ('PRE_TRADING', 'TRADING', 'HALT')")
+                .contains("i.expiry_time <= ?");
+        assertThat(args.getValue()).containsExactly(Timestamp.from(now), 25);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    @Test
+    void settlingContractsDueScansCurrentSettlingContracts() {
+        Instant now = Instant.parse("2026-03-27T08:05:00Z");
+
+        repository.settlingContractsDue(now, 25);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("instrument_current_versions")
+                .contains("i.instrument_type IN ('DELIVERY', 'OPTION')")
+                .contains("i.status = 'SETTLING'")
+                .contains("i.delivery_time <= ?");
+        assertThat(args.getValue()).containsExactly(Timestamp.from(now), 25);
+    }
+
     @Test
     void insertPersistsExpiringOptionMetadata() {
         Instant expiryTime = Instant.parse("2026-03-27T08:00:00Z");
