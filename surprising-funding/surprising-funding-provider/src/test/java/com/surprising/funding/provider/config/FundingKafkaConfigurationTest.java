@@ -25,8 +25,20 @@ class FundingKafkaConfigurationTest {
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
         properties.getKafka().setProductTopicsEnabled(true);
 
+        assertThat(properties.getKafka().isFundingProductLine()).isTrue();
         assertThat(properties.getKafka().getFundingRateTopic())
                 .isEqualTo("surprising.inverse-perp.funding.rate.v1");
+    }
+
+    @Test
+    void productTopicsDoNotCreateFundingTopicForNonFundingProductLine() {
+        FundingProperties properties = new FundingProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+
+        assertThat(properties.getKafka().isFundingProductLine()).isFalse();
+        assertThat(properties.getKafka().getFundingRateTopic())
+                .isEqualTo("surprising.perp.funding.rate.v1");
     }
 
     @Test

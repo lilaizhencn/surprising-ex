@@ -157,11 +157,17 @@ public class WebSocketProperties {
         }
 
         public String getFundingRateTopic() {
-            return productTopicsEnabled ? productTopics().fundingRateTopic() : fundingRateTopic;
+            return isFundingRateTopicEnabled() && productTopicsEnabled
+                    ? productTopics().fundingRateTopic()
+                    : fundingRateTopic;
         }
 
         public void setFundingRateTopic(String fundingRateTopic) {
             this.fundingRateTopic = fundingRateTopic;
+        }
+
+        public boolean isFundingRateTopicEnabled() {
+            return !productTopicsEnabled || productLine.isFundingProduct();
         }
 
         public String getOrderEventsTopic() {

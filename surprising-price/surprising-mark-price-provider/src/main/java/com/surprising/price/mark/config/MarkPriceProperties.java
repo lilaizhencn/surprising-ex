@@ -59,7 +59,13 @@ public class MarkPriceProperties {
     }
 
     public String fundingRateTopic() {
-        return kafka.productTopicsEnabled ? productTopics().fundingRateTopic() : topics.getFundingRateTopic();
+        return isFundingRateExpected() && kafka.productTopicsEnabled
+                ? productTopics().fundingRateTopic()
+                : topics.getFundingRateTopic();
+    }
+
+    public boolean isFundingRateExpected() {
+        return !kafka.productTopicsEnabled || kafka.productLine.isFundingProduct();
     }
 
     public String markPriceTopic() {

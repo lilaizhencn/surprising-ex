@@ -38,4 +38,29 @@ class MarkPriceCalculatorTest {
         assertThat(event.markPrice()).isEqualByComparingTo("101.000000000000000000");
         assertThat(event.status()).isEqualTo(PriceStatus.HEALTHY);
     }
+
+    @Test
+    void nonFundingProductDoesNotRequireFundingRateForHealthyMarkPrice() {
+        MarkPriceProperties properties = new MarkPriceProperties();
+        properties.getKafka().setProductLine(com.surprising.product.api.ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        MarkPriceCalculator calculator = new MarkPriceCalculator(properties);
+        Instant now = Instant.parse("2026-06-30T10:00:00Z");
+
+        MarkPriceEvent event = calculator.calculate(
+                "BTC-USDT-260925",
+                1,
+                new IndexPriceEvent("BTC-USDT-260925", new BigDecimal("100.00"), 1, PriceStatus.HEALTHY,
+                        5, 5, BigDecimal.valueOf(5), now, List.of()),
+                new PerpBookTickerEvent("BTC-USDT-260925", new BigDecimal("100.00"),
+                        new BigDecimal("100.00"), 1, now),
+                new PerpTradeEvent("BTC-USDT-260925", "t1", 1, now,
+                        new BigDecimal("100.00"), BigDecimal.ONE, "BUY"),
+                null,
+                BigDecimal.ZERO,
+                now);
+
+        assertThat(event.status()).isEqualTo(PriceStatus.HEALTHY);
+        assertThat(event.fundingRate()).isEqualByComparingTo(BigDecimal.ZERO);
+    }
 }

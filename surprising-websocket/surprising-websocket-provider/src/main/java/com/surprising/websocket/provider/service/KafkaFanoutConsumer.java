@@ -142,6 +142,7 @@ public class KafkaFanoutConsumer {
     @KafkaListener(
             topics = "#{__listener.fundingRateTopic()}",
             groupId = "#{__listener.groupId()}",
+            autoStartup = "#{__listener.fundingRateListenerEnabled()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onFundingRate(ConsumerRecord<String, String> record) {
         try {
@@ -285,6 +286,10 @@ public class KafkaFanoutConsumer {
 
     public String fundingRateTopic() {
         return properties.getKafka().getFundingRateTopic();
+    }
+
+    public boolean fundingRateListenerEnabled() {
+        return properties.getKafka().isFundingRateTopicEnabled();
     }
 
     public String orderEventsTopic() {

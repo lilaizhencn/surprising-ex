@@ -56,7 +56,7 @@ public class MarkPriceCalculator {
         BigDecimal markPrice = rawMark.max(clampLow).min(clampHigh).setScale(scale, RoundingMode.HALF_UP);
 
         PriceStatus status = markPrice.compareTo(rawMark) == 0 ? PriceStatus.HEALTHY : PriceStatus.CLAMPED;
-        if (funding == null && status == PriceStatus.HEALTHY) {
+        if (funding == null && properties.isFundingRateExpected() && status == PriceStatus.HEALTHY) {
             status = PriceStatus.DEGRADED;
         }
 

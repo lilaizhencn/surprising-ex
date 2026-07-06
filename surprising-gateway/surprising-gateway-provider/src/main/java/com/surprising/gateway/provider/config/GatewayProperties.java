@@ -442,10 +442,20 @@ public class GatewayProperties {
                     new KafkaConsumerGroup(topics.consumerGroup("trigger"),
                             List.of(topics.markPriceTopic(), topics.indexPriceTopic(), topics.matchTradesTopic())),
                     new KafkaConsumerGroup(topics.consumerGroup("mark-price"),
-                            List.of(topics.indexPriceTopic(), topics.bookTickerTopic(),
-                                    topics.publicTradesTopic(), topics.fundingRateTopic())),
+                            markPriceConsumerTopics(productLine, topics)),
                     new KafkaConsumerGroup(topics.consumerGroup("candlestick"),
                             List.of(topics.matchTradesTopic())));
+        }
+
+        private static List<String> markPriceConsumerTopics(ProductLine productLine, ProductTopicNames topics) {
+            List<String> topicNames = new ArrayList<>(List.of(
+                    topics.indexPriceTopic(),
+                    topics.bookTickerTopic(),
+                    topics.publicTradesTopic()));
+            if (productLine.isFundingProduct()) {
+                topicNames.add(topics.fundingRateTopic());
+            }
+            return List.copyOf(topicNames);
         }
     }
 

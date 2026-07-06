@@ -42,7 +42,19 @@ class GatewayKafkaLagPropertiesTest {
         assertThat(kafka.getConsumerGroups().get(5).getTopics())
                 .containsExactly("surprising.linear-delivery.index.price.v1",
                         "surprising.linear-delivery.book.ticker.v1",
-                        "surprising.linear-delivery.trade.events.v1",
-                        "surprising.linear-delivery.funding.rate.v1");
+                        "surprising.linear-delivery.trade.events.v1");
+    }
+
+    @Test
+    void fundingProductsIncludeFundingRateInMarkPriceLagGroup() {
+        GatewayProperties.KafkaLag kafka = new GatewayProperties.KafkaLag();
+        kafka.setProductLine(ProductLine.INVERSE_PERPETUAL);
+        kafka.setProductTopicsEnabled(true);
+
+        assertThat(kafka.getConsumerGroups().get(5).getTopics())
+                .containsExactly("surprising.inverse-perp.index.price.v1",
+                        "surprising.inverse-perp.book.ticker.v1",
+                        "surprising.inverse-perp.trade.events.v1",
+                        "surprising.inverse-perp.funding.rate.v1");
     }
 }

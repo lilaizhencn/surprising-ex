@@ -38,8 +38,9 @@ class WebSocketPropertiesTest {
                 .isEqualTo("surprising.linear-delivery.index.price.v1");
         assertThat(properties.getKafka().getMarkPriceTopic())
                 .isEqualTo("surprising.linear-delivery.mark.price.v1");
+        assertThat(properties.getKafka().isFundingRateTopicEnabled()).isFalse();
         assertThat(properties.getKafka().getFundingRateTopic())
-                .isEqualTo("surprising.linear-delivery.funding.rate.v1");
+                .isEqualTo("surprising.perp.funding.rate.v1");
         assertThat(properties.getKafka().getOrderEventsTopic())
                 .isEqualTo("surprising.linear-delivery.order.events.v1");
         assertThat(properties.getKafka().getMatchResultsTopic())
@@ -52,5 +53,16 @@ class WebSocketPropertiesTest {
                 .isEqualTo("surprising.linear-delivery.risk.account.events.v1");
         assertThat(properties.getKafka().getPositionRiskEventsTopic())
                 .isEqualTo("surprising.linear-delivery.risk.position.events.v1");
+    }
+
+    @Test
+    void canResolveFundingRateTopicForFundingProductLine() {
+        WebSocketProperties properties = new WebSocketProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+
+        assertThat(properties.getKafka().isFundingRateTopicEnabled()).isTrue();
+        assertThat(properties.getKafka().getFundingRateTopic())
+                .isEqualTo("surprising.inverse-perp.funding.rate.v1");
     }
 }

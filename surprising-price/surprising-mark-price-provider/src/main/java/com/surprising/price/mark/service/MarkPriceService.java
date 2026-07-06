@@ -81,7 +81,9 @@ public class MarkPriceService {
         });
     }
 
-    @KafkaListener(topics = "#{__listener.fundingRateTopic()}", groupId = "#{__listener.groupId()}")
+    @KafkaListener(topics = "#{__listener.fundingRateTopic()}",
+            groupId = "#{__listener.groupId()}",
+            autoStartup = "#{__listener.fundingRateListenerEnabled()}")
     public void onFundingRate(String payload) {
         parse(payload, PerpFundingRateEvent.class, "funding rate", event -> fundingRates.put(event.symbol(), event));
     }
@@ -161,6 +163,10 @@ public class MarkPriceService {
 
     public String fundingRateTopic() {
         return properties.fundingRateTopic();
+    }
+
+    public boolean fundingRateListenerEnabled() {
+        return properties.isFundingRateExpected();
     }
 
     public String groupId() {

@@ -85,7 +85,13 @@ public class FundingProperties {
         }
 
         public String getFundingRateTopic() {
-            return productTopicsEnabled ? ProductTopicNames.of(productLine).fundingRateTopic() : fundingRateTopic;
+            return isFundingProductLine() && productTopicsEnabled
+                    ? ProductTopicNames.of(productLine).fundingRateTopic()
+                    : fundingRateTopic;
+        }
+
+        public boolean isFundingProductLine() {
+            return !productTopicsEnabled || productLine.isFundingProduct();
         }
 
         public void setFundingRateTopic(String fundingRateTopic) {

@@ -142,6 +142,7 @@ class MarkPriceServiceTest {
         ArgumentCaptor<MarkPriceEvent> eventCaptor = ArgumentCaptor.forClass(MarkPriceEvent.class);
         verify(repository).save(eventCaptor.capture());
         MarkPriceEvent event = eventCaptor.getValue();
+        assertThat(event.status()).isEqualTo(PriceStatus.HEALTHY);
         verify(kafkaTemplate).send(eq("surprising.linear-delivery.mark.price.v1"), eq("BTC-USDT"), eq(event));
         verify(kafkaTemplate).send(eq("surprising.linear-delivery.mark.price.audit.v1"), eq("BTC-USDT"), eq(event));
     }
