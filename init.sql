@@ -45,11 +45,16 @@ CREATE TABLE IF NOT EXISTS instruments (
     updated_at                  TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (symbol, version),
     CONSTRAINT instruments_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
-    CONSTRAINT instruments_type_check CHECK (instrument_type IN ('SPOT', 'PERPETUAL')),
-    CONSTRAINT instruments_contract_type_check CHECK (contract_type IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL')),
+    CONSTRAINT instruments_type_check CHECK (instrument_type IN ('SPOT', 'PERPETUAL', 'DELIVERY', 'OPTION')),
+    CONSTRAINT instruments_contract_type_check CHECK (
+        contract_type IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                          'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'VANILLA_OPTION')
+    ),
     CONSTRAINT instruments_product_contract_check CHECK (
         (instrument_type = 'SPOT' AND contract_type = 'SPOT')
         OR (instrument_type = 'PERPETUAL' AND contract_type IN ('LINEAR_PERPETUAL', 'INVERSE_PERPETUAL'))
+        OR (instrument_type = 'DELIVERY' AND contract_type IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY'))
+        OR (instrument_type = 'OPTION' AND contract_type = 'VANILLA_OPTION')
     ),
     CONSTRAINT instruments_status_check CHECK (status IN ('PRE_TRADING', 'TRADING', 'HALT', 'SETTLING', 'CLOSED')),
     CONSTRAINT instruments_positive_values CHECK (
@@ -84,6 +89,33 @@ CREATE INDEX IF NOT EXISTS instruments_updated_page_idx
 
 CREATE INDEX IF NOT EXISTS instruments_created_page_idx
     ON instruments (created_at DESC, symbol DESC, version DESC);
+
+DO $$
+BEGIN
+    IF to_regclass('public.instruments') IS NOT NULL THEN
+        ALTER TABLE instruments DROP CONSTRAINT IF EXISTS instruments_type_check;
+        ALTER TABLE instruments
+            ADD CONSTRAINT instruments_type_check CHECK (
+                instrument_type IN ('SPOT', 'PERPETUAL', 'DELIVERY', 'OPTION')
+            );
+
+        ALTER TABLE instruments DROP CONSTRAINT IF EXISTS instruments_contract_type_check;
+        ALTER TABLE instruments
+            ADD CONSTRAINT instruments_contract_type_check CHECK (
+                contract_type IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                                  'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'VANILLA_OPTION')
+            );
+
+        ALTER TABLE instruments DROP CONSTRAINT IF EXISTS instruments_product_contract_check;
+        ALTER TABLE instruments
+            ADD CONSTRAINT instruments_product_contract_check CHECK (
+                (instrument_type = 'SPOT' AND contract_type = 'SPOT')
+                OR (instrument_type = 'PERPETUAL' AND contract_type IN ('LINEAR_PERPETUAL', 'INVERSE_PERPETUAL'))
+                OR (instrument_type = 'DELIVERY' AND contract_type IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY'))
+                OR (instrument_type = 'OPTION' AND contract_type = 'VANILLA_OPTION')
+            );
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS instrument_current_versions (
     symbol              TEXT PRIMARY KEY,
@@ -1287,7 +1319,8 @@ CREATE TABLE IF NOT EXISTS account_product_balances (
     updated_at          TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (account_type, user_id, asset),
     CONSTRAINT account_product_balances_type_check CHECK (
-        account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL')
+        account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
+                         'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
     ),
     CONSTRAINT account_product_balances_user_positive CHECK (user_id > 0),
     CONSTRAINT account_product_balances_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
@@ -1305,7 +1338,8 @@ CREATE TABLE IF NOT EXISTS account_product_deficits (
     updated_at          TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (account_type, user_id, asset),
     CONSTRAINT account_product_deficits_type_check CHECK (
-        account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL')
+        account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
+                         'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
     ),
     CONSTRAINT account_product_deficits_user_positive CHECK (user_id > 0),
     CONSTRAINT account_product_deficits_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
@@ -1327,7 +1361,8 @@ CREATE TABLE IF NOT EXISTS account_product_ledger_entries (
     reason              TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT account_product_ledger_type_check CHECK (
-        account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL')
+        account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
+                         'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
     ),
     CONSTRAINT account_product_ledger_user_positive CHECK (user_id > 0),
     CONSTRAINT account_product_ledger_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
@@ -1353,8 +1388,10 @@ CREATE TABLE IF NOT EXISTS account_product_transfers (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT account_product_transfers_type_check CHECK (
-        source_account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL')
-        AND target_account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL')
+        source_account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
+                                'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+        AND target_account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
+                                    'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
         AND source_account_type <> target_account_type
     ),
     CONSTRAINT account_product_transfers_user_positive CHECK (user_id > 0),
@@ -1443,7 +1480,8 @@ CREATE TABLE IF NOT EXISTS account_admin_balance_adjustments (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT account_admin_adjustments_kind_check CHECK (adjustment_kind IN ('BASIC', 'PRODUCT')),
     CONSTRAINT account_admin_adjustments_type_check CHECK (
-        account_type IS NULL OR account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL')
+        account_type IS NULL OR account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
+                                                 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
     ),
     CONSTRAINT account_admin_adjustments_kind_type_check CHECK (
         (adjustment_kind = 'BASIC' AND account_type IS NULL)
@@ -1482,7 +1520,7 @@ CREATE TABLE IF NOT EXISTS account_margin_reservations (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT account_margin_reservations_type_check CHECK (
-        account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL')
+        account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL', 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
     ),
     CONSTRAINT account_margin_reservations_user_positive CHECK (user_id > 0),
     CONSTRAINT account_margin_reservations_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
@@ -1507,6 +1545,66 @@ CREATE INDEX IF NOT EXISTS account_margin_reservations_user_idx
 
 CREATE INDEX IF NOT EXISTS account_margin_reservations_symbol_idx
     ON account_margin_reservations (symbol, status, updated_at DESC);
+
+DO $$
+BEGIN
+    IF to_regclass('public.account_product_balances') IS NOT NULL THEN
+        ALTER TABLE account_product_balances DROP CONSTRAINT IF EXISTS account_product_balances_type_check;
+        ALTER TABLE account_product_balances
+            ADD CONSTRAINT account_product_balances_type_check CHECK (
+                account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
+                                 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+            );
+    END IF;
+
+    IF to_regclass('public.account_product_deficits') IS NOT NULL THEN
+        ALTER TABLE account_product_deficits DROP CONSTRAINT IF EXISTS account_product_deficits_type_check;
+        ALTER TABLE account_product_deficits
+            ADD CONSTRAINT account_product_deficits_type_check CHECK (
+                account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
+                                 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+            );
+    END IF;
+
+    IF to_regclass('public.account_product_ledger_entries') IS NOT NULL THEN
+        ALTER TABLE account_product_ledger_entries DROP CONSTRAINT IF EXISTS account_product_ledger_type_check;
+        ALTER TABLE account_product_ledger_entries
+            ADD CONSTRAINT account_product_ledger_type_check CHECK (
+                account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
+                                 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+            );
+    END IF;
+
+    IF to_regclass('public.account_product_transfers') IS NOT NULL THEN
+        ALTER TABLE account_product_transfers DROP CONSTRAINT IF EXISTS account_product_transfers_type_check;
+        ALTER TABLE account_product_transfers
+            ADD CONSTRAINT account_product_transfers_type_check CHECK (
+                source_account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
+                                        'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+                AND target_account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
+                                            'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+                AND source_account_type <> target_account_type
+            );
+    END IF;
+
+    IF to_regclass('public.account_admin_balance_adjustments') IS NOT NULL THEN
+        ALTER TABLE account_admin_balance_adjustments DROP CONSTRAINT IF EXISTS account_admin_adjustments_type_check;
+        ALTER TABLE account_admin_balance_adjustments
+            ADD CONSTRAINT account_admin_adjustments_type_check CHECK (
+                account_type IS NULL OR account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
+                                                         'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+            );
+    END IF;
+
+    IF to_regclass('public.account_margin_reservations') IS NOT NULL THEN
+        ALTER TABLE account_margin_reservations DROP CONSTRAINT IF EXISTS account_margin_reservations_type_check;
+        ALTER TABLE account_margin_reservations
+            ADD CONSTRAINT account_margin_reservations_type_check CHECK (
+                account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL',
+                                 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+            );
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS account_spot_order_reservations (
     reservation_id      BIGINT PRIMARY KEY,
@@ -2719,13 +2817,27 @@ CREATE TABLE IF NOT EXISTS gateway_admin_account_asset_snapshots (
     CONSTRAINT gateway_account_asset_snapshots_valuation_asset_check CHECK (valuation_asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT gateway_account_asset_snapshots_asset_check CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT gateway_account_asset_snapshots_account_type_check CHECK (
-        account_type IN ('BASIC', 'FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL')
+        account_type IN ('BASIC', 'FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
+                         'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
     ),
     CONSTRAINT gateway_account_asset_snapshots_counts_check CHECK (user_count >= 0 AND balance_count >= 0)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS gateway_account_asset_snapshots_uidx
     ON gateway_admin_account_asset_snapshots (snapshot_date, valuation_asset, account_type, asset);
+
+DO $$
+BEGIN
+    IF to_regclass('public.gateway_admin_account_asset_snapshots') IS NOT NULL THEN
+        ALTER TABLE gateway_admin_account_asset_snapshots
+            DROP CONSTRAINT IF EXISTS gateway_account_asset_snapshots_account_type_check;
+        ALTER TABLE gateway_admin_account_asset_snapshots
+            ADD CONSTRAINT gateway_account_asset_snapshots_account_type_check CHECK (
+                account_type IN ('BASIC', 'FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
+                                 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+            );
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS gateway_account_asset_snapshots_date_idx
     ON gateway_admin_account_asset_snapshots (snapshot_date DESC, valuation_asset, account_type, asset);
