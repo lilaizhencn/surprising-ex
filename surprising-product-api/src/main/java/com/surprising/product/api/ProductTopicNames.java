@@ -39,8 +39,24 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("index.price");
     }
 
+    public String indexComponentsTopic() {
+        return topic("index.components");
+    }
+
+    public String bookTickerTopic() {
+        return topic("book.ticker");
+    }
+
     public String markPriceTopic() {
         return topic("mark.price");
+    }
+
+    public String markPriceAuditTopic() {
+        return topic("mark.price.audit");
+    }
+
+    public String fundingRateTopic() {
+        return topic("funding.rate");
     }
 
     public String publicTradesTopic() {

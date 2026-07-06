@@ -1,5 +1,7 @@
 package com.surprising.price.mark.config;
 
+import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductTopicNames;
 import java.math.BigDecimal;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -44,8 +46,38 @@ public class MarkPriceProperties {
         this.coordination = coordination;
     }
 
+    public String indexPriceTopic() {
+        return kafka.productTopicsEnabled ? productTopics().indexPriceTopic() : topics.getIndexPriceTopic();
+    }
+
+    public String bookTickerTopic() {
+        return kafka.productTopicsEnabled ? productTopics().bookTickerTopic() : topics.getBookTickerTopic();
+    }
+
+    public String tradeTopic() {
+        return kafka.productTopicsEnabled ? productTopics().publicTradesTopic() : topics.getTradeTopic();
+    }
+
+    public String fundingRateTopic() {
+        return kafka.productTopicsEnabled ? productTopics().fundingRateTopic() : topics.getFundingRateTopic();
+    }
+
+    public String markPriceTopic() {
+        return kafka.productTopicsEnabled ? productTopics().markPriceTopic() : topics.getMarkPriceTopic();
+    }
+
+    public String markPriceAuditTopic() {
+        return kafka.productTopicsEnabled ? productTopics().markPriceAuditTopic() : topics.getMarkPriceAuditTopic();
+    }
+
+    private ProductTopicNames productTopics() {
+        return ProductTopicNames.of(kafka.productLine);
+    }
+
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        private boolean productTopicsEnabled;
         private String groupId = "surprising-mark-price-v1";
         private int concurrency = 2;
         private int maxPollRecords = 500;
@@ -58,8 +90,24 @@ public class MarkPriceProperties {
             this.bootstrapServers = bootstrapServers;
         }
 
+        public ProductLine getProductLine() {
+            return productLine;
+        }
+
+        public void setProductLine(ProductLine productLine) {
+            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        }
+
+        public boolean isProductTopicsEnabled() {
+            return productTopicsEnabled;
+        }
+
+        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
+            this.productTopicsEnabled = productTopicsEnabled;
+        }
+
         public String getGroupId() {
-            return groupId;
+            return productTopicsEnabled ? ProductTopicNames.of(productLine).consumerGroup("mark-price") : groupId;
         }
 
         public void setGroupId(String groupId) {

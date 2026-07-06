@@ -2,6 +2,7 @@ package com.surprising.price.mark.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
@@ -16,6 +17,34 @@ import org.springframework.kafka.support.serializer.JsonSerializer;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class MarkKafkaConfigurationTest {
+
+    @Test
+    void defaultsToLegacyPerpTopicsUntilProductTopicsAreEnabled() {
+        MarkPriceProperties properties = new MarkPriceProperties();
+
+        assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-mark-price-v1");
+        assertThat(properties.indexPriceTopic()).isEqualTo("surprising.perp.index.price.v1");
+        assertThat(properties.bookTickerTopic()).isEqualTo("surprising.perp.book.ticker.v1");
+        assertThat(properties.tradeTopic()).isEqualTo("surprising.perp.trade.events.v1");
+        assertThat(properties.fundingRateTopic()).isEqualTo("surprising.perp.funding.rate.v1");
+        assertThat(properties.markPriceTopic()).isEqualTo("surprising.perp.mark.price.v1");
+        assertThat(properties.markPriceAuditTopic()).isEqualTo("surprising.perp.mark.price.audit.v1");
+    }
+
+    @Test
+    void canResolveMarkTopicsAndGroupFromProductLine() {
+        MarkPriceProperties properties = new MarkPriceProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+
+        assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-inverse-delivery-mark-price-v1");
+        assertThat(properties.indexPriceTopic()).isEqualTo("surprising.inverse-delivery.index.price.v1");
+        assertThat(properties.bookTickerTopic()).isEqualTo("surprising.inverse-delivery.book.ticker.v1");
+        assertThat(properties.tradeTopic()).isEqualTo("surprising.inverse-delivery.trade.events.v1");
+        assertThat(properties.fundingRateTopic()).isEqualTo("surprising.inverse-delivery.funding.rate.v1");
+        assertThat(properties.markPriceTopic()).isEqualTo("surprising.inverse-delivery.mark.price.v1");
+        assertThat(properties.markPriceAuditTopic()).isEqualTo("surprising.inverse-delivery.mark.price.audit.v1");
+    }
 
     @Test
     void producerUsesDurableIdempotentSettings() {

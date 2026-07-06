@@ -1,5 +1,7 @@
 package com.surprising.price.index.config;
 
+import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductTopicNames;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -84,6 +86,8 @@ public class IndexPriceProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        private boolean productTopicsEnabled;
         private String indexPriceTopic = "surprising.perp.index.price.v1";
         private String indexComponentsTopic = "surprising.perp.index.components.v1";
 
@@ -95,8 +99,24 @@ public class IndexPriceProperties {
             this.bootstrapServers = bootstrapServers;
         }
 
+        public ProductLine getProductLine() {
+            return productLine;
+        }
+
+        public void setProductLine(ProductLine productLine) {
+            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        }
+
+        public boolean isProductTopicsEnabled() {
+            return productTopicsEnabled;
+        }
+
+        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
+            this.productTopicsEnabled = productTopicsEnabled;
+        }
+
         public String getIndexPriceTopic() {
-            return indexPriceTopic;
+            return productTopicsEnabled ? productTopics().indexPriceTopic() : indexPriceTopic;
         }
 
         public void setIndexPriceTopic(String indexPriceTopic) {
@@ -104,11 +124,15 @@ public class IndexPriceProperties {
         }
 
         public String getIndexComponentsTopic() {
-            return indexComponentsTopic;
+            return productTopicsEnabled ? productTopics().indexComponentsTopic() : indexComponentsTopic;
         }
 
         public void setIndexComponentsTopic(String indexComponentsTopic) {
             this.indexComponentsTopic = indexComponentsTopic;
+        }
+
+        private ProductTopicNames productTopics() {
+            return ProductTopicNames.of(productLine);
         }
     }
 

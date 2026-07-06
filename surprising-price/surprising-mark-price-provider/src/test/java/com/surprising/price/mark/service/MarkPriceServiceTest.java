@@ -9,6 +9,7 @@ import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PerpBookTickerEvent;
@@ -118,8 +119,31 @@ class MarkPriceServiceTest {
         assertThat(event.symbol()).isEqualTo("BTC-USDT");
         assertThat(event.sequence()).isEqualTo(11L);
         assertThat(event.markPrice()).isEqualByComparingTo("100.000000000000000000");
-        verify(kafkaTemplate).send(eq(properties.getTopics().getMarkPriceTopic()), eq("BTC-USDT"), eq(event));
-        verify(kafkaTemplate).send(eq(properties.getTopics().getMarkPriceAuditTopic()), eq("BTC-USDT"), eq(event));
+        verify(kafkaTemplate).send(eq(properties.markPriceTopic()), eq("BTC-USDT"), eq(event));
+        verify(kafkaTemplate).send(eq(properties.markPriceAuditTopic()), eq("BTC-USDT"), eq(event));
+    }
+
+    @Test
+    void publishesMarkPriceToProductSpecificTopicsWhenEnabled() throws Exception {
+        MarkPriceRepository repository = mock(MarkPriceRepository.class);
+        KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
+        when(repository.nextSequence("price-mark", "BTC-USDT")).thenReturn(11L);
+        MarkPriceProperties properties = properties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
+                new MarkPriceCalculator(properties), repository, kafkaTemplate);
+        Instant now = Instant.now();
+
+        service.onIndexPrice(new ObjectMapper().writeValueAsString(
+                new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 2, PriceStatus.HEALTHY, 3, 3,
+                        BigDecimal.valueOf(3), now, List.of())));
+
+        ArgumentCaptor<MarkPriceEvent> eventCaptor = ArgumentCaptor.forClass(MarkPriceEvent.class);
+        verify(repository).save(eventCaptor.capture());
+        MarkPriceEvent event = eventCaptor.getValue();
+        verify(kafkaTemplate).send(eq("surprising.linear-delivery.mark.price.v1"), eq("BTC-USDT"), eq(event));
+        verify(kafkaTemplate).send(eq("surprising.linear-delivery.mark.price.audit.v1"), eq("BTC-USDT"), eq(event));
     }
 
     private MarkPriceService service(MarkPriceRepository repository, KafkaTemplate<String, Object> kafkaTemplate) {

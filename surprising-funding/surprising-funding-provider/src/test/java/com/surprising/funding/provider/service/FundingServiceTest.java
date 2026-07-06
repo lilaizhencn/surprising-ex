@@ -3,6 +3,7 @@ package com.surprising.funding.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.funding.api.model.AdminCursorPage;
 import com.surprising.funding.api.model.FundingPaymentResponse;
 import com.surprising.funding.api.model.FundingRateResponse;
@@ -52,6 +53,22 @@ class FundingServiceTest {
 
         assertThat(fundingRepository.rateInputCalls).isZero();
         assertThat(fundingRepository.savedRates).isZero();
+    }
+
+    @Test
+    void publishRatesUsesProductSpecificFundingTopicWhenEnabled() {
+        FakeFundingRepository fundingRepository = new FakeFundingRepository();
+        RecordingFundingOutboxRepository outboxRepository = new RecordingFundingOutboxRepository();
+        FundingProperties properties = new FundingProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+        FundingService service = new FundingService(properties, fundingRepository, outboxRepository,
+                transactionManager());
+
+        service.publishRates();
+
+        assertThat(outboxRepository.topic).isEqualTo("surprising.inverse-perp.funding.rate.v1");
+        assertThat(outboxRepository.eventKey).isEqualTo("BTC-USDT");
     }
 
     @Test
@@ -223,6 +240,21 @@ class FundingServiceTest {
         public void enqueue(String topic, String eventKey, String eventType, String payload, Instant now) {
             enqueued++;
             throw new IllegalStateException("outbox down");
+        }
+    }
+
+    private static final class RecordingFundingOutboxRepository extends FundingOutboxRepository {
+        private String topic;
+        private String eventKey;
+
+        private RecordingFundingOutboxRepository() {
+            super(null, null);
+        }
+
+        @Override
+        public void enqueue(String topic, String eventKey, String eventType, String payload, Instant now) {
+            this.topic = topic;
+            this.eventKey = eventKey;
         }
     }
 

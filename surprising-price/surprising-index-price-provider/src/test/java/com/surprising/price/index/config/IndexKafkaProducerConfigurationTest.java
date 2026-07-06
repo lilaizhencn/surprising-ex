@@ -2,6 +2,7 @@ package com.surprising.price.index.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -10,6 +11,27 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.support.serializer.JsonSerializer;
 
 class IndexKafkaProducerConfigurationTest {
+
+    @Test
+    void defaultsToLegacyPerpTopicsUntilProductTopicsAreEnabled() {
+        IndexPriceProperties properties = new IndexPriceProperties();
+
+        assertThat(properties.getKafka().getIndexPriceTopic()).isEqualTo("surprising.perp.index.price.v1");
+        assertThat(properties.getKafka().getIndexComponentsTopic())
+                .isEqualTo("surprising.perp.index.components.v1");
+    }
+
+    @Test
+    void canResolveIndexTopicsFromProductLine() {
+        IndexPriceProperties properties = new IndexPriceProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+
+        assertThat(properties.getKafka().getIndexPriceTopic())
+                .isEqualTo("surprising.linear-delivery.index.price.v1");
+        assertThat(properties.getKafka().getIndexComponentsTopic())
+                .isEqualTo("surprising.linear-delivery.index.components.v1");
+    }
 
     @Test
     void producerUsesDurableIdempotentSettings() {

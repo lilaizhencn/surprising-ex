@@ -22,6 +22,8 @@ surprising:
   funding:
     kafka:
       bootstrap-servers: localhost:9092
+      product-line: LINEAR_PERPETUAL
+      product-topics-enabled: false
       funding-rate-topic: surprising.perp.funding.rate.v1
     calculation:
       publish-delay-ms: 1000

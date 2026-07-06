@@ -16,7 +16,11 @@ class ProductTopicNamesTest {
         assertThat(linear.orderCommandsTopic()).isEqualTo("surprising.linear-perp.order.commands.v1");
         assertThat(inverse.matchTradesTopic()).isEqualTo("surprising.inverse-perp.match.trades.v1");
         assertThat(linear.indexPriceTopic()).isEqualTo("surprising.linear-perp.index.price.v1");
+        assertThat(linear.indexComponentsTopic()).isEqualTo("surprising.linear-perp.index.components.v1");
+        assertThat(linear.bookTickerTopic()).isEqualTo("surprising.linear-perp.book.ticker.v1");
         assertThat(linear.markPriceTopic()).isEqualTo("surprising.linear-perp.mark.price.v1");
+        assertThat(linear.markPriceAuditTopic()).isEqualTo("surprising.linear-perp.mark.price.audit.v1");
+        assertThat(linear.fundingRateTopic()).isEqualTo("surprising.linear-perp.funding.rate.v1");
         assertThat(linear.accountPositionEventsTopic())
                 .isEqualTo("surprising.linear-perp.account.position.events.v1");
         assertThat(linear.accountRiskEventsTopic()).isEqualTo("surprising.linear-perp.risk.account.events.v1");

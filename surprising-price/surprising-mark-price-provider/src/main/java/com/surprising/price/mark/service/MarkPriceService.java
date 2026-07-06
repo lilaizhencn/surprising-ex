@@ -57,7 +57,7 @@ public class MarkPriceService {
         this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
     }
 
-    @KafkaListener(topics = "${surprising.price.mark.topics.index-price-topic}", groupId = "${surprising.price.mark.kafka.group-id}")
+    @KafkaListener(topics = "#{__listener.indexPriceTopic()}", groupId = "#{__listener.groupId()}")
     public void onIndexPrice(String payload) {
         parse(payload, IndexPriceEvent.class, "index price", event -> {
             indexPrices.put(event.symbol(), event);
@@ -65,7 +65,7 @@ public class MarkPriceService {
         });
     }
 
-    @KafkaListener(topics = "${surprising.price.mark.topics.book-ticker-topic}", groupId = "${surprising.price.mark.kafka.group-id}")
+    @KafkaListener(topics = "#{__listener.bookTickerTopic()}", groupId = "#{__listener.groupId()}")
     public void onBookTicker(String payload) {
         parse(payload, PerpBookTickerEvent.class, "book ticker", event -> {
             bookTickers.put(event.symbol(), event);
@@ -73,7 +73,7 @@ public class MarkPriceService {
         });
     }
 
-    @KafkaListener(topics = "${surprising.price.mark.topics.trade-topic}", groupId = "${surprising.price.mark.kafka.group-id}")
+    @KafkaListener(topics = "#{__listener.tradeTopic()}", groupId = "#{__listener.groupId()}")
     public void onTrade(String payload) {
         parse(payload, PerpTradeEvent.class, "trade", event -> {
             trades.put(event.symbol(), event);
@@ -81,7 +81,7 @@ public class MarkPriceService {
         });
     }
 
-    @KafkaListener(topics = "${surprising.price.mark.topics.funding-rate-topic}", groupId = "${surprising.price.mark.kafka.group-id}")
+    @KafkaListener(topics = "#{__listener.fundingRateTopic()}", groupId = "#{__listener.groupId()}")
     public void onFundingRate(String payload) {
         parse(payload, PerpFundingRateEvent.class, "funding rate", event -> fundingRates.put(event.symbol(), event));
     }
@@ -142,9 +142,29 @@ public class MarkPriceService {
         MarkPriceEvent event = markPriceCalculator.calculate(symbol, sequence, index, book, trade,
                 fundingRates.get(symbol), basisAverage, now);
         markPriceRepository.save(event);
-        kafkaTemplate.send(properties.getTopics().getMarkPriceTopic(), symbol, event);
-        kafkaTemplate.send(properties.getTopics().getMarkPriceAuditTopic(), symbol, event);
+        kafkaTemplate.send(properties.markPriceTopic(), symbol, event);
+        kafkaTemplate.send(properties.markPriceAuditTopic(), symbol, event);
         return true;
+    }
+
+    public String indexPriceTopic() {
+        return properties.indexPriceTopic();
+    }
+
+    public String bookTickerTopic() {
+        return properties.bookTickerTopic();
+    }
+
+    public String tradeTopic() {
+        return properties.tradeTopic();
+    }
+
+    public String fundingRateTopic() {
+        return properties.fundingRateTopic();
+    }
+
+    public String groupId() {
+        return properties.getKafka().getGroupId();
     }
 
     private PerpBookTickerEvent syntheticBookTicker(IndexPriceEvent index, Instant now) {

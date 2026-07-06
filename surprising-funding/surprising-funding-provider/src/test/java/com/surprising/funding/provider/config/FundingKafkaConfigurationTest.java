@@ -2,6 +2,7 @@ package com.surprising.funding.provider.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -9,6 +10,24 @@ import org.junit.jupiter.api.Test;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 
 class FundingKafkaConfigurationTest {
+
+    @Test
+    void defaultsToLegacyPerpTopicUntilProductTopicsAreEnabled() {
+        FundingProperties properties = new FundingProperties();
+
+        assertThat(properties.getKafka().getFundingRateTopic())
+                .isEqualTo("surprising.perp.funding.rate.v1");
+    }
+
+    @Test
+    void canResolveFundingTopicFromProductLine() {
+        FundingProperties properties = new FundingProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+
+        assertThat(properties.getKafka().getFundingRateTopic())
+                .isEqualTo("surprising.inverse-perp.funding.rate.v1");
+    }
 
     @Test
     void producerUsesDurableIdempotentSettings() {

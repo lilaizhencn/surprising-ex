@@ -23,6 +23,8 @@ surprising:
     mark:
       kafka:
         bootstrap-servers: localhost:9092
+        product-line: LINEAR_PERPETUAL
+        product-topics-enabled: false
         group-id: surprising-mark-price-v1
         concurrency: 2
         max-poll-records: 500
