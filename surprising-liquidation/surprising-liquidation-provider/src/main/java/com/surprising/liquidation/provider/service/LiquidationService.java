@@ -236,8 +236,8 @@ public class LiquidationService {
 
     private RiskStatus latestRiskStatus(com.surprising.liquidation.provider.model.ClaimedCandidate candidate) {
         if (candidate.marginMode() == MarginMode.CROSS) {
-            return liquidationRepository.latestRiskStatus(candidate.userId(), candidate.settleAsset(),
-                    properties.getRisk().getMaxSnapshotAge());
+            return liquidationRepository.latestRiskStatus(candidate.userId(), candidate.accountType(),
+                    candidate.settleAsset(), properties.getRisk().getMaxSnapshotAge());
         }
         return liquidationRepository.latestRiskStatus(candidate.userId(), candidate.symbol(),
                 candidate.marginMode(), candidate.positionSide(), candidate.instrumentVersion(),

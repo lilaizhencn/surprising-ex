@@ -5,11 +5,13 @@ import com.surprising.instrument.api.math.PerpetualContractMath;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.liquidation.api.model.LiquidationOrderResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderStatus;
+import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.liquidation.provider.model.ClaimedCandidate;
 import com.surprising.liquidation.provider.model.LiquidationCloseState;
 import com.surprising.liquidation.provider.model.LiquidationPricingDecision;
 import com.surprising.liquidation.provider.model.LiquidationPricingInput;
 import com.surprising.liquidation.provider.model.LiquidationSizingInput;
+import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
@@ -23,29 +25,57 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
 public class LiquidationRepository {
 
+    private static final String DEFAULT_ACCOUNT_TYPE = "USDT_PERPETUAL";
+
     private final JdbcTemplate jdbcTemplate;
+    private final LiquidationProperties properties;
 
     public LiquidationRepository(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, new LiquidationProperties());
+    }
+
+    @Autowired
+    public LiquidationRepository(JdbcTemplate jdbcTemplate, LiquidationProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
+        this.properties = properties == null ? new LiquidationProperties() : properties;
     }
 
     public Optional<ClaimedCandidate> claimCandidate(long candidateId) {
-        return jdbcTemplate.query("""
-                UPDATE risk_liquidation_candidates
+        List<Object> args = new ArrayList<>();
+        args.add(candidateId);
+        StringBuilder sql = new StringBuilder("""
+                UPDATE risk_liquidation_candidates c
                    SET status = 'PROCESSING',
                        updated_at = now()
-                 WHERE candidate_id = ?
-                   AND status = 'NEW'
-                RETURNING candidate_id, snapshot_id, user_id, symbol, margin_mode, position_side, settle_asset,
-                          instrument_version, signed_quantity_steps, mark_price_ticks,
-                          equity_units, maintenance_margin_units, margin_ratio_ppm
-                """, (rs, rowNum) -> new ClaimedCandidate(
+                """);
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            sql.append("""
+                  FROM instruments i
+                 WHERE c.candidate_id = ?
+                   AND c.status = 'NEW'
+                   AND i.symbol = c.symbol
+                   AND i.version = c.instrument_version
+                """);
+            sql.append(productLineFilter("i", args)).append('\n');
+        } else {
+            sql.append("""
+                 WHERE c.candidate_id = ?
+                   AND c.status = 'NEW'
+                """);
+        }
+        sql.append("""
+                RETURNING c.candidate_id, c.snapshot_id, c.user_id, c.symbol, c.margin_mode, c.position_side,
+                          c.account_type, c.settle_asset, c.instrument_version, c.signed_quantity_steps,
+                          c.mark_price_ticks, c.equity_units, c.maintenance_margin_units, c.margin_ratio_ppm
+                """);
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new ClaimedCandidate(
                 rs.getLong("candidate_id"),
                 rs.getLong("snapshot_id"),
                 rs.getLong("user_id"),
@@ -53,12 +83,13 @@ public class LiquidationRepository {
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 PositionSide.fromNullableDbValue(rs.getString("position_side")),
                 rs.getLong("instrument_version"),
+                rs.getString("account_type"),
                 rs.getString("settle_asset"),
                 rs.getLong("signed_quantity_steps"),
                 rs.getLong("mark_price_ticks"),
                 rs.getLong("equity_units"),
                 rs.getLong("maintenance_margin_units"),
-                rs.getLong("margin_ratio_ppm")), candidateId).stream().findFirst();
+                rs.getLong("margin_ratio_ppm")), args.toArray()).stream().findFirst();
     }
 
     public RiskStatus latestRiskStatus(long userId,
@@ -96,15 +127,24 @@ public class LiquidationRepository {
     }
 
     public RiskStatus latestRiskStatus(long userId, String settleAsset, Duration maxSnapshotAge) {
+        return latestRiskStatus(userId, DEFAULT_ACCOUNT_TYPE, settleAsset, maxSnapshotAge);
+    }
+
+    public RiskStatus latestRiskStatus(long userId,
+                                       String accountType,
+                                       String settleAsset,
+                                       Duration maxSnapshotAge) {
         return jdbcTemplate.query("""
                 SELECT status
                   FROM risk_account_snapshots
-                 WHERE user_id = ? AND settle_asset = ?
+                 WHERE user_id = ?
+                   AND account_type = ?
+                   AND settle_asset = ?
                    AND event_time >= now() - (? * INTERVAL '1 millisecond')
                  ORDER BY event_time DESC
                  LIMIT 1
                 """, (rs, rowNum) -> RiskStatus.valueOf(rs.getString("status")),
-                userId, settleAsset, Math.max(1L, maxSnapshotAge.toMillis()))
+                userId, normalizeAccountType(accountType), settleAsset, Math.max(1L, maxSnapshotAge.toMillis()))
                 .stream()
                 .findFirst()
                 .orElse(RiskStatus.NORMAL);
@@ -704,6 +744,21 @@ public class LiquidationRepository {
                                          String adminUserId,
                                          String reason,
                                          Instant createdAt) {
+    }
+
+    private String productLineFilter(String alias, List<Object> args) {
+        ProductLine productLine = properties.getKafka().getProductLine();
+        if (!productLine.isMarginProduct()) {
+            return "AND 1 = 0";
+        }
+        args.add(productLine.contractTypeCode());
+        return "AND " + alias + ".contract_type = ?";
+    }
+
+    private String normalizeAccountType(String accountType) {
+        return accountType == null || accountType.isBlank()
+                ? DEFAULT_ACCOUNT_TYPE
+                : accountType.trim().toUpperCase();
     }
 
     private void requireSingleRow(int rows, String operation) {

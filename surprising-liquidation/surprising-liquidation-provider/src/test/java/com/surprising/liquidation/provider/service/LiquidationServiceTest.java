@@ -86,6 +86,23 @@ class LiquidationServiceTest {
     }
 
     @Test
+    void crossLiquidationRechecksRiskWithinClaimedAccountType() {
+        FakeLiquidationRepository liquidationRepository = new FakeLiquidationRepository();
+        liquidationRepository.candidateAccountType = "USDT_DELIVERY";
+        FakeLiquidationOrderRepository orderRepository = new FakeLiquidationOrderRepository();
+        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
+                liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(),
+                new LiquidationPriceCalculator());
+
+        service.processCandidate(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
+                "USDT", 10L, 590_000L, -200_000_000L, 88_500_000L, 1_100_000L,
+                Instant.parse("2026-07-01T00:00:00Z")));
+
+        assertThat(liquidationRepository.accountRiskChecks).isEqualTo(1);
+        assertThat(orderRepository.commands).hasSize(1);
+    }
+
+    @Test
     void hedgeLiquidationUsesClaimedPositionSideForPreemptionSizingOrderAndAudit() {
         FakeLiquidationRepository liquidationRepository = new FakeLiquidationRepository();
         liquidationRepository.candidatePositionSide = PositionSide.SHORT;
@@ -326,6 +343,7 @@ class LiquidationServiceTest {
         private long pricingSignedQuantitySteps = 10L;
         private long candidateSignedQuantitySteps = 10L;
         private PositionSide candidatePositionSide = PositionSide.NET;
+        private String candidateAccountType = "USDT_PERPETUAL";
         private RiskStatus accountRiskStatus = RiskStatus.LIQUIDATION;
         private RiskStatus positionRiskStatus = RiskStatus.LIQUIDATION;
         private final List<String> markedStatuses = new ArrayList<>();
@@ -387,14 +405,18 @@ class LiquidationServiceTest {
         public Optional<ClaimedCandidate> claimCandidate(long candidateId) {
             claimAttempts++;
             return Optional.of(new ClaimedCandidate(candidateId, 9301L, 2002L, "BTC-USDT",
-                    MarginMode.CROSS, candidatePositionSide, 8L, "USDT", candidateSignedQuantitySteps,
+                    MarginMode.CROSS, candidatePositionSide, 8L, candidateAccountType, "USDT", candidateSignedQuantitySteps,
                     590_000L, 1_000L, 500L, 1_100_000L));
         }
 
         @Override
-        public RiskStatus latestRiskStatus(long userId, String settleAsset, Duration maxSnapshotAge) {
+        public RiskStatus latestRiskStatus(long userId,
+                                           String accountType,
+                                           String settleAsset,
+                                           Duration maxSnapshotAge) {
             accountRiskChecks++;
             assertThat(userId).isEqualTo(2002L);
+            assertThat(accountType).isEqualTo(candidateAccountType);
             assertThat(settleAsset).isEqualTo("USDT");
             assertThat(maxSnapshotAge).isEqualTo(Duration.ofSeconds(5));
             return accountRiskStatus;

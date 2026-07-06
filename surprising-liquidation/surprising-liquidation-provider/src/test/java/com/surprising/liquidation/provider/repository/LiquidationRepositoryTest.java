@@ -10,10 +10,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.liquidation.provider.model.LiquidationSizingInput;
 import com.surprising.liquidation.api.model.LiquidationOrderStatus;
 import com.surprising.liquidation.provider.model.LiquidationPricingDecision;
 import com.surprising.liquidation.provider.model.LiquidationPricingInput;
+import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
@@ -38,25 +40,78 @@ class LiquidationRepositoryTest {
     @Test
     void latestRiskStatusRequiresFreshSnapshot() {
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("USDT"), eq(7000L)))
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("USDT_PERPETUAL"),
+                eq("USDT"), eq(7000L)))
                 .thenReturn(List.of(RiskStatus.LIQUIDATION));
 
         RiskStatus status = repository.latestRiskStatus(1001L, "USDT", Duration.ofSeconds(7));
 
         assertThat(status).isEqualTo(RiskStatus.LIQUIDATION);
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("USDT"), eq(7000L));
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("USDT_PERPETUAL"),
+                eq("USDT"), eq(7000L));
         assertThat(sql.getValue()).contains("event_time >= now() - (? * INTERVAL '1 millisecond')");
     }
 
     @Test
     void staleOrMissingRiskSnapshotIsTreatedAsNormal() {
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("USDT"), eq(5000L)))
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("USDT_PERPETUAL"),
+                eq("USDT"), eq(5000L)))
                 .thenReturn(List.of());
 
         assertThat(repository.latestRiskStatus(1001L, "USDT", Duration.ofSeconds(5)))
                 .isEqualTo(RiskStatus.NORMAL);
+    }
+
+    @Test
+    void latestRiskStatusFiltersByAccountType() {
+        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("USDT_DELIVERY"),
+                eq("USDT"), eq(5000L)))
+                .thenReturn(List.of(RiskStatus.WARNING));
+
+        RiskStatus status = repository.latestRiskStatus(1001L, "USDT_DELIVERY", "USDT", Duration.ofSeconds(5));
+
+        assertThat(status).isEqualTo(RiskStatus.WARNING);
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("USDT_DELIVERY"),
+                eq("USDT"), eq(5000L));
+        assertThat(sql.getValue()).contains("account_type = ?");
+    }
+
+    @Test
+    void claimCandidateLeavesLegacyTopicsUnfiltered() {
+        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(9401L))).thenReturn(List.of());
+
+        repository.claimCandidate(9401L);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(9401L));
+        assertThat(sql.getValue())
+                .doesNotContain("FROM instruments i")
+                .doesNotContain("i.contract_type = ?");
+    }
+
+    @Test
+    void claimCandidateFiltersByProductLineWhenProductTopicsAreEnabled() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate, properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(9401L), eq("VANILLA_OPTION")))
+                .thenReturn(List.of());
+
+        repository.claimCandidate(9401L);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(9401L), eq("VANILLA_OPTION"));
+        assertThat(sql.getValue())
+                .contains("FROM instruments i")
+                .contains("i.symbol = c.symbol")
+                .contains("i.version = c.instrument_version")
+                .contains("i.contract_type = ?");
     }
 
     @Test
