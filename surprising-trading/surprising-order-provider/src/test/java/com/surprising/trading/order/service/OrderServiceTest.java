@@ -11,6 +11,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.AmendOrderRequest;
@@ -434,6 +435,39 @@ class OrderServiceTest {
                 anyLong(), anyLong(), anyLong(), anyLong());
         verify(orderMarginRepository, never()).reserve(anyLong(), anyString(), anyString(), anyLong(), anyString(),
                 any(), any(), anyLong(), any());
+    }
+
+    @Test
+    void reduceOnlyOptionBuyReservesPremiumForShortClose() {
+        OrderService service = service();
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L, InstrumentType.PERPETUAL,
+                ContractType.VANILLA_OPTION));
+        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT-260925-70000-C"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
+        when(orderRepository.nextSequence("order")).thenReturn(9002L);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L);
+        when(orderRepository.nextSequence("command")).thenReturn(9200L);
+        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+        when(orderMarginRepository.requirement(eq("BTC-USDT-260925-70000-C"), eq(7L), eq(1001L),
+                eq(MarginMode.CROSS), eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT),
+                eq(120L), eq(2L), anyLong(), anyLong()))
+                .thenReturn(Optional.of(new MarginRequirement("OPTION", "USDT", 240L)));
+        when(orderMarginRepository.reserve(eq(1001L), eq("OPTION"), eq("USDT"), eq(9002L),
+                eq("BTC-USDT-260925-70000-C"), eq(MarginMode.CROSS), eq(PositionSide.NET), eq(240L), any()))
+                .thenReturn(true);
+
+        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "option-close-short",
+                "BTC-USDT-260925-70000-C", OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC, 120L, 2L,
+                MarginMode.CROSS, PositionSide.NET, true, false);
+
+        var response = service.place(request);
+
+        assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
+        assertThat(response.reduceOnly()).isTrue();
+        verify(orderMarginRepository).reserve(eq(1001L), eq("OPTION"), eq("USDT"), eq(9002L),
+                eq("BTC-USDT-260925-70000-C"), eq(MarginMode.CROSS), eq(PositionSide.NET), eq(240L), any());
+        verify(orderRepository).nextSequence("command");
     }
 
     @Test

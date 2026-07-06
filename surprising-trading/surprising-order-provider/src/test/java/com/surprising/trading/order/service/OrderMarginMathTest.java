@@ -130,10 +130,13 @@ class OrderMarginMathTest {
     }
 
     @Test
-    void optionMarginUsesLinearPremiumFormula() {
+    void optionBuyerMarginUsesPremiumAndSellerAddsSingleLegRisk() {
         assertThat(OrderMarginMath.initialMarginUnits(ContractType.VANILLA_OPTION,
                 OrderSide.BUY, OrderType.LIMIT, 100L, 6L, null, 0L,
-                100L, 1L, 100_000_000L, 10_000L)).isEqualTo(600L);
+                100L, 1L, 100_000_000L, 10_000L)).isEqualTo(60_000L);
+        assertThat(OrderMarginMath.initialMarginUnits(ContractType.VANILLA_OPTION,
+                OrderSide.SELL, OrderType.LIMIT, 100L, 6L, 100L, 0L,
+                100L, 1L, 100_000_000L, 10_000L)).isEqualTo(60_600L);
         assertThat(OrderMarginMath.notionalUnits(ContractType.VANILLA_OPTION, 6L, 100L,
                 100L, 1L, 100_000_000L)).isEqualTo(60_000L);
     }

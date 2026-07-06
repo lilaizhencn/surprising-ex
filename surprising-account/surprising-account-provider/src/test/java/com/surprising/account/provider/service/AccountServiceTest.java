@@ -181,7 +181,7 @@ class AccountServiceTest {
     }
 
     @Test
-    void optionTradeSettlesPremiumPnlToOptionAccount() {
+    void optionTradeTransfersPremiumWithoutApplyingClosePnlToBalance() {
         String symbol = "BTC-USDT-260925-70000-C";
         FakeAccountRepository repository = new FakeAccountRepository();
         repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
@@ -211,9 +211,13 @@ class AccountServiceTest {
 
         service.processTrade(trade);
 
-        assertThat(repository.pnlAccountTypes).containsExactly(AccountType.OPTION);
+        assertThat(repository.pnlAccountTypes).isEmpty();
+        assertThat(repository.optionPremiumAccountTypes).containsExactly(AccountType.OPTION, AccountType.OPTION);
+        assertThat(repository.optionPremiumByUser).containsEntry(2002L, 240L).containsEntry(1001L, -240L);
         assertThat(repository.feeAccountTypes).containsExactly(AccountType.OPTION, AccountType.OPTION);
-        assertThat(repository.pnlByUser).containsEntry(2002L, 40L);
+        assertThat(repository.pnlByUser).isEmpty();
+        assertThat(repository.positionState(2002L, symbol))
+                .isEqualTo(new PositionState(1L, 6L, 100L, 40L));
     }
 
     @Test
@@ -260,7 +264,7 @@ class AccountServiceTest {
         assertThat(settled).isEqualTo(1);
         assertThat(repository.positionState(2002L, symbol))
                 .isEqualTo(new PositionState(0L, 0L, 0L, 60L));
-        assertThat(repository.lifecyclePnlByUser).containsEntry(2002L, 60L);
+        assertThat(repository.lifecyclePnlByUser).containsEntry(2002L, 100L);
         assertThat(repository.lifecycleAccountTypes).containsExactly(AccountType.OPTION);
         assertThat(repository.lifecycleReferences).containsExactly(
                 "OPTION_EXERCISE:BTC-USDT-260925-70000-C:6:2002:CROSS:NET");
@@ -792,6 +796,7 @@ class AccountServiceTest {
         private final Map<PositionKey, Long> releasedPositionMargin = new HashMap<>();
         private final Map<Long, Long> pnlByUser = new HashMap<>();
         private final Map<Long, Long> lifecyclePnlByUser = new HashMap<>();
+        private final Map<Long, Long> optionPremiumByUser = new HashMap<>();
         private final Map<String, Long> latestMarkPriceTicks = new HashMap<>();
         private final Map<String, Long> latestMarkPriceUnits = new HashMap<>();
         private final Map<Long, Long> feeByUser = new HashMap<>();
@@ -807,6 +812,7 @@ class AccountServiceTest {
         private final Map<String, SpotInstrumentSpec> spotSpecs = new HashMap<>();
         private final List<AccountType> pnlAccountTypes = new ArrayList<>();
         private final List<AccountType> lifecycleAccountTypes = new ArrayList<>();
+        private final List<AccountType> optionPremiumAccountTypes = new ArrayList<>();
         private final List<String> lifecycleReferences = new ArrayList<>();
         private final List<AccountType> feeAccountTypes = new ArrayList<>();
         private final List<AccountType> liquidationFeeAccountTypes = new ArrayList<>();
@@ -1062,6 +1068,27 @@ class AccountServiceTest {
             lifecycleReferences.add(referenceId);
             lifecyclePnlByUser.merge(userId, realizedPnlDeltaUnits, Long::sum);
             return true;
+        }
+
+        @Override
+        public void settleOptionPremium(AccountType accountType,
+                                        OrderSide side,
+                                        long userId,
+                                        String asset,
+                                        long orderId,
+                                        long tradeId,
+                                        String symbol,
+                                        MarginMode marginMode,
+                                        long premiumUnits,
+                                        boolean orderCompleted,
+                                        Instant now) {
+            assertThat(accountType).isEqualTo(AccountType.OPTION);
+            assertThat(asset).isEqualTo("USDT");
+            assertThat(symbol).isEqualTo("BTC-USDT-260925-70000-C");
+            assertThat(premiumUnits).isPositive();
+            optionPremiumAccountTypes.add(accountType);
+            optionPremiumByUser.merge(userId, side == OrderSide.BUY ? Math.negateExact(premiumUnits) : premiumUnits,
+                    Long::sum);
         }
 
         @Override

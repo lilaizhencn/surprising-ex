@@ -92,11 +92,11 @@ public class OrderValidator {
     private ValidationResult validateInstrumentTradingMode(PlaceOrderRequest request, InstrumentRule rule) {
         String status = rule.status();
         if ("TRADING".equals(status)) {
-            return ValidationResult.ok(rule.version(), rule.instrumentType());
+            return ValidationResult.ok(rule.version(), rule.instrumentType(), rule.contractType());
         }
         if ("SETTLING".equals(status)) {
             if (request.reduceOnly()) {
-                return ValidationResult.ok(rule.version(), rule.instrumentType());
+                return ValidationResult.ok(rule.version(), rule.instrumentType(), rule.contractType());
             }
             return ValidationResult.reject("instrument is reduce-only", rule.version(), rule.instrumentType());
         }
@@ -147,7 +147,7 @@ public class OrderValidator {
 
     private ValidationResult validateLimitPriceBand(PlaceOrderRequest request, InstrumentRule rule) {
         if (!properties.getRisk().isLimitPriceProtectionEnabled()) {
-            return ValidationResult.ok(rule.version(), rule.instrumentType());
+            return ValidationResult.ok(rule.version(), rule.instrumentType(), rule.contractType());
         }
         OptionalLong markPriceTicks = markPriceLookup.latestMarkPriceTicks(request.symbol(), rule.version(),
                 properties.getRisk().getLimitPriceMaxMarkAgeMs());
@@ -167,7 +167,7 @@ public class OrderValidator {
         if (request.side() == OrderSide.SELL && request.priceTicks() < boundaryTicks) {
             return ValidationResult.reject("limit sell price exceeds mark price band", rule.version(), rule.instrumentType());
         }
-        return ValidationResult.ok(rule.version(), rule.instrumentType());
+        return ValidationResult.ok(rule.version(), rule.instrumentType(), rule.contractType());
     }
 
     private ValidationResult validateNotionalRange(PlaceOrderRequest request,
@@ -191,7 +191,7 @@ public class OrderValidator {
         if (maxExecutionNotionalUnits > rule.maxNotionalUnits()) {
             return ValidationResult.reject("notional is above maximum limit", rule.version(), rule.instrumentType());
         }
-        return ValidationResult.ok(rule.version(), rule.instrumentType());
+        return ValidationResult.ok(rule.version(), rule.instrumentType(), rule.contractType());
     }
 
     private long notionalUnits(PlaceOrderRequest request, InstrumentRule rule, long effectivePriceTicks) {

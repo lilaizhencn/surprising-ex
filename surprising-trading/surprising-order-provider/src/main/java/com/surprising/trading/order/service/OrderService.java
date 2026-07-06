@@ -20,6 +20,7 @@ import com.surprising.trading.api.model.BatchPlaceOrderRequest;
 import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.CancelOpenOrdersRequest;
 import com.surprising.trading.api.model.ClosePositionRequest;
+import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.api.model.OrderBatchItemResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
@@ -123,7 +124,8 @@ public class OrderService {
             if (!reduceOnlyValidation.accepted()) {
                 validation = ValidationResult.reject(reduceOnlyValidation.rejectReason(), validation.instrumentVersion());
             } else {
-                validation = ValidationResult.ok(reduceOnlyValidation.instrumentVersion());
+                validation = ValidationResult.ok(reduceOnlyValidation.instrumentVersion(),
+                        validation.instrumentType(), validation.contractType());
             }
         }
         OrderFeeSnapshot feeSnapshot = rejectedFeeSnapshot();
@@ -172,7 +174,7 @@ public class OrderService {
             throw new IllegalStateException("failed to insert order " + orderId);
         }
 
-        if (validation.accepted() && !normalized.reduceOnly()) {
+        if (validation.accepted() && (!normalized.reduceOnly() || requiresReduceOnlyFunds(normalized, validation))) {
             validation = reserveOpeningFunds(normalized, orderId, validation, feeSnapshot, now);
             if (!validation.accepted()) {
                 orderRepository.reject(orderId, validation.rejectReason(), now);
@@ -224,7 +226,8 @@ public class OrderService {
             if (!reduceOnlyValidation.accepted()) {
                 return testRejected(reduceOnlyValidation, "REDUCE_ONLY");
             }
-            validation = ValidationResult.ok(reduceOnlyValidation.instrumentVersion());
+            validation = ValidationResult.ok(reduceOnlyValidation.instrumentVersion(),
+                    validation.instrumentType(), validation.contractType());
         }
         var resolvedFeeSnapshot = orderFeeRepository.snapshot(normalized.userId(), normalized.symbol(),
                 validation.instrumentVersion(), Instant.now());
@@ -232,7 +235,7 @@ public class OrderService {
             return new TestOrderResponse(false, "fee schedule unavailable", validation.instrumentVersion(),
                     "FEE", null, null, 0L);
         }
-        if (normalized.reduceOnly()) {
+        if (normalized.reduceOnly() && !requiresReduceOnlyFunds(normalized, validation)) {
             return new TestOrderResponse(true, null, validation.instrumentVersion(), "ACCEPTED",
                     null, null, 0L);
         }
@@ -462,6 +465,12 @@ public class OrderService {
             return ValidationResult.reject("margin mode switch requires closing positions and open orders first");
         }
         return ValidationResult.ok(0L);
+    }
+
+    private boolean requiresReduceOnlyFunds(PlaceOrderRequest request, ValidationResult validation) {
+        return request.reduceOnly()
+                && validation.contractType() == ContractType.VANILLA_OPTION
+                && request.side() == OrderSide.BUY;
     }
 
     private OrderFeeSnapshot rejectedFeeSnapshot() {

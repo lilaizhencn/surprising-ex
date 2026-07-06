@@ -435,9 +435,11 @@ public class AccountService {
                     position.entryPriceTicks(), position.realizedPnlUnits());
             PositionChange change = positionCalculator.closeAtSettlement(current, settlementPriceTicks, spec);
             String referenceId = lifecycleReferenceId(referenceType, symbol, instrumentVersion, position);
+            long ledgerDeltaUnits = lifecycleLedgerDeltaUnits(referenceType, settlementPriceTicks, spec, position,
+                    change);
             boolean applied = accountRepository.settleLifecyclePnl(accountType, position.userId(),
                     spec.settleAsset(), referenceType, referenceId, reason, symbol, position.marginMode(),
-                    change.realizedPnlDeltaUnits(), eventTime);
+                    ledgerDeltaUnits, eventTime);
             if (!applied) {
                 continue;
             }
@@ -489,6 +491,18 @@ public class AccountService {
         if (eventContractType != null && eventContractType != instrumentContractType) {
             throw new IllegalArgumentException(eventName + " contract type does not match instrument");
         }
+    }
+
+    private long lifecycleLedgerDeltaUnits(String referenceType,
+                                           long settlementPriceTicks,
+                                           ContractSpec spec,
+                                           PositionResponse position,
+                                           PositionChange change) {
+        if (spec.contractType().isOption() && "OPTION_EXERCISE".equals(referenceType)) {
+            return MarginTransferMath.optionExercisePayoffUnits(spec, settlementPriceTicks,
+                    position.signedQuantitySteps());
+        }
+        return change.realizedPnlDeltaUnits();
     }
 
     private String lifecycleReferenceId(String referenceType,
@@ -543,15 +557,23 @@ public class AccountService {
         long openSteps = Math.subtractExact(quantitySteps, closeSteps);
         PositionChange change = positionCalculator.apply(current, side, priceTicks, quantitySteps,
                 positionSpec, fillSpec);
-        if (closeSteps > 0) {
+        if (fillSpec.contractType().isOption()) {
+            accountRepository.settleOptionPremium(derivativeAccountType(fillSpec), side, userId,
+                    fillSpec.settleAsset(), orderId, tradeId, symbol, normalizedMarginMode,
+                    MarginTransferMath.optionPremiumUnits(fillSpec, priceTicks, quantitySteps), orderCompleted,
+                    eventTime);
+        }
+        if (closeSteps > 0 && !positionSpec.contractType().isOption()) {
             accountRepository.settleRealizedPnl(derivativeAccountType(positionSpec), userId,
                     positionSpec.settleAsset(), orderId, tradeId, symbol, normalizedMarginMode,
                     change.realizedPnlDeltaUnits(), eventTime);
         }
         if (openSteps > 0) {
-            long actualMarginUnits = MarginTransferMath.openingInitialMarginUnits(fillSpec, priceTicks, openSteps);
-            accountRepository.consumeOrderMargin(orderId, userId, symbol, normalizedMarginMode, openSteps, actualMarginUnits,
-                    orderCompleted, eventTime);
+            if (!fillSpec.contractType().isOption() || side == OrderSide.SELL) {
+                long actualMarginUnits = MarginTransferMath.openingInitialMarginUnits(fillSpec, priceTicks, openSteps);
+                accountRepository.consumeOrderMargin(orderId, userId, symbol, normalizedMarginMode, openSteps,
+                        actualMarginUnits, orderCompleted, eventTime);
+            }
         }
         OrderFeeSnapshot feeSnapshot = orderFeeSnapshot(orderId, userId, symbol);
         long feeRatePpm = taker ? feeSnapshot.takerFeeRatePpm() : feeSnapshot.makerFeeRatePpm();

@@ -246,6 +246,69 @@ class OrderMarginRepositoryTest {
     }
 
     @Test
+    void optionBuyRequirementUsesPremiumFromOptionAccount() throws Exception {
+        OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
+        when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
+                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
+                eq(1001L), eq("CROSS"), eq("NET"),
+                eq("BUY"), eq(5_000L),
+                eq("BTC-USDT-260925-70000-C"), eq(1L), eq("LIMIT")))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    return List.of(mapper.mapRow(instrumentRequirementRow(
+                            0L, 0L, 100_000L, 300_000L, 50_000L, 0L,
+                            "VANILLA_OPTION", "USDT"), 0));
+                });
+        when(jdbcTemplate.query(contains("FROM instrument_risk_brackets"), anyRowMapper(),
+                eq("BTC-USDT-260925-70000-C"), eq(1L), eq(4_000L)))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    return List.of(mapper.mapRow(riskBracketRow(100_000L), 0));
+                });
+
+        var requirement = repository.requirement("BTC-USDT-260925-70000-C", 1L, 1001L,
+                MarginMode.CROSS, OrderSide.BUY, OrderType.LIMIT, 100L, 4L, 10_000L, 5_000L);
+
+        assertThat(requirement).isPresent();
+        assertThat(requirement.get().accepted()).isTrue();
+        assertThat(requirement.get().accountType()).isEqualTo("OPTION");
+        assertThat(requirement.get().initialMarginUnits()).isEqualTo(4_000L);
+    }
+
+    @Test
+    void optionSellRequirementAddsSingleLegSellerRisk() throws Exception {
+        OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
+        when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
+                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
+                eq(1001L), eq("CROSS"), eq("NET"),
+                eq("SELL"), eq(5_000L),
+                eq("BTC-USDT-260925-70000-C"), eq(1L), eq("LIMIT")))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = instrumentRequirementRow(
+                            0L, 0L, 100_000L, 300_000L, 50_000L, 0L,
+                            "VANILLA_OPTION", "USDT");
+                    when(rs.getLong("mark_ticks")).thenReturn(99L);
+                    when(rs.wasNull()).thenReturn(false, true);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+        when(jdbcTemplate.query(contains("FROM instrument_risk_brackets"), anyRowMapper(),
+                eq("BTC-USDT-260925-70000-C"), eq(1L), eq(4_000L)))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    return List.of(mapper.mapRow(riskBracketRow(100_000L), 0));
+                });
+
+        var requirement = repository.requirement("BTC-USDT-260925-70000-C", 1L, 1001L,
+                MarginMode.CROSS, OrderSide.SELL, OrderType.LIMIT, 100L, 4L, 10_000L, 5_000L);
+
+        assertThat(requirement).isPresent();
+        assertThat(requirement.get().accepted()).isTrue();
+        assertThat(requirement.get().accountType()).isEqualTo("OPTION");
+        assertThat(requirement.get().initialMarginUnits()).isEqualTo(4_040L);
+    }
+
+    @Test
     void reserveFailsFastWhenGuardedBalanceUpdateDoesNotApply() throws Exception {
         OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
         when(jdbcTemplate.query(contains("FROM account_balances"), anyRowMapper(), eq(1001L), eq("USDT")))

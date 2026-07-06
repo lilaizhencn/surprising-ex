@@ -55,6 +55,15 @@ public final class OrderMarginMath {
         requirePositive(initialMarginRatePpm, "initialMarginRatePpm");
         long effectivePriceTicks = collateralPriceTicks(side, orderType, priceTicks, markPriceTicks,
                 marketMaxSlippagePpm, contractType, protectAdverseFillPrice);
+        if (contractType.isOption()) {
+            BigInteger premium = optionPremiumUnits(quantitySteps, effectivePriceTicks, notionalMultiplierUnits);
+            if (side == OrderSide.BUY) {
+                return premium.longValueExact();
+            }
+            BigInteger sellerRisk = linearInitialMargin(quantitySteps, effectivePriceTicks, notionalMultiplierUnits,
+                    initialMarginRatePpm);
+            return premium.add(sellerRisk).longValueExact();
+        }
         BigInteger margin = contractType.isInverse()
                 ? inverseInitialMargin(quantitySteps, notionalMultiplierUnits, settleScaleUnits,
                 effectivePriceTicks, priceTickUnits, initialMarginRatePpm)
@@ -171,6 +180,14 @@ public final class OrderMarginMath {
                 .multiply(big(notionalMultiplierUnits))
                 .multiply(big(initialMarginRatePpm));
         return divideCeilingBig(numerator, PPM);
+    }
+
+    private static BigInteger optionPremiumUnits(long quantitySteps,
+                                                 long effectivePriceTicks,
+                                                 long notionalMultiplierUnits) {
+        return big(quantitySteps)
+                .multiply(big(effectivePriceTicks))
+                .multiply(big(notionalMultiplierUnits));
     }
 
     private static BigInteger inverseInitialMargin(long quantitySteps,

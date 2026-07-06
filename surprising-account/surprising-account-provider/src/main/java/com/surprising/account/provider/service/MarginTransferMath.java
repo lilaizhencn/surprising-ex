@@ -68,9 +68,41 @@ public final class MarginTransferMath {
         if (openSteps <= 0) {
             return 0L;
         }
+        if (spec.contractType().isOption()) {
+            return optionSellerInitialMarginUnits(spec, priceTicks, openSteps);
+        }
         return PerpetualContractMath.initialMarginUnits(spec.contractType(), openSteps, priceTicks,
                 spec.notionalMultiplierUnits(), spec.priceTickUnits(), spec.settleScaleUnits(),
                 spec.initialMarginRatePpm());
+    }
+
+    public static long optionPremiumUnits(ContractSpec spec, long priceTicks, long quantitySteps) {
+        if (!spec.contractType().isOption()) {
+            throw new IllegalArgumentException("option premium requires an option contract");
+        }
+        if (priceTicks <= 0 || quantitySteps <= 0) {
+            throw new IllegalArgumentException("priceTicks and quantitySteps must be positive");
+        }
+        return Math.multiplyExact(Math.multiplyExact(priceTicks, quantitySteps), spec.notionalMultiplierUnits());
+    }
+
+    public static long optionExercisePayoffUnits(ContractSpec spec, long payoffPriceTicks, long signedQuantitySteps) {
+        if (!spec.contractType().isOption()) {
+            throw new IllegalArgumentException("option payoff requires an option contract");
+        }
+        if (payoffPriceTicks < 0 || signedQuantitySteps == 0) {
+            throw new IllegalArgumentException("payoffPriceTicks must be non-negative and quantity must be non-zero");
+        }
+        return Math.multiplyExact(Math.multiplyExact(payoffPriceTicks, signedQuantitySteps),
+                spec.notionalMultiplierUnits());
+    }
+
+    private static long optionSellerInitialMarginUnits(ContractSpec spec, long priceTicks, long openSteps) {
+        long premiumUnits = optionPremiumUnits(spec, priceTicks, openSteps);
+        long riskMarginUnits = PerpetualContractMath.initialMarginUnits(spec.contractType(), openSteps, priceTicks,
+                spec.notionalMultiplierUnits(), spec.priceTickUnits(), spec.settleScaleUnits(),
+                spec.initialMarginRatePpm());
+        return Math.addExact(premiumUnits, riskMarginUnits);
     }
 
     public static long excessOrderMarginUnits(long allocatedUnits, long actualMarginUnits) {

@@ -1574,6 +1574,38 @@ public class AccountRepository {
         return true;
     }
 
+    public void settleOptionPremium(AccountType accountType,
+                                    OrderSide side,
+                                    long userId,
+                                    String asset,
+                                    long orderId,
+                                    long tradeId,
+                                    String symbol,
+                                    MarginMode marginMode,
+                                    long premiumUnits,
+                                    boolean orderCompleted,
+                                    Instant now) {
+        if (premiumUnits <= 0) {
+            return;
+        }
+        AccountType normalizedType = requireAccountType(accountType);
+        if (normalizedType != AccountType.OPTION) {
+            throw new IllegalArgumentException("option premium requires OPTION account");
+        }
+        String referenceId = tradeId + ":" + orderId + ":" + side.name();
+        if (side == OrderSide.BUY) {
+            long balanceAfterUnits = debitOptionPremium(normalizedType, userId, asset, orderId, symbol, marginMode,
+                    premiumUnits, orderCompleted, now);
+            insertProductSettlementLedger(userId, normalizedType, asset, Math.negateExact(premiumUnits),
+                    balanceAfterUnits, "OPTION_PREMIUM", referenceId, "OPTION_PREMIUM_PAID", now);
+            return;
+        }
+        long balanceAfterUnits = applyAmountToBalance(normalizedType, userId, asset, symbol, marginMode,
+                premiumUnits, now);
+        insertProductSettlementLedger(userId, normalizedType, asset, premiumUnits, balanceAfterUnits,
+                "OPTION_PREMIUM", referenceId, "OPTION_PREMIUM_RECEIVED", now);
+    }
+
     public void settleRealizedPnl(long userId,
                                   String asset,
                                   long orderId,
@@ -2003,6 +2035,77 @@ public class AccountRepository {
         if (rows != 1) {
             throw new IllegalStateException("insufficient locked product balance for margin release");
         }
+    }
+
+    private long debitOptionPremium(AccountType accountType,
+                                    long userId,
+                                    String asset,
+                                    long orderId,
+                                    String symbol,
+                                    MarginMode marginMode,
+                                    long premiumUnits,
+                                    boolean orderCompleted,
+                                    Instant now) {
+        OrderMarginReservation reservation = lockOrderMarginReservation(orderId, userId, symbol);
+        if (reservation == null) {
+            return applyAmountToBalance(accountType, userId, asset, symbol, marginMode,
+                    Math.negateExact(premiumUnits), now);
+        }
+        long spendableUnits = Math.subtractExact(reservation.reservedUnits(),
+                Math.addExact(reservation.releasedUnits(), reservation.positionMarginUnits()));
+        if (spendableUnits < premiumUnits) {
+            throw new IllegalStateException("reserved option premium is smaller than filled amount for order "
+                    + orderId);
+        }
+        debitBalanceLock(accountType, userId, asset, premiumUnits, now);
+        int reservationRows = jdbcTemplate.update("""
+                UPDATE account_margin_reservations
+                   SET released_units = released_units + ?,
+                       status = CASE
+                           WHEN released_units + ? >= reserved_units AND position_margin_units = 0 THEN 'RELEASED'
+                           WHEN released_units + ? + position_margin_units >= reserved_units THEN 'CONSUMED'
+                           WHEN position_margin_units > 0 THEN 'PARTIALLY_CONSUMED'
+                           ELSE 'PARTIALLY_RELEASED'
+                       END,
+                       reason = 'OPTION_PREMIUM_PAID',
+                       updated_at = ?
+                 WHERE order_id = ?
+                   AND released_units + position_margin_units + ? <= reserved_units
+                """, premiumUnits, premiumUnits, premiumUnits, Timestamp.from(now), orderId, premiumUnits);
+        requireSingleRow(reservationRows, "option premium reservation debit");
+        if (orderCompleted) {
+            long remainingUnits = Math.subtractExact(spendableUnits, premiumUnits);
+            releaseReservedMargin(orderId, reservation.accountType(), reservation.userId(), reservation.asset(),
+                    remainingUnits, "OPTION_PREMIUM_REMAINDER", now);
+        }
+        return productEquity(accountType, userId, asset);
+    }
+
+    private void debitBalanceLock(AccountType accountType, long userId, String asset, long amountUnits, Instant now) {
+        int rows = jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET locked_units = locked_units - ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                   AND locked_units >= ?
+                """, amountUnits, Timestamp.from(now), accountType.name(), userId, asset, amountUnits);
+        if (rows != 1) {
+            throw new IllegalStateException("insufficient locked product balance for option premium");
+        }
+    }
+
+    private long productEquity(AccountType accountType, long userId, String asset) {
+        Long equityUnits = jdbcTemplate.queryForObject("""
+                SELECT b.available_units + b.locked_units - COALESCE(d.deficit_units, 0) AS equity_units
+                  FROM account_product_balances b
+             LEFT JOIN account_product_deficits d USING (account_type, user_id, asset)
+                 WHERE b.account_type = ?
+                   AND b.user_id = ?
+                   AND b.asset = ?
+                """, Long.class, accountType.name(), userId, asset);
+        return equityUnits == null ? 0L : equityUnits;
     }
 
     private void releaseLegacyBalanceLock(long userId, String asset, long amountUnits, Instant now) {
