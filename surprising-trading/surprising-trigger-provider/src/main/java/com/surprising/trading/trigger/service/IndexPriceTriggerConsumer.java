@@ -1,10 +1,12 @@
 package com.surprising.trading.trigger.service;
 
 import com.surprising.trading.api.KafkaSymbolKeyValidator;
+import com.surprising.trading.trigger.config.TriggerProperties;
 import com.surprising.trading.trigger.model.MarkTrigger;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
@@ -18,15 +20,24 @@ public class IndexPriceTriggerConsumer {
 
     private final IndexPriceTriggerParser parser;
     private final TriggerOrderService triggerOrderService;
+    private final TriggerProperties properties;
 
     public IndexPriceTriggerConsumer(IndexPriceTriggerParser parser, TriggerOrderService triggerOrderService) {
+        this(parser, triggerOrderService, new TriggerProperties());
+    }
+
+    @Autowired
+    public IndexPriceTriggerConsumer(IndexPriceTriggerParser parser,
+                                     TriggerOrderService triggerOrderService,
+                                     TriggerProperties properties) {
         this.parser = parser;
         this.triggerOrderService = triggerOrderService;
+        this.properties = properties;
     }
 
     @KafkaListener(
-            topics = "${surprising.trading.trigger.kafka.index-price-topic}",
-            groupId = "${surprising.trading.trigger.kafka.group-id}",
+            topics = "#{__listener.indexPriceTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "triggerKafkaListenerContainerFactory")
     public void onIndexPrice(ConsumerRecord<String, String> record) {
         try {
@@ -37,5 +48,13 @@ public class IndexPriceTriggerConsumer {
             log.error("Failed to process index price trigger: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to process index price trigger", ex);
         }
+    }
+
+    public String indexPriceTopic() {
+        return properties.getKafka().getIndexPriceTopic();
+    }
+
+    public String groupId() {
+        return properties.getKafka().getGroupId();
     }
 }

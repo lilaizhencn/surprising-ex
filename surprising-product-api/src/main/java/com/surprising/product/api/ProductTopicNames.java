@@ -35,6 +35,14 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("orderbook.depth");
     }
 
+    public String indexPriceTopic() {
+        return topic("index.price");
+    }
+
+    public String markPriceTopic() {
+        return topic("mark.price");
+    }
+
     public String publicTradesTopic() {
         return topic("trade.events");
     }

@@ -23,6 +23,8 @@ surprising:
     trigger:
       kafka:
         bootstrap-servers: localhost:9092
+        product-line: LINEAR_PERPETUAL
+        product-topics-enabled: false
         group-id: surprising-trigger-v1
         mark-price-topic: surprising.perp.mark.price.v1
         index-price-topic: surprising.perp.index.price.v1

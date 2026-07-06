@@ -85,6 +85,8 @@ create_product_topics() {
   create_topic "${prefix}.orderbook.depth.v1"
   case "${product_line}" in
     linear-perp|inverse-perp|linear-delivery|inverse-delivery|option)
+      create_topic "${prefix}.index.price.v1"
+      create_topic "${prefix}.mark.price.v1"
       create_topic "${prefix}.account.position.events.v1"
       create_topic "${prefix}.risk.account.events.v1"
       create_topic "${prefix}.risk.position.events.v1"

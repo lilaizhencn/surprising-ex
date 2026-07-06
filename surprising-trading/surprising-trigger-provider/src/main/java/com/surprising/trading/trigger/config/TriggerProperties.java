@@ -1,5 +1,7 @@
 package com.surprising.trading.trigger.config;
 
+import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -27,6 +29,8 @@ public class TriggerProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        private boolean productTopicsEnabled;
         private String groupId = "surprising-trigger-v1";
         private String markPriceTopic = "surprising.perp.mark.price.v1";
         private String indexPriceTopic = "surprising.perp.index.price.v1";
@@ -42,8 +46,24 @@ public class TriggerProperties {
             this.bootstrapServers = bootstrapServers;
         }
 
+        public ProductLine getProductLine() {
+            return productLine;
+        }
+
+        public void setProductLine(ProductLine productLine) {
+            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        }
+
+        public boolean isProductTopicsEnabled() {
+            return productTopicsEnabled;
+        }
+
+        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
+            this.productTopicsEnabled = productTopicsEnabled;
+        }
+
         public String getGroupId() {
-            return groupId;
+            return productTopicsEnabled ? productTopics().consumerGroup("trigger") : groupId;
         }
 
         public void setGroupId(String groupId) {
@@ -51,7 +71,7 @@ public class TriggerProperties {
         }
 
         public String getMarkPriceTopic() {
-            return markPriceTopic;
+            return productTopicsEnabled ? productTopics().markPriceTopic() : markPriceTopic;
         }
 
         public void setMarkPriceTopic(String markPriceTopic) {
@@ -59,7 +79,7 @@ public class TriggerProperties {
         }
 
         public String getIndexPriceTopic() {
-            return indexPriceTopic;
+            return productTopicsEnabled ? productTopics().indexPriceTopic() : indexPriceTopic;
         }
 
         public void setIndexPriceTopic(String indexPriceTopic) {
@@ -67,7 +87,7 @@ public class TriggerProperties {
         }
 
         public String getLastPriceTopic() {
-            return lastPriceTopic;
+            return productTopicsEnabled ? productTopics().matchTradesTopic() : lastPriceTopic;
         }
 
         public void setLastPriceTopic(String lastPriceTopic) {
@@ -88,6 +108,10 @@ public class TriggerProperties {
 
         public void setMaxPollRecords(int maxPollRecords) {
             this.maxPollRecords = maxPollRecords;
+        }
+
+        private ProductTopicNames productTopics() {
+            return ProductTopicNames.of(productLine);
         }
     }
 

@@ -2,6 +2,7 @@ package com.surprising.trading.trigger.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
@@ -16,9 +17,22 @@ class TriggerKafkaConfigurationTest {
     void propertiesExposeAllSupportedTriggerSourceTopics() {
         TriggerProperties properties = new TriggerProperties();
 
+        assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-trigger-v1");
         assertThat(properties.getKafka().getMarkPriceTopic()).isEqualTo("surprising.perp.mark.price.v1");
         assertThat(properties.getKafka().getIndexPriceTopic()).isEqualTo("surprising.perp.index.price.v1");
         assertThat(properties.getKafka().getLastPriceTopic()).isEqualTo("surprising.perp.match.trades.v1");
+    }
+
+    @Test
+    void canResolveTriggerTopicsAndGroupFromProductLine() {
+        TriggerProperties properties = new TriggerProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+
+        assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-inverse-perp-trigger-v1");
+        assertThat(properties.getKafka().getMarkPriceTopic()).isEqualTo("surprising.inverse-perp.mark.price.v1");
+        assertThat(properties.getKafka().getIndexPriceTopic()).isEqualTo("surprising.inverse-perp.index.price.v1");
+        assertThat(properties.getKafka().getLastPriceTopic()).isEqualTo("surprising.inverse-perp.match.trades.v1");
     }
 
     @Test
