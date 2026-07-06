@@ -10,8 +10,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.funding.api.model.FundingRateResponse;
+import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.model.FundingPaymentCandidate;
 import com.surprising.funding.provider.model.FundingRateInput;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.sql.ResultSet;
@@ -48,6 +50,74 @@ class FundingRepositoryTest {
                 Instant.parse("2026-07-01T08:00:00Z"), now))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("funding rate insert");
+    }
+
+    @Test
+    void rateInputsDefaultToPerpetualInstruments() {
+        FundingRepository repository = new FundingRepository(jdbcTemplate);
+
+        repository.rateInputs(java.time.Duration.ofSeconds(10));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
+        assertThat(sql.getValue())
+                .contains("i.instrument_type = 'PERPETUAL'")
+                .contains("i.funding_interval_hours > 0")
+                .doesNotContain("i.contract_type = ?");
+        assertThat(args.getValue()).containsExactly(10_000L);
+    }
+
+    @Test
+    void rateInputsFilterConfiguredFundingProductLine() {
+        FundingProperties properties = new FundingProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
+        FundingRepository repository = new FundingRepository(jdbcTemplate, properties);
+
+        repository.rateInputs(java.time.Duration.ofSeconds(10));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
+        assertThat(sql.getValue()).contains("i.contract_type = ?");
+        assertThat(args.getValue()).containsExactly("INVERSE_PERPETUAL", 10_000L);
+    }
+
+    @Test
+    void rateInputsSkipNonFundingProductLines() {
+        FundingProperties properties = new FundingProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        FundingRepository repository = new FundingRepository(jdbcTemplate, properties);
+
+        repository.rateInputs(java.time.Duration.ofSeconds(10));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
+        assertThat(sql.getValue()).contains("1 = 0").doesNotContain("i.contract_type = ?");
+        assertThat(args.getValue()).containsExactly(10_000L);
+    }
+
+    @Test
+    void dueRatesFilterConfiguredFundingProductLine() {
+        FundingProperties properties = new FundingProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
+        FundingRepository repository = new FundingRepository(jdbcTemplate, properties);
+        Instant now = Instant.parse("2026-07-01T08:00:00Z");
+
+        repository.dueRates(now, 20);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
+        assertThat(sql.getValue())
+                .contains("JOIN instrument_current_versions")
+                .contains("JOIN instruments i")
+                .contains("i.contract_type = ?");
+        assertThat(args.getValue()).containsExactly(Timestamp.from(now), "INVERSE_PERPETUAL", 20);
     }
 
     @Test

@@ -63,6 +63,8 @@ public class IndexInstrumentConfigService {
     }
 
     private List<IndexPriceProperties.SymbolConfig> loadFromInstrumentSnapshot() {
+        List<Object> args = new ArrayList<>();
+        String productCondition = productCondition(args);
         String sql = """
                 SELECT i.symbol, i.min_valid_index_sources,
                        s.source, s.enabled, s.base_url, s.path, s.source_symbol, s.parser,
@@ -74,13 +76,13 @@ public class IndexInstrumentConfigService {
                     ON c.symbol = i.symbol AND c.version = i.version
                   JOIN instrument_index_sources s
                     ON s.symbol = i.symbol AND s.version = i.version
-                 WHERE i.instrument_type = 'PERPETUAL'
+                 WHERE %s
                    AND i.status = 'TRADING'
                    AND s.enabled = TRUE
                  ORDER BY i.symbol ASC, s.source ASC
-                """;
+                """.formatted(productCondition);
         Map<String, IndexPriceProperties.SymbolConfig> bySymbol = new LinkedHashMap<>();
-        jdbcTemplate.query(sql, rs -> {
+        jdbcTemplate.query(sql, args.toArray(), rs -> {
             String symbol = rs.getString("symbol");
             IndexPriceProperties.SymbolConfig symbolConfig = bySymbol.computeIfAbsent(symbol, ignored -> {
                 IndexPriceProperties.SymbolConfig config = new IndexPriceProperties.SymbolConfig();
@@ -99,6 +101,14 @@ public class IndexInstrumentConfigService {
                 .filter(symbol -> !symbol.getSources().isEmpty())
                 .map(this::copySymbol)
                 .toList();
+    }
+
+    private String productCondition(List<Object> args) {
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            args.add(properties.getKafka().getProductLine().contractTypeCode());
+            return "i.contract_type = ?";
+        }
+        return "i.instrument_type = 'PERPETUAL'";
     }
 
     private IndexPriceProperties.SourceConfig toSource(java.sql.ResultSet rs) throws java.sql.SQLException {

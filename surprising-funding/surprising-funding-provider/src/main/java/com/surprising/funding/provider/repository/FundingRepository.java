@@ -6,10 +6,12 @@ import com.surprising.funding.api.model.AdminCursorPage;
 import com.surprising.funding.api.model.FundingPaymentResponse;
 import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.api.model.FundingSettlementResponse;
+import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.model.FundingBalanceState;
 import com.surprising.funding.provider.model.FundingPaymentCandidate;
 import com.surprising.funding.provider.model.FundingRateInput;
 import com.surprising.funding.provider.service.FundingMath;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.sql.Timestamp;
@@ -27,9 +29,15 @@ public class FundingRepository {
     private static final String RATE_MODULE = "funding-rate";
 
     private final JdbcTemplate jdbcTemplate;
+    private final FundingProperties properties;
 
-    public FundingRepository(JdbcTemplate jdbcTemplate) {
+    public FundingRepository(JdbcTemplate jdbcTemplate, FundingProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
+        this.properties = properties == null ? new FundingProperties() : properties;
+    }
+
+    protected FundingRepository(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, new FundingProperties());
     }
 
     public boolean acquireLease(String symbol, String ownerId, Duration leaseDuration) {
@@ -80,6 +88,9 @@ public class FundingRepository {
     }
 
     public List<FundingRateInput> rateInputs(Duration maxMarkAge) {
+        List<Object> args = new ArrayList<>();
+        String productCondition = fundingInstrumentCondition(args, "i");
+        args.add(maxMarkAge.toMillis());
         return jdbcTemplate.query("""
                 SELECT i.symbol,
                        CAST(round(((pm.mark_price - pm.index_price) / pm.index_price) * 1000000) AS BIGINT)
@@ -100,9 +111,11 @@ public class FundingRepository {
                        LIMIT 1
                   ) pm ON TRUE
                  WHERE i.status = 'TRADING'
+                   AND %s
+                   AND i.funding_interval_hours > 0
                    AND pm.index_price > 0
                    AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
-                """, (rs, rowNum) -> new FundingRateInput(
+                """.formatted(productCondition), (rs, rowNum) -> new FundingRateInput(
                 rs.getString("symbol"),
                 0L,
                 rs.getLong("premium_rate_ppm"),
@@ -110,7 +123,7 @@ public class FundingRepository {
                 rs.getLong("funding_rate_floor_ppm"),
                 rs.getLong("funding_rate_cap_ppm"),
                 rs.getInt("funding_interval_hours"),
-                rs.getTimestamp("event_time").toInstant()), maxMarkAge.toMillis());
+                rs.getTimestamp("event_time").toInstant()), args.toArray());
     }
 
     public FundingRateResponse saveRate(FundingRateInput input,
@@ -172,10 +185,19 @@ public class FundingRepository {
     }
 
     public List<FundingRateResponse> dueRates(Instant now, int limit) {
+        List<Object> args = new ArrayList<>();
+        args.add(Timestamp.from(now));
+        String productCondition = fundingInstrumentCondition(args, "i");
+        args.add(limit);
         return jdbcTemplate.query("""
                 SELECT DISTINCT ON (r.symbol, r.funding_time) r.*
                   FROM funding_rate_ticks r
+                  JOIN instrument_current_versions c
+                    ON c.symbol = r.symbol
+                  JOIN instruments i
+                    ON i.symbol = c.symbol AND i.version = c.version
                  WHERE r.funding_time <= ?
+                   AND %s
                    AND NOT EXISTS (
                        SELECT 1
                          FROM funding_settlements s
@@ -184,7 +206,7 @@ public class FundingRepository {
                    )
                  ORDER BY r.symbol, r.funding_time, r.sequence DESC
                  LIMIT ?
-                """, (rs, rowNum) -> toRate(rs), Timestamp.from(now), limit);
+                """.formatted(productCondition), (rs, rowNum) -> toRate(rs), args.toArray());
     }
 
     public Optional<Long> createSettlement(FundingRateResponse rate, Instant now) {
@@ -579,6 +601,18 @@ public class FundingRepository {
         if (rows != 1) {
             throw new IllegalStateException("failed to write " + operation);
         }
+    }
+
+    private String fundingInstrumentCondition(List<Object> args, String alias) {
+        ProductLine productLine = properties.getKafka().getProductLine();
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            if (!productLine.isFundingProduct()) {
+                return "1 = 0";
+            }
+            args.add(productLine.contractTypeCode());
+            return alias + ".contract_type = ?";
+        }
+        return alias + ".instrument_type = 'PERPETUAL'";
     }
 
     private record PositionMargin(String symbol,
