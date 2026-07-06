@@ -103,12 +103,26 @@ class AccountKafkaConfigurationTest {
                 .isEqualTo("surprising.linear-perp.order.events.v1");
         assertThat(properties.getKafka().getPositionEventsTopic())
                 .isEqualTo("surprising.linear-perp.account.position.events.v1");
-
-        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        assertThat(properties.getKafka().isDeliverySettlementsTopicEnabled()).isFalse();
+        assertThat(properties.getKafka().isOptionExercisesTopicEnabled()).isFalse();
         assertThat(properties.getKafka().getDeliverySettlementsTopic())
                 .isEqualTo("surprising.linear-delivery.delivery.settlements.v1");
+        assertThat(properties.getKafka().getOptionExercisesTopic())
+                .isEqualTo("surprising.option.option.exercises.v1");
+
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        assertThat(properties.getKafka().isDeliverySettlementsTopicEnabled()).isTrue();
+        assertThat(properties.getKafka().isOptionExercisesTopicEnabled()).isFalse();
+        assertThat(properties.getKafka().getDeliverySettlementsTopic())
+                .isEqualTo("surprising.linear-delivery.delivery.settlements.v1");
+        assertThat(properties.getKafka().getOptionExercisesTopic())
+                .isEqualTo("surprising.option.option.exercises.v1");
 
         properties.getKafka().setProductLine(ProductLine.OPTION);
+        assertThat(properties.getKafka().isDeliverySettlementsTopicEnabled()).isFalse();
+        assertThat(properties.getKafka().isOptionExercisesTopicEnabled()).isTrue();
+        assertThat(properties.getKafka().getDeliverySettlementsTopic())
+                .isEqualTo("surprising.linear-delivery.delivery.settlements.v1");
         assertThat(properties.getKafka().getOptionExercisesTopic())
                 .isEqualTo("surprising.option.option.exercises.v1");
     }

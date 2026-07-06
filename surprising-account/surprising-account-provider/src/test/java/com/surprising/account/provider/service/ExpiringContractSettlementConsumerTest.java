@@ -77,9 +77,13 @@ class ExpiringContractSettlementConsumerTest {
 
         assertThat(deliveryConsumer.deliverySettlementsTopic())
                 .isEqualTo("surprising.linear-delivery.delivery.settlements.v1");
+        assertThat(deliveryConsumer.deliverySettlementsListenerEnabled()).isTrue();
+        assertThat(deliveryConsumer.optionExercisesListenerEnabled()).isFalse();
         assertThat(deliveryConsumer.groupId()).isEqualTo("surprising-linear-delivery-account-v1");
 
         properties.getKafka().setProductLine(ProductLine.OPTION);
+        assertThat(deliveryConsumer.deliverySettlementsListenerEnabled()).isFalse();
+        assertThat(deliveryConsumer.optionExercisesListenerEnabled()).isTrue();
         assertThat(deliveryConsumer.optionExercisesTopic())
                 .isEqualTo("surprising.option.option.exercises.v1");
         assertThat(deliveryConsumer.groupId()).isEqualTo("surprising-option-account-v1");

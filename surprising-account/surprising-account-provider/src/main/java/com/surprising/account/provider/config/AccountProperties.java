@@ -142,19 +142,33 @@ public class AccountProperties {
         }
 
         public String getDeliverySettlementsTopic() {
-            return productTopicsEnabled ? productTopics().deliverySettlementsTopic() : deliverySettlementsTopic;
+            return isDeliverySettlementsTopicEnabled() && productTopicsEnabled
+                    ? productTopics().deliverySettlementsTopic()
+                    : deliverySettlementsTopic;
         }
 
         public void setDeliverySettlementsTopic(String deliverySettlementsTopic) {
             this.deliverySettlementsTopic = deliverySettlementsTopic;
         }
 
+        public boolean isDeliverySettlementsTopicEnabled() {
+            return !productTopicsEnabled
+                    || productLine == ProductLine.LINEAR_DELIVERY
+                    || productLine == ProductLine.INVERSE_DELIVERY;
+        }
+
         public String getOptionExercisesTopic() {
-            return productTopicsEnabled ? productTopics().optionExercisesTopic() : optionExercisesTopic;
+            return isOptionExercisesTopicEnabled() && productTopicsEnabled
+                    ? productTopics().optionExercisesTopic()
+                    : optionExercisesTopic;
         }
 
         public void setOptionExercisesTopic(String optionExercisesTopic) {
             this.optionExercisesTopic = optionExercisesTopic;
+        }
+
+        public boolean isOptionExercisesTopicEnabled() {
+            return !productTopicsEnabled || productLine.isOptionProduct();
         }
 
         public int getConcurrency() {

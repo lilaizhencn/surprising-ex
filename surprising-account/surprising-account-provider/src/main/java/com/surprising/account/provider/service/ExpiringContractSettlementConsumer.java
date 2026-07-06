@@ -38,6 +38,7 @@ public class ExpiringContractSettlementConsumer {
     @KafkaListener(
             topics = "#{__listener.deliverySettlementsTopic()}",
             groupId = "#{__listener.groupId()}",
+            autoStartup = "#{__listener.deliverySettlementsListenerEnabled()}",
             containerFactory = "accountKafkaListenerContainerFactory")
     public void onDeliverySettlements(List<ConsumerRecord<String, String>> records) {
         for (ConsumerRecord<String, String> record : records) {
@@ -61,6 +62,7 @@ public class ExpiringContractSettlementConsumer {
     @KafkaListener(
             topics = "#{__listener.optionExercisesTopic()}",
             groupId = "#{__listener.groupId()}",
+            autoStartup = "#{__listener.optionExercisesListenerEnabled()}",
             containerFactory = "accountKafkaListenerContainerFactory")
     public void onOptionExercises(List<ConsumerRecord<String, String>> records) {
         for (ConsumerRecord<String, String> record : records) {
@@ -85,8 +87,16 @@ public class ExpiringContractSettlementConsumer {
         return properties.getKafka().getDeliverySettlementsTopic();
     }
 
+    public boolean deliverySettlementsListenerEnabled() {
+        return properties.getKafka().isDeliverySettlementsTopicEnabled();
+    }
+
     public String optionExercisesTopic() {
         return properties.getKafka().getOptionExercisesTopic();
+    }
+
+    public boolean optionExercisesListenerEnabled() {
+        return properties.getKafka().isOptionExercisesTopicEnabled();
     }
 
     public String groupId() {
