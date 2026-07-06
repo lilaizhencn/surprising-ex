@@ -17,9 +17,11 @@ import com.surprising.trading.api.model.OrderSide;
 import com.surprising.websocket.api.model.ExecutionReportEvent;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
+import com.surprising.websocket.provider.config.WebSocketProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -39,18 +41,28 @@ public class KafkaFanoutConsumer {
     private final ObjectMapper objectMapper;
     private final SubscriptionRegistry registry;
     private final CandleUpdateCoalescer candleUpdateCoalescer;
+    private final WebSocketProperties properties;
 
     public KafkaFanoutConsumer(ObjectMapper objectMapper,
                                SubscriptionRegistry registry,
                                CandleUpdateCoalescer candleUpdateCoalescer) {
+        this(objectMapper, registry, candleUpdateCoalescer, new WebSocketProperties());
+    }
+
+    @Autowired
+    public KafkaFanoutConsumer(ObjectMapper objectMapper,
+                               SubscriptionRegistry registry,
+                               CandleUpdateCoalescer candleUpdateCoalescer,
+                               WebSocketProperties properties) {
         this.objectMapper = objectMapper;
         this.registry = registry;
         this.candleUpdateCoalescer = candleUpdateCoalescer;
+        this.properties = properties;
     }
 
     @KafkaListener(
-            topics = "${surprising.websocket.kafka.candle-topic}",
-            groupId = "${surprising.websocket.kafka.group-id}",
+            topics = "#{__listener.candleTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onCandle(ConsumerRecord<String, String> record) {
         try {
@@ -64,8 +76,8 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "${surprising.websocket.kafka.trade-topic}",
-            groupId = "${surprising.websocket.kafka.group-id}",
+            topics = "#{__listener.tradeTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onTrade(ConsumerRecord<String, String> record) {
         try {
@@ -80,8 +92,8 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "${surprising.websocket.kafka.order-book-depth-topic}",
-            groupId = "${surprising.websocket.kafka.group-id}",
+            topics = "#{__listener.orderBookDepthTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onOrderBookDepth(ConsumerRecord<String, String> record) {
         try {
@@ -96,8 +108,8 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "${surprising.websocket.kafka.index-price-topic}",
-            groupId = "${surprising.websocket.kafka.group-id}",
+            topics = "#{__listener.indexPriceTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onIndexPrice(ConsumerRecord<String, String> record) {
         try {
@@ -112,8 +124,8 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "${surprising.websocket.kafka.mark-price-topic}",
-            groupId = "${surprising.websocket.kafka.group-id}",
+            topics = "#{__listener.markPriceTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onMarkPrice(ConsumerRecord<String, String> record) {
         try {
@@ -128,8 +140,8 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "${surprising.websocket.kafka.funding-rate-topic}",
-            groupId = "${surprising.websocket.kafka.group-id}",
+            topics = "#{__listener.fundingRateTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onFundingRate(ConsumerRecord<String, String> record) {
         try {
@@ -144,8 +156,8 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "${surprising.websocket.kafka.order-events-topic}",
-            groupId = "${surprising.websocket.kafka.group-id}",
+            topics = "#{__listener.orderEventsTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onOrderEvent(ConsumerRecord<String, String> record) {
         try {
@@ -161,8 +173,8 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "${surprising.websocket.kafka.match-results-topic}",
-            groupId = "${surprising.websocket.kafka.group-id}",
+            topics = "#{__listener.matchResultsTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onMatchResult(ConsumerRecord<String, String> record) {
         try {
@@ -178,8 +190,8 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "${surprising.websocket.kafka.match-trades-topic}",
-            groupId = "${surprising.websocket.kafka.group-id}",
+            topics = "#{__listener.matchTradesTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onMatchTrade(ConsumerRecord<String, String> record) {
         try {
@@ -200,8 +212,8 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "${surprising.websocket.kafka.position-events-topic}",
-            groupId = "${surprising.websocket.kafka.group-id}",
+            topics = "#{__listener.positionEventsTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onPosition(ConsumerRecord<String, String> record) {
         try {
@@ -216,8 +228,8 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "${surprising.websocket.kafka.account-risk-events-topic}",
-            groupId = "${surprising.websocket.kafka.group-id}",
+            topics = "#{__listener.accountRiskEventsTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onAccountRisk(ConsumerRecord<String, String> record) {
         try {
@@ -232,8 +244,8 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "${surprising.websocket.kafka.position-risk-events-topic}",
-            groupId = "${surprising.websocket.kafka.group-id}",
+            topics = "#{__listener.positionRiskEventsTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onPositionRisk(ConsumerRecord<String, String> record) {
         try {
@@ -245,6 +257,58 @@ public class KafkaFanoutConsumer {
             log.error("Failed to fanout position risk update: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout position risk update", ex);
         }
+    }
+
+    public String groupId() {
+        return properties.getKafka().getGroupId();
+    }
+
+    public String candleTopic() {
+        return properties.getKafka().getCandleTopic();
+    }
+
+    public String tradeTopic() {
+        return properties.getKafka().getTradeTopic();
+    }
+
+    public String orderBookDepthTopic() {
+        return properties.getKafka().getOrderBookDepthTopic();
+    }
+
+    public String indexPriceTopic() {
+        return properties.getKafka().getIndexPriceTopic();
+    }
+
+    public String markPriceTopic() {
+        return properties.getKafka().getMarkPriceTopic();
+    }
+
+    public String fundingRateTopic() {
+        return properties.getKafka().getFundingRateTopic();
+    }
+
+    public String orderEventsTopic() {
+        return properties.getKafka().getOrderEventsTopic();
+    }
+
+    public String matchResultsTopic() {
+        return properties.getKafka().getMatchResultsTopic();
+    }
+
+    public String matchTradesTopic() {
+        return properties.getKafka().getMatchTradesTopic();
+    }
+
+    public String positionEventsTopic() {
+        return properties.getKafka().getPositionEventsTopic();
+    }
+
+    public String accountRiskEventsTopic() {
+        return properties.getKafka().getAccountRiskEventsTopic();
+    }
+
+    public String positionRiskEventsTopic() {
+        return properties.getKafka().getPositionRiskEventsTopic();
     }
 
     private void requireMatchingAccountRiskKey(String recordKey, RiskAccountUpdatedEvent event) {

@@ -1,5 +1,7 @@
 package com.surprising.websocket.provider.config;
 
+import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -48,6 +50,8 @@ public class WebSocketProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        private boolean productTopicsEnabled;
         private String groupId = "surprising-websocket-local";
         private int concurrency = 2;
         private int maxPollRecords = 1000;
@@ -72,8 +76,24 @@ public class WebSocketProperties {
             this.bootstrapServers = bootstrapServers;
         }
 
+        public ProductLine getProductLine() {
+            return productLine;
+        }
+
+        public void setProductLine(ProductLine productLine) {
+            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        }
+
+        public boolean isProductTopicsEnabled() {
+            return productTopicsEnabled;
+        }
+
+        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
+            this.productTopicsEnabled = productTopicsEnabled;
+        }
+
         public String getGroupId() {
-            return groupId;
+            return productTopicsEnabled ? productTopics().consumerGroup("websocket") + "-" + groupId : groupId;
         }
 
         public void setGroupId(String groupId) {
@@ -97,7 +117,7 @@ public class WebSocketProperties {
         }
 
         public String getCandleTopic() {
-            return candleTopic;
+            return productTopicsEnabled ? productTopics().candleEventsTopic() : candleTopic;
         }
 
         public void setCandleTopic(String candleTopic) {
@@ -105,7 +125,7 @@ public class WebSocketProperties {
         }
 
         public String getTradeTopic() {
-            return tradeTopic;
+            return productTopicsEnabled ? productTopics().publicTradesTopic() : tradeTopic;
         }
 
         public void setTradeTopic(String tradeTopic) {
@@ -113,7 +133,7 @@ public class WebSocketProperties {
         }
 
         public String getOrderBookDepthTopic() {
-            return orderBookDepthTopic;
+            return productTopicsEnabled ? productTopics().orderBookDepthTopic() : orderBookDepthTopic;
         }
 
         public void setOrderBookDepthTopic(String orderBookDepthTopic) {
@@ -121,7 +141,7 @@ public class WebSocketProperties {
         }
 
         public String getIndexPriceTopic() {
-            return indexPriceTopic;
+            return productTopicsEnabled ? productTopics().indexPriceTopic() : indexPriceTopic;
         }
 
         public void setIndexPriceTopic(String indexPriceTopic) {
@@ -129,7 +149,7 @@ public class WebSocketProperties {
         }
 
         public String getMarkPriceTopic() {
-            return markPriceTopic;
+            return productTopicsEnabled ? productTopics().markPriceTopic() : markPriceTopic;
         }
 
         public void setMarkPriceTopic(String markPriceTopic) {
@@ -137,7 +157,7 @@ public class WebSocketProperties {
         }
 
         public String getFundingRateTopic() {
-            return fundingRateTopic;
+            return productTopicsEnabled ? productTopics().fundingRateTopic() : fundingRateTopic;
         }
 
         public void setFundingRateTopic(String fundingRateTopic) {
@@ -145,7 +165,7 @@ public class WebSocketProperties {
         }
 
         public String getOrderEventsTopic() {
-            return orderEventsTopic;
+            return productTopicsEnabled ? productTopics().orderEventsTopic() : orderEventsTopic;
         }
 
         public void setOrderEventsTopic(String orderEventsTopic) {
@@ -153,7 +173,7 @@ public class WebSocketProperties {
         }
 
         public String getMatchResultsTopic() {
-            return matchResultsTopic;
+            return productTopicsEnabled ? productTopics().matchResultsTopic() : matchResultsTopic;
         }
 
         public void setMatchResultsTopic(String matchResultsTopic) {
@@ -161,7 +181,7 @@ public class WebSocketProperties {
         }
 
         public String getMatchTradesTopic() {
-            return matchTradesTopic;
+            return productTopicsEnabled ? productTopics().matchTradesTopic() : matchTradesTopic;
         }
 
         public void setMatchTradesTopic(String matchTradesTopic) {
@@ -169,7 +189,7 @@ public class WebSocketProperties {
         }
 
         public String getPositionEventsTopic() {
-            return positionEventsTopic;
+            return productTopicsEnabled ? productTopics().accountPositionEventsTopic() : positionEventsTopic;
         }
 
         public void setPositionEventsTopic(String positionEventsTopic) {
@@ -177,7 +197,7 @@ public class WebSocketProperties {
         }
 
         public String getAccountRiskEventsTopic() {
-            return accountRiskEventsTopic;
+            return productTopicsEnabled ? productTopics().accountRiskEventsTopic() : accountRiskEventsTopic;
         }
 
         public void setAccountRiskEventsTopic(String accountRiskEventsTopic) {
@@ -185,11 +205,15 @@ public class WebSocketProperties {
         }
 
         public String getPositionRiskEventsTopic() {
-            return positionRiskEventsTopic;
+            return productTopicsEnabled ? productTopics().positionRiskEventsTopic() : positionRiskEventsTopic;
         }
 
         public void setPositionRiskEventsTopic(String positionRiskEventsTopic) {
             this.positionRiskEventsTopic = positionRiskEventsTopic;
+        }
+
+        private ProductTopicNames productTopics() {
+            return ProductTopicNames.of(productLine);
         }
     }
 

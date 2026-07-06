@@ -14,6 +14,8 @@ surprising:
   websocket:
     kafka:
       bootstrap-servers: localhost:9092
+      product-line: LINEAR_PERPETUAL
+      product-topics-enabled: false
       # Horizontal fanout requires each WebSocket node to receive public market data locally.
       # Keep this stable and unique per pod/instance; using the same group across all nodes would
       # deliver each Kafka record to only one node, while using a fresh random group on every restart
