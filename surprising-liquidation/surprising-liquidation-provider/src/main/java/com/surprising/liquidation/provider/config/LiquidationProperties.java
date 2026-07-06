@@ -1,5 +1,7 @@
 package com.surprising.liquidation.provider.config;
 
+import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -54,6 +56,8 @@ public class LiquidationProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        private boolean productTopicsEnabled;
         private String groupId = "surprising-liquidation-v1";
         private String liquidationCandidatesTopic = "surprising.perp.liquidation.candidates.v1";
         private String matchResultsTopic = "surprising.perp.match.results.v1";
@@ -70,8 +74,24 @@ public class LiquidationProperties {
             this.bootstrapServers = bootstrapServers;
         }
 
+        public ProductLine getProductLine() {
+            return productLine;
+        }
+
+        public void setProductLine(ProductLine productLine) {
+            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        }
+
+        public boolean isProductTopicsEnabled() {
+            return productTopicsEnabled;
+        }
+
+        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
+            this.productTopicsEnabled = productTopicsEnabled;
+        }
+
         public String getGroupId() {
-            return groupId;
+            return productTopicsEnabled ? productTopics().consumerGroup("liquidation") : groupId;
         }
 
         public void setGroupId(String groupId) {
@@ -79,7 +99,7 @@ public class LiquidationProperties {
         }
 
         public String getLiquidationCandidatesTopic() {
-            return liquidationCandidatesTopic;
+            return productTopicsEnabled ? productTopics().liquidationCandidatesTopic() : liquidationCandidatesTopic;
         }
 
         public void setLiquidationCandidatesTopic(String liquidationCandidatesTopic) {
@@ -87,7 +107,7 @@ public class LiquidationProperties {
         }
 
         public String getMatchResultsTopic() {
-            return matchResultsTopic;
+            return productTopicsEnabled ? productTopics().matchResultsTopic() : matchResultsTopic;
         }
 
         public void setMatchResultsTopic(String matchResultsTopic) {
@@ -95,7 +115,7 @@ public class LiquidationProperties {
         }
 
         public String getOrderCommandsTopic() {
-            return orderCommandsTopic;
+            return productTopicsEnabled ? productTopics().orderCommandsTopic() : orderCommandsTopic;
         }
 
         public void setOrderCommandsTopic(String orderCommandsTopic) {
@@ -103,7 +123,7 @@ public class LiquidationProperties {
         }
 
         public String getOrderEventsTopic() {
-            return orderEventsTopic;
+            return productTopicsEnabled ? productTopics().orderEventsTopic() : orderEventsTopic;
         }
 
         public void setOrderEventsTopic(String orderEventsTopic) {
@@ -124,6 +144,10 @@ public class LiquidationProperties {
 
         public void setMaxPollRecords(int maxPollRecords) {
             this.maxPollRecords = maxPollRecords;
+        }
+
+        private ProductTopicNames productTopics() {
+            return ProductTopicNames.of(productLine);
         }
     }
 

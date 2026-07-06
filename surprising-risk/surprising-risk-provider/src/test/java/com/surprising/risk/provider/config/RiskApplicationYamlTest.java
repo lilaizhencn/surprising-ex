@@ -17,6 +17,12 @@ class RiskApplicationYamlTest {
         List<PropertySource<?>> sources = loader.load("application", new ClassPathResource("application.yml"));
 
         assertThat(sources)
+                .extracting(source -> source.getProperty("surprising.risk.kafka.product-topics-enabled"))
+                .contains(false);
+        assertThat(sources)
+                .extracting(source -> source.getProperty("surprising.risk.kafka.product-line"))
+                .contains("LINEAR_PERPETUAL");
+        assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.risk.kafka.position-events-topic"))
                 .contains("surprising.account.position.events.v1");
         assertThat(sources)

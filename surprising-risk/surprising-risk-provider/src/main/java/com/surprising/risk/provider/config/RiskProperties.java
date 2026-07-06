@@ -1,5 +1,7 @@
 package com.surprising.risk.provider.config;
 
+import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -45,6 +47,8 @@ public class RiskProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        private boolean productTopicsEnabled;
         private String groupId = "surprising-risk-v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
         private String accountRiskEventsTopic = "surprising.risk.account.events.v1";
@@ -61,8 +65,24 @@ public class RiskProperties {
             this.bootstrapServers = bootstrapServers;
         }
 
+        public ProductLine getProductLine() {
+            return productLine;
+        }
+
+        public void setProductLine(ProductLine productLine) {
+            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        }
+
+        public boolean isProductTopicsEnabled() {
+            return productTopicsEnabled;
+        }
+
+        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
+            this.productTopicsEnabled = productTopicsEnabled;
+        }
+
         public String getGroupId() {
-            return groupId;
+            return productTopicsEnabled ? productTopics().consumerGroup("risk") : groupId;
         }
 
         public void setGroupId(String groupId) {
@@ -70,7 +90,7 @@ public class RiskProperties {
         }
 
         public String getPositionEventsTopic() {
-            return positionEventsTopic;
+            return productTopicsEnabled ? productTopics().accountPositionEventsTopic() : positionEventsTopic;
         }
 
         public void setPositionEventsTopic(String positionEventsTopic) {
@@ -78,7 +98,7 @@ public class RiskProperties {
         }
 
         public String getAccountRiskEventsTopic() {
-            return accountRiskEventsTopic;
+            return productTopicsEnabled ? productTopics().accountRiskEventsTopic() : accountRiskEventsTopic;
         }
 
         public void setAccountRiskEventsTopic(String accountRiskEventsTopic) {
@@ -86,7 +106,7 @@ public class RiskProperties {
         }
 
         public String getPositionRiskEventsTopic() {
-            return positionRiskEventsTopic;
+            return productTopicsEnabled ? productTopics().positionRiskEventsTopic() : positionRiskEventsTopic;
         }
 
         public void setPositionRiskEventsTopic(String positionRiskEventsTopic) {
@@ -94,7 +114,7 @@ public class RiskProperties {
         }
 
         public String getLiquidationCandidatesTopic() {
-            return liquidationCandidatesTopic;
+            return productTopicsEnabled ? productTopics().liquidationCandidatesTopic() : liquidationCandidatesTopic;
         }
 
         public void setLiquidationCandidatesTopic(String liquidationCandidatesTopic) {
@@ -115,6 +135,10 @@ public class RiskProperties {
 
         public void setMaxPollRecords(int maxPollRecords) {
             this.maxPollRecords = maxPollRecords;
+        }
+
+        private ProductTopicNames productTopics() {
+            return ProductTopicNames.of(productLine);
         }
     }
 

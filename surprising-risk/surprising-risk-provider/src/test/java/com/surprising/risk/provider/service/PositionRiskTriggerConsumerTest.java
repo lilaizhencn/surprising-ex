@@ -1,10 +1,13 @@
 package com.surprising.risk.provider.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import com.surprising.product.api.ProductLine;
+import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -44,6 +47,19 @@ class PositionRiskTriggerConsumerTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("failed to process position risk trigger");
         verifyNoInteractions(riskService);
+    }
+
+    @Test
+    void resolvesPositionTopicAndGroupFromProductLine() {
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        PositionRiskTriggerConsumer consumer = new PositionRiskTriggerConsumer(new ObjectMapper(),
+                mock(RiskService.class), properties);
+
+        assertThat(consumer.positionEventsTopic())
+                .isEqualTo("surprising.option.account.position.events.v1");
+        assertThat(consumer.groupId()).isEqualTo("surprising-option-risk-v1");
     }
 
     private ConsumerRecord<String, String> record(String key, String value) {

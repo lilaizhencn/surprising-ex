@@ -2,6 +2,7 @@ package com.surprising.liquidation.provider.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
@@ -58,5 +59,38 @@ class LiquidationKafkaConfigurationTest {
         assertThat(config).containsEntry(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         assertThat(config).containsEntry(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
         assertThat(config).containsEntry(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
+    }
+
+    @Test
+    void defaultsToLegacyPerpTopicsUntilProductTopicsAreEnabled() {
+        LiquidationProperties properties = new LiquidationProperties();
+
+        assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-liquidation-v1");
+        assertThat(properties.getKafka().getLiquidationCandidatesTopic())
+                .isEqualTo("surprising.perp.liquidation.candidates.v1");
+        assertThat(properties.getKafka().getMatchResultsTopic())
+                .isEqualTo("surprising.perp.match.results.v1");
+        assertThat(properties.getKafka().getOrderCommandsTopic())
+                .isEqualTo("surprising.perp.order.commands.v1");
+        assertThat(properties.getKafka().getOrderEventsTopic())
+                .isEqualTo("surprising.perp.order.events.v1");
+    }
+
+    @Test
+    void canResolveLiquidationTopicsAndGroupFromProductLine() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+
+        assertThat(properties.getKafka().getGroupId())
+                .isEqualTo("surprising-inverse-delivery-liquidation-v1");
+        assertThat(properties.getKafka().getLiquidationCandidatesTopic())
+                .isEqualTo("surprising.inverse-delivery.liquidation.candidates.v1");
+        assertThat(properties.getKafka().getMatchResultsTopic())
+                .isEqualTo("surprising.inverse-delivery.match.results.v1");
+        assertThat(properties.getKafka().getOrderCommandsTopic())
+                .isEqualTo("surprising.inverse-delivery.order.commands.v1");
+        assertThat(properties.getKafka().getOrderEventsTopic())
+                .isEqualTo("surprising.inverse-delivery.order.events.v1");
     }
 }

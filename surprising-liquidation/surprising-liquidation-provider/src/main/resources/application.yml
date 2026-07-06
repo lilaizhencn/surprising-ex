@@ -22,6 +22,8 @@ surprising:
   liquidation:
     kafka:
       bootstrap-servers: localhost:9092
+      product-line: LINEAR_PERPETUAL
+      product-topics-enabled: false
       group-id: surprising-liquidation-v1
       liquidation-candidates-topic: surprising.perp.liquidation.candidates.v1
       match-results-topic: surprising.perp.match.results.v1

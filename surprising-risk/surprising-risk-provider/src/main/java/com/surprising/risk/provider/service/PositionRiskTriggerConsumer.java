@@ -1,10 +1,12 @@
 package com.surprising.risk.provider.service;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.trading.api.KafkaSymbolKeyValidator;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -16,10 +18,17 @@ public class PositionRiskTriggerConsumer {
 
     private final ObjectMapper objectMapper;
     private final RiskService riskService;
+    private final RiskProperties properties;
 
     public PositionRiskTriggerConsumer(ObjectMapper objectMapper, RiskService riskService) {
+        this(objectMapper, riskService, new RiskProperties());
+    }
+
+    @Autowired
+    public PositionRiskTriggerConsumer(ObjectMapper objectMapper, RiskService riskService, RiskProperties properties) {
         this.objectMapper = objectMapper;
         this.riskService = riskService;
+        this.properties = properties;
     }
 
     /**
@@ -27,8 +36,8 @@ public class PositionRiskTriggerConsumer {
      * handler safe for at-least-once delivery and multi-node risk deployments.
      */
     @KafkaListener(
-            topics = "${surprising.risk.kafka.position-events-topic}",
-            groupId = "${surprising.risk.kafka.group-id}",
+            topics = "#{__listener.positionEventsTopic()}",
+            groupId = "#{__listener.groupId()}",
             containerFactory = "riskKafkaListenerContainerFactory")
     public void onPositionUpdated(ConsumerRecord<String, String> record) {
         try {
@@ -40,5 +49,13 @@ public class PositionRiskTriggerConsumer {
             log.error("Failed to process position risk trigger: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to process position risk trigger", ex);
         }
+    }
+
+    public String positionEventsTopic() {
+        return properties.getKafka().getPositionEventsTopic();
+    }
+
+    public String groupId() {
+        return properties.getKafka().getGroupId();
     }
 }

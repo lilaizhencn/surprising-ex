@@ -2,6 +2,7 @@ package com.surprising.risk.provider.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
@@ -59,5 +60,38 @@ class RiskKafkaConfigurationTest {
         assertThat(config).containsEntry(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         assertThat(config).containsEntry(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
         assertThat(config).containsEntry(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
+    }
+
+    @Test
+    void defaultsToLegacyPerpTopicsUntilProductTopicsAreEnabled() {
+        RiskProperties properties = new RiskProperties();
+
+        assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-risk-v1");
+        assertThat(properties.getKafka().getPositionEventsTopic())
+                .isEqualTo("surprising.account.position.events.v1");
+        assertThat(properties.getKafka().getAccountRiskEventsTopic())
+                .isEqualTo("surprising.risk.account.events.v1");
+        assertThat(properties.getKafka().getPositionRiskEventsTopic())
+                .isEqualTo("surprising.risk.position.events.v1");
+        assertThat(properties.getKafka().getLiquidationCandidatesTopic())
+                .isEqualTo("surprising.perp.liquidation.candidates.v1");
+    }
+
+    @Test
+    void canResolveRiskTopicsAndGroupFromProductLine() {
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+
+        assertThat(properties.getKafka().getGroupId())
+                .isEqualTo("surprising-linear-delivery-risk-v1");
+        assertThat(properties.getKafka().getPositionEventsTopic())
+                .isEqualTo("surprising.linear-delivery.account.position.events.v1");
+        assertThat(properties.getKafka().getAccountRiskEventsTopic())
+                .isEqualTo("surprising.linear-delivery.risk.account.events.v1");
+        assertThat(properties.getKafka().getPositionRiskEventsTopic())
+                .isEqualTo("surprising.linear-delivery.risk.position.events.v1");
+        assertThat(properties.getKafka().getLiquidationCandidatesTopic())
+                .isEqualTo("surprising.linear-delivery.liquidation.candidates.v1");
     }
 }

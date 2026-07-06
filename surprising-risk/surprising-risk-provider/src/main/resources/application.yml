@@ -22,6 +22,8 @@ surprising:
   risk:
     kafka:
       bootstrap-servers: localhost:9092
+      product-line: LINEAR_PERPETUAL
+      product-topics-enabled: false
       group-id: surprising-risk-v1
       position-events-topic: surprising.account.position.events.v1
       account-risk-events-topic: surprising.risk.account.events.v1

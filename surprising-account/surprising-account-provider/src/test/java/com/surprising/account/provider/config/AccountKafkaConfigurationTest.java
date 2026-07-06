@@ -79,6 +79,8 @@ class AccountKafkaConfigurationTest {
                 .isEqualTo("surprising.perp.order.commands.v1");
         assertThat(properties.getKafka().getOrderEventsTopic())
                 .isEqualTo("surprising.perp.order.events.v1");
+        assertThat(properties.getKafka().getPositionEventsTopic())
+                .isEqualTo("surprising.account.position.events.v1");
     }
 
     @Test
@@ -95,5 +97,7 @@ class AccountKafkaConfigurationTest {
                 .isEqualTo("surprising.linear-perp.order.commands.v1");
         assertThat(properties.getKafka().getOrderEventsTopic())
                 .isEqualTo("surprising.linear-perp.order.events.v1");
+        assertThat(properties.getKafka().getPositionEventsTopic())
+                .isEqualTo("surprising.linear-perp.account.position.events.v1");
     }
 }

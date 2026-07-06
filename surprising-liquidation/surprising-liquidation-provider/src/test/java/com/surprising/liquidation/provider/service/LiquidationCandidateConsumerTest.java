@@ -2,7 +2,10 @@ package com.surprising.liquidation.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
+import com.surprising.liquidation.provider.config.LiquidationProperties;
+import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.LiquidationCandidateEvent;
 import java.time.Instant;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -55,6 +58,31 @@ class LiquidationCandidateConsumerTest {
                         .hasMessageContaining("liquidation candidate Kafka key must match payload symbol"));
 
         assertThat(liquidationService.processed).isNull();
+    }
+
+    @Test
+    void resolvesCandidateTopicAndGroupFromProductLine() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        LiquidationCandidateConsumer consumer = new LiquidationCandidateConsumer(new ObjectMapper(),
+                mock(LiquidationService.class), properties);
+
+        assertThat(consumer.liquidationCandidatesTopic())
+                .isEqualTo("surprising.linear-delivery.liquidation.candidates.v1");
+        assertThat(consumer.groupId()).isEqualTo("surprising-linear-delivery-liquidation-v1");
+    }
+
+    @Test
+    void resolvesMatchResultTopicAndGroupFromProductLine() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        LiquidationMatchResultConsumer consumer = new LiquidationMatchResultConsumer(new ObjectMapper(),
+                mock(LiquidationService.class), properties);
+
+        assertThat(consumer.matchResultsTopic()).isEqualTo("surprising.linear-delivery.match.results.v1");
+        assertThat(consumer.groupId()).isEqualTo("surprising-linear-delivery-liquidation-v1");
     }
 
     private static final class RecordingLiquidationService extends LiquidationService {

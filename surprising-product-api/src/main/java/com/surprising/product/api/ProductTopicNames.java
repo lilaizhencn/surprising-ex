@@ -43,6 +43,22 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("candle.events");
     }
 
+    public String accountPositionEventsTopic() {
+        return topic("account.position.events");
+    }
+
+    public String accountRiskEventsTopic() {
+        return topic("risk.account.events");
+    }
+
+    public String positionRiskEventsTopic() {
+        return topic("risk.position.events");
+    }
+
+    public String liquidationCandidatesTopic() {
+        return topic("liquidation.candidates");
+    }
+
     public String deliverySettlementsTopic() {
         return topic("delivery.settlements");
     }

@@ -124,7 +124,7 @@ public class AccountProperties {
         }
 
         public String getPositionEventsTopic() {
-            return positionEventsTopic;
+            return productTopicsEnabled ? productTopics().accountPositionEventsTopic() : positionEventsTopic;
         }
 
         public void setPositionEventsTopic(String positionEventsTopic) {
