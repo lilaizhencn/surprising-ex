@@ -11,6 +11,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.account.api.model.LiquidationFeeSettledEvent;
+import com.surprising.insurance.provider.config.InsuranceProperties;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -36,13 +38,15 @@ class InsuranceRepositoryTest {
     void duplicateFundAdjustmentDoesNotUpdateBalanceAgain() throws Exception {
         InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
 
-        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class), eq("USDT")))
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class),
+                eq("USDT_PERPETUAL"), eq("USDT")))
                 .thenReturn(1_000L);
         when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
                 eq("insurance-ledger"))).thenReturn(101L);
         when(jdbcTemplate.update(contains("INSERT INTO insurance_fund_ledger"), any(Object[].class)))
                 .thenReturn(0);
-        when(jdbcTemplate.query(contains("FROM insurance_fund_ledger"), anyRowMapper(), eq("ops-1"), eq("USDT")))
+        when(jdbcTemplate.query(contains("FROM insurance_fund_ledger"), anyRowMapper(), eq("ops-1"),
+                eq("USDT_PERPETUAL"), eq("USDT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
@@ -50,7 +54,8 @@ class InsuranceRepositoryTest {
                     when(rs.getString("reason")).thenReturn("REPLAYED_REQUEST");
                     return List.of(mapper.mapRow(rs, 0));
                 });
-        when(jdbcTemplate.query(contains("FROM insurance_fund_balances"), anyRowMapper(), eq("USDT"), eq("USDT")))
+        when(jdbcTemplate.query(contains("FROM insurance_fund_balances"), anyRowMapper(),
+                eq("USDT_PERPETUAL"), eq("USDT"), eq("USDT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
@@ -71,13 +76,15 @@ class InsuranceRepositoryTest {
     void duplicateFundAdjustmentWithDifferentPayloadFailsBeforeBalanceMutation() throws Exception {
         InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
 
-        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class), eq("USDT")))
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class),
+                eq("USDT_PERPETUAL"), eq("USDT")))
                 .thenReturn(1_000L);
         when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
                 eq("insurance-ledger"))).thenReturn(101L);
         when(jdbcTemplate.update(contains("INSERT INTO insurance_fund_ledger"), any(Object[].class)))
                 .thenReturn(0);
-        when(jdbcTemplate.query(contains("FROM insurance_fund_ledger"), anyRowMapper(), eq("ops-1"), eq("USDT")))
+        when(jdbcTemplate.query(contains("FROM insurance_fund_ledger"), anyRowMapper(), eq("ops-1"),
+                eq("USDT_PERPETUAL"), eq("USDT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
@@ -96,16 +103,18 @@ class InsuranceRepositoryTest {
     void coverageFailsWhenFundLedgerInsertIsSkippedByConflict() throws Exception {
         InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
 
-        when(jdbcTemplate.query(contains("FROM account_deficits"), anyRowMapper(), eq(1)))
+        when(jdbcTemplate.query(contains("FROM account_deficits"), anyRowMapper(), eq("USDT_PERPETUAL"), eq(1)))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
+                    when(rs.getString("account_type")).thenReturn("USDT_PERPETUAL");
                     when(rs.getLong("user_id")).thenReturn(1001L);
                     when(rs.getString("asset")).thenReturn("USDT");
                     when(rs.getLong("deficit_units")).thenReturn(500L);
                     return List.of(mapper.mapRow(rs, 0));
                 });
-        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class), eq("USDT")))
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class),
+                eq("USDT_PERPETUAL"), eq("USDT")))
                 .thenReturn(1_000L);
         when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
                 eq("insurance-coverage"))).thenReturn(201L);
@@ -131,16 +140,18 @@ class InsuranceRepositoryTest {
     void coverDeficitsPartiallyCoversDeficitAndLeavesResidualForAdl() throws Exception {
         InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
 
-        when(jdbcTemplate.query(contains("FROM account_deficits"), anyRowMapper(), eq(1)))
+        when(jdbcTemplate.query(contains("FROM account_deficits"), anyRowMapper(), eq("USDT_PERPETUAL"), eq(1)))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
+                    when(rs.getString("account_type")).thenReturn("USDT_PERPETUAL");
                     when(rs.getLong("user_id")).thenReturn(4004L);
                     when(rs.getString("asset")).thenReturn("USDT");
                     when(rs.getLong("deficit_units")).thenReturn(1_000L);
                     return List.of(mapper.mapRow(rs, 0));
                 });
-        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class), eq("USDT")))
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class),
+                eq("USDT_PERPETUAL"), eq("USDT")))
                 .thenReturn(600L);
         when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
                 eq("insurance-coverage"))).thenReturn(9501L);
@@ -163,15 +174,15 @@ class InsuranceRepositoryTest {
 
         assertThat(coveredRows).isEqualTo(1);
         verify(jdbcTemplate).update(contains("INSERT INTO insurance_deficit_coverages"),
-                eq(9501L), eq(4004L), eq("USDT"), eq(1_000L), eq(600L), eq(400L),
+                eq(9501L), eq("USDT_PERPETUAL"), eq(4004L), eq("USDT"), eq(1_000L), eq(600L), eq(400L),
                 eq("PARTIALLY_COVERED"), eq("DEFICIT_COVERAGE"), any(java.sql.Timestamp.class),
                 any(java.sql.Timestamp.class));
         verify(jdbcTemplate).update(contains("UPDATE insurance_fund_balances"),
-                eq(0L), any(java.sql.Timestamp.class), eq("USDT"));
+                eq(0L), any(java.sql.Timestamp.class), eq("USDT_PERPETUAL"), eq("USDT"));
         verify(jdbcTemplate).update(contains("UPDATE account_deficits"),
                 eq(400L), any(java.sql.Timestamp.class), eq(4004L), eq("USDT"));
         verify(jdbcTemplate).update(contains("INSERT INTO insurance_fund_ledger"),
-                eq(9601L), eq("USDT"), eq(-600L), eq(0L), eq("DEFICIT_COVERAGE"),
+                eq(9601L), eq("USDT_PERPETUAL"), eq("USDT"), eq(-600L), eq(0L), eq("DEFICIT_COVERAGE"),
                 eq("9501"), eq("COVER_ACCOUNT_DEFICIT"), any(java.sql.Timestamp.class));
         verify(jdbcTemplate).update(contains("INSERT INTO account_ledger_entries"),
                 eq(9701L), eq(4004L), eq("USDT"), eq(600L), eq(-400L),
@@ -179,19 +190,67 @@ class InsuranceRepositoryTest {
     }
 
     @Test
-    void coverDeficitsLeavesRowsForFutureScanWhenFundIsEmpty() throws Exception {
-        InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
+    void productLineModeCoversProductDeficitsAndWritesProductLedger() throws Exception {
+        InsuranceProperties properties = new InsuranceProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        InsuranceRepository repository = new InsuranceRepository(jdbcTemplate, properties);
 
-        when(jdbcTemplate.query(contains("FROM account_deficits"), anyRowMapper(), eq(1)))
-                .thenAnswer(invocation -> {
+        when(jdbcTemplate.query(contains("FROM account_product_deficits"), anyRowMapper(),
+                eq("USDT_DELIVERY"), eq(1))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
+                    when(rs.getString("account_type")).thenReturn("USDT_DELIVERY");
                     when(rs.getLong("user_id")).thenReturn(4004L);
                     when(rs.getString("asset")).thenReturn("USDT");
                     when(rs.getLong("deficit_units")).thenReturn(1_000L);
                     return List.of(mapper.mapRow(rs, 0));
                 });
-        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class), eq("USDT")))
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class),
+                eq("USDT_DELIVERY"), eq("USDT"))).thenReturn(600L);
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
+                eq("insurance-coverage"))).thenReturn(9501L);
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
+                eq("insurance-ledger"))).thenReturn(9601L);
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO account_sequences"), eq(Long.class),
+                eq("ledger-entry"))).thenReturn(9701L);
+        when(jdbcTemplate.update(contains("INSERT INTO insurance_deficit_coverages"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE insurance_fund_balances"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE account_product_deficits"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("INSERT INTO insurance_fund_ledger"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("INSERT INTO account_product_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+
+        assertThat(repository.coverDeficits(1)).isEqualTo(1);
+
+        verify(jdbcTemplate).update(contains("UPDATE account_product_deficits"),
+                eq(400L), any(java.sql.Timestamp.class), eq("USDT_DELIVERY"), eq(4004L), eq("USDT"));
+        verify(jdbcTemplate).update(contains("INSERT INTO account_product_ledger_entries"),
+                eq(9701L), eq("USDT_DELIVERY"), eq(4004L), eq("USDT"), eq(600L), eq(-400L),
+                eq("9501"), any(java.sql.Timestamp.class));
+        verify(jdbcTemplate, never()).update(contains("UPDATE account_deficits"), any(Object[].class));
+    }
+
+    @Test
+    void coverDeficitsLeavesRowsForFutureScanWhenFundIsEmpty() throws Exception {
+        InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
+
+        when(jdbcTemplate.query(contains("FROM account_deficits"), anyRowMapper(), eq("USDT_PERPETUAL"), eq(1)))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getString("account_type")).thenReturn("USDT_PERPETUAL");
+                    when(rs.getLong("user_id")).thenReturn(4004L);
+                    when(rs.getString("asset")).thenReturn("USDT");
+                    when(rs.getLong("deficit_units")).thenReturn(1_000L);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class),
+                eq("USDT_PERPETUAL"), eq("USDT")))
                 .thenReturn(0L);
 
         int coveredRows = repository.coverDeficits(1);
@@ -208,7 +267,8 @@ class InsuranceRepositoryTest {
         InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
         LiquidationFeeSettledEvent event = liquidationFeeEvent(9201L, 7001L, 70L);
 
-        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class), eq("USDT")))
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class),
+                eq("USDT_PERPETUAL"), eq("USDT")))
                 .thenReturn(1_000L);
         when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
                 eq("insurance-ledger"))).thenReturn(9901L);
@@ -221,9 +281,10 @@ class InsuranceRepositoryTest {
 
         assertThat(collected).isTrue();
         verify(jdbcTemplate).update(contains("INSERT INTO insurance_fund_ledger"),
-                eq(9901L), eq("USDT"), eq(70L), eq(1_070L), eq("9201:7001"), any(Timestamp.class));
+                eq(9901L), eq("USDT_PERPETUAL"), eq("USDT"), eq(70L), eq(1_070L), eq("9201:7001"),
+                any(Timestamp.class));
         verify(jdbcTemplate).update(contains("UPDATE insurance_fund_balances"),
-                eq(1_070L), any(Timestamp.class), eq("USDT"));
+                eq(1_070L), any(Timestamp.class), eq("USDT_PERPETUAL"), eq("USDT"));
     }
 
     @Test
@@ -231,14 +292,15 @@ class InsuranceRepositoryTest {
         InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
         LiquidationFeeSettledEvent event = liquidationFeeEvent(9201L, 7001L, 70L);
 
-        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class), eq("USDT")))
+        when(jdbcTemplate.queryForObject(contains("SELECT balance_units"), eq(Long.class),
+                eq("USDT_PERPETUAL"), eq("USDT")))
                 .thenReturn(1_000L);
         when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
                 eq("insurance-ledger"))).thenReturn(9901L);
         when(jdbcTemplate.update(contains("INSERT INTO insurance_fund_ledger"), any(Object[].class)))
                 .thenReturn(0);
         when(jdbcTemplate.query(contains("reference_type = 'LIQUIDATION_FEE'"), anyRowMapper(),
-                eq("9201:7001"), eq("USDT"))).thenAnswer(invocation -> {
+                eq("9201:7001"), eq("USDT_PERPETUAL"), eq("USDT"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getLong("amount_units")).thenReturn(70L);

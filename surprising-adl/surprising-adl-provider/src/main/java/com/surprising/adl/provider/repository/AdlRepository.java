@@ -3,6 +3,7 @@ package com.surprising.adl.provider.repository;
 import com.surprising.adl.api.model.AdminCursorPage;
 import com.surprising.adl.api.model.AdlEventResponse;
 import com.surprising.adl.api.model.AdlSide;
+import com.surprising.adl.provider.config.AdlProperties;
 import com.surprising.adl.provider.model.AdlCandidate;
 import com.surprising.adl.provider.model.DeficitRow;
 import com.surprising.adl.provider.service.AdlMath;
@@ -16,56 +17,26 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
 public class AdlRepository {
 
-    private static final String CANDIDATE_SELECT = """
-            SELECT p.user_id,
-                   i.settle_asset AS asset,
-                   p.symbol,
-                   p.margin_mode,
-                   p.position_side,
-                   i.contract_type,
-                   i.notional_multiplier_units,
-                   i.price_tick_units,
-                   ss.scale_units AS settle_scale_units,
-                   p.signed_quantity_steps,
-                   p.entry_price_ticks,
-                   pm.mark_price_ticks,
-                   COALESCE(m.margin_units, 0) AS margin_units
-              FROM account_positions p
-              JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
-              JOIN account_asset_scales ss ON ss.asset = i.settle_asset
-              JOIN LATERAL (
-                  SELECT ((pm.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_price_ticks,
-                         event_time
-                    FROM price_mark_ticks pm
-                   WHERE pm.symbol = p.symbol
-                   ORDER BY event_time DESC
-                   LIMIT 1
-              ) pm ON TRUE
-              LEFT JOIN account_position_margins m
-                ON m.user_id = p.user_id
-               AND m.symbol = p.symbol
-               AND m.asset = i.settle_asset
-               AND m.margin_mode = p.margin_mode
-               AND m.position_side = p.position_side
-              LEFT JOIN account_deficits d
-                ON d.user_id = p.user_id
-               AND d.asset = i.settle_asset
-             WHERE i.settle_asset = ?
-               AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
-               AND p.signed_quantity_steps <> 0
-               AND COALESCE(d.deficit_units, 0) = 0
-            """;
+    private static final String DEFAULT_ACCOUNT_TYPE = "USDT_PERPETUAL";
 
     private final JdbcTemplate jdbcTemplate;
+    private final AdlProperties properties;
 
     public AdlRepository(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, new AdlProperties());
+    }
+
+    @Autowired
+    public AdlRepository(JdbcTemplate jdbcTemplate, AdlProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
+        this.properties = properties == null ? new AdlProperties() : properties;
     }
 
     public long nextAdlSequence(String sequenceName) {
@@ -103,10 +74,31 @@ public class AdlRepository {
      * This gives insurance-provider the first chance to absorb bankruptcy losses.
      */
     public List<DeficitRow> claimResidualDeficits(int batchSize, Duration minAge) {
+        String accountType = accountType();
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            return jdbcTemplate.query("""
+                    SELECT d.account_type, d.user_id, d.asset, d.deficit_units
+                      FROM account_product_deficits d
+                      LEFT JOIN insurance_fund_balances f
+                        ON f.account_type = d.account_type AND f.asset = d.asset
+                     WHERE d.account_type = ?
+                       AND d.deficit_units > 0
+                       AND d.updated_at <= now() - (? * INTERVAL '1 millisecond')
+                       AND COALESCE(f.balance_units, 0) = 0
+                     ORDER BY d.updated_at ASC
+                     LIMIT ?
+                     FOR UPDATE OF d SKIP LOCKED
+                    """, (rs, rowNum) -> new DeficitRow(
+                    rs.getString("account_type"),
+                    rs.getLong("user_id"),
+                    rs.getString("asset"),
+                    rs.getLong("deficit_units")), accountType, minAge.toMillis(), batchSize);
+        }
         return jdbcTemplate.query("""
-                SELECT d.user_id, d.asset, d.deficit_units
+                SELECT ? AS account_type, d.user_id, d.asset, d.deficit_units
                   FROM account_deficits d
-                  LEFT JOIN insurance_fund_balances f ON f.asset = d.asset
+                  LEFT JOIN insurance_fund_balances f
+                    ON f.account_type = ? AND f.asset = d.asset
                  WHERE d.deficit_units > 0
                    AND d.updated_at <= now() - (? * INTERVAL '1 millisecond')
                    AND COALESCE(f.balance_units, 0) = 0
@@ -114,9 +106,10 @@ public class AdlRepository {
                  LIMIT ?
                  FOR UPDATE OF d SKIP LOCKED
                 """, (rs, rowNum) -> new DeficitRow(
+                rs.getString("account_type"),
                 rs.getLong("user_id"),
                 rs.getString("asset"),
-                rs.getLong("deficit_units")), minAge.toMillis(), batchSize);
+                rs.getLong("deficit_units")), accountType, accountType, minAge.toMillis(), batchSize);
     }
 
     public List<AdlCandidate> queue(String asset, int limit, Duration maxMarkAge) {
@@ -128,14 +121,17 @@ public class AdlRepository {
         String sql = """
                 SELECT *
                   FROM (
-                """ + CANDIDATE_SELECT + """
+                """ + candidateSelect() + """
                        AND (? = 0 OR p.user_id <> ?)
                   ) q
                  ORDER BY q.user_id ASC, q.symbol ASC
                  LIMIT ?
                 """;
-        return jdbcTemplate.query(sql, (rs, rowNum) -> toCandidate(rs), asset, maxMarkAge.toMillis(),
-                        excludedUserId, excludedUserId, fetchLimit)
+        List<Object> args = candidateArgs(asset, maxMarkAge);
+        args.add(excludedUserId);
+        args.add(excludedUserId);
+        args.add(fetchLimit);
+        return jdbcTemplate.query(sql, (rs, rowNum) -> toCandidate(rs), args.toArray())
                 .stream()
                 .filter(candidate -> candidate.profitTicksPerStep() > 0 && candidate.unrealizedProfitUnits() > 0)
                 .sorted((left, right) -> {
@@ -152,15 +148,19 @@ public class AdlRepository {
                                                 PositionSide positionSide,
                                                 String asset,
                                                 Duration maxMarkAge) {
-        String sql = CANDIDATE_SELECT + """
+        String sql = candidateSelect() + """
                    AND p.user_id = ?
                    AND p.symbol = ?
                    AND p.margin_mode = ?
                    AND p.position_side = ?
                  FOR UPDATE OF p SKIP LOCKED
                 """;
-        return jdbcTemplate.query(sql, (rs, rowNum) -> toCandidate(rs), asset, maxMarkAge.toMillis(), userId, symbol,
-                        MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name())
+        List<Object> args = candidateArgs(asset, maxMarkAge);
+        args.add(userId);
+        args.add(symbol);
+        args.add(MarginMode.defaultIfNull(marginMode).name());
+        args.add(PositionSide.defaultIfNull(positionSide).name());
+        return jdbcTemplate.query(sql, (rs, rowNum) -> toCandidate(rs), args.toArray())
                 .stream()
                 .filter(candidate -> candidate.profitTicksPerStep() > 0 && candidate.unrealizedProfitUnits() > 0)
                 .findFirst();
@@ -171,7 +171,8 @@ public class AdlRepository {
     }
 
     public long executeAdl(DeficitRow deficit, AdlCandidate candidate, long remainingDeficitUnits) {
-        if (remainingDeficitUnits <= 0 || insuranceBalance(candidate.asset()) > 0) {
+        String accountType = normalizeAccountType(deficit.accountType());
+        if (remainingDeficitUnits <= 0 || insuranceBalance(accountType, candidate.asset()) > 0) {
             return remainingDeficitUnits;
         }
         long closeSteps = AdlMath.closeStepsForCover(remainingDeficitUnits, candidate.absQuantitySteps(),
@@ -187,14 +188,14 @@ public class AdlRepository {
         long eventId = nextAdlSequence("adl-event");
         long realizedPnlUnits = realizedProfitUnits;
         reduceTargetPosition(candidate, closeSteps, realizedPnlUnits, now);
-        releaseTargetMargin(candidate, closeSteps, now);
-        applyTargetProfitAndTransfer(candidate.userId(), candidate.asset(), realizedProfitUnits, coveredUnits,
-                eventId, now);
+        releaseTargetMargin(accountType, candidate, closeSteps, now);
+        applyTargetProfitAndTransfer(accountType, candidate.userId(), candidate.asset(),
+                realizedProfitUnits, coveredUnits, eventId, now);
         long nextRemaining = Math.subtractExact(remainingDeficitUnits, coveredUnits);
-        reduceDeficit(deficit.userId(), deficit.asset(), nextRemaining, now);
-        insertAccountLedger(deficit.userId(), deficit.asset(), coveredUnits, -nextRemaining,
+        reduceDeficit(accountType, deficit, nextRemaining, now);
+        insertAccountLedger(accountType, deficit.userId(), deficit.asset(), coveredUnits, -nextRemaining,
                 "ADL_COVERAGE", String.valueOf(eventId), "ADL_DEFICIT_COVERAGE", now);
-        insertAdlEvent(eventId, deficit, candidate, closeSteps, realizedProfitUnits, coveredUnits,
+        insertAdlEvent(accountType, eventId, deficit, candidate, closeSteps, realizedProfitUnits, coveredUnits,
                 nextRemaining, now);
         return nextRemaining;
     }
@@ -203,12 +204,14 @@ public class AdlRepository {
         return jdbcTemplate.query("""
                 SELECT *
                   FROM adl_events
-                 WHERE (CAST(? AS text) IS NULL OR deficit_user_id = ? OR target_user_id = ?)
+                 WHERE account_type = ?
+                   AND (CAST(? AS text) IS NULL OR deficit_user_id = ? OR target_user_id = ?)
                    AND (CAST(? AS text) IS NULL OR asset = ?)
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
                  ORDER BY created_at DESC
                  LIMIT ?
-                """, (rs, rowNum) -> toEvent(rs), userId, userId, userId, asset, asset, symbol, symbol, limit);
+                """, (rs, rowNum) -> toEvent(rs), accountType(), userId, userId, userId, asset, asset, symbol,
+                symbol, limit);
     }
 
     public AdminCursorPage.CursorPage<AdlEventResponse> eventsPage(
@@ -222,6 +225,7 @@ public class AdlRepository {
         AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort);
         AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
         List<Object> args = new ArrayList<>();
+        args.add(accountType());
         args.add(userId);
         args.add(userId);
         args.add(userId);
@@ -234,7 +238,8 @@ public class AdlRepository {
         String sql = """
                 SELECT *
                   FROM adl_events
-                 WHERE (CAST(? AS text) IS NULL OR deficit_user_id = ? OR target_user_id = ?)
+                 WHERE account_type = ?
+                   AND (CAST(? AS text) IS NULL OR deficit_user_id = ? OR target_user_id = ?)
                    AND (CAST(? AS text) IS NULL OR asset = ?)
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
                 """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
@@ -254,18 +259,136 @@ public class AdlRepository {
         return AdminCursorPage.parseSort(value, createdAtDesc, List.of(createdAtDesc, createdAtAsc));
     }
 
-    private long insuranceBalance(String asset) {
+    private String accountType() {
+        return normalizeAccountType(properties.getKafka().getAccountType());
+    }
+
+    private String normalizeAccountType(String accountType) {
+        return accountType == null || accountType.isBlank()
+                ? DEFAULT_ACCOUNT_TYPE
+                : accountType.trim().toUpperCase();
+    }
+
+    private boolean productTopicsEnabled() {
+        return properties.getKafka().isProductTopicsEnabled();
+    }
+
+    private String balanceTable() {
+        return productTopicsEnabled() ? "account_product_balances" : "account_balances";
+    }
+
+    private String deficitTable() {
+        return productTopicsEnabled() ? "account_product_deficits" : "account_deficits";
+    }
+
+    private String productUsingPrefix() {
+        return productTopicsEnabled() ? "account_type, " : "";
+    }
+
+    private String accountTypePredicate() {
+        return productTopicsEnabled() ? "account_type = ? AND " : "";
+    }
+
+    private String accountTypePredicate(String alias) {
+        return productTopicsEnabled() ? alias + ".account_type = ? AND " : "";
+    }
+
+    private Object[] accountTypeArgs(String accountType, Object... rest) {
+        return scopedArgs(accountType, 0, rest);
+    }
+
+    private Object[] scopedArgs(String accountType, int accountTypeIndex, Object... rest) {
+        if (!productTopicsEnabled()) {
+            return rest;
+        }
+        Object[] args = new Object[rest.length + 1];
+        System.arraycopy(rest, 0, args, 0, accountTypeIndex);
+        args[accountTypeIndex] = normalizeAccountType(accountType);
+        System.arraycopy(rest, accountTypeIndex, args, accountTypeIndex + 1, rest.length - accountTypeIndex);
+        return args;
+    }
+
+    private String candidateSelect() {
+        String deficitJoin = productTopicsEnabled()
+                ? """
+                  LEFT JOIN account_product_deficits d
+                    ON d.account_type = ?
+                   AND d.user_id = p.user_id
+                   AND d.asset = i.settle_asset
+                """
+                : """
+                  LEFT JOIN account_deficits d
+                    ON d.user_id = p.user_id
+                   AND d.asset = i.settle_asset
+                """;
+        String productFilter = productTopicsEnabled()
+                ? "   AND i.contract_type = ?\n"
+                : "";
+        return """
+                SELECT p.user_id,
+                       i.settle_asset AS asset,
+                       p.symbol,
+                       p.margin_mode,
+                       p.position_side,
+                       i.contract_type,
+                       i.notional_multiplier_units,
+                       i.price_tick_units,
+                       ss.scale_units AS settle_scale_units,
+                       p.signed_quantity_steps,
+                       p.entry_price_ticks,
+                       pm.mark_price_ticks,
+                       COALESCE(m.margin_units, 0) AS margin_units
+                  FROM account_positions p
+                  JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
+                  JOIN account_asset_scales ss ON ss.asset = i.settle_asset
+                  JOIN LATERAL (
+                      SELECT ((pm.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_price_ticks,
+                             event_time
+                        FROM price_mark_ticks pm
+                       WHERE pm.symbol = p.symbol
+                       ORDER BY event_time DESC
+                       LIMIT 1
+                  ) pm ON TRUE
+                  LEFT JOIN account_position_margins m
+                    ON m.user_id = p.user_id
+                   AND m.symbol = p.symbol
+                   AND m.asset = i.settle_asset
+                   AND m.margin_mode = p.margin_mode
+                   AND m.position_side = p.position_side
+                %s
+                 WHERE i.settle_asset = ?
+                   AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
+                   AND p.signed_quantity_steps <> 0
+                   AND COALESCE(d.deficit_units, 0) = 0
+                %s
+                """.formatted(deficitJoin, productFilter);
+    }
+
+    private List<Object> candidateArgs(String asset, Duration maxMarkAge) {
+        List<Object> args = new ArrayList<>();
+        if (productTopicsEnabled()) {
+            args.add(accountType());
+        }
+        args.add(asset);
+        args.add(maxMarkAge.toMillis());
+        if (productTopicsEnabled()) {
+            args.add(properties.getKafka().getProductLine().contractTypeCode());
+        }
+        return args;
+    }
+
+    private long insuranceBalance(String accountType, String asset) {
         jdbcTemplate.update("""
-                INSERT INTO insurance_fund_balances (asset, balance_units, updated_at)
-                VALUES (?, 0, now())
-                ON CONFLICT (asset) DO NOTHING
-                """, asset);
+                INSERT INTO insurance_fund_balances (account_type, asset, balance_units, updated_at)
+                VALUES (?, ?, 0, now())
+                ON CONFLICT (account_type, asset) DO NOTHING
+                """, accountType, asset);
         return jdbcTemplate.query("""
                 SELECT balance_units
                   FROM insurance_fund_balances
-                 WHERE asset = ?
+                 WHERE account_type = ? AND asset = ?
                  FOR UPDATE
-                """, (rs, rowNum) -> rs.getLong(1), asset).stream().findFirst().orElse(0L);
+                """, (rs, rowNum) -> rs.getLong(1), accountType, asset).stream().findFirst().orElse(0L);
     }
 
     private void reduceTargetPosition(AdlCandidate candidate,
@@ -328,7 +451,7 @@ public class AdlRepository {
         return signedQuantitySteps < 0 ? Math.negateExact(signedQuantitySteps) : 0L;
     }
 
-    private void releaseTargetMargin(AdlCandidate candidate, long closeSteps, Instant now) {
+    private void releaseTargetMargin(String accountType, AdlCandidate candidate, long closeSteps, Instant now) {
         var margins = jdbcTemplate.query("""
                 SELECT asset, margin_mode, position_side, margin_units
                   FROM account_position_margins
@@ -349,16 +472,17 @@ public class AdlRepository {
             if (releaseUnits <= 0) {
                 continue;
             }
-            ensureBalanceRows(candidate.userId(), margin.asset(), now);
+            ensureBalanceRows(accountType, candidate.userId(), margin.asset(), now);
             int rows = jdbcTemplate.update("""
-                    UPDATE account_balances
+                    UPDATE %s
                        SET locked_units = locked_units - ?,
                            available_units = available_units + ?,
                            updated_at = ?
-                     WHERE user_id = ? AND asset = ?
+                     WHERE %s user_id = ? AND asset = ?
                        AND locked_units >= ?
-                    """, releaseUnits, releaseUnits, Timestamp.from(now), candidate.userId(), margin.asset(),
-                    releaseUnits);
+                    """.formatted(balanceTable(), accountTypePredicate()), scopedArgs(accountType, 3,
+                    releaseUnits, releaseUnits, Timestamp.from(now), candidate.userId(), margin.asset(),
+                    releaseUnits));
             if (rows != 1) {
                 throw new IllegalStateException("insufficient locked margin for ADL release");
             }
@@ -382,100 +506,124 @@ public class AdlRepository {
         }
     }
 
-    private void applyTargetProfitAndTransfer(long userId,
+    private void applyTargetProfitAndTransfer(String accountType,
+                                              long userId,
                                               String asset,
                                               long realizedProfitUnits,
                                               long coveredUnits,
                                               long eventId,
                                               Instant now) {
-        long balanceAfterProfit = applyPositiveAmount(userId, asset, realizedProfitUnits, now);
-        insertAccountLedger(userId, asset, realizedProfitUnits, balanceAfterProfit, "ADL_REALIZED_PNL",
+        long balanceAfterProfit = applyPositiveAmount(accountType, userId, asset, realizedProfitUnits, now);
+        insertAccountLedger(accountType, userId, asset, realizedProfitUnits, balanceAfterProfit, "ADL_REALIZED_PNL",
                 String.valueOf(eventId), "ADL_POSITION_DELEVERAGED", now);
-        long balanceAfterTransfer = deductAvailable(userId, asset, coveredUnits, now);
-        insertAccountLedger(userId, asset, -coveredUnits, balanceAfterTransfer, "ADL_TRANSFER",
+        long balanceAfterTransfer = deductAvailable(accountType, userId, asset, coveredUnits, now);
+        insertAccountLedger(accountType, userId, asset, -coveredUnits, balanceAfterTransfer, "ADL_TRANSFER",
                 String.valueOf(eventId), "ADL_DEFICIT_TRANSFER", now);
     }
 
-    private long applyPositiveAmount(long userId, String asset, long amountUnits, Instant now) {
-        ensureBalanceRows(userId, asset, now);
-        BalanceState current = lockBalance(userId, asset);
+    private long applyPositiveAmount(String accountType, long userId, String asset, long amountUnits, Instant now) {
+        ensureBalanceRows(accountType, userId, asset, now);
+        BalanceState current = lockBalance(accountType, userId, asset);
         long deficitOffset = Math.min(current.deficitUnits(), amountUnits);
         long nextDeficit = Math.subtractExact(current.deficitUnits(), deficitOffset);
         long nextAvailable = Math.addExact(current.availableUnits(), Math.subtractExact(amountUnits, deficitOffset));
-        updateBalance(userId, asset, nextAvailable, current.lockedUnits(), nextDeficit, now);
+        updateBalance(accountType, userId, asset, nextAvailable, current.lockedUnits(), nextDeficit, now);
         return Math.subtractExact(Math.addExact(nextAvailable, current.lockedUnits()), nextDeficit);
     }
 
-    private long deductAvailable(long userId, String asset, long amountUnits, Instant now) {
-        BalanceState current = lockBalance(userId, asset);
+    private long deductAvailable(String accountType, long userId, String asset, long amountUnits, Instant now) {
+        BalanceState current = lockBalance(accountType, userId, asset);
         if (current.availableUnits() < amountUnits) {
             throw new IllegalStateException("insufficient ADL realized profit for transfer");
         }
         long nextAvailable = Math.subtractExact(current.availableUnits(), amountUnits);
-        updateBalance(userId, asset, nextAvailable, current.lockedUnits(), current.deficitUnits(), now);
+        updateBalance(accountType, userId, asset, nextAvailable, current.lockedUnits(), current.deficitUnits(), now);
         return Math.subtractExact(Math.addExact(nextAvailable, current.lockedUnits()), current.deficitUnits());
     }
 
-    private void reduceDeficit(long userId, String asset, long remainingDeficitUnits, Instant now) {
+    private void reduceDeficit(String accountType, DeficitRow deficit, long remainingDeficitUnits, Instant now) {
         int rows = jdbcTemplate.update("""
-                UPDATE account_deficits
+                UPDATE %s
                    SET deficit_units = ?,
                        updated_at = ?
-                 WHERE user_id = ? AND asset = ?
-                """, remainingDeficitUnits, Timestamp.from(now), userId, asset);
+                 WHERE %s user_id = ? AND asset = ?
+                """.formatted(deficitTable(), accountTypePredicate()), scopedArgs(accountType, 2,
+                remainingDeficitUnits, Timestamp.from(now), deficit.userId(), deficit.asset()));
         requireSingleRow(rows, "ADL deficit reduction");
     }
 
-    private void ensureBalanceRows(long userId, String asset, Instant now) {
+    private void ensureBalanceRows(String accountType, long userId, String asset, Instant now) {
+        accountType = normalizeAccountType(accountType);
+        if (productTopicsEnabled()) {
+            jdbcTemplate.update("""
+                    INSERT INTO account_product_balances (
+                        account_type, user_id, asset, available_units, locked_units, updated_at
+                    ) VALUES (?, ?, ?, 0, 0, ?)
+                    ON CONFLICT (account_type, user_id, asset) DO NOTHING
+                    """, accountType, userId, asset, Timestamp.from(now));
+            jdbcTemplate.update("""
+                    INSERT INTO account_product_deficits (account_type, user_id, asset, deficit_units, updated_at)
+                    VALUES (?, ?, ?, 0, ?)
+                    ON CONFLICT (account_type, user_id, asset) DO NOTHING
+                    """, accountType, userId, asset, Timestamp.from(now));
+            return;
+        }
         jdbcTemplate.update("""
-                INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
-                VALUES (?, ?, 0, 0, ?)
-                ON CONFLICT (user_id, asset) DO NOTHING
-                """, userId, asset, Timestamp.from(now));
+                    INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
+                    VALUES (?, ?, 0, 0, ?)
+                    ON CONFLICT (user_id, asset) DO NOTHING
+                    """, userId, asset, Timestamp.from(now));
         jdbcTemplate.update("""
-                INSERT INTO account_deficits (user_id, asset, deficit_units, updated_at)
-                VALUES (?, ?, 0, ?)
-                ON CONFLICT (user_id, asset) DO NOTHING
-                """, userId, asset, Timestamp.from(now));
+                    INSERT INTO account_deficits (user_id, asset, deficit_units, updated_at)
+                    VALUES (?, ?, 0, ?)
+                    ON CONFLICT (user_id, asset) DO NOTHING
+                    """, userId, asset, Timestamp.from(now));
     }
 
-    private BalanceState lockBalance(long userId, String asset) {
+    private BalanceState lockBalance(String accountType, long userId, String asset) {
+        accountType = normalizeAccountType(accountType);
         return jdbcTemplate.queryForObject("""
                 SELECT b.available_units, b.locked_units, d.deficit_units
-                  FROM account_balances b
-                  JOIN account_deficits d USING (user_id, asset)
-                 WHERE b.user_id = ? AND b.asset = ?
+                  FROM %s b
+                  JOIN %s d USING (%suser_id, asset)
+                 WHERE %sb.user_id = ? AND b.asset = ?
                  FOR UPDATE OF b, d
-                """, (rs, rowNum) -> new BalanceState(
+                """.formatted(balanceTable(), deficitTable(), productUsingPrefix(), accountTypePredicate("b")),
+                (rs, rowNum) -> new BalanceState(
                 rs.getLong("available_units"),
                 rs.getLong("locked_units"),
-                rs.getLong("deficit_units")), userId, asset);
+                rs.getLong("deficit_units")), accountTypeArgs(accountType, userId, asset));
     }
 
-    private void updateBalance(long userId,
+    private void updateBalance(String accountType,
+                               long userId,
                                String asset,
                                long availableUnits,
                                long lockedUnits,
                                long deficitUnits,
                                Instant now) {
+        accountType = normalizeAccountType(accountType);
         int balanceRows = jdbcTemplate.update("""
-                UPDATE account_balances
+                UPDATE %s
                    SET available_units = ?,
                        locked_units = ?,
                        updated_at = ?
-                 WHERE user_id = ? AND asset = ?
-                """, availableUnits, lockedUnits, Timestamp.from(now), userId, asset);
+                 WHERE %suser_id = ? AND asset = ?
+                """.formatted(balanceTable(), accountTypePredicate()), scopedArgs(accountType, 3,
+                availableUnits, lockedUnits, Timestamp.from(now), userId, asset));
         requireSingleRow(balanceRows, "ADL account balance update");
         int deficitRows = jdbcTemplate.update("""
-                UPDATE account_deficits
+                UPDATE %s
                    SET deficit_units = ?,
                        updated_at = ?
-                 WHERE user_id = ? AND asset = ?
-                """, deficitUnits, Timestamp.from(now), userId, asset);
+                 WHERE %suser_id = ? AND asset = ?
+                """.formatted(deficitTable(), accountTypePredicate()), scopedArgs(accountType, 2,
+                deficitUnits, Timestamp.from(now), userId, asset));
         requireSingleRow(deficitRows, "ADL account deficit update");
     }
 
-    private void insertAccountLedger(long userId,
+    private void insertAccountLedger(String accountType,
+                                     long userId,
                                      String asset,
                                      long amountUnits,
                                      long balanceAfterUnits,
@@ -483,18 +631,29 @@ public class AdlRepository {
                                      String referenceId,
                                      String reason,
                                      Instant now) {
-        int rows = jdbcTemplate.update("""
-                INSERT INTO account_ledger_entries (
-                    entry_id, user_id, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, nextAccountSequence("ledger-entry"), userId, asset, amountUnits, balanceAfterUnits,
-                referenceType, referenceId, reason, Timestamp.from(now));
+        accountType = normalizeAccountType(accountType);
+        int rows = productTopicsEnabled()
+                ? jdbcTemplate.update("""
+                    INSERT INTO account_product_ledger_entries (
+                        entry_id, account_type, user_id, asset, amount_units, balance_after_units,
+                        reference_type, reference_id, reason, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
+                    """, nextAccountSequence("ledger-entry"), accountType, userId, asset, amountUnits,
+                        balanceAfterUnits, referenceType, referenceId, reason, Timestamp.from(now))
+                : jdbcTemplate.update("""
+                    INSERT INTO account_ledger_entries (
+                        entry_id, user_id, asset, amount_units, balance_after_units,
+                        reference_type, reference_id, reason, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
+                    """, nextAccountSequence("ledger-entry"), userId, asset, amountUnits, balanceAfterUnits,
+                        referenceType, referenceId, reason, Timestamp.from(now));
         requireSingleRow(rows, "ADL account ledger insert");
     }
 
-    private void insertAdlEvent(long eventId,
+    private void insertAdlEvent(String accountType,
+                                long eventId,
                                 DeficitRow deficit,
                                 AdlCandidate candidate,
                                 long closedSteps,
@@ -504,15 +663,17 @@ public class AdlRepository {
                                 Instant now) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO adl_events (
-                    event_id, deficit_user_id, target_user_id, asset, symbol, target_side, target_position_side,
+                    event_id, account_type, deficit_user_id, target_user_id, asset, symbol, target_side,
+                    target_position_side,
                     closed_quantity_steps, entry_price_ticks, mark_price_ticks, requested_deficit_units,
                     realized_profit_units, covered_units, remaining_deficit_units,
                     priority_score_ppm, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ADL_DEFICIT_COVERAGE', ?)
-                """, eventId, deficit.userId(), candidate.userId(), candidate.asset(), candidate.symbol(),
-                candidate.side().name(), candidate.positionSide().name(), closedSteps, candidate.entryPriceTicks(),
-                candidate.markPriceTicks(), deficit.deficitUnits(), realizedProfitUnits, coveredUnits,
-                remainingDeficitUnits, candidate.priorityScorePpm(), Timestamp.from(now));
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ADL_DEFICIT_COVERAGE', ?)
+                """, eventId, normalizeAccountType(accountType), deficit.userId(), candidate.userId(),
+                candidate.asset(), candidate.symbol(), candidate.side().name(), candidate.positionSide().name(),
+                closedSteps, candidate.entryPriceTicks(), candidate.markPriceTicks(), deficit.deficitUnits(),
+                realizedProfitUnits, coveredUnits, remainingDeficitUnits, candidate.priorityScorePpm(),
+                Timestamp.from(now));
         requireSingleRow(rows, "ADL event insert");
     }
 

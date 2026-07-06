@@ -63,6 +63,7 @@ public class AccountOutboxRepository {
                                                                    long userId,
                                                                    String symbol,
                                                                    MarginMode marginMode,
+                                                                   String accountType,
                                                                    String asset,
                                                                    long amountUnits,
                                                                    long feeRatePpm,
@@ -70,7 +71,7 @@ public class AccountOutboxRepository {
                                                                    String traceId) {
         long eventId = sequenceRepository.nextSequence("liquidation-fee-event");
         LiquidationFeeSettledEvent event = new LiquidationFeeSettledEvent(eventId, tradeId, orderId,
-                liquidationOrderId, candidateId, userId, symbol, marginMode, asset, amountUnits, feeRatePpm,
+                liquidationOrderId, candidateId, userId, symbol, marginMode, accountType, asset, amountUnits, feeRatePpm,
                 now, traceId);
         long outboxId = sequenceRepository.nextSequence("account-outbox");
         int rows = jdbcTemplate.update("""

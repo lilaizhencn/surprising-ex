@@ -734,6 +734,7 @@ class AccountServiceTest {
             assertThat(call.orderId()).isEqualTo(9010L);
             assertThat(call.liquidationOrderId()).isEqualTo(6001L);
             assertThat(call.candidateId()).isEqualTo(9401L);
+            assertThat(call.accountType()).isEqualTo("USDT_PERPETUAL");
             assertThat(call.asset()).isEqualTo("USDT");
             assertThat(call.amountUnits()).isEqualTo(3_600L);
             assertThat(call.traceId()).isEqualTo("trace-liquidation-fee");
@@ -1290,19 +1291,20 @@ class AccountServiceTest {
                                                                        long orderId,
                                                                        long liquidationOrderId,
                                                                        long candidateId,
-                                                                       long userId,
-                                                                       String symbol,
-                                                                       MarginMode marginMode,
-                                                                       String asset,
-                                                                       long amountUnits,
-                                                                       long feeRatePpm,
+                                                                        long userId,
+                                                                        String symbol,
+                                                                        MarginMode marginMode,
+                                                                        String accountType,
+                                                                        String asset,
+                                                                        long amountUnits,
+                                                                        long feeRatePpm,
                                                                        Instant now,
                                                                        String traceId) {
             liquidationFeeCalls.add(new LiquidationFeeSettledCall(topic, tradeId, orderId, liquidationOrderId,
-                    candidateId, userId, symbol, marginMode, asset, amountUnits, feeRatePpm, now, traceId));
+                    candidateId, userId, symbol, marginMode, accountType, asset, amountUnits, feeRatePpm, now, traceId));
             return new LiquidationFeeSettledEvent(liquidationFeeCalls.size(), tradeId, orderId,
-                    liquidationOrderId, candidateId, userId, symbol, marginMode, asset, amountUnits, feeRatePpm,
-                    now, traceId);
+                    liquidationOrderId, candidateId, userId, symbol, marginMode, accountType, asset,
+                    amountUnits, feeRatePpm, now, traceId);
         }
     }
 
@@ -1318,11 +1320,12 @@ class AccountServiceTest {
                                              long orderId,
                                              long liquidationOrderId,
                                              long candidateId,
-                                             long userId,
-                                             String symbol,
-                                             MarginMode marginMode,
-                                             String asset,
-                                             long amountUnits,
+                                              long userId,
+                                              String symbol,
+                                              MarginMode marginMode,
+                                              String accountType,
+                                              String asset,
+                                              long amountUnits,
                                              long feeRatePpm,
                                              Instant eventTime,
                                              String traceId) {

@@ -1,5 +1,7 @@
 package com.surprising.insurance.provider.config;
 
+import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductTopicNames;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.insurance")
@@ -13,7 +15,7 @@ public class InsuranceProperties {
     }
 
     public void setKafka(Kafka kafka) {
-        this.kafka = kafka;
+        this.kafka = kafka == null ? new Kafka() : kafka;
     }
 
     public Coverage getCoverage() {
@@ -26,6 +28,8 @@ public class InsuranceProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        private boolean productTopicsEnabled;
         private String groupId = "surprising-insurance-v1";
         private String liquidationFeeEventsTopic = "surprising.account.liquidation-fee.events.v1";
         private int concurrency = 2;
@@ -39,8 +43,24 @@ public class InsuranceProperties {
             this.bootstrapServers = bootstrapServers;
         }
 
+        public ProductLine getProductLine() {
+            return productLine;
+        }
+
+        public void setProductLine(ProductLine productLine) {
+            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        }
+
+        public boolean isProductTopicsEnabled() {
+            return productTopicsEnabled;
+        }
+
+        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
+            this.productTopicsEnabled = productTopicsEnabled;
+        }
+
         public String getGroupId() {
-            return groupId;
+            return productTopicsEnabled ? productTopics().consumerGroup("insurance") : groupId;
         }
 
         public void setGroupId(String groupId) {
@@ -48,7 +68,9 @@ public class InsuranceProperties {
         }
 
         public String getLiquidationFeeEventsTopic() {
-            return liquidationFeeEventsTopic;
+            return productTopicsEnabled
+                    ? productTopics().accountLiquidationFeeEventsTopic()
+                    : liquidationFeeEventsTopic;
         }
 
         public void setLiquidationFeeEventsTopic(String liquidationFeeEventsTopic) {
@@ -69,6 +91,14 @@ public class InsuranceProperties {
 
         public void setMaxPollRecords(int maxPollRecords) {
             this.maxPollRecords = maxPollRecords;
+        }
+
+        public String getAccountType() {
+            return productLine.accountTypeCode();
+        }
+
+        private ProductTopicNames productTopics() {
+            return ProductTopicNames.of(productLine);
         }
     }
 

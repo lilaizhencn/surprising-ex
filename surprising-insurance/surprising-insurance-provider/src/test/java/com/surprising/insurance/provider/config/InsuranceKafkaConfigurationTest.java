@@ -2,6 +2,7 @@ package com.surprising.insurance.provider.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
@@ -33,5 +34,18 @@ class InsuranceKafkaConfigurationTest {
                         CooperativeStickyAssignor.class.getName());
         assertThat(listenerFactory.getContainerProperties().getAckMode())
                 .isEqualTo(ContainerProperties.AckMode.RECORD);
+    }
+
+    @Test
+    void canResolveInsuranceTopicAndGroupFromProductLine() {
+        InsuranceProperties properties = new InsuranceProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+
+        assertThat(properties.getKafka().getGroupId())
+                .isEqualTo("surprising-linear-delivery-insurance-v1");
+        assertThat(properties.getKafka().getLiquidationFeeEventsTopic())
+                .isEqualTo("surprising.linear-delivery.account.liquidation-fee.events.v1");
+        assertThat(properties.getKafka().getAccountType()).isEqualTo("USDT_DELIVERY");
     }
 }

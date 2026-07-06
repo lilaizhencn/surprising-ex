@@ -1,11 +1,21 @@
 package com.surprising.adl.provider.config;
 
+import com.surprising.product.api.ProductLine;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.adl")
 public class AdlProperties {
 
+    private Kafka kafka = new Kafka();
     private Scanner scanner = new Scanner();
+
+    public Kafka getKafka() {
+        return kafka;
+    }
+
+    public void setKafka(Kafka kafka) {
+        this.kafka = kafka == null ? new Kafka() : kafka;
+    }
 
     public Scanner getScanner() {
         return scanner;
@@ -13,6 +23,31 @@ public class AdlProperties {
 
     public void setScanner(Scanner scanner) {
         this.scanner = scanner;
+    }
+
+    public static class Kafka {
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        private boolean productTopicsEnabled;
+
+        public ProductLine getProductLine() {
+            return productLine;
+        }
+
+        public void setProductLine(ProductLine productLine) {
+            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        }
+
+        public boolean isProductTopicsEnabled() {
+            return productTopicsEnabled;
+        }
+
+        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
+            this.productTopicsEnabled = productTopicsEnabled;
+        }
+
+        public String getAccountType() {
+            return productLine.accountTypeCode();
+        }
     }
 
     public static class Scanner {

@@ -71,6 +71,10 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("account.position.events");
     }
 
+    public String accountLiquidationFeeEventsTopic() {
+        return topic("account.liquidation-fee.events");
+    }
+
     public String accountRiskEventsTopic() {
         return topic("risk.account.events");
     }

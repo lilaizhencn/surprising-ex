@@ -616,10 +616,11 @@ public class AccountService {
                                               String traceId) {
         liquidationFeeContext(orderId, userId, symbol).ifPresent(context -> {
             long requestedFeeUnits = liquidationFeeUnits(fillSpec, priceTicks, quantitySteps, context);
-            accountRepository.settleLiquidationFee(derivativeAccountType(fillSpec), userId, fillSpec.settleAsset(),
+            AccountType accountType = derivativeAccountType(fillSpec);
+            accountRepository.settleLiquidationFee(accountType, userId, fillSpec.settleAsset(),
                     orderId, tradeId, symbol, marginMode, requestedFeeUnits, context, eventTime)
                     .ifPresent(settlement -> enqueueLiquidationFeeEvent(tradeId, orderId, userId, symbol,
-                            marginMode, fillSpec.settleAsset(), settlement, eventTime, traceId));
+                            marginMode, accountType, fillSpec.settleAsset(), settlement, eventTime, traceId));
         });
     }
 
@@ -639,6 +640,7 @@ public class AccountService {
                                             long userId,
                                             String symbol,
                                             MarginMode marginMode,
+                                            AccountType accountType,
                                             String asset,
                                             LiquidationFeeSettlement settlement,
                                             Instant eventTime,
@@ -648,7 +650,8 @@ public class AccountService {
         }
         outboxRepository.enqueueLiquidationFeeSettled(properties.getKafka().getLiquidationFeeEventsTopic(),
                 tradeId, orderId, settlement.liquidationOrderId(), settlement.candidateId(), userId, symbol,
-                marginMode, asset, settlement.collectedFeeUnits(), settlement.feeRatePpm(), eventTime, traceId);
+                marginMode, accountType.name(), asset, settlement.collectedFeeUnits(), settlement.feeRatePpm(),
+                eventTime, traceId);
     }
 
     private ContractSpec contractSpec(String symbol, long instrumentVersion) {

@@ -134,7 +134,7 @@ public class AccountProperties {
         }
 
         public String getLiquidationFeeEventsTopic() {
-            return liquidationFeeEventsTopic;
+            return productTopicsEnabled ? productTopics().accountLiquidationFeeEventsTopic() : liquidationFeeEventsTopic;
         }
 
         public void setLiquidationFeeEventsTopic(String liquidationFeeEventsTopic) {

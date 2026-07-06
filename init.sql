@@ -2164,15 +2164,21 @@ CREATE TABLE IF NOT EXISTS insurance_sequences (
 );
 
 CREATE TABLE IF NOT EXISTS insurance_fund_balances (
-    asset               TEXT PRIMARY KEY,
+    account_type        TEXT NOT NULL DEFAULT 'USDT_PERPETUAL',
+    asset               TEXT NOT NULL,
     balance_units       BIGINT NOT NULL DEFAULT 0,
     updated_at          TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (account_type, asset),
+    CONSTRAINT insurance_fund_balances_type_check CHECK (
+        account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL', 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT insurance_fund_balances_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT insurance_fund_balances_non_negative CHECK (balance_units >= 0)
 );
 
 CREATE TABLE IF NOT EXISTS insurance_fund_ledger (
     entry_id            BIGINT PRIMARY KEY,
+    account_type        TEXT NOT NULL DEFAULT 'USDT_PERPETUAL',
     asset               TEXT NOT NULL,
     amount_units        BIGINT NOT NULL,
     balance_after_units BIGINT NOT NULL,
@@ -2180,19 +2186,23 @@ CREATE TABLE IF NOT EXISTS insurance_fund_ledger (
     reference_id        TEXT NOT NULL,
     reason              TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT insurance_fund_ledger_type_check CHECK (
+        account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL', 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT insurance_fund_ledger_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT insurance_fund_ledger_amount_non_zero CHECK (amount_units <> 0),
     CONSTRAINT insurance_fund_ledger_balance_non_negative CHECK (balance_after_units >= 0)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS insurance_fund_ledger_reference_uidx
-    ON insurance_fund_ledger (reference_type, reference_id, asset);
+    ON insurance_fund_ledger (reference_type, reference_id, account_type, asset);
 
 CREATE INDEX IF NOT EXISTS insurance_fund_ledger_asset_time_idx
-    ON insurance_fund_ledger (asset, created_at DESC);
+    ON insurance_fund_ledger (account_type, asset, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS insurance_deficit_coverages (
     coverage_id                 BIGINT PRIMARY KEY,
+    account_type                TEXT NOT NULL DEFAULT 'USDT_PERPETUAL',
     user_id                     BIGINT NOT NULL,
     asset                       TEXT NOT NULL,
     requested_units             BIGINT NOT NULL,
@@ -2202,6 +2212,9 @@ CREATE TABLE IF NOT EXISTS insurance_deficit_coverages (
     reason                      TEXT,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT insurance_coverages_type_check CHECK (
+        account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL', 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT insurance_coverages_user_positive CHECK (user_id > 0),
     CONSTRAINT insurance_coverages_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT insurance_coverages_non_negative CHECK (
@@ -2214,10 +2227,60 @@ CREATE TABLE IF NOT EXISTS insurance_deficit_coverages (
 );
 
 CREATE INDEX IF NOT EXISTS insurance_coverages_user_time_idx
-    ON insurance_deficit_coverages (user_id, created_at DESC);
+    ON insurance_deficit_coverages (account_type, user_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS insurance_coverages_asset_time_idx
-    ON insurance_deficit_coverages (asset, created_at DESC);
+    ON insurance_deficit_coverages (account_type, asset, created_at DESC);
+
+DO $$
+BEGIN
+    ALTER TABLE insurance_fund_balances
+        ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'USDT_PERPETUAL';
+    ALTER TABLE insurance_fund_balances
+        DROP CONSTRAINT IF EXISTS insurance_fund_balances_pkey;
+    ALTER TABLE insurance_fund_balances
+        ADD CONSTRAINT insurance_fund_balances_pkey PRIMARY KEY (account_type, asset);
+    ALTER TABLE insurance_fund_balances
+        DROP CONSTRAINT IF EXISTS insurance_fund_balances_type_check;
+    ALTER TABLE insurance_fund_balances
+        ADD CONSTRAINT insurance_fund_balances_type_check CHECK (
+            account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL', 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+        );
+
+    ALTER TABLE insurance_fund_ledger
+        ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'USDT_PERPETUAL';
+    ALTER TABLE insurance_fund_ledger
+        DROP CONSTRAINT IF EXISTS insurance_fund_ledger_type_check;
+    ALTER TABLE insurance_fund_ledger
+        ADD CONSTRAINT insurance_fund_ledger_type_check CHECK (
+            account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL', 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+        );
+
+    ALTER TABLE insurance_deficit_coverages
+        ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'USDT_PERPETUAL';
+    ALTER TABLE insurance_deficit_coverages
+        DROP CONSTRAINT IF EXISTS insurance_coverages_type_check;
+    ALTER TABLE insurance_deficit_coverages
+        ADD CONSTRAINT insurance_coverages_type_check CHECK (
+            account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL', 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+        );
+END $$;
+
+DROP INDEX IF EXISTS insurance_fund_ledger_reference_uidx;
+CREATE UNIQUE INDEX IF NOT EXISTS insurance_fund_ledger_reference_uidx
+    ON insurance_fund_ledger (reference_type, reference_id, account_type, asset);
+
+DROP INDEX IF EXISTS insurance_fund_ledger_asset_time_idx;
+CREATE INDEX IF NOT EXISTS insurance_fund_ledger_asset_time_idx
+    ON insurance_fund_ledger (account_type, asset, created_at DESC);
+
+DROP INDEX IF EXISTS insurance_coverages_user_time_idx;
+CREATE INDEX IF NOT EXISTS insurance_coverages_user_time_idx
+    ON insurance_deficit_coverages (account_type, user_id, created_at DESC);
+
+DROP INDEX IF EXISTS insurance_coverages_asset_time_idx;
+CREATE INDEX IF NOT EXISTS insurance_coverages_asset_time_idx
+    ON insurance_deficit_coverages (account_type, asset, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS adl_sequences (
     sequence_name       TEXT PRIMARY KEY,
@@ -2228,6 +2291,7 @@ CREATE TABLE IF NOT EXISTS adl_sequences (
 
 CREATE TABLE IF NOT EXISTS adl_events (
     event_id                    BIGINT PRIMARY KEY,
+    account_type                TEXT NOT NULL DEFAULT 'USDT_PERPETUAL',
     deficit_user_id             BIGINT NOT NULL,
     target_user_id              BIGINT NOT NULL,
     asset                       TEXT NOT NULL,
@@ -2244,6 +2308,9 @@ CREATE TABLE IF NOT EXISTS adl_events (
     priority_score_ppm          BIGINT NOT NULL,
     reason                      TEXT,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT adl_events_type_check CHECK (
+        account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL', 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT adl_events_users_positive CHECK (deficit_user_id > 0 AND target_user_id > 0),
     CONSTRAINT adl_events_distinct_users CHECK (deficit_user_id <> target_user_id),
     CONSTRAINT adl_events_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
@@ -2263,13 +2330,37 @@ CREATE TABLE IF NOT EXISTS adl_events (
 );
 
 CREATE INDEX IF NOT EXISTS adl_events_deficit_user_time_idx
-    ON adl_events (deficit_user_id, created_at DESC);
+    ON adl_events (account_type, deficit_user_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS adl_events_target_user_time_idx
-    ON adl_events (target_user_id, created_at DESC);
+    ON adl_events (account_type, target_user_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS adl_events_asset_symbol_time_idx
-    ON adl_events (asset, symbol, created_at DESC);
+    ON adl_events (account_type, asset, symbol, created_at DESC);
+
+DO $$
+BEGIN
+    ALTER TABLE adl_events
+        ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'USDT_PERPETUAL';
+    ALTER TABLE adl_events
+        DROP CONSTRAINT IF EXISTS adl_events_type_check;
+    ALTER TABLE adl_events
+        ADD CONSTRAINT adl_events_type_check CHECK (
+            account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL', 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
+        );
+END $$;
+
+DROP INDEX IF EXISTS adl_events_deficit_user_time_idx;
+CREATE INDEX IF NOT EXISTS adl_events_deficit_user_time_idx
+    ON adl_events (account_type, deficit_user_id, created_at DESC);
+
+DROP INDEX IF EXISTS adl_events_target_user_time_idx;
+CREATE INDEX IF NOT EXISTS adl_events_target_user_time_idx
+    ON adl_events (account_type, target_user_id, created_at DESC);
+
+DROP INDEX IF EXISTS adl_events_asset_symbol_time_idx;
+CREATE INDEX IF NOT EXISTS adl_events_asset_symbol_time_idx
+    ON adl_events (account_type, asset, symbol, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS market_maker_strategy_leases (
     strategy_id                 TEXT NOT NULL,
