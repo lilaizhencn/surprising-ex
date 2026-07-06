@@ -2,9 +2,12 @@ package com.surprising.trading.order.repository;
 
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
+import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.InstrumentRuleLookup;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -15,15 +18,21 @@ import org.springframework.stereotype.Repository;
 public class InstrumentRuleRepository implements InstrumentRuleLookup {
 
     private final JdbcTemplate jdbcTemplate;
+    private final TradingOrderProperties properties;
 
     public InstrumentRuleRepository(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, new TradingOrderProperties());
+    }
+
+    public InstrumentRuleRepository(JdbcTemplate jdbcTemplate, TradingOrderProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
+        this.properties = properties;
     }
 
     @Override
     public Optional<InstrumentRule> currentRule(String symbol) {
         // Instrument owns the exact long unit conversion used by exchange-core.
-        String sql = """
+        StringBuilder sql = new StringBuilder("""
                 SELECT i.symbol,
                        i.version,
                        i.status,
@@ -49,8 +58,14 @@ public class InstrumentRuleRepository implements InstrumentRuleLookup {
                   JOIN instrument_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
                  WHERE i.symbol = ?
-                """;
-        return jdbcTemplate.query(sql, (rs, rowNum) -> new InstrumentRule(
+                """);
+        List<Object> args = new ArrayList<>();
+        args.add(symbol);
+        productContractTypeFilter().ifPresent(contractType -> {
+            sql.append("   AND i.contract_type = ?\n");
+            args.add(contractType);
+        });
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new InstrumentRule(
                 rs.getString("symbol"),
                 rs.getLong("version"),
                 rs.getString("status"),
@@ -71,7 +86,7 @@ public class InstrumentRuleRepository implements InstrumentRuleLookup {
                 rs.getLong("max_notional_units"),
                 rs.getLong("notional_multiplier_units"),
                 rs.getLong("max_leverage_ppm"),
-                rs.getLong("initial_margin_rate_ppm")), symbol).stream().findFirst();
+                rs.getLong("initial_margin_rate_ppm")), args.toArray()).stream().findFirst();
     }
 
     private Set<String> csv(String value) {
@@ -82,5 +97,12 @@ public class InstrumentRuleRepository implements InstrumentRuleLookup {
                 .map(String::trim)
                 .filter(part -> !part.isEmpty())
                 .collect(Collectors.toUnmodifiableSet());
+    }
+
+    private Optional<String> productContractTypeFilter() {
+        TradingOrderProperties.Kafka kafka = properties.getKafka();
+        return kafka.isProductTopicsEnabled()
+                ? Optional.of(kafka.getProductLine().contractTypeCode())
+                : Optional.empty();
     }
 }
