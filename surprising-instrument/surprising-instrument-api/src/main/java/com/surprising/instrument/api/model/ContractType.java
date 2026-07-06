@@ -23,7 +23,7 @@ public enum ContractType {
     }
 
     public boolean isLinear() {
-        return this == LINEAR_PERPETUAL || this == LINEAR_DELIVERY;
+        return this == LINEAR_PERPETUAL || this == LINEAR_DELIVERY || this == VANILLA_OPTION;
     }
 
     public boolean isInverse() {
@@ -42,6 +42,6 @@ public enum ContractType {
     }
 
     public boolean usesPriceQuantityNotional() {
-        return this == SPOT || this == LINEAR_PERPETUAL || this == LINEAR_DELIVERY;
+        return this == SPOT || this == LINEAR_PERPETUAL || this == LINEAR_DELIVERY || this == VANILLA_OPTION;
     }
 }

@@ -19,8 +19,14 @@ import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRepository;
+import com.surprising.instrument.api.model.ContractSettlementMethod;
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.instrument.api.model.InstrumentType;
+import com.surprising.instrument.api.model.InstrumentStatus;
+import com.surprising.instrument.api.model.OptionExerciseEvent;
+import com.surprising.instrument.api.model.OptionExerciseStyle;
+import com.surprising.instrument.api.model.OptionType;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
@@ -172,6 +178,92 @@ class AccountServiceTest {
         assertThat(repository.pnlAccountTypes).containsExactly(AccountType.USDT_DELIVERY);
         assertThat(repository.feeAccountTypes).containsExactly(AccountType.USDT_DELIVERY, AccountType.USDT_DELIVERY);
         assertThat(repository.pnlByUser).containsEntry(2002L, 200_000L);
+    }
+
+    @Test
+    void optionTradeSettlesPremiumPnlToOptionAccount() {
+        String symbol = "BTC-USDT-260925-70000-C";
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
+                "USDT", 1L, 100_000_000L, 100_000_000L, 10_000L, 2L, 5L));
+        repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
+                new PositionState(3L, 6L, 100L, 0L));
+        repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 5L));
+        repository.feeSnapshots.put(9001L, new OrderFeeSnapshot(2L, 5L));
+        AccountService service = new AccountService(repository, new PositionCalculator());
+
+        MatchTradeEvent trade = new MatchTradeEvent(
+                9602L,
+                9402L,
+                symbol,
+                9002L,
+                6L,
+                2002L,
+                OrderSide.SELL,
+                9001L,
+                6L,
+                1001L,
+                120L,
+                2L,
+                true,
+                false,
+                EVENT_TIME.plusSeconds(11));
+
+        service.processTrade(trade);
+
+        assertThat(repository.pnlAccountTypes).containsExactly(AccountType.OPTION);
+        assertThat(repository.feeAccountTypes).containsExactly(AccountType.OPTION, AccountType.OPTION);
+        assertThat(repository.pnlByUser).containsEntry(2002L, 40L);
+    }
+
+    @Test
+    void deliverySettlementClosesOpenPositionsAtLatestMark() {
+        String symbol = "BTC-USDT-DELIVERY";
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.contractSpecs.put(symbol + ":4", new ContractSpec(4L, ContractType.LINEAR_DELIVERY,
+                "USDT", 1L, 100_000_000L, 100_000_000L, 10_000L, 2L, 5L));
+        repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
+                new PositionState(3L, 4L, 500_000L, 0L));
+        repository.latestMarkPriceTicks.put(symbol + ":4", 600_000L);
+        AccountService service = new AccountService(repository, new PositionCalculator());
+
+        int settled = service.processDeliverySettlement(new DeliverySettlementEvent(
+                symbol, 4L, ContractType.LINEAR_DELIVERY, EVENT_TIME, EVENT_TIME,
+                ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME, null));
+
+        assertThat(settled).isEqualTo(1);
+        assertThat(repository.positionState(2002L, symbol))
+                .isEqualTo(new PositionState(0L, 0L, 0L, 300_000L));
+        assertThat(repository.lifecyclePnlByUser).containsEntry(2002L, 300_000L);
+        assertThat(repository.lifecycleAccountTypes).containsExactly(AccountType.USDT_DELIVERY);
+        assertThat(repository.lifecycleReferences).containsExactly(
+                "DELIVERY_SETTLEMENT:BTC-USDT-DELIVERY:4:2002:CROSS:NET");
+        assertThat(repository.releasedPositionMargin)
+                .containsEntry(new PositionKey(2002L, symbol, MarginMode.CROSS), 3L);
+    }
+
+    @Test
+    void optionExerciseClosesOpenPositionsAtIntrinsicValue() {
+        String symbol = "BTC-USDT-260925-70000-C";
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
+                "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
+        repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
+                new PositionState(2L, 6L, 20L, 0L));
+        repository.latestMarkPriceUnits.put("BTC-USDT", 150L);
+        AccountService service = new AccountService(repository, new PositionCalculator());
+
+        int settled = service.processOptionExercise(new OptionExerciseEvent(
+                symbol, 6L, "BTC-USDT", 100L, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
+                EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME, null));
+
+        assertThat(settled).isEqualTo(1);
+        assertThat(repository.positionState(2002L, symbol))
+                .isEqualTo(new PositionState(0L, 0L, 0L, 60L));
+        assertThat(repository.lifecyclePnlByUser).containsEntry(2002L, 60L);
+        assertThat(repository.lifecycleAccountTypes).containsExactly(AccountType.OPTION);
+        assertThat(repository.lifecycleReferences).containsExactly(
+                "OPTION_EXERCISE:BTC-USDT-260925-70000-C:6:2002:CROSS:NET");
     }
 
     @Test
@@ -699,6 +791,9 @@ class AccountServiceTest {
         private final Map<Long, Boolean> releaseSweepByOrder = new HashMap<>();
         private final Map<PositionKey, Long> releasedPositionMargin = new HashMap<>();
         private final Map<Long, Long> pnlByUser = new HashMap<>();
+        private final Map<Long, Long> lifecyclePnlByUser = new HashMap<>();
+        private final Map<String, Long> latestMarkPriceTicks = new HashMap<>();
+        private final Map<String, Long> latestMarkPriceUnits = new HashMap<>();
         private final Map<Long, Long> feeByUser = new HashMap<>();
         private final Map<Long, LiquidationFeeContext> liquidationFeeContexts = new HashMap<>();
         private final Map<Long, Integer> liquidationFeeContextLoads = new HashMap<>();
@@ -711,6 +806,8 @@ class AccountServiceTest {
         private final Map<String, InstrumentType> instrumentTypes = new HashMap<>();
         private final Map<String, SpotInstrumentSpec> spotSpecs = new HashMap<>();
         private final List<AccountType> pnlAccountTypes = new ArrayList<>();
+        private final List<AccountType> lifecycleAccountTypes = new ArrayList<>();
+        private final List<String> lifecycleReferences = new ArrayList<>();
         private final List<AccountType> feeAccountTypes = new ArrayList<>();
         private final List<AccountType> liquidationFeeAccountTypes = new ArrayList<>();
         private final List<SpotSettlementCall> spotSettlements = new ArrayList<>();
@@ -725,7 +822,8 @@ class AccountServiceTest {
 
         @Override
         public ContractSpec contractSpec(String symbol, long instrumentVersion) {
-            assertThat(symbol).isIn("BTC-USDT", "ETH-USDT", "BTC-USDT-DELIVERY");
+            assertThat(symbol).isIn("BTC-USDT", "ETH-USDT", "BTC-USDT-DELIVERY",
+                    "BTC-USDT-260925-70000-C");
             contractSpecLoads.merge(symbol + ":" + instrumentVersion, 1, Integer::sum);
             return Optional.ofNullable(contractSpecs.get(symbol + ":" + instrumentVersion))
                     .orElseGet(() -> new ContractSpec(instrumentVersion, ContractType.LINEAR_PERPETUAL,
@@ -743,6 +841,18 @@ class AccountServiceTest {
             spotSpecLoads.merge(symbol + ":" + instrumentVersion, 1, Integer::sum);
             return Optional.ofNullable(spotSpecs.get(symbol + ":" + instrumentVersion))
                     .orElseThrow(() -> new IllegalStateException("missing spot spec " + symbol));
+        }
+
+        @Override
+        public long latestMarkPriceTicks(String symbol, long instrumentVersion) {
+            return Optional.ofNullable(latestMarkPriceTicks.get(symbol + ":" + instrumentVersion))
+                    .orElseThrow(() -> new IllegalStateException("missing mark price ticks " + symbol));
+        }
+
+        @Override
+        public long latestMarkPriceUnits(String symbol) {
+            return Optional.ofNullable(latestMarkPriceUnits.get(symbol))
+                    .orElseThrow(() -> new IllegalStateException("missing mark price units " + symbol));
         }
 
         @Override
@@ -800,6 +910,22 @@ class AccountServiceTest {
                     .filter(entry -> entry.getKey().userId() == userId)
                     .filter(entry -> normalizedPositionSide == null
                             || entry.getKey().positionSide() == normalizedPositionSide)
+                    .map(entry -> {
+                        PositionKey key = entry.getKey();
+                        PositionState state = entry.getValue();
+                        return new PositionResponse(key.userId(), key.symbol(), state.instrumentVersion(),
+                                key.marginMode(), key.positionSide(), state.signedQuantitySteps(),
+                                state.entryPriceTicks(), state.realizedPnlUnits(), EVENT_TIME);
+                    })
+                    .toList();
+        }
+
+        @Override
+        public List<PositionResponse> openPositionsForSettlement(String symbol, long instrumentVersion) {
+            return positions.entrySet().stream()
+                    .filter(entry -> entry.getKey().symbol().equals(symbol))
+                    .filter(entry -> entry.getValue().instrumentVersion() == instrumentVersion)
+                    .filter(entry -> entry.getValue().signedQuantitySteps() != 0L)
                     .map(entry -> {
                         PositionKey key = entry.getKey();
                         PositionState state = entry.getValue();
@@ -897,7 +1023,8 @@ class AccountServiceTest {
                                       long realizedPnlDeltaUnits,
                                       Instant now) {
             assertThat(asset).isEqualTo("USDT");
-            assertThat(symbol).isIn("BTC-USDT", "ETH-USDT", "BTC-USDT-DELIVERY");
+            assertThat(symbol).isIn("BTC-USDT", "ETH-USDT", "BTC-USDT-DELIVERY",
+                    "BTC-USDT-260925-70000-C");
             assertThat(marginMode).isIn(MarginMode.CROSS, MarginMode.ISOLATED);
             pnlByUser.merge(userId, realizedPnlDeltaUnits, Long::sum);
         }
@@ -917,6 +1044,27 @@ class AccountServiceTest {
         }
 
         @Override
+        public boolean settleLifecyclePnl(AccountType accountType,
+                                          long userId,
+                                          String asset,
+                                          String referenceType,
+                                          String referenceId,
+                                          String reason,
+                                          String symbol,
+                                          MarginMode marginMode,
+                                          long realizedPnlDeltaUnits,
+                                          Instant now) {
+            assertThat(asset).isEqualTo("USDT");
+            assertThat(symbol).isIn("BTC-USDT-DELIVERY", "BTC-USDT-260925-70000-C");
+            assertThat(marginMode).isIn(MarginMode.CROSS, MarginMode.ISOLATED);
+            assertThat(reason).isEqualTo(referenceType);
+            lifecycleAccountTypes.add(accountType);
+            lifecycleReferences.add(referenceId);
+            lifecyclePnlByUser.merge(userId, realizedPnlDeltaUnits, Long::sum);
+            return true;
+        }
+
+        @Override
         public void settleTradeFee(long userId,
                                    String asset,
                                    long orderId,
@@ -928,7 +1076,8 @@ class AccountServiceTest {
                                    MarginMode marginMode,
                                    Instant now) {
             assertThat(asset).isEqualTo("USDT");
-            assertThat(symbol).isIn("BTC-USDT", "ETH-USDT", "BTC-USDT-DELIVERY");
+            assertThat(symbol).isIn("BTC-USDT", "ETH-USDT", "BTC-USDT-DELIVERY",
+                    "BTC-USDT-260925-70000-C");
             assertThat(marginMode).isIn(MarginMode.CROSS, MarginMode.ISOLATED);
             OrderFeeSnapshot snapshot = feeSnapshots.get(orderId);
             assertThat(feeRatePpm).isEqualTo("TAKER_FEE".equals(reason)

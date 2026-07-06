@@ -81,6 +81,10 @@ class AccountKafkaConfigurationTest {
                 .isEqualTo("surprising.perp.order.events.v1");
         assertThat(properties.getKafka().getPositionEventsTopic())
                 .isEqualTo("surprising.account.position.events.v1");
+        assertThat(properties.getKafka().getDeliverySettlementsTopic())
+                .isEqualTo("surprising.linear-delivery.delivery.settlements.v1");
+        assertThat(properties.getKafka().getOptionExercisesTopic())
+                .isEqualTo("surprising.option.option.exercises.v1");
     }
 
     @Test
@@ -99,5 +103,13 @@ class AccountKafkaConfigurationTest {
                 .isEqualTo("surprising.linear-perp.order.events.v1");
         assertThat(properties.getKafka().getPositionEventsTopic())
                 .isEqualTo("surprising.linear-perp.account.position.events.v1");
+
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        assertThat(properties.getKafka().getDeliverySettlementsTopic())
+                .isEqualTo("surprising.linear-delivery.delivery.settlements.v1");
+
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        assertThat(properties.getKafka().getOptionExercisesTopic())
+                .isEqualTo("surprising.option.option.exercises.v1");
     }
 }

@@ -130,14 +130,18 @@ class OrderMarginMathTest {
     }
 
     @Test
-    void rejectsSpotAndOptionMarginFormulas() {
+    void optionMarginUsesLinearPremiumFormula() {
+        assertThat(OrderMarginMath.initialMarginUnits(ContractType.VANILLA_OPTION,
+                OrderSide.BUY, OrderType.LIMIT, 100L, 6L, null, 0L,
+                100L, 1L, 100_000_000L, 10_000L)).isEqualTo(600L);
+        assertThat(OrderMarginMath.notionalUnits(ContractType.VANILLA_OPTION, 6L, 100L,
+                100L, 1L, 100_000_000L)).isEqualTo(60_000L);
+    }
+
+    @Test
+    void rejectsSpotMarginFormulas() {
         assertThatThrownBy(() -> OrderMarginMath.notionalUnits(ContractType.SPOT, 1L, 100L,
                 1L, 1L, 1L))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("unsupported contract type");
-        assertThatThrownBy(() -> OrderMarginMath.initialMarginUnits(ContractType.VANILLA_OPTION,
-                OrderSide.BUY, OrderType.LIMIT, 100L, 1L, null, 0L,
-                1L, 1L, 1L, 1L))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("unsupported contract type");
     }

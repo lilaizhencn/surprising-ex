@@ -49,12 +49,16 @@ class PerpetualContractMathTest {
     }
 
     @Test
-    void rejectsSpotAndOptionContracts() {
+    void optionContractsUseLinearPremiumFormulas() {
+        assertThat(PerpetualContractMath.notionalUnits(ContractType.VANILLA_OPTION, 6L, 100L,
+                100L, 1L, 100_000_000L)).isEqualTo(60_000L);
+        assertThat(PerpetualContractMath.unrealizedPnlUnits(ContractType.VANILLA_OPTION, 6L,
+                100L, 20L, 100L, 1L, 100_000_000L)).isEqualTo(-48_000L);
+    }
+
+    @Test
+    void rejectsSpotContracts() {
         assertThatThrownBy(() -> PerpetualContractMath.notionalUnits(ContractType.SPOT,
-                1L, 100L, 1L, 1L, 1L))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("unsupported contract type");
-        assertThatThrownBy(() -> PerpetualContractMath.notionalUnits(ContractType.VANILLA_OPTION,
                 1L, 100L, 1L, 1L, 1L))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("unsupported contract type");

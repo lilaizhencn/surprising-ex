@@ -85,14 +85,36 @@ class PositionCalculatorTest {
     }
 
     @Test
-    void rejectsUnsupportedContractTypesForPositions() {
+    void optionContractsUseLinearPremiumPositionRules() {
         ContractSpec option = new ContractSpec(4L, ContractType.VANILLA_OPTION, "USDT", 1L,
                 100_000_000L, 100_000_000L, 0L, 0L);
 
-        assertThatThrownBy(() -> calculator.apply(new PositionState(0L, 0L, 0L, 0L),
-                OrderSide.BUY, 120L, 1L, option, option))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("unsupported position contract type");
+        var change = calculator.apply(new PositionState(2L, 4L, 120L, 0L),
+                OrderSide.SELL, 150L, 1L, option, option);
+
+        assertThat(change.next()).isEqualTo(new PositionState(1L, 4L, 120L, 30L));
+        assertThat(change.realizedPnlDeltaUnits()).isEqualTo(30L);
+    }
+
+    @Test
+    void closesDeliveryAtSettlementPrice() {
+        var change = calculator.closeAtSettlement(new PositionState(10L, 4L, 100L, 0L),
+                130L, linearDelivery());
+
+        assertThat(change.next()).isEqualTo(new PositionState(0L, 0L, 0L, 300L));
+        assertThat(change.realizedPnlDeltaUnits()).isEqualTo(300L);
+    }
+
+    @Test
+    void closesWorthlessOptionAtZeroIntrinsicValue() {
+        ContractSpec option = new ContractSpec(4L, ContractType.VANILLA_OPTION, "USDT", 1L,
+                100_000_000L, 100_000_000L, 0L, 0L);
+
+        var change = calculator.closeAtSettlement(new PositionState(2L, 4L, 120L, 0L),
+                0L, option);
+
+        assertThat(change.next()).isEqualTo(new PositionState(0L, 0L, 0L, -240L));
+        assertThat(change.realizedPnlDeltaUnits()).isEqualTo(-240L);
     }
 
     @Test

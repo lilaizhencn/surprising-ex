@@ -58,6 +58,28 @@ public class PositionCalculator {
                 pnlDelta);
     }
 
+    public PositionChange closeAtSettlement(PositionState current,
+                                            long settlementPriceTicks,
+                                            ContractSpec contractSpec) {
+        if (current == null || contractSpec == null) {
+            throw new IllegalArgumentException("position state and contract spec are required");
+        }
+        if (current.signedQuantitySteps() == 0) {
+            return new PositionChange(current, 0L);
+        }
+        if (settlementPriceTicks <= 0 && !contractSpec.contractType().isOption()) {
+            throw new IllegalArgumentException("settlementPriceTicks must be positive");
+        }
+        if (settlementPriceTicks < 0) {
+            throw new IllegalArgumentException("settlementPriceTicks must be non-negative");
+        }
+        long closeQty = Math.absExact(current.signedQuantitySteps());
+        long pnlDelta = realizedPnlUnits(current.signedQuantitySteps(), current.entryPriceTicks(),
+                settlementPriceTicks, closeQty, contractSpec);
+        return new PositionChange(new PositionState(0L, 0L, 0L,
+                Math.addExact(current.realizedPnlUnits(), pnlDelta)), pnlDelta);
+    }
+
     private long averageEntryPriceTicks(ContractType contractType,
                                         long oldAbs,
                                         long oldEntryPriceTicks,

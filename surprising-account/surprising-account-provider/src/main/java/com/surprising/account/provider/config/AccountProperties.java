@@ -56,6 +56,8 @@ public class AccountProperties {
         private String orderEventsTopic = "surprising.perp.order.events.v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
         private String liquidationFeeEventsTopic = "surprising.account.liquidation-fee.events.v1";
+        private String deliverySettlementsTopic = "surprising.linear-delivery.delivery.settlements.v1";
+        private String optionExercisesTopic = "surprising.option.option.exercises.v1";
         private int concurrency = 2;
         private int maxPollRecords = 500;
 
@@ -137,6 +139,22 @@ public class AccountProperties {
 
         public void setLiquidationFeeEventsTopic(String liquidationFeeEventsTopic) {
             this.liquidationFeeEventsTopic = liquidationFeeEventsTopic;
+        }
+
+        public String getDeliverySettlementsTopic() {
+            return productTopicsEnabled ? productTopics().deliverySettlementsTopic() : deliverySettlementsTopic;
+        }
+
+        public void setDeliverySettlementsTopic(String deliverySettlementsTopic) {
+            this.deliverySettlementsTopic = deliverySettlementsTopic;
+        }
+
+        public String getOptionExercisesTopic() {
+            return productTopicsEnabled ? productTopics().optionExercisesTopic() : optionExercisesTopic;
+        }
+
+        public void setOptionExercisesTopic(String optionExercisesTopic) {
+            this.optionExercisesTopic = optionExercisesTopic;
         }
 
         public int getConcurrency() {

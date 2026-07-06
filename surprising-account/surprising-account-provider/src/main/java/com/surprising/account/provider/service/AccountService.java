@@ -30,8 +30,12 @@ import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRepository;
+import com.surprising.instrument.api.model.ContractSettlementMethod;
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.instrument.api.model.InstrumentType;
+import com.surprising.instrument.api.model.OptionExerciseEvent;
+import com.surprising.instrument.api.model.OptionType;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
@@ -351,6 +355,36 @@ public class AccountService {
     }
 
     @Transactional
+    public int processDeliverySettlement(DeliverySettlementEvent event) {
+        if (event == null) {
+            throw new IllegalArgumentException("delivery settlement event is required");
+        }
+        requireCashSettlement(event.settlementMethod());
+        String symbol = normalizeSymbol(event.symbol());
+        ContractSpec spec = contractSpec(symbol, event.version());
+        requireMatchingContractType(event.contractType(), spec.contractType(), "delivery settlement");
+        if (!spec.contractType().isDelivery()) {
+            throw new IllegalArgumentException("delivery settlement event must reference a delivery contract");
+        }
+        long settlementPriceTicks = accountRepository.latestMarkPriceTicks(symbol, event.version());
+        return settleExpiringPositions(symbol, event.version(), settlementPriceTicks,
+                event.eventTime(), "DELIVERY_SETTLEMENT", "DELIVERY_SETTLEMENT");
+    }
+
+    @Transactional
+    public int processOptionExercise(OptionExerciseEvent event) {
+        if (event == null) {
+            throw new IllegalArgumentException("option exercise event is required");
+        }
+        requireCashSettlement(event.settlementMethod());
+        String symbol = normalizeSymbol(event.symbol());
+        ContractSpec spec = contractSpec(symbol, event.version());
+        long settlementPriceTicks = optionIntrinsicPriceTicks(event, spec);
+        return settleExpiringPositions(symbol, event.version(), settlementPriceTicks,
+                event.eventTime(), "OPTION_EXERCISE", "OPTION_EXERCISE");
+    }
+
+    @Transactional
     public boolean processTradeIfNew(MatchTradeEvent trade) {
         if (!accountRepository.markTradeProcessing(trade.tradeId(), trade.symbol())) {
             return false;
@@ -381,6 +415,88 @@ public class AccountService {
                 trade.makerPositionSide(), trade.priceTicks(), trade.quantitySteps(),
                 trade.makerOrderCompleted(), false, trade.eventTime(), traceId);
         return true;
+    }
+
+    private int settleExpiringPositions(String symbol,
+                                        long instrumentVersion,
+                                        long settlementPriceTicks,
+                                        Instant eventTime,
+                                        String referenceType,
+                                        String reason) {
+        ContractSpec spec = contractSpec(symbol, instrumentVersion);
+        AccountType accountType = derivativeAccountType(spec);
+        List<PositionResponse> positions = accountRepository.openPositionsForSettlement(symbol, instrumentVersion);
+        int settled = 0;
+        for (PositionResponse position : positions) {
+            if (position.signedQuantitySteps() == 0L) {
+                continue;
+            }
+            PositionState current = new PositionState(position.signedQuantitySteps(), position.instrumentVersion(),
+                    position.entryPriceTicks(), position.realizedPnlUnits());
+            PositionChange change = positionCalculator.closeAtSettlement(current, settlementPriceTicks, spec);
+            String referenceId = lifecycleReferenceId(referenceType, symbol, instrumentVersion, position);
+            boolean applied = accountRepository.settleLifecyclePnl(accountType, position.userId(),
+                    spec.settleAsset(), referenceType, referenceId, reason, symbol, position.marginMode(),
+                    change.realizedPnlDeltaUnits(), eventTime);
+            if (!applied) {
+                continue;
+            }
+            long closeSteps = Math.absExact(position.signedQuantitySteps());
+            accountRepository.releasePositionMargin(position.userId(), symbol, position.marginMode(),
+                    closeSteps, position.positionSide(), closeSteps, eventTime);
+            PositionResponse updated = accountRepository.updatePosition(position.userId(), symbol,
+                    position.marginMode(), position.positionSide(), change.next(), position.signedQuantitySteps(),
+                    eventTime);
+            if (outboxRepository != null) {
+                outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
+                        0L, updated, eventTime, TraceContext.currentOrCreate());
+            }
+            settled++;
+        }
+        return settled;
+    }
+
+    private long optionIntrinsicPriceTicks(OptionExerciseEvent event, ContractSpec spec) {
+        if (!spec.contractType().isOption()) {
+            throw new IllegalArgumentException("option exercise event must reference an option contract");
+        }
+        String underlyingSymbol = normalizeSymbol(event.underlyingSymbol());
+        long underlyingPriceUnits = accountRepository.latestMarkPriceUnits(underlyingSymbol);
+        long strikePriceUnits = event.strikePriceUnits();
+        if (strikePriceUnits <= 0) {
+            throw new IllegalArgumentException("strikePriceUnits must be positive");
+        }
+        OptionType optionType = event.optionType();
+        if (optionType == null) {
+            throw new IllegalArgumentException("optionType is required");
+        }
+        long intrinsicUnits = switch (optionType) {
+            case CALL -> Math.max(0L, Math.subtractExact(underlyingPriceUnits, strikePriceUnits));
+            case PUT -> Math.max(0L, Math.subtractExact(strikePriceUnits, underlyingPriceUnits));
+        };
+        return Math.addExact(intrinsicUnits, spec.priceTickUnits() / 2L) / spec.priceTickUnits();
+    }
+
+    private void requireCashSettlement(ContractSettlementMethod settlementMethod) {
+        if (settlementMethod != ContractSettlementMethod.CASH) {
+            throw new IllegalArgumentException("only cash settlement is supported");
+        }
+    }
+
+    private void requireMatchingContractType(ContractType eventContractType,
+                                             ContractType instrumentContractType,
+                                             String eventName) {
+        if (eventContractType != null && eventContractType != instrumentContractType) {
+            throw new IllegalArgumentException(eventName + " contract type does not match instrument");
+        }
+    }
+
+    private String lifecycleReferenceId(String referenceType,
+                                        String symbol,
+                                        long instrumentVersion,
+                                        PositionResponse position) {
+        return referenceType + ":" + symbol + ":" + instrumentVersion + ":" + position.userId()
+                + ":" + position.marginMode().name() + ":" + position.positionSide().name();
     }
 
     private void applySpotTradeSide(long tradeId,
@@ -540,7 +656,7 @@ public class AccountService {
 
     private AccountType derivativeAccountType(ContractSpec spec) {
         ContractType contractType = spec.contractType();
-        if (contractType == ContractType.SPOT || contractType.isOption()) {
+        if (contractType == ContractType.SPOT) {
             throw new IllegalArgumentException("unsupported derivative settlement contract type: " + contractType);
         }
         return AccountType.valueOf(contractType.productLine().accountTypeCode());

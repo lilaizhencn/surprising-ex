@@ -815,6 +815,19 @@ public class AccountRepository {
                 normalizedPositionSide);
     }
 
+    public List<PositionResponse> openPositionsForSettlement(String symbol, long instrumentVersion) {
+        return jdbcTemplate.query("""
+                SELECT user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
+                       entry_price_ticks, realized_pnl_units, updated_at
+                  FROM account_positions
+                 WHERE symbol = ?
+                   AND instrument_version = ?
+                   AND signed_quantity_steps <> 0
+                 ORDER BY user_id ASC, margin_mode ASC, position_side ASC
+                 FOR UPDATE
+                """, (rs, rowNum) -> toPositionResponse(rs), symbol, instrumentVersion);
+    }
+
     public Optional<PositionMarginResponse> positionMargin(long userId, String symbol, MarginMode marginMode) {
         return positionMargin(userId, symbol, marginMode, PositionSide.NET);
     }
@@ -1365,6 +1378,38 @@ public class AccountRepository {
                         + symbol + " version " + instrumentVersion));
     }
 
+    public long latestMarkPriceTicks(String symbol, long instrumentVersion) {
+        return jdbcTemplate.query("""
+                SELECT ((m.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_price_ticks
+                  FROM instruments i
+                  JOIN LATERAL (
+                      SELECT mark_price_units
+                        FROM price_mark_ticks
+                       WHERE symbol = i.symbol
+                       ORDER BY event_time DESC
+                       LIMIT 1
+                  ) m ON TRUE
+                 WHERE i.symbol = ?
+                   AND i.version = ?
+                """, (rs, rowNum) -> rs.getLong("mark_price_ticks"), symbol, instrumentVersion)
+                .stream()
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("latest mark price not found for " + symbol));
+    }
+
+    public long latestMarkPriceUnits(String symbol) {
+        return jdbcTemplate.query("""
+                SELECT mark_price_units
+                  FROM price_mark_ticks
+                 WHERE symbol = ?
+                 ORDER BY event_time DESC
+                 LIMIT 1
+                """, (rs, rowNum) -> rs.getLong("mark_price_units"), symbol)
+                .stream()
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("latest mark price not found for " + symbol));
+    }
+
     public SpotInstrumentSpec spotInstrumentSpec(String symbol, long instrumentVersion) {
         return jdbcTemplate.query("""
                 SELECT version, base_asset, quote_asset, quantity_step_units, notional_multiplier_units
@@ -1477,6 +1522,56 @@ public class AccountRepository {
                 realizedPnlDeltaUnits, now);
         updateProductSettlementLedgerBalance(userId, normalizedType, asset, "TRADE_PNL", referenceId,
                 balanceAfterUnits);
+    }
+
+    public boolean settleLifecyclePnl(AccountType accountType,
+                                      long userId,
+                                      String asset,
+                                      String referenceType,
+                                      String referenceId,
+                                      String reason,
+                                      String symbol,
+                                      MarginMode marginMode,
+                                      long realizedPnlDeltaUnits,
+                                      Instant now) {
+        if (realizedPnlDeltaUnits == 0) {
+            return true;
+        }
+        AccountType normalizedType = requireAccountType(accountType);
+        if (isLegacyPerpetualAccount(normalizedType)) {
+            int ledgerRows = jdbcTemplate.update("""
+                    INSERT INTO account_ledger_entries (
+                        entry_id, user_id, asset, amount_units, balance_after_units,
+                        reference_type, reference_id, reason, symbol, created_at
+                    ) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+                    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
+                    """, sequenceRepository.nextSequence("ledger-entry"), userId, asset, realizedPnlDeltaUnits,
+                    referenceType, referenceId, reason, symbol, Timestamp.from(now));
+            if (ledgerRows == 0) {
+                return false;
+            }
+            long balanceAfterUnits = applyAmountToBalance(normalizedType, userId, asset, symbol, marginMode,
+                    realizedPnlDeltaUnits, now);
+            int ledgerRowsAfter = jdbcTemplate.update("""
+                    UPDATE account_ledger_entries
+                       SET balance_after_units = ?
+                     WHERE reference_type = ?
+                       AND reference_id = ?
+                       AND user_id = ?
+                       AND asset = ?
+                    """, balanceAfterUnits, referenceType, referenceId, userId, asset);
+            requireSingleRow(ledgerRowsAfter, "lifecycle pnl ledger update");
+            return true;
+        }
+        if (!tryInsertProductSettlementLedger(userId, normalizedType, asset, realizedPnlDeltaUnits, 0L,
+                referenceType, referenceId, reason, now)) {
+            return false;
+        }
+        long balanceAfterUnits = applyAmountToBalance(normalizedType, userId, asset, symbol, marginMode,
+                realizedPnlDeltaUnits, now);
+        updateProductSettlementLedgerBalance(userId, normalizedType, asset, referenceType, referenceId,
+                balanceAfterUnits);
+        return true;
     }
 
     public void settleRealizedPnl(long userId,
@@ -2343,6 +2438,26 @@ public class AccountRepository {
                 """, sequenceRepository.nextSequence("product-ledger-entry"), userId, accountType.name(), asset,
                 amountUnits, balanceAfterUnits, referenceType, referenceId, reason, Timestamp.from(now));
         requireSingleRow(rows, referenceType.toLowerCase().replace('_', ' ') + " product ledger insert");
+    }
+
+    private boolean tryInsertProductSettlementLedger(long userId,
+                                                     AccountType accountType,
+                                                     String asset,
+                                                     long amountUnits,
+                                                     long balanceAfterUnits,
+                                                     String referenceType,
+                                                     String referenceId,
+                                                     String reason,
+                                                     Instant now) {
+        int rows = jdbcTemplate.update("""
+                INSERT INTO account_product_ledger_entries (
+                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
+                """, sequenceRepository.nextSequence("product-ledger-entry"), userId, accountType.name(), asset,
+                amountUnits, balanceAfterUnits, referenceType, referenceId, reason, Timestamp.from(now));
+        return rows == 1;
     }
 
     private void updateProductSettlementLedgerBalance(long userId,
