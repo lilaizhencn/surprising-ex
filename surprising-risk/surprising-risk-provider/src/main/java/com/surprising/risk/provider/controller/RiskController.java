@@ -30,9 +30,11 @@ public class RiskController {
 
     @GetMapping(RiskApiPaths.RISK_BASE_PATH + "/account/latest")
     public RiskAccountSnapshotResponse latestAccountRisk(@RequestParam("userId") long userId,
+                                                         @RequestParam(value = "accountType",
+                                                                 defaultValue = "USDT_PERPETUAL") String accountType,
                                                          @RequestParam("settleAsset") String settleAsset) {
         try {
-            return riskService.latestAccount(userId, settleAsset);
+            return riskService.latestAccount(userId, accountType, settleAsset);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

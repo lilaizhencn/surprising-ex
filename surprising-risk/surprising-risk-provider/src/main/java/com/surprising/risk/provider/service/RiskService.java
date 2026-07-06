@@ -80,8 +80,8 @@ public class RiskService {
                 try {
                     scanRiskGroup(key);
                 } catch (Exception ex) {
-                    log.error("Failed to scan risk group userId={} settleAsset={}: {}",
-                            key.userId(), key.settleAsset(), ex.getMessage(), ex);
+                    log.error("Failed to scan risk group userId={} accountType={} settleAsset={}: {}",
+                            key.userId(), key.accountType(), key.settleAsset(), ex.getMessage(), ex);
                 }
             }
         }
@@ -157,7 +157,11 @@ public class RiskService {
     }
 
     public RiskAccountSnapshotResponse latestAccount(long userId, String settleAsset) {
-        return riskRepository.latestAccount(userId, normalizeAsset(settleAsset))
+        return latestAccount(userId, "USDT_PERPETUAL", settleAsset);
+    }
+
+    public RiskAccountSnapshotResponse latestAccount(long userId, String accountType, String settleAsset) {
+        return riskRepository.latestAccount(userId, normalizeAccountType(accountType), normalizeAsset(settleAsset))
                 .orElseThrow(() -> new IllegalStateException("risk snapshot not found"));
     }
 
@@ -263,8 +267,8 @@ public class RiskService {
                 : minMarginRatioPpm, "minMarginRatioPpm");
         List<HighRiskAccount> rows = riskRepository.highRiskAccounts(threshold, normalizeLimit(limit));
         List<HighRiskAccountResponse> accounts = rows.stream()
-                .map(row -> new HighRiskAccountResponse(row.snapshotId(), row.userId(), row.settleAsset(),
-                        row.walletBalanceUnits(), row.unrealizedPnlUnits(), row.equityUnits(),
+                .map(row -> new HighRiskAccountResponse(row.snapshotId(), row.userId(), row.accountType(),
+                        row.settleAsset(), row.walletBalanceUnits(), row.unrealizedPnlUnits(), row.equityUnits(),
                         row.maintenanceMarginUnits(), row.marginRatioPpm(), row.status(), row.eventTime(),
                         row.positionCount(), row.riskPositionCount(), row.activeCandidateCount(),
                         row.topSymbol(), row.topMarginMode(), row.topPositionMarginRatioPpm(),
@@ -286,8 +290,8 @@ public class RiskService {
         AdminCursorPage.CursorPage<HighRiskAccount> page = riskRepository.highRiskAccountsPage(threshold,
                 normalizeLimit(limit), cursor, sort);
         List<HighRiskAccountResponse> accounts = page.items().stream()
-                .map(row -> new HighRiskAccountResponse(row.snapshotId(), row.userId(), row.settleAsset(),
-                        row.walletBalanceUnits(), row.unrealizedPnlUnits(), row.equityUnits(),
+                .map(row -> new HighRiskAccountResponse(row.snapshotId(), row.userId(), row.accountType(),
+                        row.settleAsset(), row.walletBalanceUnits(), row.unrealizedPnlUnits(), row.equityUnits(),
                         row.maintenanceMarginUnits(), row.marginRatioPpm(), row.status(), row.eventTime(),
                         row.positionCount(), row.riskPositionCount(), row.activeCandidateCount(),
                         row.topSymbol(), row.topMarginMode(), row.topPositionMarginRatioPpm(),
@@ -308,7 +312,7 @@ public class RiskService {
                            PositionRiskTarget eventTarget,
                            Instant now,
                            String traceId) {
-        long walletBalance = riskRepository.walletBalanceUnits(key.userId(), key.settleAsset());
+        long walletBalance = riskRepository.walletBalanceUnits(key.userId(), key.accountType(), key.settleAsset());
         List<CalculatedPositionRisk> crossPositions = positions.stream()
                 .filter(position -> position.marginMode() == MarginMode.CROSS)
                 .toList();
@@ -321,7 +325,7 @@ public class RiskService {
                 properties.getCalculation().getLiquidationMarginRatioPpm());
         long snapshotId = sequenceRepository.nextSequence("risk-snapshot");
         RiskAccountSnapshotResponse account = new RiskAccountSnapshotResponse(snapshotId, key.userId(),
-                key.settleAsset(), walletBalance, unrealizedPnl, equity, maintenanceMargin, marginRatio,
+                key.accountType(), key.settleAsset(), walletBalance, unrealizedPnl, equity, maintenanceMargin, marginRatio,
                 accountStatus, now);
         riskRepository.saveAccountSnapshot(account);
         enqueueAccountRisk(account, now, traceId);
@@ -356,7 +360,8 @@ public class RiskService {
         RiskAccountUpdatedEvent event = RiskAccountUpdatedEvent.from(sequenceRepository.nextSequence("risk-event"),
                 account, traceId);
         outboxRepository.enqueue(properties.getKafka().getAccountRiskEventsTopic(),
-                account.userId() + ":" + account.settleAsset(), "RISK_ACCOUNT_UPDATED", payload(event), now);
+                account.userId() + ":" + account.accountType() + ":" + account.settleAsset(),
+                "RISK_ACCOUNT_UPDATED", payload(event), now);
     }
 
     private void enqueuePositionRisk(long snapshotId,
@@ -445,6 +450,17 @@ public class RiskService {
         String normalized = asset.trim().toUpperCase();
         if (!normalized.matches("[A-Z0-9]{2,20}")) {
             throw new IllegalArgumentException("invalid asset: " + asset);
+        }
+        return normalized;
+    }
+
+    private String normalizeAccountType(String accountType) {
+        if (accountType == null || accountType.isBlank()) {
+            return "USDT_PERPETUAL";
+        }
+        String normalized = accountType.trim().toUpperCase();
+        if (!normalized.matches("[A-Z0-9_]{2,32}")) {
+            throw new IllegalArgumentException("invalid accountType: " + accountType);
         }
         return normalized;
     }
@@ -599,6 +615,7 @@ public class RiskService {
 
     public record HighRiskAccountResponse(long snapshotId,
                                           long userId,
+                                          String accountType,
                                           String settleAsset,
                                           long walletBalanceUnits,
                                           long unrealizedPnlUnits,

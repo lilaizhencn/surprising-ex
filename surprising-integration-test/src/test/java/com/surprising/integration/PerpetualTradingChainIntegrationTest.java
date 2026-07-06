@@ -1965,9 +1965,14 @@ class PerpetualTradingChainIntegrationTest {
             return calculatePositions(maxMarkAge).stream()
                     .map(position -> new RiskGroupKey(position.userId(), position.settleAsset()))
                     .distinct()
-                    .sorted(Comparator.comparingLong(RiskGroupKey::userId).thenComparing(RiskGroupKey::settleAsset))
+                    .sorted(Comparator.comparingLong(RiskGroupKey::userId)
+                            .thenComparing(RiskGroupKey::accountType)
+                            .thenComparing(RiskGroupKey::settleAsset))
                     .filter(key -> after == null || key.userId() > after.userId()
                             || (key.userId() == after.userId()
+                            && key.accountType().compareTo(after.accountType()) > 0)
+                            || (key.userId() == after.userId()
+                            && key.accountType().equals(after.accountType())
                             && key.settleAsset().compareTo(after.settleAsset()) > 0))
                     .limit(limit)
                     .toList();
@@ -1990,6 +1995,11 @@ class PerpetualTradingChainIntegrationTest {
         public long walletBalanceUnits(long userId, String settleAsset) {
             BalanceState balance = state.balance(userId);
             return balance.availableUnits + balance.lockedUnits - balance.deficitUnits;
+        }
+
+        @Override
+        public long walletBalanceUnits(long userId, String accountType, String settleAsset) {
+            return walletBalanceUnits(userId, settleAsset);
         }
 
         @Override
@@ -2051,6 +2061,11 @@ class PerpetualTradingChainIntegrationTest {
         @Override
         public Optional<RiskAccountSnapshotResponse> latestAccount(long userId, String settleAsset) {
             return Optional.ofNullable(accountSnapshots.get(new UserAssetKey(userId, settleAsset)));
+        }
+
+        @Override
+        public Optional<RiskAccountSnapshotResponse> latestAccount(long userId, String accountType, String settleAsset) {
+            return latestAccount(userId, settleAsset);
         }
 
         @Override

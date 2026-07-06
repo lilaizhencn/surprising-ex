@@ -1648,14 +1648,35 @@ CREATE TABLE IF NOT EXISTS risk_sequences (
 
 CREATE TABLE IF NOT EXISTS risk_scan_leases (
     user_id             BIGINT NOT NULL,
+    account_type        TEXT NOT NULL DEFAULT 'USDT_PERPETUAL',
     settle_asset        TEXT NOT NULL,
     owner_id            TEXT NOT NULL,
     lease_until         TIMESTAMPTZ NOT NULL,
     updated_at          TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (user_id, settle_asset),
+    PRIMARY KEY (user_id, account_type, settle_asset),
     CONSTRAINT risk_scan_leases_user_positive CHECK (user_id > 0),
+    CONSTRAINT risk_scan_leases_account_type_format CHECK (account_type ~ '^[A-Z0-9_]{2,32}$'),
     CONSTRAINT risk_scan_leases_asset_format CHECK (settle_asset ~ '^[A-Z0-9]{2,20}$')
 );
+
+ALTER TABLE risk_scan_leases
+    ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'USDT_PERPETUAL';
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+          FROM pg_constraint
+         WHERE conrelid = 'risk_scan_leases'::regclass
+           AND conname = 'risk_scan_leases_pkey'
+    ) THEN
+        ALTER TABLE risk_scan_leases DROP CONSTRAINT risk_scan_leases_pkey;
+    END IF;
+    ALTER TABLE risk_scan_leases
+        ADD CONSTRAINT risk_scan_leases_pkey PRIMARY KEY (user_id, account_type, settle_asset);
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE INDEX IF NOT EXISTS risk_scan_leases_expiry_idx
     ON risk_scan_leases (lease_until);
@@ -1663,6 +1684,7 @@ CREATE INDEX IF NOT EXISTS risk_scan_leases_expiry_idx
 CREATE TABLE IF NOT EXISTS risk_account_snapshots (
     snapshot_id                 BIGINT PRIMARY KEY,
     user_id                     BIGINT NOT NULL,
+    account_type                TEXT NOT NULL DEFAULT 'USDT_PERPETUAL',
     settle_asset                TEXT NOT NULL,
     wallet_balance_units        BIGINT NOT NULL,
     unrealized_pnl_units        BIGINT NOT NULL,
@@ -1673,6 +1695,7 @@ CREATE TABLE IF NOT EXISTS risk_account_snapshots (
     event_time                  TIMESTAMPTZ NOT NULL,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT risk_account_snapshots_user_positive CHECK (user_id > 0),
+    CONSTRAINT risk_account_snapshots_account_type_format CHECK (account_type ~ '^[A-Z0-9_]{2,32}$'),
     CONSTRAINT risk_account_snapshots_asset_format CHECK (settle_asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT risk_account_snapshots_non_negative CHECK (
         maintenance_margin_units >= 0 AND margin_ratio_ppm >= 0
@@ -1680,8 +1703,14 @@ CREATE TABLE IF NOT EXISTS risk_account_snapshots (
     CONSTRAINT risk_account_snapshots_status_check CHECK (status IN ('NORMAL', 'WARNING', 'LIQUIDATION'))
 );
 
+ALTER TABLE risk_account_snapshots
+    ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'USDT_PERPETUAL';
+
 CREATE INDEX IF NOT EXISTS risk_account_snapshots_query_idx
     ON risk_account_snapshots (user_id, settle_asset, event_time DESC);
+
+CREATE INDEX IF NOT EXISTS risk_account_snapshots_account_query_idx
+    ON risk_account_snapshots (user_id, account_type, settle_asset, event_time DESC);
 
 CREATE INDEX IF NOT EXISTS risk_account_snapshots_status_idx
     ON risk_account_snapshots (status, event_time DESC);
@@ -1738,6 +1767,7 @@ CREATE TABLE IF NOT EXISTS risk_liquidation_candidates (
     margin_mode                 TEXT NOT NULL DEFAULT 'CROSS',
     position_side               TEXT NOT NULL DEFAULT 'NET',
     instrument_version          BIGINT NOT NULL,
+    account_type                TEXT NOT NULL DEFAULT 'USDT_PERPETUAL',
     settle_asset                TEXT NOT NULL,
     signed_quantity_steps       BIGINT NOT NULL,
     mark_price_ticks            BIGINT NOT NULL,
@@ -1753,10 +1783,14 @@ CREATE TABLE IF NOT EXISTS risk_liquidation_candidates (
     CONSTRAINT risk_liquidation_candidates_instrument_fk
         FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT risk_liquidation_candidates_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT risk_liquidation_candidates_account_type_format CHECK (account_type ~ '^[A-Z0-9_]{2,32}$'),
     CONSTRAINT risk_liquidation_candidates_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
     CONSTRAINT risk_liquidation_candidates_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
     CONSTRAINT risk_liquidation_candidates_status_check CHECK (status IN ('NEW', 'PROCESSING', 'COMPLETED', 'CANCELED'))
 );
+
+ALTER TABLE risk_liquidation_candidates
+    ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'USDT_PERPETUAL';
 
 CREATE UNIQUE INDEX IF NOT EXISTS risk_liquidation_candidates_snapshot_uidx
     ON risk_liquidation_candidates (snapshot_id, user_id, symbol, margin_mode, position_side);

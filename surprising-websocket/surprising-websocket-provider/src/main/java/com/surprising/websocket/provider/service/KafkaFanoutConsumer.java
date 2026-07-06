@@ -248,8 +248,10 @@ public class KafkaFanoutConsumer {
     }
 
     private void requireMatchingAccountRiskKey(String recordKey, RiskAccountUpdatedEvent event) {
-        String expected = event.userId() + ":" + event.settleAsset();
-        if (recordKey == null || !expected.equalsIgnoreCase(recordKey.trim())) {
+        String expected = event.userId() + ":" + event.accountType() + ":" + event.settleAsset();
+        String legacyExpected = event.userId() + ":" + event.settleAsset();
+        String normalizedKey = recordKey == null ? "" : recordKey.trim();
+        if (!expected.equalsIgnoreCase(normalizedKey) && !legacyExpected.equalsIgnoreCase(normalizedKey)) {
             throw new IllegalArgumentException("account risk key mismatch: expected=" + expected
                     + ", actual=" + recordKey);
         }

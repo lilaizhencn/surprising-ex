@@ -88,7 +88,8 @@ class RiskRepositoryTest {
     void acquireScanLeaseUsesRiskGroupKeyAndLeaseExpiryGuard() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("INSERT INTO risk_scan_leases"), anyRowMapper(),
-                eq(1001L), eq("USDT"), eq("risk-node-a"), any(Timestamp.class), any(Timestamp.class)))
+                eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq("risk-node-a"), any(Timestamp.class),
+                any(Timestamp.class)))
                 .thenReturn(List.of("risk-node-a"));
 
         boolean acquired = repository.acquireScanLease(new RiskGroupKey(1001L, "USDT"),
@@ -96,10 +97,10 @@ class RiskRepositoryTest {
 
         assertThat(acquired).isTrue();
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("USDT"),
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"),
                 eq("risk-node-a"), any(Timestamp.class), any(Timestamp.class));
         assertThat(sql.getValue())
-                .contains("ON CONFLICT (user_id, settle_asset) DO UPDATE")
+                .contains("ON CONFLICT (user_id, account_type, settle_asset) DO UPDATE")
                 .contains("risk_scan_leases.owner_id = EXCLUDED.owner_id")
                 .contains("risk_scan_leases.lease_until <= EXCLUDED.updated_at")
                 .contains("RETURNING owner_id");
@@ -109,7 +110,8 @@ class RiskRepositoryTest {
     void acquireScanLeaseReturnsFalseWhenAnotherLiveOwnerHoldsLease() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("INSERT INTO risk_scan_leases"), anyRowMapper(),
-                eq(1001L), eq("USDT"), eq("risk-node-b"), any(Timestamp.class), any(Timestamp.class)))
+                eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq("risk-node-b"), any(Timestamp.class),
+                any(Timestamp.class)))
                 .thenReturn(List.of());
 
         boolean acquired = repository.acquireScanLease(new RiskGroupKey(1001L, "USDT"),
@@ -122,19 +124,23 @@ class RiskRepositoryTest {
     void riskGroupsUsesFreshMarkKeysetPagination() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(10_000L),
-                eq(1001L), eq(1001L), eq(1001L), eq("USDT"), eq(200))).thenReturn(List.of());
+                eq(1001L), eq(1001L), eq(1001L), eq("USDT_PERPETUAL"), eq(1001L),
+                eq("USDT_PERPETUAL"), eq("USDT"), eq(200))).thenReturn(List.of());
 
         repository.riskGroups(Duration.ofSeconds(10), new RiskGroupKey(1001L, "USDT"), 200);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(10_000L),
-                eq(1001L), eq(1001L), eq(1001L), eq("USDT"), eq(200));
+                eq(1001L), eq(1001L), eq(1001L), eq("USDT_PERPETUAL"), eq(1001L),
+                eq("USDT_PERPETUAL"), eq("USDT"), eq(200));
         assertThat(sql.getValue())
-                .contains("bool_and(pm.event_time IS NOT NULL")
-                .contains("GROUP BY p.user_id, i.settle_asset")
+                .contains("END AS account_type")
+                .contains("bool_and(event_time IS NOT NULL")
+                .contains("GROUP BY user_id, account_type, settle_asset")
                 .contains("WHERE all_marks_fresh")
-                .contains("p.user_id > ? OR (p.user_id = ? AND i.settle_asset > ?)")
-                .contains("ORDER BY user_id ASC, settle_asset ASC")
+                .contains("user_id > ?")
+                .contains("account_type > ?")
+                .contains("ORDER BY user_id ASC, account_type ASC, settle_asset ASC")
                 .contains("LIMIT ?");
     }
 
@@ -161,16 +167,18 @@ class RiskRepositoryTest {
     @Test
     void hasOpenPositionsChecksRiskGroupWithoutMarkFreshnessFilter() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("USDT"))).thenReturn(List.of(1));
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("USDT_PERPETUAL"), eq("USDT")))
+                .thenReturn(List.of(1));
 
         boolean exists = repository.hasOpenPositions(new RiskGroupKey(1001L, "USDT"));
 
         assertThat(exists).isTrue();
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("USDT"));
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"));
         assertThat(sql.getValue())
                 .contains("FROM account_positions p")
                 .contains("JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version")
+                .contains("END = ?")
                 .contains("p.signed_quantity_steps <> 0")
                 .doesNotContain("price_mark_ticks");
     }
@@ -179,18 +187,18 @@ class RiskRepositoryTest {
     void walletBalanceUsesCoinProductAccountForInversePerpetualRiskGroup() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(),
-                eq(1001L), eq("BTC"), eq(1001L), eq("BTC"), eq(1001L), eq("BTC"),
+                eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"), eq(1001L), eq("BTC"),
                 eq(1001L), eq("BTC"), eq(1001L), eq("BTC"))).thenReturn(List.of(123L));
 
-        long walletBalanceUnits = repository.walletBalanceUnits(1001L, "BTC");
+        long walletBalanceUnits = repository.walletBalanceUnits(1001L, "COIN_PERPETUAL", "BTC");
 
         assertThat(walletBalanceUnits).isEqualTo(123L);
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
-                eq(1001L), eq("BTC"), eq(1001L), eq("BTC"), eq(1001L), eq("BTC"),
+                eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"), eq(1001L), eq("BTC"),
                 eq(1001L), eq("BTC"), eq(1001L), eq("BTC"));
         assertThat(sql.getValue())
-                .contains("WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'")
+                .contains("SELECT ? AS account_type")
                 .contains("WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'")
                 .contains("WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'")
                 .contains("r.account_type = ctx.account_type")
@@ -221,17 +229,20 @@ class RiskRepositoryTest {
     void calculatePositionsForGroupRequiresWholeGroupFreshness() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(10_000L),
-                eq(1001L), eq("USDT"), eq(1001L), eq("USDT"), eq(10_000L))).thenReturn(List.of());
+                eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"),
+                eq(10_000L))).thenReturn(List.of());
 
         repository.calculatePositions(new RiskGroupKey(1001L, "USDT"), Duration.ofSeconds(10));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(10_000L),
-                eq(1001L), eq("USDT"), eq(1001L), eq("USDT"), eq(10_000L));
+                eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"),
+                eq(10_000L));
         assertThat(sql.getValue())
                 .contains("WITH group_freshness AS")
                 .contains("COALESCE(bool_and(pm.event_time IS NOT NULL")
                 .contains("AND p.user_id = ?")
+                .contains("END = ?")
                 .contains("AND i.settle_asset = ?")
                 .contains("CROSS JOIN group_freshness gf")
                 .contains("AND gf.all_marks_fresh")

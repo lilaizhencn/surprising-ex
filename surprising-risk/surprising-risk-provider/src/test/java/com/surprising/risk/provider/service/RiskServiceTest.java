@@ -388,7 +388,7 @@ class RiskServiceTest {
     @Test
     void returnsHighRiskAccountAggregationUsingWarningThresholdByDefault() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
-        riskRepository.highRiskRows = List.of(new HighRiskAccount(901L, 1001L, "USDT",
+        riskRepository.highRiskRows = List.of(new HighRiskAccount(901L, 1001L, "USDT_PERPETUAL", "USDT",
                 1_000_000L, -300_000L, 700_000L, 600_000L, 857_142L,
                 RiskStatus.WARNING, Instant.parse("2026-07-01T00:00:00Z"), 2, 1,
                 0, "BTC-USDT", MarginMode.CROSS, 900_000L, RiskStatus.WARNING, "WARNING"));
@@ -406,6 +406,7 @@ class RiskServiceTest {
         assertThat(response.liquidationCount()).isZero();
         assertThat(response.accounts()).singleElement().satisfies(account -> {
             assertThat(account.userId()).isEqualTo(1001L);
+            assertThat(account.accountType()).isEqualTo("USDT_PERPETUAL");
             assertThat(account.topSymbol()).isEqualTo("BTC-USDT");
             assertThat(account.riskLevel()).isEqualTo("WARNING");
         });
@@ -418,7 +419,7 @@ class RiskServiceTest {
                 "BTC-USDT", 8L, "USDT", 10L, 590_000L, -200_000_000L,
                 88_500_000L, 1_100_000L, LiquidationCandidateStatus.NEW,
                 Instant.parse("2026-07-01T00:00:00Z")));
-        riskRepository.highRiskRows = List.of(new HighRiskAccount(901L, 1001L, "USDT",
+        riskRepository.highRiskRows = List.of(new HighRiskAccount(901L, 1001L, "USDT_PERPETUAL", "USDT",
                 1_000_000L, -300_000L, 700_000L, 600_000L, 857_142L,
                 RiskStatus.WARNING, Instant.parse("2026-07-01T00:00:00Z"), 2, 1,
                 0, "BTC-USDT", MarginMode.CROSS, 900_000L, RiskStatus.WARNING, "WARNING"));
@@ -489,9 +490,14 @@ class RiskServiceTest {
             return positions.stream()
                     .map(position -> new RiskGroupKey(position.userId(), position.settleAsset()))
                     .distinct()
-                    .sorted(Comparator.comparingLong(RiskGroupKey::userId).thenComparing(RiskGroupKey::settleAsset))
+                    .sorted(Comparator.comparingLong(RiskGroupKey::userId)
+                            .thenComparing(RiskGroupKey::accountType)
+                            .thenComparing(RiskGroupKey::settleAsset))
                     .filter(key -> after == null || key.userId() > after.userId()
                             || (key.userId() == after.userId()
+                            && key.accountType().compareTo(after.accountType()) > 0)
+                            || (key.userId() == after.userId()
+                            && key.accountType().equals(after.accountType())
                             && key.settleAsset().compareTo(after.settleAsset()) > 0))
                     .limit(limit)
                     .toList();
@@ -555,6 +561,11 @@ class RiskServiceTest {
 
         @Override
         public long walletBalanceUnits(long userId, String settleAsset) {
+            return walletBalanceUnits;
+        }
+
+        @Override
+        public long walletBalanceUnits(long userId, String accountType, String settleAsset) {
             return walletBalanceUnits;
         }
 

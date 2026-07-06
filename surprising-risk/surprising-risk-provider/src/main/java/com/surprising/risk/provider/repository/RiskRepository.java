@@ -26,6 +26,8 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class RiskRepository {
 
+    private static final String DEFAULT_ACCOUNT_TYPE = "USDT_PERPETUAL";
+
     private final JdbcTemplate jdbcTemplate;
 
     public RiskRepository(JdbcTemplate jdbcTemplate) {
@@ -34,14 +36,21 @@ public class RiskRepository {
 
     public List<RiskGroupKey> riskGroups(Duration maxMarkAge, RiskGroupKey after, int limit) {
         long afterUserId = after == null ? 0L : after.userId();
+        String afterAccountType = after == null ? "" : after.accountType();
         String afterSettleAsset = after == null ? "" : after.settleAsset();
         int cappedLimit = Math.max(1, limit);
         String sql = """
-                WITH open_groups AS (
+                WITH group_inputs AS (
                     SELECT p.user_id,
+                           CASE i.contract_type
+                               WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
+                               WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
+                               WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
+                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                               ELSE 'USDT_PERPETUAL'
+                           END AS account_type,
                            i.settle_asset,
-                           bool_and(pm.event_time IS NOT NULL
-                               AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')) AS all_marks_fresh
+                           pm.event_time
                       FROM account_positions p
                       JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
                       LEFT JOIN LATERAL (
@@ -52,18 +61,30 @@ public class RiskRepository {
                            LIMIT 1
                       ) pm ON TRUE
                      WHERE p.signed_quantity_steps <> 0
-                       AND (? = 0 OR p.user_id > ? OR (p.user_id = ? AND i.settle_asset > ?))
-                     GROUP BY p.user_id, i.settle_asset
+                ),
+                open_groups AS (
+                    SELECT user_id,
+                           account_type,
+                           settle_asset,
+                           bool_and(event_time IS NOT NULL
+                               AND event_time >= now() - (? * INTERVAL '1 millisecond')) AS all_marks_fresh
+                      FROM group_inputs
+                     WHERE (? = 0
+                         OR user_id > ?
+                         OR (user_id = ? AND account_type > ?)
+                         OR (user_id = ? AND account_type = ? AND settle_asset > ?))
+                     GROUP BY user_id, account_type, settle_asset
                 )
-                SELECT user_id, settle_asset
+                SELECT user_id, account_type, settle_asset
                   FROM open_groups
                  WHERE all_marks_fresh
-                 ORDER BY user_id ASC, settle_asset ASC
+                 ORDER BY user_id ASC, account_type ASC, settle_asset ASC
                  LIMIT ?
                 """;
         return jdbcTemplate.query(sql, (rs, rowNum) -> new RiskGroupKey(rs.getLong("user_id"),
-                rs.getString("settle_asset")), maxMarkAge.toMillis(), afterUserId, afterUserId,
-                afterUserId, afterSettleAsset, cappedLimit);
+                rs.getString("account_type"), rs.getString("settle_asset")), maxMarkAge.toMillis(),
+                afterUserId, afterUserId, afterUserId, afterAccountType, afterUserId, afterAccountType,
+                afterSettleAsset, cappedLimit);
     }
 
     public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId,
@@ -75,6 +96,13 @@ public class RiskRepository {
                 SELECT CAST(? AS bigint) AS user_id,
                        i.symbol,
                        i.version AS instrument_version,
+                       CASE i.contract_type
+                           WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
+                           WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
+                           WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
+                           WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                           ELSE 'USDT_PERPETUAL'
+                       END AS account_type,
                        i.settle_asset
                   FROM instruments i
                  WHERE i.symbol = ?
@@ -94,6 +122,7 @@ public class RiskRepository {
                 MarginMode.defaultIfNull(marginMode),
                 PositionSide.defaultIfNull(positionSide),
                 rs.getLong("instrument_version"),
+                rs.getString("account_type"),
                 rs.getString("settle_asset")), userId, symbol, instrumentVersion, instrumentVersion, symbol)
                 .stream()
                 .findFirst();
@@ -113,13 +142,21 @@ public class RiskRepository {
     public boolean hasOpenPositions(RiskGroupKey key) {
         return jdbcTemplate.query("""
                 SELECT 1
-                  FROM account_positions p
+                 FROM account_positions p
                   JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
                  WHERE p.user_id = ?
+                   AND CASE i.contract_type
+                           WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
+                           WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
+                           WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
+                           WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                           ELSE 'USDT_PERPETUAL'
+                       END = ?
                    AND i.settle_asset = ?
                    AND p.signed_quantity_steps <> 0
                  LIMIT 1
-                """, (rs, rowNum) -> rs.getInt(1), key.userId(), key.settleAsset()).stream().findFirst().isPresent();
+                """, (rs, rowNum) -> rs.getInt(1), key.userId(), key.accountType(), key.settleAsset())
+                .stream().findFirst().isPresent();
     }
 
     public List<CalculatedPositionRisk> calculatePositions(Duration maxMarkAge) {
@@ -219,6 +256,13 @@ public class RiskRepository {
                       ) pm ON TRUE
                      WHERE p.signed_quantity_steps <> 0
                        AND p.user_id = ?
+                       AND CASE i.contract_type
+                               WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
+                               WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
+                               WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
+                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                               ELSE 'USDT_PERPETUAL'
+                           END = ?
                        AND i.settle_asset = ?
                 ),
                 position_inputs AS (
@@ -270,6 +314,13 @@ public class RiskRepository {
                       CROSS JOIN group_freshness gf
                      WHERE p.signed_quantity_steps <> 0
                        AND p.user_id = ?
+                       AND CASE i.contract_type
+                               WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
+                               WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
+                               WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
+                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                               ELSE 'USDT_PERPETUAL'
+                           END = ?
                        AND i.settle_asset = ?
                        AND gf.all_marks_fresh
                        AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
@@ -301,17 +352,17 @@ public class RiskRepository {
                        LIMIT 1
                   ) br ON TRUE
                 """;
-        return queryCalculatedPositions(sql, maxMarkAge.toMillis(), key.userId(), key.settleAsset(),
-                key.userId(), key.settleAsset(), maxMarkAge.toMillis());
+        return queryCalculatedPositions(sql, maxMarkAge.toMillis(), key.userId(), key.accountType(),
+                key.settleAsset(), key.userId(), key.accountType(), key.settleAsset(), maxMarkAge.toMillis());
     }
 
     public boolean acquireScanLease(RiskGroupKey key, String ownerId, Duration leaseDuration) {
         Instant now = Instant.now();
         Instant leaseUntil = now.plus(leaseDuration);
         return !jdbcTemplate.query("""
-                INSERT INTO risk_scan_leases (user_id, settle_asset, owner_id, lease_until, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (user_id, settle_asset) DO UPDATE SET
+                INSERT INTO risk_scan_leases (user_id, account_type, settle_asset, owner_id, lease_until, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (user_id, account_type, settle_asset) DO UPDATE SET
                     owner_id = EXCLUDED.owner_id,
                     lease_until = EXCLUDED.lease_until,
                     updated_at = EXCLUDED.updated_at
@@ -319,7 +370,8 @@ public class RiskRepository {
                    OR risk_scan_leases.lease_until <= EXCLUDED.updated_at
                 RETURNING owner_id
                 """, (rs, rowNum) -> rs.getString("owner_id"),
-                key.userId(), key.settleAsset(), ownerId, Timestamp.from(leaseUntil), Timestamp.from(now)).isEmpty();
+                key.userId(), key.accountType(), key.settleAsset(), ownerId, Timestamp.from(leaseUntil),
+                Timestamp.from(now)).isEmpty();
     }
 
     public void savePositionSnapshot(long snapshotId,
@@ -344,11 +396,11 @@ public class RiskRepository {
     public void saveAccountSnapshot(RiskAccountSnapshotResponse snapshot) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO risk_account_snapshots (
-                    snapshot_id, user_id, settle_asset, wallet_balance_units,
+                    snapshot_id, user_id, account_type, settle_asset, wallet_balance_units,
                     unrealized_pnl_units, equity_units, maintenance_margin_units,
                     margin_ratio_ppm, status, event_time, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
-                """, snapshot.snapshotId(), snapshot.userId(), snapshot.settleAsset(),
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                """, snapshot.snapshotId(), snapshot.userId(), snapshot.accountType(), snapshot.settleAsset(),
                 snapshot.walletBalanceUnits(), snapshot.unrealizedPnlUnits(), snapshot.equityUnits(),
                 snapshot.maintenanceMarginUnits(), snapshot.marginRatioPpm(), snapshot.status().name(),
                 Timestamp.from(snapshot.eventTime()));
@@ -356,40 +408,37 @@ public class RiskRepository {
     }
 
     public long walletBalanceUnits(long userId, String settleAsset) {
+        return walletBalanceUnits(userId, DEFAULT_ACCOUNT_TYPE, settleAsset);
+    }
+
+    public long walletBalanceUnits(long userId, String accountType, String settleAsset) {
+        String normalizedAccountType = normalizeAccountType(accountType);
         return jdbcTemplate.query("""
                 WITH account_context AS (
-                    SELECT COALESCE((
-                               SELECT CASE i.contract_type
-                                          WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
-                                          WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
-                                          WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
-                                          WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                                          ELSE 'USDT_PERPETUAL'
-                                      END
-                                 FROM account_positions p
-                                 JOIN instruments i
-                                   ON i.symbol = p.symbol
-                                  AND i.version = p.instrument_version
-                                WHERE p.user_id = ?
-                                  AND i.settle_asset = ?
-                                  AND p.signed_quantity_steps <> 0
-                                ORDER BY CASE i.contract_type
-                                             WHEN 'INVERSE_PERPETUAL' THEN 1
-                                             WHEN 'LINEAR_PERPETUAL' THEN 2
-                                             WHEN 'INVERSE_DELIVERY' THEN 3
-                                             WHEN 'LINEAR_DELIVERY' THEN 4
-                                             WHEN 'VANILLA_OPTION' THEN 5
-                                             ELSE 6
-                                         END
-                                LIMIT 1
-                           ), 'USDT_PERPETUAL') AS account_type
+                    SELECT ? AS account_type
                 ),
                 isolated_position_locks AS (
                     SELECT COALESCE(SUM(m.margin_units), 0) AS units
                       FROM account_position_margins m
+                      JOIN account_positions p
+                        ON p.user_id = m.user_id
+                       AND p.symbol = m.symbol
+                       AND p.margin_mode = m.margin_mode
+                       AND p.position_side = m.position_side
+                      JOIN instruments i
+                        ON i.symbol = p.symbol
+                       AND i.version = p.instrument_version
+                     CROSS JOIN account_context ctx
                      WHERE m.user_id = ?
                        AND m.asset = ?
                        AND m.margin_mode = 'ISOLATED'
+                       AND CASE i.contract_type
+                               WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
+                               WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
+                               WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
+                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                               ELSE 'USDT_PERPETUAL'
+                           END = ctx.account_type
                 ),
                 isolated_order_locks AS (
                     SELECT COALESCE(SUM(GREATEST(r.reserved_units - r.released_units - r.position_margin_units, 0)), 0)
@@ -431,21 +480,26 @@ public class RiskRepository {
                     ON pd.account_type = pb.account_type
                    AND pd.user_id = pb.user_id
                    AND pd.asset = pb.asset
-                """, (rs, rowNum) -> rs.getLong(1), userId, settleAsset, userId, settleAsset,
-                userId, settleAsset, userId, settleAsset, userId, settleAsset)
+                """, (rs, rowNum) -> rs.getLong(1), normalizedAccountType, userId, settleAsset, userId, settleAsset,
+                userId, settleAsset, userId, settleAsset)
                 .stream()
                 .findFirst()
                 .orElse(0L);
     }
 
     public Optional<RiskAccountSnapshotResponse> latestAccount(long userId, String settleAsset) {
+        return latestAccount(userId, DEFAULT_ACCOUNT_TYPE, settleAsset);
+    }
+
+    public Optional<RiskAccountSnapshotResponse> latestAccount(long userId, String accountType, String settleAsset) {
         return jdbcTemplate.query("""
                 SELECT *
                   FROM risk_account_snapshots
-                 WHERE user_id = ? AND settle_asset = ?
+                 WHERE user_id = ? AND account_type = ? AND settle_asset = ?
                  ORDER BY event_time DESC
                  LIMIT 1
-                """, (rs, rowNum) -> toAccountSnapshot(rs), userId, settleAsset).stream().findFirst();
+                """, (rs, rowNum) -> toAccountSnapshot(rs), userId, normalizeAccountType(accountType),
+                settleAsset).stream().findFirst();
     }
 
     public List<RiskPositionSnapshotResponse> latestPositions(long userId) {
@@ -466,13 +520,15 @@ public class RiskRepository {
                                            Instant now) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO risk_liquidation_candidates (
-                    candidate_id, snapshot_id, user_id, symbol, margin_mode, position_side, instrument_version, settle_asset,
+                    candidate_id, snapshot_id, user_id, symbol, margin_mode, position_side,
+                    instrument_version, account_type, settle_asset,
                     signed_quantity_steps, mark_price_ticks, equity_units,
                     maintenance_margin_units, margin_ratio_ppm, status, event_time, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, now(), now())
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, now(), now())
                 ON CONFLICT (user_id, symbol, margin_mode, position_side) WHERE status IN ('NEW', 'PROCESSING') DO NOTHING
                 """, candidateId, account.snapshotId(), position.userId(), position.symbol(),
-                position.marginMode().name(), position.positionSide().name(), position.instrumentVersion(), position.settleAsset(),
+                position.marginMode().name(), position.positionSide().name(), position.instrumentVersion(),
+                account.accountType(), position.settleAsset(),
                 position.signedQuantitySteps(), position.markPriceTicks(), equityUnits,
                 position.maintenanceMarginUnits(), Math.max(account.marginRatioPpm(), positionMarginRatioPpm),
                 Timestamp.from(now));
@@ -576,12 +632,13 @@ public class RiskRepository {
         int safeLimit = Math.max(1, Math.min(limit, 500));
         return jdbcTemplate.query("""
                 WITH latest_accounts AS (
-                    SELECT DISTINCT ON (user_id, settle_asset) *
+                    SELECT DISTINCT ON (user_id, account_type, settle_asset) *
                       FROM risk_account_snapshots
-                     ORDER BY user_id ASC, settle_asset ASC, event_time DESC
+                     ORDER BY user_id ASC, account_type ASC, settle_asset ASC, event_time DESC
                 )
                 SELECT a.snapshot_id,
                        a.user_id,
+                       a.account_type,
                        a.settle_asset,
                        a.wallet_balance_units,
                        a.unrealized_pnl_units,
@@ -631,6 +688,7 @@ public class RiskRepository {
                       SELECT COUNT(*) AS active_candidate_count
                         FROM risk_liquidation_candidates c
                        WHERE c.user_id = a.user_id
+                         AND c.account_type = a.account_type
                          AND c.settle_asset = a.settle_asset
                          AND c.status IN ('NEW', 'PROCESSING')
                   ) candidate_stats ON TRUE
@@ -653,6 +711,7 @@ public class RiskRepository {
                 """, (rs, rowNum) -> new HighRiskAccount(
                 rs.getLong("snapshot_id"),
                 rs.getLong("user_id"),
+                rs.getString("account_type"),
                 rs.getString("settle_asset"),
                 rs.getLong("wallet_balance_units"),
                 rs.getLong("unrealized_pnl_units"),
@@ -688,12 +747,13 @@ public class RiskRepository {
         args.add(safeLimit + 1);
         String sql = """
                 WITH latest_accounts AS (
-                    SELECT DISTINCT ON (user_id, settle_asset) *
+                    SELECT DISTINCT ON (user_id, account_type, settle_asset) *
                       FROM risk_account_snapshots
-                     ORDER BY user_id ASC, settle_asset ASC, event_time DESC
+                     ORDER BY user_id ASC, account_type ASC, settle_asset ASC, event_time DESC
                 )
                 SELECT a.snapshot_id,
                        a.user_id,
+                       a.account_type,
                        a.settle_asset,
                        a.wallet_balance_units,
                        a.unrealized_pnl_units,
@@ -743,6 +803,7 @@ public class RiskRepository {
                       SELECT COUNT(*) AS active_candidate_count
                         FROM risk_liquidation_candidates c
                        WHERE c.user_id = a.user_id
+                         AND c.account_type = a.account_type
                          AND c.settle_asset = a.settle_asset
                          AND c.status IN ('NEW', 'PROCESSING')
                   ) candidate_stats ON TRUE
@@ -759,6 +820,7 @@ public class RiskRepository {
         List<HighRiskAccount> rows = jdbcTemplate.query(sql, (rs, rowNum) -> new HighRiskAccount(
                 rs.getLong("snapshot_id"),
                 rs.getLong("user_id"),
+                rs.getString("account_type"),
                 rs.getString("settle_asset"),
                 rs.getLong("wallet_balance_units"),
                 rs.getLong("unrealized_pnl_units"),
@@ -799,6 +861,7 @@ public class RiskRepository {
         return new RiskAccountSnapshotResponse(
                 rs.getLong("snapshot_id"),
                 rs.getLong("user_id"),
+                rs.getString("account_type"),
                 rs.getString("settle_asset"),
                 rs.getLong("wallet_balance_units"),
                 rs.getLong("unrealized_pnl_units"),
@@ -839,6 +902,7 @@ public class RiskRepository {
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 PositionSide.fromNullableDbValue(rs.getString("position_side")),
                 rs.getLong("instrument_version"),
+                rs.getString("account_type"),
                 rs.getString("settle_asset"),
                 rs.getLong("signed_quantity_steps"),
                 rs.getLong("mark_price_ticks"),
@@ -881,6 +945,12 @@ public class RiskRepository {
 
     private MarginMode nullableMarginMode(String value) {
         return value == null || value.isBlank() ? null : MarginMode.valueOf(value);
+    }
+
+    private String normalizeAccountType(String accountType) {
+        return accountType == null || accountType.isBlank()
+                ? DEFAULT_ACCOUNT_TYPE
+                : accountType.trim().toUpperCase();
     }
 
     private List<CalculatedPositionRisk> queryCalculatedPositions(String sql, Object... args) {
@@ -942,6 +1012,7 @@ public class RiskRepository {
 
     public record HighRiskAccount(long snapshotId,
                                   long userId,
+                                  String accountType,
                                   String settleAsset,
                                   long walletBalanceUnits,
                                   long unrealizedPnlUnits,

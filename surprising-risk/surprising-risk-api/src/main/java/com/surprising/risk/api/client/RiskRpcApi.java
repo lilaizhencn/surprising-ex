@@ -21,6 +21,8 @@ public interface RiskRpcApi {
 
     @GetMapping("/account/latest")
     RiskAccountSnapshotResponse latestAccountRisk(@RequestParam("userId") @Positive long userId,
+                                                  @RequestParam(value = "accountType",
+                                                          defaultValue = "USDT_PERPETUAL") String accountType,
                                                   @RequestParam("settleAsset") @NotBlank String settleAsset);
 
     @GetMapping("/positions/latest")
