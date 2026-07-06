@@ -88,13 +88,17 @@ create_product_topics() {
       create_topic "${prefix}.index.price.v1"
       create_topic "${prefix}.index.components.v1"
       create_topic "${prefix}.book.ticker.v1"
-      create_topic "${prefix}.funding.rate.v1"
       create_topic "${prefix}.mark.price.v1"
       create_topic "${prefix}.mark.price.audit.v1"
       create_topic "${prefix}.account.position.events.v1"
       create_topic "${prefix}.risk.account.events.v1"
       create_topic "${prefix}.risk.position.events.v1"
       create_topic "${prefix}.liquidation.candidates.v1"
+      ;;
+  esac
+  case "${product_line}" in
+    linear-perp|inverse-perp)
+      create_topic "${prefix}.funding.rate.v1"
       ;;
   esac
   case "${product_line}" in
