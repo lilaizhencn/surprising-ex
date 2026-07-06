@@ -1,12 +1,14 @@
 package com.surprising.risk.provider.repository;
 
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.AdminCursorPage;
 import com.surprising.risk.api.model.LiquidationCandidateResponse;
 import com.surprising.risk.api.model.LiquidationCandidateStatus;
 import com.surprising.risk.api.model.RiskAccountSnapshotResponse;
 import com.surprising.risk.api.model.RiskPositionSnapshotResponse;
 import com.surprising.risk.api.model.RiskStatus;
+import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.model.CalculatedPositionRisk;
 import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
@@ -19,6 +21,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
@@ -29,9 +32,16 @@ public class RiskRepository {
     private static final String DEFAULT_ACCOUNT_TYPE = "USDT_PERPETUAL";
 
     private final JdbcTemplate jdbcTemplate;
+    private final RiskProperties properties;
 
     public RiskRepository(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, new RiskProperties());
+    }
+
+    @Autowired
+    public RiskRepository(JdbcTemplate jdbcTemplate, RiskProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
+        this.properties = properties == null ? new RiskProperties() : properties;
     }
 
     public List<RiskGroupKey> riskGroups(Duration maxMarkAge, RiskGroupKey after, int limit) {
@@ -39,6 +49,8 @@ public class RiskRepository {
         String afterAccountType = after == null ? "" : after.accountType();
         String afterSettleAsset = after == null ? "" : after.settleAsset();
         int cappedLimit = Math.max(1, limit);
+        List<Object> args = new ArrayList<>();
+        String productLineFilter = productLineFilter("i", args);
         String sql = """
                 WITH group_inputs AS (
                     SELECT p.user_id,
@@ -61,6 +73,7 @@ public class RiskRepository {
                            LIMIT 1
                       ) pm ON TRUE
                      WHERE p.signed_quantity_steps <> 0
+                       %s
                 ),
                 open_groups AS (
                     SELECT user_id,
@@ -80,11 +93,18 @@ public class RiskRepository {
                  WHERE all_marks_fresh
                  ORDER BY user_id ASC, account_type ASC, settle_asset ASC
                  LIMIT ?
-                """;
+                """.formatted(productLineFilter);
+        args.add(maxMarkAge.toMillis());
+        args.add(afterUserId);
+        args.add(afterUserId);
+        args.add(afterUserId);
+        args.add(afterAccountType);
+        args.add(afterUserId);
+        args.add(afterAccountType);
+        args.add(afterSettleAsset);
+        args.add(cappedLimit);
         return jdbcTemplate.query(sql, (rs, rowNum) -> new RiskGroupKey(rs.getLong("user_id"),
-                rs.getString("account_type"), rs.getString("settle_asset")), maxMarkAge.toMillis(),
-                afterUserId, afterUserId, afterUserId, afterAccountType, afterUserId, afterAccountType,
-                afterSettleAsset, cappedLimit);
+                rs.getString("account_type"), rs.getString("settle_asset")), args.toArray());
     }
 
     public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId,
@@ -92,6 +112,7 @@ public class RiskRepository {
                                                                    MarginMode marginMode,
                                                                    PositionSide positionSide,
                                                                    long instrumentVersion) {
+        List<Object> args = new ArrayList<>();
         String sql = """
                 SELECT CAST(? AS bigint) AS user_id,
                        i.symbol,
@@ -111,11 +132,17 @@ public class RiskRepository {
                          ELSE COALESCE((
                              SELECT cv.version
                                FROM instrument_current_versions cv
-                              WHERE cv.symbol = ?
+                             WHERE cv.symbol = ?
                          ), 0)
                        END
+                   %s
                  LIMIT 1
-                """;
+                """.formatted(productLineFilter("i", args));
+        args.add(0, userId);
+        args.add(1, symbol);
+        args.add(2, instrumentVersion);
+        args.add(3, instrumentVersion);
+        args.add(4, symbol);
         return jdbcTemplate.query(sql, (rs, rowNum) -> new PositionRiskTarget(
                 rs.getLong("user_id"),
                 rs.getString("symbol"),
@@ -123,7 +150,7 @@ public class RiskRepository {
                 PositionSide.defaultIfNull(positionSide),
                 rs.getLong("instrument_version"),
                 rs.getString("account_type"),
-                rs.getString("settle_asset")), userId, symbol, instrumentVersion, instrumentVersion, symbol)
+                rs.getString("settle_asset")), args.toArray())
                 .stream()
                 .findFirst();
     }
@@ -140,6 +167,8 @@ public class RiskRepository {
     }
 
     public boolean hasOpenPositions(RiskGroupKey key) {
+        List<Object> args = new ArrayList<>(List.of(key.userId(), key.accountType(), key.settleAsset()));
+        String productLineFilter = productLineFilter("i", args);
         return jdbcTemplate.query("""
                 SELECT 1
                  FROM account_positions p
@@ -149,17 +178,19 @@ public class RiskRepository {
                            WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
                            WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
                            WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
-                           WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                           ELSE 'USDT_PERPETUAL'
+                     WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                     ELSE 'USDT_PERPETUAL'
                        END = ?
                    AND i.settle_asset = ?
+                   %s
                    AND p.signed_quantity_steps <> 0
                  LIMIT 1
-                """, (rs, rowNum) -> rs.getInt(1), key.userId(), key.accountType(), key.settleAsset())
+                """.formatted(productLineFilter), (rs, rowNum) -> rs.getInt(1), args.toArray())
                 .stream().findFirst().isPresent();
     }
 
     public List<CalculatedPositionRisk> calculatePositions(Duration maxMarkAge) {
+        List<Object> args = new ArrayList<>();
         String sql = """
                 WITH position_inputs AS (
                     SELECT p.user_id,
@@ -209,6 +240,7 @@ public class RiskRepository {
                       ) position_margin ON TRUE
                      WHERE p.signed_quantity_steps <> 0
                        AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
+                       %s
                 )
                 SELECT pi.user_id,
                        pi.symbol,
@@ -236,11 +268,14 @@ public class RiskRepository {
                        ORDER BY b.notional_floor_units DESC
                        LIMIT 1
                   ) br ON TRUE
-                """;
-        return queryCalculatedPositions(sql, maxMarkAge.toMillis());
+                """.formatted(productLineFilter("i", args));
+        args.add(0, maxMarkAge.toMillis());
+        return queryCalculatedPositions(sql, args.toArray());
     }
 
     public List<CalculatedPositionRisk> calculatePositions(RiskGroupKey key, Duration maxMarkAge) {
+        List<Object> groupArgs = new ArrayList<>();
+        List<Object> positionArgs = new ArrayList<>();
         String sql = """
                 WITH group_freshness AS (
                     SELECT COALESCE(bool_and(pm.event_time IS NOT NULL
@@ -264,6 +299,7 @@ public class RiskRepository {
                                ELSE 'USDT_PERPETUAL'
                            END = ?
                        AND i.settle_asset = ?
+                       %s
                 ),
                 position_inputs AS (
                     SELECT p.user_id,
@@ -324,6 +360,7 @@ public class RiskRepository {
                        AND i.settle_asset = ?
                        AND gf.all_marks_fresh
                        AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
+                       %s
                 )
                 SELECT pi.user_id,
                        pi.symbol,
@@ -351,9 +388,19 @@ public class RiskRepository {
                        ORDER BY b.notional_floor_units DESC
                        LIMIT 1
                   ) br ON TRUE
-                """;
-        return queryCalculatedPositions(sql, maxMarkAge.toMillis(), key.userId(), key.accountType(),
-                key.settleAsset(), key.userId(), key.accountType(), key.settleAsset(), maxMarkAge.toMillis());
+                """.formatted(productLineFilter("i", groupArgs), productLineFilter("i", positionArgs));
+        List<Object> args = new ArrayList<>();
+        args.add(maxMarkAge.toMillis());
+        args.add(key.userId());
+        args.add(key.accountType());
+        args.add(key.settleAsset());
+        args.addAll(groupArgs);
+        args.add(key.userId());
+        args.add(key.accountType());
+        args.add(key.settleAsset());
+        args.add(maxMarkAge.toMillis());
+        args.addAll(positionArgs);
+        return queryCalculatedPositions(sql, args.toArray());
     }
 
     public boolean acquireScanLease(RiskGroupKey key, String ownerId, Duration leaseDuration) {
@@ -951,6 +998,18 @@ public class RiskRepository {
         return accountType == null || accountType.isBlank()
                 ? DEFAULT_ACCOUNT_TYPE
                 : accountType.trim().toUpperCase();
+    }
+
+    private String productLineFilter(String alias, List<Object> args) {
+        if (!properties.getKafka().isProductTopicsEnabled()) {
+            return "";
+        }
+        ProductLine productLine = properties.getKafka().getProductLine();
+        if (!productLine.isMarginProduct()) {
+            return "AND 1 = 0";
+        }
+        args.add(productLine.contractTypeCode());
+        return "AND " + alias + ".contract_type = ?";
     }
 
     private List<CalculatedPositionRisk> queryCalculatedPositions(String sql, Object... args) {

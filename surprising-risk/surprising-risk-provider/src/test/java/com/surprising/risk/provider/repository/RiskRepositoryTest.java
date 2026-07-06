@@ -8,8 +8,10 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.RiskAccountSnapshotResponse;
 import com.surprising.risk.api.model.RiskStatus;
+import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.model.CalculatedPositionRisk;
 import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
@@ -145,6 +147,23 @@ class RiskRepositoryTest {
     }
 
     @Test
+    void riskGroupsFilterConfiguredProductLineWhenProductTopicsAreEnabled() {
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        RiskRepository repository = new RiskRepository(jdbcTemplate, properties);
+
+        repository.riskGroups(Duration.ofSeconds(10), null, 50);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
+        assertThat(sql.getValue()).contains("i.contract_type = ?");
+        assertThat(args.getValue()).containsExactly(
+                "VANILLA_OPTION", 10_000L, 0L, 0L, 0L, "", 0L, "", "", 50);
+    }
+
+    @Test
     void riskTargetForPositionEventUsesEventVersionOrCurrentVersionFallback() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("BTC-USDT"),
@@ -223,6 +242,24 @@ class RiskRepositoryTest {
                 .contains("COALESCE(br.maintenance_margin_rate_ppm")
                 .contains("pi.base_maintenance_margin_rate_ppm")
                 .contains("i.contract_type IN ('INVERSE_PERPETUAL', 'INVERSE_DELIVERY')");
+    }
+
+    @Test
+    void calculatePositionsForGroupFiltersConfiguredProductLine() {
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        RiskRepository repository = new RiskRepository(jdbcTemplate, properties);
+
+        repository.calculatePositions(new RiskGroupKey(1001L, "OPTION", "USDT"), Duration.ofSeconds(10));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
+        assertThat(sql.getValue()).contains("i.contract_type = ?");
+        assertThat(args.getValue()).containsExactly(
+                10_000L, 1001L, "OPTION", "USDT", "VANILLA_OPTION",
+                1001L, "OPTION", "USDT", 10_000L, "VANILLA_OPTION");
     }
 
     @Test
