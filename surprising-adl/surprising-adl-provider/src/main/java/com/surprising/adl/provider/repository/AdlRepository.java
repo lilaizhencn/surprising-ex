@@ -454,10 +454,10 @@ public class AdlRepository {
         }
         jdbcTemplate.update("""
                 INSERT INTO trading_symbol_open_interest (
-                    symbol, long_quantity_steps, short_quantity_steps, open_quantity_steps, updated_at
-                ) VALUES (?, 0, 0, 0, ?)
-                ON CONFLICT (symbol) DO NOTHING
-                """, symbol, Timestamp.from(now));
+                    product_line, symbol, long_quantity_steps, short_quantity_steps, open_quantity_steps, updated_at
+                ) VALUES (?, ?, 0, 0, 0, ?)
+                ON CONFLICT (product_line, symbol) DO NOTHING
+                """, productLine(), symbol, Timestamp.from(now));
         int rows = jdbcTemplate.update("""
                 UPDATE trading_symbol_open_interest
                    SET long_quantity_steps = long_quantity_steps + ?,
@@ -465,10 +465,11 @@ public class AdlRepository {
                        open_quantity_steps = GREATEST(long_quantity_steps + ?, short_quantity_steps + ?),
                        updated_at = ?
                  WHERE symbol = ?
+                   AND product_line = ?
                    AND long_quantity_steps + ? >= 0
                    AND short_quantity_steps + ? >= 0
                 """, longDelta, shortDelta, longDelta, shortDelta, Timestamp.from(now), symbol,
-                longDelta, shortDelta);
+                productLine(), longDelta, shortDelta);
         requireSingleRow(rows, "ADL symbol open interest update");
     }
 
