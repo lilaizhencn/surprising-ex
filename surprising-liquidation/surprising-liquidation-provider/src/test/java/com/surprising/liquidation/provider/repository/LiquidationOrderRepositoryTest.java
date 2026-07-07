@@ -109,17 +109,18 @@ class LiquidationOrderRepositoryTest {
 
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).update(contains("INSERT INTO trading_orders"), args.capture());
-        assertThat(args.getValue()).hasSize(14);
-        assertThat(args.getValue()[8]).isEqualTo("ISOLATED");
-        assertThat(args.getValue()[9]).isEqualTo("LONG");
-        assertThat(args.getValue()[10]).isEqualTo(200L);
-        assertThat(args.getValue()[11]).isEqualTo(500L);
+        assertThat(args.getValue()).hasSize(15);
+        assertThat(args.getValue()[1]).isEqualTo("LINEAR_PERPETUAL");
+        assertThat(args.getValue()[9]).isEqualTo("ISOLATED");
+        assertThat(args.getValue()[10]).isEqualTo("LONG");
+        assertThat(args.getValue()[11]).isEqualTo(200L);
+        assertThat(args.getValue()[12]).isEqualTo(500L);
     }
 
     @Test
     void liquidationFeeSnapshotFiltersUserFeeByInstrumentProductLine() {
         LiquidationOrderRepository repository = repository();
-        givenFeeSnapshot();
+        givenFeeSnapshot(ProductLine.OPTION);
         when(sequenceRepository.nextTradingSequence("order")).thenReturn(7001L);
         when(sequenceRepository.nextTradingSequence("event")).thenReturn(7002L);
         when(sequenceRepository.nextTradingSequence("command")).thenReturn(7003L);
@@ -140,6 +141,9 @@ class LiquidationOrderRepositoryTest {
                 .contains("AND product_line = (SELECT product_line FROM instrument_fee)")
                 .contains("source_priority")
                 .contains("ORDER BY priority ASC, source_priority ASC");
+        ArgumentCaptor<Object[]> orderArgs = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(contains("INSERT INTO trading_orders"), orderArgs.capture());
+        assertThat(orderArgs.getValue()[1]).isEqualTo("OPTION");
     }
 
     @Test
@@ -309,11 +313,17 @@ class LiquidationOrderRepositoryTest {
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private void givenFeeSnapshot() {
+        givenFeeSnapshot(ProductLine.LINEAR_PERPETUAL);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void givenFeeSnapshot(ProductLine productLine) {
         when(jdbcTemplate.query(contains("WITH instrument_fee"), any(RowMapper.class),
                 any(String.class), eq(8L), any(String.class), eq(2002L), any(String.class), any(), any()))
                 .thenAnswer(invocation -> {
                     RowMapper mapper = invocation.getArgument(1);
                     ResultSet rs = org.mockito.Mockito.mock(ResultSet.class);
+                    when(rs.getString("product_line")).thenReturn(productLine.name());
                     when(rs.getLong("maker_fee_rate_ppm")).thenReturn(200L);
                     when(rs.getLong("taker_fee_rate_ppm")).thenReturn(500L);
                     return java.util.List.of(mapper.mapRow(rs, 0));

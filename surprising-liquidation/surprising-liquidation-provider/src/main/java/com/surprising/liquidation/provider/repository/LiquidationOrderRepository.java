@@ -2,6 +2,7 @@ package com.surprising.liquidation.provider.repository;
 
 import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.liquidation.provider.model.TradingOutboxRecord;
+import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineSql;
 import com.surprising.trading.api.model.OrderCommandEvent;
 import com.surprising.trading.api.model.OrderCommandType;
@@ -54,15 +55,16 @@ public class LiquidationOrderRepository {
         FeeSnapshot feeSnapshot = feeSnapshot(userId, symbol, instrumentVersion, now);
         int orderRows = jdbcTemplate.update("""
                 INSERT INTO trading_orders (
-                    order_id, user_id, client_order_id, symbol, instrument_version, side, order_type, time_in_force,
+                    order_id, product_line, user_id, client_order_id, symbol, instrument_version, side, order_type, time_in_force,
                     price_ticks, quantity_steps, executed_quantity_steps, remaining_quantity_steps,
                     margin_mode, position_side, maker_fee_rate_ppm, taker_fee_rate_ppm,
                     reduce_only, post_only, status, reject_reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'MARKET', 'IOC', 0, ?, 0, ?, ?, ?, ?, ?,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'MARKET', 'IOC', 0, ?, 0, ?, ?, ?, ?, ?,
                     TRUE, FALSE, 'ACCEPTED', NULL, ?, ?)
-                """, orderId, userId, clientOrderId, symbol, instrumentVersion, side.name(), quantitySteps, quantitySteps,
-                MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name(),
-                feeSnapshot.makerFeeRatePpm(), feeSnapshot.takerFeeRatePpm(), Timestamp.from(now), Timestamp.from(now));
+                """, orderId, feeSnapshot.productLine().name(), userId, clientOrderId, symbol, instrumentVersion,
+                side.name(), quantitySteps, quantitySteps, MarginMode.defaultIfNull(marginMode).name(),
+                PositionSide.defaultIfNull(positionSide).name(), feeSnapshot.makerFeeRatePpm(),
+                feeSnapshot.takerFeeRatePpm(), Timestamp.from(now), Timestamp.from(now));
         if (orderRows != 1) {
             throw new IllegalStateException("failed to create liquidation trading order");
         }
@@ -148,11 +150,13 @@ public class LiquidationOrderRepository {
                      LIMIT 1
                 )
                 SELECT COALESCE(u.maker_fee_rate_ppm, i.maker_fee_rate_ppm) AS maker_fee_rate_ppm,
-                       COALESCE(u.taker_fee_rate_ppm, i.taker_fee_rate_ppm) AS taker_fee_rate_ppm
+                       COALESCE(u.taker_fee_rate_ppm, i.taker_fee_rate_ppm) AS taker_fee_rate_ppm,
+                       i.product_line
                   FROM instrument_fee i
              LEFT JOIN active_user_fee u ON TRUE
                 """.formatted(ProductLineSql.contractTypeProductLineCase("contract_type")),
                 (rs, rowNum) -> new FeeSnapshot(
+                ProductLine.valueOf(rs.getString("product_line")),
                 rs.getLong("maker_fee_rate_ppm"),
                 rs.getLong("taker_fee_rate_ppm")), symbol, instrumentVersion, symbol, userId, symbol,
                 Timestamp.from(now), Timestamp.from(now)).stream().findFirst()
@@ -375,7 +379,7 @@ public class LiquidationOrderRepository {
         }
     }
 
-    private record FeeSnapshot(long makerFeeRatePpm, long takerFeeRatePpm) {
+    private record FeeSnapshot(ProductLine productLine, long makerFeeRatePpm, long takerFeeRatePpm) {
     }
 
     private String truncate(String value) {
