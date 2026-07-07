@@ -1,9 +1,12 @@
 package com.surprising.trading.matching.repository;
 
+import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.StoredOutboxRecord;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -12,10 +15,19 @@ public class MatchingOutboxRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final MatchingSequenceRepository sequenceRepository;
+    private final MatchingProperties properties;
 
     public MatchingOutboxRepository(JdbcTemplate jdbcTemplate, MatchingSequenceRepository sequenceRepository) {
+        this(jdbcTemplate, sequenceRepository, new MatchingProperties());
+    }
+
+    @Autowired
+    public MatchingOutboxRepository(JdbcTemplate jdbcTemplate,
+                                    MatchingSequenceRepository sequenceRepository,
+                                    MatchingProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
+        this.properties = properties == null ? new MatchingProperties() : properties;
     }
 
     public void enqueue(String aggregateType,
@@ -37,7 +49,8 @@ public class MatchingOutboxRepository {
     }
 
     public List<StoredOutboxRecord> claimPending(int limit, Instant leaseUntil, Instant now) {
-        return jdbcTemplate.query("""
+        List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("""
                 WITH earliest AS (
                     SELECT DISTINCT ON (topic, event_key)
                            id
@@ -48,13 +61,16 @@ public class MatchingOutboxRepository {
                 ),
                 candidates AS (
                     SELECT e.id
-                      FROM trading_outbox_events e
-                      JOIN earliest c ON c.id = e.id
-                     WHERE e.published_at IS NULL
-                       AND e.aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH')
-                       AND e.next_attempt_at <= ?
-                       AND pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))
-                     ORDER BY e.topic, e.event_key, e.id
+                  FROM trading_outbox_events e
+                  JOIN earliest c ON c.id = e.id
+                 WHERE e.published_at IS NULL
+                   AND e.aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH')
+                """);
+        appendTopicScope(sql, "e", args);
+        sql.append("""
+                   AND e.next_attempt_at <= ?
+                   AND pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))
+                 ORDER BY e.topic, e.event_key, e.id
                      LIMIT ?
                      FOR UPDATE OF e SKIP LOCKED
                 )
@@ -64,17 +80,23 @@ public class MatchingOutboxRepository {
                   FROM candidates c
                  WHERE e.id = c.id
              RETURNING e.id, e.topic, e.event_key, e.payload::text AS payload, e.next_attempt_at
-                """, (rs, rowNum) -> new StoredOutboxRecord(
+                """);
+        args.add(Timestamp.from(now));
+        args.add(Math.max(1, limit));
+        args.add(Timestamp.from(leaseUntil));
+        args.add(Timestamp.from(now));
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new StoredOutboxRecord(
                 rs.getLong("id"),
                 rs.getString("topic"),
                 rs.getString("event_key"),
                 rs.getString("payload"),
                 rs.getTimestamp("next_attempt_at").toInstant()),
-                Timestamp.from(now), Math.max(1, limit), Timestamp.from(leaseUntil), Timestamp.from(now));
+                args.toArray());
     }
 
     public List<StoredOutboxRecord> lockPending(int limit) {
-        return jdbcTemplate.query("""
+        List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("""
                 WITH earliest AS (
                     SELECT DISTINCT ON (topic, event_key)
                            id
@@ -88,17 +110,22 @@ public class MatchingOutboxRepository {
                   JOIN earliest c ON c.id = e.id
                  WHERE e.published_at IS NULL
                    AND e.aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH')
+                """);
+        appendTopicScope(sql, "e", args);
+        sql.append("""
                    AND e.next_attempt_at <= now()
                    AND pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))
                  ORDER BY e.topic, e.event_key, e.id
                  LIMIT ?
                  FOR UPDATE OF e SKIP LOCKED
-                """, (rs, rowNum) -> new StoredOutboxRecord(
+                """);
+        args.add(limit);
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new StoredOutboxRecord(
                 rs.getLong("id"),
                 rs.getString("topic"),
                 rs.getString("event_key"),
                 rs.getString("payload"),
-                rs.getTimestamp("next_attempt_at").toInstant()), limit);
+                rs.getTimestamp("next_attempt_at").toInstant()), args.toArray());
     }
 
     public void markPublished(long id, Instant now) {
@@ -129,6 +156,17 @@ public class MatchingOutboxRepository {
             return null;
         }
         return value.length() <= 1000 ? value : value.substring(0, 1000);
+    }
+
+    private void appendTopicScope(StringBuilder sql, String alias, List<Object> args) {
+        MatchingProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled()) {
+            return;
+        }
+        sql.append("   AND ").append(alias).append(".topic IN (?, ?, ?)\n");
+        args.add(kafka.getMatchResultsTopic());
+        args.add(kafka.getMatchTradesTopic());
+        args.add(kafka.getOrderBookDepthTopic());
     }
 
     private void requireSingleRow(int rows, String operation) {
