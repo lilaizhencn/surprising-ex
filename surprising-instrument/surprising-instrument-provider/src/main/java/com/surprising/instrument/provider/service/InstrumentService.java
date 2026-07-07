@@ -11,6 +11,7 @@ import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.instrument.provider.config.InstrumentProperties;
 import com.surprising.instrument.provider.repository.InstrumentRepository;
+import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Instant;
 import java.util.Optional;
@@ -39,6 +40,14 @@ public class InstrumentService {
     public InstrumentResponse latest(String symbol) {
         return instrumentRepository.latest(normalizeSymbol(symbol))
                 .orElseThrow(() -> new IllegalStateException("instrument not found: " + symbol));
+    }
+
+    public InstrumentResponse latest(String symbol, ProductLine productLine) {
+        InstrumentResponse response = latest(symbol);
+        if (productLine == null || response.contractType().productLine() == productLine) {
+            return response;
+        }
+        throw new IllegalStateException("instrument not found for productLine: " + symbol + ":" + productLine.name());
     }
 
     public InstrumentResponse version(String symbol, long version) {

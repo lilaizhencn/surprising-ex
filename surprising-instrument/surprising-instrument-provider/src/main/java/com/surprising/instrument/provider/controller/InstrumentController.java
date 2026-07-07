@@ -7,10 +7,13 @@ import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.provider.service.InstrumentService;
+import com.surprising.product.api.ProductLine;
+import java.util.Locale;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,9 +29,13 @@ public class InstrumentController {
     }
 
     @GetMapping(InstrumentApiPaths.BASE_PATH + "/latest")
-    public InstrumentResponse latest(@RequestParam("symbol") String symbol) {
+    public InstrumentResponse latest(@RequestParam("symbol") String symbol,
+                                     @RequestHeader(value = "X-Product-Line", required = false)
+                                     String productLineHeader,
+                                     @RequestParam(value = "productLine", required = false)
+                                     String productLineValue) {
         try {
-            return instrumentService.latest(symbol);
+            return instrumentService.latest(symbol, productLine(productLineValue, productLineHeader));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -108,5 +115,23 @@ public class InstrumentController {
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         }
+    }
+
+    private ProductLine productLine(String queryValue, String headerValue) {
+        String value = queryValue != null && !queryValue.isBlank() ? queryValue : headerValue;
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim();
+        String enumName = normalized.toUpperCase(Locale.ROOT).replace('-', '_');
+        for (ProductLine productLine : ProductLine.values()) {
+            if (productLine.name().equals(enumName)
+                    || productLine.topicSegment().equalsIgnoreCase(normalized)
+                    || productLine.accountTypeCode().equalsIgnoreCase(normalized)
+                    || productLine.contractTypeCode().equalsIgnoreCase(normalized)) {
+                return productLine;
+            }
+        }
+        throw new IllegalArgumentException("unsupported productLine: " + value);
     }
 }

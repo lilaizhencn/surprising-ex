@@ -1,9 +1,11 @@
 package com.surprising.instrument.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.surprising.instrument.api.model.ContractSettlementMethod;
 import com.surprising.instrument.api.model.ContractType;
@@ -16,8 +18,10 @@ import com.surprising.instrument.api.model.OptionExerciseStyle;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.instrument.provider.config.InstrumentProperties;
 import com.surprising.instrument.provider.repository.InstrumentRepository;
+import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -71,9 +75,38 @@ class InstrumentServiceTest {
                 org.mockito.ArgumentMatchers.any(Object.class));
     }
 
+    @Test
+    void latestAcceptsMatchingProductLine() {
+        InstrumentRepository repository = mock(InstrumentRepository.class);
+        InstrumentService service = service(repository);
+        InstrumentResponse instrument = option("BTC-USDT-260327-50000-C", InstrumentStatus.TRADING);
+        when(repository.latest("BTC-USDT-260327-50000-C")).thenReturn(Optional.of(instrument));
+
+        InstrumentResponse response = service.latest("BTC-USDT-260327-50000-C", ProductLine.OPTION);
+
+        assertThat(response).isSameAs(instrument);
+    }
+
+    @Test
+    void latestRejectsMismatchedProductLine() {
+        InstrumentRepository repository = mock(InstrumentRepository.class);
+        InstrumentService service = service(repository);
+        when(repository.latest("BTC-USDT-260327"))
+                .thenReturn(Optional.of(delivery("BTC-USDT-260327", InstrumentStatus.TRADING)));
+
+        assertThatThrownBy(() -> service.latest("BTC-USDT-260327", ProductLine.LINEAR_PERPETUAL))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("instrument not found for productLine");
+    }
+
     private InstrumentService service(KafkaTemplate<String, Object> kafkaTemplate, InstrumentProperties properties) {
         return new InstrumentService(mock(InstrumentRepository.class), mock(InstrumentValidator.class),
                 properties, kafkaTemplate);
+    }
+
+    private InstrumentService service(InstrumentRepository repository) {
+        return new InstrumentService(repository, mock(InstrumentValidator.class),
+                new InstrumentProperties(), kafkaTemplate());
     }
 
     @SuppressWarnings("unchecked")
