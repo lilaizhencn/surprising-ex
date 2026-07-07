@@ -50,6 +50,7 @@ public class ExpiringContractSettlementConsumer {
         try {
             DeliverySettlementEvent event = objectMapper.readValue(record.value(), DeliverySettlementEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "delivery settlement");
+            requireCurrentProductTopic(record.topic(), deliverySettlementsTopic(), "delivery settlement");
             int settled = accountService.processDeliverySettlement(event);
             log.info("Processed delivery settlement symbol={} version={} positions={}",
                     event.symbol(), event.version(), settled);
@@ -74,6 +75,7 @@ public class ExpiringContractSettlementConsumer {
         try {
             OptionExerciseEvent event = objectMapper.readValue(record.value(), OptionExerciseEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "option exercise");
+            requireCurrentProductTopic(record.topic(), optionExercisesTopic(), "option exercise");
             int settled = accountService.processOptionExercise(event);
             log.info("Processed option exercise symbol={} version={} positions={}",
                     event.symbol(), event.version(), settled);
@@ -101,5 +103,21 @@ public class ExpiringContractSettlementConsumer {
 
     public String groupId() {
         return properties.getKafka().getGroupId();
+    }
+
+    private void requireCurrentProductTopic(String topic, String expectedTopic, String eventName) {
+        if (!properties.getKafka().isProductTopicsEnabled()) {
+            return;
+        }
+        if (!expectedTopic.equals(topic)) {
+            throw new ProductTopicMismatchException(eventName + " topic must match current product line: expected="
+                    + expectedTopic + " actual=" + topic);
+        }
+    }
+
+    private static final class ProductTopicMismatchException extends RuntimeException {
+        private ProductTopicMismatchException(String message) {
+            super(message);
+        }
     }
 }

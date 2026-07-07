@@ -68,6 +68,50 @@ class ExpiringContractSettlementConsumerTest {
     }
 
     @Test
+    void rejectsDeliverySettlementFromOtherProductTopicBeforeSettlement() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        RecordingAccountService accountService = new RecordingAccountService();
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        ExpiringContractSettlementConsumer consumer =
+                new ExpiringContractSettlementConsumer(objectMapper, accountService, properties);
+
+        assertThatThrownBy(() -> consumer.onDeliverySettlement(new ConsumerRecord<>(
+                "surprising.inverse-delivery.delivery.settlements.v1", 0, 1L, "BTC-USDT-260327",
+                objectMapper.writeValueAsString(deliveryEvent("BTC-USDT-260327")))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("failed to process delivery settlement")
+                .satisfies(ex -> assertThat(ex.getCause())
+                        .hasMessageContaining("delivery settlement topic must match current product line")
+                        .hasMessageContaining("surprising.linear-delivery.delivery.settlements.v1"));
+
+        assertThat(accountService.deliveryEvent).isNull();
+    }
+
+    @Test
+    void rejectsOptionExerciseFromOtherProductTopicBeforeSettlement() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        RecordingAccountService accountService = new RecordingAccountService();
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        ExpiringContractSettlementConsumer consumer =
+                new ExpiringContractSettlementConsumer(objectMapper, accountService, properties);
+
+        assertThatThrownBy(() -> consumer.onOptionExercise(new ConsumerRecord<>(
+                "surprising.linear-delivery.option.exercises.v1", 0, 1L, "BTC-USDT-260925-70000-C",
+                objectMapper.writeValueAsString(optionEvent("BTC-USDT-260925-70000-C")))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("failed to process option exercise")
+                .satisfies(ex -> assertThat(ex.getCause())
+                        .hasMessageContaining("option exercise topic must match current product line")
+                        .hasMessageContaining("surprising.option.option.exercises.v1"));
+
+        assertThat(accountService.optionEvent).isNull();
+    }
+
+    @Test
     void exposesResolvedLifecycleTopicsAndGroupFromProperties() {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
