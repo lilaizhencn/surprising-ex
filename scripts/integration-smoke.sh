@@ -98,28 +98,28 @@ UPDATE instrument_current_versions
  WHERE symbol = 'BTC-USDT';
 
 INSERT INTO trading_orders (
-    order_id, user_id, client_order_id, symbol, instrument_version, side, order_type, time_in_force,
+    order_id, product_line, user_id, client_order_id, symbol, instrument_version, side, order_type, time_in_force,
     price_ticks, quantity_steps, executed_quantity_steps, remaining_quantity_steps,
     reduce_only, post_only, status, reject_reason, created_at, updated_at
 ) VALUES
-    (9001, 1001, 'maker-1', 'BTC-USDT', 1, 'SELL', 'LIMIT', 'GTC', 600000, 10, 3, 7, FALSE, FALSE, 'PARTIALLY_FILLED', NULL, now(), now()),
-    (9002, 2002, 'taker-1', 'BTC-USDT', 1, 'BUY', 'LIMIT', 'IOC', 600000, 3, 3, 0, FALSE, FALSE, 'FILLED', NULL, now(), now());
+    (9001, 'LINEAR_PERPETUAL', 1001, 'maker-1', 'BTC-USDT', 1, 'SELL', 'LIMIT', 'GTC', 600000, 10, 3, 7, FALSE, FALSE, 'PARTIALLY_FILLED', NULL, now(), now()),
+    (9002, 'LINEAR_PERPETUAL', 2002, 'taker-1', 'BTC-USDT', 1, 'BUY', 'LIMIT', 'IOC', 600000, 3, 3, 0, FALSE, FALSE, 'FILLED', NULL, now(), now());
 
 INSERT INTO trading_match_results (
-    command_id, order_id, user_id, symbol, instrument_version, command_type, result_code,
+    command_id, product_line, order_id, user_id, symbol, instrument_version, command_type, result_code,
     filled_quantity_steps, order_status, event_time
-) VALUES (9101, 9002, 2002, 'BTC-USDT', 1, 'PLACE', 'SUCCESS', 3, 'FILLED', now());
+) VALUES (9101, 'LINEAR_PERPETUAL', 9002, 2002, 'BTC-USDT', 1, 'PLACE', 'SUCCESS', 3, 'FILLED', now());
 
 INSERT INTO trading_match_trades (
-    trade_id, command_id, symbol, taker_order_id, taker_instrument_version, taker_user_id, taker_side,
+    trade_id, command_id, product_line, symbol, taker_order_id, taker_instrument_version, taker_user_id, taker_side,
     maker_order_id, maker_instrument_version, maker_user_id, price_ticks, quantity_steps,
     taker_order_completed, maker_order_completed, event_time
-) VALUES (9201, 9101, 'BTC-USDT', 9002, 1, 2002, 'BUY', 9001, 1, 1001, 600000, 3, TRUE, FALSE, now());
+) VALUES (9201, 9101, 'LINEAR_PERPETUAL', 'BTC-USDT', 9002, 1, 2002, 'BUY', 9001, 1, 1001, 600000, 3, TRUE, FALSE, now());
 
-INSERT INTO account_positions (user_id, symbol, instrument_version, signed_quantity_steps, entry_price_ticks, realized_pnl_units, updated_at)
+INSERT INTO account_positions (product_line, user_id, symbol, instrument_version, signed_quantity_steps, entry_price_ticks, realized_pnl_units, updated_at)
 VALUES
-    (1001, 'BTC-USDT', 1, -3, 600000, 0, now()),
-    (2002, 'BTC-USDT', 1, 3, 600000, 0, now());
+    ('LINEAR_PERPETUAL', 1001, 'BTC-USDT', 1, -3, 600000, 0, now()),
+    ('LINEAR_PERPETUAL', 2002, 'BTC-USDT', 1, 3, 600000, 0, now());
 
 INSERT INTO price_mark_ticks (
     symbol, sequence, mark_price, mark_price_units, index_price, price1, price2, last_trade_price,
@@ -157,29 +157,29 @@ BEGIN
     END IF;
 
     INSERT INTO risk_account_snapshots (
-        snapshot_id, user_id, settle_asset, wallet_balance_units, unrealized_pnl_units,
+        snapshot_id, product_line, user_id, account_type, settle_asset, wallet_balance_units, unrealized_pnl_units,
         equity_units, maintenance_margin_units, margin_ratio_ppm, status, event_time
-    ) VALUES (9301, 2002, 'USDT', 100000000, -300000000, -200000000, 88500000, 1000000000000, 'LIQUIDATION', now());
+    ) VALUES (9301, 'LINEAR_PERPETUAL', 2002, 'USDT_PERPETUAL', 'USDT', 100000000, -300000000, -200000000, 88500000, 1000000000000, 'LIQUIDATION', now());
 
     INSERT INTO risk_position_snapshots (
-        snapshot_id, user_id, symbol, instrument_version, settle_asset, signed_quantity_steps,
+        product_line, snapshot_id, user_id, symbol, instrument_version, settle_asset, signed_quantity_steps,
         entry_price_ticks, mark_price_ticks, notional_units, unrealized_pnl_units,
         maintenance_margin_units, margin_ratio_ppm, status, event_time
-    ) VALUES (9301, 2002, 'BTC-USDT', 1, 'USDT', 3, 600000, 590000,
+    ) VALUES ('LINEAR_PERPETUAL', 9301, 2002, 'BTC-USDT', 1, 'USDT', 3, 600000, 590000,
               17700000000, -300000000, 88500000, 1000000000000, 'LIQUIDATION', now());
 
     INSERT INTO risk_liquidation_candidates (
-        candidate_id, snapshot_id, user_id, symbol, instrument_version, settle_asset,
+        candidate_id, product_line, snapshot_id, user_id, symbol, instrument_version, account_type, settle_asset,
         signed_quantity_steps, mark_price_ticks, equity_units, maintenance_margin_units,
         margin_ratio_ppm, status, event_time
-    ) VALUES (9401, 9301, 2002, 'BTC-USDT', 1, 'USDT', 3, 590000, -200000000, 88500000, 1000000000000, 'NEW', now())
+    ) VALUES (9401, 'LINEAR_PERPETUAL', 9301, 2002, 'BTC-USDT', 1, 'USDT_PERPETUAL', 'USDT', 3, 590000, -200000000, 88500000, 1000000000000, 'NEW', now())
     ON CONFLICT DO NOTHING;
 
     INSERT INTO risk_liquidation_candidates (
-        candidate_id, snapshot_id, user_id, symbol, instrument_version, settle_asset,
+        candidate_id, product_line, snapshot_id, user_id, symbol, instrument_version, account_type, settle_asset,
         signed_quantity_steps, mark_price_ticks, equity_units, maintenance_margin_units,
         margin_ratio_ppm, status, event_time
-    ) VALUES (9402, 9301, 2002, 'BTC-USDT', 1, 'USDT', 3, 590000, -200000000, 88500000, 1000000000000, 'NEW', now())
+    ) VALUES (9402, 'LINEAR_PERPETUAL', 9301, 2002, 'BTC-USDT', 1, 'USDT_PERPETUAL', 'USDT', 3, 590000, -200000000, 88500000, 1000000000000, 'NEW', now())
     ON CONFLICT DO NOTHING;
 
     SELECT count(*) INTO active_candidates
@@ -317,12 +317,12 @@ BEGIN
 END $$;
 
 INSERT INTO account_positions (
-    user_id, symbol, instrument_version, signed_quantity_steps,
+    product_line, user_id, symbol, instrument_version, signed_quantity_steps,
     entry_price_ticks, realized_pnl_units, updated_at
-) VALUES (5005, 'BTC-USDT', 1, 10, 580000, 0, now());
+) VALUES ('LINEAR_PERPETUAL', 5005, 'BTC-USDT', 1, 10, 580000, 0, now());
 
-INSERT INTO account_position_margins (user_id, symbol, asset, margin_units, updated_at)
-VALUES (5005, 'BTC-USDT', 'USDT', 1000, now());
+INSERT INTO account_position_margins (product_line, user_id, symbol, asset, margin_units, updated_at)
+VALUES ('LINEAR_PERPETUAL', 5005, 'BTC-USDT', 'USDT', 1000, now());
 
 DO $$
 DECLARE
@@ -445,8 +445,8 @@ INSERT INTO instruments (
 INSERT INTO instrument_current_versions (symbol, version, updated_at)
 VALUES ('BTC-USD', 1, now());
 
-INSERT INTO account_positions (user_id, symbol, instrument_version, signed_quantity_steps, entry_price_ticks, realized_pnl_units, updated_at)
-VALUES (3003, 'BTC-USD', 1, 1, 50000, 0, now());
+INSERT INTO account_positions (product_line, user_id, symbol, instrument_version, signed_quantity_steps, entry_price_ticks, realized_pnl_units, updated_at)
+VALUES ('INVERSE_PERPETUAL', 3003, 'BTC-USD', 1, 1, 50000, 0, now());
 
 INSERT INTO price_mark_ticks (
     symbol, sequence, mark_price, mark_price_units, index_price, price1, price2, last_trade_price,
