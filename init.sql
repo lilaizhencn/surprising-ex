@@ -1508,6 +1508,7 @@ CREATE TABLE IF NOT EXISTS trading_matching_assets (
 );
 
 CREATE TABLE IF NOT EXISTS trading_matching_symbols (
+    product_line        TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     symbol              TEXT PRIMARY KEY,
     symbol_id           INTEGER NOT NULL UNIQUE,
     base_asset          TEXT NOT NULL,
@@ -1519,6 +1520,10 @@ CREATE TABLE IF NOT EXISTS trading_matching_symbols (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT trading_matching_symbols_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT trading_matching_symbols_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT trading_matching_symbols_symbol_id_positive CHECK (symbol_id > 0),
     CONSTRAINT trading_matching_symbols_base_asset_fk
         FOREIGN KEY (base_asset) REFERENCES trading_matching_assets(asset),
@@ -1528,8 +1533,45 @@ CREATE TABLE IF NOT EXISTS trading_matching_symbols (
         FOREIGN KEY (settle_asset) REFERENCES trading_matching_assets(asset)
 );
 
+ALTER TABLE trading_matching_symbols
+    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+
+UPDATE trading_matching_symbols s
+   SET product_line = CASE i.contract_type
+       WHEN 'SPOT' THEN 'SPOT'
+       WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+       WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+       WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+       WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+       WHEN 'VANILLA_OPTION' THEN 'OPTION'
+       ELSE s.product_line
+   END
+  FROM instruments i
+  JOIN instrument_current_versions c
+    ON c.symbol = i.symbol AND c.version = i.version
+ WHERE i.symbol = s.symbol;
+
+ALTER TABLE trading_matching_symbols
+    DROP CONSTRAINT IF EXISTS trading_matching_symbols_pkey;
+
+ALTER TABLE trading_matching_symbols
+    DROP CONSTRAINT IF EXISTS trading_matching_symbols_product_line_check;
+
+ALTER TABLE trading_matching_symbols
+    ADD CONSTRAINT trading_matching_symbols_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    );
+
+ALTER TABLE trading_matching_symbols
+    ADD CONSTRAINT trading_matching_symbols_pkey PRIMARY KEY (product_line, symbol);
+
+DROP INDEX IF EXISTS trading_matching_symbols_enabled_idx;
 CREATE INDEX IF NOT EXISTS trading_matching_symbols_enabled_idx
-    ON trading_matching_symbols (enabled, symbol_id);
+    ON trading_matching_symbols (product_line, enabled, symbol_id);
+
+CREATE INDEX IF NOT EXISTS trading_matching_symbols_symbol_idx
+    ON trading_matching_symbols (symbol);
 
 CREATE TABLE IF NOT EXISTS trading_match_results (
     command_id              BIGINT PRIMARY KEY,

@@ -50,6 +50,20 @@ class MatchingSymbolRepositoryTest {
         assertThat(jdbcTemplate.args).containsExactly("BTC-USD-240927", "INVERSE_DELIVERY");
     }
 
+    @Test
+    void findsMatchingSymbolWithinCurrentProductLine() {
+        RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
+        MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductLine(ProductLine.SPOT);
+        properties.getKafka().setProductTopicsEnabled(true);
+        MatchingSymbolRepository repository = new MatchingSymbolRepository(jdbcTemplate, null, properties);
+
+        repository.findMatchingSymbol("BTC-USDT");
+
+        assertThat(jdbcTemplate.sql).contains("product_line = ?").contains("symbol = ?");
+        assertThat(jdbcTemplate.args).containsExactly("SPOT", "BTC-USDT");
+    }
+
     private static final class RecordingJdbcTemplate extends JdbcTemplate {
         private String sql;
         private Object[] args = new Object[0];
