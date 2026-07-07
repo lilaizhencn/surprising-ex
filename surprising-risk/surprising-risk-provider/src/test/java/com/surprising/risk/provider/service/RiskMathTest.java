@@ -51,6 +51,14 @@ class RiskMathTest {
     }
 
     @Test
+    void optionLongHasNoMaintenanceMarginAfterPremiumIsPaid() {
+        assertThat(RiskMath.maintenanceMarginUnits(ContractType.VANILLA_OPTION, 6L, 90L,
+                100L, 1L, 100_000_000L, 5_000L)).isZero();
+        assertThat(RiskMath.maintenanceMarginUnits(ContractType.VANILLA_OPTION, -6L, 90L,
+                100L, 1L, 100_000_000L, 5_000L)).isEqualTo(270L);
+    }
+
+    @Test
     void rejectsOverflowInsteadOfWrappingRiskAmounts() {
         assertThatThrownBy(() -> RiskMath.notionalUnits(ContractType.LINEAR_PERPETUAL,
                 Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE, 1L, 1L))

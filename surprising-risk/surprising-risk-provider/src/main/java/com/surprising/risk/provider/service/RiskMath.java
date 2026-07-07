@@ -68,6 +68,9 @@ public final class RiskMath {
                                               long priceTickUnits,
                                               long settleScaleUnits,
                                               long maintenanceMarginRatePpm) {
+        if (contractType != null && contractType.isOption() && signedQuantitySteps > 0) {
+            return 0L;
+        }
         return PerpetualContractMath.maintenanceMarginUnits(contractType, signedQuantitySteps, markPriceTicks,
                 notionalMultiplierUnits, priceTickUnits, settleScaleUnits, maintenanceMarginRatePpm);
     }

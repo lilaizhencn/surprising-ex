@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -16,6 +17,7 @@ import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.model.CalculatedPositionRisk;
 import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
+import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -364,6 +366,26 @@ class RiskRepositoryTest {
     }
 
     @Test
+    void calculatePositionsKeepsOptionLongMaintenanceMarginZero() throws Exception {
+        RiskRepository repository = new RiskRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(10_000L))).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            RowMapper<CalculatedPositionRisk> mapper = invocation.getArgument(1);
+            return List.of(
+                    mapper.mapRow(optionPositionRow(6L), 0),
+                    mapper.mapRow(optionPositionRow(-6L), 1));
+        });
+
+        List<CalculatedPositionRisk> positions = repository.calculatePositions(Duration.ofSeconds(10));
+
+        assertThat(positions).hasSize(2);
+        assertThat(positions.get(0).signedQuantitySteps()).isEqualTo(6L);
+        assertThat(positions.get(0).maintenanceMarginUnits()).isZero();
+        assertThat(positions.get(1).signedQuantitySteps()).isEqualTo(-6L);
+        assertThat(positions.get(1).maintenanceMarginUnits()).isEqualTo(270L);
+    }
+
+    @Test
     void calculatePositionsForGroupRequiresWholeGroupFreshness() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(10_000L),
@@ -391,5 +413,25 @@ class RiskRepositoryTest {
     @SuppressWarnings("unchecked")
     private RowMapper<Object> anyRowMapper() {
         return any(RowMapper.class);
+    }
+
+    private ResultSet optionPositionRow(long signedQuantitySteps) throws Exception {
+        ResultSet rs = mock(ResultSet.class);
+        when(rs.getString("contract_type")).thenReturn("VANILLA_OPTION");
+        when(rs.getLong("signed_quantity_steps")).thenReturn(signedQuantitySteps);
+        when(rs.getLong("entry_price_ticks")).thenReturn(100L);
+        when(rs.getLong("mark_price_ticks")).thenReturn(90L);
+        when(rs.getLong("notional_multiplier_units")).thenReturn(100L);
+        when(rs.getLong("price_tick_units")).thenReturn(1L);
+        when(rs.getLong("settle_scale_units")).thenReturn(100_000_000L);
+        when(rs.getLong("maintenance_margin_rate_ppm")).thenReturn(5_000L);
+        when(rs.getLong("user_id")).thenReturn(1001L);
+        when(rs.getString("symbol")).thenReturn("BTC-USDT-260925-70000-C");
+        when(rs.getString("margin_mode")).thenReturn("CROSS");
+        when(rs.getString("position_side")).thenReturn("NET");
+        when(rs.getLong("instrument_version")).thenReturn(6L);
+        when(rs.getString("settle_asset")).thenReturn("USDT");
+        when(rs.getLong("position_margin_units")).thenReturn(0L);
+        return rs;
     }
 }
