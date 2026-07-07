@@ -188,6 +188,7 @@ public class LiquidationRepository {
                 SELECT remaining_quantity_steps
                   FROM trading_orders
                  WHERE user_id = ?
+                   AND product_line = ?
                    AND symbol = ?
                    AND margin_mode = ?
                    AND position_side = ?
@@ -196,9 +197,9 @@ public class LiquidationRepository {
                    AND reduce_only = TRUE
                    AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                 FOR UPDATE
-                """, (rs, rowNum) -> rs.getLong("remaining_quantity_steps"), userId, symbol,
-                MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name(),
-                instrumentVersion, closeSide.name())
+                """, (rs, rowNum) -> rs.getLong("remaining_quantity_steps"), userId,
+                currentProductLine().name(), symbol, MarginMode.defaultIfNull(marginMode).name(),
+                PositionSide.defaultIfNull(positionSide).name(), instrumentVersion, closeSide.name())
                 .stream()
                 .mapToLong(Long::longValue)
                 .reduce(0L, Math::addExact);

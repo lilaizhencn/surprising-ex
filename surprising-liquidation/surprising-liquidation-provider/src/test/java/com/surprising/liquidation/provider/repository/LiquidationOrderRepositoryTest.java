@@ -44,7 +44,8 @@ class LiquidationOrderRepositoryTest {
     void preemptsOpenReduceOnlyCloseOrdersBeforeLiquidationOrder() throws Exception {
         LiquidationOrderRepository repository = repository();
         when(jdbcTemplate.query(contains("FROM trading_orders"), any(RowMapper.class), eq(2002L),
-                eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(8L), eq("SELL"))).thenAnswer(invocation -> {
+                eq("LINEAR_PERPETUAL"), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(8L), eq("SELL")))
+                .thenAnswer(invocation -> {
                     RowMapper mapper = invocation.getArgument(1);
                     return java.util.List.of(
                             mapper.mapRow(orderRow(101L, "reduce-101", "ACCEPTED"), 0),
@@ -68,6 +69,30 @@ class LiquidationOrderRepositoryTest {
         assertThat(outboxArgs.getAllValues())
                 .extracting(args -> args[1] + ":" + args[5])
                 .containsExactly("ORDER:CANCEL_REQUESTED", "ORDER:CANCEL", "ORDER:CANCEL");
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void preemptOpenReduceOnlyCloseOrdersFiltersByCurrentProductLine() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        LiquidationOrderRepository repository = new LiquidationOrderRepository(jdbcTemplate, sequenceRepository,
+                properties);
+        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), eq(2002L),
+                eq("LINEAR_DELIVERY"), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(8L), eq("SELL")))
+                .thenReturn(java.util.List.of());
+
+        int preempted = repository.cancelOpenReduceOnlyCloseOrders(2002L, "BTC-USDT", MarginMode.CROSS,
+                PositionSide.NET, 8L, OrderSide.SELL, Instant.parse("2026-07-01T00:00:00Z"), value -> "{}");
+
+        assertThat(preempted).isZero();
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), eq(2002L),
+                eq("LINEAR_DELIVERY"), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(8L), eq("SELL"));
+        assertThat(sql.getValue())
+                .contains("product_line = ?")
+                .contains("FOR UPDATE");
     }
 
     @Test

@@ -203,12 +203,33 @@ class LiquidationRepositoryTest {
     void lockOpenReduceOnlyStepsFailsOnOverflow() {
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("FROM trading_orders"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(7L), eq("SELL")))
+                eq(1001L), eq("LINEAR_PERPETUAL"), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(7L), eq("SELL")))
                 .thenReturn(List.of(Long.MAX_VALUE, 1L));
 
         assertThatThrownBy(() -> repository.lockOpenReduceOnlySteps(1001L, "BTC-USDT", 7L,
                 com.surprising.trading.api.model.OrderSide.SELL))
                 .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    void lockOpenReduceOnlyStepsFiltersByCurrentProductLine() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate, properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(),
+                eq(1001L), eq("LINEAR_DELIVERY"), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(7L), eq("SELL")))
+                .thenReturn(List.of(2L, 3L));
+
+        long steps = repository.lockOpenReduceOnlySteps(1001L, "BTC-USDT", 7L, OrderSide.SELL);
+
+        assertThat(steps).isEqualTo(5L);
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
+                eq(1001L), eq("LINEAR_DELIVERY"), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(7L), eq("SELL"));
+        assertThat(sql.getValue())
+                .contains("product_line = ?")
+                .contains("FOR UPDATE");
     }
 
     @Test

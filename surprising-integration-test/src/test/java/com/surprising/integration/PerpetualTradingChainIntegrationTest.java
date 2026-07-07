@@ -515,6 +515,41 @@ class PerpetualTradingChainIntegrationTest {
         }
     }
 
+    @Test
+    void liquidationPreemptionIgnoresReduceOnlyOrdersFromOtherProductLines() {
+        try (Harness harness = new Harness()) {
+            harness.state.setBalance(1101L, 1_000L);
+            harness.state.setBalance(2202L, 1_000L);
+
+            harness.place(1101L, "risk-maker-sell", OrderSide.SELL, OrderType.LIMIT,
+                    TimeInForce.GTC, 100L, 6L, false);
+            harness.place(2202L, "risk-user-open-long", OrderSide.BUY, OrderType.LIMIT,
+                    TimeInForce.IOC, 100L, 6L, false);
+            harness.processNewOrderCommands();
+            harness.state.markPriceTicks = 99L;
+
+            harness.riskService.scan();
+            LiquidationCandidateEvent candidate = harness.riskOutbox.lastCandidate();
+            long foreignOrderId = 90_001L;
+            Instant now = Instant.parse("2026-07-01T00:00:00Z");
+            harness.state.orders.put(foreignOrderId, new OrderRecord(foreignOrderId, ProductLine.OPTION,
+                    2202L, "option-reduce-only-close", SYMBOL, VERSION, OrderSide.SELL, OrderType.LIMIT,
+                    TimeInForce.GTC, 99L, 6L, 0L, 6L, MarginMode.CROSS, PositionSide.NET,
+                    0L, 0L, true, false, OrderStatus.ACCEPTED, null, now, now));
+
+            harness.liquidationService.processCandidate(candidate);
+
+            assertThat(harness.liquidationOrderRepository.commands).singleElement()
+                    .satisfies(command -> {
+                        assertThat(command.commandType()).isEqualTo(OrderCommandType.PLACE);
+                        assertThat(command.reduceOnly()).isTrue();
+                        assertThat(command.side()).isEqualTo(OrderSide.SELL);
+                    });
+            assertThat(harness.state.orders.get(foreignOrderId).productLine()).isEqualTo(ProductLine.OPTION);
+            assertThat(harness.state.orders.get(foreignOrderId).status()).isEqualTo(OrderStatus.ACCEPTED);
+        }
+    }
+
     private static final class Harness implements AutoCloseable {
         private final SharedState state;
         private final ObjectMapper objectMapper = new ObjectMapper();
@@ -2926,6 +2961,7 @@ class PerpetualTradingChainIntegrationTest {
                                                    Function<Object, String> serializer) {
             PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
             List<OrderRecord> openReduceOnlyOrders = state.orders.values().stream()
+                    .filter(order -> order.productLine() == state.productLine())
                     .filter(order -> order.userId() == userId)
                     .filter(order -> symbol.equals(order.symbol()))
                     .filter(order -> order.marginMode() == MarginMode.defaultIfNull(marginMode))
@@ -2941,7 +2977,8 @@ class PerpetualTradingChainIntegrationTest {
                     .toList();
             for (OrderRecord order : openReduceOnlyOrders) {
                 if (order.status() != OrderStatus.CANCEL_REQUESTED) {
-                    state.orders.put(order.orderId(), new OrderRecord(order.orderId(), order.userId(),
+                    state.orders.put(order.orderId(), new OrderRecord(order.orderId(), order.productLine(),
+                            order.userId(),
                             order.clientOrderId(), order.symbol(), order.instrumentVersion(), order.side(),
                             order.orderType(), order.timeInForce(), order.priceTicks(), order.quantitySteps(),
                             order.executedQuantitySteps(), order.remainingQuantitySteps(), order.marginMode(),
@@ -2998,7 +3035,8 @@ class PerpetualTradingChainIntegrationTest {
                                                              Function<Object, String> serializer) {
             long orderId = state.next("trading-order");
             long commandId = state.next("trading-command");
-            OrderRecord order = new OrderRecord(orderId, userId, "LIQ-" + candidateId, symbol, instrumentVersion,
+            OrderRecord order = new OrderRecord(orderId, state.productLine(), userId, "LIQ-" + candidateId, symbol,
+                    instrumentVersion,
                     side, OrderType.MARKET, TimeInForce.IOC, 0L, quantitySteps, 0L, quantitySteps,
                     MarginMode.defaultIfNull(marginMode), PositionSide.defaultIfNull(positionSide),
                     state.makerFeeRatePpm, state.takerFeeRatePpm,

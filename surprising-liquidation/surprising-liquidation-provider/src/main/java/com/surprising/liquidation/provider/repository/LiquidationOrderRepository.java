@@ -214,6 +214,7 @@ public class LiquidationOrderRepository {
                        time_in_force, price_ticks, quantity_steps, remaining_quantity_steps, margin_mode, position_side, status, post_only
                   FROM trading_orders
                  WHERE user_id = ?
+                   AND product_line = ?
                    AND symbol = ?
                    AND margin_mode = ?
                    AND position_side = ?
@@ -238,7 +239,8 @@ public class LiquidationOrderRepository {
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 PositionSide.fromNullableDbValue(rs.getString("position_side")),
                 OrderStatus.valueOf(rs.getString("status")),
-                rs.getBoolean("post_only")), userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                rs.getBoolean("post_only")), userId, currentProductLine().name(), symbol,
+                MarginMode.defaultIfNull(marginMode).name(),
                 PositionSide.defaultIfNull(positionSide).name(), instrumentVersion, closeSide.name());
     }
 
@@ -409,6 +411,12 @@ public class LiquidationOrderRepository {
             throw new IllegalStateException("liquidation trading outbox topic must match current product line: "
                     + "expected one of [" + orderEventsTopic + ", " + orderCommandsTopic + "] actual=" + topic);
         }
+    }
+
+    private ProductLine currentProductLine() {
+        return properties.getKafka().isProductTopicsEnabled()
+                ? properties.getKafka().getProductLine()
+                : ProductLine.LINEAR_PERPETUAL;
     }
 
     private void requireSingleRow(int rows, String operation) {
