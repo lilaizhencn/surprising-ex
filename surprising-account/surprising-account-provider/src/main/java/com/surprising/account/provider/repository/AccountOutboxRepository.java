@@ -52,6 +52,7 @@ public class AccountOutboxRepository {
                                                        PositionResponse position,
                                                        Instant now,
                                                        String traceId) {
+        requireCurrentProductTopic(topic);
         long eventId = sequenceRepository.nextSequence("position-event");
         PositionUpdatedEvent event = new PositionUpdatedEvent(eventId, tradeId, position.userId(), position.symbol(),
                 position.instrumentVersion(), position.marginMode(), position.positionSide(), position.signedQuantitySteps(),
@@ -82,6 +83,7 @@ public class AccountOutboxRepository {
                                                                    long feeRatePpm,
                                                                    Instant now,
                                                                    String traceId) {
+        requireCurrentProductTopic(topic);
         long eventId = sequenceRepository.nextSequence("liquidation-fee-event");
         LiquidationFeeSettledEvent event = new LiquidationFeeSettledEvent(eventId, tradeId, orderId,
                 liquidationOrderId, candidateId, userId, symbol, marginMode, accountType, asset, amountUnits, feeRatePpm,
@@ -158,6 +160,19 @@ public class AccountOutboxRepository {
         sql.append("   AND topic IN (?, ?)\n");
         args.add(kafka.getPositionEventsTopic());
         args.add(kafka.getLiquidationFeeEventsTopic());
+    }
+
+    private void requireCurrentProductTopic(String topic) {
+        AccountProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled()) {
+            return;
+        }
+        String positionEventsTopic = kafka.getPositionEventsTopic();
+        String liquidationFeeEventsTopic = kafka.getLiquidationFeeEventsTopic();
+        if (!positionEventsTopic.equals(topic) && !liquidationFeeEventsTopic.equals(topic)) {
+            throw new IllegalStateException("account outbox topic must match current product line: expected one of ["
+                    + positionEventsTopic + ", " + liquidationFeeEventsTopic + "] actual=" + topic);
+        }
     }
 
     private void requireSingleRow(int rows, String operation) {
