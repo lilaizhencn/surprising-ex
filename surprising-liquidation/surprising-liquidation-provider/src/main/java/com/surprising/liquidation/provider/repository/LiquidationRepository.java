@@ -361,36 +361,63 @@ public class LiquidationRepository {
     }
 
     public void markCandidate(long candidateId, String status) {
-        int rows = jdbcTemplate.update("""
-                UPDATE risk_liquidation_candidates
+        List<Object> args = new ArrayList<>();
+        args.add(status);
+        args.add(candidateId);
+        StringBuilder sql = new StringBuilder("""
+                UPDATE risk_liquidation_candidates c
                    SET status = ?,
                        updated_at = now()
-                 WHERE candidate_id = ?
-                """, status, candidateId);
+                """);
+        appendCandidateScope(sql, args);
+        sql.append("""
+                 WHERE c.candidate_id = ?
+                """);
+        appendCandidateProductLineFilter(sql, args);
+        int rows = jdbcTemplate.update(sql.toString(), args.toArray());
         requireSingleRow(rows, "liquidation candidate status update");
     }
 
     public Optional<Long> updateOrderLifecycle(long orderId,
                                                LiquidationOrderStatus orderStatus,
                                                String candidateStatus) {
-        List<Long> candidateIds = jdbcTemplate.query("""
-                UPDATE liquidation_orders
+        List<Object> orderArgs = new ArrayList<>();
+        orderArgs.add(orderStatus.name());
+        orderArgs.add(orderId);
+        StringBuilder orderSql = new StringBuilder("""
+                UPDATE liquidation_orders lo
                    SET status = ?
-                 WHERE order_id = ?
-                   AND status IN ('SUBMITTED', 'PARTIALLY_FILLED')
-                RETURNING candidate_id
-                """, (rs, rowNum) -> rs.getLong("candidate_id"), orderStatus.name(), orderId);
+                """);
+        appendOrderCandidateUpdateScope(orderSql, orderArgs);
+        orderSql.append("""
+                 WHERE lo.order_id = ?
+                   AND lo.status IN ('SUBMITTED', 'PARTIALLY_FILLED')
+                """);
+        appendOrderCandidateUpdateProductLineFilter(orderSql, orderArgs);
+        orderSql.append("""
+                RETURNING lo.candidate_id
+                """);
+        List<Long> candidateIds = jdbcTemplate.query(orderSql.toString(),
+                (rs, rowNum) -> rs.getLong("candidate_id"), orderArgs.toArray());
         if (candidateIds.isEmpty()) {
             return Optional.empty();
         }
         long candidateId = candidateIds.get(0);
-        int rows = jdbcTemplate.update("""
-                UPDATE risk_liquidation_candidates
+        List<Object> candidateArgs = new ArrayList<>();
+        candidateArgs.add(candidateStatus);
+        candidateArgs.add(candidateId);
+        StringBuilder candidateSql = new StringBuilder("""
+                UPDATE risk_liquidation_candidates c
                    SET status = ?,
                        updated_at = now()
-                 WHERE candidate_id = ?
-                   AND status = 'PROCESSING'
-                """, candidateStatus, candidateId);
+                """);
+        appendCandidateScope(candidateSql, candidateArgs);
+        candidateSql.append("""
+                 WHERE c.candidate_id = ?
+                   AND c.status = 'PROCESSING'
+                """);
+        appendCandidateProductLineFilter(candidateSql, candidateArgs);
+        int rows = jdbcTemplate.update(candidateSql.toString(), candidateArgs.toArray());
         requireSingleRow(rows, "liquidation candidate lifecycle update");
         return Optional.of(candidateId);
     }
@@ -471,13 +498,24 @@ public class LiquidationRepository {
     }
 
     public List<LiquidationOrderResponse> orders(Long userId, int limit) {
-        return jdbcTemplate.query("""
-                SELECT *
-                  FROM liquidation_orders
-                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
-                 ORDER BY created_at DESC
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.add(userId);
+        StringBuilder sql = new StringBuilder("""
+                SELECT lo.*
+                  FROM liquidation_orders lo
+                """);
+        appendOrderCandidateScope(sql, args);
+        sql.append("""
+                 WHERE (CAST(? AS text) IS NULL OR lo.user_id = ?)
+                """);
+        appendProductLineFilter(sql, "i", args);
+        sql.append("""
+                 ORDER BY lo.created_at DESC
                  LIMIT ?
-                """, (rs, rowNum) -> toOrder(rs), userId, userId, limit);
+                """);
+        args.add(limit);
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toOrder(rs), args.toArray());
     }
 
     public AdminCursorPage.CursorPage<LiquidationOrderResponse> ordersPage(
@@ -491,40 +529,58 @@ public class LiquidationRepository {
         List<Object> args = new ArrayList<>();
         args.add(userId);
         args.add(userId);
+        StringBuilder sql = new StringBuilder("""
+                SELECT lo.*
+                  FROM liquidation_orders lo
+                """);
+        appendOrderCandidateScope(sql, args);
+        sql.append("""
+                 WHERE (CAST(? AS text) IS NULL OR lo.user_id = ?)
+                """);
+        appendProductLineFilter(sql, "i", args);
+        sql.append(AdminCursorPage.seekCondition(sortSpec, decodedCursor));
         AdminCursorPage.addCursorArgs(args, decodedCursor);
-        args.add(safeLimit + 1);
-        String sql = """
-                SELECT *
-                  FROM liquidation_orders
-                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
-                """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
-                 ORDER BY created_at %s, liquidation_order_id %s
+        sql.append("""
+                 ORDER BY lo.created_at %s, lo.liquidation_order_id %s
                  LIMIT ?
-                """.formatted(sortSpec.directionSql(), sortSpec.directionSql());
-        List<LiquidationOrderResponse> rows = jdbcTemplate.query(sql, (rs, rowNum) -> toOrder(rs), args.toArray());
+                """.formatted(sortSpec.directionSql(), sortSpec.directionSql()));
+        args.add(safeLimit + 1);
+        List<LiquidationOrderResponse> rows = jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toOrder(rs),
+                args.toArray());
         return AdminCursorPage.page(rows, safeLimit, sortSpec, LiquidationOrderResponse::createdAt,
                 LiquidationOrderResponse::liquidationOrderId);
     }
 
     public List<LiquidationOrderResponse> ordersByCandidate(long candidateId) {
-        return jdbcTemplate.query("""
-                SELECT *
-                  FROM liquidation_orders
-                 WHERE candidate_id = ?
-                 ORDER BY created_at DESC
-                """, (rs, rowNum) -> toOrder(rs), candidateId);
+        List<Object> args = new ArrayList<>();
+        args.add(candidateId);
+        StringBuilder sql = new StringBuilder("""
+                SELECT lo.*
+                  FROM liquidation_orders lo
+                """);
+        appendOrderCandidateScope(sql, args);
+        sql.append("""
+                 WHERE lo.candidate_id = ?
+                """);
+        appendProductLineFilter(sql, "i", args);
+        sql.append("""
+                 ORDER BY lo.created_at DESC
+                """);
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toOrder(rs), args.toArray());
     }
 
     private AdminCursorPage.SortSpec parseCreatedAtSort(String value) {
         AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
-                "createdAt", "created_at", "liquidation_order_id", true);
+                "createdAt", "lo.created_at", "lo.liquidation_order_id", true);
         AdminCursorPage.SortSpec createdAtAsc = new AdminCursorPage.SortSpec(
-                "createdAt", "created_at", "liquidation_order_id", false);
+                "createdAt", "lo.created_at", "lo.liquidation_order_id", false);
         return AdminCursorPage.parseSort(value, createdAtDesc, List.of(createdAtDesc, createdAtAsc));
     }
 
     public Optional<Map<String, Object>> candidate(long candidateId) {
-        return jdbcTemplate.queryForList("""
+        List<Object> args = new ArrayList<>();
+        args.add(candidateId);
+        StringBuilder sql = new StringBuilder("""
                 SELECT c.candidate_id, c.snapshot_id, c.user_id, c.symbol, c.margin_mode,
                        c.instrument_version, c.settle_asset, c.signed_quantity_steps,
                        c.mark_price_ticks, c.equity_units, c.maintenance_margin_units,
@@ -532,8 +588,13 @@ public class LiquidationRepository {
                        a.status AS account_risk_status
                   FROM risk_liquidation_candidates c
                   LEFT JOIN risk_account_snapshots a ON a.snapshot_id = c.snapshot_id
+                """);
+        appendCandidateInstrumentJoin(sql, args);
+        sql.append("""
                  WHERE c.candidate_id = ?
-                """, candidateId).stream().findFirst().map(this::normalizedRow);
+                """);
+        appendProductLineFilter(sql, "i", args);
+        return jdbcTemplate.queryForList(sql.toString(), args.toArray()).stream().findFirst().map(this::normalizedRow);
     }
 
     public List<LiquidationTimelineEvent> timeline(long candidateId, int limit) {
@@ -626,10 +687,16 @@ public class LiquidationRepository {
     }
 
     public Optional<CanceledCandidate> cancelCandidateIfSafe(long candidateId, Instant now) {
-        return jdbcTemplate.query("""
+        List<Object> args = new ArrayList<>();
+        args.add(Timestamp.from(now));
+        args.add(candidateId);
+        StringBuilder sql = new StringBuilder("""
                 UPDATE risk_liquidation_candidates c
                    SET status = 'CANCELED',
                        updated_at = ?
+                """);
+        appendCandidateScope(sql, args);
+        sql.append("""
                  WHERE c.candidate_id = ?
                    AND c.status IN ('NEW', 'PROCESSING')
                    AND NOT EXISTS (
@@ -638,11 +705,15 @@ public class LiquidationRepository {
                         WHERE lo.candidate_id = c.candidate_id
                           AND lo.status IN ('SUBMITTED', 'PARTIALLY_FILLED')
                    )
+                """);
+        appendCandidateProductLineFilter(sql, args);
+        sql.append("""
                 RETURNING c.candidate_id, c.status, c.updated_at
-                """, (rs, rowNum) -> new CanceledCandidate(
+                """);
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new CanceledCandidate(
                 rs.getLong("candidate_id"),
                 rs.getString("status"),
-                rs.getTimestamp("updated_at").toInstant()), Timestamp.from(now), candidateId)
+                rs.getTimestamp("updated_at").toInstant()), args.toArray())
                 .stream().findFirst();
     }
 
@@ -753,6 +824,72 @@ public class LiquidationRepository {
         }
         args.add(productLine.contractTypeCode());
         return "AND " + alias + ".contract_type = ?";
+    }
+
+    private void appendProductLineFilter(StringBuilder sql, String alias, List<Object> args) {
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            sql.append(productLineFilter(alias, args)).append('\n');
+        }
+    }
+
+    private void appendCandidateProductLineFilter(StringBuilder sql, List<Object> args) {
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            sql.append("""
+                   AND i.symbol = c.symbol
+                   AND i.version = c.instrument_version
+                """);
+            sql.append(productLineFilter("i", args)).append('\n');
+        }
+    }
+
+    private void appendCandidateScope(StringBuilder sql, List<Object> args) {
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            sql.append("""
+                  FROM instruments i
+                """);
+        }
+    }
+
+    private void appendCandidateInstrumentJoin(StringBuilder sql, List<Object> args) {
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            sql.append("""
+                  JOIN instruments i
+                    ON i.symbol = c.symbol
+                   AND i.version = c.instrument_version
+                """);
+        }
+    }
+
+    private void appendOrderCandidateScope(StringBuilder sql, List<Object> args) {
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            sql.append("""
+                  JOIN risk_liquidation_candidates c
+                    ON c.candidate_id = lo.candidate_id
+                  JOIN instruments i
+                    ON i.symbol = c.symbol
+                   AND i.version = c.instrument_version
+                """);
+        }
+    }
+
+    private void appendOrderCandidateUpdateScope(StringBuilder sql, List<Object> args) {
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            sql.append("""
+                  FROM risk_liquidation_candidates c
+                  JOIN instruments i
+                    ON i.symbol = c.symbol
+                   AND i.version = c.instrument_version
+                """);
+        }
+    }
+
+    private void appendOrderCandidateUpdateProductLineFilter(StringBuilder sql, List<Object> args) {
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            sql.append("""
+                   AND c.candidate_id = lo.candidate_id
+                """);
+            sql.append(productLineFilter("i", args)).append('\n');
+        }
     }
 
     private String normalizeAccountType(String accountType) {

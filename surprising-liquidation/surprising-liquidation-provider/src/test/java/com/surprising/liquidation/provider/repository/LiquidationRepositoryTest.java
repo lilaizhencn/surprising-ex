@@ -19,6 +19,7 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
+import java.sql.Timestamp;
 import java.sql.ResultSet;
 import java.time.Duration;
 import java.time.Instant;
@@ -109,6 +110,89 @@ class LiquidationRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(9401L), eq("VANILLA_OPTION"));
         assertThat(sql.getValue())
                 .contains("FROM instruments i")
+                .contains("i.symbol = c.symbol")
+                .contains("i.version = c.instrument_version")
+                .contains("i.contract_type = ?");
+    }
+
+    @Test
+    void ordersFiltersByProductLineWhenProductTopicsAreEnabled() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate, properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(2002L), eq(2002L),
+                eq("LINEAR_DELIVERY"), eq(25))).thenReturn(List.of());
+
+        repository.orders(2002L, 25);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(2002L), eq(2002L),
+                eq("LINEAR_DELIVERY"), eq(25));
+        assertThat(sql.getValue())
+                .contains("SELECT lo.*")
+                .contains("JOIN risk_liquidation_candidates c")
+                .contains("JOIN instruments i")
+                .contains("i.contract_type = ?")
+                .contains("ORDER BY lo.created_at DESC");
+    }
+
+    @Test
+    void ordersPageFiltersByProductLineAndUsesAliasedCursorColumns() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate, properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(2002L), eq(2002L),
+                eq("INVERSE_DELIVERY"), eq(26))).thenReturn(List.of());
+
+        repository.ordersPage(2002L, 25, null, "createdAt.asc");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(2002L), eq(2002L),
+                eq("INVERSE_DELIVERY"), eq(26));
+        assertThat(sql.getValue())
+                .contains("JOIN risk_liquidation_candidates c")
+                .contains("JOIN instruments i")
+                .contains("i.contract_type = ?")
+                .contains("ORDER BY lo.created_at ASC, lo.liquidation_order_id ASC");
+    }
+
+    @Test
+    void ordersByCandidateFiltersByProductLineWhenProductTopicsAreEnabled() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate, properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(9401L), eq("VANILLA_OPTION")))
+                .thenReturn(List.of());
+
+        repository.ordersByCandidate(9401L);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(9401L), eq("VANILLA_OPTION"));
+        assertThat(sql.getValue())
+                .contains("WHERE lo.candidate_id = ?")
+                .contains("JOIN risk_liquidation_candidates c")
+                .contains("JOIN instruments i")
+                .contains("i.contract_type = ?");
+    }
+
+    @Test
+    void candidateDetailsFilterByProductLineWhenProductTopicsAreEnabled() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate, properties);
+        when(jdbcTemplate.queryForList(any(String.class), eq(9401L), eq("VANILLA_OPTION")))
+                .thenReturn(List.of());
+
+        repository.candidate(9401L);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).queryForList(sql.capture(), eq(9401L), eq("VANILLA_OPTION"));
+        assertThat(sql.getValue())
+                .contains("JOIN instruments i")
                 .contains("i.symbol = c.symbol")
                 .contains("i.version = c.instrument_version")
                 .contains("i.contract_type = ?");
@@ -234,6 +318,50 @@ class LiquidationRepositoryTest {
                 "COMPLETED"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("liquidation candidate lifecycle update");
+    }
+
+    @Test
+    void updateOrderLifecycleFiltersByProductLineWhenProductTopicsAreEnabled() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate, properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq("FILLED"), eq(7001L),
+                eq("INVERSE_DELIVERY"))).thenReturn(List.of());
+
+        assertThat(repository.updateOrderLifecycle(7001L, LiquidationOrderStatus.FILLED, "COMPLETED"))
+                .isEmpty();
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq("FILLED"), eq(7001L),
+                eq("INVERSE_DELIVERY"));
+        assertThat(sql.getValue())
+                .contains("FROM risk_liquidation_candidates c")
+                .contains("JOIN instruments i")
+                .contains("c.candidate_id = lo.candidate_id")
+                .contains("i.contract_type = ?");
+    }
+
+    @Test
+    void cancelCandidateFiltersByProductLineWhenProductTopicsAreEnabled() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate, properties);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(Timestamp.from(now)), eq(9401L),
+                eq("LINEAR_PERPETUAL"))).thenReturn(List.of());
+
+        repository.cancelCandidateIfSafe(9401L, now);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(Timestamp.from(now)), eq(9401L),
+                eq("LINEAR_PERPETUAL"));
+        assertThat(sql.getValue())
+                .contains("FROM instruments i")
+                .contains("i.symbol = c.symbol")
+                .contains("i.version = c.instrument_version")
+                .contains("i.contract_type = ?");
     }
 
     @SuppressWarnings("unchecked")
