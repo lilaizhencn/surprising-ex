@@ -183,12 +183,12 @@ public class FeeTierRepository {
                 productLineName, userId, Timestamp.from(since), productLineName, productLineName));
         long assetBalance = number(jdbcTemplate.queryForObject("""
                 WITH raw_balances AS (
-                    SELECT b.asset, b.available_units, b.locked_units
+                    SELECT b.user_id, b.asset, b.available_units, b.locked_units
                       FROM account_balances b
                      WHERE ? = 'USDT_PERPETUAL'
                        AND b.user_id = ?
                     UNION ALL
-                    SELECT b.asset, b.available_units, b.locked_units
+                    SELECT b.user_id, b.asset, b.available_units, b.locked_units
                       FROM account_product_balances b
                      WHERE ? <> 'USDT_PERPETUAL'
                        AND b.account_type = ?
@@ -224,7 +224,7 @@ public class FeeTierRepository {
                 )
                 SELECT LEAST(COALESCE(SUM(value_units), 0), 9223372036854775807)::bigint
                   FROM valued_balances
-                """, Number.class, accountType, userId, accountType, accountType, userId));
+                """, Number.class, accountType, userId, accountType, accountType, userId, userId));
         return new FeeTierMetrics(trailingVolume, assetBalance);
     }
 

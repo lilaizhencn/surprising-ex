@@ -1590,6 +1590,11 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public boolean orderExists(long orderId) {
+            return state.orders.containsKey(orderId);
+        }
+
+        @Override
         public long orderInstrumentVersion(long orderId) {
             return Optional.ofNullable(state.orders.get(orderId))
                     .map(OrderRecord::instrumentVersion)

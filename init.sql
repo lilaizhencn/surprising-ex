@@ -1883,6 +1883,7 @@ CREATE TABLE IF NOT EXISTS account_product_ledger_entries (
     balance_after_units BIGINT NOT NULL,
     reference_type      TEXT NOT NULL,
     reference_id        TEXT NOT NULL,
+    symbol              TEXT,
     reason              TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT account_product_ledger_type_check CHECK (

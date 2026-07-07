@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -31,6 +32,7 @@ public class FundingRepository {
     private final JdbcTemplate jdbcTemplate;
     private final FundingProperties properties;
 
+    @Autowired
     public FundingRepository(JdbcTemplate jdbcTemplate, FundingProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties == null ? new FundingProperties() : properties;

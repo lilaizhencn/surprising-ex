@@ -73,6 +73,9 @@ public class MatchingService {
         if (resultRepository.commandResultExists(command.commandId())) {
             return;
         }
+        if (!resultRepository.orderExists(command.orderId())) {
+            return;
+        }
         Instant now = Instant.now();
         MatchingSymbol symbol = exchangeCoreEngine.ensureSymbol(command.symbol())
                 .orElse(null);

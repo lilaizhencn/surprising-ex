@@ -6,6 +6,7 @@ import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.ReduceOnlyPositionLookup;
 import com.surprising.trading.order.model.ValidationResult;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -18,6 +19,7 @@ public class ReduceOnlyValidator {
         this(positionLookup, new TradingOrderProperties());
     }
 
+    @Autowired
     public ReduceOnlyValidator(ReduceOnlyPositionLookup positionLookup, TradingOrderProperties properties) {
         this.positionLookup = positionLookup;
         this.properties = properties;

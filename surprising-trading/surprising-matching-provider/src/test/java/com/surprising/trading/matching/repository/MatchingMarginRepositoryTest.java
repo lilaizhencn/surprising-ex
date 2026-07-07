@@ -1,6 +1,7 @@
 package com.surprising.trading.matching.repository;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -54,6 +55,37 @@ class MatchingMarginRepositoryTest {
         verify(jdbcTemplate).update(contains("UPDATE account_margin_reservations"),
                 eq(300L), eq(300L), eq(300L), eq("CANCEL"), any(Timestamp.class), eq(9001L));
         verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
+    }
+
+    @Test
+    void releaseUnusedNoopsWhenMarginReservationAlreadyTerminal() {
+        MatchingMarginRepository repository = new MatchingMarginRepository(jdbcTemplate);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        when(jdbcTemplate.query(anyString(), anyRowMapper(), eq(9002L)))
+                .thenReturn(List.of())
+                .thenReturn(List.of())
+                .thenReturn(List.of(1));
+
+        repository.releaseUnused(9002L, "ORDER_CANCELED", now);
+
+        verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
+        verify(jdbcTemplate, never()).query(contains("SELECT reduce_only"), anyRowMapper(), eq(9002L));
+    }
+
+    @Test
+    void releaseAllNoopsWhenSpotReservationAlreadyTerminal() {
+        MatchingMarginRepository repository = new MatchingMarginRepository(jdbcTemplate);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        when(jdbcTemplate.query(anyString(), anyRowMapper(), eq(9003L)))
+                .thenReturn(List.of())
+                .thenReturn(List.of())
+                .thenReturn(List.of())
+                .thenReturn(List.of(1));
+
+        repository.releaseAll(9003L, "ORDER_CANCELED", now);
+
+        verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
+        verify(jdbcTemplate, never()).query(contains("SELECT reduce_only"), anyRowMapper(), eq(9003L));
     }
 
     @SuppressWarnings("unchecked")

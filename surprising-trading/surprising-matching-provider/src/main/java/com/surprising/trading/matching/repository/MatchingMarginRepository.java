@@ -24,6 +24,9 @@ public class MatchingMarginRepository {
             if (releaseAllSpot(orderId, reason, now)) {
                 return;
             }
+            if (hasAnyReservation(orderId)) {
+                return;
+            }
             requireReservationUnlessReduceOnly(orderId);
             return;
         }
@@ -35,6 +38,9 @@ public class MatchingMarginRepository {
         var reservation = lockReservation(orderId);
         if (reservation == null) {
             if (releaseUnusedSpot(orderId, reason, now)) {
+                return;
+            }
+            if (hasAnyReservation(orderId)) {
                 return;
             }
             requireReservationUnlessReduceOnly(orderId);
@@ -118,6 +124,28 @@ public class MatchingMarginRepository {
                 rs.getLong("settled_units"),
                 rs.getLong("released_units")), orderId);
         return rows == null ? null : rows.stream().findFirst().orElse(null);
+    }
+
+    private boolean hasAnyReservation(long orderId) {
+        return hasAnyMarginReservation(orderId) || hasAnySpotReservation(orderId);
+    }
+
+    private boolean hasAnyMarginReservation(long orderId) {
+        return jdbcTemplate.query("""
+                SELECT 1
+                  FROM account_margin_reservations
+                 WHERE order_id = ?
+                 LIMIT 1
+                """, (rs, rowNum) -> 1, orderId).stream().findFirst().isPresent();
+    }
+
+    private boolean hasAnySpotReservation(long orderId) {
+        return jdbcTemplate.query("""
+                SELECT 1
+                  FROM account_spot_order_reservations
+                 WHERE order_id = ?
+                 LIMIT 1
+                """, (rs, rowNum) -> 1, orderId).stream().findFirst().isPresent();
     }
 
     private void requireReservationUnlessReduceOnly(long orderId) {

@@ -31,9 +31,10 @@ class FeeTierRepositoryTest {
                         "INVERSE_DELIVERY");
         assertThat(jdbcTemplate.queryForObjectSql.get(1))
                 .contains("FROM account_product_balances b")
-                .contains("b.account_type = ?");
+                .contains("b.account_type = ?")
+                .contains("SELECT b.user_id, b.asset, b.available_units, b.locked_units");
         assertThat(jdbcTemplate.queryForObjectArgs.get(1))
-                .containsExactly("COIN_DELIVERY", 1001L, "COIN_DELIVERY", "COIN_DELIVERY", 1001L);
+                .containsExactly("COIN_DELIVERY", 1001L, "COIN_DELIVERY", "COIN_DELIVERY", 1001L, 1001L);
     }
 
     @Test

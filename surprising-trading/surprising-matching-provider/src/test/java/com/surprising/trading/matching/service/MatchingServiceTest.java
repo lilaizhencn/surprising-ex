@@ -126,6 +126,30 @@ class MatchingServiceTest {
     }
 
     @Test
+    void skipsCommandWhenOrderIsMissingFromDatabase() throws Exception {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getEngine().setExchangeId("matching-service-missing-order-test");
+        properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
+        MatchingSymbol matchingSymbol = new MatchingSymbol("BTC-USDT", 301, 11, 12);
+        InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
+        ExchangeCoreEngine engine = new ExchangeCoreEngine(properties,
+                new FakeMatchingSymbolRepository(instrument, matchingSymbol),
+                new FakeRecoveryRepository());
+        FakeResultRepository resultRepository = new FakeResultRepository();
+        resultRepository.missingOrderIds.add(404L);
+        MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
+                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository,
+                new FakeOutboxRepository());
+
+        service.process(new OrderCommandEvent(OrderCommandType.PLACE, 901L, 404L, 1001L,
+                "missing-404", "BTC-USDT", 5L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
+                100L, 1L, false, false, Instant.parse("2026-07-01T00:00:00Z"), "trace-missing-901"));
+
+        assertThat(resultRepository.results).isEmpty();
+        assertThat(resultRepository.trades).isEmpty();
+    }
+
+    @Test
     void emitsHedgePositionSidesFromTakerCommandAndMakerLookup() throws Exception {
         MatchingProperties properties = new MatchingProperties();
         properties.getEngine().setExchangeId("matching-service-hedge-position-side-test");
@@ -443,6 +467,7 @@ class MatchingServiceTest {
     private static final class FakeResultRepository extends MatchingResultRepository {
         private final List<MatchResultEvent> results = new ArrayList<>();
         private final List<MatchTradeEvent> trades = new ArrayList<>();
+        private final List<Long> missingOrderIds = new ArrayList<>();
         private final Map<Long, Long> orderVersions = new HashMap<>();
         private final Map<Long, MarginMode> orderMarginModes = new HashMap<>();
         private final Map<Long, PositionSide> orderPositionSides = new HashMap<>();
@@ -458,6 +483,11 @@ class MatchingServiceTest {
         @Override
         public boolean commandResultExists(long commandId) {
             return results.stream().anyMatch(result -> result.commandId() == commandId);
+        }
+
+        @Override
+        public boolean orderExists(long orderId) {
+            return !missingOrderIds.contains(orderId);
         }
 
         @Override

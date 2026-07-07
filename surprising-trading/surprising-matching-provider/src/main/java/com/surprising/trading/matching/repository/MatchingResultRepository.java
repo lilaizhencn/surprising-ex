@@ -41,6 +41,13 @@ public class MatchingResultRepository {
         return Boolean.TRUE.equals(exists);
     }
 
+    public boolean orderExists(long orderId) {
+        Boolean exists = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM trading_orders WHERE order_id = ?)
+                """, Boolean.class, orderId);
+        return Boolean.TRUE.equals(exists);
+    }
+
     public long orderInstrumentVersion(long orderId) {
         Long version = jdbcTemplate.query("""
                 SELECT instrument_version
