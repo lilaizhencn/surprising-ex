@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -40,6 +41,58 @@ class FundingOutboxRepositoryTest {
                 "{}", Instant.parse("2026-07-01T00:00:00Z")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("funding outbox enqueue");
+    }
+
+    @Test
+    void enqueueAllowsCurrentFundingProductTopicWhenProductTopicsAreEnabled() {
+        FundingProperties properties = new FundingProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+        FundingOutboxRepository repository = new FundingOutboxRepository(jdbcTemplate, fundingRepository, properties);
+        when(fundingRepository.nextSequence("funding-outbox")).thenReturn(902L);
+        when(jdbcTemplate.update(contains("INSERT INTO funding_outbox_events"), any(Object[].class))).thenReturn(1);
+
+        repository.enqueue("surprising.inverse-perp.funding.rate.v1", "BTC-USD", "FUNDING_RATE",
+                "{}", Instant.parse("2026-07-01T00:00:00Z"));
+
+        verify(fundingRepository).nextSequence("funding-outbox");
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(contains("INSERT INTO funding_outbox_events"), args.capture());
+        assertThat(args.getValue()[1]).isEqualTo("surprising.inverse-perp.funding.rate.v1");
+    }
+
+    @Test
+    void enqueueRejectsOtherFundingProductTopicBeforeWritingWhenProductTopicsAreEnabled() {
+        FundingProperties properties = new FundingProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+        FundingOutboxRepository repository = new FundingOutboxRepository(jdbcTemplate, fundingRepository, properties);
+
+        assertThatThrownBy(() -> repository.enqueue("surprising.inverse-perp.funding.rate.v1", "BTC-USDT",
+                "FUNDING_RATE", "{}", Instant.parse("2026-07-01T00:00:00Z")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("funding outbox topic must match current product line")
+                .hasMessageContaining("surprising.linear-perp.funding.rate.v1");
+
+        verify(fundingRepository, never()).nextSequence("funding-outbox");
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO funding_outbox_events"), any(Object[].class));
+    }
+
+    @Test
+    void enqueueRejectsNonFundingProductLineBeforeWritingWhenProductTopicsAreEnabled() {
+        FundingProperties properties = new FundingProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        FundingOutboxRepository repository = new FundingOutboxRepository(jdbcTemplate, fundingRepository, properties);
+
+        assertThatThrownBy(() -> repository.enqueue("surprising.perp.funding.rate.v1", "BTC-USDT-260925",
+                "FUNDING_RATE", "{}", Instant.parse("2026-07-01T00:00:00Z")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("funding outbox is disabled for non-funding product line")
+                .hasMessageContaining("LINEAR_DELIVERY");
+
+        verify(fundingRepository, never()).nextSequence("funding-outbox");
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO funding_outbox_events"), any(Object[].class));
     }
 
     @Test

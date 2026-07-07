@@ -31,6 +31,7 @@ public class FundingOutboxRepository {
     }
 
     public void enqueue(String topic, String eventKey, String eventType, String payload, Instant now) {
+        requireCurrentProductTopic(topic);
         long id = fundingRepository.nextSequence("funding-outbox");
         int rows = jdbcTemplate.update("""
                 INSERT INTO funding_outbox_events (
@@ -105,6 +106,22 @@ public class FundingOutboxRepository {
         }
         sql.append("   AND topic = ?\n");
         args.add(kafka.getFundingRateTopic());
+    }
+
+    private void requireCurrentProductTopic(String topic) {
+        FundingProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled()) {
+            return;
+        }
+        if (!kafka.isFundingProductLine()) {
+            throw new IllegalStateException("funding outbox is disabled for non-funding product line: "
+                    + kafka.getProductLine());
+        }
+        String expectedTopic = kafka.getFundingRateTopic();
+        if (!expectedTopic.equals(topic)) {
+            throw new IllegalStateException("funding outbox topic must match current product line: expected="
+                    + expectedTopic + " actual=" + topic);
+        }
     }
 
     private void requireSingleRow(int rows, String operation) {
