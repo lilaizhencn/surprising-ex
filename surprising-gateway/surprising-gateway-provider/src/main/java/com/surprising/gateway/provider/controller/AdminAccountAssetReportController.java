@@ -432,7 +432,8 @@ public class AdminAccountAssetReportController {
             return null;
         }
         String normalized = accountType.trim().toUpperCase(Locale.ROOT);
-        if (!List.of("BASIC", "FUNDING", "SPOT", "USDT_PERPETUAL", "COIN_PERPETUAL").contains(normalized)) {
+        if (!List.of("BASIC", "FUNDING", "SPOT", "USDT_PERPETUAL", "COIN_PERPETUAL",
+                "USDT_DELIVERY", "COIN_DELIVERY", "OPTION").contains(normalized)) {
             throw new IllegalArgumentException("invalid accountType: " + accountType);
         }
         return normalized;

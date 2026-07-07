@@ -2,6 +2,7 @@ package com.surprising.gateway.provider.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -73,6 +74,28 @@ class AdminAccountAssetReportControllerTest {
     }
 
     @Test
+    void valuationAcceptsDeliveryAndOptionAccountTypes() {
+        AuthService authService = mock(AuthService.class);
+        JwtPrincipal principal = new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"),
+                Instant.parse("2026-07-03T00:00:00Z"));
+        when(authService.requireAdminPermission("Bearer admin", "admin.reports.read")).thenReturn(principal);
+        FakeJdbcTemplate jdbcTemplate = new FakeJdbcTemplate();
+        AdminAccountAssetReportController controller = new AdminAccountAssetReportController(
+                authService, jdbcTemplate, new AdminAccountAssetSnapshotService(jdbcTemplate));
+
+        controller.valuation("Bearer admin", "USDT", null, "coin_delivery", null, true,
+                50, null, "valuationValue.desc");
+
+        assertThat(jdbcTemplate.lastQueryArgs).contains("COIN_DELIVERY");
+
+        controller.valuation("Bearer admin", "USDT", null, "option", null, true,
+                50, null, "valuationValue.desc");
+
+        assertThat(jdbcTemplate.lastQueryArgs).contains("OPTION");
+        verify(authService, times(2)).requireAdminPermission("Bearer admin", "admin.reports.read");
+    }
+
+    @Test
     void createSnapshotWritesReportRowsAndReturnsStoredSnapshot() {
         AuthService authService = mock(AuthService.class);
         JwtPrincipal principal = new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"),
@@ -126,11 +149,13 @@ class AdminAccountAssetReportControllerTest {
 
     private static final class FakeJdbcTemplate extends JdbcTemplate {
         private String lastQuerySql;
+        private Object[] lastQueryArgs = new Object[0];
         private String lastUpdateSql;
 
         @Override
         public List<Map<String, Object>> queryForList(String sql, Object... args) {
             this.lastQuerySql = sql;
+            this.lastQueryArgs = args == null ? new Object[0] : args;
             if (sql.contains("FROM gateway_admin_account_asset_snapshots")) {
                 List<Map<String, Object>> rows = List.of(row(
                         "snapshot_id", 99L,
