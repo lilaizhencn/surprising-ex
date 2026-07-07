@@ -288,6 +288,22 @@ class InsuranceRepositoryTest {
     }
 
     @Test
+    void productLineModeRejectsLiquidationFeeForAnotherAccountType() {
+        InsuranceProperties properties = new InsuranceProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        InsuranceRepository repository = new InsuranceRepository(jdbcTemplate, properties);
+        LiquidationFeeSettledEvent event = liquidationFeeEvent(9201L, 7001L, "USDT_PERPETUAL", 70L);
+
+        assertThatThrownBy(() -> repository.collectLiquidationFee(event))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not match insurance provider account type USDT_DELIVERY");
+
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO insurance_fund_ledger"), any(Object[].class));
+        verify(jdbcTemplate, never()).update(contains("UPDATE insurance_fund_balances"), any(Object[].class));
+    }
+
+    @Test
     void duplicateLiquidationFeeEventDoesNotCreditFundAgain() throws Exception {
         InsuranceRepository repository = new InsuranceRepository(jdbcTemplate);
         LiquidationFeeSettledEvent event = liquidationFeeEvent(9201L, 7001L, 70L);
@@ -320,8 +336,15 @@ class InsuranceRepositoryTest {
     }
 
     private LiquidationFeeSettledEvent liquidationFeeEvent(long tradeId, long orderId, long amountUnits) {
+        return liquidationFeeEvent(tradeId, orderId, "USDT_PERPETUAL", amountUnits);
+    }
+
+    private LiquidationFeeSettledEvent liquidationFeeEvent(long tradeId,
+                                                          long orderId,
+                                                          String accountType,
+                                                          long amountUnits) {
         return new LiquidationFeeSettledEvent(8801L, tradeId, orderId, 6001L, 9401L, 2002L,
-                "BTC-USDT", MarginMode.CROSS, "USDT", amountUnits, 3_000L,
+                "BTC-USDT", MarginMode.CROSS, accountType, "USDT", amountUnits, 3_000L,
                 Instant.parse("2026-07-01T00:00:00Z"), "trace-1");
     }
 }

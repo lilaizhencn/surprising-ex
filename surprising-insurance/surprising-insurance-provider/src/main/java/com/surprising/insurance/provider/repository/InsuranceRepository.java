@@ -272,6 +272,7 @@ public class InsuranceRepository {
         }
         Instant now = event.eventTime() == null ? Instant.now() : event.eventTime();
         String accountType = normalizeAccountType(event.accountType());
+        requireProviderAccountType(accountType);
         String referenceId = event.tradeId() + ":" + event.orderId();
         ensureFundBalance(accountType, event.asset(), now);
         Long current = jdbcTemplate.queryForObject("""
@@ -484,6 +485,17 @@ public class InsuranceRepository {
 
     private String accountType() {
         return normalizeAccountType(properties.getKafka().getAccountType());
+    }
+
+    private void requireProviderAccountType(String eventAccountType) {
+        if (!properties.getKafka().isProductTopicsEnabled()) {
+            return;
+        }
+        String providerAccountType = accountType();
+        if (!Objects.equals(eventAccountType, providerAccountType)) {
+            throw new IllegalArgumentException("liquidation fee account type " + eventAccountType
+                    + " does not match insurance provider account type " + providerAccountType);
+        }
     }
 
     private String normalizeAccountType(String accountType) {
