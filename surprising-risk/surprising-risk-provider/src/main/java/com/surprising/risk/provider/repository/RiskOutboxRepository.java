@@ -1,9 +1,12 @@
 package com.surprising.risk.provider.repository;
 
+import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.model.RiskOutboxRecord;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -12,10 +15,19 @@ public class RiskOutboxRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final RiskSequenceRepository sequenceRepository;
+    private final RiskProperties properties;
 
     public RiskOutboxRepository(JdbcTemplate jdbcTemplate, RiskSequenceRepository sequenceRepository) {
+        this(jdbcTemplate, sequenceRepository, new RiskProperties());
+    }
+
+    @Autowired
+    public RiskOutboxRepository(JdbcTemplate jdbcTemplate,
+                                RiskSequenceRepository sequenceRepository,
+                                RiskProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
+        this.properties = properties == null ? new RiskProperties() : properties;
     }
 
     public void enqueue(String topic, String eventKey, String eventType, String payload, Instant now) {
@@ -31,19 +43,25 @@ public class RiskOutboxRepository {
     }
 
     public List<RiskOutboxRecord> lockPending(int limit) {
-        return jdbcTemplate.query("""
+        List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("""
                 SELECT id, topic, event_key, payload::text AS payload
                   FROM risk_outbox_events
                  WHERE published_at IS NULL
+                """);
+        appendTopicScope(sql, args);
+        sql.append("""
                    AND next_attempt_at <= now()
                  ORDER BY next_attempt_at ASC, id ASC
                  LIMIT ?
                  FOR UPDATE SKIP LOCKED
-                """, (rs, rowNum) -> new RiskOutboxRecord(
+                """);
+        args.add(limit);
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new RiskOutboxRecord(
                 rs.getLong("id"),
                 rs.getString("topic"),
                 rs.getString("event_key"),
-                rs.getString("payload")), limit);
+                rs.getString("payload")), args.toArray());
     }
 
     public void markPublished(long id, Instant now) {
@@ -74,6 +92,17 @@ public class RiskOutboxRepository {
             return null;
         }
         return value.length() <= 1000 ? value : value.substring(0, 1000);
+    }
+
+    private void appendTopicScope(StringBuilder sql, List<Object> args) {
+        RiskProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled()) {
+            return;
+        }
+        sql.append("   AND topic IN (?, ?, ?)\n");
+        args.add(kafka.getAccountRiskEventsTopic());
+        args.add(kafka.getPositionRiskEventsTopic());
+        args.add(kafka.getLiquidationCandidatesTopic());
     }
 
     private void requireSingleRow(int rows, String operation) {
