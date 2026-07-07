@@ -370,13 +370,10 @@ public class AlgoOrderRepository {
     }
 
     private String productLineNameFromContractType(String contractType) {
-        String normalizedContractType = emptyToNull(contractType);
-        return normalizedContractType == null
+        String normalizedFilter = emptyToNull(contractType);
+        return normalizedFilter == null
                 ? null
-                : ProductLine.fromContractTypeCode(normalizedContractType)
-                .or(() -> ProductLine.fromAccountTypeCode(normalizedContractType))
-                .orElseThrow(() -> new IllegalArgumentException("unsupported product filter: " + contractType))
-                .name();
+                : ProductLine.requireExternalCode(normalizedFilter).name();
     }
 
     private ProductLine productLine(ProductLine productLine) {

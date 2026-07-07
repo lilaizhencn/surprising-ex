@@ -91,6 +91,19 @@ public enum ProductLine {
         return Optional.empty();
     }
 
+    public static Optional<ProductLine> fromExternalCode(String value) {
+        String normalized = normalize(value);
+        for (ProductLine productLine : values()) {
+            if (productLine.name().equals(normalized)
+                    || productLine.accountTypeCode.equals(normalized)
+                    || productLine.contractTypeCode().equals(normalized)
+                    || normalize(productLine.topicSegment).equals(normalized)) {
+                return Optional.of(productLine);
+            }
+        }
+        return Optional.empty();
+    }
+
     public static ProductLine requireAccountTypeCode(String accountTypeCode) {
         return fromAccountTypeCode(accountTypeCode)
                 .orElseThrow(() -> new IllegalArgumentException("unsupported product account type: " + accountTypeCode));
@@ -99,6 +112,11 @@ public enum ProductLine {
     public static ProductLine requireContractTypeCode(String contractTypeCode) {
         return fromContractTypeCode(contractTypeCode)
                 .orElseThrow(() -> new IllegalArgumentException("unsupported product contract type: " + contractTypeCode));
+    }
+
+    public static ProductLine requireExternalCode(String value) {
+        return fromExternalCode(value)
+                .orElseThrow(() -> new IllegalArgumentException("unsupported product filter: " + value));
     }
 
     private static String normalize(String value) {

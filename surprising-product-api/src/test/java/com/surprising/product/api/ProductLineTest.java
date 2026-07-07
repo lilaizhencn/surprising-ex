@@ -29,6 +29,15 @@ class ProductLineTest {
     }
 
     @Test
+    void mapsExternalProductCodesToProductLines() {
+        assertThat(ProductLine.requireExternalCode("linear-perp")).isEqualTo(ProductLine.LINEAR_PERPETUAL);
+        assertThat(ProductLine.requireExternalCode("LINEAR_PERPETUAL")).isEqualTo(ProductLine.LINEAR_PERPETUAL);
+        assertThat(ProductLine.requireExternalCode("COIN_PERPETUAL")).isEqualTo(ProductLine.INVERSE_PERPETUAL);
+        assertThat(ProductLine.requireExternalCode("VANILLA_OPTION")).isEqualTo(ProductLine.OPTION);
+        assertThat(ProductLine.fromExternalCode("  option  ")).contains(ProductLine.OPTION);
+    }
+
+    @Test
     void exposesProductCapabilities() {
         assertThat(ProductLine.SPOT.isDerivative()).isFalse();
         assertThat(ProductLine.LINEAR_PERPETUAL.isFundingProduct()).isTrue();
@@ -49,5 +58,12 @@ class ProductLineTest {
         assertThatThrownBy(() -> ProductLine.requireContractTypeCode("QUANTO"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("unsupported product contract type");
+    }
+
+    @Test
+    void rejectsUnknownExternalProductCode() {
+        assertThatThrownBy(() -> ProductLine.requireExternalCode("QUANTO"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unsupported product filter");
     }
 }
