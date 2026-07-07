@@ -271,7 +271,7 @@ class FundingRepositoryTest {
     }
 
     @Test
-    void fundingChargeLocksPositionMarginByConfiguredFundingProductLine() throws Exception {
+    void fundingChargeWritesConfiguredProductAccountForInversePerpetual() throws Exception {
         FundingProperties properties = new FundingProperties();
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
@@ -282,16 +282,16 @@ class FundingRepositoryTest {
                 10L, 1_000L, 90_000L, -90L);
 
         when(jdbcTemplate.queryForObject(contains("INSERT INTO account_sequences"), eq(Long.class),
-                eq("ledger-entry"))).thenReturn(1L);
-        when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
+                eq("product-ledger-entry"))).thenReturn(1L);
+        when(jdbcTemplate.update(contains("INSERT INTO account_product_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
-        when(jdbcTemplate.update(contains("UPDATE account_ledger_entries"), any(Object[].class)))
+        when(jdbcTemplate.update(contains("UPDATE account_product_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_position_margins"), any(Object[].class)))
                 .thenReturn(1);
-        when(jdbcTemplate.update(contains("UPDATE account_balances"), any(Object[].class)))
+        when(jdbcTemplate.update(contains("UPDATE account_product_balances"), any(Object[].class)))
                 .thenReturn(1);
-        when(jdbcTemplate.update(contains("UPDATE account_deficits"), any(Object[].class)))
+        when(jdbcTemplate.update(contains("UPDATE account_product_deficits"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
                 eq(1001L), eq("INVERSE_PERPETUAL"), eq("BTC"), eq("CROSS"), eq("NET")))
@@ -306,8 +306,8 @@ class FundingRepositoryTest {
                     when(rs.getLong("margin_units")).thenReturn(90L);
                     return List.of(mapper.mapRow(rs, 0));
                 });
-        when(jdbcTemplate.queryForObject(contains("SELECT b.available_units"), anyRowMapper(),
-                eq(1001L), eq("BTC"))).thenAnswer(invocation -> {
+        when(jdbcTemplate.queryForObject(contains("FROM account_product_balances b"), anyRowMapper(),
+                eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getLong("available_units")).thenReturn(0L);
@@ -322,9 +322,18 @@ class FundingRepositoryTest {
         verify(jdbcTemplate).query(selectSql.capture(), anyRowMapper(),
                 eq(1001L), eq("INVERSE_PERPETUAL"), eq("BTC"), eq("CROSS"), eq("NET"));
         assertThat(selectSql.getValue()).contains("product_line = ?");
+        verify(jdbcTemplate).update(contains("INSERT INTO account_product_ledger_entries"),
+                eq(1L), eq(1001L), eq("COIN_PERPETUAL"), eq("BTC"), eq(-90L),
+                eq("3001:1001:BTC-USD:CROSS:NET"), eq("FUNDING_PAID"), any(Timestamp.class));
         verify(jdbcTemplate).update(contains("UPDATE account_position_margins"),
                 eq(90L), any(Timestamp.class), eq(1001L), eq("BTC-USD"), eq("BTC"), eq("CROSS"), eq("NET"),
                 eq("INVERSE_PERPETUAL"), eq(90L));
+        verify(jdbcTemplate).update(contains("UPDATE account_product_balances"),
+                eq(0L), eq(0L), any(Timestamp.class), eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"));
+        verify(jdbcTemplate).update(contains("UPDATE account_product_deficits"),
+                eq(0L), any(Timestamp.class), eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"));
+        verify(jdbcTemplate).update(contains("UPDATE account_product_ledger_entries"),
+                eq(0L), eq("3001:1001:BTC-USD:CROSS:NET"), eq(1001L), eq("COIN_PERPETUAL"), eq("BTC"));
     }
 
     @Test

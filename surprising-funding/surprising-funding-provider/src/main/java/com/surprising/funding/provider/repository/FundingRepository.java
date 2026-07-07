@@ -313,6 +313,16 @@ public class FundingRepository {
     }
 
     public void applyPaymentToAccount(long settlementId, FundingPaymentCandidate payment, Instant now) {
+        ProductLine productLine = currentFundingProductLine()
+                .orElseThrow(() -> new IllegalStateException("funding payment requires a funding product line"));
+        if (!usesProductAccount(productLine)) {
+            applyPaymentToLegacyAccount(settlementId, payment, now);
+            return;
+        }
+        applyPaymentToProductAccount(productLine, settlementId, payment, now);
+    }
+
+    private void applyPaymentToLegacyAccount(long settlementId, FundingPaymentCandidate payment, Instant now) {
         String referenceId = settlementId + ":" + payment.userId() + ":" + payment.symbol() + ":"
                 + payment.marginMode().name() + ":" + payment.positionSide().name();
         int ledgerRows = jdbcTemplate.update("""
@@ -335,6 +345,37 @@ public class FundingRepository {
                    AND asset = ?
                 """, balanceAfterUnits, referenceId, payment.userId(), payment.asset());
         requireSingleRow(ledgerUpdateRows, "funding account ledger balance update");
+    }
+
+    private void applyPaymentToProductAccount(ProductLine productLine,
+                                              long settlementId,
+                                              FundingPaymentCandidate payment,
+                                              Instant now) {
+        String accountType = productLine.accountTypeCode();
+        String referenceId = settlementId + ":" + payment.userId() + ":" + payment.symbol() + ":"
+                + payment.marginMode().name() + ":" + payment.positionSide().name();
+        int ledgerRows = jdbcTemplate.update("""
+                INSERT INTO account_product_ledger_entries (
+                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, 0, 'FUNDING', ?, ?, ?)
+                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
+                """, nextAccountSequence("product-ledger-entry"), payment.userId(), accountType, payment.asset(),
+                payment.amountUnits(), referenceId,
+                payment.amountUnits() >= 0 ? "FUNDING_RECEIVED" : "FUNDING_PAID", Timestamp.from(now));
+        requireSingleRow(ledgerRows, "funding product account ledger insert");
+        long balanceAfterUnits = applyProductBalance(productLine, payment.userId(), payment.symbol(),
+                payment.marginMode(), payment.positionSide(), payment.asset(), payment.amountUnits(), now);
+        int ledgerUpdateRows = jdbcTemplate.update("""
+                UPDATE account_product_ledger_entries
+                   SET balance_after_units = ?
+                 WHERE reference_type = 'FUNDING'
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND account_type = ?
+                   AND asset = ?
+                """, balanceAfterUnits, referenceId, payment.userId(), accountType, payment.asset());
+        requireSingleRow(ledgerUpdateRows, "funding product account ledger balance update");
     }
 
     public void completeSettlement(long settlementId,
@@ -471,6 +512,76 @@ public class FundingRepository {
                  WHERE user_id = ? AND asset = ?
                 """, next.deficitUnits(), Timestamp.from(now), userId, asset);
         requireSingleRow(deficitRows, "funding account deficit update");
+        return Math.subtractExact(Math.addExact(next.availableUnits(), next.lockedUnits()), next.deficitUnits());
+    }
+
+    private long applyProductBalance(ProductLine productLine,
+                                     long userId,
+                                     String symbol,
+                                     MarginMode marginMode,
+                                     PositionSide positionSide,
+                                     String asset,
+                                     long amountUnits,
+                                     Instant now) {
+        String accountType = productLine.accountTypeCode();
+        jdbcTemplate.update("""
+                INSERT INTO account_product_balances (
+                    account_type, user_id, asset, available_units, locked_units, updated_at
+                ) VALUES (?, ?, ?, 0, 0, ?)
+                ON CONFLICT (account_type, user_id, asset) DO NOTHING
+                """, accountType, userId, asset, Timestamp.from(now));
+        jdbcTemplate.update("""
+                INSERT INTO account_product_deficits (account_type, user_id, asset, deficit_units, updated_at)
+                VALUES (?, ?, ?, 0, ?)
+                ON CONFLICT (account_type, user_id, asset) DO NOTHING
+                """, accountType, userId, asset, Timestamp.from(now));
+        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        List<PositionMargin> lockedMargins = amountUnits < 0
+                ? lockPositionMargins(userId, symbol, normalizedMarginMode, PositionSide.defaultIfNull(positionSide),
+                asset)
+                : List.of();
+        long maxLockedDebitUnits = lockedMargins.stream()
+                .mapToLong(PositionMargin::marginUnits)
+                .reduce(0L, Math::addExact);
+        FundingBalanceState current = jdbcTemplate.queryForObject("""
+                SELECT b.available_units, b.locked_units, d.deficit_units
+                  FROM account_product_balances b
+                  JOIN account_product_deficits d USING (account_type, user_id, asset)
+                 WHERE b.account_type = ? AND b.user_id = ? AND b.asset = ?
+                 FOR UPDATE OF b, d
+                """, (rs, rowNum) -> new FundingBalanceState(
+                rs.getLong("available_units"),
+                rs.getLong("locked_units"),
+                rs.getLong("deficit_units")), accountType, userId, asset);
+        long availableInput = amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED
+                ? 0L
+                : current.availableUnits();
+        FundingBalanceState next = FundingMath.applyPayment(availableInput, current.lockedUnits(),
+                current.deficitUnits(), amountUnits, maxLockedDebitUnits);
+        if (amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED) {
+            next = new FundingBalanceState(current.availableUnits(), next.lockedUnits(), next.deficitUnits());
+        }
+        long lockedDebitUnits = Math.subtractExact(current.lockedUnits(), next.lockedUnits());
+        reducePositionMargins(userId, asset, lockedDebitUnits, lockedMargins, now);
+        int balanceRows = jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET available_units = ?,
+                       locked_units = ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, next.availableUnits(), next.lockedUnits(), Timestamp.from(now), accountType, userId, asset);
+        requireSingleRow(balanceRows, "funding product account balance update");
+        int deficitRows = jdbcTemplate.update("""
+                UPDATE account_product_deficits
+                   SET deficit_units = ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, next.deficitUnits(), Timestamp.from(now), accountType, userId, asset);
+        requireSingleRow(deficitRows, "funding product account deficit update");
         return Math.subtractExact(Math.addExact(next.availableUnits(), next.lockedUnits()), next.deficitUnits());
     }
 
@@ -637,6 +748,10 @@ public class FundingRepository {
                 ? properties.getKafka().getProductLine()
                 : ProductLine.LINEAR_PERPETUAL;
         return productLine.isFundingProduct() ? Optional.of(productLine) : Optional.empty();
+    }
+
+    private boolean usesProductAccount(ProductLine productLine) {
+        return productLine != ProductLine.LINEAR_PERPETUAL;
     }
 
     private record PositionMargin(ProductLine productLine,
