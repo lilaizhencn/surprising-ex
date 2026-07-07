@@ -62,6 +62,64 @@ Keep the matching provider on JDK 21 unless exchange-core and Chronicle are reva
 - Gateway providers are stateless. Scale them behind a load balancer and point route `base-url` values at Kubernetes Services or your service-discovery layer.
 - Market-maker providers coordinate by `market_maker_strategy_leases(strategy_id, symbol)`. Multiple nodes may run the same config, but only the lease owner quotes a strategy-symbol pair. Keep the provider on an internal network and keep `surprising.market-maker.engine.enabled=false` unless liquidity accounts are funded and risk caps are reviewed.
 
+## Product-Line Provider Instances
+
+The backend keeps one shared codebase and runs product-line instances by configuration. Use product topic routing for separated order, match, account, risk, liquidation, mark price, candlestick, WebSocket, and funding traffic.
+
+Local multi-product startup:
+
+```bash
+mvn -q -DskipTests package
+
+PRODUCT_LINE=LINEAR_PERPETUAL PORT_OFFSET=0 ./scripts/start-product-line-providers.sh
+PRODUCT_LINE=LINEAR_DELIVERY PORT_OFFSET=100 ./scripts/start-product-line-providers.sh
+PRODUCT_LINE=OPTION PORT_OFFSET=200 ./scripts/start-product-line-providers.sh
+
+PRODUCT_LINE=OPTION PORT_OFFSET=200 ACTION=stop ./scripts/start-product-line-providers.sh
+```
+
+`PORT_OFFSET` is added to each provider's default port. For example, order/matching/account/risk use `9084/9085/9086/9087` for `LINEAR_PERPETUAL`, `9184/9185/9186/9187` for `LINEAR_DELIVERY`, and `9284/9285/9286/9287` for `OPTION`.
+
+The startup script sets product-line Kafka topic routing, product-specific consumer groups, unique client ids, and unique coordination node ids where a provider needs them. Index price, mark price, risk, liquidation, and funding are skipped automatically for `SPOT`; funding is also skipped for delivery and option product lines. Use `BUILD_SERVICES=true` when jars are not already built, `SERVICES="order matching account"` for a subset, and `WAIT_HEALTH=false` for CI environments where Actuator health is not exposed.
+
+For Kubernetes, systemd, or another process manager, use the same environment pattern instead of the script:
+
+- Set `SURPRISING_*_KAFKA_PRODUCT_LINE` to one of `SPOT`, `LINEAR_PERPETUAL`, `INVERSE_PERPETUAL`, `LINEAR_DELIVERY`, `INVERSE_DELIVERY`, or `OPTION`.
+- Set `SURPRISING_*_KAFKA_PRODUCT_TOPICS_ENABLED=true`.
+- Keep product-line consumer groups separate when each line owns its own processing state, for example `surprising-account-option-v1` and `surprising-account-linear-delivery-v1`.
+- Keep Kafka Streams state directories, matching client ids, and price/risk/funding coordination node ids unique per pod or process.
+- Keep instrument-provider shared unless there is an operational reason to split it. Instrument APIs are product-line aware through `productLine` query parameters and `X-Product-Line` headers.
+
+Configure gateway product routes after starting product-line provider instances. The variable names follow `GATEWAY_ROUTE_{SERVICE}_{PRODUCT_LINE}_BASE_URL`. Common service prefixes are `CANDLESTICK`, `PRICE_INDEX`, `PRICE_MARK`, `TRADING`, `TRADING_MARKET`, `TRADING_TRIGGER`, `ACCOUNT`, `RISK`, `LIQUIDATION`, `FUNDING`, `INSURANCE`, `ADL`, and `MARKET_MAKER`.
+
+Example local routes for the three startup commands above:
+
+```bash
+export GATEWAY_ROUTE_TRADING_LINEAR_DELIVERY_BASE_URL=http://localhost:9184
+export GATEWAY_ROUTE_TRADING_MARKET_LINEAR_DELIVERY_BASE_URL=http://localhost:9185
+export GATEWAY_ROUTE_ACCOUNT_LINEAR_DELIVERY_BASE_URL=http://localhost:9186
+export GATEWAY_ROUTE_RISK_LINEAR_DELIVERY_BASE_URL=http://localhost:9187
+export GATEWAY_ROUTE_LIQUIDATION_LINEAR_DELIVERY_BASE_URL=http://localhost:9188
+export GATEWAY_ROUTE_PRICE_MARK_LINEAR_DELIVERY_BASE_URL=http://localhost:9183
+export GATEWAY_ROUTE_CANDLESTICK_LINEAR_DELIVERY_BASE_URL=http://localhost:9181
+
+export GATEWAY_ROUTE_TRADING_OPTION_BASE_URL=http://localhost:9284
+export GATEWAY_ROUTE_TRADING_MARKET_OPTION_BASE_URL=http://localhost:9285
+export GATEWAY_ROUTE_ACCOUNT_OPTION_BASE_URL=http://localhost:9286
+export GATEWAY_ROUTE_RISK_OPTION_BASE_URL=http://localhost:9287
+export GATEWAY_ROUTE_LIQUIDATION_OPTION_BASE_URL=http://localhost:9288
+export GATEWAY_ROUTE_PRICE_MARK_OPTION_BASE_URL=http://localhost:9283
+export GATEWAY_ROUTE_CANDLESTICK_OPTION_BASE_URL=http://localhost:9281
+```
+
+Client deployment must point every client to the gateway and WebSocket edge, not to product providers directly:
+
+- `surprising-ex-web`: set `VITE_API_BASE_URL` and `VITE_WS_BASE_URL`.
+- `surprising-admin-web`: set `VITE_GATEWAY_BASE_URL`.
+- `surprising-client`: build with `--dart-define=SURPRISING_GATEWAY_URL=...` and `--dart-define=SURPRISING_WEBSOCKET_URL=...`.
+
+All three clients send `productLine` on REST requests and WebSocket subscription payloads. When a client switches from perpetual to delivery, option, or spot, use a full REST refresh and WebSocket resubscribe so stale product-line market data cannot be reused.
+
 ## Observability
 
 - Scrape every provider's `/actuator/prometheus` endpoint.
@@ -81,6 +139,7 @@ The root `init.sql` creates:
 
 - `instruments`: immutable product-rule snapshots keyed by `(symbol, version)`.
 - `instrument_current_versions`: current version pointer per symbol.
+- `instrument_product_current_versions`: current version pointer per `(product_line, symbol)`, used by product-line-aware latest/list and lifecycle scans.
 - `instrument_symbol_sequences`: atomic instrument version allocator per symbol.
 - `instrument_risk_brackets`: risk tiers keyed by `(symbol, version, bracket_no)`.
 - `instrument_index_sources`: index component source config keyed by `(symbol, version, source)`.
