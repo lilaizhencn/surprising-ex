@@ -226,8 +226,9 @@ class AccountRepositoryTest {
     @Test
     void positionMarginAdjustmentLocksPositionByProductLineContractType() {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
-        when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
-                eq("iso-add-line"), eq(1001L), eq("BTC-USDT-260925"))).thenReturn(List.of());
+        when(jdbcTemplate.query(contains("FROM account_product_ledger_entries"), anyRowMapper(),
+                eq("iso-add-line"), eq(1001L), eq("USDT_DELIVERY"), eq("BTC-USDT-260925")))
+                .thenReturn(List.of());
         when(jdbcTemplate.query(contains("p.product_line = ?"), anyRowMapper(),
                 eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT-260925"), eq("NET")))
                 .thenReturn(List.of());
@@ -241,6 +242,50 @@ class AccountRepositoryTest {
         verify(jdbcTemplate).query(contains("p.product_line = ?"), anyRowMapper(),
                 eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT-260925"), eq("NET"));
         verify(jdbcTemplate, never()).update(contains("INSERT INTO account_ledger_entries"), any(Object[].class));
+    }
+
+    @Test
+    void productPositionMarginAdjustmentUsesProductBalanceAndLedger() throws Exception {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        when(sequenceRepository.nextSequence("product-ledger-entry")).thenReturn(7101L);
+        when(jdbcTemplate.query(contains("FROM account_product_ledger_entries"), anyRowMapper(),
+                eq("iso-add-delivery"), eq(1001L), eq("USDT_DELIVERY"), eq("BTC-USDT-260925")))
+                .thenReturn(List.of());
+        when(jdbcTemplate.query(contains("p.product_line = ?"), anyRowMapper(),
+                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT-260925"), eq("NET")))
+                .thenAnswer(positionTarget("USDT", 7L, 10L));
+        when(jdbcTemplate.update(contains("INSERT INTO account_product_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.query(contains("SELECT margin_units"), anyRowMapper(),
+                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT-260925"), eq("USDT"), eq("ISOLATED"), eq("NET")))
+                .thenAnswer(marginUnits(600L))
+                .thenAnswer(marginUnits(700L));
+        when(jdbcTemplate.update(contains("UPDATE account_product_balances"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.update(contains("INSERT INTO account_position_margins"), any(Object[].class)))
+                .thenReturn(1);
+        when(jdbcTemplate.query(contains("FROM account_product_balances b"), anyRowMapper(),
+                eq(1001L), eq("USDT_DELIVERY"), eq("USDT"))).thenAnswer(productBalance(AccountType.USDT_DELIVERY,
+                900L, 700L, 1_600L));
+        when(jdbcTemplate.update(contains("UPDATE account_product_ledger_entries"), any(Object[].class)))
+                .thenReturn(1);
+
+        var response = repository.adjustIsolatedPositionMargin(ProductLine.LINEAR_DELIVERY,
+                1001L, "BTC-USDT-260925", 100L, "iso-add-delivery", "ADD_POSITION_MARGIN",
+                Duration.ofSeconds(10), 50_000L);
+
+        assertThat(response.positionMarginUnits()).isEqualTo(700L);
+        assertThat(response.availableUnits()).isEqualTo(900L);
+        assertThat(response.lockedUnits()).isEqualTo(700L);
+        verify(jdbcTemplate).update(contains("INSERT INTO account_product_ledger_entries"),
+                eq(7101L), eq(1001L), eq("USDT_DELIVERY"), eq("USDT"), eq(100L),
+                eq("iso-add-delivery"), eq("ADD_POSITION_MARGIN"), eq("BTC-USDT-260925"), any(Timestamp.class));
+        verify(jdbcTemplate).update(contains("UPDATE account_product_balances"),
+                eq(100L), eq(100L), any(Timestamp.class), eq("USDT_DELIVERY"), eq(1001L), eq("USDT"), eq(100L));
+        verify(jdbcTemplate).update(contains("UPDATE account_product_ledger_entries"),
+                eq(1_600L), eq("iso-add-delivery"), eq(1001L), eq("USDT_DELIVERY"), eq("USDT"));
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO account_ledger_entries"), any(Object[].class));
+        verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
     }
 
     @Test
@@ -1091,6 +1136,24 @@ class AccountRepositoryTest {
             RowMapper<?> mapper = invocation.getArgument(1);
             ResultSet rs = mock(ResultSet.class);
             when(rs.getLong("user_id")).thenReturn(1001L);
+            when(rs.getString("asset")).thenReturn("USDT");
+            when(rs.getLong("available_units")).thenReturn(availableUnits);
+            when(rs.getLong("locked_units")).thenReturn(lockedUnits);
+            when(rs.getLong("equity_units")).thenReturn(equityUnits);
+            when(rs.getTimestamp("updated_at")).thenReturn(Timestamp.from(Instant.parse("2026-07-01T00:00:00Z")));
+            return List.of(mapper.mapRow(rs, 0));
+        };
+    }
+
+    private org.mockito.stubbing.Answer<List<Object>> productBalance(AccountType accountType,
+                                                                     long availableUnits,
+                                                                     long lockedUnits,
+                                                                     long equityUnits) {
+        return invocation -> {
+            RowMapper<?> mapper = invocation.getArgument(1);
+            ResultSet rs = mock(ResultSet.class);
+            when(rs.getLong("user_id")).thenReturn(1001L);
+            when(rs.getString("account_type")).thenReturn(accountType.name());
             when(rs.getString("asset")).thenReturn("USDT");
             when(rs.getLong("available_units")).thenReturn(availableUnits);
             when(rs.getLong("locked_units")).thenReturn(lockedUnits);

@@ -1809,8 +1809,22 @@ CREATE TABLE IF NOT EXISTS account_product_ledger_entries (
     ),
     CONSTRAINT account_product_ledger_user_positive CHECK (user_id > 0),
     CONSTRAINT account_product_ledger_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
-    CONSTRAINT account_product_ledger_amount_non_zero CHECK (amount_units <> 0)
+    CONSTRAINT account_product_ledger_amount_non_zero CHECK (amount_units <> 0),
+    CONSTRAINT account_product_ledger_symbol_format CHECK (
+        symbol IS NULL OR symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'
+    )
 );
+
+ALTER TABLE account_product_ledger_entries
+    ADD COLUMN IF NOT EXISTS symbol TEXT;
+
+ALTER TABLE account_product_ledger_entries
+    DROP CONSTRAINT IF EXISTS account_product_ledger_symbol_format;
+
+ALTER TABLE account_product_ledger_entries
+    ADD CONSTRAINT account_product_ledger_symbol_format CHECK (
+        symbol IS NULL OR symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'
+    );
 
 CREATE UNIQUE INDEX IF NOT EXISTS account_product_ledger_reference_uidx
     ON account_product_ledger_entries (reference_type, reference_id, user_id, account_type, asset);
@@ -2713,6 +2727,7 @@ CREATE TABLE IF NOT EXISTS insurance_fund_ledger (
     reference_type      TEXT NOT NULL,
     reference_id        TEXT NOT NULL,
     reason              TEXT,
+    symbol              TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT insurance_fund_ledger_type_check CHECK (
         account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL', 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')

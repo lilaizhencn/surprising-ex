@@ -1071,31 +1071,40 @@ public class AccountRepository {
                                                                                 Duration maxRiskSnapshotAge,
                                                                                 long removalBufferPpm) {
         Optional<PositionMarginAdjustmentReference> existing =
-                positionMarginAdjustmentReference(userId, symbol, referenceId);
+                productLine == null
+                        ? positionMarginAdjustmentReference(userId, symbol, referenceId)
+                        : productPositionMarginAdjustmentReference(accountType(productLine), userId, symbol, referenceId);
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
         if (existing.isPresent()) {
             requirePositionMarginAdjustmentMatches(existing.get(), amountUnits, reason, symbol);
-            return positionMarginAdjustmentResponse(userId, symbol, existing.get().asset(), normalizedPositionSide, amountUnits,
-                    referenceId);
+            return productLine == null
+                    ? positionMarginAdjustmentResponse(userId, symbol, existing.get().asset(), normalizedPositionSide,
+                            amountUnits, referenceId)
+                    : positionMarginAdjustmentResponse(productLine, userId, symbol, existing.get().asset(),
+                            normalizedPositionSide, amountUnits, referenceId);
         }
 
         PositionCollateralTarget target = productLine == null
                 ? lockOpenIsolatedPosition(userId, symbol, normalizedPositionSide)
                 : lockOpenIsolatedPosition(productLine, userId, symbol, normalizedPositionSide);
-        int ledgerRows = jdbcTemplate.update("""
-                INSERT INTO account_ledger_entries (
-                    entry_id, user_id, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, symbol, created_at
-                ) VALUES (?, ?, ?, ?, 0, 'POSITION_MARGIN_ADJUSTMENT', ?, ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, sequenceRepository.nextSequence("ledger-entry"), userId, target.asset(), amountUnits,
-                referenceId, reason, symbol, Timestamp.from(Instant.now()));
+        AccountType productAccountType = productLine == null ? null : accountType(productLine);
+        int ledgerRows = productLine == null
+                ? insertPositionMarginAdjustmentLedger(userId, target.asset(), amountUnits, referenceId, reason, symbol)
+                : insertProductPositionMarginAdjustmentLedger(productAccountType, userId, target.asset(),
+                        amountUnits, referenceId, reason, symbol);
         if (ledgerRows == 0) {
-            PositionMarginAdjustmentReference duplicate =
-                    positionMarginAdjustmentReferenceByAsset(userId, target.asset(), referenceId)
-                            .orElseThrow(() -> new IllegalStateException("duplicate position margin adjustment but ledger missing"));
+            Optional<PositionMarginAdjustmentReference> duplicateReference = productLine == null
+                    ? positionMarginAdjustmentReferenceByAsset(userId, target.asset(), referenceId)
+                    : productPositionMarginAdjustmentReferenceByAsset(productAccountType, userId, target.asset(),
+                            referenceId);
+            PositionMarginAdjustmentReference duplicate = duplicateReference
+                    .orElseThrow(() -> new IllegalStateException("duplicate position margin adjustment but ledger missing"));
             requirePositionMarginAdjustmentMatches(duplicate, amountUnits, reason, symbol);
-            return positionMarginAdjustmentResponse(userId, symbol, target.asset(), normalizedPositionSide, amountUnits, referenceId);
+            return productLine == null
+                    ? positionMarginAdjustmentResponse(userId, symbol, target.asset(), normalizedPositionSide,
+                            amountUnits, referenceId)
+                    : positionMarginAdjustmentResponse(productLine, userId, symbol, target.asset(),
+                            normalizedPositionSide, amountUnits, referenceId);
         }
 
         Instant now = Instant.now();
@@ -1103,27 +1112,35 @@ public class AccountRepository {
         long currentMarginUnits = lockPositionMarginUnits(resolvedProductLine, userId, symbol, target.asset(),
                 MarginMode.ISOLATED, normalizedPositionSide);
         if (amountUnits > 0) {
-            addIsolatedPositionMargin(resolvedProductLine, userId, symbol, target.asset(), normalizedPositionSide,
-                    amountUnits, now);
+            if (productLine == null) {
+                addIsolatedPositionMargin(userId, symbol, target.asset(), normalizedPositionSide, amountUnits, now);
+            } else {
+                addProductIsolatedPositionMargin(productAccountType, resolvedProductLine, userId, symbol,
+                        target.asset(), normalizedPositionSide, amountUnits, now);
+            }
         } else {
             long removeUnits = Math.absExact(amountUnits);
             validateIsolatedMarginRemoval(target, currentMarginUnits, removeUnits, maxRiskSnapshotAge,
                     removalBufferPpm);
-            removeIsolatedPositionMargin(resolvedProductLine, userId, symbol, target.asset(), normalizedPositionSide,
-                    removeUnits, now);
+            if (productLine == null) {
+                removeIsolatedPositionMargin(userId, symbol, target.asset(), normalizedPositionSide, removeUnits, now);
+            } else {
+                removeProductIsolatedPositionMargin(productAccountType, resolvedProductLine, userId, symbol,
+                        target.asset(), normalizedPositionSide, removeUnits, now);
+            }
         }
 
         PositionMarginAdjustmentResponse response =
-                positionMarginAdjustmentResponse(userId, symbol, target.asset(), normalizedPositionSide,
-                        amountUnits, referenceId);
-        int ledgerRowsAfter = jdbcTemplate.update("""
-                UPDATE account_ledger_entries
-                   SET balance_after_units = ?
-                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, response.equityUnits(), referenceId, userId, target.asset());
+                productLine == null
+                        ? positionMarginAdjustmentResponse(userId, symbol, target.asset(), normalizedPositionSide,
+                                amountUnits, referenceId)
+                        : positionMarginAdjustmentResponse(productLine, userId, symbol, target.asset(),
+                                normalizedPositionSide, amountUnits, referenceId);
+        int ledgerRowsAfter = productLine == null
+                ? updatePositionMarginAdjustmentLedgerBalance(userId, target.asset(), referenceId,
+                        response.equityUnits())
+                : updateProductPositionMarginAdjustmentLedgerBalance(productAccountType, userId, target.asset(),
+                        referenceId, response.equityUnits());
         requireSingleRow(ledgerRowsAfter, "position margin adjustment ledger update");
         return response;
     }
@@ -1296,6 +1313,40 @@ public class AccountRepository {
         requireSingleRow(marginRows, "isolated position margin add");
     }
 
+    private void addProductIsolatedPositionMargin(AccountType accountType,
+                                                  ProductLine productLine,
+                                                  long userId,
+                                                  String symbol,
+                                                  String asset,
+                                                  PositionSide positionSide,
+                                                  long amountUnits,
+                                                  Instant now) {
+        ProductLine resolvedProductLine = productLine(productLine);
+        int balanceRows = jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET available_units = available_units - ?,
+                       locked_units = locked_units + ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                   AND available_units >= ?
+                """, amountUnits, amountUnits, Timestamp.from(now), accountType.name(), userId, asset, amountUnits);
+        if (balanceRows != 1) {
+            throw new IllegalArgumentException("insufficient available product balance");
+        }
+        int marginRows = jdbcTemplate.update("""
+                INSERT INTO account_position_margins (
+                    product_line, user_id, symbol, asset, margin_mode, position_side, margin_units, updated_at
+                ) VALUES (?, ?, ?, ?, 'ISOLATED', ?, ?, ?)
+                ON CONFLICT (product_line, user_id, symbol, asset, margin_mode, position_side) DO UPDATE
+                   SET margin_units = account_position_margins.margin_units + EXCLUDED.margin_units,
+                       updated_at = EXCLUDED.updated_at
+                """, resolvedProductLine.name(), userId, symbol, asset, PositionSide.defaultIfNull(positionSide).name(),
+                amountUnits, Timestamp.from(now));
+        requireSingleRow(marginRows, "product isolated position margin add");
+    }
+
     private void removeIsolatedPositionMargin(long userId,
                                               String symbol,
                                               String asset,
@@ -1343,6 +1394,49 @@ public class AccountRepository {
                 """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
         if (balanceRows != 1) {
             throw new IllegalStateException("insufficient locked balance for isolated margin removal");
+        }
+    }
+
+    private void removeProductIsolatedPositionMargin(AccountType accountType,
+                                                     ProductLine productLine,
+                                                     long userId,
+                                                     String symbol,
+                                                     String asset,
+                                                     PositionSide positionSide,
+                                                     long amountUnits,
+                                                     Instant now) {
+        ProductLine resolvedProductLine = productLine(productLine);
+        int marginRows = jdbcTemplate.update("""
+                UPDATE account_position_margins
+                   SET margin_units = margin_units - ?,
+                       updated_at = ?
+                 WHERE product_line = ?
+                   AND user_id = ?
+                   AND symbol = ?
+                   AND asset = ?
+                   AND margin_mode = 'ISOLATED'
+                   AND position_side = ?
+                   AND margin_units >= ?
+                """, amountUnits, Timestamp.from(now), resolvedProductLine.name(), userId, symbol, asset,
+                PositionSide.defaultIfNull(positionSide).name(), amountUnits);
+        requireSingleRow(marginRows, "product isolated position margin remove");
+        jdbcTemplate.update("""
+                DELETE FROM account_position_margins
+                 WHERE product_line = ? AND user_id = ? AND symbol = ? AND asset = ? AND margin_mode = 'ISOLATED'
+                   AND position_side = ? AND margin_units = 0
+                """, resolvedProductLine.name(), userId, symbol, asset, PositionSide.defaultIfNull(positionSide).name());
+        int balanceRows = jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET available_units = available_units + ?,
+                       locked_units = locked_units - ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                   AND locked_units >= ?
+                """, amountUnits, amountUnits, Timestamp.from(now), accountType.name(), userId, asset, amountUnits);
+        if (balanceRows != 1) {
+            throw new IllegalStateException("insufficient locked product balance for isolated margin removal");
         }
     }
 
@@ -1438,6 +1532,89 @@ public class AccountRepository {
                 currentBalance.equityUnits(), referenceId, currentBalance.updatedAt());
     }
 
+    private PositionMarginAdjustmentResponse positionMarginAdjustmentResponse(ProductLine productLine,
+                                                                              long userId,
+                                                                              String symbol,
+                                                                              String asset,
+                                                                              PositionSide positionSide,
+                                                                              long amountUnits,
+                                                                              String referenceId) {
+        ProductLine resolvedProductLine = productLine(productLine);
+        AccountType accountType = accountType(resolvedProductLine);
+        PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
+        long marginUnits = lockPositionMarginUnits(resolvedProductLine, userId, symbol, asset, MarginMode.ISOLATED,
+                normalizedPositionSide);
+        ProductBalanceResponse currentBalance = productBalance(userId, accountType, asset)
+                .orElse(new ProductBalanceResponse(userId, accountType, asset, 0L, 0L, 0L, Instant.EPOCH));
+        return new PositionMarginAdjustmentResponse(userId, symbol, asset, MarginMode.ISOLATED,
+                normalizedPositionSide, amountUnits,
+                marginUnits, currentBalance.availableUnits(), currentBalance.lockedUnits(),
+                currentBalance.equityUnits(), referenceId, currentBalance.updatedAt());
+    }
+
+    private int insertPositionMarginAdjustmentLedger(long userId,
+                                                     String asset,
+                                                     long amountUnits,
+                                                     String referenceId,
+                                                     String reason,
+                                                     String symbol) {
+        return jdbcTemplate.update("""
+                INSERT INTO account_ledger_entries (
+                    entry_id, user_id, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, symbol, created_at
+                ) VALUES (?, ?, ?, ?, 0, 'POSITION_MARGIN_ADJUSTMENT', ?, ?, ?, ?)
+                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
+                """, sequenceRepository.nextSequence("ledger-entry"), userId, asset, amountUnits,
+                referenceId, reason, symbol, Timestamp.from(Instant.now()));
+    }
+
+    private int insertProductPositionMarginAdjustmentLedger(AccountType accountType,
+                                                            long userId,
+                                                            String asset,
+                                                            long amountUnits,
+                                                            String referenceId,
+                                                            String reason,
+                                                            String symbol) {
+        return jdbcTemplate.update("""
+                INSERT INTO account_product_ledger_entries (
+                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, symbol, created_at
+                ) VALUES (?, ?, ?, ?, ?, 0, 'POSITION_MARGIN_ADJUSTMENT', ?, ?, ?, ?)
+                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
+                """, sequenceRepository.nextSequence("product-ledger-entry"), userId, accountType.name(), asset,
+                amountUnits, referenceId, reason, symbol, Timestamp.from(Instant.now()));
+    }
+
+    private int updatePositionMarginAdjustmentLedgerBalance(long userId,
+                                                            String asset,
+                                                            String referenceId,
+                                                            long balanceAfterUnits) {
+        return jdbcTemplate.update("""
+                UPDATE account_ledger_entries
+                   SET balance_after_units = ?
+                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, balanceAfterUnits, referenceId, userId, asset);
+    }
+
+    private int updateProductPositionMarginAdjustmentLedgerBalance(AccountType accountType,
+                                                                   long userId,
+                                                                   String asset,
+                                                                   String referenceId,
+                                                                   long balanceAfterUnits) {
+        return jdbcTemplate.update("""
+                UPDATE account_product_ledger_entries
+                   SET balance_after_units = ?
+                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND account_type = ?
+                   AND asset = ?
+                """, balanceAfterUnits, referenceId, userId, accountType.name(), asset);
+    }
+
     private Optional<PositionMarginAdjustmentReference> positionMarginAdjustmentReference(long userId,
                                                                                          String symbol,
                                                                                          String referenceId) {
@@ -1472,6 +1649,46 @@ public class AccountRepository {
                 rs.getLong("amount_units"),
                 rs.getString("reason"),
                 rs.getString("symbol")), referenceId, userId, asset).stream().findFirst();
+    }
+
+    private Optional<PositionMarginAdjustmentReference> productPositionMarginAdjustmentReference(AccountType accountType,
+                                                                                                 long userId,
+                                                                                                 String symbol,
+                                                                                                 String referenceId) {
+        return jdbcTemplate.query("""
+                SELECT asset, amount_units, reason, symbol
+                  FROM account_product_ledger_entries
+                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND account_type = ?
+                   AND symbol = ?
+                 FOR UPDATE
+                """, (rs, rowNum) -> new PositionMarginAdjustmentReference(
+                rs.getString("asset"),
+                rs.getLong("amount_units"),
+                rs.getString("reason"),
+                rs.getString("symbol")), referenceId, userId, accountType.name(), symbol).stream().findFirst();
+    }
+
+    private Optional<PositionMarginAdjustmentReference> productPositionMarginAdjustmentReferenceByAsset(AccountType accountType,
+                                                                                                        long userId,
+                                                                                                        String asset,
+                                                                                                        String referenceId) {
+        return jdbcTemplate.query("""
+                SELECT asset, amount_units, reason, symbol
+                  FROM account_product_ledger_entries
+                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND account_type = ?
+                   AND asset = ?
+                 FOR UPDATE
+                """, (rs, rowNum) -> new PositionMarginAdjustmentReference(
+                rs.getString("asset"),
+                rs.getLong("amount_units"),
+                rs.getString("reason"),
+                rs.getString("symbol")), referenceId, userId, accountType.name(), asset).stream().findFirst();
     }
 
     private void requirePositionMarginAdjustmentMatches(PositionMarginAdjustmentReference existing,
@@ -3514,6 +3731,10 @@ public class AccountRepository {
 
     private ProductLine productLine(ProductLine productLine) {
         return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+    }
+
+    private AccountType accountType(ProductLine productLine) {
+        return AccountType.valueOf(productLine(productLine).accountTypeCode());
     }
 
     private static String productLineExpression(String instrumentAlias) {
