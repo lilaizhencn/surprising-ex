@@ -58,7 +58,7 @@ class AdminSupportControllerTest {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("X-Request-Id", "request-1");
 
-        var response = controller.overview("Bearer support", 1001L, "usdt", 25, request);
+        var response = controller.overview("Bearer support", 1001L, null, "LINEAR_DELIVERY", "usdt", 25, request);
 
         assertThat(response.user().userId()).isEqualTo(1001L);
         assertThat(response.user().status()).isEqualTo("NORMAL");
@@ -67,16 +67,34 @@ class AdminSupportControllerTest {
         assertThat(response.compliance().openAmlCases()).isEqualTo(1);
         assertThat(response.errors()).isEmpty();
         assertThat(restTemplate.urls).extracting(URI::toString)
-                .contains("http://account:9086/api/v1/admin/accounts/balances?userId=1001");
+                .anySatisfy(uri -> assertThat(uri)
+                        .startsWith("http://account:9086/api/v1/admin/accounts/balances?")
+                        .contains("userId=1001")
+                        .contains("productLine=LINEAR_DELIVERY"));
         assertThat(restTemplate.urls).extracting(URI::toString)
                 .anySatisfy(uri -> assertThat(uri)
                         .startsWith("http://order:9084/api/v1/admin/trading/orders?")
                         .contains("userId=1001")
-                        .contains("limit=25"));
+                        .contains("limit=25")
+                        .contains("productLine=LINEAR_DELIVERY"));
+        assertThat(restTemplate.urls).extracting(URI::toString)
+                .anySatisfy(uri -> assertThat(uri)
+                        .startsWith("http://risk:9087/api/v1/risk/account/latest?")
+                        .contains("userId=1001")
+                        .contains("settleAsset=USDT")
+                        .contains("productLine=LINEAR_DELIVERY")
+                        .contains("accountType=USDT_DELIVERY"));
+        assertThat(restTemplate.urls).extracting(URI::toString)
+                .anySatisfy(uri -> assertThat(uri)
+                        .startsWith("http://risk:9087/api/v1/risk/positions/latest?")
+                        .contains("userId=1001")
+                        .contains("productLine=LINEAR_DELIVERY"));
         assertThat(restTemplate.requestEntities.get(0).getHeaders().getFirst("X-Admin-Roles"))
                 .isEqualTo("SUPPORT");
         assertThat(restTemplate.requestEntities.get(0).getHeaders().getFirst("X-Request-Id"))
                 .isEqualTo("request-1");
+        assertThat(restTemplate.requestEntities.get(0).getHeaders().getFirst("X-Product-Line"))
+                .isEqualTo("LINEAR_DELIVERY");
         verify(authService).requireAdminPermission("Bearer support", "admin.support.read");
     }
 

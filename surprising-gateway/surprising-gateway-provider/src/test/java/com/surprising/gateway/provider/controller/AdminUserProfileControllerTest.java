@@ -37,29 +37,41 @@ class AdminUserProfileControllerTest {
         request.addHeader("X-Request-Id", "request-1");
         request.addHeader("X-Forwarded-For", "203.0.113.10");
 
-        var response = controller.profile("Bearer admin", 1001L, "usdt", 50, request);
+        var response = controller.profile("Bearer admin", 1001L, null, "LINEAR_DELIVERY", "usdt", 50, request);
 
         assertThat(response.user().userId()).isEqualTo(1001L);
         assertThat(response.sessions().count()).isEqualTo(1);
         assertThat(response.loginLogs().count()).isEqualTo(1);
         assertThat(response.errors()).isEmpty();
         assertThat(restTemplate.urls).extracting(URI::toString)
-                .contains("http://account:9086/api/v1/admin/accounts/balances?userId=1001");
+                .anySatisfy(uri -> assertThat(uri)
+                        .startsWith("http://account:9086/api/v1/admin/accounts/balances?")
+                        .contains("userId=1001")
+                        .contains("productLine=LINEAR_DELIVERY"));
         assertThat(restTemplate.urls).extracting(URI::toString)
                 .anySatisfy(uri -> assertThat(uri)
                         .startsWith("http://order:9084/api/v1/admin/trading/orders?")
                         .contains("userId=1001")
-                        .contains("limit=50"));
+                        .contains("limit=50")
+                        .contains("productLine=LINEAR_DELIVERY"));
         assertThat(restTemplate.urls).extracting(URI::toString)
                 .anySatisfy(uri -> assertThat(uri)
                         .startsWith("http://trigger:9095/api/v1/admin/trading/trigger-orders?")
                         .contains("userId=1001")
-                        .contains("limit=50"));
+                        .contains("limit=50")
+                        .contains("productLine=LINEAR_DELIVERY"));
         assertThat(restTemplate.urls).extracting(URI::toString)
                 .anySatisfy(uri -> assertThat(uri)
                         .startsWith("http://risk:9087/api/v1/risk/account/latest?")
                         .contains("userId=1001")
-                        .contains("settleAsset=USDT"));
+                        .contains("settleAsset=USDT")
+                        .contains("productLine=LINEAR_DELIVERY")
+                        .contains("accountType=USDT_DELIVERY"));
+        assertThat(restTemplate.urls).extracting(URI::toString)
+                .anySatisfy(uri -> assertThat(uri)
+                        .startsWith("http://risk:9087/api/v1/risk/positions/latest?")
+                        .contains("userId=1001")
+                        .contains("productLine=LINEAR_DELIVERY"));
         assertThat(restTemplate.requestEntities).isNotEmpty();
         HttpEntity<?> firstRequest = restTemplate.requestEntities.get(0);
         assertThat(firstRequest.getHeaders().getFirst("X-Admin-User-Id")).isEqualTo("7");
@@ -67,6 +79,7 @@ class AdminUserProfileControllerTest {
         assertThat(firstRequest.getHeaders().getFirst("X-Admin-Roles")).isEqualTo("ADMIN");
         assertThat(firstRequest.getHeaders().getFirst("X-Request-Id")).isEqualTo("request-1");
         assertThat(firstRequest.getHeaders().getFirst("X-Forwarded-For")).isEqualTo("203.0.113.10");
+        assertThat(firstRequest.getHeaders().getFirst("X-Product-Line")).isEqualTo("LINEAR_DELIVERY");
     }
 
     @Test
@@ -74,7 +87,8 @@ class AdminUserProfileControllerTest {
         AdminUserProfileController controller = new AdminUserProfileController(
                 authService(), properties(false), new CapturingRestTemplate());
 
-        var response = controller.profile("Bearer admin", 1001L, "USDT", 10, new MockHttpServletRequest());
+        var response = controller.profile("Bearer admin", 1001L, null, null, "USDT", 10,
+                new MockHttpServletRequest());
 
         assertThat(response.user().userId()).isEqualTo(1001L);
         assertThat(response.errors())

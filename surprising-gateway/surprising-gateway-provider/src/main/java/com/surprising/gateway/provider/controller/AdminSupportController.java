@@ -12,10 +12,12 @@ import com.surprising.gateway.provider.auth.SupportTicketRepository.SupportTicke
 import com.surprising.gateway.provider.auth.SupportTicketRepository.SupportTicketNote;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.config.GatewayProperties.BackendRoute;
+import com.surprising.product.api.ProductLine;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -70,6 +72,10 @@ public class AdminSupportController {
     @GetMapping("/users/{userId}/overview")
     public SupportUserOverviewResponse overview(@RequestHeader("Authorization") String authorization,
                                                 @PathVariable("userId") long userId,
+                                                @RequestHeader(value = "X-Product-Line", required = false)
+                                                String productLineHeader,
+                                                @RequestParam(value = "productLine", required = false)
+                                                String productLineValue,
                                                 @RequestParam(value = "settleAsset", defaultValue = "USDT") String settleAsset,
                                                 @RequestParam(value = "limit", defaultValue = "" + DEFAULT_LIMIT) int limit,
                                                 HttpServletRequest request) {
@@ -77,22 +83,33 @@ public class AdminSupportController {
         AuthenticatedUser user = user(authorization, userId);
         int boundedLimit = boundLimit(limit);
         String normalizedSettleAsset = normalizeAsset(settleAsset);
+        ProductLine productLine = productLine(productLineValue, productLineHeader);
 
         List<SupportOverviewError> errors = new ArrayList<>();
-        SupportDownstreamContext context = new SupportDownstreamContext(principal, request, errors);
+        SupportDownstreamContext context = new SupportDownstreamContext(principal, productLine, request, errors);
         SupportAccountOverview account = new SupportAccountOverview(
-                fetch(context, "account", "balances", "/balances", Map.of("userId", userId)),
-                fetch(context, "account", "productBalances", "/product-balances", Map.of("userId", userId)),
-                fetch(context, "account", "positions", "/positions", Map.of("userId", userId)),
-                fetch(context, "account", "transfers", "/transfers", Map.of("userId", userId, "limit", boundedLimit)));
+                fetch(context, "account", "balances", "/balances",
+                        withProductLine(productLine, Map.of("userId", userId))),
+                fetch(context, "account", "productBalances", "/product-balances",
+                        withProductLine(productLine, Map.of("userId", userId))),
+                fetch(context, "account", "positions", "/positions",
+                        withProductLine(productLine, Map.of("userId", userId))),
+                fetch(context, "account", "transfers", "/transfers",
+                        withProductLine(productLine, Map.of("userId", userId, "limit", boundedLimit))));
         SupportTradingOverview trading = new SupportTradingOverview(
-                fetch(context, "trading-orders", "orders", "", Map.of("userId", userId, "limit", boundedLimit)),
-                fetch(context, "trading-orders", "trades", "/trades", Map.of("userId", userId, "limit", boundedLimit)),
-                fetch(context, "trading-trigger", "triggerOrders", "", Map.of("userId", userId, "limit", boundedLimit)));
-        SupportRiskOverview risk = new SupportRiskOverview(
-                fetch(context, "risk", "accountLatest", "/account/latest",
-                        Map.of("userId", userId, "settleAsset", normalizedSettleAsset)),
-                fetch(context, "risk", "positionsLatest", "/positions/latest", Map.of("userId", userId)));
+                fetch(context, "trading-orders", "orders", "",
+                        withProductLine(productLine, Map.of("userId", userId, "limit", boundedLimit))),
+                fetch(context, "trading-orders", "trades", "/trades",
+                        withProductLine(productLine, Map.of("userId", userId, "limit", boundedLimit))),
+                fetch(context, "trading-trigger", "triggerOrders", "",
+                        withProductLine(productLine, Map.of("userId", userId, "limit", boundedLimit))));
+        SupportRiskOverview risk = productLine == null || productLine.isMarginProduct()
+                ? new SupportRiskOverview(
+                        fetch(context, "risk", "accountLatest", "/account/latest",
+                                riskAccountQuery(userId, normalizedSettleAsset, productLine)),
+                        fetch(context, "risk", "positionsLatest", "/positions/latest",
+                                withProductLine(productLine, Map.of("userId", userId))))
+                : new SupportRiskOverview(null, Map.of("count", 0, "positions", List.of()));
 
         return new SupportUserOverviewResponse(
                 Instant.now(),
@@ -244,16 +261,22 @@ public class AdminSupportController {
             context.errors().add(new SupportOverviewError(service, section, null, null, "admin route is not configured"));
             return null;
         }
+        BackendRoute resolvedRoute = route.resolve(context.productLine());
+        if (resolvedRoute == null) {
+            context.errors().add(new SupportOverviewError(service, section, null, null,
+                    "product route is not configured: " + context.productLine().name()));
+            return null;
+        }
         URI uri;
         try {
-            uri = targetUri(route, path, queryParams);
+            uri = targetUri(resolvedRoute, path, queryParams);
         } catch (IllegalArgumentException ex) {
             context.errors().add(new SupportOverviewError(service, section, null, null, ex.getMessage()));
             return null;
         }
         try {
             ResponseEntity<Object> response = restTemplate.exchange(
-                    uri, HttpMethod.GET, new HttpEntity<>(headers(context, route)), Object.class);
+                    uri, HttpMethod.GET, new HttpEntity<>(headers(context, resolvedRoute)), Object.class);
             return response.getBody();
         } catch (RestClientResponseException ex) {
             context.errors().add(new SupportOverviewError(
@@ -282,6 +305,9 @@ public class AdminSupportController {
         if (forwardedFor != null && !forwardedFor.isBlank()) {
             headers.set("X-Forwarded-For", forwardedFor);
         }
+        if (context.productLine() != null) {
+            headers.set("X-Product-Line", context.productLine().name());
+        }
         if (route.hasBasicAuth()) {
             headers.setBasicAuth(route.getBasicAuthUsername(), route.getBasicAuthPassword());
         }
@@ -304,6 +330,61 @@ public class AdminSupportController {
             }
         });
         return builder.build().toUri();
+    }
+
+    private Map<String, Object> withProductLine(ProductLine productLine, Map<String, ?> queryParams) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        queryParams.forEach(result::put);
+        if (productLine != null) {
+            result.putIfAbsent("productLine", productLine.name());
+        }
+        return result;
+    }
+
+    private Map<String, Object> riskAccountQuery(long userId, String settleAsset, ProductLine productLine) {
+        Map<String, Object> result = withProductLine(productLine,
+                Map.of("userId", userId, "settleAsset", settleAsset));
+        if (productLine != null) {
+            result.put("accountType", productLine.accountTypeCode());
+        }
+        return result;
+    }
+
+    private ProductLine productLine(String queryValue, String headerValue) {
+        String value = firstNonBlank(queryValue, headerValue);
+        if (value == null) {
+            return null;
+        }
+        ProductLine byAccountType = ProductLine.fromAccountTypeCode(value).orElse(null);
+        if (byAccountType != null) {
+            return byAccountType;
+        }
+        ProductLine byContractType = ProductLine.fromContractTypeCode(value).orElse(null);
+        if (byContractType != null) {
+            return byContractType;
+        }
+        String enumName = value.toUpperCase(Locale.ROOT)
+                .replace('-', '_')
+                .replace('.', '_');
+        for (ProductLine productLine : ProductLine.values()) {
+            if (productLine.name().equals(enumName)
+                    || productLine.topicSegment().equalsIgnoreCase(value)) {
+                return productLine;
+            }
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "unsupported productLine: " + value);
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     private int boundLimit(int limit) {
@@ -405,6 +486,7 @@ public class AdminSupportController {
 
     private record SupportDownstreamContext(
             JwtPrincipal principal,
+            ProductLine productLine,
             HttpServletRequest request,
             List<SupportOverviewError> errors) {
     }
