@@ -818,13 +818,16 @@ public class AccountRepository {
                                ELSE mt.maker_instrument_version
                            END
                       LEFT JOIN account_processed_trades pt
-                        ON pt.symbol = mt.symbol
+                        ON pt.product_line = mt.product_line
+                       AND pt.symbol = mt.symbol
                        AND pt.trade_id = mt.trade_id
                      WHERE (mt.taker_user_id = ? OR mt.maker_user_id = ?)
                        AND pt.trade_id IS NULL
+                       AND mt.product_line = ?
                        AND %s = ?
                 )
-                """.formatted(productLineExpression("i")), Boolean.class, userId, userId, userId, productLineName);
+                """.formatted(productLineExpression("i")),
+                Boolean.class, userId, userId, userId, productLineName, productLineName);
         if (Boolean.TRUE.equals(hasUnsettledTrades)) {
             throw new IllegalStateException("position mode switch requires all matched trades to be settled");
         }
@@ -1746,11 +1749,16 @@ public class AccountRepository {
     }
 
     public boolean markTradeProcessing(long tradeId, String symbol) {
+        return markTradeProcessing(ProductLine.LINEAR_PERPETUAL, tradeId, symbol);
+    }
+
+    public boolean markTradeProcessing(ProductLine productLine, long tradeId, String symbol) {
+        ProductLine resolvedProductLine = productLine(productLine);
         int rows = jdbcTemplate.update("""
-                INSERT INTO account_processed_trades (trade_id, symbol, processed_at)
-                VALUES (?, ?, now())
-                ON CONFLICT (symbol, trade_id) DO NOTHING
-                """, tradeId, symbol);
+                INSERT INTO account_processed_trades (product_line, trade_id, symbol, processed_at)
+                VALUES (?, ?, ?, now())
+                ON CONFLICT (product_line, symbol, trade_id) DO NOTHING
+                """, resolvedProductLine.name(), tradeId, symbol);
         return rows == 1;
     }
 

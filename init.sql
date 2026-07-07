@@ -2218,15 +2218,45 @@ CREATE INDEX IF NOT EXISTS account_positions_open_scan_idx
     WHERE signed_quantity_steps <> 0;
 
 CREATE TABLE IF NOT EXISTS account_processed_trades (
+    product_line        TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     trade_id            BIGINT NOT NULL,
     symbol              TEXT NOT NULL,
     processed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (symbol, trade_id),
+    PRIMARY KEY (product_line, symbol, trade_id),
+    CONSTRAINT account_processed_trades_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT account_processed_trades_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$')
 );
 
+ALTER TABLE account_processed_trades
+    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+
+UPDATE account_processed_trades pt
+   SET product_line = COALESCE(mt.product_line, pt.product_line)
+  FROM trading_match_trades mt
+ WHERE mt.symbol = pt.symbol
+   AND mt.trade_id = pt.trade_id;
+
+ALTER TABLE account_processed_trades
+    DROP CONSTRAINT IF EXISTS account_processed_trades_pkey;
+
+ALTER TABLE account_processed_trades
+    DROP CONSTRAINT IF EXISTS account_processed_trades_product_line_check;
+
+ALTER TABLE account_processed_trades
+    ADD CONSTRAINT account_processed_trades_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    );
+
+ALTER TABLE account_processed_trades
+    ADD CONSTRAINT account_processed_trades_pkey PRIMARY KEY (product_line, symbol, trade_id);
+
+DROP INDEX IF EXISTS account_processed_trades_symbol_idx;
 CREATE INDEX IF NOT EXISTS account_processed_trades_symbol_idx
-    ON account_processed_trades (symbol, processed_at DESC);
+    ON account_processed_trades (product_line, symbol, processed_at DESC);
 
 CREATE TABLE IF NOT EXISTS account_outbox_events (
     id                  BIGINT PRIMARY KEY,

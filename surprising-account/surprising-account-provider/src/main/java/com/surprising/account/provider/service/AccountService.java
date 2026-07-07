@@ -479,9 +479,6 @@ public class AccountService {
 
     @Transactional
     public boolean processTradeIfNew(MatchTradeEvent trade) {
-        if (!accountRepository.markTradeProcessing(trade.tradeId(), trade.symbol())) {
-            return false;
-        }
         String traceId = trade.traceId();
         InstrumentType takerInstrumentType = instrumentType(trade.symbol(), trade.takerInstrumentVersion());
         InstrumentType makerInstrumentType = trade.takerInstrumentVersion() == trade.makerInstrumentVersion()
@@ -489,6 +486,12 @@ public class AccountService {
                 : instrumentType(trade.symbol(), trade.makerInstrumentVersion());
         if (takerInstrumentType != makerInstrumentType) {
             throw new IllegalStateException("matched orders use different instrument types for " + trade.symbol());
+        }
+        ProductLine productLine = takerInstrumentType == InstrumentType.SPOT
+                ? ProductLine.SPOT
+                : contractSpec(trade.symbol(), trade.takerInstrumentVersion()).contractType().productLine();
+        if (!accountRepository.markTradeProcessing(productLine, trade.tradeId(), trade.symbol())) {
+            return false;
         }
         if (takerInstrumentType == InstrumentType.SPOT) {
             applySpotTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),

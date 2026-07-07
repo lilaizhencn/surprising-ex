@@ -989,9 +989,9 @@ class AccountServiceTest {
         }
 
         @Override
-        public boolean markTradeProcessing(long tradeId, String symbol) {
+        public boolean markTradeProcessing(ProductLine productLine, long tradeId, String symbol) {
             tradeProcessingAttempts++;
-            return processedTradeIds.add(new ProcessedTradeKey(symbol, tradeId));
+            return processedTradeIds.add(new ProcessedTradeKey(productLine, symbol, tradeId));
         }
 
         @Override
@@ -1666,6 +1666,6 @@ class AccountServiceTest {
         }
     }
 
-    private record ProcessedTradeKey(String symbol, long tradeId) {
+    private record ProcessedTradeKey(ProductLine productLine, String symbol, long tradeId) {
     }
 }

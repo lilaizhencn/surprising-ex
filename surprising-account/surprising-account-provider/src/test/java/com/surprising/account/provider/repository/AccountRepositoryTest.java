@@ -63,16 +63,17 @@ class AccountRepositoryTest {
     }
 
     @Test
-    void processedTradeIdempotencyIsScopedBySymbol() {
+    void processedTradeIdempotencyIsScopedByProductLineAndSymbol() {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
-        when(jdbcTemplate.update(contains("INSERT INTO account_processed_trades"), eq(9001L), eq("BTC-USDT")))
+        when(jdbcTemplate.update(contains("INSERT INTO account_processed_trades"),
+                eq("LINEAR_DELIVERY"), eq(9001L), eq("BTC-USDT-260626")))
                 .thenReturn(1);
 
-        repository.markTradeProcessing(9001L, "BTC-USDT");
+        repository.markTradeProcessing(ProductLine.LINEAR_DELIVERY, 9001L, "BTC-USDT-260626");
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).update(sql.capture(), eq(9001L), eq("BTC-USDT"));
-        assertThat(sql.getValue()).contains("ON CONFLICT (symbol, trade_id) DO NOTHING");
+        verify(jdbcTemplate).update(sql.capture(), eq("LINEAR_DELIVERY"), eq(9001L), eq("BTC-USDT-260626"));
+        assertThat(sql.getValue()).contains("ON CONFLICT (product_line, symbol, trade_id) DO NOTHING");
     }
 
     @Test
@@ -1028,7 +1029,8 @@ class AccountRepositoryTest {
                 eq(1001L), eq(productLine.name())))
                 .thenReturn(hasActiveAlgoOrders);
         when(jdbcTemplate.queryForObject(contains("FROM trading_match_trades"), eq(Boolean.class),
-                eq(1001L), eq(1001L), eq(1001L), eq(productLine.name()))).thenReturn(hasUnsettledTrades);
+                eq(1001L), eq(1001L), eq(1001L), eq(productLine.name()), eq(productLine.name())))
+                .thenReturn(hasUnsettledTrades);
         when(jdbcTemplate.queryForObject(contains("FROM account_margin_reservations"), eq(Boolean.class),
                 eq(1001L), eq(productLine.accountTypeCode()))).thenReturn(hasActiveReservations);
     }
