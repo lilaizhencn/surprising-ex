@@ -54,9 +54,10 @@ public class AlgoOrderService {
     @Transactional
     public AlgoOrderResponse place(PlaceAlgoOrderRequest request) {
         PlaceAlgoOrderRequest normalized = normalize(request);
+        ProductLine productLine = currentProductLine();
         if (normalized.clientAlgoOrderId() != null && !normalized.clientAlgoOrderId().isBlank()) {
             var existing = algoOrderRepository.findByClientAlgoOrderId(
-                    normalized.userId(), normalized.clientAlgoOrderId().trim());
+                    productLine, normalized.userId(), normalized.clientAlgoOrderId().trim());
             if (existing.isPresent()) {
                 AlgoOrderRecord existingOrder = existing.get();
                 requireAlgoOrderCurrentProductLine(existingOrder);
@@ -70,6 +71,7 @@ public class AlgoOrderService {
                 : normalized.startAt();
         AlgoOrderRecord record = new AlgoOrderRecord(
                 algoOrderId,
+                productLine,
                 normalized.userId(),
                 emptyToNull(normalized.clientAlgoOrderId()),
                 normalized.symbol(),
@@ -96,7 +98,7 @@ public class AlgoOrderService {
                 now);
         boolean inserted = algoOrderRepository.insert(record);
         if (!inserted && record.clientAlgoOrderId() != null) {
-            return algoOrderRepository.findByClientAlgoOrderId(record.userId(), record.clientAlgoOrderId())
+            return algoOrderRepository.findByClientAlgoOrderId(productLine, record.userId(), record.clientAlgoOrderId())
                     .map(existing -> {
                         requireAlgoOrderCurrentProductLine(existing);
                         return toResponse(existing);
@@ -194,7 +196,7 @@ public class AlgoOrderService {
         }
         int limit = Math.max(1, properties.getAlgo().getClaimBatchSize());
         Instant now = Instant.now();
-        for (AlgoOrderRecord record : algoOrderRepository.dueOrders(now, limit)) {
+        for (AlgoOrderRecord record : algoOrderRepository.dueOrders(currentProductLine(), now, limit)) {
             try {
                 executeDue(record, now);
             } catch (RuntimeException ex) {

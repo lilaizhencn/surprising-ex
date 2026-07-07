@@ -1102,6 +1102,7 @@ CREATE INDEX IF NOT EXISTS trading_cancel_all_after_due_idx
 
 CREATE TABLE IF NOT EXISTS trading_algo_orders (
     algo_order_id              BIGINT PRIMARY KEY,
+    product_line               TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     user_id                    BIGINT NOT NULL,
     client_algo_order_id       TEXT,
     symbol                     TEXT NOT NULL,
@@ -1126,6 +1127,10 @@ CREATE TABLE IF NOT EXISTS trading_algo_orders (
     completed_at               TIMESTAMPTZ,
     created_at                 TIMESTAMPTZ NOT NULL,
     updated_at                 TIMESTAMPTZ NOT NULL,
+    CONSTRAINT trading_algo_orders_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT trading_algo_orders_user_positive CHECK (user_id > 0),
     CONSTRAINT trading_algo_orders_client_id_length CHECK (
         client_algo_order_id IS NULL OR length(client_algo_order_id) <= 64
@@ -1157,12 +1162,39 @@ CREATE TABLE IF NOT EXISTS trading_algo_orders (
         FOREIGN KEY (current_order_id) REFERENCES trading_orders(order_id)
 );
 
+DO $$
+BEGIN
+    ALTER TABLE trading_algo_orders
+        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+    ALTER TABLE trading_algo_orders
+        DROP CONSTRAINT IF EXISTS trading_algo_orders_product_line_check;
+    ALTER TABLE trading_algo_orders
+        ADD CONSTRAINT trading_algo_orders_product_line_check CHECK (
+            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+        );
+    UPDATE trading_algo_orders a
+       SET product_line = CASE i.contract_type
+           WHEN 'SPOT' THEN 'SPOT'
+           WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+           WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+           WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+           WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+           WHEN 'VANILLA_OPTION' THEN 'OPTION'
+           ELSE a.product_line
+       END
+      FROM instrument_current_versions c
+      JOIN instruments i ON i.symbol = c.symbol AND i.version = c.version
+     WHERE c.symbol = a.symbol;
+END $$;
+
+DROP INDEX IF EXISTS trading_algo_orders_user_client_uidx;
 CREATE UNIQUE INDEX IF NOT EXISTS trading_algo_orders_user_client_uidx
-    ON trading_algo_orders (user_id, client_algo_order_id)
+    ON trading_algo_orders (product_line, user_id, client_algo_order_id)
     WHERE client_algo_order_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS trading_algo_orders_due_idx
-    ON trading_algo_orders (next_slice_at, algo_order_id)
+    ON trading_algo_orders (product_line, next_slice_at, algo_order_id)
     WHERE status IN ('PENDING', 'RUNNING');
 
 CREATE INDEX IF NOT EXISTS trading_algo_orders_user_status_idx

@@ -1,5 +1,6 @@
 package com.surprising.trading.order.repository;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AlgoOrderStatus;
 import com.surprising.trading.api.model.AlgoOrderType;
 import com.surprising.trading.api.model.MarginMode;
@@ -27,12 +28,12 @@ public class AlgoOrderRepository {
 
     private static final String INSERT_ALGO_SQL = """
             INSERT INTO trading_algo_orders (
-                algo_order_id, user_id, client_algo_order_id, symbol, algo_type, side, price_ticks,
+                algo_order_id, product_line, user_id, client_algo_order_id, symbol, algo_type, side, price_ticks,
                 quantity_steps, child_quantity_steps, interval_seconds, duration_seconds, margin_mode,
                 position_side, reduce_only, post_only, time_in_force, status, current_order_id,
                 reject_reason, trace_id, start_at, next_slice_at, completed_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (user_id, client_algo_order_id) WHERE client_algo_order_id IS NOT NULL DO NOTHING
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (product_line, user_id, client_algo_order_id) WHERE client_algo_order_id IS NOT NULL DO NOTHING
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -52,7 +53,7 @@ public class AlgoOrderRepository {
 
     public boolean insert(AlgoOrderRecord order) {
         int rows = jdbcTemplate.update(INSERT_ALGO_SQL,
-                order.algoOrderId(), order.userId(), emptyToNull(order.clientAlgoOrderId()), order.symbol(),
+                order.algoOrderId(), order.productLine().name(), order.userId(), emptyToNull(order.clientAlgoOrderId()), order.symbol(),
                 order.algoType().name(), order.side().name(), order.priceTicks(), order.quantitySteps(),
                 order.childQuantitySteps(), order.intervalSeconds(), order.durationSeconds(),
                 order.marginMode().name(), order.positionSide().name(), order.reduceOnly(), order.postOnly(),
@@ -69,11 +70,17 @@ public class AlgoOrderRepository {
     }
 
     public Optional<AlgoOrderRecord> findByClientAlgoOrderId(long userId, String clientAlgoOrderId) {
+        return findByClientAlgoOrderId(ProductLine.LINEAR_PERPETUAL, userId, clientAlgoOrderId);
+    }
+
+    public Optional<AlgoOrderRecord> findByClientAlgoOrderId(ProductLine productLine, long userId,
+                                                             String clientAlgoOrderId) {
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_algo_orders
-                 WHERE user_id = ? AND client_algo_order_id = ?
-                """, (rs, rowNum) -> toAlgoRecord(rs), userId, clientAlgoOrderId).stream().findFirst();
+                 WHERE product_line = ? AND user_id = ? AND client_algo_order_id = ?
+                """, (rs, rowNum) -> toAlgoRecord(rs), productLine(productLine).name(), userId, clientAlgoOrderId)
+                .stream().findFirst();
     }
 
     public boolean algoOrderMatchesContractType(long algoOrderId, String contractType) {
@@ -124,15 +131,20 @@ public class AlgoOrderRepository {
     }
 
     public List<AlgoOrderRecord> dueOrders(Instant now, int limit) {
+        return dueOrders(ProductLine.LINEAR_PERPETUAL, now, limit);
+    }
+
+    public List<AlgoOrderRecord> dueOrders(ProductLine productLine, Instant now, int limit) {
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_algo_orders
-                 WHERE status IN ('PENDING', 'RUNNING')
+                 WHERE product_line = ?
+                   AND status IN ('PENDING', 'RUNNING')
                    AND next_slice_at <= ?
                  ORDER BY next_slice_at ASC, algo_order_id ASC
                  LIMIT ?
                  FOR UPDATE SKIP LOCKED
-                """, (rs, rowNum) -> toAlgoRecord(rs), Timestamp.from(now), limit);
+                """, (rs, rowNum) -> toAlgoRecord(rs), productLine(productLine).name(), Timestamp.from(now), limit);
     }
 
     public List<AlgoOrderRecord> cancelableOpenOrders(long userId, String symbol, AlgoOrderType algoType, int limit) {
@@ -302,6 +314,7 @@ public class AlgoOrderRepository {
     private AlgoOrderRecord toAlgoRecord(ResultSet rs) throws SQLException {
         return new AlgoOrderRecord(
                 rs.getLong("algo_order_id"),
+                ProductLine.valueOf(rs.getString("product_line")),
                 rs.getLong("user_id"),
                 rs.getString("client_algo_order_id"),
                 rs.getString("symbol"),
@@ -372,6 +385,10 @@ public class AlgoOrderRepository {
 
     private String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private ProductLine productLine(ProductLine productLine) {
+        return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
     }
 
     private Timestamp timestampOrNull(Instant value) {
