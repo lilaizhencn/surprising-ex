@@ -7,6 +7,7 @@ import com.surprising.trading.api.model.FeeScheduleSourceType;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineSql;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -45,15 +46,7 @@ public class OrderFeeRepository {
                 WITH instrument_fee AS (
                     SELECT maker_fee_rate_ppm,
                            taker_fee_rate_ppm,
-                           CASE contract_type
-                               WHEN 'SPOT' THEN 'SPOT'
-                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                               ELSE 'LINEAR_PERPETUAL'
-                           END AS product_line
+                           %s AS product_line
                       FROM instruments
                      WHERE symbol = ?
                        AND version = ?
@@ -93,7 +86,8 @@ public class OrderFeeRepository {
                        COALESCE(u.source, 'INSTRUMENT') AS source
                   FROM instrument_fee i
              LEFT JOIN active_user_fee u ON TRUE
-                """, (rs, rowNum) -> new OrderFeeSnapshot(
+                """.formatted(ProductLineSql.contractTypeProductLineCase("contract_type")),
+                (rs, rowNum) -> new OrderFeeSnapshot(
                 ProductLine.valueOf(rs.getString("product_line")),
                 rs.getLong("maker_fee_rate_ppm"),
                 rs.getLong("taker_fee_rate_ppm"),

@@ -2,6 +2,7 @@ package com.surprising.trading.order.repository;
 
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineSql;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
@@ -81,15 +82,7 @@ public class OrderMarginRepository {
                     ON ls.user_id = ?
                    AND ls.symbol = i.symbol
                    AND ls.margin_mode = ?
-                   AND ls.product_line = CASE i.contract_type
-                           WHEN 'SPOT' THEN 'SPOT'
-                           WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-                           WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-                           WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-                           WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-                           WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                           ELSE 'LINEAR_PERPETUAL'
-                       END
+                   AND ls.product_line = %s
              LEFT JOIN account_positions p
                     ON p.user_id = ?
                    AND p.symbol = i.symbol
@@ -117,7 +110,7 @@ public class OrderMarginRepository {
                  WHERE i.symbol = ?
                    AND i.version = ?
                    AND (? <> 'MARKET' OR pm.mark_ticks IS NOT NULL)
-                """;
+                """.formatted(ProductLineSql.contractTypeProductLineCase("i.contract_type"));
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
