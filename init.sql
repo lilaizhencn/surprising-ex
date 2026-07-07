@@ -1010,6 +1010,7 @@ CREATE INDEX IF NOT EXISTS trading_orders_recovery_idx
       AND remaining_quantity_steps > 0;
 
 CREATE TABLE IF NOT EXISTS trading_cancel_all_after (
+    product_line                    TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     user_id                         BIGINT NOT NULL,
     symbol_scope                    TEXT NOT NULL,
     countdown_ms                    BIGINT NOT NULL,
@@ -1023,7 +1024,11 @@ CREATE TABLE IF NOT EXISTS trading_cancel_all_after (
     last_error                      TEXT,
     created_at                      TIMESTAMPTZ NOT NULL,
     updated_at                      TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (user_id, symbol_scope),
+    PRIMARY KEY (product_line, user_id, symbol_scope),
+    CONSTRAINT trading_cancel_all_after_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT trading_cancel_all_after_user_positive CHECK (user_id > 0),
     CONSTRAINT trading_cancel_all_after_scope_check CHECK (
         symbol_scope = '*' OR symbol_scope ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'
@@ -1041,8 +1046,26 @@ CREATE TABLE IF NOT EXISTS trading_cancel_all_after (
     )
 );
 
+DO $$
+BEGIN
+    ALTER TABLE trading_cancel_all_after
+        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+    ALTER TABLE trading_cancel_all_after
+        DROP CONSTRAINT IF EXISTS trading_cancel_all_after_product_line_check;
+    ALTER TABLE trading_cancel_all_after
+        ADD CONSTRAINT trading_cancel_all_after_product_line_check CHECK (
+            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+        );
+    ALTER TABLE trading_cancel_all_after
+        DROP CONSTRAINT IF EXISTS trading_cancel_all_after_pkey;
+    ALTER TABLE trading_cancel_all_after
+        ADD CONSTRAINT trading_cancel_all_after_pkey PRIMARY KEY (product_line, user_id, symbol_scope);
+END $$;
+
+DROP INDEX IF EXISTS trading_cancel_all_after_due_idx;
 CREATE INDEX IF NOT EXISTS trading_cancel_all_after_due_idx
-    ON trading_cancel_all_after (trigger_at, user_id, symbol_scope)
+    ON trading_cancel_all_after (product_line, trigger_at, user_id, symbol_scope)
     WHERE status = 'ACTIVE';
 
 CREATE TABLE IF NOT EXISTS trading_algo_orders (

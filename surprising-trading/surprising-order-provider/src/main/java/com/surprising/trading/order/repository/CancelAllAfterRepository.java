@@ -1,5 +1,6 @@
 package com.surprising.trading.order.repository;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.model.CancelAllAfterTimer;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -22,12 +23,17 @@ public class CancelAllAfterRepository {
 
     public CancelAllAfterTimer upsert(long userId, String symbolScope, long countdownMs,
                                       Instant triggerAt, String status, Instant now, String traceId) {
+        return upsert(ProductLine.LINEAR_PERPETUAL, userId, symbolScope, countdownMs, triggerAt, status, now, traceId);
+    }
+
+    public CancelAllAfterTimer upsert(ProductLine productLine, long userId, String symbolScope, long countdownMs,
+                                      Instant triggerAt, String status, Instant now, String traceId) {
         return jdbcTemplate.queryForObject("""
                 INSERT INTO trading_cancel_all_after (
-                    user_id, symbol_scope, countdown_ms, status, trigger_at,
+                    product_line, user_id, symbol_scope, countdown_ms, status, trigger_at,
                     last_heartbeat_at, triggered_at, trace_id, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
-                ON CONFLICT (user_id, symbol_scope) DO UPDATE SET
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+                ON CONFLICT (product_line, user_id, symbol_scope) DO UPDATE SET
                     countdown_ms = EXCLUDED.countdown_ms,
                     status = EXCLUDED.status,
                     trigger_at = EXCLUDED.trigger_at,
@@ -40,17 +46,22 @@ public class CancelAllAfterRepository {
                     updated_at = EXCLUDED.updated_at
                 RETURNING user_id, symbol_scope, countdown_ms, status, trigger_at, updated_at,
                           canceled_order_count, canceled_trigger_order_count
-                """, (rs, rowNum) -> map(rs), userId, symbolScope, countdownMs, status,
+                """, (rs, rowNum) -> map(rs), productLine(productLine).name(), userId, symbolScope, countdownMs, status,
                 timestampOrNull(triggerAt), Timestamp.from(now), emptyToNull(traceId),
                 Timestamp.from(now), Timestamp.from(now));
     }
 
     public List<CancelAllAfterTimer> claimDueTimers(Instant now, int limit) {
+        return claimDueTimers(ProductLine.LINEAR_PERPETUAL, now, limit);
+    }
+
+    public List<CancelAllAfterTimer> claimDueTimers(ProductLine productLine, Instant now, int limit) {
         return jdbcTemplate.query("""
                 WITH due AS (
-                    SELECT user_id, symbol_scope
+                    SELECT product_line, user_id, symbol_scope
                       FROM trading_cancel_all_after
-                     WHERE status = 'ACTIVE'
+                     WHERE product_line = ?
+                       AND status = 'ACTIVE'
                        AND trigger_at <= ?
                      ORDER BY trigger_at ASC, user_id ASC, symbol_scope ASC
                      LIMIT ?
@@ -60,15 +71,22 @@ public class CancelAllAfterRepository {
                    SET status = 'TRIGGERING',
                        updated_at = ?
                   FROM due
-                 WHERE timer.user_id = due.user_id
+                 WHERE timer.product_line = due.product_line
+                   AND timer.user_id = due.user_id
                    AND timer.symbol_scope = due.symbol_scope
                 RETURNING timer.user_id, timer.symbol_scope, timer.countdown_ms, timer.status,
                           timer.trigger_at, timer.updated_at,
                           timer.canceled_order_count, timer.canceled_trigger_order_count
-                """, (rs, rowNum) -> map(rs), Timestamp.from(now), limit, Timestamp.from(now));
+                """, (rs, rowNum) -> map(rs), productLine(productLine).name(), Timestamp.from(now), limit,
+                Timestamp.from(now));
     }
 
     public void markTriggered(long userId, String symbolScope, int canceledOrders,
+                              int canceledTriggerOrders, Instant now) {
+        markTriggered(ProductLine.LINEAR_PERPETUAL, userId, symbolScope, canceledOrders, canceledTriggerOrders, now);
+    }
+
+    public void markTriggered(ProductLine productLine, long userId, String symbolScope, int canceledOrders,
                               int canceledTriggerOrders, Instant now) {
         jdbcTemplate.update("""
                 UPDATE trading_cancel_all_after
@@ -78,23 +96,29 @@ public class CancelAllAfterRepository {
                        canceled_trigger_order_count = ?,
                        last_error = NULL,
                        updated_at = ?
-                 WHERE user_id = ?
+                 WHERE product_line = ?
+                   AND user_id = ?
                    AND symbol_scope = ?
                    AND status = 'TRIGGERING'
                 """, Timestamp.from(now), canceledOrders, canceledTriggerOrders,
-                Timestamp.from(now), userId, symbolScope);
+                Timestamp.from(now), productLine(productLine).name(), userId, symbolScope);
     }
 
     public void releaseForRetry(long userId, String symbolScope, String error, Instant now) {
+        releaseForRetry(ProductLine.LINEAR_PERPETUAL, userId, symbolScope, error, now);
+    }
+
+    public void releaseForRetry(ProductLine productLine, long userId, String symbolScope, String error, Instant now) {
         jdbcTemplate.update("""
                 UPDATE trading_cancel_all_after
                    SET status = 'ACTIVE',
                        last_error = ?,
                        updated_at = ?
-                 WHERE user_id = ?
+                 WHERE product_line = ?
+                   AND user_id = ?
                    AND symbol_scope = ?
                    AND status = 'TRIGGERING'
-                """, truncate(error, 512), Timestamp.from(now), userId, symbolScope);
+                """, truncate(error, 512), Timestamp.from(now), productLine(productLine).name(), userId, symbolScope);
     }
 
     private static CancelAllAfterTimer map(ResultSet rs) throws SQLException {
@@ -119,6 +143,10 @@ public class CancelAllAfterRepository {
 
     private static String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value;
+    }
+
+    private static ProductLine productLine(ProductLine productLine) {
+        return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
     }
 
     private static String truncate(String value, int maxLength) {
