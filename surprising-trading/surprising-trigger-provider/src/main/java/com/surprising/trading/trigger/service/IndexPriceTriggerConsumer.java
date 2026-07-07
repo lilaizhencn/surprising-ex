@@ -41,6 +41,7 @@ public class IndexPriceTriggerConsumer {
             containerFactory = "triggerKafkaListenerContainerFactory")
     public void onIndexPrice(ConsumerRecord<String, String> record) {
         try {
+            TriggerTopicGuard.requireCurrentProductTopic(properties, record.topic(), indexPriceTopic(), "index price");
             MarkTrigger trigger = parser.parse(record.value());
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), trigger.symbol(), "index price");
             triggerOrderService.onIndexPrice(trigger);

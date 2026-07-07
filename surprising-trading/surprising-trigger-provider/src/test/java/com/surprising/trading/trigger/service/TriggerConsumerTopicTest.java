@@ -1,10 +1,18 @@
 package com.surprising.trading.trigger.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.trigger.config.TriggerProperties;
+import com.surprising.trading.trigger.model.LastPriceTrigger;
+import com.surprising.trading.trigger.model.MarkTrigger;
+import java.time.Instant;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 
 class TriggerConsumerTopicTest {
@@ -29,5 +37,67 @@ class TriggerConsumerTopicTest {
         assertThat(markConsumer.groupId()).isEqualTo("surprising-linear-delivery-trigger-v1");
         assertThat(indexConsumer.groupId()).isEqualTo("surprising-linear-delivery-trigger-v1");
         assertThat(lastConsumer.groupId()).isEqualTo("surprising-linear-delivery-trigger-v1");
+    }
+
+    @Test
+    void markPriceConsumerRejectsOtherProductTopicBeforeParsing() {
+        TriggerProperties properties = productProperties(ProductLine.LINEAR_DELIVERY);
+        MarkPriceTriggerParser parser = mock(MarkPriceTriggerParser.class);
+        TriggerOrderService triggerOrderService = mock(TriggerOrderService.class);
+        MarkPriceTriggerConsumer consumer = new MarkPriceTriggerConsumer(parser, triggerOrderService, properties);
+
+        assertThatThrownBy(() -> consumer.onMarkPrice(new ConsumerRecord<>(
+                "surprising.inverse-delivery.mark.price.v1", 0, 1L, "BTC-USDT-260925", "{}")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("failed to process mark price trigger")
+                .hasRootCauseMessage("mark price topic must match current product line: expected="
+                        + "surprising.linear-delivery.mark.price.v1 actual="
+                        + "surprising.inverse-delivery.mark.price.v1");
+
+        verify(parser, never()).parse("{}");
+        verify(triggerOrderService, never()).onMarkPrice(
+                new MarkTrigger("BTC-USDT-260925", 1L, Instant.parse("2026-07-01T00:00:00Z")));
+    }
+
+    @Test
+    void indexPriceConsumerRejectsOtherProductTopicBeforeParsing() {
+        TriggerProperties properties = productProperties(ProductLine.OPTION);
+        IndexPriceTriggerParser parser = mock(IndexPriceTriggerParser.class);
+        TriggerOrderService triggerOrderService = mock(TriggerOrderService.class);
+        IndexPriceTriggerConsumer consumer = new IndexPriceTriggerConsumer(parser, triggerOrderService, properties);
+
+        assertThatThrownBy(() -> consumer.onIndexPrice(new ConsumerRecord<>(
+                "surprising.linear-delivery.index.price.v1", 0, 1L, "BTC-USDT-260925-70000-C", "{}")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("failed to process index price trigger")
+                .hasRootCauseMessage("index price topic must match current product line: expected="
+                        + "surprising.option.index.price.v1 actual=surprising.linear-delivery.index.price.v1");
+
+        verify(parser, never()).parse("{}");
+        verify(triggerOrderService, never()).onIndexPrice(
+                new MarkTrigger("BTC-USDT-260925-70000-C", 1L, Instant.parse("2026-07-01T00:00:00Z")));
+    }
+
+    @Test
+    void lastPriceConsumerAllowsCurrentProductTopic() {
+        TriggerProperties properties = productProperties(ProductLine.INVERSE_PERPETUAL);
+        LastPriceTriggerParser parser = mock(LastPriceTriggerParser.class);
+        TriggerOrderService triggerOrderService = mock(TriggerOrderService.class);
+        LastPriceTrigger trigger = new LastPriceTrigger("BTC-USD", 101L, 60_000L,
+                Instant.parse("2026-07-01T00:00:00Z"));
+        when(parser.parse("{}")).thenReturn(trigger);
+        LastPriceTriggerConsumer consumer = new LastPriceTriggerConsumer(parser, triggerOrderService, properties);
+
+        consumer.onLastPrice(new ConsumerRecord<>("surprising.inverse-perp.match.trades.v1", 0, 1L,
+                "BTC-USD", "{}"));
+
+        verify(triggerOrderService).onLastPrice(trigger);
+    }
+
+    private TriggerProperties productProperties(ProductLine productLine) {
+        TriggerProperties properties = new TriggerProperties();
+        properties.getKafka().setProductLine(productLine);
+        properties.getKafka().setProductTopicsEnabled(true);
+        return properties;
     }
 }

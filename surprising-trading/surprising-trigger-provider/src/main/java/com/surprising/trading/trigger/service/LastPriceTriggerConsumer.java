@@ -41,6 +41,7 @@ public class LastPriceTriggerConsumer {
             containerFactory = "triggerKafkaListenerContainerFactory")
     public void onLastPrice(ConsumerRecord<String, String> record) {
         try {
+            TriggerTopicGuard.requireCurrentProductTopic(properties, record.topic(), lastPriceTopic(), "last price");
             LastPriceTrigger trigger = parser.parse(record.value());
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), trigger.symbol(), "last price");
             triggerOrderService.onLastPrice(trigger);

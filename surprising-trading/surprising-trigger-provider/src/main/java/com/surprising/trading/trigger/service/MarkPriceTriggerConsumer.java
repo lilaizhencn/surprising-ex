@@ -44,6 +44,7 @@ public class MarkPriceTriggerConsumer {
             containerFactory = "triggerKafkaListenerContainerFactory")
     public void onMarkPrice(ConsumerRecord<String, String> record) {
         try {
+            TriggerTopicGuard.requireCurrentProductTopic(properties, record.topic(), markPriceTopic(), "mark price");
             MarkTrigger trigger = parser.parse(record.value());
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), trigger.symbol(), "mark price");
             triggerOrderService.onMarkPrice(trigger);
