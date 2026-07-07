@@ -610,18 +610,30 @@ public class RiskRepository {
     }
 
     public Optional<LiquidationCandidateResponse> liquidationCandidate(long candidateId) {
-        return jdbcTemplate.query("SELECT * FROM risk_liquidation_candidates WHERE candidate_id = ?",
-                (rs, rowNum) -> toCandidate(rs), candidateId).stream().findFirst();
+        List<Object> args = new ArrayList<>();
+        args.add(candidateId);
+        String sql = """
+                SELECT c.*
+                  FROM risk_liquidation_candidates c
+                 WHERE c.candidate_id = ?
+                   %s
+                """.formatted(productAccountTypeFilter("c", args));
+        return jdbcTemplate.query(sql, (rs, rowNum) -> toCandidate(rs), args.toArray()).stream().findFirst();
     }
 
     public List<LiquidationCandidateResponse> liquidationCandidates(LiquidationCandidateStatus status, int limit) {
-        return jdbcTemplate.query("""
-                SELECT *
-                  FROM risk_liquidation_candidates
-                 WHERE status = ?
-                 ORDER BY event_time ASC
+        List<Object> args = new ArrayList<>();
+        args.add(status.name());
+        String sql = """
+                SELECT c.*
+                  FROM risk_liquidation_candidates c
+                 WHERE c.status = ?
+                   %s
+                 ORDER BY c.event_time ASC
                  LIMIT ?
-                """, (rs, rowNum) -> toCandidate(rs), status.name(), limit);
+                """.formatted(productAccountTypeFilter("c", args));
+        args.add(limit);
+        return jdbcTemplate.query(sql, (rs, rowNum) -> toCandidate(rs), args.toArray());
     }
 
     public AdminCursorPage.CursorPage<LiquidationCandidateResponse> liquidationCandidatesPage(
@@ -634,16 +646,18 @@ public class RiskRepository {
         AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
         List<Object> args = new ArrayList<>();
         args.add(status.name());
+        String accountTypeFilter = productAccountTypeFilter("c", args);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(safeLimit + 1);
-        String sql = """
-                SELECT *
-                  FROM risk_liquidation_candidates
-                 WHERE status = ?
+        String sql = ("""
+                SELECT c.*
+                  FROM risk_liquidation_candidates c
+                 WHERE c.status = ?
+                   %s
                 """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
-                 ORDER BY event_time %s, candidate_id %s
+                 ORDER BY c.event_time %s, c.candidate_id %s
                  LIMIT ?
-                """.formatted(sortSpec.directionSql(), sortSpec.directionSql());
+                """).formatted(accountTypeFilter, sortSpec.directionSql(), sortSpec.directionSql());
         List<LiquidationCandidateResponse> rows = jdbcTemplate.query(sql, (rs, rowNum) -> toCandidate(rs),
                 args.toArray());
         return AdminCursorPage.page(rows, safeLimit, sortSpec, LiquidationCandidateResponse::eventTime,
@@ -694,10 +708,13 @@ public class RiskRepository {
 
     public List<HighRiskAccount> highRiskAccounts(long minMarginRatioPpm, int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 500));
-        return jdbcTemplate.query("""
+        List<Object> args = new ArrayList<>();
+        String latestAccountFilter = productAccountTypeWhereClause(args);
+        String sql = ("""
                 WITH latest_accounts AS (
                     SELECT DISTINCT ON (user_id, account_type, settle_asset) *
                       FROM risk_account_snapshots
+                     %s
                      ORDER BY user_id ASC, account_type ASC, settle_asset ASC, event_time DESC
                 )
                 SELECT a.snapshot_id,
@@ -772,7 +789,13 @@ public class RiskRepository {
                        a.margin_ratio_ppm DESC,
                        a.event_time DESC
                  LIMIT ?
-                """, (rs, rowNum) -> new HighRiskAccount(
+                """).formatted(latestAccountFilter);
+        args.add(minMarginRatioPpm);
+        args.add(minMarginRatioPpm);
+        args.add(minMarginRatioPpm);
+        args.add(minMarginRatioPpm);
+        args.add(safeLimit);
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new HighRiskAccount(
                 rs.getLong("snapshot_id"),
                 rs.getLong("user_id"),
                 rs.getString("account_type"),
@@ -791,8 +814,7 @@ public class RiskRepository {
                 nullableMarginMode(rs.getString("top_margin_mode")),
                 nullableLong(rs, "top_position_margin_ratio_ppm"),
                 nullableRiskStatus(rs.getString("top_position_status")),
-                rs.getString("risk_level")), minMarginRatioPpm, minMarginRatioPpm, minMarginRatioPpm,
-                minMarginRatioPpm, safeLimit);
+                rs.getString("risk_level")), args.toArray());
     }
 
     public AdminCursorPage.CursorPage<HighRiskAccount> highRiskAccountsPage(
@@ -804,15 +826,17 @@ public class RiskRepository {
         AdminCursorPage.SortSpec sortSpec = parseHighRiskAccountSort(sort);
         AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
         List<Object> args = new ArrayList<>();
+        String latestAccountFilter = productAccountTypeWhereClause(args);
         args.add(minMarginRatioPpm);
         args.add(minMarginRatioPpm);
         args.add(minMarginRatioPpm);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(safeLimit + 1);
-        String sql = """
+        String sql = ("""
                 WITH latest_accounts AS (
                     SELECT DISTINCT ON (user_id, account_type, settle_asset) *
                       FROM risk_account_snapshots
+                     %s
                      ORDER BY user_id ASC, account_type ASC, settle_asset ASC, event_time DESC
                 )
                 SELECT a.snapshot_id,
@@ -880,7 +904,7 @@ public class RiskRepository {
                 """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
                  ORDER BY a.event_time %s, a.snapshot_id %s
                  LIMIT ?
-                """.formatted(sortSpec.directionSql(), sortSpec.directionSql());
+                """).formatted(latestAccountFilter, sortSpec.directionSql(), sortSpec.directionSql());
         List<HighRiskAccount> rows = jdbcTemplate.query(sql, (rs, rowNum) -> new HighRiskAccount(
                 rs.getLong("snapshot_id"),
                 rs.getLong("user_id"),
@@ -1027,6 +1051,24 @@ public class RiskRepository {
         }
         args.add(productLine.contractTypeCode());
         return "AND " + alias + ".contract_type = ?";
+    }
+
+    private String productAccountTypeFilter(String alias, List<Object> args) {
+        if (!properties.getKafka().isProductTopicsEnabled()) {
+            return "";
+        }
+        ProductLine productLine = properties.getKafka().getProductLine();
+        if (!productLine.isMarginProduct()) {
+            return "AND 1 = 0";
+        }
+        args.add(productLine.accountTypeCode());
+        String prefix = alias == null || alias.isBlank() ? "" : alias + ".";
+        return "AND " + prefix + "account_type = ?";
+    }
+
+    private String productAccountTypeWhereClause(List<Object> args) {
+        String filter = productAccountTypeFilter(null, args);
+        return filter.isBlank() ? "" : "WHERE " + filter.substring("AND ".length());
     }
 
     private List<CalculatedPositionRisk> queryCalculatedPositions(String sql, Object... args) {

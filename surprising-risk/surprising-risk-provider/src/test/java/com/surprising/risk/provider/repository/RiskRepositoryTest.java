@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.risk.api.model.LiquidationCandidateStatus;
 import com.surprising.risk.api.model.RiskAccountSnapshotResponse;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.risk.provider.config.RiskProperties;
@@ -181,6 +182,86 @@ class RiskRepositoryTest {
                 .contains("i.contract_type = ?")
                 .contains("ORDER BY s.symbol ASC, s.margin_mode ASC, s.position_side ASC, s.event_time DESC");
         assertThat(args.getValue()).containsExactly(1001L, "LINEAR_DELIVERY");
+    }
+
+    @Test
+    void liquidationCandidatesFilterConfiguredProductLineWhenProductTopicsAreEnabled() {
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        RiskRepository repository = new RiskRepository(jdbcTemplate, properties);
+
+        repository.liquidationCandidates(LiquidationCandidateStatus.NEW, 25);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
+        assertThat(sql.getValue())
+                .contains("FROM risk_liquidation_candidates c")
+                .contains("c.status = ?")
+                .contains("c.account_type = ?")
+                .contains("ORDER BY c.event_time ASC");
+        assertThat(args.getValue()).containsExactly("NEW", "COIN_DELIVERY", 25);
+    }
+
+    @Test
+    void liquidationCandidatesPageFilterConfiguredProductLineWhenProductTopicsAreEnabled() {
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        RiskRepository repository = new RiskRepository(jdbcTemplate, properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Object[].class))).thenReturn(List.of());
+
+        repository.liquidationCandidatesPage(LiquidationCandidateStatus.NEW, 25, null, null);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
+        assertThat(sql.getValue())
+                .contains("FROM risk_liquidation_candidates c")
+                .contains("c.status = ?")
+                .contains("c.account_type = ?")
+                .contains("ORDER BY c.event_time ASC, c.candidate_id ASC");
+        assertThat(args.getValue()).containsExactly("NEW", "USDT_DELIVERY", 26);
+    }
+
+    @Test
+    void highRiskAccountsFilterConfiguredProductLineWhenProductTopicsAreEnabled() {
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        RiskRepository repository = new RiskRepository(jdbcTemplate, properties);
+
+        repository.highRiskAccounts(800_000L, 50);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
+        assertThat(sql.getValue())
+                .contains("FROM risk_account_snapshots")
+                .contains("WHERE account_type = ?")
+                .contains("ORDER BY user_id ASC, account_type ASC, settle_asset ASC, event_time DESC");
+        assertThat(args.getValue()).containsExactly("OPTION", 800_000L, 800_000L, 800_000L, 800_000L, 50);
+    }
+
+    @Test
+    void highRiskAccountsPageFilterConfiguredProductLineWhenProductTopicsAreEnabled() {
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+        RiskRepository repository = new RiskRepository(jdbcTemplate, properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Object[].class))).thenReturn(List.of());
+
+        repository.highRiskAccountsPage(800_000L, 25, null, null);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
+        assertThat(sql.getValue())
+                .contains("FROM risk_account_snapshots")
+                .contains("WHERE account_type = ?")
+                .contains("ORDER BY a.event_time DESC, a.snapshot_id DESC");
+        assertThat(args.getValue()).containsExactly("COIN_PERPETUAL", 800_000L, 800_000L, 800_000L, 26);
     }
 
     @Test

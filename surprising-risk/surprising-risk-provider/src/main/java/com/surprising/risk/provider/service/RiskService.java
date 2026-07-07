@@ -20,6 +20,7 @@ import com.surprising.risk.provider.repository.RiskRepository;
 import com.surprising.risk.provider.repository.RiskRepository.HighRiskAccount;
 import com.surprising.risk.provider.repository.RiskRepository.RiskRuleOverride;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
@@ -157,11 +158,11 @@ public class RiskService {
     }
 
     public RiskAccountSnapshotResponse latestAccount(long userId, String settleAsset) {
-        return latestAccount(userId, "USDT_PERPETUAL", settleAsset);
+        return latestAccount(userId, null, settleAsset);
     }
 
     public RiskAccountSnapshotResponse latestAccount(long userId, String accountType, String settleAsset) {
-        return riskRepository.latestAccount(userId, normalizeAccountType(accountType), normalizeAsset(settleAsset))
+        return riskRepository.latestAccount(userId, scopedAccountType(accountType), normalizeAsset(settleAsset))
                 .orElseThrow(() -> new IllegalStateException("risk snapshot not found"));
     }
 
@@ -463,6 +464,27 @@ public class RiskService {
             throw new IllegalArgumentException("invalid accountType: " + accountType);
         }
         return normalized;
+    }
+
+    private String scopedAccountType(String accountType) {
+        ProductLine productLine = currentProductLineFilter();
+        if (productLine == null) {
+            return normalizeAccountType(accountType);
+        }
+        String currentAccountType = productLine.accountTypeCode();
+        if (accountType == null || accountType.isBlank()) {
+            return currentAccountType;
+        }
+        String normalized = normalizeAccountType(accountType);
+        if (!currentAccountType.equals(normalized)) {
+            throw new IllegalArgumentException("accountType must match current product line account");
+        }
+        return normalized;
+    }
+
+    private ProductLine currentProductLineFilter() {
+        RiskProperties.Kafka kafka = properties == null ? null : properties.getKafka();
+        return kafka != null && kafka.isProductTopicsEnabled() ? kafka.getProductLine() : null;
     }
 
     private String normalizeSymbol(String symbol) {

@@ -1,7 +1,9 @@
 package com.surprising.risk.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.AdminCursorPage;
 import com.surprising.risk.api.model.LiquidationCandidateResponse;
 import com.surprising.risk.api.model.LiquidationCandidateStatus;
@@ -218,6 +220,37 @@ class RiskServiceTest {
         assertThat(outboxRepository.enqueued).isZero();
         assertThat(transactionManager.commits).isEqualTo(1);
         assertThat(transactionManager.rollbacks).isZero();
+    }
+
+    @Test
+    void latestAccountDefaultsToProviderProductLineWhenProductTopicsAreEnabled() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                new FakeRiskSequenceRepository(), new FakeRiskOutboxRepository(), new TrackingTransactionManager());
+
+        RiskAccountSnapshotResponse response = service.latestAccount(1001L, "USDT");
+
+        assertThat(response.accountType()).isEqualTo("USDT_DELIVERY");
+        assertThat(riskRepository.lastLatestAccountType).isEqualTo("USDT_DELIVERY");
+        assertThat(riskRepository.lastLatestAccountSettleAsset).isEqualTo("USDT");
+    }
+
+    @Test
+    void latestAccountRejectsOtherAccountTypeWhenProviderIsProductScoped() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                new FakeRiskSequenceRepository(), new FakeRiskOutboxRepository(), new TrackingTransactionManager());
+
+        assertThatThrownBy(() -> service.latestAccount(1001L, "USDT_DELIVERY", "USDT"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("accountType must match current product line account");
+        assertThat(riskRepository.lastLatestAccountType).isNull();
     }
 
     @Test
@@ -474,6 +507,8 @@ class RiskServiceTest {
         private int lastHighRiskLimit;
         private String lastHighRiskCursor;
         private String lastHighRiskSort;
+        private String lastLatestAccountType;
+        private String lastLatestAccountSettleAsset;
         private LiquidationCandidateStatus lastCandidateStatus;
         private int lastCandidateLimit;
         private String lastCandidateCursor;
@@ -567,6 +602,15 @@ class RiskServiceTest {
         @Override
         public long walletBalanceUnits(long userId, String accountType, String settleAsset) {
             return walletBalanceUnits;
+        }
+
+        @Override
+        public Optional<RiskAccountSnapshotResponse> latestAccount(long userId, String accountType, String settleAsset) {
+            lastLatestAccountType = accountType;
+            lastLatestAccountSettleAsset = settleAsset;
+            return Optional.of(new RiskAccountSnapshotResponse(101L, userId, accountType, settleAsset,
+                    1_000_000L, 0L, 1_000_000L, 0L, 0L, RiskStatus.NORMAL,
+                    Instant.parse("2026-07-01T00:00:00Z")));
         }
 
         @Override
