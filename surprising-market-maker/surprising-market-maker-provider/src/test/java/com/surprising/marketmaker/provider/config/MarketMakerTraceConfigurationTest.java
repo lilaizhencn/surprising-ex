@@ -2,6 +2,7 @@ package com.surprising.marketmaker.provider.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import feign.RequestTemplate;
 import jakarta.servlet.FilterChain;
@@ -15,6 +16,7 @@ class MarketMakerTraceConfigurationTest {
     @AfterEach
     void clearTraceContext() {
         TraceContext.clear();
+        MarketMakerProductLineContext.clear();
     }
 
     @Test
@@ -41,5 +43,16 @@ class MarketMakerTraceConfigurationTest {
 
         assertThat(template.headers())
                 .containsEntry(TraceContext.TRACE_ID_HEADER, java.util.List.of("trace-mm-feign-1"));
+    }
+
+    @Test
+    void feignInterceptorForwardsCurrentProductLine() {
+        MarketMakerProductLineContext.set(ProductLine.LINEAR_DELIVERY);
+        RequestTemplate template = new RequestTemplate();
+
+        new MarketMakerFeignConfiguration().marketMakerTraceRequestInterceptor().apply(template);
+
+        assertThat(template.headers())
+                .containsEntry("X-Product-Line", java.util.List.of("LINEAR_DELIVERY"));
     }
 }

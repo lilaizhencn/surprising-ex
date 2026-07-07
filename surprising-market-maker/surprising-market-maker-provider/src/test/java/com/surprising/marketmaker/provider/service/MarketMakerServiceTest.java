@@ -25,6 +25,7 @@ import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.marketmaker.api.model.MarketMakerRunRequest;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyStatus;
+import com.surprising.marketmaker.provider.config.MarketMakerProductLineContext;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookLevel;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
@@ -84,9 +85,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.zip.CRC32;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 class MarketMakerServiceTest {
+
+    @AfterEach
+    void clearProductLineContext() {
+        MarketMakerProductLineContext.clear();
+    }
 
     @Test
     void runOncePlacesPostOnlyQuotesThroughOrderRpc() {
@@ -109,6 +116,9 @@ class MarketMakerServiceTest {
                     assertThat(request.orderType()).isEqualTo(OrderType.LIMIT);
                     assertThat(request.userId()).isEqualTo(900001L);
                 });
+        assertThat(fixtures.orderRpc.productLinesDuringOpenOrders).containsOnly(ProductLine.LINEAR_PERPETUAL);
+        assertThat(fixtures.orderRpc.productLinesDuringPlace).containsOnly(ProductLine.LINEAR_PERPETUAL);
+        assertThat(MarketMakerProductLineContext.current()).isNull();
     }
 
     @Test
@@ -160,6 +170,7 @@ class MarketMakerServiceTest {
         assertThat(fixtures.orderRpc.cancelRequests).singleElement()
                 .extracting(CancelOrderRequest::orderId)
                 .isEqualTo(7L);
+        assertThat(fixtures.orderRpc.productLinesDuringCancel).containsOnly(ProductLine.LINEAR_PERPETUAL);
         assertThat(fixtures.orderRpc.placeRequests).hasSize(6);
     }
 
@@ -482,6 +493,9 @@ class MarketMakerServiceTest {
         private final List<OrderResponse> openOrders;
         private final List<PlaceOrderRequest> placeRequests = new ArrayList<>();
         private final List<CancelOrderRequest> cancelRequests = new ArrayList<>();
+        private final List<ProductLine> productLinesDuringPlace = new ArrayList<>();
+        private final List<ProductLine> productLinesDuringCancel = new ArrayList<>();
+        private final List<ProductLine> productLinesDuringOpenOrders = new ArrayList<>();
 
         private FakeOrderRpc(List<OrderResponse> openOrders) {
             this.openOrders = new ArrayList<>(openOrders);
@@ -489,6 +503,7 @@ class MarketMakerServiceTest {
 
         @Override
         public OrderResponse place(PlaceOrderRequest request) {
+            productLinesDuringPlace.add(MarketMakerProductLineContext.current());
             placeRequests.add(request);
             return order(1000L + placeRequests.size(), request.userId(), request.clientOrderId(), request.side(),
                     request.priceTicks(), request.quantitySteps(), OrderStatus.ACCEPTED);
@@ -521,6 +536,7 @@ class MarketMakerServiceTest {
 
         @Override
         public OrderResponse cancel(CancelOrderRequest request) {
+            productLinesDuringCancel.add(MarketMakerProductLineContext.current());
             cancelRequests.add(request);
             return order(request.orderId(), request.userId(), "canceled", OrderSide.BUY,
                     1L, 0L, OrderStatus.CANCELED);
@@ -578,6 +594,7 @@ class MarketMakerServiceTest {
 
         @Override
         public OrderQueryResponse openOrders(long userId, String symbol, int limit) {
+            productLinesDuringOpenOrders.add(MarketMakerProductLineContext.current());
             return new OrderQueryResponse(openOrders.size(), openOrders);
         }
     }
@@ -661,6 +678,11 @@ class MarketMakerServiceTest {
 
         @Override
         public PositionModeResponse positionMode(long userId) {
+            return positionMode(userId, null);
+        }
+
+        @Override
+        public PositionModeResponse positionMode(long userId, ProductLine productLine) {
             return new PositionModeResponse(userId, PositionMode.ONE_WAY, Instant.parse("2026-01-01T00:00:00Z"));
         }
 

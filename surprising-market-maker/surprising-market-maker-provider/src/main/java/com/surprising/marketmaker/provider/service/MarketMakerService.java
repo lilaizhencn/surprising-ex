@@ -9,6 +9,7 @@ import com.surprising.marketmaker.api.model.MarketMakerRunRequest;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyQueryResponse;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyResponse;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyStatus;
+import com.surprising.marketmaker.provider.config.MarketMakerProductLineContext;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.model.DesiredQuote;
 import com.surprising.marketmaker.provider.model.QuotePlan;
@@ -396,6 +397,8 @@ public class MarketMakerService {
         ProductLine productLine = strategy.getProductLine();
         String accountPrefix = accountPrefix(strategy, symbol, accountId);
         List<MarketMakerAnomaly> rowAnomalies = new ArrayList<>();
+        ProductLine previousProductLine = MarketMakerProductLineContext.current();
+        MarketMakerProductLineContext.set(productLine);
         if (!strategy.isEnabled()) {
             rowAnomalies.add(anomaly("INFO", "STRATEGY_DISABLED", strategyId, productLine, symbol, accountId,
                     0, 1, "strategy is disabled by configuration"));
@@ -502,6 +505,8 @@ public class MarketMakerService {
                     state.skippedCycles(), 0, 0, effectiveMaxInventorySteps(strategy), 0, 0, null,
                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                     state.lastTraceId(), state.lastError(), state.lastCycleTime(), message);
+        } finally {
+            MarketMakerProductLineContext.set(previousProductLine);
         }
     }
 
@@ -691,37 +696,44 @@ public class MarketMakerService {
                                    long cycleSequence,
                                    String symbol,
                                    String traceId) {
-        if (properties.getCoordination().isEnabled()
-                && !leaseCoordinator.tryAcquire(strategy.getProductLine(), strategy.getStrategyId(), symbol, nodeId,
-                properties.getCoordination().getLeaseDuration())) {
-            state.addSkipped(1L);
-            recordRunEvent(strategy, symbol, null, cycleSequence, "SKIPPED",
-                    0, 0, 0, "LEASE_NOT_ACQUIRED", null, traceId, Instant.now());
-            return;
-        }
-        Instant now = Instant.now();
+        ProductLine previousProductLine = MarketMakerProductLineContext.current();
+        MarketMakerProductLineContext.set(strategy.getProductLine());
         try {
-            InstrumentResponse instrument = instrumentRpcApi.latest(symbol);
-            requireTradable(instrument, strategy.getProductLine());
-            OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
-                    properties.getQuoting().getOrderBookDepth());
-            MarkPriceResponse markPrice = latestMarkPrice(symbol);
-            ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol, strategy.getProductLine(), instrument);
-            recordReferenceSample(strategy, symbol, cycleSequence, referenceOrderBook, traceId, now);
-            for (long accountId : strategy.getAccountIds()) {
-                quoteAccount(strategy, state, cycleSequence, symbol, instrument, orderBook, markPrice,
-                        referenceOrderBook, accountId, now, traceId);
+            if (properties.getCoordination().isEnabled()
+                    && !leaseCoordinator.tryAcquire(strategy.getProductLine(), strategy.getStrategyId(), symbol, nodeId,
+                    properties.getCoordination().getLeaseDuration())) {
+                state.addSkipped(1L);
+                recordRunEvent(strategy, symbol, null, cycleSequence, "SKIPPED",
+                        0, 0, 0, "LEASE_NOT_ACQUIRED", null, traceId, Instant.now());
+                return;
             }
-            maybeTrade(strategy, state, cycleSequence, symbol, instrument, markPrice, now, traceId);
-            state.markSuccess(traceId, now);
-            recordRunEvent(strategy, symbol, null, cycleSequence, "CYCLE_SUCCESS",
-                    0, 0, 0, null, null, traceId, now);
-        } catch (RuntimeException ex) {
-            log.warn("Market-maker cycle failed strategyId={} symbol={} error={}",
-                    strategy.getStrategyId(), symbol, ex.getMessage());
-            state.markFailure(traceId, ex.getMessage(), now);
-            recordRunEvent(strategy, symbol, null, cycleSequence, "CYCLE_FAILED",
-                    0, 0, 0, null, ex.getMessage(), traceId, now);
+            Instant now = Instant.now();
+            try {
+                InstrumentResponse instrument = instrumentRpcApi.latest(symbol);
+                requireTradable(instrument, strategy.getProductLine());
+                OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
+                        properties.getQuoting().getOrderBookDepth());
+                MarkPriceResponse markPrice = latestMarkPrice(symbol);
+                ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol,
+                        strategy.getProductLine(), instrument);
+                recordReferenceSample(strategy, symbol, cycleSequence, referenceOrderBook, traceId, now);
+                for (long accountId : strategy.getAccountIds()) {
+                    quoteAccount(strategy, state, cycleSequence, symbol, instrument, orderBook, markPrice,
+                            referenceOrderBook, accountId, now, traceId);
+                }
+                maybeTrade(strategy, state, cycleSequence, symbol, instrument, markPrice, now, traceId);
+                state.markSuccess(traceId, now);
+                recordRunEvent(strategy, symbol, null, cycleSequence, "CYCLE_SUCCESS",
+                        0, 0, 0, null, null, traceId, now);
+            } catch (RuntimeException ex) {
+                log.warn("Market-maker cycle failed strategyId={} symbol={} error={}",
+                        strategy.getStrategyId(), symbol, ex.getMessage());
+                state.markFailure(traceId, ex.getMessage(), now);
+                recordRunEvent(strategy, symbol, null, cycleSequence, "CYCLE_FAILED",
+                        0, 0, 0, null, ex.getMessage(), traceId, now);
+            }
+        } finally {
+            MarketMakerProductLineContext.set(previousProductLine);
         }
     }
 
