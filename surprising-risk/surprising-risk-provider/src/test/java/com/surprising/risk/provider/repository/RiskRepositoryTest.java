@@ -85,7 +85,7 @@ class RiskRepositoryTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
         assertThat(sql.getValue())
-                .contains("ON CONFLICT (user_id, symbol, margin_mode, position_side) WHERE status IN ('NEW', 'PROCESSING') DO NOTHING")
+                .contains("ON CONFLICT (product_line, user_id, symbol, margin_mode, position_side) WHERE status IN ('NEW', 'PROCESSING') DO NOTHING")
                 .doesNotContain("ON CONFLICT DO NOTHING");
     }
 
@@ -93,7 +93,7 @@ class RiskRepositoryTest {
     void acquireScanLeaseUsesRiskGroupKeyAndLeaseExpiryGuard() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("INSERT INTO risk_scan_leases"), anyRowMapper(),
-                eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq("risk-node-a"), any(Timestamp.class),
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq("risk-node-a"), any(Timestamp.class),
                 any(Timestamp.class)))
                 .thenReturn(List.of("risk-node-a"));
 
@@ -102,10 +102,10 @@ class RiskRepositoryTest {
 
         assertThat(acquired).isTrue();
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"),
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq("LINEAR_PERPETUAL"), eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"),
                 eq("risk-node-a"), any(Timestamp.class), any(Timestamp.class));
         assertThat(sql.getValue())
-                .contains("ON CONFLICT (user_id, account_type, settle_asset) DO UPDATE")
+                .contains("ON CONFLICT (product_line, user_id, account_type, settle_asset) DO UPDATE")
                 .contains("risk_scan_leases.owner_id = EXCLUDED.owner_id")
                 .contains("risk_scan_leases.lease_until <= EXCLUDED.updated_at")
                 .contains("RETURNING owner_id");
@@ -115,7 +115,7 @@ class RiskRepositoryTest {
     void acquireScanLeaseReturnsFalseWhenAnotherLiveOwnerHoldsLease() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("INSERT INTO risk_scan_leases"), anyRowMapper(),
-                eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq("risk-node-b"), any(Timestamp.class),
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq("risk-node-b"), any(Timestamp.class),
                 any(Timestamp.class)))
                 .thenReturn(List.of());
 
@@ -161,9 +161,9 @@ class RiskRepositoryTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
-        assertThat(sql.getValue()).contains("i.contract_type = ?");
+        assertThat(sql.getValue()).contains("p.product_line = ?");
         assertThat(args.getValue()).containsExactly(
-                "VANILLA_OPTION", 10_000L, 0L, 0L, 0L, "", 0L, "", "", 50);
+                "OPTION", 10_000L, 0L, 0L, 0L, "", 0L, "", "", 50);
     }
 
     @Test
@@ -179,9 +179,8 @@ class RiskRepositoryTest {
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
         assertThat(sql.getValue())
-                .contains("JOIN instruments i ON i.symbol = s.symbol AND i.version = s.instrument_version")
                 .contains("WHERE s.user_id = ?")
-                .contains("i.contract_type = ?")
+                .contains("s.product_line = ?")
                 .contains("ORDER BY s.symbol ASC, s.margin_mode ASC, s.position_side ASC, s.event_time DESC");
         assertThat(args.getValue()).containsExactly(1001L, "LINEAR_DELIVERY");
     }
@@ -201,9 +200,10 @@ class RiskRepositoryTest {
         assertThat(sql.getValue())
                 .contains("FROM risk_liquidation_candidates c")
                 .contains("c.status = ?")
+                .contains("c.product_line = ?")
                 .contains("c.account_type = ?")
                 .contains("ORDER BY c.event_time ASC");
-        assertThat(args.getValue()).containsExactly("NEW", "COIN_DELIVERY", 25);
+        assertThat(args.getValue()).containsExactly("NEW", "INVERSE_DELIVERY", "COIN_DELIVERY", 25);
     }
 
     @Test
@@ -222,9 +222,10 @@ class RiskRepositoryTest {
         assertThat(sql.getValue())
                 .contains("FROM risk_liquidation_candidates c")
                 .contains("c.status = ?")
+                .contains("c.product_line = ?")
                 .contains("c.account_type = ?")
                 .contains("ORDER BY c.event_time ASC, c.candidate_id ASC");
-        assertThat(args.getValue()).containsExactly("NEW", "USDT_DELIVERY", 26);
+        assertThat(args.getValue()).containsExactly("NEW", "LINEAR_DELIVERY", "USDT_DELIVERY", 26);
     }
 
     @Test
@@ -241,9 +242,9 @@ class RiskRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
         assertThat(sql.getValue())
                 .contains("FROM risk_account_snapshots")
-                .contains("WHERE account_type = ?")
+                .contains("WHERE product_line = ? AND account_type = ?")
                 .contains("ORDER BY user_id ASC, account_type ASC, settle_asset ASC, event_time DESC");
-        assertThat(args.getValue()).containsExactly("OPTION", 800_000L, 800_000L, 800_000L, 800_000L, 50);
+        assertThat(args.getValue()).containsExactly("OPTION", "OPTION", 800_000L, 800_000L, 800_000L, 800_000L, 50);
     }
 
     @Test
@@ -261,9 +262,9 @@ class RiskRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
         assertThat(sql.getValue())
                 .contains("FROM risk_account_snapshots")
-                .contains("WHERE account_type = ?")
+                .contains("WHERE product_line = ? AND account_type = ?")
                 .contains("ORDER BY a.event_time DESC, a.snapshot_id DESC");
-        assertThat(args.getValue()).containsExactly("COIN_PERPETUAL", 800_000L, 800_000L, 800_000L, 26);
+        assertThat(args.getValue()).containsExactly("INVERSE_PERPETUAL", "COIN_PERPETUAL", 800_000L, 800_000L, 800_000L, 26);
     }
 
     @Test
@@ -359,10 +360,10 @@ class RiskRepositoryTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
-        assertThat(sql.getValue()).contains("i.contract_type = ?");
+        assertThat(sql.getValue()).contains("p.product_line = ?");
         assertThat(args.getValue()).containsExactly(
-                10_000L, 1001L, "OPTION", "USDT", "VANILLA_OPTION",
-                1001L, "OPTION", "USDT", 10_000L, "VANILLA_OPTION");
+                10_000L, 1001L, "OPTION", "USDT", "OPTION",
+                1001L, "OPTION", "USDT", 10_000L, "OPTION");
     }
 
     @Test

@@ -51,7 +51,7 @@ public class RiskRepository {
         String afterSettleAsset = after == null ? "" : after.settleAsset();
         int cappedLimit = Math.max(1, limit);
         List<Object> args = new ArrayList<>();
-        String productLineFilter = productLineFilter("i", args);
+        String productLineFilter = positionProductLineFilter("p", args);
         String sql = """
                 WITH group_inputs AS (
                     SELECT p.user_id,
@@ -126,7 +126,7 @@ public class RiskRepository {
                        END
                    %s
                  LIMIT 1
-                """.formatted(accountTypeExpression("i"), productLineFilter("i", args));
+                """.formatted(accountTypeExpression("i"), instrumentProductLineFilter("i", args));
         args.add(0, userId);
         args.add(1, symbol);
         args.add(2, instrumentVersion);
@@ -157,7 +157,7 @@ public class RiskRepository {
 
     public boolean hasOpenPositions(RiskGroupKey key) {
         List<Object> args = new ArrayList<>(List.of(key.userId(), key.accountType(), key.settleAsset()));
-        String productLineFilter = productLineFilter("i", args);
+        String productLineFilter = positionProductLineFilter("p", args);
         return jdbcTemplate.query("""
                 SELECT 1
                  FROM account_positions p
@@ -220,6 +220,7 @@ public class RiskRepository {
                              AND m.asset = i.settle_asset
                              AND m.margin_mode = p.margin_mode
                              AND m.position_side = p.position_side
+                             AND m.product_line = p.product_line
                       ) position_margin ON TRUE
                      WHERE p.signed_quantity_steps <> 0
                        AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
@@ -251,7 +252,7 @@ public class RiskRepository {
                        ORDER BY b.notional_floor_units DESC
                        LIMIT 1
                   ) br ON TRUE
-                """.formatted(productLineFilter("i", args));
+                """.formatted(positionProductLineFilter("p", args));
         args.add(0, maxMarkAge.toMillis());
         return queryCalculatedPositions(sql, args.toArray());
     }
@@ -323,6 +324,7 @@ public class RiskRepository {
                              AND m.asset = i.settle_asset
                              AND m.margin_mode = p.margin_mode
                              AND m.position_side = p.position_side
+                             AND m.product_line = p.product_line
                       ) position_margin ON TRUE
                       CROSS JOIN group_freshness gf
                      WHERE p.signed_quantity_steps <> 0
@@ -359,8 +361,8 @@ public class RiskRepository {
                        ORDER BY b.notional_floor_units DESC
                        LIMIT 1
                   ) br ON TRUE
-                """.formatted(accountTypeExpression("i"), productLineFilter("i", groupArgs),
-                accountTypeExpression("i"), productLineFilter("i", positionArgs));
+                """.formatted(accountTypeExpression("i"), positionProductLineFilter("p", groupArgs),
+                accountTypeExpression("i"), positionProductLineFilter("p", positionArgs));
         List<Object> args = new ArrayList<>();
         args.add(maxMarkAge.toMillis());
         args.add(key.userId());
@@ -379,9 +381,10 @@ public class RiskRepository {
         Instant now = Instant.now();
         Instant leaseUntil = now.plus(leaseDuration);
         return !jdbcTemplate.query("""
-                INSERT INTO risk_scan_leases (user_id, account_type, settle_asset, owner_id, lease_until, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT (user_id, account_type, settle_asset) DO UPDATE SET
+                INSERT INTO risk_scan_leases (
+                    product_line, user_id, account_type, settle_asset, owner_id, lease_until, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (product_line, user_id, account_type, settle_asset) DO UPDATE SET
                     owner_id = EXCLUDED.owner_id,
                     lease_until = EXCLUDED.lease_until,
                     updated_at = EXCLUDED.updated_at
@@ -389,7 +392,8 @@ public class RiskRepository {
                    OR risk_scan_leases.lease_until <= EXCLUDED.updated_at
                 RETURNING owner_id
                 """, (rs, rowNum) -> rs.getString("owner_id"),
-                key.userId(), key.accountType(), key.settleAsset(), ownerId, Timestamp.from(leaseUntil),
+                productLineForAccountType(key.accountType()).name(), key.userId(), key.accountType(),
+                key.settleAsset(), ownerId, Timestamp.from(leaseUntil),
                 Timestamp.from(now)).isEmpty();
     }
 
@@ -400,11 +404,11 @@ public class RiskRepository {
                                      Instant now) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO risk_position_snapshots (
-                    snapshot_id, user_id, symbol, margin_mode, position_side, instrument_version, settle_asset, signed_quantity_steps,
+                    product_line, snapshot_id, user_id, symbol, margin_mode, position_side, instrument_version, settle_asset, signed_quantity_steps,
                     entry_price_ticks, mark_price_ticks, notional_units, unrealized_pnl_units,
                     maintenance_margin_units, position_margin_units, margin_ratio_ppm, status, event_time, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
-                """, snapshotId, position.userId(), position.symbol(), position.marginMode().name(),
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                """, currentProductLine().name(), snapshotId, position.userId(), position.symbol(), position.marginMode().name(),
                 position.positionSide().name(), position.instrumentVersion(), position.settleAsset(),
                 position.signedQuantitySteps(), position.entryPriceTicks(), position.markPriceTicks(),
                 position.notionalUnits(), position.unrealizedPnlUnits(), position.maintenanceMarginUnits(),
@@ -415,11 +419,12 @@ public class RiskRepository {
     public void saveAccountSnapshot(RiskAccountSnapshotResponse snapshot) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO risk_account_snapshots (
-                    snapshot_id, user_id, account_type, settle_asset, wallet_balance_units,
+                    product_line, snapshot_id, user_id, account_type, settle_asset, wallet_balance_units,
                     unrealized_pnl_units, equity_units, maintenance_margin_units,
                     margin_ratio_ppm, status, event_time, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
-                """, snapshot.snapshotId(), snapshot.userId(), snapshot.accountType(), snapshot.settleAsset(),
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                """, productLineForAccountType(snapshot.accountType()).name(), snapshot.snapshotId(),
+                snapshot.userId(), snapshot.accountType(), snapshot.settleAsset(),
                 snapshot.walletBalanceUnits(), snapshot.unrealizedPnlUnits(), snapshot.equityUnits(),
                 snapshot.maintenanceMarginUnits(), snapshot.marginRatioPpm(), snapshot.status().name(),
                 Timestamp.from(snapshot.eventTime()));
@@ -444,6 +449,7 @@ public class RiskRepository {
                        AND p.symbol = m.symbol
                        AND p.margin_mode = m.margin_mode
                        AND p.position_side = m.position_side
+                       AND p.product_line = m.product_line
                       JOIN instruments i
                         ON i.symbol = p.symbol
                        AND i.version = p.instrument_version
@@ -509,11 +515,11 @@ public class RiskRepository {
         return jdbcTemplate.query("""
                 SELECT *
                   FROM risk_account_snapshots
-                 WHERE user_id = ? AND account_type = ? AND settle_asset = ?
+                 WHERE product_line = ? AND user_id = ? AND account_type = ? AND settle_asset = ?
                  ORDER BY event_time DESC
                  LIMIT 1
-                """, (rs, rowNum) -> toAccountSnapshot(rs), userId, normalizeAccountType(accountType),
-                settleAsset).stream().findFirst();
+                """, (rs, rowNum) -> toAccountSnapshot(rs), productLineForAccountType(accountType).name(),
+                userId, normalizeAccountType(accountType), settleAsset).stream().findFirst();
     }
 
     public List<RiskPositionSnapshotResponse> latestPositions(long userId) {
@@ -522,18 +528,13 @@ public class RiskRepository {
                 SELECT DISTINCT ON (s.symbol, s.margin_mode, s.position_side) s.*
                   FROM risk_position_snapshots s
                 """);
-        if (properties.getKafka().isProductTopicsEnabled()) {
-            sql.append("""
-                  JOIN instruments i ON i.symbol = s.symbol AND i.version = s.instrument_version
-                """);
-        }
         sql.append("""
                  WHERE s.user_id = ?
                 """);
         args.add(userId);
         if (properties.getKafka().isProductTopicsEnabled()) {
             sql.append("                   ")
-                    .append(productLineFilter("i", args))
+                    .append(productLineColumnFilter("s", args))
                     .append("\n");
         }
         sql.append("""
@@ -551,13 +552,14 @@ public class RiskRepository {
                                            Instant now) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO risk_liquidation_candidates (
-                    candidate_id, snapshot_id, user_id, symbol, margin_mode, position_side,
+                    product_line, candidate_id, snapshot_id, user_id, symbol, margin_mode, position_side,
                     instrument_version, account_type, settle_asset,
                     signed_quantity_steps, mark_price_ticks, equity_units,
                     maintenance_margin_units, margin_ratio_ppm, status, event_time, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, now(), now())
-                ON CONFLICT (user_id, symbol, margin_mode, position_side) WHERE status IN ('NEW', 'PROCESSING') DO NOTHING
-                """, candidateId, account.snapshotId(), position.userId(), position.symbol(),
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, now(), now())
+                ON CONFLICT (product_line, user_id, symbol, margin_mode, position_side) WHERE status IN ('NEW', 'PROCESSING') DO NOTHING
+                """, productLineForAccountType(account.accountType()).name(), candidateId, account.snapshotId(),
+                position.userId(), position.symbol(),
                 position.marginMode().name(), position.positionSide().name(), position.instrumentVersion(),
                 account.accountType(), position.settleAsset(),
                 position.signedQuantitySteps(), position.markPriceTicks(), equityUnits,
@@ -721,6 +723,7 @@ public class RiskRepository {
                         FROM risk_position_snapshots p
                        WHERE p.snapshot_id = a.snapshot_id
                          AND p.user_id = a.user_id
+                         AND p.product_line = a.product_line
                          AND p.settle_asset = a.settle_asset
                   ) position_stats ON TRUE
                   LEFT JOIN LATERAL (
@@ -728,6 +731,7 @@ public class RiskRepository {
                         FROM risk_position_snapshots p
                        WHERE p.snapshot_id = a.snapshot_id
                          AND p.user_id = a.user_id
+                         AND p.product_line = a.product_line
                          AND p.settle_asset = a.settle_asset
                        ORDER BY p.margin_ratio_ppm DESC, p.symbol ASC, p.margin_mode ASC
                        LIMIT 1
@@ -736,6 +740,7 @@ public class RiskRepository {
                       SELECT COUNT(*) AS active_candidate_count
                         FROM risk_liquidation_candidates c
                        WHERE c.user_id = a.user_id
+                         AND c.product_line = a.product_line
                          AND c.account_type = a.account_type
                          AND c.settle_asset = a.settle_asset
                          AND c.status IN ('NEW', 'PROCESSING')
@@ -843,6 +848,7 @@ public class RiskRepository {
                         FROM risk_position_snapshots p
                        WHERE p.snapshot_id = a.snapshot_id
                          AND p.user_id = a.user_id
+                         AND p.product_line = a.product_line
                          AND p.settle_asset = a.settle_asset
                   ) position_stats ON TRUE
                   LEFT JOIN LATERAL (
@@ -850,6 +856,7 @@ public class RiskRepository {
                         FROM risk_position_snapshots p
                        WHERE p.snapshot_id = a.snapshot_id
                          AND p.user_id = a.user_id
+                         AND p.product_line = a.product_line
                          AND p.settle_asset = a.settle_asset
                        ORDER BY p.margin_ratio_ppm DESC, p.symbol ASC, p.margin_mode ASC
                        LIMIT 1
@@ -858,6 +865,7 @@ public class RiskRepository {
                       SELECT COUNT(*) AS active_candidate_count
                         FROM risk_liquidation_candidates c
                        WHERE c.user_id = a.user_id
+                         AND c.product_line = a.product_line
                          AND c.account_type = a.account_type
                          AND c.settle_asset = a.settle_asset
                          AND c.status IN ('NEW', 'PROCESSING')
@@ -1008,11 +1016,22 @@ public class RiskRepository {
                 : accountType.trim().toUpperCase();
     }
 
-    private String productLineFilter(String alias, List<Object> args) {
+    private ProductLine currentProductLine() {
+        return properties.getKafka().isProductTopicsEnabled()
+                ? properties.getKafka().getProductLine()
+                : ProductLine.LINEAR_PERPETUAL;
+    }
+
+    private ProductLine productLineForAccountType(String accountType) {
+        return ProductLine.fromAccountTypeCode(normalizeAccountType(accountType))
+                .orElse(currentProductLine());
+    }
+
+    private String instrumentProductLineFilter(String alias, List<Object> args) {
         if (!properties.getKafka().isProductTopicsEnabled()) {
             return "";
         }
-        ProductLine productLine = properties.getKafka().getProductLine();
+        ProductLine productLine = currentProductLine();
         if (!productLine.isMarginProduct()) {
             return "AND 1 = 0";
         }
@@ -1020,17 +1039,35 @@ public class RiskRepository {
         return "AND " + alias + ".contract_type = ?";
     }
 
+    private String positionProductLineFilter(String alias, List<Object> args) {
+        if (!properties.getKafka().isProductTopicsEnabled()) {
+            return "";
+        }
+        return productLineColumnFilter(alias, args);
+    }
+
+    private String productLineColumnFilter(String alias, List<Object> args) {
+        ProductLine productLine = currentProductLine();
+        if (!productLine.isMarginProduct()) {
+            return "AND 1 = 0";
+        }
+        args.add(productLine.name());
+        String prefix = alias == null || alias.isBlank() ? "" : alias + ".";
+        return "AND " + prefix + "product_line = ?";
+    }
+
     private String productAccountTypeFilter(String alias, List<Object> args) {
         if (!properties.getKafka().isProductTopicsEnabled()) {
             return "";
         }
-        ProductLine productLine = properties.getKafka().getProductLine();
+        ProductLine productLine = currentProductLine();
         if (!productLine.isMarginProduct()) {
             return "AND 1 = 0";
         }
+        args.add(productLine.name());
         args.add(productLine.accountTypeCode());
         String prefix = alias == null || alias.isBlank() ? "" : alias + ".";
-        return "AND " + prefix + "account_type = ?";
+        return "AND " + prefix + "product_line = ? AND " + prefix + "account_type = ?";
     }
 
     private String productAccountTypeWhereClause(List<Object> args) {
