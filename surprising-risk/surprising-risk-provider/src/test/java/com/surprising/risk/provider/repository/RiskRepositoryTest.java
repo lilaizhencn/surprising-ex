@@ -164,6 +164,26 @@ class RiskRepositoryTest {
     }
 
     @Test
+    void latestPositionsFilterConfiguredProductLineWhenProductTopicsAreEnabled() {
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        RiskRepository repository = new RiskRepository(jdbcTemplate, properties);
+
+        repository.latestPositions(1001L);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
+        assertThat(sql.getValue())
+                .contains("JOIN instruments i ON i.symbol = s.symbol AND i.version = s.instrument_version")
+                .contains("WHERE s.user_id = ?")
+                .contains("i.contract_type = ?")
+                .contains("ORDER BY s.symbol ASC, s.margin_mode ASC, s.position_side ASC, s.event_time DESC");
+        assertThat(args.getValue()).containsExactly(1001L, "LINEAR_DELIVERY");
+    }
+
+    @Test
     void riskTargetForPositionEventUsesEventVersionOrCurrentVersionFallback() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("BTC-USDT"),

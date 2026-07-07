@@ -550,12 +550,29 @@ public class RiskRepository {
     }
 
     public List<RiskPositionSnapshotResponse> latestPositions(long userId) {
-        return jdbcTemplate.query("""
-                SELECT DISTINCT ON (symbol, margin_mode, position_side) *
-                  FROM risk_position_snapshots
-                 WHERE user_id = ?
-                 ORDER BY symbol ASC, margin_mode ASC, position_side ASC, event_time DESC
-                """, (rs, rowNum) -> toPositionSnapshot(rs), userId);
+        List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("""
+                SELECT DISTINCT ON (s.symbol, s.margin_mode, s.position_side) s.*
+                  FROM risk_position_snapshots s
+                """);
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            sql.append("""
+                  JOIN instruments i ON i.symbol = s.symbol AND i.version = s.instrument_version
+                """);
+        }
+        sql.append("""
+                 WHERE s.user_id = ?
+                """);
+        args.add(userId);
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            sql.append("                   ")
+                    .append(productLineFilter("i", args))
+                    .append("\n");
+        }
+        sql.append("""
+                 ORDER BY s.symbol ASC, s.margin_mode ASC, s.position_side ASC, s.event_time DESC
+                """);
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toPositionSnapshot(rs), args.toArray());
     }
 
     public long createLiquidationCandidate(RiskAccountSnapshotResponse account,
