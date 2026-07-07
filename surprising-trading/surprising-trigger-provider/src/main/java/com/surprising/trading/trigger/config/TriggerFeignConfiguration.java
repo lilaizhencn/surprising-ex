@@ -8,11 +8,17 @@ import org.springframework.context.annotation.Configuration;
 public class TriggerFeignConfiguration {
 
     @Bean
-    public RequestInterceptor triggerTraceRequestInterceptor() {
+    public RequestInterceptor triggerTraceRequestInterceptor(TriggerProperties properties) {
         return template -> {
             String traceId = TriggerTraceContext.current();
             if (traceId != null && !traceId.isBlank()) {
                 template.header("X-Trace-Id", traceId);
+            }
+            TriggerProperties.Kafka kafka = properties == null || properties.getKafka() == null
+                    ? new TriggerProperties.Kafka()
+                    : properties.getKafka();
+            if (kafka.isProductTopicsEnabled()) {
+                template.header("X-Product-Line", kafka.getProductLine().name());
             }
         };
     }
