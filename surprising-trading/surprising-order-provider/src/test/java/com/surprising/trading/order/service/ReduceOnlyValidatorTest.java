@@ -2,11 +2,13 @@ package com.surprising.trading.order.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.TimeInForce;
+import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.ReduceOnlyPositionLookup;
 import java.util.Optional;
@@ -54,6 +56,19 @@ class ReduceOnlyValidatorTest {
         assertThat(result.rejectReason()).isEqualTo("reduce-only quantity exceeds available position");
     }
 
+    @Test
+    void readsPositionAndPendingCloseOrdersInsideConfiguredProductLine() {
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        ReduceOnlyValidator validator = new ReduceOnlyValidator(lookup(ProductLine.LINEAR_DELIVERY, 10L, 2L),
+                properties);
+
+        var result = validator.validate(request(OrderSide.SELL, 8L));
+
+        assertThat(result.accepted()).isTrue();
+        assertThat(result.instrumentVersion()).isEqualTo(1L);
+    }
+
     private PlaceOrderRequest request(OrderSide side, long quantitySteps) {
         return new PlaceOrderRequest(1001L, "c1", "BTC-USDT", side,
                 OrderType.MARKET, TimeInForce.IOC, 0L, quantitySteps, true, false);
@@ -71,6 +86,36 @@ class ReduceOnlyValidatorTest {
             @Override
             public long lockedOpenReduceOnlySteps(long userId, String symbol, MarginMode marginMode, long instrumentVersion,
                                                   OrderSide closeSide) {
+                assertThat(marginMode).isEqualTo(MarginMode.CROSS);
+                return pendingCloseSteps;
+            }
+        };
+    }
+
+    private ReduceOnlyPositionLookup lookup(ProductLine expectedProductLine,
+                                            long signedQuantitySteps,
+                                            long pendingCloseSteps) {
+        return new ReduceOnlyPositionLookup() {
+            @Override
+            public Optional<ReduceOnlyPosition> lockedPosition(ProductLine productLine,
+                                                               long userId,
+                                                               String symbol,
+                                                               MarginMode marginMode,
+                                                               com.surprising.trading.api.model.PositionSide positionSide) {
+                assertThat(productLine).isEqualTo(expectedProductLine);
+                assertThat(marginMode).isEqualTo(MarginMode.CROSS);
+                return Optional.of(new ReduceOnlyPosition(signedQuantitySteps, 1L));
+            }
+
+            @Override
+            public long lockedOpenReduceOnlySteps(ProductLine productLine,
+                                                  long userId,
+                                                  String symbol,
+                                                  MarginMode marginMode,
+                                                  long instrumentVersion,
+                                                  com.surprising.trading.api.model.PositionSide positionSide,
+                                                  OrderSide closeSide) {
+                assertThat(productLine).isEqualTo(expectedProductLine);
                 assertThat(marginMode).isEqualTo(MarginMode.CROSS);
                 return pendingCloseSteps;
             }

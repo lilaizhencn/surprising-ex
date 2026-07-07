@@ -78,14 +78,14 @@ class OrderRepositoryTest {
 
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
-    void lockUserSymbolMarginScopeUsesSharedAdvisoryLockKey() {
+    void lockUserSymbolMarginScopeUsesProductScopedAdvisoryLockKey() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         OrderRepository repository = new OrderRepository(jdbcTemplate);
 
-        repository.lockUserSymbolMarginScope(1001L, "BTC-USDT");
+        repository.lockUserSymbolMarginScope(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT");
 
         verify(jdbcTemplate).query(contains("pg_advisory_xact_lock"),
-                any(ResultSetExtractor.class), eq("1001:BTC-USDT"));
+                any(ResultSetExtractor.class), eq("LINEAR_DELIVERY:1001:BTC-USDT"));
     }
 
     @Test
@@ -93,22 +93,47 @@ class OrderRepositoryTest {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         OrderRepository repository = new OrderRepository(jdbcTemplate);
         when(jdbcTemplate.queryForObject(contains("account_positions"), eq(Boolean.class),
-                eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
-                eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
-                eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
-                eq(1001L), eq("BTC-USDT"), eq("ISOLATED")))
+                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
+                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
+                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
+                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED")))
                 .thenReturn(true);
 
-        boolean conflict = repository.hasActiveMarginModeConflict(1001L, "BTC-USDT", MarginMode.ISOLATED);
+        boolean conflict = repository.hasActiveMarginModeConflict(ProductLine.LINEAR_DELIVERY, 1001L,
+                "BTC-USDT", MarginMode.ISOLATED);
 
         assertThat(conflict).isTrue();
         verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.argThat(sql ->
-                        sql.contains("trading_trigger_orders") && sql.contains("trading_algo_orders")),
+                        sql.contains("p.product_line = ?")
+                                && sql.contains("o.product_line = ?")
+                                && sql.contains("t.product_line = ?")
+                                && sql.contains("a.product_line = ?")),
                 eq(Boolean.class),
-                eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
-                eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
-                eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
-                eq(1001L), eq("BTC-USDT"), eq("ISOLATED"));
+                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
+                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
+                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
+                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED"));
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void lockedPositionScopesByProductLine() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OrderRepository repository = new OrderRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(java.util.List.of());
+
+        repository.lockedPosition(ProductLine.OPTION, 1001L, "BTC-USDT-260925-70000-C",
+                MarginMode.CROSS, com.surprising.trading.api.model.PositionSide.NET);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("product_line = ?")
+                .contains("FOR UPDATE");
+        assertThat(args.getValue()).containsExactly("OPTION", 1001L, "BTC-USDT-260925-70000-C",
+                "CROSS", "NET");
     }
 
     @Test

@@ -117,9 +117,9 @@ public class OrderService {
         orderRepository.lockUserPositionMode(productLine, normalized.userId());
         PositionMode positionMode = orderRepository.positionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
-        orderRepository.lockUserSymbolMarginScope(normalized.userId(), normalized.symbol());
+        orderRepository.lockUserSymbolMarginScope(productLine, normalized.userId(), normalized.symbol());
         Instant now = Instant.now();
-        ValidationResult validation = validateMarginMode(normalized);
+        ValidationResult validation = validateMarginMode(productLine, normalized);
         if (validation.accepted()) {
             validation = orderValidator.validate(normalized);
         }
@@ -221,8 +221,8 @@ public class OrderService {
         orderRepository.lockUserPositionMode(productLine, normalized.userId());
         PositionMode positionMode = orderRepository.positionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
-        orderRepository.lockUserSymbolMarginScope(normalized.userId(), normalized.symbol());
-        ValidationResult validation = validateMarginMode(normalized);
+        orderRepository.lockUserSymbolMarginScope(productLine, normalized.userId(), normalized.symbol());
+        ValidationResult validation = validateMarginMode(productLine, normalized);
         if (!validation.accepted()) {
             return testRejected(validation, "MARGIN_MODE");
         }
@@ -279,7 +279,7 @@ public class OrderService {
         }
 
         orderRepository.lockUserPositionMode(productLine, original.userId());
-        orderRepository.lockUserSymbolMarginScope(original.userId(), original.symbol());
+        orderRepository.lockUserSymbolMarginScope(productLine, original.userId(), original.symbol());
         long replacementPriceTicks = normalized.priceTicks() == null ? original.priceTicks() : normalized.priceTicks();
         long replacementQuantitySteps = normalized.quantitySteps() == null
                 ? original.remainingQuantitySteps()
@@ -346,8 +346,8 @@ public class OrderService {
         if (PositionMode.defaultIfNull(positionMode) == PositionMode.HEDGE && !positionSide.isHedgeSide()) {
             throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
         }
-        orderRepository.lockUserSymbolMarginScope(request.userId(), symbol);
-        ReduceOnlyPosition position = orderRepository.lockedPosition(request.userId(), symbol, marginMode,
+        orderRepository.lockUserSymbolMarginScope(productLine, request.userId(), symbol);
+        ReduceOnlyPosition position = orderRepository.lockedPosition(productLine, request.userId(), symbol, marginMode,
                         positionSide)
                 .orElseThrow(() -> new IllegalStateException("open position not found"));
         if (position.signedQuantitySteps() == 0L) {
@@ -471,10 +471,11 @@ public class OrderService {
                 value.accountType(), value.asset(), value.initialMarginUnits());
     }
 
-    private ValidationResult validateMarginMode(PlaceOrderRequest request) {
+    private ValidationResult validateMarginMode(ProductLine productLine, PlaceOrderRequest request) {
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         if (!request.reduceOnly()
-                && orderRepository.hasActiveMarginModeConflict(request.userId(), request.symbol(), marginMode)) {
+                && orderRepository.hasActiveMarginModeConflict(productLine, request.userId(), request.symbol(),
+                        marginMode)) {
             return ValidationResult.reject("margin mode switch requires closing positions and open orders first");
         }
         return ValidationResult.ok(0L);

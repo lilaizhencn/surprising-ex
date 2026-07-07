@@ -597,7 +597,8 @@ class PerpetualTradingChainIntegrationTest {
                     ? Optional.of(rule)
                     : Optional.empty(), orderProperties,
                     (symbol, instrumentVersion, maxAgeMs) -> OptionalLong.of(state.markPriceTicks));
-            ReduceOnlyValidator reduceOnlyValidator = new ReduceOnlyValidator(new FakeReduceOnlyLookup(state));
+            ReduceOnlyValidator reduceOnlyValidator = new ReduceOnlyValidator(new FakeReduceOnlyLookup(state),
+                    orderProperties);
             FakeOrderMarginRepository marginRepository = new FakeOrderMarginRepository(state);
             SpotOrderReservationRepository spotReservationRepository = state.instrumentType == InstrumentType.SPOT
                     ? new FakeSpotOrderReservationRepository(state)
@@ -987,7 +988,21 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public void lockUserSymbolMarginScope(ProductLine productLine, long userId, String symbol) {
+            assertThat(productLine).isEqualTo(state.productLine());
+        }
+
+        @Override
         public boolean hasActiveMarginModeConflict(long userId, String symbol, MarginMode marginMode) {
+            return hasActiveMarginModeConflict(state.productLine(), userId, symbol, marginMode);
+        }
+
+        @Override
+        public boolean hasActiveMarginModeConflict(ProductLine productLine,
+                                                   long userId,
+                                                   String symbol,
+                                                   MarginMode marginMode) {
+            assertThat(productLine).isEqualTo(state.productLine());
             MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
             boolean conflictingPosition = state.positions.entrySet().stream()
                     .anyMatch(entry -> entry.getKey().userId() == userId
@@ -998,6 +1013,7 @@ class PerpetualTradingChainIntegrationTest {
                 return true;
             }
             return state.orders.values().stream()
+                    .filter(order -> order.productLine() == productLine)
                     .filter(order -> order.userId() == userId)
                     .filter(order -> order.symbol().equals(symbol))
                     .filter(order -> order.marginMode() != normalizedMarginMode)
@@ -1005,6 +1021,19 @@ class PerpetualTradingChainIntegrationTest {
                             || order.status() == OrderStatus.PARTIALLY_FILLED
                             || order.status() == OrderStatus.CANCEL_REQUESTED)
                     .anyMatch(order -> order.remainingQuantitySteps() > 0L);
+        }
+
+        @Override
+        public Optional<ReduceOnlyPosition> lockedPosition(ProductLine productLine,
+                                                           long userId,
+                                                           String symbol,
+                                                           MarginMode marginMode,
+                                                           PositionSide positionSide) {
+            assertThat(productLine).isEqualTo(state.productLine());
+            PositionState position = state.position(userId, marginMode, positionSide);
+            return position.signedQuantitySteps() == 0L
+                    ? Optional.empty()
+                    : Optional.of(new ReduceOnlyPosition(position.signedQuantitySteps(), position.instrumentVersion()));
         }
 
         @Override
@@ -1305,7 +1334,17 @@ class PerpetualTradingChainIntegrationTest {
 
         @Override
         public Optional<ReduceOnlyPosition> lockedPosition(long userId, String symbol, MarginMode marginMode) {
-            PositionState position = state.position(userId, marginMode);
+            return lockedPosition(state.productLine(), userId, symbol, marginMode, PositionSide.NET);
+        }
+
+        @Override
+        public Optional<ReduceOnlyPosition> lockedPosition(ProductLine productLine,
+                                                           long userId,
+                                                           String symbol,
+                                                           MarginMode marginMode,
+                                                           PositionSide positionSide) {
+            assertThat(productLine).isEqualTo(state.productLine());
+            PositionState position = state.position(userId, marginMode, positionSide);
             return position.signedQuantitySteps() == 0
                     ? Optional.empty()
                     : Optional.of(new ReduceOnlyPosition(position.signedQuantitySteps(), position.instrumentVersion()));
@@ -1324,10 +1363,25 @@ class PerpetualTradingChainIntegrationTest {
                                               MarginMode marginMode,
                                               long instrumentVersion,
                                               OrderSide closeSide) {
+            return lockedOpenReduceOnlySteps(state.productLine(), userId, symbol, marginMode, instrumentVersion,
+                    PositionSide.NET, closeSide);
+        }
+
+        @Override
+        public long lockedOpenReduceOnlySteps(ProductLine productLine,
+                                              long userId,
+                                              String symbol,
+                                              MarginMode marginMode,
+                                              long instrumentVersion,
+                                              PositionSide positionSide,
+                                              OrderSide closeSide) {
+            assertThat(productLine).isEqualTo(state.productLine());
             return state.orders.values().stream()
+                    .filter(order -> order.productLine() == productLine)
                     .filter(order -> order.userId() == userId)
                     .filter(order -> order.symbol().equals(symbol))
                     .filter(order -> order.marginMode() == MarginMode.defaultIfNull(marginMode))
+                    .filter(order -> order.positionSide() == PositionSide.defaultIfNull(positionSide))
                     .filter(order -> order.instrumentVersion() == instrumentVersion)
                     .filter(order -> order.reduceOnly() && order.side() == closeSide)
                     .filter(order -> order.status() == OrderStatus.ACCEPTED

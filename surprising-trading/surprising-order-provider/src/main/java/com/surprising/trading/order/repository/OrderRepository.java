@@ -96,25 +96,39 @@ public class OrderRepository {
     }
 
     public void lockUserSymbolMarginScope(long userId, String symbol) {
+        lockUserSymbolMarginScope(ProductLine.LINEAR_PERPETUAL, userId, symbol);
+    }
+
+    public void lockUserSymbolMarginScope(ProductLine productLine, long userId, String symbol) {
         jdbcTemplate.query("""
                 SELECT pg_advisory_xact_lock(hashtext('trading-margin-mode'), hashtext(?))
-                """, rs -> null, userId + ":" + symbol);
+                """, rs -> null, productLine(productLine).name() + ":" + userId + ":" + symbol);
     }
 
     public boolean hasActiveMarginModeConflict(long userId, String symbol, MarginMode marginMode) {
+        return hasActiveMarginModeConflict(ProductLine.LINEAR_PERPETUAL, userId, symbol, marginMode);
+    }
+
+    public boolean hasActiveMarginModeConflict(ProductLine productLine,
+                                               long userId,
+                                               String symbol,
+                                               MarginMode marginMode) {
         String normalizedMode = MarginMode.defaultIfNull(marginMode).name();
+        String resolvedProductLine = productLine(productLine).name();
         Boolean conflict = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
                       FROM account_positions p
-                     WHERE p.user_id = ?
+                     WHERE p.product_line = ?
+                       AND p.user_id = ?
                        AND p.symbol = ?
                        AND p.margin_mode <> ?
                        AND p.signed_quantity_steps <> 0
                     UNION ALL
                     SELECT 1
                       FROM trading_orders o
-                     WHERE o.user_id = ?
+                     WHERE o.product_line = ?
+                       AND o.user_id = ?
                        AND o.symbol = ?
                        AND o.margin_mode <> ?
                        AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
@@ -122,20 +136,24 @@ public class OrderRepository {
                     UNION ALL
                     SELECT 1
                       FROM trading_trigger_orders t
-                     WHERE t.user_id = ?
+                     WHERE t.product_line = ?
+                       AND t.user_id = ?
                        AND t.symbol = ?
                        AND t.margin_mode <> ?
                        AND t.status IN ('PENDING', 'TRIGGERING')
                     UNION ALL
                     SELECT 1
                       FROM trading_algo_orders a
-                     WHERE a.user_id = ?
+                     WHERE a.product_line = ?
+                       AND a.user_id = ?
                        AND a.symbol = ?
                        AND a.margin_mode <> ?
                        AND a.status IN ('PENDING', 'RUNNING', 'CANCEL_REQUESTED')
                 )
-                """, Boolean.class, userId, symbol, normalizedMode, userId, symbol, normalizedMode,
-                userId, symbol, normalizedMode, userId, symbol, normalizedMode);
+                """, Boolean.class, resolvedProductLine, userId, symbol, normalizedMode,
+                resolvedProductLine, userId, symbol, normalizedMode,
+                resolvedProductLine, userId, symbol, normalizedMode,
+                resolvedProductLine, userId, symbol, normalizedMode);
         return Boolean.TRUE.equals(conflict);
     }
 
@@ -330,17 +348,27 @@ public class OrderRepository {
                                                        String symbol,
                                                        MarginMode marginMode,
                                                        PositionSide positionSide) {
+        return lockedPosition(ProductLine.LINEAR_PERPETUAL, userId, symbol, marginMode, positionSide);
+    }
+
+    public Optional<ReduceOnlyPosition> lockedPosition(ProductLine productLine,
+                                                       long userId,
+                                                       String symbol,
+                                                       MarginMode marginMode,
+                                                       PositionSide positionSide) {
         return jdbcTemplate.query("""
                 SELECT signed_quantity_steps, instrument_version
                   FROM account_positions
-                 WHERE user_id = ?
+                 WHERE product_line = ?
+                   AND user_id = ?
                    AND symbol = ?
                    AND margin_mode = ?
                    AND position_side = ?
                  FOR UPDATE
                 """, (rs, rowNum) -> new ReduceOnlyPosition(
                 rs.getLong("signed_quantity_steps"),
-                rs.getLong("instrument_version")), userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                rs.getLong("instrument_version")), productLine(productLine).name(), userId, symbol,
+                MarginMode.defaultIfNull(marginMode).name(),
                 PositionSide.defaultIfNull(positionSide).name()).stream().findFirst();
     }
 

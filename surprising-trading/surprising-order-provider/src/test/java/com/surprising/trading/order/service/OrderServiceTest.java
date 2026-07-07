@@ -324,7 +324,8 @@ class OrderServiceTest {
     @Test
     void openingOrderRejectsMarginModeSwitchWhileOtherModeIsActive() {
         OrderService service = service();
-        when(orderRepository.hasActiveMarginModeConflict(1001L, "BTC-USDT", MarginMode.ISOLATED))
+        when(orderRepository.hasActiveMarginModeConflict(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
+                MarginMode.ISOLATED))
                 .thenReturn(true);
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
@@ -339,7 +340,7 @@ class OrderServiceTest {
         assertThat(response.rejectReason())
                 .isEqualTo("margin mode switch requires closing positions and open orders first");
         assertThat(response.marginMode()).isEqualTo(MarginMode.ISOLATED);
-        verify(orderRepository).lockUserSymbolMarginScope(1001L, "BTC-USDT");
+        verify(orderRepository).lockUserSymbolMarginScope(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT");
         verify(orderValidator, never()).validate(any());
         verify(orderFeeRepository, never()).snapshot(anyLong(), anyString(), anyLong(), any());
         verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
@@ -358,7 +359,7 @@ class OrderServiceTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("positionSide LONG/SHORT requires HEDGE position mode");
 
-        verify(orderRepository, never()).lockUserSymbolMarginScope(anyLong(), anyString());
+        verify(orderRepository, never()).lockUserSymbolMarginScope(any(ProductLine.class), anyLong(), anyString());
         verify(orderRepository, never()).insert(any());
         verify(outboxRepository, never()).enqueue(anyString(), anyLong(), anyString(), anyString(), anyString(),
                 anyString(), any());
@@ -491,8 +492,9 @@ class OrderServiceTest {
 
         assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
         assertThat(response.reduceOnly()).isTrue();
-        verify(orderRepository).lockUserSymbolMarginScope(1001L, "BTC-USDT");
-        verify(orderRepository, never()).hasActiveMarginModeConflict(anyLong(), anyString(), any());
+        verify(orderRepository).lockUserSymbolMarginScope(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT");
+        verify(orderRepository, never()).hasActiveMarginModeConflict(any(ProductLine.class), anyLong(), anyString(),
+                any());
         verify(orderRepository).nextSequence("command");
     }
 
@@ -637,7 +639,8 @@ class OrderServiceTest {
     @Test
     void closePositionPlacesReduceOnlyMarketIocForLockedLongPosition() {
         OrderService service = service();
-        when(orderRepository.lockedPosition(1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET))
+        when(orderRepository.lockedPosition(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
+                PositionSide.NET))
                 .thenReturn(Optional.of(new ReduceOnlyPosition(12L, 7L)));
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
@@ -661,8 +664,42 @@ class OrderServiceTest {
         verify(orderRepository).insert(orderCaptor.capture());
         assertThat(orderCaptor.getValue().clientOrderId()).isEqualTo("close-long");
         assertThat(orderCaptor.getValue().priceTicks()).isZero();
+        verify(orderRepository, times(2)).lockUserSymbolMarginScope(ProductLine.LINEAR_PERPETUAL, 1001L,
+                "BTC-USDT");
         verify(orderMarginRepository, never()).reserve(anyLong(), anyString(), anyString(), anyLong(), anyString(),
                 any(), any(), anyLong(), any());
+    }
+
+    @Test
+    void closePositionLocksPositionInsideCurrentProductLine() {
+        OrderService service = service(ProductLine.LINEAR_DELIVERY);
+        when(orderRepository.lockedPosition(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT", MarginMode.CROSS,
+                PositionSide.NET))
+                .thenReturn(Optional.of(new ReduceOnlyPosition(-9L, 17L)));
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(17L));
+        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(17L));
+        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(17L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
+        when(orderRepository.nextSequence("order")).thenReturn(9002L);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L);
+        when(orderRepository.nextSequence("command")).thenReturn(9200L);
+        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+
+        var response = service.closePosition(new ClosePositionRequest(1001L, "close-delivery-short",
+                "btc-usdt", MarginMode.CROSS, PositionSide.NET));
+
+        assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
+        assertThat(response.side()).isEqualTo(OrderSide.BUY);
+        assertThat(response.quantitySteps()).isEqualTo(9L);
+        ArgumentCaptor<OrderRecord> orderCaptor = ArgumentCaptor.forClass(OrderRecord.class);
+        verify(orderRepository).insert(orderCaptor.capture());
+        assertThat(orderCaptor.getValue().productLine()).isEqualTo(ProductLine.LINEAR_DELIVERY);
+        verify(orderRepository, times(2)).lockUserSymbolMarginScope(ProductLine.LINEAR_DELIVERY, 1001L,
+                "BTC-USDT");
+        verify(orderRepository).lockedPosition(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT",
+                MarginMode.CROSS, PositionSide.NET);
+        verify(orderRepository, never()).lockedPosition(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
+                MarginMode.CROSS, PositionSide.NET);
     }
 
     @Test
