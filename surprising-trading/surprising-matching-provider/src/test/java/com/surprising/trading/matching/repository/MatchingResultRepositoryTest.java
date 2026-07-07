@@ -99,7 +99,7 @@ class MatchingResultRepositoryTest {
     }
 
     @Test
-    void matchTradeIdempotencyIsScopedBySymbol() {
+    void matchTradeIdempotencyIsScopedByProductLineAndSymbol() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         MatchingResultRepository repository = new MatchingResultRepository(jdbcTemplate,
                 mock(MatchingMarginRepository.class));
@@ -112,7 +112,7 @@ class MatchingResultRepositoryTest {
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
-        assertThat(sql.getValue()).contains("ON CONFLICT (symbol, trade_id) DO NOTHING");
+        assertThat(sql.getValue()).contains("ON CONFLICT (product_line, symbol, trade_id) DO NOTHING");
     }
 
     @Test

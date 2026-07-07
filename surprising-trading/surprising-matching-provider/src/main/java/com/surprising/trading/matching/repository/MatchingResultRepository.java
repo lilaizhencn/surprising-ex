@@ -99,7 +99,7 @@ public class MatchingResultRepository {
                     maker_user_id, maker_margin_mode, maker_position_side, price_ticks, quantity_steps,
                     taker_order_completed, maker_order_completed, trace_id, event_time, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
-                ON CONFLICT (symbol, trade_id) DO NOTHING
+                ON CONFLICT (product_line, symbol, trade_id) DO NOTHING
                 """, trade.tradeId(), trade.commandId(), productLine(), trade.symbol(), trade.takerOrderId(),
                 trade.takerInstrumentVersion(), trade.takerUserId(), trade.takerSide().name(),
                 trade.takerMarginMode().name(), trade.takerPositionSide().name(), trade.makerOrderId(),

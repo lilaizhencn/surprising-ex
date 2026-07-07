@@ -1699,7 +1699,7 @@ CREATE TABLE IF NOT EXISTS trading_match_trades (
     trace_id                TEXT,
     event_time              TIMESTAMPTZ NOT NULL,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (symbol, trade_id),
+    PRIMARY KEY (product_line, symbol, trade_id),
     CONSTRAINT trading_match_trades_command_fk
         FOREIGN KEY (command_id) REFERENCES trading_match_results(command_id),
     CONSTRAINT trading_match_trades_taker_instrument_fk
@@ -1736,6 +1736,12 @@ ALTER TABLE trading_match_trades
         product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
                          'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
     );
+
+ALTER TABLE trading_match_trades
+    DROP CONSTRAINT IF EXISTS trading_match_trades_pkey;
+
+ALTER TABLE trading_match_trades
+    ADD CONSTRAINT trading_match_trades_pkey PRIMARY KEY (product_line, symbol, trade_id);
 
 DROP INDEX IF EXISTS trading_match_trades_symbol_time_idx;
 CREATE INDEX IF NOT EXISTS trading_match_trades_symbol_time_idx
