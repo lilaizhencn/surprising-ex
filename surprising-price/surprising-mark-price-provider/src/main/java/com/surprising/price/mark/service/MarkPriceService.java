@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -58,7 +59,12 @@ public class MarkPriceService {
     }
 
     @KafkaListener(topics = "#{__listener.indexPriceTopic()}", groupId = "#{__listener.groupId()}")
-    public void onIndexPrice(String payload) {
+    public void onIndexPrice(ConsumerRecord<String, String> record) {
+        requireCurrentProductTopic(record.topic(), indexPriceTopic(), "index price");
+        onIndexPrice(record.value());
+    }
+
+    void onIndexPrice(String payload) {
         parse(payload, IndexPriceEvent.class, "index price", event -> {
             indexPrices.put(event.symbol(), event);
             publishIfReady(event.symbol());
@@ -66,7 +72,12 @@ public class MarkPriceService {
     }
 
     @KafkaListener(topics = "#{__listener.bookTickerTopic()}", groupId = "#{__listener.groupId()}")
-    public void onBookTicker(String payload) {
+    public void onBookTicker(ConsumerRecord<String, String> record) {
+        requireCurrentProductTopic(record.topic(), bookTickerTopic(), "book ticker");
+        onBookTicker(record.value());
+    }
+
+    void onBookTicker(String payload) {
         parse(payload, PerpBookTickerEvent.class, "book ticker", event -> {
             bookTickers.put(event.symbol(), event);
             publishIfReady(event.symbol());
@@ -74,7 +85,12 @@ public class MarkPriceService {
     }
 
     @KafkaListener(topics = "#{__listener.tradeTopic()}", groupId = "#{__listener.groupId()}")
-    public void onTrade(String payload) {
+    public void onTrade(ConsumerRecord<String, String> record) {
+        requireCurrentProductTopic(record.topic(), tradeTopic(), "trade");
+        onTrade(record.value());
+    }
+
+    void onTrade(String payload) {
         parse(payload, PerpTradeEvent.class, "trade", event -> {
             trades.put(event.symbol(), event);
             publishIfReady(event.symbol());
@@ -84,7 +100,12 @@ public class MarkPriceService {
     @KafkaListener(topics = "#{__listener.fundingRateTopic()}",
             groupId = "#{__listener.groupId()}",
             autoStartup = "#{__listener.fundingRateListenerEnabled()}")
-    public void onFundingRate(String payload) {
+    public void onFundingRate(ConsumerRecord<String, String> record) {
+        requireCurrentProductTopic(record.topic(), fundingRateTopic(), "funding rate");
+        onFundingRate(record.value());
+    }
+
+    void onFundingRate(String payload) {
         parse(payload, PerpFundingRateEvent.class, "funding rate", event -> fundingRates.put(event.symbol(), event));
     }
 
@@ -198,6 +219,16 @@ public class MarkPriceService {
                 properties.getCoordination().getLeaseDuration());
     }
 
+    private void requireCurrentProductTopic(String topic, String expectedTopic, String streamName) {
+        if (!properties.getKafka().isProductTopicsEnabled()) {
+            return;
+        }
+        if (!expectedTopic.equals(topic)) {
+            throw new ProductTopicMismatchException(streamName + " topic must match current product line: expected="
+                    + expectedTopic + " actual=" + topic);
+        }
+    }
+
     private boolean fresh(IndexPriceEvent event, Instant now) {
         return event != null
                 && event.indexPrice() != null
@@ -233,6 +264,12 @@ public class MarkPriceService {
             consumer.accept(objectMapper.readValue(payload, type));
         } catch (Exception ex) {
             log.warn("Dropped invalid {} payload: {}", name, ex.getMessage());
+        }
+    }
+
+    static final class ProductTopicMismatchException extends RuntimeException {
+        private ProductTopicMismatchException(String message) {
+            super(message);
         }
     }
 }
