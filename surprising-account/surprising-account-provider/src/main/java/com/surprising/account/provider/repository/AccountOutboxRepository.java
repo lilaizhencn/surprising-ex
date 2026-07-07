@@ -3,11 +3,14 @@ package com.surprising.account.provider.repository;
 import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.api.model.PositionUpdatedEvent;
-import com.surprising.trading.api.model.MarginMode;
+import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountOutboxRecord;
+import com.surprising.trading.api.model.MarginMode;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import tools.jackson.databind.ObjectMapper;
@@ -25,13 +28,23 @@ public class AccountOutboxRepository {
     private final JdbcTemplate jdbcTemplate;
     private final AccountSequenceRepository sequenceRepository;
     private final ObjectMapper objectMapper;
+    private final AccountProperties properties;
 
     public AccountOutboxRepository(JdbcTemplate jdbcTemplate,
                                    AccountSequenceRepository sequenceRepository,
                                    ObjectMapper objectMapper) {
+        this(jdbcTemplate, sequenceRepository, objectMapper, new AccountProperties());
+    }
+
+    @Autowired
+    public AccountOutboxRepository(JdbcTemplate jdbcTemplate,
+                                   AccountSequenceRepository sequenceRepository,
+                                   ObjectMapper objectMapper,
+                                   AccountProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
         this.objectMapper = objectMapper;
+        this.properties = properties == null ? new AccountProperties() : properties;
     }
 
     public PositionUpdatedEvent enqueuePositionUpdated(String topic,
@@ -86,19 +99,25 @@ public class AccountOutboxRepository {
     }
 
     public List<AccountOutboxRecord> lockPending(int limit) {
-        return jdbcTemplate.query("""
+        List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("""
                 SELECT id, topic, event_key, payload::text AS payload
                   FROM account_outbox_events
                  WHERE published_at IS NULL
+                """);
+        appendTopicScope(sql, args);
+        sql.append("""
                    AND next_attempt_at <= now()
                  ORDER BY next_attempt_at ASC, id ASC
                  LIMIT ?
                  FOR UPDATE SKIP LOCKED
-                """, (rs, rowNum) -> new AccountOutboxRecord(
+                """);
+        args.add(limit);
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new AccountOutboxRecord(
                 rs.getLong("id"),
                 rs.getString("topic"),
                 rs.getString("event_key"),
-                rs.getString("payload")), limit);
+                rs.getString("payload")), args.toArray());
     }
 
     public void markPublished(long id, Instant now) {
@@ -129,6 +148,16 @@ public class AccountOutboxRepository {
             return null;
         }
         return value.length() <= 1000 ? value : value.substring(0, 1000);
+    }
+
+    private void appendTopicScope(StringBuilder sql, List<Object> args) {
+        AccountProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled()) {
+            return;
+        }
+        sql.append("   AND topic IN (?, ?)\n");
+        args.add(kafka.getPositionEventsTopic());
+        args.add(kafka.getLiquidationFeeEventsTopic());
     }
 
     private void requireSingleRow(int rows, String operation) {
