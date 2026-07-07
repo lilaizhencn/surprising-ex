@@ -95,6 +95,49 @@ class OrderRepositoryTest {
 
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
+    void openOrdersFiltersByContractTypeWhenProvided() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OrderRepository repository = new OrderRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(java.util.List.of());
+
+        repository.openOrders(1001L, "BTC-USDT", 50, "LINEAR_DELIVERY");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("FROM instruments i")
+                .contains("i.version = trading_orders.instrument_version")
+                .contains("i.contract_type = ?");
+        assertThat(args.getValue()).containsExactly(1001L, "BTC-USDT", "BTC-USDT",
+                "LINEAR_DELIVERY", "LINEAR_DELIVERY", 50);
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void adminCancelableOrdersFiltersByContractTypeWhenProvided() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OrderRepository repository = new OrderRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(java.util.List.of());
+
+        repository.adminCancelableOrders(1001L, "BTC-USDT", "COIN_PERPETUAL", 25);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("FROM instruments i")
+                .contains("i.version = trading_orders.instrument_version")
+                .contains("i.contract_type = ?")
+                .contains("remaining_quantity_steps > 0");
+        assertThat(args.getValue()).containsExactly(1001L, 1001L, "BTC-USDT", "BTC-USDT",
+                "COIN_PERPETUAL", "COIN_PERPETUAL", 25);
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
     void adminOrderPageFiltersByContractTypeWhenProvided() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         OrderRepository repository = new OrderRepository(jdbcTemplate);

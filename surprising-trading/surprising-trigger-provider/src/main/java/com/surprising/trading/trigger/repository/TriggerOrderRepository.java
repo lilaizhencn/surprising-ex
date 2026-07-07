@@ -268,29 +268,61 @@ public class TriggerOrderRepository {
     }
 
     public List<TriggerOrderRecord> openOrders(long userId, String symbol, int limit) {
+        return openOrders(userId, symbol, limit, null);
+    }
+
+    public List<TriggerOrderRecord> openOrders(long userId, String symbol, int limit, String contractType) {
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
+        String normalizedSymbol = emptyToNull(symbol);
+        String normalizedContractType = emptyToNull(contractType);
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_trigger_orders
                  WHERE user_id = ?
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR EXISTS (
+                        SELECT 1
+                          FROM instrument_current_versions c
+                          JOIN instruments i
+                            ON i.symbol = c.symbol AND i.version = c.version
+                         WHERE c.symbol = trading_trigger_orders.symbol
+                           AND i.contract_type = ?
+                   ))
                    AND status IN ('PENDING', 'TRIGGERING')
                  ORDER BY created_at DESC, trigger_order_id DESC
                  LIMIT ?
-                """, (rs, rowNum) -> toRecord(rs), userId, symbol, symbol, normalizedLimit);
+                """, (rs, rowNum) -> toRecord(rs),
+                userId, normalizedSymbol, normalizedSymbol, normalizedContractType, normalizedContractType,
+                normalizedLimit);
     }
 
     public List<TriggerOrderRecord> pendingCancelableOrders(long userId, String symbol, int limit) {
+        return pendingCancelableOrders(userId, symbol, limit, null);
+    }
+
+    public List<TriggerOrderRecord> pendingCancelableOrders(long userId, String symbol, int limit, String contractType) {
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
+        String normalizedSymbol = emptyToNull(symbol);
+        String normalizedContractType = emptyToNull(contractType);
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_trigger_orders
                  WHERE user_id = ?
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR EXISTS (
+                        SELECT 1
+                          FROM instrument_current_versions c
+                          JOIN instruments i
+                            ON i.symbol = c.symbol AND i.version = c.version
+                         WHERE c.symbol = trading_trigger_orders.symbol
+                           AND i.contract_type = ?
+                   ))
                    AND status = 'PENDING'
                  ORDER BY created_at ASC, trigger_order_id ASC
                  LIMIT ?
-                """, (rs, rowNum) -> toRecord(rs), userId, symbol, symbol, normalizedLimit);
+                """, (rs, rowNum) -> toRecord(rs),
+                userId, normalizedSymbol, normalizedSymbol, normalizedContractType, normalizedContractType,
+                normalizedLimit);
     }
 
     public List<TriggerOrderRecord> adminOrders(Long userId,

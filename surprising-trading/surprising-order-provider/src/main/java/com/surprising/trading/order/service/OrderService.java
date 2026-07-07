@@ -529,7 +529,10 @@ public class OrderService {
         String symbol = request.symbol() == null || request.symbol().isBlank()
                 ? null
                 : normalizeSymbol(request.symbol());
-        List<OrderRecord> orders = orderRepository.adminCancelableOrders(request.userId(), symbol, limit);
+        String contractType = currentProductContractType();
+        List<OrderRecord> orders = contractType == null
+                ? orderRepository.adminCancelableOrders(request.userId(), symbol, limit)
+                : orderRepository.adminCancelableOrders(request.userId(), symbol, contractType, limit);
         List<OrderBatchItemResponse> results = new ArrayList<>();
         for (int i = 0; i < orders.size(); i++) {
             try {
@@ -565,7 +568,8 @@ public class OrderService {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
-        List<OrderResponse> rows = orderRepository.openOrders(userId, normalizedSymbol, limit)
+        String contractType = currentProductContractType();
+        List<OrderResponse> rows = orderRepository.openOrders(userId, normalizedSymbol, limit, contractType)
                 .stream()
                 .map(this::toResponse)
                 .toList();
@@ -824,6 +828,10 @@ public class OrderService {
 
     private String contractType(ProductLine productLine) {
         return productLine == null ? null : productLine.contractTypeCode();
+    }
+
+    private String currentProductContractType() {
+        return properties.getKafka().isProductTopicsEnabled() ? contractType(currentProductLine()) : null;
     }
 
     private String adminCancelReason(String reason) {

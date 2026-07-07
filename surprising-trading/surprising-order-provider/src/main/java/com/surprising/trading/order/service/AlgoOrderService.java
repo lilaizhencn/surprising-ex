@@ -1,5 +1,6 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.AlgoOrderBatchItemResponse;
 import com.surprising.trading.api.model.AlgoOrderBatchResponse;
@@ -135,8 +136,11 @@ public class AlgoOrderService {
         String symbol = request.symbol() == null || request.symbol().isBlank()
                 ? null
                 : normalizeSymbol(request.symbol());
-        List<AlgoOrderRecord> orders = algoOrderRepository.cancelableOpenOrders(
-                request.userId(), symbol, request.algoType(), limit);
+        String contractType = currentProductContractType();
+        List<AlgoOrderRecord> orders = contractType == null
+                ? algoOrderRepository.cancelableOpenOrders(request.userId(), symbol, request.algoType(), limit)
+                : algoOrderRepository.cancelableOpenOrders(
+                        request.userId(), symbol, request.algoType(), limit, contractType);
         List<AlgoOrderBatchItemResponse> results = new ArrayList<>();
         for (int i = 0; i < orders.size(); i++) {
             try {
@@ -165,7 +169,8 @@ public class AlgoOrderService {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
-        List<AlgoOrderResponse> orders = algoOrderRepository.openOrders(userId, normalizedSymbol, limit)
+        String contractType = currentProductContractType();
+        List<AlgoOrderResponse> orders = algoOrderRepository.openOrders(userId, normalizedSymbol, limit, contractType)
                 .stream()
                 .map(this::toResponse)
                 .toList();
@@ -405,5 +410,17 @@ public class AlgoOrderService {
 
     private String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private String currentProductContractType() {
+        return properties.getKafka().isProductTopicsEnabled() ? contractType(currentProductLine()) : null;
+    }
+
+    private String contractType(ProductLine productLine) {
+        return productLine == null ? null : productLine.contractTypeCode();
+    }
+
+    private ProductLine currentProductLine() {
+        return properties.getKafka().getProductLine();
     }
 }

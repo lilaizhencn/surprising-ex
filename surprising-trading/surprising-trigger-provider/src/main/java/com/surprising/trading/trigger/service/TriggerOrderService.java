@@ -244,8 +244,10 @@ public class TriggerOrderService {
         String symbol = request.symbol() == null || request.symbol().isBlank()
                 ? null
                 : normalizeSymbol(request.symbol());
-        List<TriggerOrderRecord> orders = triggerOrderRepository.pendingCancelableOrders(
-                request.userId(), symbol, limit);
+        String contractType = currentProductContractType();
+        List<TriggerOrderRecord> orders = contractType == null
+                ? triggerOrderRepository.pendingCancelableOrders(request.userId(), symbol, limit)
+                : triggerOrderRepository.pendingCancelableOrders(request.userId(), symbol, limit, contractType);
         List<TriggerOrderBatchItemResponse> results = new ArrayList<>();
         for (int i = 0; i < orders.size(); i++) {
             try {
@@ -264,7 +266,9 @@ public class TriggerOrderService {
             throw new IllegalArgumentException("userId must be positive");
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
-        List<TriggerOrderResponse> orders = triggerOrderRepository.openOrders(userId, normalizedSymbol, limit)
+        String contractType = currentProductContractType();
+        List<TriggerOrderResponse> orders = triggerOrderRepository.openOrders(
+                userId, normalizedSymbol, limit, contractType)
                 .stream()
                 .map(this::toResponse)
                 .toList();
@@ -598,6 +602,10 @@ public class TriggerOrderService {
 
     private String contractType(ProductLine productLine) {
         return productLine == null ? null : productLine.contractTypeCode();
+    }
+
+    private String currentProductContractType() {
+        return properties.getKafka().isProductTopicsEnabled() ? contractType(currentProductLine()) : null;
     }
 
     private TriggerOrderResponse toResponse(TriggerOrderRecord order) {

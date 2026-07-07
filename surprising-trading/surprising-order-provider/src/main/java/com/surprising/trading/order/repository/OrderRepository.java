@@ -213,17 +213,30 @@ public class OrderRepository {
     }
 
     public List<OrderRecord> openOrders(long userId, String symbol, int limit) {
+        return openOrders(userId, symbol, limit, null);
+    }
+
+    public List<OrderRecord> openOrders(long userId, String symbol, int limit, String contractType) {
         String normalizedSymbol = emptyToNull(symbol);
+        String normalizedContractType = emptyToNull(contractType);
         String sql = """
                 SELECT *
                   FROM trading_orders
                  WHERE user_id = ?
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR EXISTS (
+                        SELECT 1
+                          FROM instruments i
+                         WHERE i.symbol = trading_orders.symbol
+                           AND i.version = trading_orders.instrument_version
+                           AND i.contract_type = ?
+                   ))
                    AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                  ORDER BY created_at DESC
                  LIMIT ?
                 """;
-        return jdbcTemplate.query(sql, (rs, rowNum) -> toRecord(rs), userId, normalizedSymbol, normalizedSymbol, limit);
+        return jdbcTemplate.query(sql, (rs, rowNum) -> toRecord(rs),
+                userId, normalizedSymbol, normalizedSymbol, normalizedContractType, normalizedContractType, limit);
     }
 
     public List<OrderRecord> adminOrders(Long userId,

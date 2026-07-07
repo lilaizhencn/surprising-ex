@@ -77,15 +77,30 @@ public class AlgoOrderRepository {
     }
 
     public List<AlgoOrderRecord> openOrders(long userId, String symbol, int limit) {
+        return openOrders(userId, symbol, limit, null);
+    }
+
+    public List<AlgoOrderRecord> openOrders(long userId, String symbol, int limit, String contractType) {
+        String normalizedSymbol = emptyToNull(symbol);
+        String normalizedContractType = emptyToNull(contractType);
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_algo_orders
                  WHERE user_id = ?
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND (CAST(? AS text) IS NULL OR EXISTS (
+                        SELECT 1
+                          FROM instrument_current_versions c
+                          JOIN instruments i
+                            ON i.symbol = c.symbol AND i.version = c.version
+                         WHERE c.symbol = trading_algo_orders.symbol
+                           AND i.contract_type = ?
+                   ))
                    AND status IN ('PENDING', 'RUNNING', 'CANCEL_REQUESTED')
                  ORDER BY created_at DESC, algo_order_id DESC
                  LIMIT ?
-                """, (rs, rowNum) -> toAlgoRecord(rs), userId, symbol, symbol, limit);
+                """, (rs, rowNum) -> toAlgoRecord(rs),
+                userId, normalizedSymbol, normalizedSymbol, normalizedContractType, normalizedContractType, limit);
     }
 
     public List<AlgoOrderRecord> dueOrders(Instant now, int limit) {
@@ -101,19 +116,34 @@ public class AlgoOrderRepository {
     }
 
     public List<AlgoOrderRecord> cancelableOpenOrders(long userId, String symbol, AlgoOrderType algoType, int limit) {
+        return cancelableOpenOrders(userId, symbol, algoType, limit, null);
+    }
+
+    public List<AlgoOrderRecord> cancelableOpenOrders(
+            long userId, String symbol, AlgoOrderType algoType, int limit, String contractType) {
+        String normalizedSymbol = emptyToNull(symbol);
         String normalizedType = algoType == null ? null : algoType.name();
+        String normalizedContractType = emptyToNull(contractType);
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_algo_orders
                  WHERE user_id = ?
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
                    AND (CAST(? AS text) IS NULL OR algo_type = ?)
+                   AND (CAST(? AS text) IS NULL OR EXISTS (
+                        SELECT 1
+                          FROM instrument_current_versions c
+                          JOIN instruments i
+                            ON i.symbol = c.symbol AND i.version = c.version
+                         WHERE c.symbol = trading_algo_orders.symbol
+                           AND i.contract_type = ?
+                   ))
                    AND status IN ('PENDING', 'RUNNING')
                  ORDER BY created_at ASC, algo_order_id ASC
                  LIMIT ?
                  FOR UPDATE SKIP LOCKED
-                """, (rs, rowNum) -> toAlgoRecord(rs), userId, symbol, symbol,
-                normalizedType, normalizedType, limit);
+                """, (rs, rowNum) -> toAlgoRecord(rs), userId, normalizedSymbol, normalizedSymbol,
+                normalizedType, normalizedType, normalizedContractType, normalizedContractType, limit);
     }
 
     public boolean markCancelRequested(long algoOrderId, Instant now) {
