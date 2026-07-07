@@ -38,6 +38,7 @@ public class LiquidationFeeEventConsumer {
             containerFactory = "insuranceKafkaListenerContainerFactory")
     public void onLiquidationFee(ConsumerRecord<String, String> record) {
         try {
+            requireCurrentProductTopic(record.topic());
             LiquidationFeeSettledEvent event = objectMapper.readValue(record.value(),
                     LiquidationFeeSettledEvent.class);
             requireAssetKey(record.key(), event.asset());
@@ -54,11 +55,29 @@ public class LiquidationFeeEventConsumer {
         }
     }
 
+    private void requireCurrentProductTopic(String topic) {
+        InsuranceProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled()) {
+            return;
+        }
+        String expectedTopic = kafka.getLiquidationFeeEventsTopic();
+        if (!expectedTopic.equals(topic)) {
+            throw new ProductTopicMismatchException("liquidation fee topic must match current product line: expected="
+                    + expectedTopic + " actual=" + topic);
+        }
+    }
+
     public String liquidationFeeEventsTopic() {
         return properties.getKafka().getLiquidationFeeEventsTopic();
     }
 
     public String groupId() {
         return properties.getKafka().getGroupId();
+    }
+
+    private static final class ProductTopicMismatchException extends RuntimeException {
+        private ProductTopicMismatchException(String message) {
+            super(message);
+        }
     }
 }
