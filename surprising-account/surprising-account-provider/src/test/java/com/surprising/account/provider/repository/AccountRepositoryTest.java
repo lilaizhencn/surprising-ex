@@ -286,6 +286,25 @@ class AccountRepositoryTest {
     }
 
     @Test
+    void settlementOpenPositionsLockAllVersionsForProductLineAndSymbol() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.query(contains("FOR UPDATE"), anyRowMapper(),
+                eq("LINEAR_DELIVERY"), eq("BTC-USDT-260925"))).thenReturn(List.of());
+
+        repository.openPositionsForSettlement(ProductLine.LINEAR_DELIVERY, "BTC-USDT-260925");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
+                eq("LINEAR_DELIVERY"), eq("BTC-USDT-260925"));
+        assertThat(sql.getValue())
+                .contains("product_line = ?")
+                .contains("symbol = ?")
+                .contains("signed_quantity_steps <> 0")
+                .contains("FOR UPDATE")
+                .doesNotContain("instrument_version = ?");
+    }
+
+    @Test
     void positionMarginQueryCanScopeByProductLineContractType() {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         when(jdbcTemplate.query(contains("p.product_line = ?"), anyRowMapper(),

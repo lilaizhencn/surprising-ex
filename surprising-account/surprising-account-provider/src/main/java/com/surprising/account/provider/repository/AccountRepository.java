@@ -899,6 +899,20 @@ public class AccountRepository {
                 """, (rs, rowNum) -> toPositionResponse(rs), symbol, instrumentVersion);
     }
 
+    public List<PositionResponse> openPositionsForSettlement(ProductLine productLine, String symbol) {
+        ProductLine resolvedProductLine = productLine(productLine);
+        return jdbcTemplate.query("""
+                SELECT user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
+                       entry_price_ticks, realized_pnl_units, updated_at
+                  FROM account_positions
+                 WHERE product_line = ?
+                   AND symbol = ?
+                   AND signed_quantity_steps <> 0
+                 ORDER BY user_id ASC, margin_mode ASC, position_side ASC, instrument_version ASC
+                 FOR UPDATE
+                """, (rs, rowNum) -> toPositionResponse(rs), resolvedProductLine.name(), symbol);
+    }
+
     public Optional<PositionMarginResponse> positionMargin(long userId, String symbol, MarginMode marginMode) {
         return positionMargin(userId, symbol, marginMode, PositionSide.NET);
     }

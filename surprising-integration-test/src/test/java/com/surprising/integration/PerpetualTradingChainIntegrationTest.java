@@ -249,8 +249,8 @@ class PerpetualTradingChainIntegrationTest {
             assertThat(harness.state.positionMargin(1001L)).isEqualTo(400L);
 
             harness.state.markPriceTicks = 120L;
-            assertThat(harness.settleDelivery()).isEqualTo(2);
-            assertThat(harness.settleDelivery()).isZero();
+            assertThat(harness.settleDelivery(VERSION + 1)).isEqualTo(2);
+            assertThat(harness.settleDelivery(VERSION + 1)).isZero();
 
             assertThat(harness.state.position(2002L)).isEqualTo(new PositionState(0L, 0L, 0L, 8_000L));
             assertThat(harness.state.position(1001L)).isEqualTo(new PositionState(0L, 0L, 0L, -8_000L));
@@ -279,8 +279,8 @@ class PerpetualTradingChainIntegrationTest {
             assertThat(harness.state.positionMargin(2002L)).isEqualTo(1_100L);
 
             harness.state.underlyingMarkPriceUnits = 120L;
-            assertThat(harness.exerciseCallOption(100L)).isEqualTo(2);
-            assertThat(harness.exerciseCallOption(100L)).isZero();
+            assertThat(harness.exerciseCallOption(VERSION + 1, 100L)).isEqualTo(2);
+            assertThat(harness.exerciseCallOption(VERSION + 1, 100L)).isZero();
 
             assertThat(harness.state.position(1001L)).isEqualTo(new PositionState(0L, 0L, 0L, 3_000L));
             assertThat(harness.state.position(2002L)).isEqualTo(new PositionState(0L, 0L, 0L, -3_000L));
@@ -689,35 +689,40 @@ class PerpetualTradingChainIntegrationTest {
             }
         }
 
-        private int settleDelivery() {
+        private int settleDelivery(long eventVersion) {
             return accountService.processDeliverySettlement(new DeliverySettlementEvent(
-                    SYMBOL, VERSION, state.contractType, Instant.now(), Instant.now(),
+                    SYMBOL, eventVersion, state.contractType, Instant.now(), Instant.now(),
                     ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, Instant.now(),
-                    instrument(InstrumentStatus.CLOSED)));
+                    instrument(eventVersion, InstrumentStatus.CLOSED)));
         }
 
-        private int exerciseCallOption(long strikePriceUnits) {
+        private int exerciseCallOption(long eventVersion, long strikePriceUnits) {
             return accountService.processOptionExercise(new OptionExerciseEvent(
-                    SYMBOL, VERSION, SYMBOL, strikePriceUnits, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
+                    SYMBOL, eventVersion, SYMBOL, strikePriceUnits, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
                     Instant.now(), Instant.now(), ContractSettlementMethod.CASH, InstrumentStatus.CLOSED,
-                    Instant.now(), optionInstrument(strikePriceUnits, InstrumentStatus.CLOSED)));
+                    Instant.now(), optionInstrument(eventVersion, strikePriceUnits, InstrumentStatus.CLOSED)));
         }
 
-        private InstrumentResponse optionInstrument(long strikePriceUnits, InstrumentStatus status) {
-            return instrument(status, SYMBOL, strikePriceUnits, OptionType.CALL);
+        private InstrumentResponse optionInstrument(long version, long strikePriceUnits, InstrumentStatus status) {
+            return instrument(version, status, SYMBOL, strikePriceUnits, OptionType.CALL);
         }
 
         private InstrumentResponse instrument(InstrumentStatus status) {
-            return instrument(status, null, null, null);
+            return instrument(VERSION, status, null, null, null);
         }
 
-        private InstrumentResponse instrument(InstrumentStatus status,
+        private InstrumentResponse instrument(long version, InstrumentStatus status) {
+            return instrument(version, status, null, null, null);
+        }
+
+        private InstrumentResponse instrument(long version,
+                                              InstrumentStatus status,
                                               String underlyingSymbol,
                                               Long strikePriceUnits,
                                               OptionType optionType) {
             return new InstrumentResponse(
                     SYMBOL,
-                    VERSION,
+                    version,
                     state.instrumentType,
                     state.contractType,
                     state.baseAsset,
@@ -1617,6 +1622,21 @@ class PerpetualTradingChainIntegrationTest {
             return state.positions.entrySet().stream()
                     .filter(entry -> entry.getKey().symbol().equals(symbol))
                     .filter(entry -> entry.getValue().instrumentVersion() == instrumentVersion)
+                    .filter(entry -> entry.getValue().signedQuantitySteps() != 0L)
+                    .map(entry -> new PositionResponse(entry.getKey().userId(), symbol,
+                            entry.getValue().instrumentVersion(), entry.getKey().marginMode(),
+                            entry.getKey().positionSide(), entry.getValue().signedQuantitySteps(),
+                            entry.getValue().entryPriceTicks(), entry.getValue().realizedPnlUnits(), Instant.now()))
+                    .sorted(Comparator.comparingLong(PositionResponse::userId))
+                    .toList();
+        }
+
+        @Override
+        public List<PositionResponse> openPositionsForSettlement(ProductLine productLine, String symbol) {
+            assertThat(productLine).isEqualTo(state.productLine());
+            assertThat(symbol).isEqualTo(SYMBOL);
+            return state.positions.entrySet().stream()
+                    .filter(entry -> entry.getKey().symbol().equals(symbol))
                     .filter(entry -> entry.getValue().signedQuantitySteps() != 0L)
                     .map(entry -> new PositionResponse(entry.getKey().userId(), symbol,
                             entry.getValue().instrumentVersion(), entry.getKey().marginMode(),

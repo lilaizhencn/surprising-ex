@@ -458,10 +458,12 @@ public class AccountService {
         if (!spec.contractType().isDelivery()) {
             throw new IllegalArgumentException("delivery settlement event must reference a delivery contract");
         }
-        long settlementPriceTicks = accountRepository.settlementMarkPriceTicks(symbol, event.version(),
-                settlementTime(event.deliveryTime(), event.eventTime()), settlementPriceWindow());
-        return settleExpiringPositions(symbol, event.version(), settlementPriceTicks,
-                event.eventTime(), "DELIVERY_SETTLEMENT", "DELIVERY_SETTLEMENT");
+        Instant settlementTime = settlementTime(event.deliveryTime(), event.eventTime());
+        Duration priceWindow = settlementPriceWindow();
+        return settleExpiringPositions(spec.contractType().productLine(), symbol, event.eventTime(),
+                "DELIVERY_SETTLEMENT", "DELIVERY_SETTLEMENT",
+                (position, positionSpec) -> accountRepository.settlementMarkPriceTicks(symbol,
+                        position.instrumentVersion(), settlementTime, priceWindow));
     }
 
     @Transactional
@@ -474,9 +476,12 @@ public class AccountService {
         String symbol = normalizeSymbol(event.symbol());
         ContractSpec spec = contractSpec(symbol, event.version());
         requireMatchingOptionInstrument(event, spec);
-        long settlementPriceTicks = optionIntrinsicPriceTicks(event, spec);
-        return settleExpiringPositions(symbol, event.version(), settlementPriceTicks,
-                event.eventTime(), "OPTION_EXERCISE", "OPTION_EXERCISE");
+        String underlyingSymbol = normalizeSymbol(event.underlyingSymbol());
+        long underlyingPriceUnits = accountRepository.settlementMarkPriceUnits(underlyingSymbol,
+                settlementTime(event.deliveryTime(), event.eventTime()), settlementPriceWindow());
+        return settleExpiringPositions(spec.contractType().productLine(), symbol, event.eventTime(),
+                "OPTION_EXERCISE", "OPTION_EXERCISE",
+                (position, positionSpec) -> optionIntrinsicPriceTicks(event, positionSpec, underlyingPriceUnits));
     }
 
     @Transactional
@@ -515,24 +520,29 @@ public class AccountService {
         return true;
     }
 
-    private int settleExpiringPositions(String symbol,
-                                        long instrumentVersion,
-                                        long settlementPriceTicks,
+    private int settleExpiringPositions(ProductLine productLine,
+                                        String symbol,
                                         Instant eventTime,
                                         String referenceType,
-                                        String reason) {
-        ContractSpec spec = contractSpec(symbol, instrumentVersion);
-        AccountType accountType = derivativeAccountType(spec);
-        List<PositionResponse> positions = accountRepository.openPositionsForSettlement(symbol, instrumentVersion);
+                                        String reason,
+                                        SettlementPriceResolver settlementPriceResolver) {
+        List<PositionResponse> positions = accountRepository.openPositionsForSettlement(productLine, symbol);
         int settled = 0;
         for (PositionResponse position : positions) {
             if (position.signedQuantitySteps() == 0L) {
                 continue;
             }
+            ContractSpec spec = contractSpec(symbol, position.instrumentVersion());
+            if (spec.contractType().productLine() != productLine) {
+                throw new IllegalStateException("settlement position product line does not match event: "
+                        + symbol + ":" + position.instrumentVersion());
+            }
+            AccountType accountType = derivativeAccountType(spec);
+            long settlementPriceTicks = settlementPriceResolver.settlementPriceTicks(position, spec);
             PositionState current = new PositionState(position.signedQuantitySteps(), position.instrumentVersion(),
                     position.entryPriceTicks(), position.realizedPnlUnits());
             PositionChange change = positionCalculator.closeAtSettlement(current, settlementPriceTicks, spec);
-            String referenceId = lifecycleReferenceId(referenceType, symbol, instrumentVersion, position);
+            String referenceId = lifecycleReferenceId(referenceType, symbol, position.instrumentVersion(), position);
             long ledgerDeltaUnits = lifecycleLedgerDeltaUnits(referenceType, settlementPriceTicks, spec, position,
                     change);
             boolean applied = accountRepository.settleLifecyclePnl(accountType, position.userId(),
@@ -556,13 +566,10 @@ public class AccountService {
         return settled;
     }
 
-    private long optionIntrinsicPriceTicks(OptionExerciseEvent event, ContractSpec spec) {
+    private long optionIntrinsicPriceTicks(OptionExerciseEvent event, ContractSpec spec, long underlyingPriceUnits) {
         if (!spec.contractType().isOption()) {
             throw new IllegalArgumentException("option exercise event must reference an option contract");
         }
-        String underlyingSymbol = normalizeSymbol(event.underlyingSymbol());
-        long underlyingPriceUnits = accountRepository.settlementMarkPriceUnits(underlyingSymbol,
-                settlementTime(event.deliveryTime(), event.eventTime()), settlementPriceWindow());
         long strikePriceUnits = event.strikePriceUnits();
         if (strikePriceUnits <= 0) {
             throw new IllegalArgumentException("strikePriceUnits must be positive");
@@ -576,6 +583,10 @@ public class AccountService {
             case PUT -> Math.max(0L, Math.subtractExact(strikePriceUnits, underlyingPriceUnits));
         };
         return Math.addExact(intrinsicUnits, spec.priceTickUnits() / 2L) / spec.priceTickUnits();
+    }
+
+    private interface SettlementPriceResolver {
+        long settlementPriceTicks(PositionResponse position, ContractSpec spec);
     }
 
     private void requireCashSettlement(ContractSettlementMethod settlementMethod) {

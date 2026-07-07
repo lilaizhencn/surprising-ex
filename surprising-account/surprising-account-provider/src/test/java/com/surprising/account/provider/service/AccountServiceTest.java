@@ -254,6 +254,31 @@ class AccountServiceTest {
     }
 
     @Test
+    void deliverySettlementEventVersionClosesOlderTradingVersionPositions() {
+        String symbol = "BTC-USDT-DELIVERY";
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.contractSpecs.put(symbol + ":4", new ContractSpec(4L, ContractType.LINEAR_DELIVERY,
+                "USDT", 1L, 100_000_000L, 100_000_000L, 10_000L, 2L, 5L));
+        repository.contractSpecs.put(symbol + ":5", new ContractSpec(5L, ContractType.LINEAR_DELIVERY,
+                "USDT", 1L, 100_000_000L, 100_000_000L, 10_000L, 2L, 5L));
+        repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
+                new PositionState(3L, 4L, 500_000L, 0L));
+        repository.latestMarkPriceTicks.put(symbol + ":4", 600_000L);
+        AccountService service = new AccountService(repository, new PositionCalculator());
+
+        int settled = service.processDeliverySettlement(new DeliverySettlementEvent(
+                symbol, 5L, ContractType.LINEAR_DELIVERY, EVENT_TIME, EVENT_TIME,
+                ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
+                deliveryInstrument(symbol, 5L, ContractType.LINEAR_DELIVERY)));
+
+        assertThat(settled).isEqualTo(1);
+        assertThat(repository.positionState(2002L, symbol))
+                .isEqualTo(new PositionState(0L, 0L, 0L, 300_000L));
+        assertThat(repository.lifecycleReferences).containsExactly(
+                "DELIVERY_SETTLEMENT:BTC-USDT-DELIVERY:4:2002:CROSS:NET");
+    }
+
+    @Test
     void deliverySettlementRequiresInstrumentSnapshotBeforeFundsAreSettled() {
         String symbol = "BTC-USDT-DELIVERY";
         FakeAccountRepository repository = new FakeAccountRepository();
@@ -300,6 +325,31 @@ class AccountServiceTest {
                 "OPTION_EXERCISE:BTC-USDT-260925-70000-C:6:2002:CROSS:NET");
         assertThat(repository.lastSettlementMarkPriceTime).isEqualTo(EVENT_TIME);
         assertThat(repository.lastSettlementPriceWindow).isEqualTo(Duration.ofMinutes(30));
+    }
+
+    @Test
+    void optionExerciseEventVersionClosesOlderTradingVersionPositions() {
+        String symbol = "BTC-USDT-260925-70000-C";
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
+                "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
+        repository.contractSpecs.put(symbol + ":7", new ContractSpec(7L, ContractType.VANILLA_OPTION,
+                "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
+        repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
+                new PositionState(2L, 6L, 20L, 0L));
+        repository.latestMarkPriceUnits.put("BTC-USDT", 150L);
+        AccountService service = new AccountService(repository, new PositionCalculator());
+
+        int settled = service.processOptionExercise(new OptionExerciseEvent(
+                symbol, 7L, "BTC-USDT", 100L, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
+                EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
+                optionInstrument(symbol, 7L, "BTC-USDT", 100L, OptionType.CALL)));
+
+        assertThat(settled).isEqualTo(1);
+        assertThat(repository.positionState(2002L, symbol))
+                .isEqualTo(new PositionState(0L, 0L, 0L, 60L));
+        assertThat(repository.lifecycleReferences).containsExactly(
+                "OPTION_EXERCISE:BTC-USDT-260925-70000-C:6:2002:CROSS:NET");
     }
 
     @Test
@@ -1100,6 +1150,25 @@ class AccountServiceTest {
                     .filter(entry -> entry.getKey().symbol().equals(symbol))
                     .filter(entry -> entry.getValue().instrumentVersion() == instrumentVersion)
                     .filter(entry -> entry.getValue().signedQuantitySteps() != 0L)
+                    .map(entry -> {
+                        PositionKey key = entry.getKey();
+                        PositionState state = entry.getValue();
+                        return new PositionResponse(key.userId(), key.symbol(), state.instrumentVersion(),
+                                key.marginMode(), key.positionSide(), state.signedQuantitySteps(),
+                                state.entryPriceTicks(), state.realizedPnlUnits(), EVENT_TIME);
+                    })
+                    .toList();
+        }
+
+        @Override
+        public List<PositionResponse> openPositionsForSettlement(ProductLine productLine, String symbol) {
+            return positions.entrySet().stream()
+                    .filter(entry -> entry.getKey().symbol().equals(symbol))
+                    .filter(entry -> entry.getValue().signedQuantitySteps() != 0L)
+                    .filter(entry -> {
+                        ContractSpec spec = contractSpecs.get(symbol + ":" + entry.getValue().instrumentVersion());
+                        return spec != null && spec.contractType().productLine() == productLine;
+                    })
                     .map(entry -> {
                         PositionKey key = entry.getKey();
                         PositionState state = entry.getValue();
