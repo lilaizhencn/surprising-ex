@@ -135,7 +135,7 @@ class OrderServiceTest {
     void duplicateClientOrderInsertConflictDoesNotReserveMargin() {
         OrderService service = service();
         OrderRecord existing = order(9001L, "dup-1", OrderStatus.ACCEPTED, null);
-        when(orderRepository.findByClientOrderId(1001L, "dup-1"))
+        when(orderRepository.findByClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "dup-1"))
                 .thenReturn(Optional.empty(), Optional.of(existing));
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
@@ -157,7 +157,7 @@ class OrderServiceTest {
     @Test
     void reservationFailureRejectsInsertedOrderWithoutPublishingCommand() {
         OrderService service = service();
-        when(orderRepository.findByClientOrderId(1001L, "no-margin")).thenReturn(Optional.empty());
+        when(orderRepository.findByClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "no-margin")).thenReturn(Optional.empty());
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
@@ -558,7 +558,7 @@ class OrderServiceTest {
         OrderService service = service();
         OrderRecord original = order(9001L, "orig-1", OrderStatus.ACCEPTED, null);
         OrderRecord cancelRequested = order(9001L, "orig-1", OrderStatus.CANCEL_REQUESTED, null);
-        when(orderRepository.findByClientOrderId(1001L, "amend-1"))
+        when(orderRepository.findByClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "amend-1"))
                 .thenReturn(Optional.empty(), Optional.empty());
         when(orderRepository.findByOrderId(9001L))
                 .thenReturn(Optional.of(original), Optional.of(cancelRequested));
@@ -599,7 +599,7 @@ class OrderServiceTest {
         OrderService service = service();
         OrderRecord original = order(9001L, "batch-orig-1", OrderStatus.ACCEPTED, null);
         OrderRecord cancelRequested = order(9001L, "batch-orig-1", OrderStatus.CANCEL_REQUESTED, null);
-        when(orderRepository.findByClientOrderId(1001L, "batch-amend-1"))
+        when(orderRepository.findByClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "batch-amend-1"))
                 .thenReturn(Optional.empty(), Optional.empty());
         when(orderRepository.findByOrderId(9001L))
                 .thenReturn(Optional.of(original), Optional.of(cancelRequested));

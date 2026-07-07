@@ -930,6 +930,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS trading_orders (
     order_id                    BIGINT PRIMARY KEY,
+    product_line                TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     user_id                     BIGINT NOT NULL,
     client_order_id             TEXT,
     symbol                      TEXT NOT NULL,
@@ -951,6 +952,10 @@ CREATE TABLE IF NOT EXISTS trading_orders (
     reject_reason               TEXT,
     created_at                  TIMESTAMPTZ NOT NULL,
     updated_at                  TIMESTAMPTZ NOT NULL,
+    CONSTRAINT trading_orders_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT trading_orders_user_positive CHECK (user_id > 0),
     CONSTRAINT trading_orders_client_id_length CHECK (client_order_id IS NULL OR length(client_order_id) <= 64),
     CONSTRAINT trading_orders_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
@@ -983,8 +988,35 @@ CREATE TABLE IF NOT EXISTS trading_orders (
     )
 );
 
+DO $$
+BEGIN
+    ALTER TABLE trading_orders
+        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+    ALTER TABLE trading_orders
+        DROP CONSTRAINT IF EXISTS trading_orders_product_line_check;
+    ALTER TABLE trading_orders
+        ADD CONSTRAINT trading_orders_product_line_check CHECK (
+            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+        );
+    UPDATE trading_orders o
+       SET product_line = CASE i.contract_type
+           WHEN 'SPOT' THEN 'SPOT'
+           WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+           WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+           WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+           WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+           WHEN 'VANILLA_OPTION' THEN 'OPTION'
+           ELSE o.product_line
+       END
+      FROM instruments i
+     WHERE i.symbol = o.symbol
+       AND i.version = o.instrument_version;
+END $$;
+
+DROP INDEX IF EXISTS trading_orders_user_client_order_uidx;
 CREATE UNIQUE INDEX IF NOT EXISTS trading_orders_user_client_order_uidx
-    ON trading_orders (user_id, client_order_id)
+    ON trading_orders (product_line, user_id, client_order_id)
     WHERE client_order_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS trading_orders_user_status_idx

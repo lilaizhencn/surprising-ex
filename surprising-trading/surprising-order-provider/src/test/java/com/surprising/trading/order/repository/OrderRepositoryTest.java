@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
@@ -54,8 +55,25 @@ class OrderRepositoryTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
         assertThat(sql.getValue())
-                .contains("ON CONFLICT (user_id, client_order_id) WHERE client_order_id IS NOT NULL DO NOTHING")
+                .contains("ON CONFLICT (product_line, user_id, client_order_id) WHERE client_order_id IS NOT NULL DO NOTHING")
                 .doesNotContain("ON CONFLICT DO NOTHING");
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void findByClientOrderIdScopesByProductLine() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OrderRepository repository = new OrderRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(java.util.List.of());
+
+        repository.findByClientOrderId(ProductLine.OPTION, 1001L, "cli-1");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue()).contains("WHERE product_line = ? AND user_id = ? AND client_order_id = ?");
+        assertThat(args.getValue()).containsExactly("OPTION", 1001L, "cli-1");
     }
 
     @Test

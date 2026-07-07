@@ -30,12 +30,12 @@ public class OrderRepository {
 
     private static final String INSERT_ORDER_SQL = """
             INSERT INTO trading_orders (
-                order_id, user_id, client_order_id, symbol, instrument_version, side, order_type, time_in_force,
+                order_id, product_line, user_id, client_order_id, symbol, instrument_version, side, order_type, time_in_force,
                 price_ticks, quantity_steps, executed_quantity_steps, remaining_quantity_steps,
                 margin_mode, position_side, maker_fee_rate_ppm, taker_fee_rate_ppm,
                 reduce_only, post_only, status, reject_reason, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (user_id, client_order_id) WHERE client_order_id IS NOT NULL DO NOTHING
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (product_line, user_id, client_order_id) WHERE client_order_id IS NOT NULL DO NOTHING
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -56,7 +56,7 @@ public class OrderRepository {
 
     public boolean insert(OrderRecord order) {
         int rows = jdbcTemplate.update(INSERT_ORDER_SQL,
-                order.orderId(), order.userId(), emptyToNull(order.clientOrderId()), order.symbol(),
+                order.orderId(), order.productLine().name(), order.userId(), emptyToNull(order.clientOrderId()), order.symbol(),
                 nullableVersion(order.instrumentVersion()), order.side().name(), order.orderType().name(),
                 order.timeInForce().name(),
                 order.priceTicks(), order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
@@ -205,11 +205,15 @@ public class OrderRepository {
     }
 
     public Optional<OrderRecord> findByClientOrderId(long userId, String clientOrderId) {
+        return findByClientOrderId(ProductLine.LINEAR_PERPETUAL, userId, clientOrderId);
+    }
+
+    public Optional<OrderRecord> findByClientOrderId(ProductLine productLine, long userId, String clientOrderId) {
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_orders
-                 WHERE user_id = ? AND client_order_id = ?
-                """, (rs, rowNum) -> toRecord(rs), userId, clientOrderId).stream().findFirst();
+                 WHERE product_line = ? AND user_id = ? AND client_order_id = ?
+                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), userId, clientOrderId).stream().findFirst();
     }
 
     public List<OrderRecord> openOrders(long userId, String symbol, int limit) {
@@ -537,6 +541,7 @@ public class OrderRepository {
     private OrderRecord toRecord(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new OrderRecord(
                 rs.getLong("order_id"),
+                ProductLine.valueOf(rs.getString("product_line")),
                 rs.getLong("user_id"),
                 rs.getString("client_order_id"),
                 rs.getString("symbol"),

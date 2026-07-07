@@ -103,9 +103,10 @@ public class OrderService {
     public OrderResponse place(PlaceOrderRequest request) {
         PlaceOrderRequest normalized = normalize(request);
         String traceId = TraceContext.currentOrCreate();
+        ProductLine productLine = currentProductLine();
         // clientOrderId is the public idempotency key. Replays return the first persisted result.
         if (hasClientOrderId(normalized)) {
-            var existing = orderRepository.findByClientOrderId(normalized.userId(), normalized.clientOrderId());
+            var existing = orderRepository.findByClientOrderId(productLine, normalized.userId(), normalized.clientOrderId());
             if (existing.isPresent()) {
                 OrderRecord existingOrder = existing.get();
                 requireOrderCurrentProductLine(existingOrder);
@@ -113,7 +114,6 @@ public class OrderService {
             }
         }
 
-        ProductLine productLine = currentProductLine();
         orderRepository.lockUserPositionMode(productLine, normalized.userId());
         PositionMode positionMode = orderRepository.positionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
@@ -146,6 +146,7 @@ public class OrderService {
         OrderStatus status = validation.accepted() ? OrderStatus.ACCEPTED : OrderStatus.REJECTED;
         OrderRecord order = new OrderRecord(
                 orderId,
+                productLine,
                 normalized.userId(),
                 emptyToNull(normalized.clientOrderId()),
                 normalized.symbol(),
@@ -170,7 +171,7 @@ public class OrderService {
 
         boolean inserted = orderRepository.insert(order);
         if (!inserted && hasClientOrderId(normalized)) {
-            return orderRepository.findByClientOrderId(normalized.userId(), normalized.clientOrderId())
+            return orderRepository.findByClientOrderId(productLine, normalized.userId(), normalized.clientOrderId())
                     .map(existing -> {
                         requireOrderCurrentProductLine(existing);
                         return toResponse(existing);
@@ -253,8 +254,9 @@ public class OrderService {
     @Transactional
     public AmendOrderResponse amend(AmendOrderRequest request) {
         AmendOrderRequest normalized = normalizeAmend(request);
+        ProductLine productLine = currentProductLine();
         var existingReplacement = orderRepository.findByClientOrderId(
-                normalized.userId(), normalized.newClientOrderId());
+                productLine, normalized.userId(), normalized.newClientOrderId());
         OrderRecord original = orderRepository.findByOrderId(normalized.orderId())
                 .orElseThrow(() -> new IllegalStateException("order not found: " + normalized.orderId()));
         requireOrderCurrentProductLine(original);
@@ -276,7 +278,7 @@ public class OrderService {
             throw new IllegalStateException("order has no open quantity to amend");
         }
 
-        orderRepository.lockUserPositionMode(currentProductLine(), original.userId());
+        orderRepository.lockUserPositionMode(productLine, original.userId());
         orderRepository.lockUserSymbolMarginScope(original.userId(), original.symbol());
         long replacementPriceTicks = normalized.priceTicks() == null ? original.priceTicks() : normalized.priceTicks();
         long replacementQuantitySteps = normalized.quantitySteps() == null
@@ -566,7 +568,7 @@ public class OrderService {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        return orderRepository.findByClientOrderId(userId, normalizeClientOrderId(clientOrderId))
+        return orderRepository.findByClientOrderId(currentProductLine(), userId, normalizeClientOrderId(clientOrderId))
                 .map(order -> {
                     requireOrderCurrentProductLine(order);
                     return toResponse(order);
@@ -916,6 +918,7 @@ public class OrderService {
     private OrderRecord rejectOrder(OrderRecord order, String rejectReason, Instant now) {
         return new OrderRecord(
                 order.orderId(),
+                order.productLine(),
                 order.userId(),
                 order.clientOrderId(),
                 order.symbol(),
