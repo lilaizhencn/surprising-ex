@@ -898,12 +898,35 @@ CREATE INDEX IF NOT EXISTS trading_leverage_settings_symbol_idx
     ON trading_leverage_settings (product_line, symbol, margin_mode, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS account_position_modes (
-    user_id             BIGINT PRIMARY KEY,
+    product_line        TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
+    user_id             BIGINT NOT NULL,
     position_mode       TEXT NOT NULL DEFAULT 'ONE_WAY',
     updated_at          TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (product_line, user_id),
+    CONSTRAINT account_position_modes_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT account_position_modes_user_positive CHECK (user_id > 0),
     CONSTRAINT account_position_modes_mode_check CHECK (position_mode IN ('ONE_WAY', 'HEDGE'))
 );
+
+DO $$
+BEGIN
+    ALTER TABLE account_position_modes
+        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+    ALTER TABLE account_position_modes
+        DROP CONSTRAINT IF EXISTS account_position_modes_product_line_check;
+    ALTER TABLE account_position_modes
+        ADD CONSTRAINT account_position_modes_product_line_check CHECK (
+            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+        );
+    ALTER TABLE account_position_modes
+        DROP CONSTRAINT IF EXISTS account_position_modes_pkey;
+    ALTER TABLE account_position_modes
+        ADD CONSTRAINT account_position_modes_pkey PRIMARY KEY (product_line, user_id);
+END $$;
 
 CREATE TABLE IF NOT EXISTS trading_orders (
     order_id                    BIGINT PRIMARY KEY,

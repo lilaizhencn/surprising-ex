@@ -1,5 +1,6 @@
 package com.surprising.trading.order.repository;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AdminMatchResultResponse;
 import com.surprising.trading.api.model.AdminMatchTradeResponse;
 import com.surprising.trading.api.model.AdminCursorPage;
@@ -66,18 +67,32 @@ public class OrderRepository {
     }
 
     public void lockUserPositionMode(long userId) {
+        lockUserPositionMode(ProductLine.LINEAR_PERPETUAL, userId);
+    }
+
+    public void lockUserPositionMode(ProductLine productLine, long userId) {
         jdbcTemplate.query("""
                 SELECT pg_advisory_xact_lock(hashtext('position-mode'), hashtext(?))
-                """, rs -> null, Long.toString(userId));
+                """, rs -> null, productLine(productLine).name() + ":" + userId);
     }
 
     public PositionMode positionMode(long userId) {
+        return positionMode(ProductLine.LINEAR_PERPETUAL, userId);
+    }
+
+    public PositionMode positionMode(ProductLine productLine, long userId) {
         String mode = jdbcTemplate.query("""
                 SELECT position_mode
                   FROM account_position_modes
-                 WHERE user_id = ?
-                """, (rs, rowNum) -> rs.getString("position_mode"), userId).stream().findFirst().orElse(null);
+                 WHERE product_line = ?
+                   AND user_id = ?
+                """, (rs, rowNum) -> rs.getString("position_mode"), productLine(productLine).name(), userId)
+                .stream().findFirst().orElse(null);
         return PositionMode.fromNullableDbValue(mode);
+    }
+
+    private ProductLine productLine(ProductLine productLine) {
+        return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
     }
 
     public void lockUserSymbolMarginScope(long userId, String symbol) {

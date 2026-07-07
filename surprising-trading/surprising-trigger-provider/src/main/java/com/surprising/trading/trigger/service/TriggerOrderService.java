@@ -86,8 +86,9 @@ public class TriggerOrderService {
         if (normalized.expiresAt() != null && !normalized.expiresAt().isAfter(now)) {
             throw new IllegalArgumentException("expiresAt must be in the future");
         }
-        triggerOrderRepository.lockUserPositionMode(normalized.userId());
-        PositionMode positionMode = triggerOrderRepository.positionMode(normalized.userId());
+        ProductLine productLine = currentProductLine();
+        triggerOrderRepository.lockUserPositionMode(productLine, normalized.userId());
+        PositionMode positionMode = triggerOrderRepository.positionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
         triggerOrderRepository.lockUserSymbolMarginScope(normalized.userId(), normalized.symbol());
         if (triggerOrderRepository.hasActiveMarginModeConflict(
@@ -719,5 +720,9 @@ public class TriggerOrderService {
 
     private String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private ProductLine currentProductLine() {
+        return properties.getKafka().getProductLine();
     }
 }

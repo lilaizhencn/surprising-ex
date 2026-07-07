@@ -1,5 +1,6 @@
 package com.surprising.account.api.client;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.account.api.AccountApiPaths;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.BalanceQueryResponse;
@@ -52,7 +53,13 @@ public interface AccountRpcApi {
     ProductTransferResponse transfer(@Valid @RequestBody ProductTransferRequest request);
 
     @GetMapping("/position-mode")
-    PositionModeResponse positionMode(@RequestParam("userId") @Positive long userId);
+    PositionModeResponse positionMode(@RequestParam("userId") @Positive long userId,
+                                      @RequestParam(value = "productLine", required = false)
+                                      ProductLine productLine);
+
+    default PositionModeResponse positionMode(long userId) {
+        return positionMode(userId, null);
+    }
 
     @PostMapping("/position-mode")
     PositionModeResponse updatePositionMode(@Valid @RequestBody PositionModeUpdateRequest request);

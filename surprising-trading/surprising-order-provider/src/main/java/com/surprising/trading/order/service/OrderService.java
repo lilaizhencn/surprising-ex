@@ -111,8 +111,9 @@ public class OrderService {
             }
         }
 
-        orderRepository.lockUserPositionMode(normalized.userId());
-        PositionMode positionMode = orderRepository.positionMode(normalized.userId());
+        ProductLine productLine = currentProductLine();
+        orderRepository.lockUserPositionMode(productLine, normalized.userId());
+        PositionMode positionMode = orderRepository.positionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
         orderRepository.lockUserSymbolMarginScope(normalized.userId(), normalized.symbol());
         Instant now = Instant.now();
@@ -210,8 +211,9 @@ public class OrderService {
     @Transactional
     public TestOrderResponse test(PlaceOrderRequest request) {
         PlaceOrderRequest normalized = normalize(request);
-        orderRepository.lockUserPositionMode(normalized.userId());
-        PositionMode positionMode = orderRepository.positionMode(normalized.userId());
+        ProductLine productLine = currentProductLine();
+        orderRepository.lockUserPositionMode(productLine, normalized.userId());
+        PositionMode positionMode = orderRepository.positionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
         orderRepository.lockUserSymbolMarginScope(normalized.userId(), normalized.symbol());
         ValidationResult validation = validateMarginMode(normalized);
@@ -267,7 +269,7 @@ public class OrderService {
             throw new IllegalStateException("order has no open quantity to amend");
         }
 
-        orderRepository.lockUserPositionMode(original.userId());
+        orderRepository.lockUserPositionMode(currentProductLine(), original.userId());
         orderRepository.lockUserSymbolMarginScope(original.userId(), original.symbol());
         long replacementPriceTicks = normalized.priceTicks() == null ? original.priceTicks() : normalized.priceTicks();
         long replacementQuantitySteps = normalized.quantitySteps() == null
@@ -329,8 +331,9 @@ public class OrderService {
         String symbol = normalizeSymbol(request.symbol());
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
-        orderRepository.lockUserPositionMode(request.userId());
-        PositionMode positionMode = orderRepository.positionMode(request.userId());
+        ProductLine productLine = currentProductLine();
+        orderRepository.lockUserPositionMode(productLine, request.userId());
+        PositionMode positionMode = orderRepository.positionMode(productLine, request.userId());
         if (PositionMode.defaultIfNull(positionMode) == PositionMode.HEDGE && !positionSide.isHedgeSide()) {
             throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
         }
@@ -1062,6 +1065,10 @@ public class OrderService {
 
     private String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private ProductLine currentProductLine() {
+        return properties.getKafka().getProductLine();
     }
 
     private OrderResponse toResponse(OrderRecord order) {

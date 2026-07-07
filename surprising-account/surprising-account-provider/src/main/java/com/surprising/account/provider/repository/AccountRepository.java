@@ -25,6 +25,7 @@ import com.surprising.account.provider.service.MarginTransferMath;
 import com.surprising.account.provider.service.PnlSettlementMath;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionMode;
@@ -675,86 +676,165 @@ public class AccountRepository {
     }
 
     public PositionModeResponse positionMode(long userId) {
+        return positionMode(ProductLine.LINEAR_PERPETUAL, userId);
+    }
+
+    public PositionModeResponse positionMode(ProductLine productLine, long userId) {
+        ProductLine resolvedProductLine = productLine(productLine);
         return jdbcTemplate.query("""
                 SELECT position_mode, updated_at
                   FROM account_position_modes
-                 WHERE user_id = ?
+                 WHERE product_line = ?
+                   AND user_id = ?
                 """, (rs, rowNum) -> new PositionModeResponse(
+                resolvedProductLine,
                 userId,
                 PositionMode.fromNullableDbValue(rs.getString("position_mode")),
-                rs.getTimestamp("updated_at").toInstant()), userId).stream().findFirst()
-                .orElse(new PositionModeResponse(userId, PositionMode.ONE_WAY, Instant.EPOCH));
+                rs.getTimestamp("updated_at").toInstant()), resolvedProductLine.name(), userId).stream().findFirst()
+                .orElse(new PositionModeResponse(resolvedProductLine, userId, PositionMode.ONE_WAY, Instant.EPOCH));
     }
 
     @Transactional
     public PositionModeResponse updatePositionMode(long userId, PositionMode positionMode, Instant now) {
+        return updatePositionMode(ProductLine.LINEAR_PERPETUAL, userId, positionMode, now);
+    }
+
+    @Transactional
+    public PositionModeResponse updatePositionMode(ProductLine productLine,
+                                                   long userId,
+                                                   PositionMode positionMode,
+                                                   Instant now) {
+        ProductLine resolvedProductLine = productLine(productLine);
         PositionMode normalizedMode = PositionMode.defaultIfNull(positionMode);
-        lockUserPositionMode(userId);
-        PositionMode current = positionMode(userId).positionMode();
+        lockUserPositionMode(resolvedProductLine, userId);
+        PositionMode current = positionMode(resolvedProductLine, userId).positionMode();
         if (current == normalizedMode) {
-            return new PositionModeResponse(userId, current, now);
+            return new PositionModeResponse(resolvedProductLine, userId, current, now);
         }
-        requirePositionModeSwitchable(userId);
+        requirePositionModeSwitchable(resolvedProductLine, userId);
         int rows = jdbcTemplate.update("""
-                INSERT INTO account_position_modes (user_id, position_mode, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT (user_id) DO UPDATE
+                INSERT INTO account_position_modes (product_line, user_id, position_mode, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (product_line, user_id) DO UPDATE
                    SET position_mode = EXCLUDED.position_mode,
                        updated_at = EXCLUDED.updated_at
-                """, userId, normalizedMode.name(), Timestamp.from(now));
+                """, resolvedProductLine.name(), userId, normalizedMode.name(), Timestamp.from(now));
         requireSingleRow(rows, "position mode upsert");
-        return new PositionModeResponse(userId, normalizedMode, now);
+        return new PositionModeResponse(resolvedProductLine, userId, normalizedMode, now);
     }
 
     private void lockUserPositionMode(long userId) {
+        lockUserPositionMode(ProductLine.LINEAR_PERPETUAL, userId);
+    }
+
+    private void lockUserPositionMode(ProductLine productLine, long userId) {
         jdbcTemplate.query("""
                 SELECT pg_advisory_xact_lock(hashtext('position-mode'), hashtext(?))
-                """, rs -> null, Long.toString(userId));
+                """, rs -> null, productLine(productLine).name() + ":" + userId);
     }
 
     private void requirePositionModeSwitchable(long userId) {
+        requirePositionModeSwitchable(ProductLine.LINEAR_PERPETUAL, userId);
+    }
+
+    private void requirePositionModeSwitchable(ProductLine productLine, long userId) {
+        String productLineName = productLine(productLine).name();
         Boolean hasPositions = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
-                      FROM account_positions
-                     WHERE user_id = ?
-                       AND signed_quantity_steps <> 0
+                      FROM account_positions p
+                      JOIN instrument_current_versions c
+                        ON c.symbol = p.symbol
+                      JOIN instruments i
+                        ON i.symbol = p.symbol
+                       AND i.version = COALESCE(p.instrument_version, c.version)
+                     WHERE p.user_id = ?
+                       AND p.signed_quantity_steps <> 0
+                       AND CASE i.contract_type
+                               WHEN 'SPOT' THEN 'SPOT'
+                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                               ELSE 'LINEAR_PERPETUAL'
+                           END = ?
                 )
-                """, Boolean.class, userId);
+                """, Boolean.class, userId, productLineName);
         if (Boolean.TRUE.equals(hasPositions)) {
             throw new IllegalStateException("position mode switch requires no open positions");
         }
         Boolean hasOpenOrders = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
-                      FROM trading_orders
-                     WHERE user_id = ?
-                       AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
-                       AND remaining_quantity_steps > 0
+                      FROM trading_orders o
+                      JOIN instrument_current_versions c
+                        ON c.symbol = o.symbol
+                      JOIN instruments i
+                        ON i.symbol = o.symbol
+                       AND i.version = COALESCE(o.instrument_version, c.version)
+                     WHERE o.user_id = ?
+                       AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                       AND o.remaining_quantity_steps > 0
+                       AND CASE i.contract_type
+                               WHEN 'SPOT' THEN 'SPOT'
+                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                               ELSE 'LINEAR_PERPETUAL'
+                           END = ?
                 )
-                """, Boolean.class, userId);
+                """, Boolean.class, userId, productLineName);
         if (Boolean.TRUE.equals(hasOpenOrders)) {
             throw new IllegalStateException("position mode switch requires no active orders");
         }
         Boolean hasTriggerOrders = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
-                      FROM trading_trigger_orders
-                     WHERE user_id = ?
-                       AND status IN ('PENDING', 'TRIGGERING')
+                      FROM trading_trigger_orders t
+                      JOIN instrument_current_versions c
+                        ON c.symbol = t.symbol
+                      JOIN instruments i
+                        ON i.symbol = t.symbol AND i.version = c.version
+                     WHERE t.user_id = ?
+                       AND t.status IN ('PENDING', 'TRIGGERING')
+                       AND CASE i.contract_type
+                               WHEN 'SPOT' THEN 'SPOT'
+                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                               ELSE 'LINEAR_PERPETUAL'
+                           END = ?
                 )
-                """, Boolean.class, userId);
+                """, Boolean.class, userId, productLineName);
         if (Boolean.TRUE.equals(hasTriggerOrders)) {
             throw new IllegalStateException("position mode switch requires no pending trigger orders");
         }
         Boolean hasAlgoOrders = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
-                      FROM trading_algo_orders
-                     WHERE user_id = ?
-                       AND status IN ('PENDING', 'RUNNING', 'CANCEL_REQUESTED')
+                      FROM trading_algo_orders a
+                      JOIN instrument_current_versions c
+                        ON c.symbol = a.symbol
+                      JOIN instruments i
+                        ON i.symbol = a.symbol AND i.version = c.version
+                     WHERE a.user_id = ?
+                       AND a.status IN ('PENDING', 'RUNNING', 'CANCEL_REQUESTED')
+                       AND CASE i.contract_type
+                               WHEN 'SPOT' THEN 'SPOT'
+                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                               ELSE 'LINEAR_PERPETUAL'
+                           END = ?
                 )
-                """, Boolean.class, userId);
+                """, Boolean.class, userId, productLineName);
         if (Boolean.TRUE.equals(hasAlgoOrders)) {
             throw new IllegalStateException("position mode switch requires no active algo orders");
         }
@@ -762,13 +842,28 @@ public class AccountRepository {
                 SELECT EXISTS (
                     SELECT 1
                       FROM trading_match_trades mt
+                      JOIN instruments i
+                        ON i.symbol = mt.symbol
+                       AND i.version = CASE
+                               WHEN mt.taker_user_id = ? THEN mt.taker_instrument_version
+                               ELSE mt.maker_instrument_version
+                           END
                       LEFT JOIN account_processed_trades pt
                         ON pt.symbol = mt.symbol
                        AND pt.trade_id = mt.trade_id
                      WHERE (mt.taker_user_id = ? OR mt.maker_user_id = ?)
                        AND pt.trade_id IS NULL
+                       AND CASE i.contract_type
+                               WHEN 'SPOT' THEN 'SPOT'
+                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                               ELSE 'LINEAR_PERPETUAL'
+                           END = ?
                 )
-                """, Boolean.class, userId, userId);
+                """, Boolean.class, userId, userId, userId, productLineName);
         if (Boolean.TRUE.equals(hasUnsettledTrades)) {
             throw new IllegalStateException("position mode switch requires all matched trades to be settled");
         }
@@ -777,9 +872,10 @@ public class AccountRepository {
                     SELECT 1
                       FROM account_margin_reservations
                      WHERE user_id = ?
+                       AND account_type = ?
                        AND status NOT IN ('RELEASED', 'CONSUMED')
                 )
-                """, Boolean.class, userId);
+                """, Boolean.class, userId, productLine(productLine).accountTypeCode());
         if (Boolean.TRUE.equals(hasActiveReservations)) {
             throw new IllegalStateException("position mode switch requires no active margin reservations");
         }
@@ -3153,6 +3249,10 @@ public class AccountRepository {
 
     private String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private ProductLine productLine(ProductLine productLine) {
+        return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
     }
 
     private void requireSingleRow(int rows, String operation) {

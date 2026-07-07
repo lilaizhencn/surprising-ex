@@ -33,6 +33,7 @@ import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.instrument.api.model.ContractSettlementMethod;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
+import com.surprising.product.api.ProductLine;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.instrument.api.model.OptionType;
@@ -273,17 +274,22 @@ public class AccountService {
     }
 
     public PositionModeResponse positionMode(long userId) {
+        return positionMode(ProductLine.LINEAR_PERPETUAL, userId);
+    }
+
+    public PositionModeResponse positionMode(ProductLine productLine, long userId) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        return accountRepository.positionMode(userId);
+        return accountRepository.positionMode(productLine, userId);
     }
 
     public PositionModeResponse updatePositionMode(PositionModeUpdateRequest request) {
         if (request.userId() <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        return accountRepository.updatePositionMode(request.userId(), request.positionMode(), Instant.now());
+        return accountRepository.updatePositionMode(request.productLine(), request.userId(),
+                request.positionMode(), Instant.now());
     }
 
     public PositionResponse position(long userId, String symbol) {

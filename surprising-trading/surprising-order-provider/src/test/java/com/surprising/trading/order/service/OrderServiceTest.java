@@ -366,7 +366,7 @@ class OrderServiceTest {
     @Test
     void hedgeOpeningOrderCarriesPositionSideAndReservesHedgeMargin() throws Exception {
         OrderService service = service();
-        when(orderRepository.positionMode(1001L)).thenReturn(PositionMode.HEDGE);
+        when(orderRepository.positionMode(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(PositionMode.HEDGE);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
@@ -408,7 +408,7 @@ class OrderServiceTest {
     @Test
     void hedgeClosingOrderIsNormalizedToReduceOnlyWithoutOpeningMarginReservation() {
         OrderService service = service();
-        when(orderRepository.positionMode(1001L)).thenReturn(PositionMode.HEDGE);
+        when(orderRepository.positionMode(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(PositionMode.HEDGE);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))

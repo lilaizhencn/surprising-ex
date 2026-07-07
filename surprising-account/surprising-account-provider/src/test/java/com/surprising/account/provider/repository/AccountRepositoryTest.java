@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.account.provider.model.PositionState;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
@@ -152,13 +153,33 @@ class AccountRepositoryTest {
         stubMissingPositionMode(1001L);
         stubPositionModeSwitchChecks(false, false, false, false, false, false);
         when(jdbcTemplate.update(contains("INSERT INTO account_position_modes"),
-                eq(1001L), eq("HEDGE"), any(Timestamp.class))).thenReturn(1);
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("HEDGE"), any(Timestamp.class))).thenReturn(1);
 
         var response = repository.updatePositionMode(1001L, PositionMode.HEDGE, now);
 
         assertThat(response.positionMode()).isEqualTo(PositionMode.HEDGE);
+        assertThat(response.productLine().name()).isEqualTo("LINEAR_PERPETUAL");
         verify(jdbcTemplate).update(contains("INSERT INTO account_position_modes"),
-                eq(1001L), eq("HEDGE"), any(Timestamp.class));
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("HEDGE"), any(Timestamp.class));
+    }
+
+    @Test
+    void updatePositionModeUsesProductLineScope() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        stubMissingPositionMode(ProductLine.INVERSE_DELIVERY, 1001L);
+        stubPositionModeSwitchChecks(ProductLine.INVERSE_DELIVERY,
+                false, false, false, false, false, false);
+        when(jdbcTemplate.update(contains("INSERT INTO account_position_modes"),
+                eq("INVERSE_DELIVERY"), eq(1001L), eq("HEDGE"), any(Timestamp.class))).thenReturn(1);
+
+        var response = repository.updatePositionMode(ProductLine.INVERSE_DELIVERY,
+                1001L, PositionMode.HEDGE, now);
+
+        assertThat(response.productLine()).isEqualTo(ProductLine.INVERSE_DELIVERY);
+        assertThat(response.positionMode()).isEqualTo(PositionMode.HEDGE);
+        verify(jdbcTemplate).update(contains("INSERT INTO account_position_modes"),
+                eq("INVERSE_DELIVERY"), eq(1001L), eq("HEDGE"), any(Timestamp.class));
     }
 
     @Test
@@ -901,7 +922,12 @@ class AccountRepositoryTest {
     }
 
     private void stubMissingPositionMode(long userId) {
-        when(jdbcTemplate.query(contains("FROM account_position_modes"), anyRowMapper(), eq(userId)))
+        stubMissingPositionMode(ProductLine.LINEAR_PERPETUAL, userId);
+    }
+
+    private void stubMissingPositionMode(ProductLine productLine, long userId) {
+        when(jdbcTemplate.query(contains("FROM account_position_modes"), anyRowMapper(),
+                eq(productLine.name()), eq(userId)))
                 .thenReturn(List.of());
     }
 
@@ -911,18 +937,34 @@ class AccountRepositoryTest {
                                               boolean hasActiveAlgoOrders,
                                               boolean hasUnsettledTrades,
                                               boolean hasActiveReservations) {
-        when(jdbcTemplate.queryForObject(contains("FROM account_positions"), eq(Boolean.class), eq(1001L)))
+        stubPositionModeSwitchChecks(ProductLine.LINEAR_PERPETUAL,
+                hasOpenPositions, hasOpenOrders, hasPendingTriggers, hasActiveAlgoOrders,
+                hasUnsettledTrades, hasActiveReservations);
+    }
+
+    private void stubPositionModeSwitchChecks(ProductLine productLine,
+                                              boolean hasOpenPositions,
+                                              boolean hasOpenOrders,
+                                              boolean hasPendingTriggers,
+                                              boolean hasActiveAlgoOrders,
+                                              boolean hasUnsettledTrades,
+                                              boolean hasActiveReservations) {
+        when(jdbcTemplate.queryForObject(contains("FROM account_positions"), eq(Boolean.class),
+                eq(1001L), eq(productLine.name())))
                 .thenReturn(hasOpenPositions);
-        when(jdbcTemplate.queryForObject(contains("FROM trading_orders"), eq(Boolean.class), eq(1001L)))
+        when(jdbcTemplate.queryForObject(contains("FROM trading_orders"), eq(Boolean.class),
+                eq(1001L), eq(productLine.name())))
                 .thenReturn(hasOpenOrders);
-        when(jdbcTemplate.queryForObject(contains("FROM trading_trigger_orders"), eq(Boolean.class), eq(1001L)))
+        when(jdbcTemplate.queryForObject(contains("FROM trading_trigger_orders"), eq(Boolean.class),
+                eq(1001L), eq(productLine.name())))
                 .thenReturn(hasPendingTriggers);
-        when(jdbcTemplate.queryForObject(contains("FROM trading_algo_orders"), eq(Boolean.class), eq(1001L)))
+        when(jdbcTemplate.queryForObject(contains("FROM trading_algo_orders"), eq(Boolean.class),
+                eq(1001L), eq(productLine.name())))
                 .thenReturn(hasActiveAlgoOrders);
         when(jdbcTemplate.queryForObject(contains("FROM trading_match_trades"), eq(Boolean.class),
-                eq(1001L), eq(1001L))).thenReturn(hasUnsettledTrades);
+                eq(1001L), eq(1001L), eq(1001L), eq(productLine.name()))).thenReturn(hasUnsettledTrades);
         when(jdbcTemplate.queryForObject(contains("FROM account_margin_reservations"), eq(Boolean.class),
-                eq(1001L))).thenReturn(hasActiveReservations);
+                eq(1001L), eq(productLine.accountTypeCode()))).thenReturn(hasActiveReservations);
     }
 
     private org.mockito.stubbing.Answer<List<Object>> positionTarget(String asset,

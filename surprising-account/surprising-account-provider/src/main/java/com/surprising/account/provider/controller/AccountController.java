@@ -22,6 +22,8 @@ import com.surprising.account.api.model.ProductTransferRecordQueryResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.provider.service.AccountService;
+import com.surprising.product.api.ProductLine;
+import java.util.Locale;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -158,23 +160,62 @@ public class AccountController {
     }
 
     @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-mode")
-    public PositionModeResponse positionMode(@RequestParam("userId") long userId) {
+    public PositionModeResponse positionMode(@RequestParam("userId") long userId,
+                                             @RequestHeader(value = "X-Product-Line", required = false)
+                                             String productLineHeader,
+                                             @RequestParam(value = "productLine", required = false)
+                                             String productLineValue) {
         try {
-            return accountService.positionMode(userId);
+            return accountService.positionMode(productLine(productLineValue, productLineHeader), userId);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
     }
 
     @PostMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-mode")
-    public PositionModeResponse updatePositionMode(@RequestBody PositionModeUpdateRequest request) {
+    public PositionModeResponse updatePositionMode(@RequestBody PositionModeUpdateRequest request,
+                                                   @RequestHeader(value = "X-Product-Line", required = false)
+                                                   String productLineHeader,
+                                                   @RequestParam(value = "productLine", required = false)
+                                                   String productLineValue) {
         try {
-            return accountService.updatePositionMode(request);
+            return accountService.updatePositionMode(
+                    withProductLine(request, productLine(productLineValue, productLineHeader)));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
         }
+    }
+
+    private PositionModeUpdateRequest withProductLine(PositionModeUpdateRequest request, ProductLine productLine) {
+        if (request == null || request.productLine() != null || productLine == null) {
+            return request;
+        }
+        return new PositionModeUpdateRequest(request.userId(), productLine, request.positionMode());
+    }
+
+    private ProductLine productLine(String queryValue, String headerValue) {
+        String value = queryValue == null || queryValue.isBlank() ? headerValue : queryValue;
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        ProductLine byAccountType = ProductLine.fromAccountTypeCode(normalized).orElse(null);
+        if (byAccountType != null) {
+            return byAccountType;
+        }
+        ProductLine byContractType = ProductLine.fromContractTypeCode(normalized).orElse(null);
+        if (byContractType != null) {
+            return byContractType;
+        }
+        String enumName = normalized.replace('-', '_');
+        for (ProductLine productLine : ProductLine.values()) {
+            if (productLine.name().equals(enumName) || productLine.topicSegment().equalsIgnoreCase(value.trim())) {
+                return productLine;
+            }
+        }
+        throw new IllegalArgumentException("unsupported productLine: " + value);
     }
 
     @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position")

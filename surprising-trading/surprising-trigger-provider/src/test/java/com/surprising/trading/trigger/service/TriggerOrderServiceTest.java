@@ -198,7 +198,7 @@ class TriggerOrderServiceTest {
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "sl-short", null, "btc-usdt",
                 OrderSide.BUY, TriggerOrderType.STOP_LOSS, TriggerPriceType.MARK_PRICE, 80_000L,
                 OrderType.MARKET, TimeInForce.IOC, 0L, 5L, MarginMode.CROSS, PositionSide.SHORT, null);
-        when(repository.positionMode(1001L)).thenReturn(PositionMode.HEDGE);
+        when(repository.positionMode(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(PositionMode.HEDGE);
         when(repository.nextSequence("trigger-order")).thenReturn(503L);
         stubCloseCapacity(repository, -20L, 0L, 0L, 0L);
         when(repository.insert(any())).thenReturn(true);
