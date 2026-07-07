@@ -7,6 +7,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.product.api.ProductLine;
+import com.surprising.trading.order.config.TradingOrderProperties;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -37,6 +39,31 @@ class OutboxRepositoryTest {
     }
 
     @Test
+    void lockPendingFiltersByProductTopicsWhenProductTopicsAreEnabled() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+        OutboxRepository repository = new OutboxRepository(jdbcTemplate,
+                org.mockito.Mockito.mock(OrderRepository.class), properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(),
+                eq("surprising.inverse-perp.order.events.v1"),
+                eq("surprising.inverse-perp.order.commands.v1"),
+                eq(100))).thenReturn(List.of());
+
+        repository.lockPending(100);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
+                eq("surprising.inverse-perp.order.events.v1"),
+                eq("surprising.inverse-perp.order.commands.v1"),
+                eq(100));
+        assertThat(sql.getValue())
+                .contains("e.topic IN (?, ?)")
+                .contains("aggregate_type = 'ORDER'");
+    }
+
+    @Test
     void claimPendingLeasesUnpublishedDueRowsForPublishOutsideTransaction() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         OutboxRepository repository = new OutboxRepository(jdbcTemplate, org.mockito.Mockito.mock(OrderRepository.class));
@@ -55,6 +82,34 @@ class OutboxRepositoryTest {
                 .contains("SET next_attempt_at = ?")
                 .contains("RETURNING e.id")
                 .contains("FOR UPDATE OF e SKIP LOCKED");
+    }
+
+    @Test
+    void claimPendingFiltersByProductTopicsWhenProductTopicsAreEnabled() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        OutboxRepository repository = new OutboxRepository(jdbcTemplate,
+                org.mockito.Mockito.mock(OrderRepository.class), properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(),
+                eq("surprising.option.order.events.v1"),
+                eq("surprising.option.order.commands.v1"),
+                any(Timestamp.class), eq(100), any(Timestamp.class), any(Timestamp.class)))
+                .thenReturn(List.of());
+
+        repository.claimPending(100, Instant.parse("2026-07-01T00:00:30Z"),
+                Instant.parse("2026-07-01T00:00:00Z"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
+                eq("surprising.option.order.events.v1"),
+                eq("surprising.option.order.commands.v1"),
+                any(Timestamp.class), eq(100), any(Timestamp.class), any(Timestamp.class));
+        assertThat(sql.getValue())
+                .contains("e.topic IN (?, ?)")
+                .contains("UPDATE trading_outbox_events")
+                .contains("RETURNING e.id");
     }
 
     @Test

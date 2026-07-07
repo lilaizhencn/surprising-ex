@@ -1,9 +1,12 @@
 package com.surprising.trading.order.repository;
 
 import com.surprising.trading.order.model.OutboxRecord;
+import com.surprising.trading.order.config.TradingOrderProperties;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -12,10 +15,19 @@ public class OutboxRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final OrderRepository orderRepository;
+    private final TradingOrderProperties properties;
 
     public OutboxRepository(JdbcTemplate jdbcTemplate, OrderRepository orderRepository) {
+        this(jdbcTemplate, orderRepository, new TradingOrderProperties());
+    }
+
+    @Autowired
+    public OutboxRepository(JdbcTemplate jdbcTemplate,
+                            OrderRepository orderRepository,
+                            TradingOrderProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
         this.orderRepository = orderRepository;
+        this.properties = properties == null ? new TradingOrderProperties() : properties;
     }
 
     public long enqueue(String aggregateType,
@@ -41,7 +53,8 @@ public class OutboxRepository {
 
     public List<OutboxRecord> claimPending(int limit, Instant leaseUntil, Instant now) {
         // The earliest unpublished row still blocks later rows for the same topic+key, preserving stream order.
-        String sql = """
+        List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("""
                 WITH earliest AS (
                     SELECT DISTINCT ON (topic, event_key)
                            id
@@ -56,6 +69,9 @@ public class OutboxRepository {
                       JOIN earliest c ON c.id = e.id
                      WHERE e.published_at IS NULL
                        AND e.aggregate_type = 'ORDER'
+                    """);
+        appendTopicScope(sql, "e", args);
+        sql.append("""
                        AND e.next_attempt_at <= ?
                        AND pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))
                      ORDER BY e.topic, e.event_key, e.id
@@ -68,18 +84,23 @@ public class OutboxRepository {
                   FROM candidates c
                  WHERE e.id = c.id
              RETURNING e.id, e.topic, e.event_key, e.payload::text AS payload, e.next_attempt_at
-                """;
-        return jdbcTemplate.query(sql, (rs, rowNum) -> new OutboxRecord(
+                """);
+        args.add(Timestamp.from(now));
+        args.add(Math.max(1, limit));
+        args.add(Timestamp.from(leaseUntil));
+        args.add(Timestamp.from(now));
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new OutboxRecord(
                 rs.getLong("id"),
                 rs.getString("topic"),
                 rs.getString("event_key"),
                 rs.getString("payload"),
                 rs.getTimestamp("next_attempt_at").toInstant()),
-                Timestamp.from(now), Math.max(1, limit), Timestamp.from(leaseUntil), Timestamp.from(now));
+                args.toArray());
     }
 
     public List<OutboxRecord> lockPending(int limit) {
-        String sql = """
+        List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("""
                 WITH earliest AS (
                     SELECT DISTINCT ON (topic, event_key)
                            id
@@ -93,18 +114,22 @@ public class OutboxRepository {
                   JOIN earliest c ON c.id = e.id
                  WHERE e.published_at IS NULL
                    AND e.aggregate_type = 'ORDER'
+                """);
+        appendTopicScope(sql, "e", args);
+        sql.append("""
                    AND e.next_attempt_at <= now()
                    AND pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))
                  ORDER BY e.topic, e.event_key, e.id
                  LIMIT ?
                  FOR UPDATE OF e SKIP LOCKED
-                """;
-        return jdbcTemplate.query(sql, (rs, rowNum) -> new OutboxRecord(
+                """);
+        args.add(limit);
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new OutboxRecord(
                 rs.getLong("id"),
                 rs.getString("topic"),
                 rs.getString("event_key"),
                 rs.getString("payload"),
-                rs.getTimestamp("next_attempt_at").toInstant()), limit);
+                rs.getTimestamp("next_attempt_at").toInstant()), args.toArray());
     }
 
     public void markPublished(long id, Instant now) {
@@ -139,5 +164,15 @@ public class OutboxRepository {
             return null;
         }
         return value.length() <= 1000 ? value : value.substring(0, 1000);
+    }
+
+    private void appendTopicScope(StringBuilder sql, String alias, List<Object> args) {
+        TradingOrderProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled()) {
+            return;
+        }
+        sql.append("   AND ").append(alias).append(".topic IN (?, ?)\n");
+        args.add(kafka.getOrderEventsTopic());
+        args.add(kafka.getOrderCommandsTopic());
     }
 }
