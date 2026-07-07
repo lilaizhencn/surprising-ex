@@ -67,6 +67,7 @@ public class KafkaFanoutConsumer {
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onCandle(ConsumerRecord<String, String> record) {
         try {
+            requireCurrentProductTopic(record.topic(), candleTopic(), "candle update");
             CandleUpdatedEvent event = objectMapper.readValue(record.value(), CandleUpdatedEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "candle update");
             candleUpdateCoalescer.publish(event, fanoutProductLine());
@@ -82,6 +83,7 @@ public class KafkaFanoutConsumer {
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onTrade(ConsumerRecord<String, String> record) {
         try {
+            requireCurrentProductTopic(record.topic(), tradeTopic(), "public trade");
             TradeEvent event = objectMapper.readValue(record.value(), TradeEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "public trade");
             registry.publish(topic(WsChannel.TRADES, event.symbol(), null), event, event.tradeTime());
@@ -97,6 +99,7 @@ public class KafkaFanoutConsumer {
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onOrderBookDepth(ConsumerRecord<String, String> record) {
         try {
+            requireCurrentProductTopic(record.topic(), orderBookDepthTopic(), "order book depth");
             OrderBookDepthEvent event = objectMapper.readValue(record.value(), OrderBookDepthEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "order book depth");
             registry.publish(topic(WsChannel.ORDER_BOOK_DEPTH, event.symbol(), null), event, event.eventTime());
@@ -112,6 +115,7 @@ public class KafkaFanoutConsumer {
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onIndexPrice(ConsumerRecord<String, String> record) {
         try {
+            requireCurrentProductTopic(record.topic(), indexPriceTopic(), "index price");
             IndexPriceEvent event = objectMapper.readValue(record.value(), IndexPriceEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "index price");
             registry.publish(topic(WsChannel.INDEX_PRICE, event.symbol(), null), event, event.eventTime());
@@ -127,6 +131,7 @@ public class KafkaFanoutConsumer {
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onMarkPrice(ConsumerRecord<String, String> record) {
         try {
+            requireCurrentProductTopic(record.topic(), markPriceTopic(), "mark price");
             MarkPriceEvent event = objectMapper.readValue(record.value(), MarkPriceEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "mark price");
             registry.publish(topic(WsChannel.MARK_PRICE, event.symbol(), null), event, event.eventTime());
@@ -143,6 +148,7 @@ public class KafkaFanoutConsumer {
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onFundingRate(ConsumerRecord<String, String> record) {
         try {
+            requireCurrentProductTopic(record.topic(), fundingRateTopic(), "funding rate");
             PerpFundingRateEvent event = objectMapper.readValue(record.value(), PerpFundingRateEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "funding rate");
             registry.publish(topic(WsChannel.FUNDING_RATE, event.symbol(), null), event, event.eventTime());
@@ -158,6 +164,7 @@ public class KafkaFanoutConsumer {
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onOrderEvent(ConsumerRecord<String, String> record) {
         try {
+            requireCurrentProductTopic(record.topic(), orderEventsTopic(), "order event");
             OrderEvent event = objectMapper.readValue(record.value(), OrderEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "order event");
             registry.publish(topic(WsChannel.ORDERS, event.symbol(), event.userId()), event, event.eventTime());
@@ -174,6 +181,7 @@ public class KafkaFanoutConsumer {
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onMatchResult(ConsumerRecord<String, String> record) {
         try {
+            requireCurrentProductTopic(record.topic(), matchResultsTopic(), "match result");
             MatchResultEvent event = objectMapper.readValue(record.value(), MatchResultEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "match result");
             registry.publish(topic(WsChannel.MATCHES, event.symbol(), event.userId()), event, event.eventTime());
@@ -190,6 +198,7 @@ public class KafkaFanoutConsumer {
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onMatchTrade(ConsumerRecord<String, String> record) {
         try {
+            requireCurrentProductTopic(record.topic(), matchTradesTopic(), "match trade");
             MatchTradeEvent event = objectMapper.readValue(record.value(), MatchTradeEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "match trade");
             registry.publish(topic(WsChannel.TRADES, event.symbol(), null), event, event.eventTime());
@@ -209,6 +218,7 @@ public class KafkaFanoutConsumer {
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onPosition(ConsumerRecord<String, String> record) {
         try {
+            requireCurrentProductTopic(record.topic(), positionEventsTopic(), "position update");
             PositionUpdatedEvent event = objectMapper.readValue(record.value(), PositionUpdatedEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "position update");
             registry.publish(topic(WsChannel.POSITIONS, event.symbol(), event.userId()), event, event.eventTime());
@@ -224,6 +234,7 @@ public class KafkaFanoutConsumer {
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onAccountRisk(ConsumerRecord<String, String> record) {
         try {
+            requireCurrentProductTopic(record.topic(), accountRiskEventsTopic(), "account risk update");
             RiskAccountUpdatedEvent event = objectMapper.readValue(record.value(), RiskAccountUpdatedEvent.class);
             requireMatchingAccountRiskKey(record.key(), event);
             registry.publish(topic(WsChannel.ACCOUNT_RISK, SubscriptionTopic.WILDCARD, event.userId()),
@@ -240,6 +251,7 @@ public class KafkaFanoutConsumer {
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onPositionRisk(ConsumerRecord<String, String> record) {
         try {
+            requireCurrentProductTopic(record.topic(), positionRiskEventsTopic(), "position risk update");
             RiskPositionUpdatedEvent event = objectMapper.readValue(record.value(), RiskPositionUpdatedEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "position risk update");
             registry.publish(topic(WsChannel.POSITION_RISK, event.symbol(), event.userId()), event, event.eventTime());
@@ -315,6 +327,16 @@ public class KafkaFanoutConsumer {
         }
     }
 
+    private void requireCurrentProductTopic(String topic, String expectedTopic, String streamName) {
+        if (!properties.getKafka().isProductTopicsEnabled()) {
+            return;
+        }
+        if (!expectedTopic.equals(topic)) {
+            throw new ProductTopicMismatchException(streamName + " topic must match current product line: expected="
+                    + expectedTopic + " actual=" + topic);
+        }
+    }
+
     private void publishExecutionReport(ExecutionReportEvent report) {
         registry.publish(topic(WsChannel.EXECUTION_REPORTS, report.symbol(), report.userId()),
                 report, report.eventTime());
@@ -326,6 +348,12 @@ public class KafkaFanoutConsumer {
 
     private ProductLine fanoutProductLine() {
         return properties.getKafka().isProductTopicsEnabled() ? properties.getKafka().getProductLine() : null;
+    }
+
+    static final class ProductTopicMismatchException extends RuntimeException {
+        private ProductTopicMismatchException(String message) {
+            super(message);
+        }
     }
 
     private ExecutionReportEvent fromOrderEvent(OrderEvent event) {

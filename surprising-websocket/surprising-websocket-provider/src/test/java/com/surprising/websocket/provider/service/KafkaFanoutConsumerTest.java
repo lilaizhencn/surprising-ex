@@ -92,6 +92,55 @@ class KafkaFanoutConsumerTest {
     }
 
     @Test
+    void productTopicFanoutRejectsOtherProductMarketDataTopicBeforePublishing() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        WebSocketProperties properties = new WebSocketProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer,
+                properties);
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        OrderBookDepthEvent event = new OrderBookDepthEvent("BTC-USDT-260925", 7L, 6L,
+                OrderBookDepthUpdateType.DELTA, 50,
+                List.of(new OrderBookLevel(99L, 5L, 1L)),
+                List.of(new OrderBookLevel(101L, 8L, 2L)), eventTime);
+
+        assertThatThrownBy(() -> consumer.onOrderBookDepth(new ConsumerRecord<>(
+                "surprising.inverse-delivery.orderbook.depth.v1", 0, 0L,
+                "BTC-USDT-260925", objectMapper.writeValueAsString(event))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("failed to fanout order book depth")
+                .hasRootCauseMessage("order book depth topic must match current product line: expected="
+                        + "surprising.linear-delivery.orderbook.depth.v1 actual="
+                        + "surprising.inverse-delivery.orderbook.depth.v1");
+
+        verifyNoInteractions(registry);
+    }
+
+    @Test
+    void productTopicFanoutRejectsOtherProductPrivateOrderTopicBeforePublishing() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        WebSocketProperties properties = new WebSocketProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer,
+                properties);
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        OrderEvent event = new OrderEvent(1L, 11L, 1001L, "BTC-USDT-260925-70000-C",
+                OrderEventType.ACCEPTED, OrderStatus.ACCEPTED, null, eventTime, "trace-order-topic");
+
+        assertThatThrownBy(() -> consumer.onOrderEvent(new ConsumerRecord<>(
+                "surprising.linear-delivery.order.events.v1", 0, 0L,
+                "BTC-USDT-260925-70000-C", objectMapper.writeValueAsString(event))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("failed to fanout order event")
+                .hasRootCauseMessage("order event topic must match current product line: expected="
+                        + "surprising.option.order.events.v1 actual=surprising.linear-delivery.order.events.v1");
+
+        verifyNoInteractions(registry);
+    }
+
+    @Test
     void fansOutFundingRateDecimalEventBySymbol() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
