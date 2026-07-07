@@ -1,5 +1,6 @@
 package com.surprising.trading.order.repository;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.LeverageSettingRequest;
 import com.surprising.trading.api.model.LeverageSettingResponse;
 import com.surprising.trading.api.model.MarginMode;
@@ -22,41 +23,66 @@ public class LeverageSettingRepository {
 
     public void upsert(LeverageSettingRequest request, Instant now) {
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
+        ProductLine productLine = productLine(request.productLine());
         jdbcTemplate.update("""
                 INSERT INTO trading_leverage_settings (
-                    user_id, symbol, margin_mode, leverage_ppm, reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (user_id, symbol, margin_mode) DO UPDATE SET
+                    product_line, user_id, symbol, margin_mode, leverage_ppm, reason, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (product_line, user_id, symbol, margin_mode) DO UPDATE SET
                     leverage_ppm = EXCLUDED.leverage_ppm,
                     reason = EXCLUDED.reason,
                     updated_at = EXCLUDED.updated_at
-                """, request.userId(), normalizeSymbol(request.symbol()), marginMode.name(), request.leveragePpm(),
-                emptyToNull(request.reason()), Timestamp.from(now), Timestamp.from(now));
+                """, productLine.name(), request.userId(), normalizeSymbol(request.symbol()), marginMode.name(),
+                request.leveragePpm(), emptyToNull(request.reason()), Timestamp.from(now), Timestamp.from(now));
     }
 
     public Optional<LeverageSettingResponse> userSetting(long userId,
                                                          String symbol,
                                                          MarginMode marginMode,
                                                          long maxLeveragePpm) {
+        return userSetting(ProductLine.LINEAR_PERPETUAL, userId, symbol, marginMode, maxLeveragePpm);
+    }
+
+    public Optional<LeverageSettingResponse> userSetting(ProductLine productLine,
+                                                         long userId,
+                                                         String symbol,
+                                                         MarginMode marginMode,
+                                                         long maxLeveragePpm) {
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         return jdbcTemplate.query("""
-                SELECT user_id, symbol, margin_mode, leverage_ppm, updated_at
+                SELECT product_line, user_id, symbol, margin_mode, leverage_ppm, updated_at
                   FROM trading_leverage_settings
-                 WHERE user_id = ? AND symbol = ? AND margin_mode = ?
+                 WHERE product_line = ? AND user_id = ? AND symbol = ? AND margin_mode = ?
                 """, (rs, rowNum) -> toResponse(rs, maxLeveragePpm, "USER"),
-                userId, normalizeSymbol(symbol), normalizedMarginMode.name()).stream().findFirst();
+                productLine(productLine).name(), userId, normalizeSymbol(symbol), normalizedMarginMode.name())
+                .stream().findFirst();
     }
 
     public Optional<Long> leveragePpm(long userId, String symbol, MarginMode marginMode) {
+        return leveragePpm(ProductLine.LINEAR_PERPETUAL, userId, symbol, marginMode);
+    }
+
+    public Optional<Long> leveragePpm(ProductLine productLine, long userId, String symbol, MarginMode marginMode) {
         return jdbcTemplate.query("""
                 SELECT leverage_ppm
                   FROM trading_leverage_settings
-                 WHERE user_id = ? AND symbol = ? AND margin_mode = ?
+                 WHERE product_line = ? AND user_id = ? AND symbol = ? AND margin_mode = ?
                 """, (rs, rowNum) -> rs.getLong("leverage_ppm"),
-                userId, normalizeSymbol(symbol), MarginMode.defaultIfNull(marginMode).name()).stream().findFirst();
+                productLine(productLine).name(), userId, normalizeSymbol(symbol),
+                MarginMode.defaultIfNull(marginMode).name()).stream().findFirst();
     }
 
     public LeverageSettingResponse instrumentDefault(long userId,
+                                                     String symbol,
+                                                     MarginMode marginMode,
+                                                     long maxLeveragePpm,
+                                                     long initialMarginRatePpm) {
+        return instrumentDefault(ProductLine.LINEAR_PERPETUAL, userId, symbol, marginMode, maxLeveragePpm,
+                initialMarginRatePpm);
+    }
+
+    public LeverageSettingResponse instrumentDefault(ProductLine productLine,
+                                                     long userId,
                                                      String symbol,
                                                      MarginMode marginMode,
                                                      long maxLeveragePpm,
@@ -66,8 +92,8 @@ public class LeverageSettingRepository {
                 maxLeveragePpm);
         long effectiveInitialMarginRatePpm = Math.max(initialMarginRatePpm,
                 OrderLeverageMath.initialMarginRateFromLeveragePpm(leveragePpm));
-        return new LeverageSettingResponse(userId, normalizeSymbol(symbol), MarginMode.defaultIfNull(marginMode),
-                leveragePpm, maxLeveragePpm, effectiveInitialMarginRatePpm,
+        return new LeverageSettingResponse(userId, productLine(productLine), normalizeSymbol(symbol),
+                MarginMode.defaultIfNull(marginMode), leveragePpm, maxLeveragePpm, effectiveInitialMarginRatePpm,
                 "INSTRUMENT_DEFAULT", Instant.EPOCH);
     }
 
@@ -75,6 +101,7 @@ public class LeverageSettingRepository {
         long leveragePpm = rs.getLong("leverage_ppm");
         return new LeverageSettingResponse(
                 rs.getLong("user_id"),
+                ProductLine.valueOf(rs.getString("product_line")),
                 rs.getString("symbol"),
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 leveragePpm,
@@ -82,6 +109,10 @@ public class LeverageSettingRepository {
                 OrderLeverageMath.initialMarginRateFromLeveragePpm(leveragePpm),
                 source,
                 rs.getTimestamp("updated_at").toInstant());
+    }
+
+    private static ProductLine productLine(ProductLine productLine) {
+        return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
     }
 
     private static String normalizeSymbol(String symbol) {

@@ -1,5 +1,6 @@
 package com.surprising.trading.api.client;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TradingApiPaths;
 import com.surprising.trading.api.model.LeverageSettingRequest;
 import com.surprising.trading.api.model.LeverageSettingResponse;
@@ -26,5 +27,10 @@ public interface LeverageRpcApi {
     @GetMapping("/settings")
     LeverageSettingResponse get(@RequestParam("userId") @Positive long userId,
                                 @RequestParam("symbol") @NotBlank String symbol,
-                                @RequestParam(value = "marginMode", required = false) MarginMode marginMode);
+                                @RequestParam(value = "marginMode", required = false) MarginMode marginMode,
+                                @RequestParam(value = "productLine", required = false) ProductLine productLine);
+
+    default LeverageSettingResponse get(long userId, String symbol, MarginMode marginMode) {
+        return get(userId, symbol, marginMode, null);
+    }
 }

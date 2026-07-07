@@ -851,6 +851,7 @@ CREATE INDEX IF NOT EXISTS trading_user_fee_tiers_status_idx
     ON trading_user_fee_tiers (product_line, status, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS trading_leverage_settings (
+    product_line        TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     user_id             BIGINT NOT NULL,
     symbol              TEXT NOT NULL,
     margin_mode         TEXT NOT NULL DEFAULT 'CROSS',
@@ -858,7 +859,11 @@ CREATE TABLE IF NOT EXISTS trading_leverage_settings (
     reason              TEXT,
     created_at          TIMESTAMPTZ NOT NULL,
     updated_at          TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (user_id, symbol, margin_mode),
+    PRIMARY KEY (product_line, user_id, symbol, margin_mode),
+    CONSTRAINT trading_leverage_settings_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT trading_leverage_settings_user_positive CHECK (user_id > 0),
     CONSTRAINT trading_leverage_settings_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT trading_leverage_settings_symbol_fk
@@ -869,8 +874,28 @@ CREATE TABLE IF NOT EXISTS trading_leverage_settings (
     )
 );
 
+DO $$
+BEGIN
+    ALTER TABLE trading_leverage_settings
+        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+    ALTER TABLE trading_leverage_settings
+        DROP CONSTRAINT IF EXISTS trading_leverage_settings_product_line_check;
+    ALTER TABLE trading_leverage_settings
+        ADD CONSTRAINT trading_leverage_settings_product_line_check CHECK (
+            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+        );
+    ALTER TABLE trading_leverage_settings
+        DROP CONSTRAINT IF EXISTS trading_leverage_settings_pkey;
+    ALTER TABLE trading_leverage_settings
+        ADD CONSTRAINT trading_leverage_settings_pkey PRIMARY KEY (
+            product_line, user_id, symbol, margin_mode
+        );
+END $$;
+
+DROP INDEX IF EXISTS trading_leverage_settings_symbol_idx;
 CREATE INDEX IF NOT EXISTS trading_leverage_settings_symbol_idx
-    ON trading_leverage_settings (symbol, margin_mode, updated_at DESC);
+    ON trading_leverage_settings (product_line, symbol, margin_mode, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS account_position_modes (
     user_id             BIGINT PRIMARY KEY,
