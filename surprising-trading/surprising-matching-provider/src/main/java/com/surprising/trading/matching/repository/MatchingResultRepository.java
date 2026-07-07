@@ -1,13 +1,16 @@
 package com.surprising.trading.matching.repository;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.PositionSide;
+import com.surprising.trading.matching.config.MatchingProperties;
 import java.sql.Timestamp;
 import java.time.Instant;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -16,10 +19,19 @@ public class MatchingResultRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final MatchingMarginRepository marginRepository;
+    private final MatchingProperties properties;
 
     public MatchingResultRepository(JdbcTemplate jdbcTemplate, MatchingMarginRepository marginRepository) {
+        this(jdbcTemplate, marginRepository, new MatchingProperties());
+    }
+
+    @Autowired
+    public MatchingResultRepository(JdbcTemplate jdbcTemplate,
+                                    MatchingMarginRepository marginRepository,
+                                    MatchingProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
         this.marginRepository = marginRepository;
+        this.properties = properties;
     }
 
     public boolean commandResultExists(long commandId) {
@@ -68,11 +80,11 @@ public class MatchingResultRepository {
     public boolean saveResult(MatchResultEvent event) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO trading_match_results (
-                    command_id, order_id, user_id, symbol, instrument_version, command_type, result_code,
+                    command_id, product_line, order_id, user_id, symbol, instrument_version, command_type, result_code,
                     filled_quantity_steps, order_status, trace_id, event_time, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
                 ON CONFLICT (command_id) DO NOTHING
-                """, event.commandId(), event.orderId(), event.userId(), event.symbol(),
+                """, event.commandId(), productLine(), event.orderId(), event.userId(), event.symbol(),
                 event.instrumentVersion(), event.commandType().name(), event.resultCode(), event.filledQuantitySteps(),
                 event.orderStatus().name(), event.traceId(), Timestamp.from(event.eventTime()));
         return rows == 1;
@@ -81,14 +93,14 @@ public class MatchingResultRepository {
     public boolean saveTrade(MatchTradeEvent trade) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO trading_match_trades (
-                    trade_id, command_id, symbol, taker_order_id, taker_instrument_version,
+                    trade_id, command_id, product_line, symbol, taker_order_id, taker_instrument_version,
                     taker_user_id, taker_side, taker_margin_mode, taker_position_side,
                     maker_order_id, maker_instrument_version,
                     maker_user_id, maker_margin_mode, maker_position_side, price_ticks, quantity_steps,
                     taker_order_completed, maker_order_completed, trace_id, event_time, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
                 ON CONFLICT (symbol, trade_id) DO NOTHING
-                """, trade.tradeId(), trade.commandId(), trade.symbol(), trade.takerOrderId(),
+                """, trade.tradeId(), trade.commandId(), productLine(), trade.symbol(), trade.takerOrderId(),
                 trade.takerInstrumentVersion(), trade.takerUserId(), trade.takerSide().name(),
                 trade.takerMarginMode().name(), trade.takerPositionSide().name(), trade.makerOrderId(),
                 trade.makerInstrumentVersion(), trade.makerUserId(), trade.makerMarginMode().name(),
@@ -175,6 +187,13 @@ public class MatchingResultRepository {
 
     private boolean isTerminal(OrderStatus status) {
         return status == OrderStatus.CANCELED || status == OrderStatus.FILLED;
+    }
+
+    private String productLine() {
+        MatchingProperties.Kafka kafka = properties.getKafka();
+        return kafka.isProductTopicsEnabled()
+                ? kafka.getProductLine().name()
+                : ProductLine.LINEAR_PERPETUAL.name();
     }
 
     private void requireSingleRow(int rows, String operation) {

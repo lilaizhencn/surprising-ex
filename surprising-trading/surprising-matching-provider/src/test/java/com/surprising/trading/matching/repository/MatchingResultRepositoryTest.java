@@ -11,11 +11,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
+import com.surprising.trading.matching.config.MatchingProperties;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -75,6 +77,28 @@ class MatchingResultRepositoryTest {
     }
 
     @Test
+    void matchResultStoresCurrentProductLineWhenProductTopicsAreEnabled() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        MatchingResultRepository repository = new MatchingResultRepository(jdbcTemplate,
+                mock(MatchingMarginRepository.class), properties);
+        when(jdbcTemplate.update(contains("INSERT INTO trading_match_results"), any(Object[].class)))
+                .thenReturn(1);
+
+        assertThat(repository.saveResult(new MatchResultEvent(11L, 101L, 1001L,
+                "BTC-USDT-260626", 1L, OrderCommandType.PLACE, "SUCCESS", 0L, OrderStatus.ACCEPTED,
+                EVENT_TIME, List.of()))).isTrue();
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(sql.capture(), args.capture());
+        assertThat(sql.getValue()).contains("command_id, product_line, order_id");
+        assertThat(args.getValue()[1]).isEqualTo("LINEAR_DELIVERY");
+    }
+
+    @Test
     void matchTradeIdempotencyIsScopedBySymbol() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         MatchingResultRepository repository = new MatchingResultRepository(jdbcTemplate,
@@ -89,6 +113,28 @@ class MatchingResultRepositoryTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
         assertThat(sql.getValue()).contains("ON CONFLICT (symbol, trade_id) DO NOTHING");
+    }
+
+    @Test
+    void matchTradeStoresCurrentProductLineWhenProductTopicsAreEnabled() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        MatchingResultRepository repository = new MatchingResultRepository(jdbcTemplate,
+                mock(MatchingMarginRepository.class), properties);
+        when(jdbcTemplate.update(contains("INSERT INTO trading_match_trades"), any(Object[].class)))
+                .thenReturn(1);
+
+        assertThat(repository.saveTrade(new MatchTradeEvent(91L, 11L, "BTC-USDT-260626-C-65000",
+                101L, 1L, 1001L, OrderSide.BUY, 202L, 1L, 2002L, 65_000L, 3L,
+                false, false, EVENT_TIME))).isTrue();
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(sql.capture(), args.capture());
+        assertThat(sql.getValue()).contains("trade_id, command_id, product_line");
+        assertThat(args.getValue()[2]).isEqualTo("OPTION");
     }
 
     @Test

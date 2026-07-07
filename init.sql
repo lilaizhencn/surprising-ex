@@ -1533,6 +1533,7 @@ CREATE INDEX IF NOT EXISTS trading_matching_symbols_enabled_idx
 
 CREATE TABLE IF NOT EXISTS trading_match_results (
     command_id              BIGINT PRIMARY KEY,
+    product_line            TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     order_id                BIGINT NOT NULL,
     user_id                 BIGINT NOT NULL,
     symbol                  TEXT NOT NULL,
@@ -1549,30 +1550,55 @@ CREATE TABLE IF NOT EXISTS trading_match_results (
     CONSTRAINT trading_match_results_instrument_fk
         FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT trading_match_results_command_type_check CHECK (command_type IN ('PLACE', 'CANCEL')),
+    CONSTRAINT trading_match_results_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT trading_match_results_quantity_non_negative CHECK (filled_quantity_steps >= 0),
     CONSTRAINT trading_match_results_status_check CHECK (
         order_status IN ('ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED', 'CANCELED', 'PARTIALLY_FILLED', 'FILLED')
     )
 );
 
-CREATE INDEX IF NOT EXISTS trading_match_results_order_idx
-    ON trading_match_results (order_id, event_time DESC);
+ALTER TABLE trading_match_results
+    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
 
+UPDATE trading_match_results r
+   SET product_line = o.product_line
+  FROM trading_orders o
+ WHERE o.order_id = r.order_id;
+
+ALTER TABLE trading_match_results
+    DROP CONSTRAINT IF EXISTS trading_match_results_product_line_check;
+
+ALTER TABLE trading_match_results
+    ADD CONSTRAINT trading_match_results_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    );
+
+DROP INDEX IF EXISTS trading_match_results_order_idx;
+CREATE INDEX IF NOT EXISTS trading_match_results_order_idx
+    ON trading_match_results (product_line, order_id, event_time DESC);
+
+DROP INDEX IF EXISTS trading_match_results_symbol_time_idx;
 CREATE INDEX IF NOT EXISTS trading_match_results_symbol_time_idx
-    ON trading_match_results (symbol, event_time DESC);
+    ON trading_match_results (product_line, symbol, event_time DESC);
 
 CREATE INDEX IF NOT EXISTS trading_match_results_trace_idx
     ON trading_match_results (trace_id)
     WHERE trace_id IS NOT NULL;
 
+DROP INDEX IF EXISTS trading_match_results_success_place_idx;
 CREATE INDEX IF NOT EXISTS trading_match_results_success_place_idx
-    ON trading_match_results (order_id)
+    ON trading_match_results (product_line, order_id)
     WHERE command_type = 'PLACE'
       AND result_code = 'SUCCESS';
 
 CREATE TABLE IF NOT EXISTS trading_match_trades (
     trade_id                BIGINT NOT NULL,
     command_id              BIGINT NOT NULL,
+    product_line            TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     symbol                  TEXT NOT NULL,
     taker_order_id          BIGINT NOT NULL,
     taker_instrument_version BIGINT NOT NULL,
@@ -1600,6 +1626,10 @@ CREATE TABLE IF NOT EXISTS trading_match_trades (
     CONSTRAINT trading_match_trades_maker_instrument_fk
         FOREIGN KEY (symbol, maker_instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT trading_match_trades_side_check CHECK (taker_side IN ('BUY', 'SELL')),
+    CONSTRAINT trading_match_trades_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT trading_match_trades_margin_mode_check CHECK (
         taker_margin_mode IN ('CROSS', 'ISOLATED') AND maker_margin_mode IN ('CROSS', 'ISOLATED')
     ),
@@ -1609,14 +1639,34 @@ CREATE TABLE IF NOT EXISTS trading_match_trades (
     CONSTRAINT trading_match_trades_positive_values CHECK (price_ticks > 0 AND quantity_steps > 0)
 );
 
+ALTER TABLE trading_match_trades
+    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+
+UPDATE trading_match_trades t
+   SET product_line = r.product_line
+  FROM trading_match_results r
+ WHERE r.command_id = t.command_id;
+
+ALTER TABLE trading_match_trades
+    DROP CONSTRAINT IF EXISTS trading_match_trades_product_line_check;
+
+ALTER TABLE trading_match_trades
+    ADD CONSTRAINT trading_match_trades_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    );
+
+DROP INDEX IF EXISTS trading_match_trades_symbol_time_idx;
 CREATE INDEX IF NOT EXISTS trading_match_trades_symbol_time_idx
-    ON trading_match_trades (symbol, event_time DESC);
+    ON trading_match_trades (product_line, symbol, event_time DESC);
 
+DROP INDEX IF EXISTS trading_match_trades_taker_order_idx;
 CREATE INDEX IF NOT EXISTS trading_match_trades_taker_order_idx
-    ON trading_match_trades (taker_order_id, event_time DESC);
+    ON trading_match_trades (product_line, taker_order_id, event_time DESC);
 
+DROP INDEX IF EXISTS trading_match_trades_maker_order_idx;
 CREATE INDEX IF NOT EXISTS trading_match_trades_maker_order_idx
-    ON trading_match_trades (maker_order_id, event_time DESC);
+    ON trading_match_trades (product_line, maker_order_id, event_time DESC);
 
 CREATE INDEX IF NOT EXISTS trading_match_trades_trace_idx
     ON trading_match_trades (trace_id)

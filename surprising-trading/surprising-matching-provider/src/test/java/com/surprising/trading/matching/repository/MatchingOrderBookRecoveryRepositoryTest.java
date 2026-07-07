@@ -20,6 +20,8 @@ class MatchingOrderBookRecoveryRepositoryTest {
         repository.recoverableOpenOrdersAfter(Instant.EPOCH, 0L, 100);
 
         assertThat(jdbcTemplate.sql).doesNotContain("i.contract_type = ?");
+        assertThat(jdbcTemplate.sql).doesNotContain("o.product_line = ?");
+        assertThat(jdbcTemplate.sql).contains("r.product_line = o.product_line");
         assertThat(jdbcTemplate.args).hasSize(4);
     }
 
@@ -34,9 +36,9 @@ class MatchingOrderBookRecoveryRepositoryTest {
 
         repository.recoverableOpenOrdersAfter(Instant.EPOCH, 0L, 100);
 
-        assertThat(jdbcTemplate.sql).contains("i.contract_type = ?");
+        assertThat(jdbcTemplate.sql).contains("o.product_line = ?");
         assertThat(jdbcTemplate.args).hasSize(5);
-        assertThat(jdbcTemplate.args[0]).isEqualTo("VANILLA_OPTION");
+        assertThat(jdbcTemplate.args[0]).isEqualTo("OPTION");
     }
 
     private static final class RecordingJdbcTemplate extends JdbcTemplate {

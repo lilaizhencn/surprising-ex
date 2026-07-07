@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -22,6 +23,7 @@ public class MatchingOrderBookRecoveryRepository {
         this(jdbcTemplate, new MatchingProperties());
     }
 
+    @Autowired
     public MatchingOrderBookRecoveryRepository(JdbcTemplate jdbcTemplate, MatchingProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties;
@@ -43,15 +45,16 @@ public class MatchingOrderBookRecoveryRepository {
                    AND o.remaining_quantity_steps > 0
                 """);
         List<Object> args = new ArrayList<>();
-        productContractTypeFilter().ifPresent(contractType -> {
-            sql.append("   AND i.contract_type = ?\n");
-            args.add(contractType);
+        productLineFilter().ifPresent(productLine -> {
+            sql.append("   AND o.product_line = ?\n");
+            args.add(productLine);
         });
         sql.append("""
                    AND EXISTS (
                        SELECT 1
                          FROM trading_match_results r
                         WHERE r.order_id = o.order_id
+                          AND r.product_line = o.product_line
                           AND r.command_type = 'PLACE'
                           AND r.result_code = 'SUCCESS'
                    )
@@ -78,10 +81,10 @@ public class MatchingOrderBookRecoveryRepository {
                 args.toArray());
     }
 
-    private Optional<String> productContractTypeFilter() {
+    private Optional<String> productLineFilter() {
         MatchingProperties.Kafka kafka = properties.getKafka();
         return kafka.isProductTopicsEnabled()
-                ? Optional.of(kafka.getProductLine().contractTypeCode())
+                ? Optional.of(kafka.getProductLine().name())
                 : Optional.empty();
     }
 }
