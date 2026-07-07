@@ -52,15 +52,19 @@ public class TriggerOrderRepository {
     public boolean insert(TriggerOrderRecord order) {
         return jdbcTemplate.update("""
                 INSERT INTO trading_trigger_orders (
-                    trigger_order_id, user_id, client_trigger_order_id, oco_group_id, symbol, side, trigger_type,
+                    trigger_order_id, product_line, user_id, client_trigger_order_id, oco_group_id, symbol, side,
+                    trigger_type,
                     trigger_price_type, trigger_condition, trigger_price_ticks, activation_price_ticks,
                     callback_rate_ppm, highest_price_ticks, lowest_price_ticks, activated_at, order_type,
                     time_in_force, price_ticks, quantity_steps, margin_mode, position_side, status, placed_order_id,
                     trigger_sequence, triggered_price_ticks, reject_reason, trace_id, expires_at, triggered_at,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT DO NOTHING
-                """, order.triggerOrderId(), order.userId(), order.clientTriggerOrderId(), order.ocoGroupId(),
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (product_line, user_id, client_trigger_order_id)
+                WHERE client_trigger_order_id IS NOT NULL
+                DO NOTHING
+                """, order.triggerOrderId(), order.productLine().name(), order.userId(), order.clientTriggerOrderId(),
+                order.ocoGroupId(),
                 order.symbol(),
                 order.side().name(), order.triggerType().name(), order.triggerPriceType().name(),
                 order.triggerCondition().name(), order.triggerPriceTicks(), order.activationPriceTicks(),
@@ -75,9 +79,13 @@ public class TriggerOrderRepository {
     }
 
     public void lockUserSymbolMarginScope(long userId, String symbol) {
+        lockUserSymbolMarginScope(ProductLine.LINEAR_PERPETUAL, userId, symbol);
+    }
+
+    public void lockUserSymbolMarginScope(ProductLine productLine, long userId, String symbol) {
         jdbcTemplate.query("""
                 SELECT pg_advisory_xact_lock(hashtext('trading-margin-mode'), hashtext(?))
-                """, rs -> null, userId + ":" + symbol);
+                """, rs -> null, productLine(productLine).name() + ":" + userId + ":" + symbol);
     }
 
     public void lockUserPositionMode(long userId) {
@@ -110,19 +118,25 @@ public class TriggerOrderRepository {
     }
 
     public boolean hasActiveMarginModeConflict(long userId, String symbol, MarginMode marginMode) {
+        return hasActiveMarginModeConflict(ProductLine.LINEAR_PERPETUAL, userId, symbol, marginMode);
+    }
+
+    public boolean hasActiveMarginModeConflict(ProductLine productLine, long userId, String symbol, MarginMode marginMode) {
         String normalizedMode = MarginMode.defaultIfNull(marginMode).name();
         Boolean conflict = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
                       FROM account_positions p
-                     WHERE p.user_id = ?
+                     WHERE p.product_line = ?
+                       AND p.user_id = ?
                        AND p.symbol = ?
                        AND p.margin_mode <> ?
                        AND p.signed_quantity_steps <> 0
                     UNION ALL
                     SELECT 1
                       FROM trading_orders o
-                     WHERE o.user_id = ?
+                     WHERE o.product_line = ?
+                       AND o.user_id = ?
                        AND o.symbol = ?
                        AND o.margin_mode <> ?
                        AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
@@ -130,13 +144,15 @@ public class TriggerOrderRepository {
                     UNION ALL
                     SELECT 1
                       FROM trading_trigger_orders t
-                     WHERE t.user_id = ?
+                     WHERE t.product_line = ?
+                       AND t.user_id = ?
                        AND t.symbol = ?
                        AND t.margin_mode <> ?
                        AND t.status IN ('PENDING', 'TRIGGERING')
                 )
-                """, Boolean.class, userId, symbol, normalizedMode, userId, symbol, normalizedMode,
-                userId, symbol, normalizedMode);
+                """, Boolean.class, productLine(productLine).name(), userId, symbol, normalizedMode,
+                productLine(productLine).name(), userId, symbol, normalizedMode,
+                productLine(productLine).name(), userId, symbol, normalizedMode);
         return Boolean.TRUE.equals(conflict);
     }
 
@@ -144,17 +160,27 @@ public class TriggerOrderRepository {
                                                     String symbol,
                                                     MarginMode marginMode,
                                                     PositionSide positionSide) {
+        return lockedPosition(ProductLine.LINEAR_PERPETUAL, userId, symbol, marginMode, positionSide);
+    }
+
+    public Optional<TriggerPosition> lockedPosition(ProductLine productLine,
+                                                    long userId,
+                                                    String symbol,
+                                                    MarginMode marginMode,
+                                                    PositionSide positionSide) {
         return jdbcTemplate.query("""
                 SELECT signed_quantity_steps, instrument_version
                   FROM account_positions
-                 WHERE user_id = ?
+                 WHERE product_line = ?
+                   AND user_id = ?
                    AND symbol = ?
                    AND margin_mode = ?
                    AND position_side = ?
                  FOR UPDATE
                 """, (rs, rowNum) -> new TriggerPosition(
                 rs.getLong("signed_quantity_steps"),
-                rs.getLong("instrument_version")), userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                rs.getLong("instrument_version")), productLine(productLine).name(), userId, symbol,
+                MarginMode.defaultIfNull(marginMode).name(),
                 PositionSide.defaultIfNull(positionSide).name()).stream().findFirst();
     }
 
@@ -164,10 +190,22 @@ public class TriggerOrderRepository {
                                     PositionSide positionSide,
                                     long instrumentVersion,
                                     OrderSide closeSide) {
+        return openReduceOnlySteps(ProductLine.LINEAR_PERPETUAL, userId, symbol, marginMode, positionSide,
+                instrumentVersion, closeSide);
+    }
+
+    public long openReduceOnlySteps(ProductLine productLine,
+                                    long userId,
+                                    String symbol,
+                                    MarginMode marginMode,
+                                    PositionSide positionSide,
+                                    long instrumentVersion,
+                                    OrderSide closeSide) {
         Long value = jdbcTemplate.queryForObject("""
                 SELECT COALESCE(SUM(remaining_quantity_steps), 0)
                   FROM trading_orders
-                 WHERE user_id = ?
+                 WHERE product_line = ?
+                   AND user_id = ?
                    AND symbol = ?
                    AND margin_mode = ?
                    AND position_side = ?
@@ -175,12 +213,23 @@ public class TriggerOrderRepository {
                    AND side = ?
                    AND reduce_only = TRUE
                    AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
-                """, Long.class, userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                """, Long.class, productLine(productLine).name(), userId, symbol,
+                MarginMode.defaultIfNull(marginMode).name(),
                 PositionSide.defaultIfNull(positionSide).name(), instrumentVersion, closeSide.name());
         return value == null ? 0L : value;
     }
 
     public long pendingTriggerCloseSteps(long userId,
+                                         String symbol,
+                                         MarginMode marginMode,
+                                         PositionSide positionSide,
+                                         OrderSide closeSide) {
+        return pendingTriggerCloseSteps(ProductLine.LINEAR_PERPETUAL, userId, symbol, marginMode, positionSide,
+                closeSide);
+    }
+
+    public long pendingTriggerCloseSteps(ProductLine productLine,
+                                         long userId,
                                          String symbol,
                                          MarginMode marginMode,
                                          PositionSide positionSide,
@@ -193,7 +242,8 @@ public class TriggerOrderRepository {
                            END AS capacity_group,
                            MAX(quantity_steps) AS quantity_steps
                       FROM trading_trigger_orders
-                     WHERE user_id = ?
+                     WHERE product_line = ?
+                       AND user_id = ?
                        AND symbol = ?
                        AND margin_mode = ?
                        AND position_side = ?
@@ -203,12 +253,24 @@ public class TriggerOrderRepository {
                 )
                 SELECT COALESCE(SUM(quantity_steps), 0)
                   FROM trigger_capacity
-                """, Long.class, userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                """, Long.class, productLine(productLine).name(), userId, symbol,
+                MarginMode.defaultIfNull(marginMode).name(),
                 PositionSide.defaultIfNull(positionSide).name(), closeSide.name());
         return value == null ? 0L : value;
     }
 
     public long pendingTriggerOcoGroupMaxSteps(long userId,
+                                               String symbol,
+                                               MarginMode marginMode,
+                                               PositionSide positionSide,
+                                               OrderSide closeSide,
+                                               String ocoGroupId) {
+        return pendingTriggerOcoGroupMaxSteps(ProductLine.LINEAR_PERPETUAL, userId, symbol, marginMode, positionSide,
+                closeSide, ocoGroupId);
+    }
+
+    public long pendingTriggerOcoGroupMaxSteps(ProductLine productLine,
+                                               long userId,
                                                String symbol,
                                                MarginMode marginMode,
                                                PositionSide positionSide,
@@ -220,14 +282,16 @@ public class TriggerOrderRepository {
         Long value = jdbcTemplate.queryForObject("""
                 SELECT COALESCE(MAX(quantity_steps), 0)
                   FROM trading_trigger_orders
-                 WHERE user_id = ?
+                 WHERE product_line = ?
+                   AND user_id = ?
                    AND symbol = ?
                    AND margin_mode = ?
                    AND position_side = ?
                    AND side = ?
                    AND oco_group_id = ?
                    AND status IN ('PENDING', 'TRIGGERING')
-                """, Long.class, userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                """, Long.class, productLine(productLine).name(), userId, symbol,
+                MarginMode.defaultIfNull(marginMode).name(),
                 PositionSide.defaultIfNull(positionSide).name(), closeSide.name(), ocoGroupId);
         return value == null ? 0L : value;
     }
@@ -245,28 +309,33 @@ public class TriggerOrderRepository {
         if (normalizedContractType == null) {
             return true;
         }
+        ProductLine normalizedProductLine = ProductLine.requireContractTypeCode(normalizedContractType);
         Boolean matched = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
                       FROM trading_trigger_orders o
-                      JOIN instrument_current_versions c
-                        ON c.symbol = o.symbol
-                      JOIN instruments i
-                        ON i.symbol = c.symbol AND i.version = c.version
                      WHERE o.trigger_order_id = ?
-                       AND i.contract_type = ?
+                       AND o.product_line = ?
                 )
-                """, Boolean.class, triggerOrderId, normalizedContractType);
+                """, Boolean.class, triggerOrderId, normalizedProductLine.name());
         return Boolean.TRUE.equals(matched);
     }
 
     public Optional<TriggerOrderRecord> findByClientTriggerOrderId(long userId, String clientTriggerOrderId) {
+        return findByClientTriggerOrderId(ProductLine.LINEAR_PERPETUAL, userId, clientTriggerOrderId);
+    }
+
+    public Optional<TriggerOrderRecord> findByClientTriggerOrderId(ProductLine productLine,
+                                                                   long userId,
+                                                                   String clientTriggerOrderId) {
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_trigger_orders
-                 WHERE user_id = ?
+                 WHERE product_line = ?
+                   AND user_id = ?
                    AND client_trigger_order_id = ?
-                """, (rs, rowNum) -> toRecord(rs), userId, clientTriggerOrderId).stream().findFirst();
+                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), userId, clientTriggerOrderId)
+                .stream().findFirst();
     }
 
     public List<TriggerOrderRecord> openOrders(long userId, String symbol, int limit) {
@@ -277,24 +346,22 @@ public class TriggerOrderRepository {
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         String normalizedSymbol = emptyToNull(symbol);
         String normalizedContractType = emptyToNull(contractType);
+        ProductLine normalizedProductLine = normalizedContractType == null
+                ? null
+                : ProductLine.requireContractTypeCode(normalizedContractType);
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_trigger_orders
                  WHERE user_id = ?
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
-                   AND (CAST(? AS text) IS NULL OR EXISTS (
-                        SELECT 1
-                          FROM instrument_current_versions c
-                          JOIN instruments i
-                            ON i.symbol = c.symbol AND i.version = c.version
-                         WHERE c.symbol = trading_trigger_orders.symbol
-                           AND i.contract_type = ?
-                   ))
+                   AND (CAST(? AS text) IS NULL OR product_line = ?)
                    AND status IN ('PENDING', 'TRIGGERING')
                  ORDER BY created_at DESC, trigger_order_id DESC
                  LIMIT ?
                 """, (rs, rowNum) -> toRecord(rs),
-                userId, normalizedSymbol, normalizedSymbol, normalizedContractType, normalizedContractType,
+                userId, normalizedSymbol, normalizedSymbol,
+                normalizedProductLine == null ? null : normalizedProductLine.name(),
+                normalizedProductLine == null ? null : normalizedProductLine.name(),
                 normalizedLimit);
     }
 
@@ -306,24 +373,22 @@ public class TriggerOrderRepository {
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         String normalizedSymbol = emptyToNull(symbol);
         String normalizedContractType = emptyToNull(contractType);
+        ProductLine normalizedProductLine = normalizedContractType == null
+                ? null
+                : ProductLine.requireContractTypeCode(normalizedContractType);
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_trigger_orders
                  WHERE user_id = ?
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
-                   AND (CAST(? AS text) IS NULL OR EXISTS (
-                        SELECT 1
-                          FROM instrument_current_versions c
-                          JOIN instruments i
-                            ON i.symbol = c.symbol AND i.version = c.version
-                         WHERE c.symbol = trading_trigger_orders.symbol
-                           AND i.contract_type = ?
-                   ))
+                   AND (CAST(? AS text) IS NULL OR product_line = ?)
                    AND status = 'PENDING'
                  ORDER BY created_at ASC, trigger_order_id ASC
                  LIMIT ?
                 """, (rs, rowNum) -> toRecord(rs),
-                userId, normalizedSymbol, normalizedSymbol, normalizedContractType, normalizedContractType,
+                userId, normalizedSymbol, normalizedSymbol,
+                normalizedProductLine == null ? null : normalizedProductLine.name(),
+                normalizedProductLine == null ? null : normalizedProductLine.name(),
                 normalizedLimit);
     }
 
@@ -355,6 +420,9 @@ public class TriggerOrderRepository {
                                                                          String sort) {
         String normalizedStatus = status == null ? null : status.name();
         String normalizedContractType = emptyToNull(contractType);
+        ProductLine normalizedProductLine = normalizedContractType == null
+                ? null
+                : ProductLine.requireContractTypeCode(normalizedContractType);
         int normalizedLimit = AdminCursorPage.limit(limit, 1000);
         AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
                 "createdAt", "created_at", "trigger_order_id", true);
@@ -372,8 +440,8 @@ public class TriggerOrderRepository {
         args.add(normalizedStatus);
         args.add(triggerOrderId);
         args.add(triggerOrderId);
-        args.add(normalizedContractType);
-        args.add(normalizedContractType);
+        args.add(normalizedProductLine == null ? null : normalizedProductLine.name());
+        args.add(normalizedProductLine == null ? null : normalizedProductLine.name());
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(normalizedLimit + 1);
         List<TriggerOrderRecord> rows = jdbcTemplate.query("""
@@ -383,12 +451,7 @@ public class TriggerOrderRepository {
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
                    AND (CAST(? AS text) IS NULL OR status = ?)
                    AND (CAST(? AS text) IS NULL OR trigger_order_id = ?)
-                   AND (CAST(? AS text) IS NULL OR EXISTS (
-                        SELECT 1
-                          FROM instruments i
-                         WHERE i.symbol = trading_trigger_orders.symbol
-                           AND i.contract_type = ?
-                   ))
+                   AND (CAST(? AS text) IS NULL OR product_line = ?)
                 %s
                  ORDER BY %s %s, %s %s
                  LIMIT ?
@@ -471,6 +534,7 @@ public class TriggerOrderRepository {
         if (normalizedContractType == null) {
             return hasPendingOrdersForPriceType(symbol, triggerPriceType);
         }
+        ProductLine normalizedProductLine = ProductLine.requireContractTypeCode(normalizedContractType);
         Boolean result = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
@@ -478,16 +542,9 @@ public class TriggerOrderRepository {
                      WHERE o.symbol = ?
                        AND o.status = 'PENDING'
                        AND o.trigger_price_type = ?
-                       AND EXISTS (
-                            SELECT 1
-                              FROM instrument_current_versions c
-                              JOIN instruments i
-                                ON i.symbol = c.symbol AND i.version = c.version
-                             WHERE c.symbol = o.symbol
-                               AND i.contract_type = ?
-                       )
+                       AND o.product_line = ?
                 )
-                """, Boolean.class, symbol, triggerPriceType.name(), normalizedContractType);
+                """, Boolean.class, symbol, triggerPriceType.name(), normalizedProductLine.name());
         return Boolean.TRUE.equals(result);
     }
 
@@ -511,23 +568,19 @@ public class TriggerOrderRepository {
                                                    Instant now,
                                                    String contractType) {
         String normalizedContractType = emptyToNull(contractType);
+        ProductLine normalizedProductLine = normalizedContractType == null
+                ? null
+                : ProductLine.requireContractTypeCode(normalizedContractType);
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         Instant eventVisibleAt = triggeredAt.plusSeconds(1);
-        String productFilter = normalizedContractType == null ? "" : """
-                       AND EXISTS (
-                            SELECT 1
-                              FROM instrument_current_versions c
-                              JOIN instruments i
-                                ON i.symbol = c.symbol AND i.version = c.version
-                             WHERE c.symbol = trading_trigger_orders.symbol
-                               AND i.contract_type = ?
-                       )
+        String productFilter = normalizedProductLine == null ? "" : """
+                       AND product_line = ?
                 """;
         List<Object> args = new ArrayList<>();
         args.add(symbol);
         args.add(triggerPriceType.name());
-        if (normalizedContractType != null) {
-            args.add(normalizedContractType);
+        if (normalizedProductLine != null) {
+            args.add(normalizedProductLine.name());
         }
         args.add(Timestamp.from(eventVisibleAt));
         args.add(Timestamp.from(now));
@@ -621,28 +674,24 @@ public class TriggerOrderRepository {
                                                            long triggerSequence,
                                                            Instant triggeredAt,
                                                            int limit,
-                                                           Instant now,
-                                                           String contractType) {
+                                                          Instant now,
+                                                          String contractType) {
         String normalizedContractType = emptyToNull(contractType);
+        ProductLine normalizedProductLine = normalizedContractType == null
+                ? null
+                : ProductLine.requireContractTypeCode(normalizedContractType);
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         Instant eventVisibleAt = triggeredAt.plusSeconds(1);
-        String productFilter = normalizedContractType == null ? "" : """
-                       AND EXISTS (
-                            SELECT 1
-                              FROM instrument_current_versions c
-                              JOIN instruments i
-                                ON i.symbol = c.symbol AND i.version = c.version
-                             WHERE c.symbol = trading_trigger_orders.symbol
-                               AND i.contract_type = ?
-                       )
+        String productFilter = normalizedProductLine == null ? "" : """
+                       AND product_line = ?
                 """;
         List<Object> args = new ArrayList<>();
         args.add(priceTicks);
         args.add(priceTicks);
         args.add(symbol);
         args.add(triggerPriceType.name());
-        if (normalizedContractType != null) {
-            args.add(normalizedContractType);
+        if (normalizedProductLine != null) {
+            args.add(normalizedProductLine.name());
         }
         args.add(Timestamp.from(eventVisibleAt));
         args.add(Timestamp.from(now));
@@ -847,6 +896,7 @@ public class TriggerOrderRepository {
         if (normalizedContractType == null) {
             return expirePending(now, limit);
         }
+        ProductLine normalizedProductLine = ProductLine.requireContractTypeCode(normalizedContractType);
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         return jdbcTemplate.update("""
                 WITH expired AS (
@@ -855,14 +905,7 @@ public class TriggerOrderRepository {
                      WHERE o.status = 'PENDING'
                        AND o.expires_at IS NOT NULL
                        AND o.expires_at <= ?
-                       AND EXISTS (
-                            SELECT 1
-                              FROM instrument_current_versions c
-                              JOIN instruments i
-                                ON i.symbol = c.symbol AND i.version = c.version
-                             WHERE c.symbol = o.symbol
-                               AND i.contract_type = ?
-                       )
+                       AND o.product_line = ?
                      ORDER BY o.expires_at ASC, o.trigger_order_id ASC
                      LIMIT ?
                      FOR UPDATE SKIP LOCKED
@@ -870,9 +913,9 @@ public class TriggerOrderRepository {
                 UPDATE trading_trigger_orders o
                    SET status = 'EXPIRED',
                        updated_at = ?
-                  FROM expired e
+                 FROM expired e
                  WHERE o.trigger_order_id = e.trigger_order_id
-                """, Timestamp.from(now), normalizedContractType, normalizedLimit, Timestamp.from(now));
+                """, Timestamp.from(now), normalizedProductLine.name(), normalizedLimit, Timestamp.from(now));
     }
 
     public int resetStaleTriggering(Instant staleBefore, Instant now, int limit) {
@@ -901,6 +944,7 @@ public class TriggerOrderRepository {
         if (normalizedContractType == null) {
             return resetStaleTriggering(staleBefore, now, limit);
         }
+        ProductLine normalizedProductLine = ProductLine.requireContractTypeCode(normalizedContractType);
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         return jdbcTemplate.update("""
                 WITH stale AS (
@@ -908,14 +952,7 @@ public class TriggerOrderRepository {
                       FROM trading_trigger_orders o
                      WHERE o.status = 'TRIGGERING'
                        AND o.updated_at < ?
-                       AND EXISTS (
-                            SELECT 1
-                              FROM instrument_current_versions c
-                              JOIN instruments i
-                                ON i.symbol = c.symbol AND i.version = c.version
-                             WHERE c.symbol = o.symbol
-                               AND i.contract_type = ?
-                       )
+                       AND o.product_line = ?
                      ORDER BY o.updated_at ASC, o.trigger_order_id ASC
                      LIMIT ?
                      FOR UPDATE SKIP LOCKED
@@ -926,12 +963,13 @@ public class TriggerOrderRepository {
                   FROM stale s
                  WHERE o.trigger_order_id = s.trigger_order_id
                    AND o.placed_order_id IS NULL
-                """, Timestamp.from(staleBefore), normalizedContractType, normalizedLimit, Timestamp.from(now));
+                """, Timestamp.from(staleBefore), normalizedProductLine.name(), normalizedLimit, Timestamp.from(now));
     }
 
     private TriggerOrderRecord toRecord(ResultSet rs) throws SQLException {
         return new TriggerOrderRecord(
                 rs.getLong("trigger_order_id"),
+                ProductLine.valueOf(rs.getString("product_line")),
                 rs.getLong("user_id"),
                 stringOrNull(rs, "client_trigger_order_id"),
                 stringOrNull(rs, "oco_group_id"),

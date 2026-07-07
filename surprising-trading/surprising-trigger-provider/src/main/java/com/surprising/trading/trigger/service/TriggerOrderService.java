@@ -74,9 +74,10 @@ public class TriggerOrderService {
     @Transactional
     public TriggerOrderResponse place(PlaceTriggerOrderRequest request) {
         PlaceTriggerOrderRequest normalized = normalize(request);
+        ProductLine productLine = currentProductLine();
         if (hasClientTriggerOrderId(normalized)) {
             var existing = triggerOrderRepository.findByClientTriggerOrderId(
-                    normalized.userId(), normalized.clientTriggerOrderId());
+                    productLine, normalized.userId(), normalized.clientTriggerOrderId());
             if (existing.isPresent()) {
                 TriggerOrderRecord existingOrder = existing.get();
                 requireTriggerOrderCurrentProductLine(existingOrder);
@@ -88,19 +89,19 @@ public class TriggerOrderService {
         if (normalized.expiresAt() != null && !normalized.expiresAt().isAfter(now)) {
             throw new IllegalArgumentException("expiresAt must be in the future");
         }
-        ProductLine productLine = currentProductLine();
         triggerOrderRepository.lockUserPositionMode(productLine, normalized.userId());
         PositionMode positionMode = triggerOrderRepository.positionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
-        triggerOrderRepository.lockUserSymbolMarginScope(normalized.userId(), normalized.symbol());
+        triggerOrderRepository.lockUserSymbolMarginScope(productLine, normalized.userId(), normalized.symbol());
         if (triggerOrderRepository.hasActiveMarginModeConflict(
-                normalized.userId(), normalized.symbol(), normalized.marginMode())) {
+                productLine, normalized.userId(), normalized.symbol(), normalized.marginMode())) {
             throw new IllegalArgumentException("margin mode switch requires closing positions and open orders first");
         }
-        validateCloseCapacity(normalized);
+        validateCloseCapacity(productLine, normalized);
         long triggerOrderId = triggerOrderRepository.nextSequence(TRIGGER_ORDER_SEQUENCE);
         TriggerOrderRecord order = new TriggerOrderRecord(
                 triggerOrderId,
+                productLine,
                 normalized.userId(),
                 emptyToNull(normalized.clientTriggerOrderId()),
                 emptyToNull(normalized.ocoGroupId()),
@@ -133,7 +134,7 @@ public class TriggerOrderService {
                 now);
         boolean inserted = triggerOrderRepository.insert(order);
         if (!inserted && hasClientTriggerOrderId(normalized)) {
-            return triggerOrderRepository.findByClientTriggerOrderId(normalized.userId(),
+            return triggerOrderRepository.findByClientTriggerOrderId(productLine, normalized.userId(),
                             normalized.clientTriggerOrderId())
                     .map(existing -> {
                         requireTriggerOrderCurrentProductLine(existing);
@@ -556,8 +557,8 @@ public class TriggerOrderService {
         return request;
     }
 
-    private void validateCloseCapacity(PlaceTriggerOrderRequest request) {
-        TriggerPosition position = triggerOrderRepository.lockedPosition(request.userId(), request.symbol(),
+    private void validateCloseCapacity(ProductLine productLine, PlaceTriggerOrderRequest request) {
+        TriggerPosition position = triggerOrderRepository.lockedPosition(productLine, request.userId(), request.symbol(),
                 request.marginMode(), request.positionSide()).orElse(null);
         long signedQuantity = position == null ? 0L : position.signedQuantitySteps();
         if (signedQuantity == 0) {
@@ -570,11 +571,13 @@ public class TriggerOrderService {
         if (request.side() != closeSide) {
             throw new IllegalArgumentException("trigger order side does not reduce current position");
         }
-        long openReduceOnlySteps = triggerOrderRepository.openReduceOnlySteps(request.userId(), request.symbol(),
+        long openReduceOnlySteps = triggerOrderRepository.openReduceOnlySteps(productLine, request.userId(),
+                request.symbol(),
                 request.marginMode(), request.positionSide(), position.instrumentVersion(), closeSide);
-        long triggerCapacitySteps = triggerOrderRepository.pendingTriggerCloseSteps(request.userId(), request.symbol(),
+        long triggerCapacitySteps = triggerOrderRepository.pendingTriggerCloseSteps(productLine, request.userId(),
+                request.symbol(),
                 request.marginMode(), request.positionSide(), closeSide);
-        long sameOcoGroupMax = triggerOrderRepository.pendingTriggerOcoGroupMaxSteps(request.userId(),
+        long sameOcoGroupMax = triggerOrderRepository.pendingTriggerOcoGroupMaxSteps(productLine, request.userId(),
                 request.symbol(), request.marginMode(), request.positionSide(), closeSide, request.ocoGroupId());
         long projectedTriggerCapacity = Math.addExact(
                 Math.subtractExact(triggerCapacitySteps, sameOcoGroupMax),

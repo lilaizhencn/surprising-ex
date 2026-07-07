@@ -1,5 +1,6 @@
 package com.surprising.trading.trigger.model;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
@@ -13,6 +14,7 @@ import java.time.Instant;
 
 public record TriggerOrderRecord(
         long triggerOrderId,
+        ProductLine productLine,
         long userId,
         String clientTriggerOrderId,
         String ocoGroupId,
@@ -45,6 +47,7 @@ public record TriggerOrderRecord(
         Instant updatedAt) {
 
     public TriggerOrderRecord {
+        productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
     }
@@ -74,7 +77,8 @@ public record TriggerOrderRecord(
                               Instant triggeredAt,
                               Instant createdAt,
                               Instant updatedAt) {
-        this(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType, triggerPriceType,
+        this(triggerOrderId, ProductLine.LINEAR_PERPETUAL, userId, clientTriggerOrderId, ocoGroupId, symbol, side,
+                triggerType, triggerPriceType,
                 triggerCondition, triggerPriceTicks, null, null, null, null, null, orderType, timeInForce,
                 priceTicks, quantitySteps, marginMode, PositionSide.NET, status, placedOrderId, triggerSequence,
                 triggeredPriceTicks, rejectReason, traceId, expiresAt, triggeredAt, createdAt, updatedAt);
@@ -106,7 +110,8 @@ public record TriggerOrderRecord(
                               Instant triggeredAt,
                               Instant createdAt,
                               Instant updatedAt) {
-        this(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType, triggerPriceType,
+        this(triggerOrderId, ProductLine.LINEAR_PERPETUAL, userId, clientTriggerOrderId, ocoGroupId, symbol, side,
+                triggerType, triggerPriceType,
                 triggerCondition, triggerPriceTicks, null, null, null, null, null, orderType, timeInForce,
                 priceTicks, quantitySteps, marginMode, positionSide, status, placedOrderId, triggerSequence,
                 triggeredPriceTicks, rejectReason, traceId, expiresAt, triggeredAt, createdAt, updatedAt);

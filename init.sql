@@ -1252,6 +1252,7 @@ CREATE TABLE IF NOT EXISTS trading_symbol_open_interest (
 
 CREATE TABLE IF NOT EXISTS trading_trigger_orders (
     trigger_order_id           BIGINT PRIMARY KEY,
+    product_line               TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     user_id                    BIGINT NOT NULL,
     client_trigger_order_id    TEXT,
     oco_group_id               TEXT,
@@ -1283,6 +1284,16 @@ CREATE TABLE IF NOT EXISTS trading_trigger_orders (
     created_at                 TIMESTAMPTZ NOT NULL,
     updated_at                 TIMESTAMPTZ NOT NULL,
     CONSTRAINT trading_trigger_orders_user_positive CHECK (user_id > 0),
+    CONSTRAINT trading_trigger_orders_product_line_check CHECK (
+        product_line IN (
+            'SPOT',
+            'LINEAR_PERPETUAL',
+            'INVERSE_PERPETUAL',
+            'LINEAR_DELIVERY',
+            'INVERSE_DELIVERY',
+            'OPTION'
+        )
+    ),
     CONSTRAINT trading_trigger_orders_client_id_length CHECK (
         client_trigger_order_id IS NULL OR length(client_trigger_order_id) <= 64
     ),
@@ -1347,43 +1358,84 @@ CREATE TABLE IF NOT EXISTS trading_trigger_orders (
     )
 );
 
+ALTER TABLE trading_trigger_orders
+    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+
+ALTER TABLE trading_trigger_orders
+    DROP CONSTRAINT IF EXISTS trading_trigger_orders_product_line_check;
+
+ALTER TABLE trading_trigger_orders
+    ADD CONSTRAINT trading_trigger_orders_product_line_check CHECK (
+        product_line IN (
+            'SPOT',
+            'LINEAR_PERPETUAL',
+            'INVERSE_PERPETUAL',
+            'LINEAR_DELIVERY',
+            'INVERSE_DELIVERY',
+            'OPTION'
+        )
+    );
+
+UPDATE trading_trigger_orders t
+   SET product_line = CASE i.contract_type
+       WHEN 'SPOT' THEN 'SPOT'
+       WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+       WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+       WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+       WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+       WHEN 'VANILLA_OPTION' THEN 'OPTION'
+       ELSE t.product_line
+   END
+  FROM instrument_current_versions c
+  JOIN instruments i ON i.symbol = c.symbol AND i.version = c.version
+ WHERE c.symbol = t.symbol;
+
+DROP INDEX IF EXISTS trading_trigger_orders_user_client_uidx;
+DROP INDEX IF EXISTS trading_trigger_orders_user_status_idx;
+DROP INDEX IF EXISTS trading_trigger_orders_user_oco_idx;
+DROP INDEX IF EXISTS trading_trigger_orders_symbol_gte_idx;
+DROP INDEX IF EXISTS trading_trigger_orders_symbol_lte_idx;
+DROP INDEX IF EXISTS trading_trigger_orders_trailing_pending_idx;
+DROP INDEX IF EXISTS trading_trigger_orders_expiry_idx;
+DROP INDEX IF EXISTS trading_trigger_orders_triggering_idx;
+
 CREATE UNIQUE INDEX IF NOT EXISTS trading_trigger_orders_user_client_uidx
-    ON trading_trigger_orders (user_id, client_trigger_order_id)
+    ON trading_trigger_orders (product_line, user_id, client_trigger_order_id)
     WHERE client_trigger_order_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_user_status_idx
-    ON trading_trigger_orders (user_id, status, updated_at DESC);
+    ON trading_trigger_orders (product_line, user_id, status, updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_user_oco_idx
-    ON trading_trigger_orders (user_id, symbol, margin_mode, oco_group_id, status, updated_at DESC)
+    ON trading_trigger_orders (product_line, user_id, symbol, margin_mode, oco_group_id, status, updated_at DESC)
     WHERE oco_group_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_symbol_gte_idx
-    ON trading_trigger_orders (symbol, trigger_price_ticks, trigger_order_id)
+    ON trading_trigger_orders (product_line, symbol, trigger_price_ticks, trigger_order_id)
     WHERE status = 'PENDING'
       AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
       AND trigger_price_type IN ('MARK_PRICE', 'INDEX_PRICE', 'LAST_PRICE')
       AND trigger_condition = 'GREATER_OR_EQUAL';
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_symbol_lte_idx
-    ON trading_trigger_orders (symbol, trigger_price_ticks DESC, trigger_order_id)
+    ON trading_trigger_orders (product_line, symbol, trigger_price_ticks DESC, trigger_order_id)
     WHERE status = 'PENDING'
       AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
       AND trigger_price_type IN ('MARK_PRICE', 'INDEX_PRICE', 'LAST_PRICE')
       AND trigger_condition = 'LESS_OR_EQUAL';
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_trailing_pending_idx
-    ON trading_trigger_orders (symbol, trigger_price_type, trigger_order_id)
+    ON trading_trigger_orders (product_line, symbol, trigger_price_type, trigger_order_id)
     WHERE status = 'PENDING'
       AND trigger_type = 'TRAILING_STOP';
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_expiry_idx
-    ON trading_trigger_orders (expires_at, trigger_order_id)
+    ON trading_trigger_orders (product_line, expires_at, trigger_order_id)
     WHERE status = 'PENDING'
       AND expires_at IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_triggering_idx
-    ON trading_trigger_orders (updated_at, trigger_order_id)
+    ON trading_trigger_orders (product_line, updated_at, trigger_order_id)
     WHERE status = 'TRIGGERING';
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_trace_idx

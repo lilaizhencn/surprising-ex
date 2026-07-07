@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
@@ -94,9 +95,27 @@ class TriggerOrderRepositoryTest {
         verify(jdbcTemplate).queryForObject(sql.capture(), eq(Boolean.class),
                 eq("ETH-USDT"), eq("INDEX_PRICE"), eq("LINEAR_DELIVERY"));
         assertThat(sql.getValue())
-                .contains("FROM instrument_current_versions c")
-                .contains("i.symbol = c.symbol AND i.version = c.version")
-                .contains("i.contract_type = ?");
+                .contains("o.product_line = ?");
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void findByClientTriggerOrderIdScopesByProductLine() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(List.of());
+
+        repository.findByClientTriggerOrderId(ProductLine.INVERSE_DELIVERY, 1001L, "trigger-1");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("WHERE product_line = ?")
+                .contains("AND user_id = ?")
+                .contains("AND client_trigger_order_id = ?");
+        assertThat(args.getValue()).containsExactly("INVERSE_DELIVERY", 1001L, "trigger-1");
     }
 
     @Test
@@ -144,8 +163,7 @@ class TriggerOrderRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
         assertThat(sql.getValue())
                 .contains("trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')")
-                .contains("FROM instrument_current_versions c")
-                .contains("i.contract_type = ?");
+                .contains("AND product_line = ?");
         assertThat(args.getValue()).contains("LINEAR_DELIVERY");
     }
 
@@ -195,8 +213,7 @@ class TriggerOrderRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
         assertThat(sql.getValue())
                 .contains("trigger_type = 'TRAILING_STOP'")
-                .contains("FROM instrument_current_versions c")
-                .contains("i.contract_type = ?");
+                .contains("AND product_line = ?");
         assertThat(args.getValue()).contains("LINEAR_DELIVERY");
     }
 
@@ -213,8 +230,7 @@ class TriggerOrderRepositoryTest {
         verify(jdbcTemplate).update(sql.capture(), args.capture());
         assertThat(sql.getValue())
                 .contains("o.status = 'PENDING'")
-                .contains("FROM instrument_current_versions c")
-                .contains("i.contract_type = ?");
+                .contains("o.product_line = ?");
         assertThat(args.getValue()).contains("LINEAR_DELIVERY");
     }
 
@@ -231,8 +247,7 @@ class TriggerOrderRepositoryTest {
         verify(jdbcTemplate).update(sql.capture(), args.capture());
         assertThat(sql.getValue())
                 .contains("o.status = 'TRIGGERING'")
-                .contains("FROM instrument_current_versions c")
-                .contains("i.contract_type = ?");
+                .contains("o.product_line = ?");
         assertThat(args.getValue()).contains("LINEAR_DELIVERY");
     }
 
@@ -245,7 +260,7 @@ class TriggerOrderRepositoryTest {
         repository.lockUserSymbolMarginScope(1001L, "BTC-USDT");
 
         verify(jdbcTemplate).query(contains("pg_advisory_xact_lock"),
-                any(ResultSetExtractor.class), eq("1001:BTC-USDT"));
+                any(ResultSetExtractor.class), eq("LINEAR_PERPETUAL:1001:BTC-USDT"));
     }
 
     @Test
@@ -253,8 +268,11 @@ class TriggerOrderRepositoryTest {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
         when(jdbcTemplate.queryForObject(contains("account_positions"), eq(Boolean.class),
+                eq("LINEAR_PERPETUAL"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"),
+                eq("LINEAR_PERPETUAL"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"),
+                eq("LINEAR_PERPETUAL"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS")))
                 .thenReturn(true);
 
@@ -262,8 +280,11 @@ class TriggerOrderRepositoryTest {
 
         assertThat(conflict).isTrue();
         verify(jdbcTemplate).queryForObject(contains("trading_trigger_orders"), eq(Boolean.class),
+                eq("LINEAR_PERPETUAL"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"),
+                eq("LINEAR_PERPETUAL"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"),
+                eq("LINEAR_PERPETUAL"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"));
     }
 
@@ -281,9 +302,7 @@ class TriggerOrderRepositoryTest {
         verify(jdbcTemplate).queryForObject(sql.capture(), any(Class.class), any(), any());
         assertThat(sql.getValue())
                 .contains("FROM trading_trigger_orders o")
-                .contains("JOIN instrument_current_versions c")
-                .contains("i.symbol = c.symbol AND i.version = c.version")
-                .contains("i.contract_type = ?");
+                .contains("o.product_line = ?");
     }
 
     @Test
@@ -300,9 +319,7 @@ class TriggerOrderRepositoryTest {
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
         assertThat(sql.getValue())
-                .contains("FROM instrument_current_versions c")
-                .contains("i.symbol = c.symbol AND i.version = c.version")
-                .contains("i.contract_type = ?");
+                .contains("product_line = ?");
         assertThat(args.getValue()).containsExactly(1001L, "BTC-USDT", "BTC-USDT",
                 "LINEAR_DELIVERY", "LINEAR_DELIVERY", 50);
     }
@@ -321,12 +338,10 @@ class TriggerOrderRepositoryTest {
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
         assertThat(sql.getValue())
-                .contains("FROM instrument_current_versions c")
-                .contains("i.symbol = c.symbol AND i.version = c.version")
-                .contains("i.contract_type = ?")
+                .contains("product_line = ?")
                 .contains("status = 'PENDING'");
         assertThat(args.getValue()).containsExactly(1001L, "BTC-USDT", "BTC-USDT",
-                "VANILLA_OPTION", "VANILLA_OPTION", 25);
+                "OPTION", "OPTION", 25);
     }
 
     @Test
@@ -343,9 +358,7 @@ class TriggerOrderRepositoryTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), any(Object[].class));
         assertThat(sql.getValue())
-                .contains("FROM instruments i")
-                .contains("i.symbol = trading_trigger_orders.symbol")
-                .contains("i.contract_type = ?");
+                .contains("product_line = ?");
     }
 
     @Test
@@ -353,6 +366,7 @@ class TriggerOrderRepositoryTest {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
         when(jdbcTemplate.queryForObject(contains("MAX(quantity_steps)"), eq(Long.class),
+                eq("LINEAR_PERPETUAL"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("LONG"), eq("SELL")))
                 .thenReturn(6L);
 
@@ -361,6 +375,7 @@ class TriggerOrderRepositoryTest {
 
         assertThat(steps).isEqualTo(6L);
         verify(jdbcTemplate).queryForObject(contains("GROUP BY capacity_group"), eq(Long.class),
+                eq("LINEAR_PERPETUAL"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("LONG"), eq("SELL"));
     }
 
@@ -369,6 +384,7 @@ class TriggerOrderRepositoryTest {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
         when(jdbcTemplate.queryForObject(contains("oco_group_id = ?"), eq(Long.class),
+                eq("LINEAR_PERPETUAL"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("LONG"), eq("SELL"), eq("oco-1")))
                 .thenReturn(4L);
 
@@ -377,6 +393,7 @@ class TriggerOrderRepositoryTest {
 
         assertThat(steps).isEqualTo(4L);
         verify(jdbcTemplate).queryForObject(contains("status IN ('PENDING', 'TRIGGERING')"), eq(Long.class),
+                eq("LINEAR_PERPETUAL"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("LONG"), eq("SELL"), eq("oco-1"));
     }
 }

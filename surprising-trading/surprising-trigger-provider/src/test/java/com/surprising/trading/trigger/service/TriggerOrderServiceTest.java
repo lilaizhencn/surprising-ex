@@ -219,7 +219,8 @@ class TriggerOrderServiceTest {
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         TriggerOrderRecord existing = record(501L, TriggerOrderStatus.PENDING);
-        when(repository.findByClientTriggerOrderId(1001L, "sl-1")).thenReturn(Optional.of(existing));
+        when(repository.findByClientTriggerOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "sl-1"))
+                .thenReturn(Optional.of(existing));
 
         TriggerOrderResponse response = service.place(new PlaceTriggerOrderRequest(1001L, "sl-1", null, "BTC-USDT",
                 OrderSide.SELL, TriggerOrderType.STOP_LOSS, TriggerPriceType.MARK_PRICE, 60_000L,
@@ -237,14 +238,15 @@ class TriggerOrderServiceTest {
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-iso", null, "BTC-USDT",
                 OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, TriggerPriceType.MARK_PRICE, 70_000L,
                 OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.ISOLATED, null);
-        when(repository.hasActiveMarginModeConflict(1001L, "BTC-USDT", MarginMode.ISOLATED))
+        when(repository.hasActiveMarginModeConflict(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
+                MarginMode.ISOLATED))
                 .thenReturn(true);
 
         assertThatThrownBy(() -> service.place(request))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("margin mode switch requires closing positions and open orders first");
 
-        verify(repository).lockUserSymbolMarginScope(1001L, "BTC-USDT");
+        verify(repository).lockUserSymbolMarginScope(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT");
         verify(repository, never()).nextSequence("trigger-order");
         verify(repository, never()).insert(any());
     }
@@ -262,7 +264,7 @@ class TriggerOrderServiceTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("positionSide LONG/SHORT requires HEDGE position mode");
 
-        verify(repository, never()).lockUserSymbolMarginScope(anyLong(), anyString());
+        verify(repository, never()).lockUserSymbolMarginScope(any(), anyLong(), anyString());
         verify(repository, never()).nextSequence("trigger-order");
         verify(repository, never()).insert(any());
     }
@@ -275,7 +277,8 @@ class TriggerOrderServiceTest {
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-empty", null, "BTC-USDT",
                 OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, TriggerPriceType.MARK_PRICE, 70_000L,
                 OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS, null);
-        when(repository.lockedPosition(1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET))
+        when(repository.lockedPosition(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
+                PositionSide.NET))
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.place(request))
@@ -380,7 +383,7 @@ class TriggerOrderServiceTest {
                 OrderType.MARKET, TimeInForce.IOC, 0L, 7L, MarginMode.CROSS, null);
         when(repository.nextSequence("trigger-order")).thenReturn(506L);
         stubCloseCapacity(repository, 10L, 0L, 0L, 0L);
-        when(repository.pendingTriggerCloseSteps(anyLong(), anyString(), any(), any(), any()))
+        when(repository.pendingTriggerCloseSteps(any(), anyLong(), anyString(), any(), any(), any()))
                 .thenReturn(0L, 4L);
         when(repository.insert(any())).thenReturn(true);
 
@@ -905,13 +908,13 @@ class TriggerOrderServiceTest {
                                    long openReduceOnlySteps,
                                    long pendingTriggerCloseSteps,
                                    long sameOcoGroupMaxSteps) {
-        when(repository.lockedPosition(anyLong(), anyString(), any(), any()))
+        when(repository.lockedPosition(any(), anyLong(), anyString(), any(), any()))
                 .thenReturn(Optional.of(new TriggerPosition(signedQuantitySteps, 1L)));
-        when(repository.openReduceOnlySteps(anyLong(), anyString(), any(), any(), anyLong(), any()))
+        when(repository.openReduceOnlySteps(any(), anyLong(), anyString(), any(), any(), anyLong(), any()))
                 .thenReturn(openReduceOnlySteps);
-        when(repository.pendingTriggerCloseSteps(anyLong(), anyString(), any(), any(), any()))
+        when(repository.pendingTriggerCloseSteps(any(), anyLong(), anyString(), any(), any(), any()))
                 .thenReturn(pendingTriggerCloseSteps);
-        when(repository.pendingTriggerOcoGroupMaxSteps(anyLong(), anyString(), any(), any(), any(), any()))
+        when(repository.pendingTriggerOcoGroupMaxSteps(any(), anyLong(), anyString(), any(), any(), any(), any()))
                 .thenReturn(sameOcoGroupMaxSteps);
     }
 
