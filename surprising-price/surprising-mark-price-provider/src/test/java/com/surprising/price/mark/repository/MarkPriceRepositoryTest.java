@@ -9,6 +9,8 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PriceStatus;
+import com.surprising.price.mark.config.MarkPriceProperties;
+import com.surprising.product.api.ProductLine;
 import java.math.BigDecimal;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
@@ -39,7 +41,28 @@ class MarkPriceRepositoryTest {
                 .contains("CAST(round(? * qs.scale_units) AS BIGINT)")
                 .contains("JOIN instrument_current_versions c")
                 .contains("JOIN account_asset_scales qs")
+                .doesNotContain("i.contract_type = ?")
                 .doesNotContain("/ i.price_tick_units");
+    }
+
+    @Test
+    void saveFiltersInstrumentByConfiguredProductLineWhenProductTopicsAreEnabled() {
+        MarkPriceProperties properties = new MarkPriceProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
+        MarkPriceRepository repository = new MarkPriceRepository(jdbcTemplate, properties);
+        when(jdbcTemplate.update(contains("INSERT INTO price_mark_ticks"), any(Object[].class)))
+                .thenReturn(1);
+
+        repository.save(event());
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(sql.capture(), args.capture());
+        assertThat(sql.getValue())
+                .contains("AND i.contract_type = ?")
+                .contains("JOIN instrument_current_versions c");
+        assertThat(args.getValue()).endsWith("BTC-USDT", "INVERSE_DELIVERY");
     }
 
     @Test

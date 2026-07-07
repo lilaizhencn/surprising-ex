@@ -3,39 +3,31 @@ package com.surprising.price.mark.repository;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPriceResponse;
 import com.surprising.price.api.model.PriceStatus;
+import com.surprising.price.mark.config.MarkPriceProperties;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
 public class MarkPriceRepository {
 
-    private static final String INSERT_SQL = """
-            INSERT INTO price_mark_ticks (
-                symbol, sequence, mark_price, mark_price_units, index_price, price1, price2, last_trade_price,
-                best_bid_price, best_ask_price, funding_rate, next_funding_time, time_until_funding_seconds,
-                basis_average, basis_window_seconds, clamp_low, clamp_high, status, event_time
-            )
-            SELECT ?, ?, ?,
-                   CAST(round(? * qs.scale_units) AS BIGINT),
-                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-              FROM instruments i
-              JOIN instrument_current_versions c
-                ON c.symbol = i.symbol AND c.version = i.version
-              JOIN account_asset_scales qs
-                ON qs.asset = i.quote_asset
-             WHERE i.symbol = ?
-            ON CONFLICT (symbol, sequence) DO NOTHING
-            """;
-
     private final JdbcTemplate jdbcTemplate;
+    private final MarkPriceProperties properties;
 
-    public MarkPriceRepository(JdbcTemplate jdbcTemplate) {
+    MarkPriceRepository(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, new MarkPriceProperties());
+    }
+
+    @Autowired
+    public MarkPriceRepository(JdbcTemplate jdbcTemplate, MarkPriceProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
+        this.properties = properties == null ? new MarkPriceProperties() : properties;
     }
 
     public boolean acquireLease(String module, String symbol, String ownerId, Duration leaseDuration) {
@@ -74,12 +66,31 @@ public class MarkPriceRepository {
     }
 
     public void save(MarkPriceEvent event) {
-        int rows = jdbcTemplate.update(INSERT_SQL, event.symbol(), event.sequence(), event.markPrice(),
-                event.markPrice(), event.indexPrice(),
-                event.price1(), event.price2(), event.lastTradePrice(), event.bestBidPrice(), event.bestAskPrice(),
-                event.fundingRate(), Timestamp.from(event.nextFundingTime()), event.timeUntilFundingSeconds(),
-                event.basisAverage(), event.basisWindowSeconds(), event.clampLow(), event.clampHigh(),
-                event.status().name(), Timestamp.from(event.eventTime()), event.symbol());
+        List<Object> args = new ArrayList<>(List.of(event.symbol(), event.sequence(), event.markPrice(),
+                event.markPrice(), event.indexPrice(), event.price1(), event.price2(), event.lastTradePrice(),
+                event.bestBidPrice(), event.bestAskPrice(), event.fundingRate(),
+                Timestamp.from(event.nextFundingTime()), event.timeUntilFundingSeconds(), event.basisAverage(),
+                event.basisWindowSeconds(), event.clampLow(), event.clampHigh(), event.status().name(),
+                Timestamp.from(event.eventTime()), event.symbol()));
+        String productCondition = productCondition(args, "i");
+        int rows = jdbcTemplate.update("""
+                INSERT INTO price_mark_ticks (
+                    symbol, sequence, mark_price, mark_price_units, index_price, price1, price2, last_trade_price,
+                    best_bid_price, best_ask_price, funding_rate, next_funding_time, time_until_funding_seconds,
+                    basis_average, basis_window_seconds, clamp_low, clamp_high, status, event_time
+                )
+                SELECT ?, ?, ?,
+                       CAST(round(? * qs.scale_units) AS BIGINT),
+                       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                  FROM instruments i
+                  JOIN instrument_current_versions c
+                    ON c.symbol = i.symbol AND c.version = i.version
+                  JOIN account_asset_scales qs
+                    ON qs.asset = i.quote_asset
+                 WHERE i.symbol = ?
+                %s
+                ON CONFLICT (symbol, sequence) DO NOTHING
+                """.formatted(productCondition), args.toArray());
         if (rows != 1) {
             throw new IllegalStateException("mark price insert failed for " + event.symbol()
                     + " sequence=" + event.sequence());
@@ -148,5 +159,13 @@ public class MarkPriceRepository {
                         PriceStatus.valueOf(rs.getString("status")),
                         rs.getTimestamp("event_time").toInstant()),
                 symbol, Timestamp.from(startTime), Timestamp.from(endTime), limit);
+    }
+
+    private String productCondition(List<Object> args, String alias) {
+        if (!properties.getKafka().isProductTopicsEnabled()) {
+            return "";
+        }
+        args.add(properties.getKafka().getProductLine().contractTypeCode());
+        return "   AND " + alias + ".contract_type = ?";
     }
 }
