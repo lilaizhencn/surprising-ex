@@ -13,6 +13,7 @@ BUILD_SERVICES="${BUILD_SERVICES:-true}"
 KEEP_TMP="${KEEP_TMP:-true}"
 RESET_KAFKA="${RESET_KAFKA:-false}"
 CREATE_KAFKA_TOPICS="${CREATE_KAFKA_TOPICS:-false}"
+RECONCILE_FUNDS="${RECONCILE_FUNDS:-true}"
 RUN_ID="${RUN_ID:-$(date +%s%N)}"
 RUN_SEQ=$((RUN_ID % 1000000000))
 RUN_SEQUENCE_BASE=$((500000000 + (RUN_SEQ % 500000) * 3000))
@@ -538,6 +539,7 @@ provider_module() {
     account) echo "surprising-account/surprising-account-provider" ;;
     risk) echo "surprising-risk/surprising-risk-provider" ;;
     liquidation) echo "surprising-liquidation/surprising-liquidation-provider" ;;
+    insurance) echo "surprising-insurance/surprising-insurance-provider" ;;
     funding) echo "surprising-funding/surprising-funding-provider" ;;
     gateway) echo "surprising-gateway/surprising-gateway-provider" ;;
     market-maker) echo "surprising-market-maker/surprising-market-maker-provider" ;;
@@ -554,6 +556,7 @@ provider_artifact() {
     account) echo "surprising-account-provider" ;;
     risk) echo "surprising-risk-provider" ;;
     liquidation) echo "surprising-liquidation-provider" ;;
+    insurance) echo "surprising-insurance-provider" ;;
     funding) echo "surprising-funding-provider" ;;
     gateway) echo "surprising-gateway-provider" ;;
     market-maker) echo "surprising-market-maker-provider" ;;
@@ -570,6 +573,7 @@ provider_port() {
     account) echo 9086 ;;
     risk) echo 9087 ;;
     liquidation) echo 9088 ;;
+    insurance) echo 9090 ;;
     funding) echo 9089 ;;
     gateway) echo 9094 ;;
     market-maker) echo 9096 ;;
@@ -584,7 +588,7 @@ package_services() {
   fi
   local missing=()
   local name
-  for name in instrument mark-price order matching account risk liquidation funding gateway market-maker; do
+  for name in instrument mark-price order matching account risk liquidation insurance funding gateway market-maker; do
     if ! boot_jar "$(provider_module "${name}")" "$(provider_artifact "${name}")" >/dev/null 2>&1; then
       missing+=(":$(provider_artifact "${name}")")
     fi
@@ -595,7 +599,7 @@ package_services() {
   fi
   local selectors
   if [[ "${BUILD_SERVICES}" == "true" ]]; then
-    selectors=":surprising-instrument-provider,:surprising-mark-price-provider,:surprising-order-provider,:surprising-matching-provider,:surprising-account-provider,:surprising-risk-provider,:surprising-liquidation-provider,:surprising-funding-provider,:surprising-gateway-provider,:surprising-market-maker-provider"
+    selectors=":surprising-instrument-provider,:surprising-mark-price-provider,:surprising-order-provider,:surprising-matching-provider,:surprising-account-provider,:surprising-risk-provider,:surprising-liquidation-provider,:surprising-insurance-provider,:surprising-funding-provider,:surprising-gateway-provider,:surprising-market-maker-provider"
   else
     local IFS=,
     selectors="${missing[*]}"
@@ -672,6 +676,16 @@ product_provider_args() {
         "--surprising.liquidation.kafka.product-topics-enabled=true" \
         "--surprising.liquidation.kafka.group-id=product-smoke-${RUN_ID}-${slug}-liquidation" \
         "--surprising.liquidation.kafka.concurrency=1"
+      ;;
+    insurance)
+      printf '%s\n' \
+        "--surprising.insurance.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
+        "--surprising.insurance.kafka.product-line=${product_line}" \
+        "--surprising.insurance.kafka.product-topics-enabled=false" \
+        "--surprising.insurance.kafka.liquidation-fee-events-topic=$(topic_name "${product_line}" "account.liquidation-fee.events")" \
+        "--surprising.insurance.kafka.group-id=product-smoke-${RUN_ID}-${slug}-insurance" \
+        "--surprising.insurance.kafka.concurrency=1" \
+        "--surprising.insurance.coverage.scan-delay-ms=500"
       ;;
     funding)
       printf '%s\n' \
@@ -764,6 +778,7 @@ start_providers_for_line() {
   if is_margin_product "${product_line}"; then
     start_provider risk "${product_line}"
     start_provider liquidation "${product_line}"
+    start_provider insurance "${product_line}"
     if is_funding_product "${product_line}"; then
       start_provider funding "${product_line}"
     fi
@@ -1108,6 +1123,38 @@ assert_no_negative_balances() {
     "0"
 }
 
+assert_liquidation_fees_insured() {
+  local product_line="$1"
+  local type
+  type="$(account_type "${product_line}")"
+  if ! is_margin_product "${product_line}"; then
+    return
+  fi
+  wait_sql_equals "liquidation fees insured ${product_line}" \
+    "WITH user_liq AS (
+       SELECT '${type}' AS account_type, asset, reference_id, amount_units
+         FROM account_ledger_entries
+        WHERE '${type}' = 'USDT_PERPETUAL'
+          AND reference_type = 'LIQUIDATION_FEE'
+       UNION ALL
+       SELECT account_type, asset, reference_id, amount_units
+         FROM account_product_ledger_entries
+        WHERE account_type = '${type}'
+          AND reference_type = 'LIQUIDATION_FEE'
+     )
+     SELECT count(*)
+       FROM user_liq l
+       LEFT JOIN insurance_fund_ledger i
+         ON i.reference_type = 'LIQUIDATION_FEE'
+        AND i.reference_id = l.reference_id
+        AND i.account_type = l.account_type
+        AND i.asset = l.asset
+      WHERE i.entry_id IS NULL
+         OR i.amount_units <> -l.amount_units" \
+    "0" \
+    "180"
+}
+
 assert_outbox_drained() {
   local product_line="$1"
   wait_sql_equals "trading outbox drained ${product_line}" \
@@ -1120,7 +1167,22 @@ assert_outbox_drained() {
     wait_sql_equals "risk outbox drained ${product_line}" \
       "SELECT count(*) FROM risk_outbox_events WHERE published_at IS NULL" \
       "0"
+    assert_liquidation_fees_insured "${product_line}"
   fi
+}
+
+reconcile_funds() {
+  local product_line="$1"
+  if [[ "${RECONCILE_FUNDS}" != "true" ]]; then
+    return
+  fi
+  PRODUCT_LINES="${product_line}" \
+    DB_HOST=localhost \
+    DB_USER="${DB_USER}" \
+    DB_PASSWORD="${DB_PASSWORD}" \
+    DB_NAME="${DB_NAME}" \
+    POSTGRES_PORT="${POSTGRES_PORT}" \
+    "${ROOT_DIR}/scripts/product-line-funds-reconcile.sh"
 }
 
 wait_market_maker_running() {
@@ -1499,6 +1561,7 @@ run_line() {
   assert_no_negative_balances "${product_line}"
   assert_outbox_drained "${product_line}"
   stop_all_providers
+  reconcile_funds "${product_line}"
   echo "Product line ${product_line} passed"
 }
 
