@@ -13,6 +13,7 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -69,20 +70,40 @@ public class ReduceOnlyOrderPruner {
     }
 
     private List<OpenReduceOnlyOrder> lockOpenReduceOnlyOrders(long userId, String symbol, PositionSide positionSide) {
-        return jdbcTemplate.query("""
-                SELECT order_id, user_id, client_order_id, symbol, instrument_version, side, order_type,
-                       time_in_force, price_ticks, quantity_steps, remaining_quantity_steps, status, post_only,
-                       created_at
-                  FROM trading_orders
-                 WHERE user_id = ?
-                   AND symbol = ?
-                   AND position_side = ?
-                   AND reduce_only = TRUE
-                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
-                   AND remaining_quantity_steps > 0
-                 ORDER BY created_at ASC, order_id ASC
+        StringBuilder sql = new StringBuilder("""
+                SELECT o.order_id, o.user_id, o.client_order_id, o.symbol, o.instrument_version, o.side,
+                       o.order_type, o.time_in_force, o.price_ticks, o.quantity_steps,
+                       o.remaining_quantity_steps, o.status, o.post_only, o.created_at
+                  FROM trading_orders o
+                """);
+        List<Object> args = new ArrayList<>();
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            sql.append("""
+                  JOIN instruments i
+                    ON i.symbol = o.symbol
+                   AND i.version = o.instrument_version
+                """);
+        }
+        sql.append("""
+                 WHERE o.user_id = ?
+                   AND o.symbol = ?
+                   AND o.position_side = ?
+                   AND o.reduce_only = TRUE
+                   AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                   AND o.remaining_quantity_steps > 0
+                """);
+        args.add(userId);
+        args.add(symbol);
+        args.add(PositionSide.defaultIfNull(positionSide).name());
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            sql.append("   AND i.contract_type = ?\n");
+            args.add(properties.getKafka().getProductLine().contractTypeCode());
+        }
+        sql.append("""
+                 ORDER BY o.created_at ASC, o.order_id ASC
                  FOR UPDATE
-                """, (rs, rowNum) -> new OpenReduceOnlyOrder(
+                """);
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new OpenReduceOnlyOrder(
                 rs.getLong("order_id"),
                 rs.getLong("user_id"),
                 rs.getString("client_order_id"),
@@ -96,8 +117,7 @@ public class ReduceOnlyOrderPruner {
                 rs.getLong("remaining_quantity_steps"),
                 OrderStatus.valueOf(rs.getString("status")),
                 rs.getBoolean("post_only"),
-                rs.getTimestamp("created_at").toInstant()), userId, symbol,
-                PositionSide.defaultIfNull(positionSide).name());
+                rs.getTimestamp("created_at").toInstant()), args.toArray());
     }
 
     private void requestReduceOnlyCancel(OpenReduceOnlyOrder order, Instant now, String traceId) {

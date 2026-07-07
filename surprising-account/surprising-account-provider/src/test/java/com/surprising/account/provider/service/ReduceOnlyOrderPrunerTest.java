@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.PositionState;
+import com.surprising.product.api.ProductLine;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -34,6 +35,27 @@ class ReduceOnlyOrderPrunerTest {
 
     @Mock
     private JdbcTemplate jdbcTemplate;
+
+    @Test
+    void productTopicsScopeOpenReduceOnlyOrdersByContractType() {
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        when(jdbcTemplate.query(contains("FROM trading_orders"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT-240927"), eq("NET"), eq("LINEAR_DELIVERY")))
+                .thenReturn(List.of());
+
+        new ReduceOnlyOrderPruner(jdbcTemplate, properties, new ObjectMapper())
+                .prune(1001L, "BTC-USDT-240927", new PositionState(4L, 1L, 100L, 0L), NOW);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT-240927"), eq("NET"), eq("LINEAR_DELIVERY"));
+        assertThat(sql.getValue())
+                .contains("JOIN instruments i")
+                .contains("i.version = o.instrument_version")
+                .contains("i.contract_type = ?");
+    }
 
     @Test
     void cancelsNewestReduceOnlyOrdersBeyondCurrentPositionCapacity() throws Exception {
