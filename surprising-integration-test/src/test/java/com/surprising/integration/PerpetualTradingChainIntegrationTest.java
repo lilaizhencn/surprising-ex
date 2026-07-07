@@ -289,6 +289,55 @@ class PerpetualTradingChainIntegrationTest {
         }
     }
 
+    @Test
+    void outOfMoneyCallOptionExerciseReleasesSellerMarginWithoutCashPayoff() {
+        try (Harness harness = Harness.option()) {
+            harness.state.setBalance(1001L, 10_000L);
+            harness.state.setBalance(2002L, 10_000L);
+
+            harness.place(2002L, "option-otm-maker-sell-5", OrderSide.SELL, OrderType.LIMIT,
+                    TimeInForce.GTC, 5L, 2L, false);
+            harness.place(1001L, "option-otm-taker-buy-5", OrderSide.BUY, OrderType.LIMIT,
+                    TimeInForce.IOC, 5L, 2L, false);
+            harness.processNewOrderCommands();
+
+            assertBalance(harness.state.balance(1001L), 9_000L, 0L, 0L);
+            assertBalance(harness.state.balance(2002L), 9_900L, 1_100L, 0L);
+
+            harness.state.underlyingMarkPriceUnits = 90L;
+            assertThat(harness.exerciseCallOption(VERSION + 1, 100L)).isEqualTo(2);
+            assertThat(harness.exerciseCallOption(VERSION + 1, 100L)).isZero();
+
+            assertThat(harness.state.position(1001L)).isEqualTo(new PositionState(0L, 0L, 0L, -1_000L));
+            assertThat(harness.state.position(2002L)).isEqualTo(new PositionState(0L, 0L, 0L, 1_000L));
+            assertBalance(harness.state.balance(1001L), 9_000L, 0L, 0L);
+            assertBalance(harness.state.balance(2002L), 11_000L, 0L, 0L);
+        }
+    }
+
+    @Test
+    void putOptionPremiumTradeThenEuropeanExerciseMovesCashOnce() {
+        try (Harness harness = Harness.option()) {
+            harness.state.setBalance(1001L, 10_000L);
+            harness.state.setBalance(2002L, 10_000L);
+
+            harness.place(2002L, "option-put-maker-sell-5", OrderSide.SELL, OrderType.LIMIT,
+                    TimeInForce.GTC, 5L, 2L, false);
+            harness.place(1001L, "option-put-taker-buy-5", OrderSide.BUY, OrderType.LIMIT,
+                    TimeInForce.IOC, 5L, 2L, false);
+            harness.processNewOrderCommands();
+
+            harness.state.underlyingMarkPriceUnits = 70L;
+            assertThat(harness.exercisePutOption(VERSION + 1, 100L)).isEqualTo(2);
+            assertThat(harness.exercisePutOption(VERSION + 1, 100L)).isZero();
+
+            assertThat(harness.state.position(1001L)).isEqualTo(new PositionState(0L, 0L, 0L, 5_000L));
+            assertThat(harness.state.position(2002L)).isEqualTo(new PositionState(0L, 0L, 0L, -5_000L));
+            assertBalance(harness.state.balance(1001L), 15_000L, 0L, 0L);
+            assertBalance(harness.state.balance(2002L), 5_000L, 0L, 0L);
+        }
+    }
+
     private static void assertBalance(BalanceState actual,
                                       long availableUnits,
                                       long lockedUnits,
@@ -733,14 +782,30 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         private int exerciseCallOption(long eventVersion, long strikePriceUnits) {
+            return exerciseOption(eventVersion, strikePriceUnits, OptionType.CALL);
+        }
+
+        private int exercisePutOption(long eventVersion, long strikePriceUnits) {
+            return exerciseOption(eventVersion, strikePriceUnits, OptionType.PUT);
+        }
+
+        private int exerciseOption(long eventVersion, long strikePriceUnits, OptionType optionType) {
             return accountService.processOptionExercise(new OptionExerciseEvent(
-                    SYMBOL, eventVersion, SYMBOL, strikePriceUnits, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
+                    SYMBOL, eventVersion, SYMBOL, strikePriceUnits, optionType, OptionExerciseStyle.EUROPEAN,
                     Instant.now(), Instant.now(), ContractSettlementMethod.CASH, InstrumentStatus.CLOSED,
-                    Instant.now(), optionInstrument(eventVersion, strikePriceUnits, InstrumentStatus.CLOSED)));
+                    Instant.now(), optionInstrument(eventVersion, strikePriceUnits, optionType,
+                            InstrumentStatus.CLOSED)));
         }
 
         private InstrumentResponse optionInstrument(long version, long strikePriceUnits, InstrumentStatus status) {
-            return instrument(version, status, SYMBOL, strikePriceUnits, OptionType.CALL);
+            return optionInstrument(version, strikePriceUnits, OptionType.CALL, status);
+        }
+
+        private InstrumentResponse optionInstrument(long version,
+                                                    long strikePriceUnits,
+                                                    OptionType optionType,
+                                                    InstrumentStatus status) {
+            return instrument(version, status, SYMBOL, strikePriceUnits, optionType);
         }
 
         private InstrumentResponse instrument(InstrumentStatus status) {

@@ -357,6 +357,94 @@ class AccountServiceTest {
     }
 
     @Test
+    void putOptionExercisePaysIntrinsicValueToLongAndDebitsShort() {
+        String symbol = "BTC-USDT-260925-70000-P";
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
+                "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
+        repository.positions.put(new PositionKey(1001L, symbol, MarginMode.CROSS, PositionSide.NET),
+                new PositionState(3L, 6L, 8L, 0L));
+        repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
+                new PositionState(-3L, 6L, 8L, 0L));
+        repository.latestMarkPriceUnits.put("BTC-USDT", 70L);
+        AccountService service = new AccountService(repository, new PositionCalculator());
+
+        int settled = service.processOptionExercise(new OptionExerciseEvent(
+                symbol, 6L, "BTC-USDT", 100L, OptionType.PUT, OptionExerciseStyle.EUROPEAN,
+                EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
+                optionInstrument(symbol, 6L, "BTC-USDT", 100L, OptionType.PUT)));
+
+        assertThat(settled).isEqualTo(2);
+        assertThat(repository.positionState(1001L, symbol))
+                .isEqualTo(new PositionState(0L, 0L, 0L, 66L));
+        assertThat(repository.positionState(2002L, symbol))
+                .isEqualTo(new PositionState(0L, 0L, 0L, -66L));
+        assertThat(repository.lifecyclePnlByUser).containsEntry(1001L, 90L).containsEntry(2002L, -90L);
+        assertThat(repository.lifecycleAccountTypes).containsExactly(AccountType.OPTION, AccountType.OPTION);
+        assertThat(repository.releasedPositionMargin)
+                .containsEntry(new PositionKey(1001L, symbol, MarginMode.CROSS), 3L)
+                .containsEntry(new PositionKey(2002L, symbol, MarginMode.CROSS), 3L);
+        assertThat(repository.scopedPositionMarginReleaseLines)
+                .containsExactly(ProductLine.OPTION, ProductLine.OPTION);
+        assertThat(repository.scopedPositionUpdateLines)
+                .containsExactly(ProductLine.OPTION, ProductLine.OPTION);
+    }
+
+    @Test
+    void outOfMoneyOptionExerciseClosesPositionsWithoutCashPayoff() {
+        String symbol = "BTC-USDT-260925-70000-C";
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
+                "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
+        repository.positions.put(new PositionKey(1001L, symbol, MarginMode.CROSS, PositionSide.NET),
+                new PositionState(2L, 6L, 5L, 0L));
+        repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
+                new PositionState(-2L, 6L, 5L, 0L));
+        repository.latestMarkPriceUnits.put("BTC-USDT", 90L);
+        AccountService service = new AccountService(repository, new PositionCalculator());
+
+        int settled = service.processOptionExercise(new OptionExerciseEvent(
+                symbol, 6L, "BTC-USDT", 100L, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
+                EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
+                optionInstrument(symbol, 6L, "BTC-USDT", 100L, OptionType.CALL)));
+
+        assertThat(settled).isEqualTo(2);
+        assertThat(repository.positionState(1001L, symbol))
+                .isEqualTo(new PositionState(0L, 0L, 0L, -10L));
+        assertThat(repository.positionState(2002L, symbol))
+                .isEqualTo(new PositionState(0L, 0L, 0L, 10L));
+        assertThat(repository.lifecyclePnlByUser).containsEntry(1001L, 0L).containsEntry(2002L, 0L);
+        assertThat(repository.releasedPositionMargin)
+                .containsEntry(new PositionKey(1001L, symbol, MarginMode.CROSS), 2L)
+                .containsEntry(new PositionKey(2002L, symbol, MarginMode.CROSS), 2L);
+    }
+
+    @Test
+    void optionExerciseDoesNotSettleClosedPositionsTwice() {
+        String symbol = "BTC-USDT-260925-70000-C";
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
+                "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
+        repository.positions.put(new PositionKey(1001L, symbol, MarginMode.CROSS, PositionSide.NET),
+                new PositionState(2L, 6L, 20L, 0L));
+        repository.latestMarkPriceUnits.put("BTC-USDT", 150L);
+        AccountService service = new AccountService(repository, new PositionCalculator());
+        OptionExerciseEvent event = new OptionExerciseEvent(
+                symbol, 6L, "BTC-USDT", 100L, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
+                EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
+                optionInstrument(symbol, 6L, "BTC-USDT", 100L, OptionType.CALL));
+
+        assertThat(service.processOptionExercise(event)).isEqualTo(1);
+        assertThat(service.processOptionExercise(event)).isZero();
+
+        assertThat(repository.lifecyclePnlByUser).containsEntry(1001L, 100L);
+        assertThat(repository.lifecycleReferences).containsExactly(
+                "OPTION_EXERCISE:BTC-USDT-260925-70000-C:6:1001:CROSS:NET");
+        assertThat(repository.releasedPositionMargin)
+                .containsEntry(new PositionKey(1001L, symbol, MarginMode.CROSS), 2L);
+    }
+
+    @Test
     void optionExerciseRequiresInstrumentSnapshotBeforeFundsAreSettled() {
         String symbol = "BTC-USDT-260925-70000-C";
         FakeAccountRepository repository = new FakeAccountRepository();
@@ -1006,7 +1094,7 @@ class AccountServiceTest {
         @Override
         public ContractSpec contractSpec(String symbol, long instrumentVersion) {
             assertThat(symbol).isIn("BTC-USDT", "ETH-USDT", "BTC-USDT-DELIVERY",
-                    "BTC-USDT-260925-70000-C");
+                    "BTC-USDT-260925-70000-C", "BTC-USDT-260925-70000-P");
             contractSpecLoads.merge(symbol + ":" + instrumentVersion, 1, Integer::sum);
             return Optional.ofNullable(contractSpecs.get(symbol + ":" + instrumentVersion))
                     .orElseGet(() -> new ContractSpec(instrumentVersion, ContractType.LINEAR_PERPETUAL,
@@ -1314,7 +1402,7 @@ class AccountServiceTest {
                                       Instant now) {
             assertThat(asset).isEqualTo("USDT");
             assertThat(symbol).isIn("BTC-USDT", "ETH-USDT", "BTC-USDT-DELIVERY",
-                    "BTC-USDT-260925-70000-C");
+                    "BTC-USDT-260925-70000-C", "BTC-USDT-260925-70000-P");
             assertThat(marginMode).isIn(MarginMode.CROSS, MarginMode.ISOLATED);
             pnlByUser.merge(userId, realizedPnlDeltaUnits, Long::sum);
         }
@@ -1345,7 +1433,8 @@ class AccountServiceTest {
                                           long realizedPnlDeltaUnits,
                                           Instant now) {
             assertThat(asset).isEqualTo("USDT");
-            assertThat(symbol).isIn("BTC-USDT-DELIVERY", "BTC-USDT-260925-70000-C");
+            assertThat(symbol).isIn("BTC-USDT-DELIVERY", "BTC-USDT-260925-70000-C",
+                    "BTC-USDT-260925-70000-P");
             assertThat(marginMode).isIn(MarginMode.CROSS, MarginMode.ISOLATED);
             assertThat(reason).isEqualTo(referenceType);
             lifecycleAccountTypes.add(accountType);
@@ -1368,7 +1457,7 @@ class AccountServiceTest {
                                         Instant now) {
             assertThat(accountType).isEqualTo(AccountType.OPTION);
             assertThat(asset).isEqualTo("USDT");
-            assertThat(symbol).isEqualTo("BTC-USDT-260925-70000-C");
+            assertThat(symbol).isIn("BTC-USDT-260925-70000-C", "BTC-USDT-260925-70000-P");
             assertThat(premiumUnits).isPositive();
             optionPremiumAccountTypes.add(accountType);
             optionPremiumByUser.merge(userId, side == OrderSide.BUY ? Math.negateExact(premiumUnits) : premiumUnits,
@@ -1388,7 +1477,7 @@ class AccountServiceTest {
                                    Instant now) {
             assertThat(asset).isEqualTo("USDT");
             assertThat(symbol).isIn("BTC-USDT", "ETH-USDT", "BTC-USDT-DELIVERY",
-                    "BTC-USDT-260925-70000-C");
+                    "BTC-USDT-260925-70000-C", "BTC-USDT-260925-70000-P");
             assertThat(marginMode).isIn(MarginMode.CROSS, MarginMode.ISOLATED);
             OrderFeeSnapshot snapshot = feeSnapshots.get(orderId);
             assertThat(feeRatePpm).isEqualTo("TAKER_FEE".equals(reason)
