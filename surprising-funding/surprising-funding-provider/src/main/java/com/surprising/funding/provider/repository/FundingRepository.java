@@ -225,6 +225,11 @@ public class FundingRepository {
     }
 
     public List<FundingPaymentCandidate> paymentCandidates(FundingRateResponse rate) {
+        Optional<ProductLine> fundingProductLine = currentFundingProductLine();
+        if (fundingProductLine.isEmpty()) {
+            return List.of();
+        }
+        ProductLine productLine = fundingProductLine.get();
         return jdbcTemplate.query("""
                 WITH rate_row AS (
                     SELECT funding_rate_ppm
@@ -246,7 +251,10 @@ public class FundingRepository {
                        mark_row.mark_price_ticks,
                        rate_row.funding_rate_ppm
                   FROM account_positions p
-                  JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
+                  JOIN instruments i
+                    ON i.symbol = p.symbol
+                   AND i.version = p.instrument_version
+                   AND i.contract_type = ?
                   JOIN account_asset_scales ss ON ss.asset = i.settle_asset
                   JOIN LATERAL (
                       SELECT ((m.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_price_ticks
@@ -257,6 +265,7 @@ public class FundingRepository {
                   ) mark_row ON TRUE
                   CROSS JOIN rate_row
                  WHERE p.symbol = ?
+                   AND p.product_line = ?
                    AND p.signed_quantity_steps <> 0
                    AND mark_row.mark_price_ticks > 0
                 ORDER BY p.user_id ASC
@@ -280,7 +289,8 @@ public class FundingRepository {
                     notionalUnits,
                     ratePpm,
                     FundingMath.paymentAmount(signedQuantity, notionalUnits, ratePpm));
-        }, rate.symbol(), Timestamp.from(rate.fundingTime()), rate.symbol());
+        }, rate.symbol(), Timestamp.from(rate.fundingTime()), productLine.contractTypeCode(), rate.symbol(),
+                productLine.name());
     }
 
     public boolean insertPayment(long settlementId, FundingPaymentCandidate payment, Instant now) {
@@ -471,35 +481,40 @@ public class FundingRepository {
                                                      String asset) {
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
+        ProductLine productLine = currentFundingProductLine()
+                .orElseThrow(() -> new IllegalStateException("funding payment requires a funding product line"));
         if (normalizedMarginMode == MarginMode.ISOLATED) {
             return jdbcTemplate.query("""
-                    SELECT symbol, asset, margin_mode, position_side, margin_units
+                    SELECT product_line, symbol, asset, margin_mode, position_side, margin_units
                       FROM account_position_margins
-                     WHERE user_id = ? AND symbol = ? AND margin_mode = ? AND position_side = ? AND asset = ?
+                     WHERE user_id = ? AND symbol = ? AND product_line = ?
+                       AND margin_mode = ? AND position_side = ? AND asset = ?
                        AND margin_units > 0
                      ORDER BY updated_at ASC, symbol ASC, margin_mode ASC, position_side ASC
                      FOR UPDATE
                     """, (rs, rowNum) -> new PositionMargin(
+                    ProductLine.valueOf(rs.getString("product_line")),
                     rs.getString("symbol"),
                     rs.getString("asset"),
                     MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                     PositionSide.fromNullableDbValue(rs.getString("position_side")),
-                    rs.getLong("margin_units")), userId, symbol, normalizedMarginMode.name(),
+                    rs.getLong("margin_units")), userId, symbol, productLine.name(), normalizedMarginMode.name(),
                     normalizedPositionSide.name(), asset);
         }
         return jdbcTemplate.query("""
-                SELECT symbol, asset, margin_mode, position_side, margin_units
+                SELECT product_line, symbol, asset, margin_mode, position_side, margin_units
                   FROM account_position_margins
-                 WHERE user_id = ? AND asset = ? AND margin_mode = ? AND position_side = ?
+                 WHERE user_id = ? AND product_line = ? AND asset = ? AND margin_mode = ? AND position_side = ?
                    AND margin_units > 0
                  ORDER BY updated_at ASC, symbol ASC, margin_mode ASC, position_side ASC
                  FOR UPDATE
                 """, (rs, rowNum) -> new PositionMargin(
+                ProductLine.valueOf(rs.getString("product_line")),
                 rs.getString("symbol"),
                 rs.getString("asset"),
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 PositionSide.fromNullableDbValue(rs.getString("position_side")),
-                rs.getLong("margin_units")), userId, asset, normalizedMarginMode.name(),
+                rs.getLong("margin_units")), userId, productLine.name(), asset, normalizedMarginMode.name(),
                 normalizedPositionSide.name());
     }
 
@@ -521,17 +536,19 @@ public class FundingRepository {
                      WHERE user_id = ? AND symbol = ? AND asset = ?
                        AND margin_mode = ?
                        AND position_side = ?
+                       AND product_line = ?
                        AND margin_units >= ?
                     """, debit, Timestamp.from(now), userId, margin.symbol(), asset, margin.marginMode().name(),
-                    margin.positionSide().name(), debit);
+                    margin.positionSide().name(), margin.productLine().name(), debit);
             if (rows != 1) {
                 throw new IllegalStateException("failed to reduce consumed position margin");
             }
             jdbcTemplate.update("""
                     DELETE FROM account_position_margins
                      WHERE user_id = ? AND symbol = ? AND asset = ? AND margin_mode = ?
-                       AND position_side = ? AND margin_units = 0
-                    """, userId, margin.symbol(), asset, margin.marginMode().name(), margin.positionSide().name());
+                       AND position_side = ? AND product_line = ? AND margin_units = 0
+                    """, userId, margin.symbol(), asset, margin.marginMode().name(), margin.positionSide().name(),
+                    margin.productLine().name());
             remaining = Math.subtractExact(remaining, debit);
         }
         if (remaining != 0) {
@@ -615,7 +632,15 @@ public class FundingRepository {
         return alias + ".instrument_type = 'PERPETUAL'";
     }
 
-    private record PositionMargin(String symbol,
+    private Optional<ProductLine> currentFundingProductLine() {
+        ProductLine productLine = properties.getKafka().isProductTopicsEnabled()
+                ? properties.getKafka().getProductLine()
+                : ProductLine.LINEAR_PERPETUAL;
+        return productLine.isFundingProduct() ? Optional.of(productLine) : Optional.empty();
+    }
+
+    private record PositionMargin(ProductLine productLine,
+                                  String symbol,
                                   String asset,
                                   MarginMode marginMode,
                                   PositionSide positionSide,
