@@ -41,6 +41,7 @@ public class LiquidationMatchResultConsumer {
         try {
             MatchResultEvent event = objectMapper.readValue(record.value(), MatchResultEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "liquidation match result");
+            requireCurrentProductTopic(record.topic());
             liquidationService.processMatchResult(event);
         } catch (Exception ex) {
             log.error("Failed to process liquidation match result: {}", ex.getMessage(), ex);
@@ -54,5 +55,23 @@ public class LiquidationMatchResultConsumer {
 
     public String groupId() {
         return properties.getKafka().getGroupId();
+    }
+
+    private void requireCurrentProductTopic(String topic) {
+        LiquidationProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled()) {
+            return;
+        }
+        String expectedTopic = kafka.getMatchResultsTopic();
+        if (!expectedTopic.equals(topic)) {
+            throw new ProductTopicMismatchException("liquidation match result topic must match current product line: expected="
+                    + expectedTopic + " actual=" + topic);
+        }
+    }
+
+    private static final class ProductTopicMismatchException extends RuntimeException {
+        private ProductTopicMismatchException(String message) {
+            super(message);
+        }
     }
 }
