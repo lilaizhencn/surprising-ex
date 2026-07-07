@@ -56,6 +56,7 @@ public class MatchingCommandConsumer {
             String payload = record.value();
             command = objectMapper.readValue(payload, OrderCommandEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), command.symbol(), "order command");
+            requireCurrentProductTopic(record.topic());
             partitionAssignmentGuard.recordProcessedCommand(record.topic(), record.partition());
             ReentrantLock lock = symbolLock(command.symbol());
             lock.lock();
@@ -68,6 +69,9 @@ public class MatchingCommandConsumer {
             }
         } catch (SymbolKeyMismatchException ex) {
             log.error("Rejected matching command with invalid Kafka key: {}", ex.getMessage());
+            throw new IllegalStateException("failed to process matching command", ex);
+        } catch (ProductTopicMismatchException ex) {
+            log.error("Rejected matching command from invalid product topic: {}", ex.getMessage());
             throw new IllegalStateException("failed to process matching command", ex);
         } catch (Exception ex) {
             log.error("Failed to process matching command: {}", ex.getMessage(), ex);
@@ -92,5 +96,23 @@ public class MatchingCommandConsumer {
 
     public String groupId() {
         return properties.getKafka().getGroupId();
+    }
+
+    private void requireCurrentProductTopic(String topic) {
+        MatchingProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled()) {
+            return;
+        }
+        String expectedTopic = kafka.getOrderCommandsTopic();
+        if (!expectedTopic.equals(topic)) {
+            throw new ProductTopicMismatchException("order command topic must match current product line: expected="
+                    + expectedTopic + " actual=" + topic);
+        }
+    }
+
+    private static final class ProductTopicMismatchException extends RuntimeException {
+        private ProductTopicMismatchException(String message) {
+            super(message);
+        }
     }
 }

@@ -9,6 +9,7 @@ import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.matching.config.MatchingProperties;
+import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
@@ -77,9 +78,36 @@ class MatchingCommandConsumerTest {
     }
 
     @Test
+    void rejectsCommandFromOtherProductTopicBeforeTouchingEngine() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        FailingMatchingService matchingService = new FailingMatchingService();
+        RecordingPartitionGuard guard = new RecordingPartitionGuard();
+        MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        MatchingCommandConsumer consumer = new MatchingCommandConsumer(objectMapper, matchingService, guard,
+                properties);
+        OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, 7001L, 8001L, 9001L,
+                "cli-9001", "BTC-USDT-260925", 3L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
+                100L, 2L, false, false, Instant.parse("2026-07-01T00:00:00Z"));
+
+        assertThatThrownBy(() -> consumer.onCommand(new ConsumerRecord<>("surprising.inverse-delivery.order.commands.v1",
+                5, 42L, "BTC-USDT-260925", objectMapper.writeValueAsString(command))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("failed to process matching command")
+                .satisfies(ex -> assertThat(ex.getCause())
+                        .hasMessageContaining("order command topic must match current product line")
+                        .hasMessageContaining("surprising.linear-delivery.order.commands.v1"));
+
+        assertThat(matchingService.processed).isNull();
+        assertThat(guard.processedPartition).isEqualTo(-1);
+        assertThat(guard.restartReason).isNull();
+    }
+
+    @Test
     void exposesResolvedListenerTopicAndGroupFromProperties() {
         MatchingProperties properties = new MatchingProperties();
-        properties.getKafka().setProductLine(com.surprising.product.api.ProductLine.SPOT);
+        properties.getKafka().setProductLine(ProductLine.SPOT);
         properties.getKafka().setProductTopicsEnabled(true);
         MatchingCommandConsumer consumer = new MatchingCommandConsumer(new ObjectMapper(),
                 new FailingMatchingService(), new RecordingPartitionGuard(), properties);
