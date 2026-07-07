@@ -102,7 +102,8 @@ class AdlRepositoryTest {
         assertThat(sql.getValue())
                 .contains("account_product_deficits")
                 .contains("d.account_type = ?")
-                .contains("i.contract_type = ?");
+                .contains("p.product_line = ?")
+                .contains("m.product_line = p.product_line");
     }
 
     @Test
@@ -161,7 +162,8 @@ class AdlRepositoryTest {
         when(jdbcTemplate.update(contains("UPDATE trading_symbol_open_interest"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT-260925"), eq("USDT"), eq("CROSS"), eq("LONG"))).thenAnswer(invocation -> {
+                eq(1001L), eq("BTC-USDT-260925"), eq("USDT"), eq("CROSS"), eq("LONG"),
+                eq("LINEAR_DELIVERY"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getString("asset")).thenReturn("USDT");
@@ -196,8 +198,14 @@ class AdlRepositoryTest {
                 500L);
 
         assertThat(remaining).isZero();
+        verify(jdbcTemplate).update(contains("UPDATE account_positions"),
+                eq(5L), eq(5L), eq(100L), eq(500L), any(Timestamp.class), eq(1001L),
+                eq("BTC-USDT-260925"), eq("CROSS"), eq("LONG"), eq("LINEAR_DELIVERY"));
         verify(jdbcTemplate).update(contains("locked_units = locked_units - ?"),
                 eq(50L), eq(50L), any(Timestamp.class), eq("USDT_DELIVERY"), eq(1001L), eq("USDT"), eq(50L));
+        verify(jdbcTemplate).update(contains("UPDATE account_position_margins"),
+                eq(50L), any(Timestamp.class), eq(1001L), eq("BTC-USDT-260925"), eq("USDT"),
+                eq("CROSS"), eq("LONG"), eq(50L), eq("LINEAR_DELIVERY"));
         verify(jdbcTemplate, times(2)).queryForObject(contains("USING (account_type, user_id, asset)"), anyRowMapper(),
                 eq("USDT_DELIVERY"), eq(1001L), eq("USDT"));
         verify(jdbcTemplate).update(contains("UPDATE account_product_balances"),

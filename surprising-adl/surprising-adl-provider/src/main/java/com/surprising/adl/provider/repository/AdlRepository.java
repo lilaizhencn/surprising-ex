@@ -281,6 +281,24 @@ public class AdlRepository {
         return properties.getKafka().isProductTopicsEnabled();
     }
 
+    private String productLine() {
+        return properties.getKafka().getProductLine().name();
+    }
+
+    private String productLinePredicate() {
+        return productTopicsEnabled() ? "product_line = ?" : "1 = 1";
+    }
+
+    private Object[] productLineArgs(Object... rest) {
+        if (!productTopicsEnabled()) {
+            return rest;
+        }
+        Object[] args = new Object[rest.length + 1];
+        System.arraycopy(rest, 0, args, 0, rest.length);
+        args[rest.length] = productLine();
+        return args;
+    }
+
     private String balanceTable() {
         return productTopicsEnabled() ? "account_product_balances" : "account_balances";
     }
@@ -330,7 +348,7 @@ public class AdlRepository {
                    AND d.asset = i.settle_asset
                 """;
         String productFilter = productTopicsEnabled()
-                ? "   AND i.contract_type = ?\n"
+                ? "   AND p.product_line = ?\n"
                 : "";
         return """
                 SELECT p.user_id,
@@ -363,6 +381,7 @@ public class AdlRepository {
                    AND m.asset = i.settle_asset
                    AND m.margin_mode = p.margin_mode
                    AND m.position_side = p.position_side
+                   AND m.product_line = p.product_line
                 %s
                  WHERE i.settle_asset = ?
                    AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
@@ -380,7 +399,7 @@ public class AdlRepository {
         args.add(asset);
         args.add(maxMarkAge.toMillis());
         if (productTopicsEnabled()) {
-            args.add(properties.getKafka().getProductLine().contractTypeCode());
+            args.add(productLine());
         }
         return args;
     }
@@ -414,8 +433,10 @@ public class AdlRepository {
                        realized_pnl_units = realized_pnl_units + ?,
                        updated_at = ?
                  WHERE user_id = ? AND symbol = ? AND margin_mode = ? AND position_side = ?
-                """, nextSignedQuantity, nextSignedQuantity, nextEntryPrice, realizedPnlUnits, Timestamp.from(now),
-                candidate.userId(), candidate.symbol(), candidate.marginMode().name(), candidate.positionSide().name());
+                   AND %s
+                """.formatted(productLinePredicate()), productLineArgs(nextSignedQuantity, nextSignedQuantity,
+                        nextEntryPrice, realizedPnlUnits, Timestamp.from(now), candidate.userId(), candidate.symbol(),
+                        candidate.marginMode().name(), candidate.positionSide().name()));
         requireSingleRow(rows, "ADL target position update");
         updateSymbolOpenInterest(candidate.symbol(), candidate.signedQuantitySteps(), nextSignedQuantity, now);
     }
@@ -467,13 +488,14 @@ public class AdlRepository {
                    AND margin_mode = ?
                    AND position_side = ?
                    AND margin_units > 0
+                   AND %s
                  FOR UPDATE
-                """, (rs, rowNum) -> new PositionMargin(rs.getString("asset"),
+                """.formatted(productLinePredicate()), (rs, rowNum) -> new PositionMargin(rs.getString("asset"),
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 PositionSide.fromNullableDbValue(rs.getString("position_side")),
                 rs.getLong("margin_units")),
-                candidate.userId(), candidate.symbol(), candidate.asset(), candidate.marginMode().name(),
-                candidate.positionSide().name());
+                productLineArgs(candidate.userId(), candidate.symbol(), candidate.asset(),
+                        candidate.marginMode().name(), candidate.positionSide().name()));
         for (PositionMargin margin : margins) {
             long releaseUnits = AdlMath.proportionalUnits(margin.marginUnits(), closeSteps,
                     candidate.absQuantitySteps());
@@ -502,15 +524,18 @@ public class AdlRepository {
                        AND margin_mode = ?
                        AND position_side = ?
                        AND margin_units >= ?
-                    """, releaseUnits, Timestamp.from(now), candidate.userId(), candidate.symbol(), margin.asset(),
-                    margin.marginMode().name(), margin.positionSide().name(), releaseUnits);
+                       AND %s
+                    """.formatted(productLinePredicate()), productLineArgs(releaseUnits, Timestamp.from(now),
+                    candidate.userId(), candidate.symbol(), margin.asset(), margin.marginMode().name(),
+                    margin.positionSide().name(), releaseUnits));
             requireSingleRow(marginRows, "ADL target position margin release");
             jdbcTemplate.update("""
                     DELETE FROM account_position_margins
                      WHERE user_id = ? AND symbol = ? AND asset = ?
                        AND margin_mode = ? AND position_side = ? AND margin_units = 0
-                    """, candidate.userId(), candidate.symbol(), margin.asset(), margin.marginMode().name(),
-                    margin.positionSide().name());
+                       AND %s
+                    """.formatted(productLinePredicate()), productLineArgs(candidate.userId(), candidate.symbol(),
+                    margin.asset(), margin.marginMode().name(), margin.positionSide().name()));
         }
     }
 
