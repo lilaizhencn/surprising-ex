@@ -5,11 +5,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AdminBalanceAdjustmentRecord;
+import com.surprising.account.api.model.AdminCursorPage;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
 import com.surprising.account.api.model.ProductBalanceResponse;
+import com.surprising.account.api.model.ProductLedgerEntryResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
+import com.surprising.account.api.model.ProductTransferRecordResponse;
 import com.surprising.account.api.model.ProductTransferResponse;
+import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.repository.AccountRepository;
+import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -52,6 +57,18 @@ class ProductAccountServiceTest {
     }
 
     @Test
+    void productBalanceAdjustmentRejectsOtherAccountsWhenProviderIsProductScoped() {
+        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        AccountService service = productScopedService(repository, ProductLine.LINEAR_DELIVERY);
+
+        assertThatThrownBy(() -> service.adjustProductBalance(new ProductBalanceAdjustmentRequest(
+                1001L, AccountType.FUNDING, "USDT", 1_000L, "deposit-line", "INITIAL_DEPOSIT")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("accountType must match current product line account");
+        assertThat(repository.adjustmentReferences).isEmpty();
+    }
+
+    @Test
     void adminProductBalanceAdjustmentRecordsGatewayIdentity() {
         FakeProductAccountRepository repository = new FakeProductAccountRepository();
         AccountService service = new AccountService(repository, new PositionCalculator());
@@ -76,6 +93,34 @@ class ProductAccountServiceTest {
     }
 
     @Test
+    void productBalancesDefaultToProviderProductAccountWhenProductTopicsAreEnabled() {
+        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        repository.put(1001L, AccountType.USDT_DELIVERY, "USDT", 1_000L);
+        repository.put(1001L, AccountType.OPTION, "USDT", 2_000L);
+        AccountService service = productScopedService(repository, ProductLine.LINEAR_DELIVERY);
+
+        var response = service.productBalances(1001L, null);
+        service.productLedger(1001L, null, null, null, 50, null, null);
+        service.productTransfers(1001L, null, null, 50, null, null);
+
+        assertThat(response.balances()).singleElement().satisfies(balance ->
+                assertThat(balance.accountType()).isEqualTo(AccountType.USDT_DELIVERY));
+        assertThat(repository.productBalanceAccountTypes).containsExactly(AccountType.USDT_DELIVERY);
+        assertThat(repository.productLedgerAccountTypes).containsExactly(AccountType.USDT_DELIVERY);
+        assertThat(repository.productTransferPageAccountTypes).containsExactly(AccountType.USDT_DELIVERY);
+    }
+
+    @Test
+    void productBalanceRejectsOtherProductLineWhenProviderIsProductScoped() {
+        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        AccountService service = productScopedService(repository, ProductLine.LINEAR_DELIVERY);
+
+        assertThatThrownBy(() -> service.productBalance(1001L, AccountType.OPTION, "USDT"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("accountType must match current product line account");
+    }
+
+    @Test
     void transferMovesAvailableUnitsBetweenIsolatedProductAccounts() {
         FakeProductAccountRepository repository = new FakeProductAccountRepository();
         repository.put(1001L, AccountType.FUNDING, "USDT", 2_000L);
@@ -94,6 +139,35 @@ class ProductAccountServiceTest {
     }
 
     @Test
+    void productScopedTransferAllowsFundingToCurrentProductAccount() {
+        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        repository.put(1001L, AccountType.FUNDING, "USDT", 2_000L);
+        AccountService service = productScopedService(repository, ProductLine.LINEAR_DELIVERY);
+
+        ProductTransferResponse response = service.transfer(new ProductTransferRequest(
+                1001L, AccountType.FUNDING, AccountType.USDT_DELIVERY, "USDT", 750L,
+                "transfer-delivery-1", "USER_TRANSFER"));
+
+        assertThat(response.status()).isEqualTo("COMPLETED");
+        assertThat(repository.balance(1001L, AccountType.FUNDING, "USDT").availableUnits()).isEqualTo(1_250L);
+        assertThat(repository.balance(1001L, AccountType.USDT_DELIVERY, "USDT").availableUnits()).isEqualTo(750L);
+    }
+
+    @Test
+    void productScopedTransferRejectsOtherProductLineAccount() {
+        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        repository.put(1001L, AccountType.FUNDING, "USDT", 2_000L);
+        AccountService service = productScopedService(repository, ProductLine.LINEAR_DELIVERY);
+
+        assertThatThrownBy(() -> service.transfer(new ProductTransferRequest(
+                1001L, AccountType.FUNDING, AccountType.OPTION, "USDT", 750L,
+                "transfer-option-1", "USER_TRANSFER")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("transfer account types must include current product line account");
+        assertThat(repository.transferReferences).isEmpty();
+    }
+
+    @Test
     void transferRejectsSameProductAccountBeforeRepositoryMutation() {
         FakeProductAccountRepository repository = new FakeProductAccountRepository();
         AccountService service = new AccountService(repository, new PositionCalculator());
@@ -105,11 +179,21 @@ class ProductAccountServiceTest {
         assertThat(repository.transferReferences).isEmpty();
     }
 
+    private AccountService productScopedService(FakeProductAccountRepository repository, ProductLine productLine) {
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(productLine);
+        return new AccountService(repository, new PositionCalculator(), null, properties, null);
+    }
+
     private static final class FakeProductAccountRepository extends AccountRepository {
         private final Map<Long, EnumMap<AccountType, Map<String, ProductBalanceResponse>>> balances = new HashMap<>();
         private final List<String> adjustmentReferences = new ArrayList<>();
         private final List<AdminBalanceAdjustmentRecord> adminAdjustments = new ArrayList<>();
         private final List<String> transferReferences = new ArrayList<>();
+        private final List<AccountType> productBalanceAccountTypes = new ArrayList<>();
+        private final List<AccountType> productLedgerAccountTypes = new ArrayList<>();
+        private final List<AccountType> productTransferPageAccountTypes = new ArrayList<>();
         private long transferId;
 
         private FakeProductAccountRepository() {
@@ -123,6 +207,7 @@ class ProductAccountServiceTest {
 
         @Override
         public List<ProductBalanceResponse> productBalances(long userId, AccountType accountType) {
+            productBalanceAccountTypes.add(accountType);
             EnumMap<AccountType, Map<String, ProductBalanceResponse>> byType = balances.get(userId);
             if (byType == null) {
                 return List.of();
@@ -133,6 +218,29 @@ class ProductAccountServiceTest {
             return byType.values().stream()
                     .flatMap(values -> values.values().stream())
                     .toList();
+        }
+
+        @Override
+        public AdminCursorPage.CursorPage<ProductLedgerEntryResponse> productLedgerPage(Long userId,
+                                                                                        AccountType accountType,
+                                                                                        String asset,
+                                                                                        String referenceType,
+                                                                                        int limit,
+                                                                                        String cursor,
+                                                                                        String sort) {
+            productLedgerAccountTypes.add(accountType);
+            return new AdminCursorPage.CursorPage<>(List.of(), null, false, "createdAt.desc", limit);
+        }
+
+        @Override
+        public AdminCursorPage.CursorPage<ProductTransferRecordResponse> productTransferPage(Long userId,
+                                                                                             AccountType accountType,
+                                                                                             String asset,
+                                                                                             int limit,
+                                                                                             String cursor,
+                                                                                             String sort) {
+            productTransferPageAccountTypes.add(accountType);
+            return new AdminCursorPage.CursorPage<>(List.of(), null, false, "createdAt.desc", limit);
         }
 
         @Override

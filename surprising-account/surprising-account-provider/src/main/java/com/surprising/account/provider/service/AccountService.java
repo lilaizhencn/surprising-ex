@@ -133,7 +133,7 @@ public class AccountService {
         if (request.amountUnits() == 0) {
             throw new IllegalArgumentException("amountUnits must not be zero");
         }
-        AccountType accountType = normalizeAccountType(request.accountType());
+        AccountType accountType = normalizeScopedProductAccountType(request.accountType());
         return accountRepository.adjustProductBalance(request.userId(), accountType, normalizeAsset(request.asset()),
                 request.amountUnits(), normalizeReferenceId(request.referenceId()), request.reason());
     }
@@ -146,7 +146,7 @@ public class AccountService {
             throw new IllegalArgumentException("amountUnits must not be zero");
         }
         long normalizedAdminUserId = normalizeAdminUserId(adminUserId);
-        AccountType accountType = normalizeAccountType(request.accountType());
+        AccountType accountType = normalizeScopedProductAccountType(request.accountType());
         String normalizedAsset = normalizeAsset(request.asset());
         String normalizedReferenceId = normalizeReferenceId(request.referenceId());
         ProductBalanceResponse response = accountRepository.adjustProductBalance(request.userId(), accountType,
@@ -158,7 +158,7 @@ public class AccountService {
     }
 
     public ProductBalanceResponse productBalance(long userId, AccountType accountType, String asset) {
-        AccountType normalizedType = normalizeAccountType(accountType);
+        AccountType normalizedType = normalizeScopedProductAccountType(accountType);
         String normalizedAsset = normalizeAsset(asset);
         return accountRepository.productBalance(userId, normalizedType, normalizedAsset)
                 .orElse(new ProductBalanceResponse(userId, normalizedType, normalizedAsset, 0L, 0L, 0L,
@@ -166,7 +166,8 @@ public class AccountService {
     }
 
     public ProductBalanceQueryResponse productBalances(long userId, AccountType accountType) {
-        List<ProductBalanceResponse> rows = accountRepository.productBalances(userId, accountType);
+        List<ProductBalanceResponse> rows = accountRepository.productBalances(userId,
+                scopedProductAccountType(accountType));
         return new ProductBalanceQueryResponse(rows.size(), rows);
     }
 
@@ -205,7 +206,8 @@ public class AccountService {
                                                     String sort) {
         requireOptionalUserId(userId);
         int safeLimit = normalizeLimit(limit);
-        var page = accountRepository.productLedgerPage(userId, accountType, normalizeOptionalAsset(asset),
+        var page = accountRepository.productLedgerPage(userId, scopedProductAccountType(accountType),
+                normalizeOptionalAsset(asset),
                 normalizeOptionalReferenceType(referenceType), safeLimit, cursor, sort);
         return new ProductLedgerQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
@@ -226,7 +228,8 @@ public class AccountService {
                                                                String sort) {
         requireOptionalUserId(userId);
         int safeLimit = normalizeLimit(limit);
-        var page = accountRepository.productTransferPage(userId, accountType, normalizeOptionalAsset(asset),
+        var page = accountRepository.productTransferPage(userId, scopedProductAccountType(accountType),
+                normalizeOptionalAsset(asset),
                 safeLimit, cursor, sort);
         return new ProductTransferRecordQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
@@ -269,6 +272,7 @@ public class AccountService {
         if (source == target) {
             throw new IllegalArgumentException("sourceAccountType and targetAccountType must be different");
         }
+        requireScopedProductTransfer(source, target);
         return accountRepository.transferProductBalance(request.userId(), source, target, normalizeAsset(request.asset()),
                 request.amountUnits(), normalizeReferenceId(request.referenceId()), request.reason());
     }
@@ -381,6 +385,54 @@ public class AccountService {
     private ProductLine currentProductLineFilter() {
         AccountProperties.Kafka kafka = properties == null ? null : properties.getKafka();
         return kafka != null && kafka.isProductTopicsEnabled() ? kafka.getProductLine() : null;
+    }
+
+    private AccountType currentProductAccountType() {
+        ProductLine productLine = currentProductLineFilter();
+        return productLine == null ? null : AccountType.valueOf(productLine.accountTypeCode());
+    }
+
+    private AccountType scopedProductAccountType(AccountType accountType) {
+        AccountType currentAccountType = currentProductAccountType();
+        if (currentAccountType == null) {
+            return accountType;
+        }
+        if (accountType == null) {
+            return currentAccountType;
+        }
+        requireCurrentProductAccountType(accountType, currentAccountType);
+        return accountType;
+    }
+
+    private AccountType normalizeScopedProductAccountType(AccountType accountType) {
+        AccountType normalizedType = normalizeAccountType(accountType);
+        AccountType currentAccountType = currentProductAccountType();
+        if (currentAccountType != null) {
+            requireCurrentProductAccountType(normalizedType, currentAccountType);
+        }
+        return normalizedType;
+    }
+
+    private void requireScopedProductTransfer(AccountType source, AccountType target) {
+        AccountType currentAccountType = currentProductAccountType();
+        if (currentAccountType == null) {
+            return;
+        }
+        if (!isFundingOrCurrentProduct(source, currentAccountType)
+                || !isFundingOrCurrentProduct(target, currentAccountType)
+                || (source != currentAccountType && target != currentAccountType)) {
+            throw new IllegalArgumentException("transfer account types must include current product line account");
+        }
+    }
+
+    private boolean isFundingOrCurrentProduct(AccountType accountType, AccountType currentAccountType) {
+        return accountType == AccountType.FUNDING || accountType == currentAccountType;
+    }
+
+    private void requireCurrentProductAccountType(AccountType accountType, AccountType currentAccountType) {
+        if (accountType != currentAccountType) {
+            throw new IllegalArgumentException("accountType must match current product line account");
+        }
     }
 
     @Transactional
