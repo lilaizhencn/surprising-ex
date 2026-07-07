@@ -8,6 +8,7 @@ import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
 import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
+import com.surprising.account.api.model.PositionMarginResponse;
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.provider.config.AccountProperties;
@@ -27,6 +28,7 @@ import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.instrument.api.model.OptionExerciseStyle;
 import com.surprising.instrument.api.model.OptionType;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
@@ -414,6 +416,28 @@ class AccountServiceTest {
     }
 
     @Test
+    void positionQueriesUseProviderProductLineWhenProductTopicsAreEnabled() {
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.positions.put(new PositionKey(1001L, "BTC-USDT-260925", MarginMode.CROSS, PositionSide.SHORT),
+                new PositionState(-1L, 4L, 620_000L, 0L));
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        AccountService service = new AccountService(repository, new PositionCalculator(), null, properties, null);
+
+        PositionResponse position = service.position(1001L, "BTC-USDT-260925", "CROSS", "SHORT");
+        var positions = service.positions(1001L, "SHORT");
+        PositionMarginResponse margin = service.positionMargin(1001L, "BTC-USDT-260925", "ISOLATED");
+
+        assertThat(position.instrumentVersion()).isEqualTo(4L);
+        assertThat(positions.count()).isEqualTo(1);
+        assertThat(margin.asset()).isEqualTo("USDT");
+        assertThat(repository.scopedPositionLines).containsExactly(ProductLine.LINEAR_DELIVERY);
+        assertThat(repository.scopedPositionsLines).containsExactly(ProductLine.LINEAR_DELIVERY);
+        assertThat(repository.scopedPositionMarginLines).containsExactly(ProductLine.LINEAR_DELIVERY);
+    }
+
+    @Test
     void sameTradeIdFromDifferentSymbolsIsProcessedIndependently() {
         FakeAccountRepository repository = new FakeAccountRepository();
         repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 5L));
@@ -505,6 +529,21 @@ class AccountServiceTest {
             assertThat(call.position().positionSide()).isEqualTo(PositionSide.NET);
             assertThat(call.traceId()).isNotBlank();
         });
+    }
+
+    @Test
+    void positionMarginAdjustmentUsesProviderProductLineWhenProductTopicsAreEnabled() {
+        FakeAccountRepository repository = new FakeAccountRepository();
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
+        AccountService service = new AccountService(repository, new PositionCalculator(), null, properties, null);
+
+        PositionMarginAdjustmentResponse response = service.adjustPositionMargin(new PositionMarginAdjustmentRequest(
+                1001L, "BTC-USD-260925", MarginMode.ISOLATED, 500L, "margin-add-delivery", null));
+
+        assertThat(response.positionMarginUnits()).isEqualTo(1_500L);
+        assertThat(repository.scopedPositionMarginAdjustmentLines).containsExactly(ProductLine.INVERSE_DELIVERY);
     }
 
     @Test
@@ -818,6 +857,10 @@ class AccountServiceTest {
         private final List<AccountType> feeAccountTypes = new ArrayList<>();
         private final List<AccountType> liquidationFeeAccountTypes = new ArrayList<>();
         private final List<SpotSettlementCall> spotSettlements = new ArrayList<>();
+        private final List<ProductLine> scopedPositionLines = new ArrayList<>();
+        private final List<ProductLine> scopedPositionsLines = new ArrayList<>();
+        private final List<ProductLine> scopedPositionMarginLines = new ArrayList<>();
+        private final List<ProductLine> scopedPositionMarginAdjustmentLines = new ArrayList<>();
         private final Set<ProcessedTradeKey> processedTradeIds = new HashSet<>();
         private int tradeProcessingAttempts;
         private int positionUpdates;
@@ -911,6 +954,13 @@ class AccountServiceTest {
         }
 
         @Override
+        public Optional<PositionResponse> position(ProductLine productLine, long userId, String symbol,
+                                                   MarginMode marginMode, PositionSide positionSide) {
+            scopedPositionLines.add(productLine);
+            return position(userId, symbol, marginMode, positionSide);
+        }
+
+        @Override
         public List<PositionResponse> positions(long userId, PositionSide positionSide) {
             PositionSide normalizedPositionSide = positionSide == null ? null : PositionSide.defaultIfNull(positionSide);
             return positions.entrySet().stream()
@@ -925,6 +975,23 @@ class AccountServiceTest {
                                 state.entryPriceTicks(), state.realizedPnlUnits(), EVENT_TIME);
                     })
                     .toList();
+        }
+
+        @Override
+        public List<PositionResponse> positions(ProductLine productLine, long userId, PositionSide positionSide) {
+            scopedPositionsLines.add(productLine);
+            return positions(userId, positionSide);
+        }
+
+        @Override
+        public Optional<PositionMarginResponse> positionMargin(ProductLine productLine,
+                                                               long userId,
+                                                               String symbol,
+                                                               MarginMode marginMode,
+                                                               PositionSide positionSide) {
+            scopedPositionMarginLines.add(productLine);
+            return Optional.of(new PositionMarginResponse(userId, symbol, "USDT", marginMode,
+                    PositionSide.defaultIfNull(positionSide), 1_500L, EVENT_TIME));
         }
 
         @Override
@@ -970,6 +1037,21 @@ class AccountServiceTest {
             assertThat(removalBufferPpm).isEqualTo(50_000L);
             return new PositionMarginAdjustmentResponse(userId, symbol, "USDT", MarginMode.ISOLATED, amountUnits,
                     1_500L, 10_000L, 1_500L, 11_500L, referenceId, EVENT_TIME);
+        }
+
+        @Override
+        public PositionMarginAdjustmentResponse adjustIsolatedPositionMargin(ProductLine productLine,
+                                                                             long userId,
+                                                                             String symbol,
+                                                                             PositionSide positionSide,
+                                                                             long amountUnits,
+                                                                             String referenceId,
+                                                                             String reason,
+                                                                             java.time.Duration maxRiskSnapshotAge,
+                                                                             long removalBufferPpm) {
+            scopedPositionMarginAdjustmentLines.add(productLine);
+            return adjustIsolatedPositionMargin(userId, symbol, positionSide, amountUnits, referenceId, reason,
+                    maxRiskSnapshotAge, removalBufferPpm);
         }
 
         @Override

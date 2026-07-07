@@ -893,6 +893,30 @@ public class AccountRepository {
                 .stream().findFirst();
     }
 
+    public Optional<PositionResponse> position(ProductLine productLine,
+                                               long userId,
+                                               String symbol,
+                                               MarginMode marginMode,
+                                               PositionSide positionSide) {
+        ProductLine resolvedProductLine = productLine(productLine);
+        return jdbcTemplate.query("""
+                SELECT p.user_id, p.symbol, p.margin_mode, p.position_side, p.instrument_version,
+                       p.signed_quantity_steps, p.entry_price_ticks, p.realized_pnl_units, p.updated_at
+                  FROM account_positions p
+                  JOIN instruments i
+                    ON i.symbol = p.symbol
+                   AND i.version = p.instrument_version
+                 WHERE p.user_id = ?
+                   AND p.symbol = ?
+                   AND p.margin_mode = ?
+                   AND p.position_side = ?
+                   AND i.contract_type = ?
+                """, (rs, rowNum) -> toPositionResponse(rs), userId, symbol,
+                MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name(),
+                resolvedProductLine.contractTypeCode())
+                .stream().findFirst();
+    }
+
     public List<PositionResponse> positions(long userId) {
         return positions(userId, null);
     }
@@ -909,6 +933,25 @@ public class AccountRepository {
                  ORDER BY symbol ASC, margin_mode ASC, position_side ASC
                 """, (rs, rowNum) -> toPositionResponse(rs), userId, normalizedPositionSide,
                 normalizedPositionSide);
+    }
+
+    public List<PositionResponse> positions(ProductLine productLine, long userId, PositionSide positionSide) {
+        ProductLine resolvedProductLine = productLine(productLine);
+        String normalizedPositionSide = positionSide == null ? null : PositionSide.defaultIfNull(positionSide).name();
+        return jdbcTemplate.query("""
+                SELECT p.user_id, p.symbol, p.margin_mode, p.position_side, p.instrument_version,
+                       p.signed_quantity_steps, p.entry_price_ticks, p.realized_pnl_units, p.updated_at
+                  FROM account_positions p
+                  JOIN instruments i
+                    ON i.symbol = p.symbol
+                   AND i.version = p.instrument_version
+                 WHERE p.user_id = ?
+                   AND (CAST(? AS text) IS NULL OR p.position_side = ?)
+                   AND p.signed_quantity_steps <> 0
+                   AND i.contract_type = ?
+                 ORDER BY p.symbol ASC, p.margin_mode ASC, p.position_side ASC
+                """, (rs, rowNum) -> toPositionResponse(rs), userId, normalizedPositionSide,
+                normalizedPositionSide, resolvedProductLine.contractTypeCode());
     }
 
     public List<PositionResponse> openPositionsForSettlement(String symbol, long instrumentVersion) {
@@ -967,6 +1010,50 @@ public class AccountRepository {
                 .findFirst();
     }
 
+    public Optional<PositionMarginResponse> positionMargin(ProductLine productLine,
+                                                           long userId,
+                                                           String symbol,
+                                                           MarginMode marginMode,
+                                                           PositionSide positionSide) {
+        ProductLine resolvedProductLine = productLine(productLine);
+        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
+        return jdbcTemplate.query("""
+                SELECT p.user_id,
+                       p.symbol,
+                       i.settle_asset AS asset,
+                       p.margin_mode,
+                       p.position_side,
+                       COALESCE(m.margin_units, 0) AS margin_units,
+                       COALESCE(m.updated_at, p.updated_at) AS updated_at
+                  FROM account_positions p
+                  JOIN instruments i
+                    ON i.symbol = p.symbol
+                   AND i.version = p.instrument_version
+                  LEFT JOIN account_position_margins m
+                    ON m.user_id = p.user_id
+                   AND m.symbol = p.symbol
+                   AND m.asset = i.settle_asset
+                   AND m.margin_mode = p.margin_mode
+                   AND m.position_side = p.position_side
+                 WHERE p.user_id = ?
+                   AND p.symbol = ?
+                   AND p.margin_mode = ?
+                   AND p.position_side = ?
+                   AND i.contract_type = ?
+                """, (rs, rowNum) -> new PositionMarginResponse(
+                rs.getLong("user_id"),
+                rs.getString("symbol"),
+                rs.getString("asset"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                PositionSide.fromNullableDbValue(rs.getString("position_side")),
+                rs.getLong("margin_units"),
+                rs.getTimestamp("updated_at").toInstant()), userId, symbol, normalizedMarginMode.name(),
+                normalizedPositionSide.name(), resolvedProductLine.contractTypeCode())
+                .stream()
+                .findFirst();
+    }
+
     public PositionMarginAdjustmentResponse adjustIsolatedPositionMargin(long userId,
                                                                          String symbol,
                                                                          long amountUnits,
@@ -978,6 +1065,31 @@ public class AccountRepository {
                 maxRiskSnapshotAge, removalBufferPpm);
     }
 
+    public PositionMarginAdjustmentResponse adjustIsolatedPositionMargin(ProductLine productLine,
+                                                                         long userId,
+                                                                         String symbol,
+                                                                         long amountUnits,
+                                                                         String referenceId,
+                                                                         String reason,
+                                                                         Duration maxRiskSnapshotAge,
+                                                                         long removalBufferPpm) {
+        return adjustIsolatedPositionMargin(productLine, userId, symbol, PositionSide.NET, amountUnits, referenceId,
+                reason, maxRiskSnapshotAge, removalBufferPpm);
+    }
+
+    public PositionMarginAdjustmentResponse adjustIsolatedPositionMargin(ProductLine productLine,
+                                                                         long userId,
+                                                                         String symbol,
+                                                                         PositionSide positionSide,
+                                                                         long amountUnits,
+                                                                         String referenceId,
+                                                                         String reason,
+                                                                         Duration maxRiskSnapshotAge,
+                                                                         long removalBufferPpm) {
+        return adjustIsolatedPositionMarginScoped(productLine(productLine), userId, symbol, positionSide,
+                amountUnits, referenceId, reason, maxRiskSnapshotAge, removalBufferPpm);
+    }
+
     public PositionMarginAdjustmentResponse adjustIsolatedPositionMargin(long userId,
                                                                          String symbol,
                                                                          PositionSide positionSide,
@@ -986,6 +1098,19 @@ public class AccountRepository {
                                                                          String reason,
                                                                          Duration maxRiskSnapshotAge,
                                                                          long removalBufferPpm) {
+        return adjustIsolatedPositionMarginScoped(null, userId, symbol, positionSide, amountUnits, referenceId,
+                reason, maxRiskSnapshotAge, removalBufferPpm);
+    }
+
+    private PositionMarginAdjustmentResponse adjustIsolatedPositionMarginScoped(ProductLine productLine,
+                                                                                long userId,
+                                                                                String symbol,
+                                                                                PositionSide positionSide,
+                                                                                long amountUnits,
+                                                                                String referenceId,
+                                                                                String reason,
+                                                                                Duration maxRiskSnapshotAge,
+                                                                                long removalBufferPpm) {
         Optional<PositionMarginAdjustmentReference> existing =
                 positionMarginAdjustmentReference(userId, symbol, referenceId);
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
@@ -995,7 +1120,9 @@ public class AccountRepository {
                     referenceId);
         }
 
-        PositionCollateralTarget target = lockOpenIsolatedPosition(userId, symbol, normalizedPositionSide);
+        PositionCollateralTarget target = productLine == null
+                ? lockOpenIsolatedPosition(userId, symbol, normalizedPositionSide)
+                : lockOpenIsolatedPosition(productLine, userId, symbol, normalizedPositionSide);
         int ledgerRows = jdbcTemplate.update("""
                 INSERT INTO account_ledger_entries (
                     entry_id, user_id, asset, amount_units, balance_after_units,
@@ -1090,6 +1217,38 @@ public class AccountRepository {
                 rs.getLong("instrument_version"),
                 rs.getLong("signed_quantity_steps")), userId, symbol,
                 PositionSide.defaultIfNull(positionSide).name()).stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("open isolated position not found"));
+    }
+
+    private PositionCollateralTarget lockOpenIsolatedPosition(ProductLine productLine,
+                                                              long userId,
+                                                              String symbol,
+                                                              PositionSide positionSide) {
+        ProductLine resolvedProductLine = productLine(productLine);
+        return jdbcTemplate.query("""
+                SELECT p.instrument_version,
+                       p.signed_quantity_steps,
+                       i.settle_asset AS asset
+                  FROM account_positions p
+                  JOIN instruments i
+                    ON i.symbol = p.symbol
+                   AND i.version = p.instrument_version
+                 WHERE p.user_id = ?
+                   AND p.symbol = ?
+                   AND p.margin_mode = 'ISOLATED'
+                   AND p.position_side = ?
+                   AND p.signed_quantity_steps <> 0
+                   AND i.contract_type = ?
+                 FOR UPDATE OF p
+                """, (rs, rowNum) -> new PositionCollateralTarget(
+                userId,
+                symbol,
+                rs.getString("asset"),
+                PositionSide.defaultIfNull(positionSide),
+                rs.getLong("instrument_version"),
+                rs.getLong("signed_quantity_steps")), userId, symbol,
+                PositionSide.defaultIfNull(positionSide).name(), resolvedProductLine.contractTypeCode())
+                .stream().findFirst()
                 .orElseThrow(() -> new IllegalStateException("open isolated position not found"));
     }
 

@@ -304,7 +304,12 @@ public class AccountService {
         String normalizedSymbol = normalizeSymbol(symbol);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
         PositionSide normalizedPositionSide = normalizePositionSide(positionSide);
-        return accountRepository.position(userId, normalizedSymbol, normalizedMarginMode, normalizedPositionSide)
+        ProductLine productLine = currentProductLineFilter();
+        Optional<PositionResponse> position = productLine == null
+                ? accountRepository.position(userId, normalizedSymbol, normalizedMarginMode, normalizedPositionSide)
+                : accountRepository.position(productLine, userId, normalizedSymbol, normalizedMarginMode,
+                        normalizedPositionSide);
+        return position
                 .orElse(new PositionResponse(userId, normalizedSymbol, 0L, normalizedMarginMode,
                         normalizedPositionSide, 0L, 0L, 0L, Instant.EPOCH));
     }
@@ -312,7 +317,12 @@ public class AccountService {
     public PositionMarginResponse positionMargin(long userId, String symbol, String marginMode) {
         String normalizedSymbol = normalizeSymbol(symbol);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
-        return accountRepository.positionMargin(userId, normalizedSymbol, normalizedMarginMode, PositionSide.NET)
+        ProductLine productLine = currentProductLineFilter();
+        Optional<PositionMarginResponse> margin = productLine == null
+                ? accountRepository.positionMargin(userId, normalizedSymbol, normalizedMarginMode, PositionSide.NET)
+                : accountRepository.positionMargin(productLine, userId, normalizedSymbol, normalizedMarginMode,
+                        PositionSide.NET);
+        return margin
                 .orElse(new PositionMarginResponse(userId, normalizedSymbol, "", normalizedMarginMode,
                         PositionSide.NET, 0L, Instant.EPOCH));
     }
@@ -325,7 +335,10 @@ public class AccountService {
         PositionSide normalizedPositionSide = positionSide == null || positionSide.isBlank()
                 ? null
                 : normalizePositionSide(positionSide);
-        List<PositionResponse> rows = accountRepository.positions(userId, normalizedPositionSide);
+        ProductLine productLine = currentProductLineFilter();
+        List<PositionResponse> rows = productLine == null
+                ? accountRepository.positions(userId, normalizedPositionSide)
+                : accountRepository.positions(productLine, userId, normalizedPositionSide);
         return new PositionQueryResponse(rows.size(), rows);
     }
 
@@ -339,20 +352,35 @@ public class AccountService {
         if (marginMode != MarginMode.ISOLATED) {
             throw new IllegalArgumentException("position margin adjustment only supports ISOLATED margin mode");
         }
-        PositionMarginAdjustmentResponse response = accountRepository.adjustIsolatedPositionMargin(
-                request.userId(), symbol, request.positionSide(), request.amountUnits(),
-                normalizeReferenceId(request.referenceId()), normalizeReason(request.reason(), request.amountUnits()),
-                properties.getPositionMargin().getMaxRiskSnapshotAge(),
-                properties.getPositionMargin().getRemovalBufferPpm());
+        ProductLine productLine = currentProductLineFilter();
+        PositionMarginAdjustmentResponse response = productLine == null
+                ? accountRepository.adjustIsolatedPositionMargin(
+                        request.userId(), symbol, request.positionSide(), request.amountUnits(),
+                        normalizeReferenceId(request.referenceId()), normalizeReason(request.reason(), request.amountUnits()),
+                        properties.getPositionMargin().getMaxRiskSnapshotAge(),
+                        properties.getPositionMargin().getRemovalBufferPpm())
+                : accountRepository.adjustIsolatedPositionMargin(
+                        productLine, request.userId(), symbol, request.positionSide(), request.amountUnits(),
+                        normalizeReferenceId(request.referenceId()), normalizeReason(request.reason(), request.amountUnits()),
+                        properties.getPositionMargin().getMaxRiskSnapshotAge(),
+                        properties.getPositionMargin().getRemovalBufferPpm());
         if (outboxRepository != null) {
-            PositionResponse current = accountRepository.position(request.userId(), symbol, MarginMode.ISOLATED,
-                            request.positionSide())
+            Optional<PositionResponse> currentPosition = productLine == null
+                    ? accountRepository.position(request.userId(), symbol, MarginMode.ISOLATED, request.positionSide())
+                    : accountRepository.position(productLine, request.userId(), symbol, MarginMode.ISOLATED,
+                            request.positionSide());
+            PositionResponse current = currentPosition
                     .orElseThrow(() -> new IllegalStateException("isolated position missing after margin adjustment"));
             // Manual margin changes do not have a trade id; tradeId=0 tells downstream consumers this is a state trigger.
             outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
                     0L, current, Instant.now(), TraceContext.currentOrCreate());
         }
         return response;
+    }
+
+    private ProductLine currentProductLineFilter() {
+        AccountProperties.Kafka kafka = properties == null ? null : properties.getKafka();
+        return kafka != null && kafka.isProductTopicsEnabled() ? kafka.getProductLine() : null;
     }
 
     @Transactional

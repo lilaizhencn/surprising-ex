@@ -183,6 +183,67 @@ class AccountRepositoryTest {
     }
 
     @Test
+    void positionQueryCanScopeByProductLineContractType() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.query(contains("i.contract_type = ?"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT-260925"), eq("CROSS"), eq("NET"), eq("LINEAR_DELIVERY")))
+                .thenReturn(List.of());
+
+        repository.position(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT-260925",
+                MarginMode.CROSS, PositionSide.NET);
+
+        verify(jdbcTemplate).query(contains("i.contract_type = ?"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT-260925"), eq("CROSS"), eq("NET"), eq("LINEAR_DELIVERY"));
+    }
+
+    @Test
+    void positionsQueryCanScopeByProductLineContractType() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.query(contains("i.contract_type = ?"), anyRowMapper(),
+                eq(1001L), eq("SHORT"), eq("SHORT"), eq("INVERSE_PERPETUAL"))).thenReturn(List.of());
+
+        repository.positions(ProductLine.INVERSE_PERPETUAL, 1001L, PositionSide.SHORT);
+
+        verify(jdbcTemplate).query(contains("i.contract_type = ?"), anyRowMapper(),
+                eq(1001L), eq("SHORT"), eq("SHORT"), eq("INVERSE_PERPETUAL"));
+    }
+
+    @Test
+    void positionMarginQueryCanScopeByProductLineContractType() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.query(contains("i.contract_type = ?"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT-260925-70000-C"), eq("ISOLATED"), eq("LONG"),
+                eq("VANILLA_OPTION"))).thenReturn(List.of());
+
+        repository.positionMargin(ProductLine.OPTION, 1001L, "BTC-USDT-260925-70000-C",
+                MarginMode.ISOLATED, PositionSide.LONG);
+
+        verify(jdbcTemplate).query(contains("i.contract_type = ?"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT-260925-70000-C"), eq("ISOLATED"), eq("LONG"),
+                eq("VANILLA_OPTION"));
+    }
+
+    @Test
+    void positionMarginAdjustmentLocksPositionByProductLineContractType() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
+                eq("iso-add-line"), eq(1001L), eq("BTC-USDT-260925"))).thenReturn(List.of());
+        when(jdbcTemplate.query(contains("i.contract_type = ?"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT-260925"), eq("NET"), eq("LINEAR_DELIVERY")))
+                .thenReturn(List.of());
+
+        assertThatThrownBy(() -> repository.adjustIsolatedPositionMargin(ProductLine.LINEAR_DELIVERY,
+                1001L, "BTC-USDT-260925", 100L, "iso-add-line", "ADD_POSITION_MARGIN",
+                Duration.ofSeconds(10), 50_000L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("open isolated position not found");
+
+        verify(jdbcTemplate).query(contains("i.contract_type = ?"), anyRowMapper(),
+                eq(1001L), eq("BTC-USDT-260925"), eq("NET"), eq("LINEAR_DELIVERY"));
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO account_ledger_entries"), any(Object[].class));
+    }
+
+    @Test
     void updatePositionModeRequiresNoOpenPositions() {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
