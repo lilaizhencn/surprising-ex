@@ -14,6 +14,7 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -266,7 +267,8 @@ public class LiquidationOrderRepository {
     }
 
     public List<TradingOutboxRecord> lockPending(int limit) {
-        return jdbcTemplate.query("""
+        List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("""
                 WITH earliest AS (
                     SELECT DISTINCT ON (topic, event_key)
                            id
@@ -280,16 +282,21 @@ public class LiquidationOrderRepository {
                   JOIN earliest c ON c.id = e.id
                  WHERE e.published_at IS NULL
                    AND e.aggregate_type IN ('ORDER', 'LIQUIDATION_ORDER')
+                """);
+        appendTopicScope(sql, args);
+        sql.append("""
                    AND e.next_attempt_at <= now()
                    AND pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))
                  ORDER BY e.topic, e.event_key, e.id
                  LIMIT ?
                  FOR UPDATE OF e SKIP LOCKED
-                """, (rs, rowNum) -> new TradingOutboxRecord(
+                """);
+        args.add(limit);
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new TradingOutboxRecord(
                 rs.getLong("id"),
                 rs.getString("topic"),
                 rs.getString("event_key"),
-                rs.getString("payload")), limit);
+                rs.getString("payload")), args.toArray());
     }
 
     public void markPublished(long id, Instant now) {
@@ -362,6 +369,15 @@ public class LiquidationOrderRepository {
             return null;
         }
         return value.length() <= 1000 ? value : value.substring(0, 1000);
+    }
+
+    private void appendTopicScope(StringBuilder sql, List<Object> args) {
+        if (!properties.getKafka().isProductTopicsEnabled()) {
+            return;
+        }
+        sql.append("   AND e.topic IN (?, ?)\n");
+        args.add(properties.getKafka().getOrderEventsTopic());
+        args.add(properties.getKafka().getOrderCommandsTopic());
     }
 
     private void requireSingleRow(int rows, String operation) {

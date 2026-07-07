@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.liquidation.provider.config.LiquidationProperties;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
@@ -174,6 +175,33 @@ class LiquidationOrderRepositoryTest {
                 .contains("aggregate_type IN ('ORDER', 'LIQUIDATION_ORDER')")
                 .contains("pg_try_advisory_xact_lock")
                 .contains("FOR UPDATE OF e SKIP LOCKED")
+                .doesNotContain("ORDER_BOOK_DEPTH")
+                .doesNotContain("MATCH_RESULT")
+                .doesNotContain("MATCH_TRADE");
+    }
+
+    @Test
+    void lockPendingFiltersByProductTopicsWhenProductTopicsAreEnabled() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        LiquidationOrderRepository repository = new LiquidationOrderRepository(jdbcTemplate, sequenceRepository,
+                properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(),
+                eq("surprising.linear-delivery.order.events.v1"),
+                eq("surprising.linear-delivery.order.commands.v1"),
+                eq(100))).thenReturn(java.util.List.of());
+
+        repository.lockPending(100);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
+                eq("surprising.linear-delivery.order.events.v1"),
+                eq("surprising.linear-delivery.order.commands.v1"),
+                eq(100));
+        assertThat(sql.getValue())
+                .contains("e.topic IN (?, ?)")
+                .contains("aggregate_type IN ('ORDER', 'LIQUIDATION_ORDER')")
                 .doesNotContain("ORDER_BOOK_DEPTH")
                 .doesNotContain("MATCH_RESULT")
                 .doesNotContain("MATCH_TRADE");
