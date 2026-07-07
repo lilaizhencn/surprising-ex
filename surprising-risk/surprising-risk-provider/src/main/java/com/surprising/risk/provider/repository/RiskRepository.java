@@ -2,6 +2,7 @@ package com.surprising.risk.provider.repository;
 
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineSql;
 import com.surprising.risk.api.model.AdminCursorPage;
 import com.surprising.risk.api.model.LiquidationCandidateResponse;
 import com.surprising.risk.api.model.LiquidationCandidateStatus;
@@ -54,13 +55,7 @@ public class RiskRepository {
         String sql = """
                 WITH group_inputs AS (
                     SELECT p.user_id,
-                           CASE i.contract_type
-                               WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
-                               WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
-                               WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
-                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                               ELSE 'USDT_PERPETUAL'
-                           END AS account_type,
+                           %s AS account_type,
                            i.settle_asset,
                            pm.event_time
                       FROM account_positions p
@@ -93,7 +88,7 @@ public class RiskRepository {
                  WHERE all_marks_fresh
                  ORDER BY user_id ASC, account_type ASC, settle_asset ASC
                  LIMIT ?
-                """.formatted(productLineFilter);
+                """.formatted(accountTypeExpression("i"), productLineFilter);
         args.add(maxMarkAge.toMillis());
         args.add(afterUserId);
         args.add(afterUserId);
@@ -117,13 +112,7 @@ public class RiskRepository {
                 SELECT CAST(? AS bigint) AS user_id,
                        i.symbol,
                        i.version AS instrument_version,
-                       CASE i.contract_type
-                           WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
-                           WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
-                           WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
-                           WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                           ELSE 'USDT_PERPETUAL'
-                       END AS account_type,
+                       %s AS account_type,
                        i.settle_asset
                   FROM instruments i
                  WHERE i.symbol = ?
@@ -137,7 +126,7 @@ public class RiskRepository {
                        END
                    %s
                  LIMIT 1
-                """.formatted(productLineFilter("i", args));
+                """.formatted(accountTypeExpression("i"), productLineFilter("i", args));
         args.add(0, userId);
         args.add(1, symbol);
         args.add(2, instrumentVersion);
@@ -174,18 +163,12 @@ public class RiskRepository {
                  FROM account_positions p
                   JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
                  WHERE p.user_id = ?
-                   AND CASE i.contract_type
-                           WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
-                           WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
-                           WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
-                     WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                     ELSE 'USDT_PERPETUAL'
-                       END = ?
+                   AND %s = ?
                    AND i.settle_asset = ?
                    %s
                    AND p.signed_quantity_steps <> 0
                  LIMIT 1
-                """.formatted(productLineFilter), (rs, rowNum) -> rs.getInt(1), args.toArray())
+                """.formatted(accountTypeExpression("i"), productLineFilter), (rs, rowNum) -> rs.getInt(1), args.toArray())
                 .stream().findFirst().isPresent();
     }
 
@@ -291,13 +274,7 @@ public class RiskRepository {
                       ) pm ON TRUE
                      WHERE p.signed_quantity_steps <> 0
                        AND p.user_id = ?
-                       AND CASE i.contract_type
-                               WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
-                               WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
-                               WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
-                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                               ELSE 'USDT_PERPETUAL'
-                           END = ?
+                       AND %s = ?
                        AND i.settle_asset = ?
                        %s
                 ),
@@ -350,13 +327,7 @@ public class RiskRepository {
                       CROSS JOIN group_freshness gf
                      WHERE p.signed_quantity_steps <> 0
                        AND p.user_id = ?
-                       AND CASE i.contract_type
-                               WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
-                               WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
-                               WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
-                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                               ELSE 'USDT_PERPETUAL'
-                           END = ?
+                       AND %s = ?
                        AND i.settle_asset = ?
                        AND gf.all_marks_fresh
                        AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
@@ -388,7 +359,8 @@ public class RiskRepository {
                        ORDER BY b.notional_floor_units DESC
                        LIMIT 1
                   ) br ON TRUE
-                """.formatted(productLineFilter("i", groupArgs), productLineFilter("i", positionArgs));
+                """.formatted(accountTypeExpression("i"), productLineFilter("i", groupArgs),
+                accountTypeExpression("i"), productLineFilter("i", positionArgs));
         List<Object> args = new ArrayList<>();
         args.add(maxMarkAge.toMillis());
         args.add(key.userId());
@@ -479,13 +451,7 @@ public class RiskRepository {
                      WHERE m.user_id = ?
                        AND m.asset = ?
                        AND m.margin_mode = 'ISOLATED'
-                       AND CASE i.contract_type
-                               WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
-                               WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
-                               WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
-                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                               ELSE 'USDT_PERPETUAL'
-                           END = ctx.account_type
+                       AND %s = ctx.account_type
                 ),
                 isolated_order_locks AS (
                     SELECT COALESCE(SUM(GREATEST(r.reserved_units - r.released_units - r.position_margin_units, 0)), 0)
@@ -527,7 +493,8 @@ public class RiskRepository {
                     ON pd.account_type = pb.account_type
                    AND pd.user_id = pb.user_id
                    AND pd.asset = pb.asset
-                """, (rs, rowNum) -> rs.getLong(1), normalizedAccountType, userId, settleAsset, userId, settleAsset,
+                """.formatted(accountTypeExpression("i")), (rs, rowNum) -> rs.getLong(1),
+                normalizedAccountType, userId, settleAsset, userId, settleAsset,
                 userId, settleAsset, userId, settleAsset)
                 .stream()
                 .findFirst()
@@ -1106,6 +1073,10 @@ public class RiskRepository {
                     maintenanceMarginUnits,
                     rs.getLong("position_margin_units"));
         };
+    }
+
+    private static String accountTypeExpression(String instrumentAlias) {
+        return ProductLineSql.contractTypeAccountTypeCase(instrumentAlias + ".contract_type");
     }
 
     private void requireSingleRow(int rows, String operation) {

@@ -21,4 +21,20 @@ public final class ProductLineSql {
                 END
                 """.formatted(expression).strip();
     }
+
+    public static String contractTypeAccountTypeCase(String contractTypeExpression) {
+        String expression = contractTypeExpression == null || contractTypeExpression.isBlank()
+                ? "contract_type"
+                : contractTypeExpression.trim();
+        return """
+                CASE %s
+                    WHEN 'SPOT' THEN 'SPOT'
+                    WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
+                    WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
+                    WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
+                    WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                    ELSE 'USDT_PERPETUAL'
+                END
+                """.formatted(expression).strip();
+    }
 }
