@@ -145,7 +145,9 @@ public class FeeTierRepository {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        String productLineName = productLineName(productLine);
+        ProductLine resolvedProductLine = productLine(productLine);
+        String productLineName = resolvedProductLine.name();
+        String accountType = resolvedProductLine.accountTypeCode();
         long trailingVolume = number(jdbcTemplate.queryForObject("""
                 WITH user_fills AS (
                     SELECT taker_user_id AS user_id, symbol, taker_instrument_version AS instrument_version,
@@ -184,7 +186,19 @@ public class FeeTierRepository {
                   FROM filled_notional
                 """, Number.class, userId, Timestamp.from(since), userId, Timestamp.from(since), productLineName));
         long assetBalance = number(jdbcTemplate.queryForObject("""
-                WITH valued_balances AS (
+                WITH raw_balances AS (
+                    SELECT b.asset, b.available_units, b.locked_units
+                      FROM account_balances b
+                     WHERE ? = 'USDT_PERPETUAL'
+                       AND b.user_id = ?
+                    UNION ALL
+                    SELECT b.asset, b.available_units, b.locked_units
+                      FROM account_product_balances b
+                     WHERE ? <> 'USDT_PERPETUAL'
+                       AND b.account_type = ?
+                       AND b.user_id = ?
+                ),
+                valued_balances AS (
                     SELECT CASE
                                WHEN b.asset IN ('USDT', 'USD')
                                THEN (b.available_units + b.locked_units)::numeric
@@ -193,7 +207,7 @@ public class FeeTierRepository {
                                    * pm.mark_price_units::numeric / s.scale_units::numeric,
                                    0)
                            END AS value_units
-                      FROM account_balances b
+                      FROM raw_balances b
                       JOIN account_asset_scales s
                         ON s.asset = b.asset
                  LEFT JOIN LATERAL (
@@ -214,7 +228,7 @@ public class FeeTierRepository {
                 )
                 SELECT LEAST(COALESCE(SUM(value_units), 0), 9223372036854775807)::bigint
                   FROM valued_balances
-                """, Number.class, userId));
+                """, Number.class, accountType, userId, accountType, accountType, userId));
         return new FeeTierMetrics(trailingVolume, assetBalance);
     }
 
@@ -224,7 +238,9 @@ public class FeeTierRepository {
 
     public List<Long> candidateUsers(ProductLine productLine, Instant since, int limit) {
         int normalizedLimit = Math.max(1, Math.min(limit, 10_000));
-        String productLineName = productLineName(productLine);
+        ProductLine resolvedProductLine = productLine(productLine);
+        String productLineName = resolvedProductLine.name();
+        String accountType = resolvedProductLine.accountTypeCode();
         return jdbcTemplate.query("""
                 SELECT user_id
                   FROM (
@@ -260,7 +276,14 @@ public class FeeTierRepository {
                         UNION
                         SELECT user_id
                           FROM account_balances
-                         WHERE available_units + locked_units > 0
+                         WHERE ? = 'USDT_PERPETUAL'
+                           AND available_units + locked_units > 0
+                        UNION
+                        SELECT user_id
+                          FROM account_product_balances
+                         WHERE ? <> 'USDT_PERPETUAL'
+                           AND account_type = ?
+                           AND available_units + locked_units > 0
                         UNION
                         SELECT user_id
                           FROM trading_user_fee_tiers
@@ -271,7 +294,8 @@ public class FeeTierRepository {
                  ORDER BY user_id ASC
                  LIMIT ?
                 """, (rs, rowNum) -> rs.getLong("user_id"), Timestamp.from(since), productLineName,
-                Timestamp.from(since), productLineName, productLineName, normalizedLimit);
+                Timestamp.from(since), productLineName, accountType, accountType, accountType, productLineName,
+                normalizedLimit);
     }
 
     public FeeTierAssignmentRecord lockAssignment(long userId, long proposedFeeScheduleId, Instant now) {
