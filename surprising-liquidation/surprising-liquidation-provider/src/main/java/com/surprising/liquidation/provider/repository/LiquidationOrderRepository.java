@@ -115,7 +115,17 @@ public class LiquidationOrderRepository {
     private FeeSnapshot feeSnapshot(long userId, String symbol, long instrumentVersion, Instant now) {
         return jdbcTemplate.query("""
                 WITH instrument_fee AS (
-                    SELECT maker_fee_rate_ppm, taker_fee_rate_ppm
+                    SELECT maker_fee_rate_ppm,
+                           taker_fee_rate_ppm,
+                           CASE contract_type
+                               WHEN 'SPOT' THEN 'SPOT'
+                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                               ELSE 'LINEAR_PERPETUAL'
+                           END AS product_line
                       FROM instruments
                      WHERE symbol = ?
                        AND version = ?
@@ -124,15 +134,24 @@ public class LiquidationOrderRepository {
                     SELECT maker_fee_rate_ppm,
                            taker_fee_rate_ppm,
                            CASE WHEN symbol = ? THEN 0 ELSE 1 END AS priority,
+                           CASE source_type
+                               WHEN 'RISK_OVERRIDE' THEN 0
+                               WHEN 'USER_OVERRIDE' THEN 1
+                               WHEN 'PROMOTION' THEN 2
+                               WHEN 'MARKET_MAKER' THEN 3
+                               WHEN 'VIP' THEN 4
+                               ELSE 5
+                           END AS source_priority,
                            effective_time,
                            fee_schedule_id
                       FROM trading_fee_schedules
                      WHERE user_id = ?
+                       AND product_line = (SELECT product_line FROM instrument_fee)
                        AND status = 'ACTIVE'
                        AND (symbol = ? OR symbol IS NULL)
                        AND effective_time <= ?
                        AND (expire_time IS NULL OR expire_time > ?)
-                     ORDER BY priority ASC, effective_time DESC, fee_schedule_id DESC
+                     ORDER BY priority ASC, source_priority ASC, effective_time DESC, fee_schedule_id DESC
                      LIMIT 1
                 )
                 SELECT COALESCE(u.maker_fee_rate_ppm, i.maker_fee_rate_ppm) AS maker_fee_rate_ppm,

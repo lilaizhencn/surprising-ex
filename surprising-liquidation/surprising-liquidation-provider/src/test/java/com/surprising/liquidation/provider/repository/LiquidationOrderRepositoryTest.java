@@ -115,6 +115,32 @@ class LiquidationOrderRepositoryTest {
     }
 
     @Test
+    void liquidationFeeSnapshotFiltersUserFeeByInstrumentProductLine() {
+        LiquidationOrderRepository repository = repository();
+        givenFeeSnapshot();
+        when(sequenceRepository.nextTradingSequence("order")).thenReturn(7001L);
+        when(sequenceRepository.nextTradingSequence("event")).thenReturn(7002L);
+        when(sequenceRepository.nextTradingSequence("command")).thenReturn(7003L);
+        when(sequenceRepository.nextTradingSequence("outbox")).thenReturn(7004L, 7005L);
+        when(jdbcTemplate.update(contains("INSERT INTO trading_orders"), any(Object[].class))).thenReturn(1);
+        when(jdbcTemplate.update(contains("INSERT INTO trading_order_events"), any(Object[].class))).thenReturn(1);
+        when(jdbcTemplate.update(contains("INSERT INTO trading_outbox_events"), any(Object[].class))).thenReturn(1);
+
+        repository.createReduceOnlyMarketOrder(9401L, 2002L, "BTC-USDT-260925-70000-C", MarginMode.CROSS,
+                PositionSide.SHORT, 8L, OrderSide.BUY, 3L, Instant.parse("2026-07-01T00:00:00Z"),
+                Object::toString);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), eq("BTC-USDT-260925-70000-C"), eq(8L),
+                eq("BTC-USDT-260925-70000-C"), eq(2002L), eq("BTC-USDT-260925-70000-C"), any(), any());
+        assertThat(sql.getValue())
+                .contains("WHEN 'VANILLA_OPTION' THEN 'OPTION'")
+                .contains("AND product_line = (SELECT product_line FROM instrument_fee)")
+                .contains("source_priority")
+                .contains("ORDER BY priority ASC, source_priority ASC");
+    }
+
+    @Test
     void failsWhenOrderEventInsertIsSkippedByConflict() {
         LiquidationOrderRepository repository = repository();
         givenFeeSnapshot();
@@ -231,7 +257,7 @@ class LiquidationOrderRepositoryTest {
     @SuppressWarnings({"rawtypes", "unchecked"})
     private void givenFeeSnapshot() {
         when(jdbcTemplate.query(contains("WITH instrument_fee"), any(RowMapper.class),
-                eq("BTC-USDT"), eq(8L), eq("BTC-USDT"), eq(2002L), eq("BTC-USDT"), any(), any()))
+                any(String.class), eq(8L), any(String.class), eq(2002L), any(String.class), any(), any()))
                 .thenAnswer(invocation -> {
                     RowMapper mapper = invocation.getArgument(1);
                     ResultSet rs = org.mockito.Mockito.mock(ResultSet.class);
