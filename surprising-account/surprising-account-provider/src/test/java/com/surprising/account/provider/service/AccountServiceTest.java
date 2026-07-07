@@ -1008,6 +1008,12 @@ class AccountServiceTest {
         }
 
         @Override
+        public PositionState lockPosition(ProductLine productLine, long userId, String symbol, MarginMode marginMode,
+                                          PositionSide positionSide) {
+            return lockPosition(userId, symbol, marginMode, positionSide);
+        }
+
+        @Override
         public Optional<PositionResponse> position(long userId, String symbol, MarginMode marginMode) {
             return position(userId, symbol, marginMode, PositionSide.NET);
         }
@@ -1139,6 +1145,19 @@ class AccountServiceTest {
         }
 
         @Override
+        public void consumeOrderMargin(ProductLine productLine,
+                                       long orderId,
+                                       long userId,
+                                       String symbol,
+                                       MarginMode marginMode,
+                                       long openSteps,
+                                       long actualMarginUnits,
+                                       boolean sweepRemainder,
+                                       Instant now) {
+            consumeOrderMargin(orderId, userId, symbol, marginMode, openSteps, actualMarginUnits, sweepRemainder, now);
+        }
+
+        @Override
         public void releaseOrderMargin(long orderId,
                                        long userId,
                                        String symbol,
@@ -1170,6 +1189,18 @@ class AccountServiceTest {
             releasedPositionMargin.merge(new PositionKey(userId, symbol, marginMode,
                     PositionSide.defaultIfNull(positionSide)), closeSteps, Long::sum);
             assertThat(closeSteps).isLessThanOrEqualTo(positionAbsSteps);
+        }
+
+        @Override
+        public void releasePositionMargin(ProductLine productLine,
+                                          long userId,
+                                          String symbol,
+                                          MarginMode marginMode,
+                                          long closeSteps,
+                                          PositionSide positionSide,
+                                          long positionAbsSteps,
+                                          Instant now) {
+            releasePositionMargin(userId, symbol, marginMode, closeSteps, positionSide, positionAbsSteps, now);
         }
 
         @Override
@@ -1389,6 +1420,18 @@ class AccountServiceTest {
             return new PositionResponse(userId, symbol, state.instrumentVersion(), marginMode,
                     normalizedPositionSide,
                     state.signedQuantitySteps(), state.entryPriceTicks(), state.realizedPnlUnits(), now);
+        }
+
+        @Override
+        public PositionResponse updatePosition(ProductLine productLine,
+                                               long userId,
+                                               String symbol,
+                                               MarginMode marginMode,
+                                               PositionSide positionSide,
+                                               PositionState state,
+                                               long previousSignedQuantitySteps,
+                                               Instant now) {
+            return updatePosition(userId, symbol, marginMode, positionSide, state, previousSignedQuantitySteps, now);
         }
 
         @Override

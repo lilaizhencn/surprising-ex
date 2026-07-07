@@ -1995,6 +1995,7 @@ CREATE INDEX IF NOT EXISTS account_spot_reservations_symbol_idx
     ON account_spot_order_reservations (symbol, status, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS account_position_margins (
+    product_line        TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     user_id             BIGINT NOT NULL,
     symbol              TEXT NOT NULL,
     asset               TEXT NOT NULL,
@@ -2002,7 +2003,11 @@ CREATE TABLE IF NOT EXISTS account_position_margins (
     position_side       TEXT NOT NULL DEFAULT 'NET',
     margin_units        BIGINT NOT NULL,
     updated_at          TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (user_id, symbol, asset, margin_mode, position_side),
+    PRIMARY KEY (product_line, user_id, symbol, asset, margin_mode, position_side),
+    CONSTRAINT account_position_margins_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT account_position_margins_user_positive CHECK (user_id > 0),
     CONSTRAINT account_position_margins_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT account_position_margins_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
@@ -2012,9 +2017,10 @@ CREATE TABLE IF NOT EXISTS account_position_margins (
 );
 
 CREATE INDEX IF NOT EXISTS account_position_margins_user_idx
-    ON account_position_margins (user_id, symbol, margin_mode, position_side);
+    ON account_position_margins (product_line, user_id, symbol, margin_mode, position_side);
 
 CREATE TABLE IF NOT EXISTS account_positions (
+    product_line            TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     user_id                 BIGINT NOT NULL,
     symbol                  TEXT NOT NULL,
     margin_mode             TEXT NOT NULL DEFAULT 'CROSS',
@@ -2024,7 +2030,11 @@ CREATE TABLE IF NOT EXISTS account_positions (
     entry_price_ticks       BIGINT NOT NULL,
     realized_pnl_units      BIGINT NOT NULL,
     updated_at              TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (user_id, symbol, margin_mode, position_side),
+    PRIMARY KEY (product_line, user_id, symbol, margin_mode, position_side),
+    CONSTRAINT account_positions_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT account_positions_user_positive CHECK (user_id > 0),
     CONSTRAINT account_positions_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT account_positions_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
@@ -2038,13 +2048,81 @@ CREATE TABLE IF NOT EXISTS account_positions (
 );
 
 CREATE INDEX IF NOT EXISTS account_positions_user_idx
-    ON account_positions (user_id);
+    ON account_positions (product_line, user_id);
 
 CREATE INDEX IF NOT EXISTS account_positions_symbol_idx
-    ON account_positions (symbol, margin_mode, position_side);
+    ON account_positions (product_line, symbol, margin_mode, position_side);
 
 CREATE INDEX IF NOT EXISTS account_positions_open_scan_idx
-    ON account_positions (user_id, symbol, margin_mode, position_side)
+    ON account_positions (product_line, user_id, symbol, margin_mode, position_side)
+    WHERE signed_quantity_steps <> 0;
+
+DO $$
+BEGIN
+    IF to_regclass('public.account_positions') IS NOT NULL THEN
+        ALTER TABLE account_positions ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+        ALTER TABLE account_positions DROP CONSTRAINT IF EXISTS account_positions_product_line_check;
+        ALTER TABLE account_positions
+            ADD CONSTRAINT account_positions_product_line_check CHECK (
+                product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                                 'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+            );
+        UPDATE account_positions p
+           SET product_line = CASE i.contract_type
+               WHEN 'SPOT' THEN 'SPOT'
+               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+               WHEN 'VANILLA_OPTION' THEN 'OPTION'
+               ELSE p.product_line
+           END
+          FROM instruments i
+         WHERE i.symbol = p.symbol
+           AND i.version = p.instrument_version;
+        ALTER TABLE account_positions DROP CONSTRAINT IF EXISTS account_positions_pkey;
+        ALTER TABLE account_positions
+            ADD CONSTRAINT account_positions_pkey PRIMARY KEY (product_line, user_id, symbol, margin_mode, position_side);
+    END IF;
+
+    IF to_regclass('public.account_position_margins') IS NOT NULL THEN
+        ALTER TABLE account_position_margins ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+        ALTER TABLE account_position_margins DROP CONSTRAINT IF EXISTS account_position_margins_product_line_check;
+        ALTER TABLE account_position_margins
+            ADD CONSTRAINT account_position_margins_product_line_check CHECK (
+                product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                                 'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+            );
+        UPDATE account_position_margins m
+           SET product_line = p.product_line
+          FROM account_positions p
+         WHERE p.user_id = m.user_id
+           AND p.symbol = m.symbol
+           AND p.margin_mode = m.margin_mode
+           AND p.position_side = m.position_side;
+        ALTER TABLE account_position_margins DROP CONSTRAINT IF EXISTS account_position_margins_pkey;
+        ALTER TABLE account_position_margins
+            ADD CONSTRAINT account_position_margins_pkey
+            PRIMARY KEY (product_line, user_id, symbol, asset, margin_mode, position_side);
+    END IF;
+END $$;
+
+DROP INDEX IF EXISTS account_position_margins_user_idx;
+DROP INDEX IF EXISTS account_positions_user_idx;
+DROP INDEX IF EXISTS account_positions_symbol_idx;
+DROP INDEX IF EXISTS account_positions_open_scan_idx;
+
+CREATE INDEX IF NOT EXISTS account_position_margins_user_idx
+    ON account_position_margins (product_line, user_id, symbol, margin_mode, position_side);
+
+CREATE INDEX IF NOT EXISTS account_positions_user_idx
+    ON account_positions (product_line, user_id);
+
+CREATE INDEX IF NOT EXISTS account_positions_symbol_idx
+    ON account_positions (product_line, symbol, margin_mode, position_side);
+
+CREATE INDEX IF NOT EXISTS account_positions_open_scan_idx
+    ON account_positions (product_line, user_id, symbol, margin_mode, position_side)
     WHERE signed_quantity_steps <> 0;
 
 CREATE TABLE IF NOT EXISTS account_processed_trades (

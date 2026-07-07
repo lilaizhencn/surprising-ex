@@ -723,7 +723,8 @@ public class AccountService {
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
         ContractSpec fillSpec = contractSpec(symbol, fillInstrumentVersion);
-        PositionState current = accountRepository.lockPosition(userId, symbol, normalizedMarginMode,
+        ProductLine productLine = ProductLine.requireContractTypeCode(fillSpec.contractType().name());
+        PositionState current = accountRepository.lockPosition(productLine, userId, symbol, normalizedMarginMode,
                 normalizedPositionSide);
         ContractSpec positionSpec = current.signedQuantitySteps() == 0
                 ? fillSpec
@@ -746,7 +747,7 @@ public class AccountService {
         if (openSteps > 0) {
             if (!fillSpec.contractType().isOption() || side == OrderSide.SELL) {
                 long actualMarginUnits = MarginTransferMath.openingInitialMarginUnits(fillSpec, priceTicks, openSteps);
-                accountRepository.consumeOrderMargin(orderId, userId, symbol, normalizedMarginMode, openSteps,
+                accountRepository.consumeOrderMargin(productLine, orderId, userId, symbol, normalizedMarginMode, openSteps,
                         actualMarginUnits, orderCompleted, eventTime);
             }
         }
@@ -761,12 +762,12 @@ public class AccountService {
                     priceTicks, quantitySteps, eventTime, traceId);
         }
         if (closeSteps > 0) {
-            accountRepository.releasePositionMargin(userId, symbol, normalizedMarginMode, closeSteps,
+            accountRepository.releasePositionMargin(productLine, userId, symbol, normalizedMarginMode, closeSteps,
                     normalizedPositionSide, Math.absExact(current.signedQuantitySteps()), eventTime);
             accountRepository.releaseOrderMargin(orderId, userId, symbol, closeSteps,
                     orderCompleted && openSteps == 0, eventTime);
         }
-        PositionResponse updated = accountRepository.updatePosition(userId, symbol, normalizedMarginMode,
+        PositionResponse updated = accountRepository.updatePosition(productLine, userId, symbol, normalizedMarginMode,
                 normalizedPositionSide,
                 change.next(), current.signedQuantitySteps(), eventTime);
         if (closeSteps > 0 && reduceOnlyOrderPruner != null) {

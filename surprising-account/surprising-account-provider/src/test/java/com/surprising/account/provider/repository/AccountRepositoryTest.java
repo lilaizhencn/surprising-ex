@@ -185,42 +185,41 @@ class AccountRepositoryTest {
     @Test
     void positionQueryCanScopeByProductLineContractType() {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
-        when(jdbcTemplate.query(contains("i.contract_type = ?"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT-260925"), eq("CROSS"), eq("NET"), eq("LINEAR_DELIVERY")))
+        when(jdbcTemplate.query(contains("product_line = ?"), anyRowMapper(),
+                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT-260925"), eq("CROSS"), eq("NET")))
                 .thenReturn(List.of());
 
         repository.position(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT-260925",
                 MarginMode.CROSS, PositionSide.NET);
 
-        verify(jdbcTemplate).query(contains("i.contract_type = ?"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT-260925"), eq("CROSS"), eq("NET"), eq("LINEAR_DELIVERY"));
+        verify(jdbcTemplate).query(contains("product_line = ?"), anyRowMapper(),
+                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT-260925"), eq("CROSS"), eq("NET"));
     }
 
     @Test
     void positionsQueryCanScopeByProductLineContractType() {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
-        when(jdbcTemplate.query(contains("i.contract_type = ?"), anyRowMapper(),
-                eq(1001L), eq("SHORT"), eq("SHORT"), eq("INVERSE_PERPETUAL"))).thenReturn(List.of());
+        when(jdbcTemplate.query(contains("product_line = ?"), anyRowMapper(),
+                eq("INVERSE_PERPETUAL"), eq(1001L), eq("SHORT"), eq("SHORT"))).thenReturn(List.of());
 
         repository.positions(ProductLine.INVERSE_PERPETUAL, 1001L, PositionSide.SHORT);
 
-        verify(jdbcTemplate).query(contains("i.contract_type = ?"), anyRowMapper(),
-                eq(1001L), eq("SHORT"), eq("SHORT"), eq("INVERSE_PERPETUAL"));
+        verify(jdbcTemplate).query(contains("product_line = ?"), anyRowMapper(),
+                eq("INVERSE_PERPETUAL"), eq(1001L), eq("SHORT"), eq("SHORT"));
     }
 
     @Test
     void positionMarginQueryCanScopeByProductLineContractType() {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
-        when(jdbcTemplate.query(contains("i.contract_type = ?"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT-260925-70000-C"), eq("ISOLATED"), eq("LONG"),
-                eq("VANILLA_OPTION"))).thenReturn(List.of());
+        when(jdbcTemplate.query(contains("p.product_line = ?"), anyRowMapper(),
+                eq("OPTION"), eq(1001L), eq("BTC-USDT-260925-70000-C"), eq("ISOLATED"), eq("LONG")))
+                .thenReturn(List.of());
 
         repository.positionMargin(ProductLine.OPTION, 1001L, "BTC-USDT-260925-70000-C",
                 MarginMode.ISOLATED, PositionSide.LONG);
 
-        verify(jdbcTemplate).query(contains("i.contract_type = ?"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT-260925-70000-C"), eq("ISOLATED"), eq("LONG"),
-                eq("VANILLA_OPTION"));
+        verify(jdbcTemplate).query(contains("p.product_line = ?"), anyRowMapper(),
+                eq("OPTION"), eq(1001L), eq("BTC-USDT-260925-70000-C"), eq("ISOLATED"), eq("LONG"));
     }
 
     @Test
@@ -228,8 +227,8 @@ class AccountRepositoryTest {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
                 eq("iso-add-line"), eq(1001L), eq("BTC-USDT-260925"))).thenReturn(List.of());
-        when(jdbcTemplate.query(contains("i.contract_type = ?"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT-260925"), eq("NET"), eq("LINEAR_DELIVERY")))
+        when(jdbcTemplate.query(contains("p.product_line = ?"), anyRowMapper(),
+                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT-260925"), eq("NET")))
                 .thenReturn(List.of());
 
         assertThatThrownBy(() -> repository.adjustIsolatedPositionMargin(ProductLine.LINEAR_DELIVERY,
@@ -238,8 +237,8 @@ class AccountRepositoryTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("open isolated position not found");
 
-        verify(jdbcTemplate).query(contains("i.contract_type = ?"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT-260925"), eq("NET"), eq("LINEAR_DELIVERY"));
+        verify(jdbcTemplate).query(contains("p.product_line = ?"), anyRowMapper(),
+                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT-260925"), eq("NET"));
         verify(jdbcTemplate, never()).update(contains("INSERT INTO account_ledger_entries"), any(Object[].class));
     }
 
@@ -319,7 +318,7 @@ class AccountRepositoryTest {
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.query(contains("SELECT margin_units"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("ISOLATED"), eq("NET")))
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("ISOLATED"), eq("NET")))
                 .thenAnswer(marginUnits(600L))
                 .thenAnswer(marginUnits(700L));
         when(jdbcTemplate.update(contains("available_units = available_units -"), any(Object[].class)))
@@ -340,7 +339,8 @@ class AccountRepositoryTest {
         verify(jdbcTemplate).update(contains("available_units = available_units -"),
                 eq(100L), eq(100L), any(Timestamp.class), eq(1001L), eq("USDT"), eq(100L));
         verify(jdbcTemplate).update(contains("INSERT INTO account_position_margins"),
-                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("NET"), eq(100L), any(Timestamp.class));
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("NET"), eq(100L),
+                any(Timestamp.class));
         verify(jdbcTemplate).update(contains("UPDATE account_ledger_entries"),
                 eq(1_600L), eq("iso-add-1"), eq(1001L), eq("USDT"));
     }
@@ -356,7 +356,7 @@ class AccountRepositoryTest {
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.query(contains("SELECT margin_units"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("ISOLATED"), eq("NET")))
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("ISOLATED"), eq("NET")))
                 .thenAnswer(marginUnits(1_000L))
                 .thenAnswer(marginUnits(800L));
         when(jdbcTemplate.query(contains("FROM risk_position_snapshots"), anyRowMapper(),
@@ -376,7 +376,8 @@ class AccountRepositoryTest {
 
         assertThat(response.positionMarginUnits()).isEqualTo(800L);
         verify(jdbcTemplate).update(contains("SET margin_units = margin_units -"),
-                eq(200L), any(Timestamp.class), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("NET"), eq(200L));
+                eq(200L), any(Timestamp.class), eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("USDT"),
+                eq("NET"), eq(200L));
         verify(jdbcTemplate).update(contains("available_units = available_units +"),
                 eq(200L), eq(200L), any(Timestamp.class), eq(1001L), eq("USDT"), eq(200L));
     }
@@ -392,7 +393,7 @@ class AccountRepositoryTest {
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.query(contains("SELECT margin_units"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("ISOLATED"), eq("NET")))
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("ISOLATED"), eq("NET")))
                 .thenAnswer(marginUnits(1_000L));
         when(jdbcTemplate.query(contains("FROM risk_position_snapshots"), anyRowMapper(),
                 eq(1001L), eq("BTC-USDT"), eq("NET"), eq(10_000L))).thenAnswer(riskSnapshot(7L, 10L, -100L,
@@ -420,7 +421,7 @@ class AccountRepositoryTest {
                     return List.of(mapper.mapRow(rs, 0));
                 });
         when(jdbcTemplate.query(contains("SELECT margin_units"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("ISOLATED"), eq("NET")))
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("ISOLATED"), eq("NET")))
                 .thenAnswer(marginUnits(700L));
         when(jdbcTemplate.query(contains("SELECT b.user_id"), anyRowMapper(),
                 eq(1001L), eq("USDT"))).thenAnswer(balance(900L, 700L, 1_600L));
@@ -450,7 +451,7 @@ class AccountRepositoryTest {
         when(jdbcTemplate.update(contains("UPDATE account_deficits"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
-                eq(1001L), eq("USDT"), eq("CROSS")))
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("USDT"), eq("CROSS")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
@@ -474,7 +475,8 @@ class AccountRepositoryTest {
                 MarginMode.CROSS, -90L, now);
 
         verify(jdbcTemplate).update(contains("UPDATE account_position_margins"),
-                eq(50L), any(Timestamp.class), eq(1001L), eq("ETH-USDT"), eq("USDT"), eq("CROSS"), eq(50L));
+                eq(50L), any(Timestamp.class), eq(1001L), eq("ETH-USDT"), eq("USDT"), eq("CROSS"),
+                eq("LINEAR_PERPETUAL"), eq(50L));
         verify(jdbcTemplate).update(contains("UPDATE account_balances"),
                 eq(0L), eq(50L), any(Timestamp.class), eq(1001L), eq("USDT"));
         verify(jdbcTemplate).update(contains("UPDATE account_deficits"),
@@ -562,7 +564,7 @@ class AccountRepositoryTest {
         when(jdbcTemplate.query(contains("reference_type = 'LIQUIDATION_FEE'"), anyRowMapper(),
                 eq("9001:5001"), eq(1001L), eq("USDT"))).thenReturn(List.of());
         when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
-                eq(1001L), eq("USDT"), eq("CROSS"))).thenAnswer(invocation -> {
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("USDT"), eq("CROSS"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getString("symbol")).thenReturn("BTC-USDT");
@@ -595,7 +597,8 @@ class AccountRepositoryTest {
 
         assertThat(settlement.collectedFeeUnits()).isEqualTo(70L);
         verify(jdbcTemplate).update(contains("UPDATE account_position_margins"),
-                eq(50L), any(Timestamp.class), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq(50L));
+                eq(50L), any(Timestamp.class), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"),
+                eq("LINEAR_PERPETUAL"), eq(50L));
         verify(jdbcTemplate).update(contains("UPDATE account_balances"),
                 eq(0L), eq(0L), any(Timestamp.class), eq(1001L), eq("USDT"));
         verify(jdbcTemplate, never()).update(contains("UPDATE account_deficits"), any(Object[].class));
@@ -618,7 +621,7 @@ class AccountRepositoryTest {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         when(jdbcTemplate.query(contains("SELECT signed_quantity_steps"), anyRowMapper(),
-                eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET"))).thenAnswer(invocation -> {
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getLong("signed_quantity_steps")).thenReturn(10L);
@@ -877,7 +880,8 @@ class AccountRepositoryTest {
         repository.consumeOrderMargin(9001L, 1001L, "BTC-USDT", MarginMode.CROSS, 6L, 600L, true, now);
 
         verify(jdbcTemplate).update(contains("INSERT INTO account_position_margins"),
-                eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq("NET"), eq(600L), any(Timestamp.class));
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq("NET"),
+                eq(600L), any(Timestamp.class));
         verify(jdbcTemplate).update(contains("UPDATE account_balances"),
                 eq(60L), eq(60L), any(Timestamp.class), eq(1001L), eq("USDT"), eq(60L));
         verify(jdbcTemplate).update(contains("UPDATE account_margin_reservations"),
@@ -913,7 +917,8 @@ class AccountRepositoryTest {
         repository.consumeOrderMargin(9001L, 1001L, "BTC-USD", MarginMode.CROSS, 6L, 600L, true, now);
 
         verify(jdbcTemplate).update(contains("INSERT INTO account_position_margins"),
-                eq(1001L), eq("BTC-USD"), eq("BTC"), eq("CROSS"), eq("NET"), eq(600L), any(Timestamp.class));
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USD"), eq("BTC"), eq("CROSS"), eq("NET"),
+                eq(600L), any(Timestamp.class));
         verify(jdbcTemplate).update(contains("UPDATE account_product_balances"),
                 eq(60L), eq(60L), any(Timestamp.class), eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"), eq(60L));
         verify(jdbcTemplate).update(contains("UPDATE account_margin_reservations"),
