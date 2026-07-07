@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
@@ -18,6 +19,45 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 class OutboxRepositoryTest {
+
+    @Test
+    void enqueueAllowsCurrentProductTopicsWhenProductTopicsAreEnabled() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OrderRepository orderRepository = org.mockito.Mockito.mock(OrderRepository.class);
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        OutboxRepository repository = new OutboxRepository(jdbcTemplate, orderRepository, properties);
+        when(orderRepository.nextSequence("outbox")).thenReturn(901L);
+        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
+
+        long outboxId = repository.enqueue("ORDER", 9001L,
+                "surprising.linear-delivery.order.commands.v1", "BTC-USDT-260925", "PLACE", "{}",
+                Instant.parse("2026-07-01T00:00:00Z"));
+
+        assertThat(outboxId).isEqualTo(901L);
+        verify(orderRepository).nextSequence("outbox");
+    }
+
+    @Test
+    void enqueueRejectsOtherProductTopicBeforeWritingWhenProductTopicsAreEnabled() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OrderRepository orderRepository = org.mockito.Mockito.mock(OrderRepository.class);
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        OutboxRepository repository = new OutboxRepository(jdbcTemplate, orderRepository, properties);
+
+        assertThatThrownBy(() -> repository.enqueue("ORDER", 9001L,
+                "surprising.linear-delivery.order.commands.v1", "BTC-USDT-260925-70000-C", "PLACE", "{}",
+                Instant.parse("2026-07-01T00:00:00Z")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("trading outbox topic must match current product line")
+                .hasMessageContaining("surprising.option.order.commands.v1");
+
+        verify(orderRepository, never()).nextSequence("outbox");
+        verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
+    }
 
     @Test
     void lockPendingSelectsUnpublishedDueRowsForRetry() {

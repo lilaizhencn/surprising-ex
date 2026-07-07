@@ -37,6 +37,7 @@ public class OutboxRepository {
                         String eventType,
                         String payload,
                         Instant now) {
+        requireCurrentProductTopic(aggregateType, topic);
         long outboxId = orderRepository.nextSequence("outbox");
         int rows = jdbcTemplate.update("""
                 INSERT INTO trading_outbox_events (
@@ -174,5 +175,18 @@ public class OutboxRepository {
         sql.append("   AND ").append(alias).append(".topic IN (?, ?)\n");
         args.add(kafka.getOrderEventsTopic());
         args.add(kafka.getOrderCommandsTopic());
+    }
+
+    private void requireCurrentProductTopic(String aggregateType, String topic) {
+        TradingOrderProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled() || !"ORDER".equals(aggregateType)) {
+            return;
+        }
+        String orderEventsTopic = kafka.getOrderEventsTopic();
+        String orderCommandsTopic = kafka.getOrderCommandsTopic();
+        if (!orderEventsTopic.equals(topic) && !orderCommandsTopic.equals(topic)) {
+            throw new IllegalStateException("trading outbox topic must match current product line: expected one of ["
+                    + orderEventsTopic + ", " + orderCommandsTopic + "] actual=" + topic);
+        }
     }
 }
