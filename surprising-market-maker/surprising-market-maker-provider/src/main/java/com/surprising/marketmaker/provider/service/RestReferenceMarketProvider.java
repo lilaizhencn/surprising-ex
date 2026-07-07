@@ -4,6 +4,7 @@ import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookLevel;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
+import com.surprising.product.api.ProductLine;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.URI;
@@ -51,15 +52,17 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     }
 
     @Override
-    public ReferenceOrderBookSnapshot snapshot(String symbol, InstrumentResponse instrument) {
+    public ReferenceOrderBookSnapshot snapshot(String symbol, ProductLine productLine, InstrumentResponse instrument) {
         MarketMakerProperties.ReferenceMarket referenceMarket = properties.getReferenceMarket();
         if (!referenceMarket.isEnabled() || instrument == null) {
             return null;
         }
+        ProductLine effectiveProductLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
         String normalizedSymbol = normalizeSymbol(symbol);
+        String cacheKey = cacheKey(effectiveProductLine, normalizedSymbol);
         Instant now = Instant.now();
-        ensureWebSocketConnections(referenceMarket, normalizedSymbol, instrument, now);
-        CachedSnapshot cached = cache.get(normalizedSymbol);
+        ensureWebSocketConnections(referenceMarket, effectiveProductLine, normalizedSymbol, instrument, now);
+        CachedSnapshot cached = cache.get(cacheKey);
         if (cached != null
                 && (cached.streaming() || cached.fetchedAt().plus(refreshInterval()).isAfter(now))
                 && fresh(cached.snapshot(), now)) {
@@ -67,13 +70,13 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         }
 
         for (MarketMakerProperties.ReferenceMarket.Source source : referenceMarket.getSources()) {
-            if (!matches(source, normalizedSymbol)) {
+            if (!matches(source, effectiveProductLine, normalizedSymbol)) {
                 continue;
             }
             try {
                 ReferenceOrderBookSnapshot snapshot = fetch(source, normalizedSymbol, instrument);
                 if (snapshot != null && snapshot.hasTwoSidedDepth()) {
-                    cache.put(normalizedSymbol, new CachedSnapshot(snapshot, Instant.now(), false));
+                    cache.put(cacheKey, new CachedSnapshot(snapshot, Instant.now(), false));
                     return snapshot;
                 }
             } catch (RuntimeException ex) {
@@ -131,7 +134,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             ReferenceOrderBookSnapshot snapshot = liveBook.snapshot(source.getName(), normalizedSymbol, receivedAt,
                     Math.max(1, properties.getReferenceMarket().getDepthLevels()));
             if (snapshot != null && snapshot.hasTwoSidedDepth()) {
-                cache.put(normalizedSymbol, new CachedSnapshot(snapshot, receivedAt, true));
+                cache.put(cacheKey(source.getProductLine(), normalizedSymbol), new CachedSnapshot(snapshot, receivedAt, true));
                 return snapshot;
             }
             return null;
@@ -279,9 +282,10 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         return new BigDecimal(value);
     }
 
-    private boolean matches(MarketMakerProperties.ReferenceMarket.Source source, String symbol) {
+    private boolean matches(MarketMakerProperties.ReferenceMarket.Source source, ProductLine productLine, String symbol) {
         return source != null
                 && source.isEnabled()
+                && source.getProductLine() == productLine
                 && symbol.equals(normalizeSymbol(source.getSymbol()));
     }
 
@@ -293,6 +297,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     }
 
     private void ensureWebSocketConnections(MarketMakerProperties.ReferenceMarket referenceMarket,
+                                            ProductLine productLine,
                                             String symbol,
                                             InstrumentResponse instrument,
                                             Instant now) {
@@ -300,7 +305,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             return;
         }
         for (MarketMakerProperties.ReferenceMarket.Source source : referenceMarket.getSources()) {
-            if (!matches(source, symbol) || !hasText(source.getWebSocketUrl())) {
+            if (!matches(source, productLine, symbol) || !hasText(source.getWebSocketUrl())) {
                 continue;
             }
             String liveKey = liveKey(source, symbol);
@@ -379,7 +384,11 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     }
 
     private String liveKey(MarketMakerProperties.ReferenceMarket.Source source, String symbol) {
-        return normalizeSymbol(source.getName()) + ":" + normalizeSymbol(symbol);
+        return source.getProductLine().name() + ":" + normalizeSymbol(source.getName()) + ":" + normalizeSymbol(symbol);
+    }
+
+    private String cacheKey(ProductLine productLine, String symbol) {
+        return (productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine).name() + ":" + normalizeSymbol(symbol);
     }
 
     private boolean hasText(String value) {

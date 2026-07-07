@@ -2363,22 +2363,29 @@ CREATE INDEX IF NOT EXISTS adl_events_asset_symbol_time_idx
     ON adl_events (account_type, asset, symbol, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS market_maker_strategy_leases (
+    product_line                TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     strategy_id                 TEXT NOT NULL,
     symbol                      TEXT NOT NULL,
     owner_id                    TEXT NOT NULL,
     lease_until                 TIMESTAMPTZ NOT NULL,
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (strategy_id, symbol),
+    PRIMARY KEY (product_line, strategy_id, symbol),
+    CONSTRAINT market_maker_leases_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT market_maker_leases_strategy_format CHECK (strategy_id ~ '^[A-Za-z0-9_.:-]{1,64}$'),
     CONSTRAINT market_maker_leases_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT market_maker_leases_owner_present CHECK (length(owner_id) > 0)
 );
 
+DROP INDEX IF EXISTS market_maker_strategy_leases_until_idx;
 CREATE INDEX IF NOT EXISTS market_maker_strategy_leases_until_idx
-    ON market_maker_strategy_leases (lease_until ASC);
+    ON market_maker_strategy_leases (product_line, lease_until ASC);
 
 CREATE TABLE IF NOT EXISTS market_maker_strategy_overrides (
-    strategy_id                 TEXT PRIMARY KEY,
+    product_line                TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
+    strategy_id                 TEXT NOT NULL,
     enabled                     BOOLEAN,
     base_quantity_steps         BIGINT,
     margin_mode                 TEXT,
@@ -2391,6 +2398,11 @@ CREATE TABLE IF NOT EXISTS market_maker_strategy_overrides (
     reason                      TEXT NOT NULL,
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     version                     BIGINT NOT NULL DEFAULT 1,
+    PRIMARY KEY (product_line, strategy_id),
+    CONSTRAINT market_maker_overrides_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT market_maker_overrides_strategy_format CHECK (strategy_id ~ '^[A-Za-z0-9_.:-]{1,64}$'),
     CONSTRAINT market_maker_overrides_margin_mode CHECK (margin_mode IS NULL OR margin_mode IN ('CROSS', 'ISOLATED')),
     CONSTRAINT market_maker_overrides_base_qty CHECK (base_quantity_steps IS NULL OR base_quantity_steps > 0),
@@ -2406,11 +2418,13 @@ CREATE TABLE IF NOT EXISTS market_maker_strategy_overrides (
     CONSTRAINT market_maker_overrides_version_positive CHECK (version > 0)
 );
 
+DROP INDEX IF EXISTS market_maker_strategy_overrides_updated_idx;
 CREATE INDEX IF NOT EXISTS market_maker_strategy_overrides_updated_idx
-    ON market_maker_strategy_overrides (updated_at DESC);
+    ON market_maker_strategy_overrides (product_line, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS market_maker_strategy_run_events (
     event_id                    BIGSERIAL PRIMARY KEY,
+    product_line                TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     strategy_id                 TEXT NOT NULL,
     symbol                      TEXT,
     account_id                  BIGINT,
@@ -2424,6 +2438,10 @@ CREATE TABLE IF NOT EXISTS market_maker_strategy_run_events (
     error_message               TEXT,
     trace_id                    TEXT,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT market_maker_run_events_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT market_maker_run_events_strategy_format CHECK (strategy_id ~ '^[A-Za-z0-9_.:-]{1,64}$'),
     CONSTRAINT market_maker_run_events_symbol_format CHECK (
         symbol IS NULL OR symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'
@@ -2439,23 +2457,28 @@ CREATE TABLE IF NOT EXISTS market_maker_strategy_run_events (
     )
 );
 
+DROP INDEX IF EXISTS market_maker_run_events_strategy_time_idx;
 CREATE INDEX IF NOT EXISTS market_maker_run_events_strategy_time_idx
-    ON market_maker_strategy_run_events (strategy_id, created_at DESC);
+    ON market_maker_strategy_run_events (product_line, strategy_id, created_at DESC);
 
+DROP INDEX IF EXISTS market_maker_run_events_symbol_time_idx;
 CREATE INDEX IF NOT EXISTS market_maker_run_events_symbol_time_idx
-    ON market_maker_strategy_run_events (symbol, created_at DESC)
+    ON market_maker_strategy_run_events (product_line, symbol, created_at DESC)
     WHERE symbol IS NOT NULL;
 
+DROP INDEX IF EXISTS market_maker_run_events_account_time_idx;
 CREATE INDEX IF NOT EXISTS market_maker_run_events_account_time_idx
-    ON market_maker_strategy_run_events (account_id, created_at DESC)
+    ON market_maker_strategy_run_events (product_line, account_id, created_at DESC)
     WHERE account_id IS NOT NULL;
 
+DROP INDEX IF EXISTS market_maker_run_events_trace_idx;
 CREATE INDEX IF NOT EXISTS market_maker_run_events_trace_idx
-    ON market_maker_strategy_run_events (trace_id)
+    ON market_maker_strategy_run_events (product_line, trace_id)
     WHERE trace_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS market_maker_reference_samples (
     sample_id                   BIGSERIAL PRIMARY KEY,
+    product_line                TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     strategy_id                 TEXT NOT NULL,
     symbol                      TEXT NOT NULL,
     node_id                     TEXT NOT NULL,
@@ -2471,6 +2494,10 @@ CREATE TABLE IF NOT EXISTS market_maker_reference_samples (
     received_at                 TIMESTAMPTZ NOT NULL,
     trace_id                    TEXT,
     sampled_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT market_maker_reference_samples_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT market_maker_reference_samples_strategy_format CHECK (strategy_id ~ '^[A-Za-z0-9_.:-]{1,64}$'),
     CONSTRAINT market_maker_reference_samples_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT market_maker_reference_samples_node_present CHECK (length(node_id) > 0),
@@ -2484,14 +2511,68 @@ CREATE TABLE IF NOT EXISTS market_maker_reference_samples (
     )
 );
 
+DO $$
+BEGIN
+    ALTER TABLE market_maker_strategy_leases
+        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+    ALTER TABLE market_maker_strategy_leases
+        DROP CONSTRAINT IF EXISTS market_maker_strategy_leases_pkey;
+    ALTER TABLE market_maker_strategy_leases
+        ADD CONSTRAINT market_maker_strategy_leases_pkey PRIMARY KEY (product_line, strategy_id, symbol);
+    ALTER TABLE market_maker_strategy_leases
+        DROP CONSTRAINT IF EXISTS market_maker_leases_product_line_check;
+    ALTER TABLE market_maker_strategy_leases
+        ADD CONSTRAINT market_maker_leases_product_line_check CHECK (
+            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+        );
+
+    ALTER TABLE market_maker_strategy_overrides
+        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+    ALTER TABLE market_maker_strategy_overrides
+        DROP CONSTRAINT IF EXISTS market_maker_strategy_overrides_pkey;
+    ALTER TABLE market_maker_strategy_overrides
+        ADD CONSTRAINT market_maker_strategy_overrides_pkey PRIMARY KEY (product_line, strategy_id);
+    ALTER TABLE market_maker_strategy_overrides
+        DROP CONSTRAINT IF EXISTS market_maker_overrides_product_line_check;
+    ALTER TABLE market_maker_strategy_overrides
+        ADD CONSTRAINT market_maker_overrides_product_line_check CHECK (
+            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+        );
+
+    ALTER TABLE market_maker_strategy_run_events
+        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+    ALTER TABLE market_maker_strategy_run_events
+        DROP CONSTRAINT IF EXISTS market_maker_run_events_product_line_check;
+    ALTER TABLE market_maker_strategy_run_events
+        ADD CONSTRAINT market_maker_run_events_product_line_check CHECK (
+            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+        );
+
+    ALTER TABLE market_maker_reference_samples
+        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+    ALTER TABLE market_maker_reference_samples
+        DROP CONSTRAINT IF EXISTS market_maker_reference_samples_product_line_check;
+    ALTER TABLE market_maker_reference_samples
+        ADD CONSTRAINT market_maker_reference_samples_product_line_check CHECK (
+            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+        );
+END $$;
+
+DROP INDEX IF EXISTS market_maker_reference_samples_strategy_time_idx;
 CREATE INDEX IF NOT EXISTS market_maker_reference_samples_strategy_time_idx
-    ON market_maker_reference_samples (strategy_id, sampled_at DESC);
+    ON market_maker_reference_samples (product_line, strategy_id, sampled_at DESC);
 
+DROP INDEX IF EXISTS market_maker_reference_samples_symbol_time_idx;
 CREATE INDEX IF NOT EXISTS market_maker_reference_samples_symbol_time_idx
-    ON market_maker_reference_samples (symbol, sampled_at DESC);
+    ON market_maker_reference_samples (product_line, symbol, sampled_at DESC);
 
+DROP INDEX IF EXISTS market_maker_reference_samples_transport_time_idx;
 CREATE INDEX IF NOT EXISTS market_maker_reference_samples_transport_time_idx
-    ON market_maker_reference_samples (transport, sampled_at DESC);
+    ON market_maker_reference_samples (product_line, transport, sampled_at DESC);
 
 CREATE TABLE IF NOT EXISTS gateway_users (
     user_id             BIGSERIAL PRIMARY KEY,

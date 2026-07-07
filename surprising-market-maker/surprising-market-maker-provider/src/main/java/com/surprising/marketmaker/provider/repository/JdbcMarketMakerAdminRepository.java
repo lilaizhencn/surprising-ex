@@ -1,5 +1,6 @@
 package com.surprising.marketmaker.provider.repository;
 
+import com.surprising.product.api.ProductLine;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -31,11 +32,12 @@ public class JdbcMarketMakerAdminRepository implements MarketMakerAdminRepositor
     public void recordRunEvent(MarketMakerRunEventWrite event) {
         jdbcTemplate.update("""
                 INSERT INTO market_maker_strategy_run_events (
-                    strategy_id, symbol, account_id, node_id, cycle_sequence, event_type,
+                    product_line, strategy_id, symbol, account_id, node_id, cycle_sequence, event_type,
                     submitted_orders, canceled_orders, rejected_orders, skipped_reason,
                     error_message, trace_id, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
+                event.productLine().name(),
                 event.strategyId(),
                 event.symbol(),
                 event.accountId(),
@@ -55,11 +57,12 @@ public class JdbcMarketMakerAdminRepository implements MarketMakerAdminRepositor
     public void recordReferenceSample(MarketMakerReferenceSampleWrite sample) {
         jdbcTemplate.update("""
                 INSERT INTO market_maker_reference_samples (
-                    strategy_id, symbol, node_id, cycle_sequence, source_name, transport,
+                    product_line, strategy_id, symbol, node_id, cycle_sequence, source_name, transport,
                     bid_levels, ask_levels, best_bid_ticks, best_ask_ticks, mid_price_ticks,
                     spread_ticks, received_at, trace_id, sampled_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
+                sample.productLine().name(),
                 sample.strategyId(),
                 sample.symbol(),
                 sample.nodeId(),
@@ -78,24 +81,28 @@ public class JdbcMarketMakerAdminRepository implements MarketMakerAdminRepositor
     }
 
     @Override
-    public List<MarketMakerRunEventRecord> runEvents(String strategyId,
+    public List<MarketMakerRunEventRecord> runEvents(ProductLine productLine,
+                                                     String strategyId,
                                                      String symbol,
                                                      Long accountId,
                                                      String eventType,
                                                      int limit) {
         int safeLimit = AdminCursorPage.limit(limit, MAX_RUN_EVENT_LIMIT);
         return jdbcTemplate.query("""
-                SELECT event_id, strategy_id, symbol, account_id, node_id, cycle_sequence,
+                SELECT event_id, product_line, strategy_id, symbol, account_id, node_id, cycle_sequence,
                        event_type, submitted_orders, canceled_orders, rejected_orders,
                        skipped_reason, error_message, trace_id, created_at
                   FROM market_maker_strategy_run_events
-                 WHERE (CAST(? AS text) IS NULL OR strategy_id = ?)
+                 WHERE (CAST(? AS text) IS NULL OR product_line = ?)
+                   AND (CAST(? AS text) IS NULL OR strategy_id = ?)
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
                    AND (CAST(? AS text) IS NULL OR account_id = ?)
                    AND (CAST(? AS text) IS NULL OR event_type = ?)
                  ORDER BY created_at DESC, event_id DESC
                  LIMIT ?
                 """, this::toRunEvent,
+                productLine == null ? null : productLine.name(),
+                productLine == null ? null : productLine.name(),
                 strategyId, strategyId,
                 symbol, symbol,
                 accountId, accountId,
@@ -104,7 +111,8 @@ public class JdbcMarketMakerAdminRepository implements MarketMakerAdminRepositor
     }
 
     @Override
-    public CursorPage<MarketMakerRunEventRecord> runEventsPage(String strategyId,
+    public CursorPage<MarketMakerRunEventRecord> runEventsPage(ProductLine productLine,
+                                                               String strategyId,
                                                                String symbol,
                                                                Long accountId,
                                                                String eventType,
@@ -116,6 +124,8 @@ public class JdbcMarketMakerAdminRepository implements MarketMakerAdminRepositor
                 sort, RUN_EVENT_CREATED_AT_DESC, RUN_EVENT_SORTS);
         AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
         List<Object> args = new ArrayList<>();
+        args.add(productLine == null ? null : productLine.name());
+        args.add(productLine == null ? null : productLine.name());
         args.add(strategyId);
         args.add(strategyId);
         args.add(symbol);
@@ -125,11 +135,12 @@ public class JdbcMarketMakerAdminRepository implements MarketMakerAdminRepositor
         args.add(eventType);
         args.add(eventType);
         String sql = """
-                SELECT event_id, strategy_id, symbol, account_id, node_id, cycle_sequence,
+                SELECT event_id, product_line, strategy_id, symbol, account_id, node_id, cycle_sequence,
                        event_type, submitted_orders, canceled_orders, rejected_orders,
                        skipped_reason, error_message, trace_id, created_at
                   FROM market_maker_strategy_run_events
-                 WHERE (CAST(? AS text) IS NULL OR strategy_id = ?)
+                 WHERE (CAST(? AS text) IS NULL OR product_line = ?)
+                   AND (CAST(? AS text) IS NULL OR strategy_id = ?)
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
                    AND (CAST(? AS text) IS NULL OR account_id = ?)
                    AND (CAST(? AS text) IS NULL OR event_type = ?)
@@ -227,6 +238,7 @@ public class JdbcMarketMakerAdminRepository implements MarketMakerAdminRepositor
                 sinceTs, untilTs);
         return new MarketMakerPnlAttributionRecord(
                 scope.strategyId(),
+                scope.productLine(),
                 scope.symbol(),
                 scope.accountId(),
                 scope.marginMode(),
@@ -252,6 +264,7 @@ public class JdbcMarketMakerAdminRepository implements MarketMakerAdminRepositor
         return new MarketMakerRunEventRecord(
                 rs.getLong("event_id"),
                 rs.getString("strategy_id"),
+                ProductLine.valueOf(rs.getString("product_line")),
                 rs.getString("symbol"),
                 nullableLong(rs, "account_id"),
                 rs.getString("node_id"),

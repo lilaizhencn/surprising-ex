@@ -13,6 +13,7 @@ import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMake
 import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerPnlAttributionResponse;
 import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerPnlAttributionTotals;
 import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerRunLogQueryResponse;
+import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -26,7 +27,7 @@ class AdminMarketMakerControllerTest {
         MarketMakerService service = mock(MarketMakerService.class);
         AdminMarketMakerController controller = new AdminMarketMakerController(service);
 
-        assertThatThrownBy(() -> controller.metrics(" ", 25))
+        assertThatThrownBy(() -> controller.metrics(" ", null, null, 25))
                 .isInstanceOfSatisfying(ResponseStatusException.class, ex ->
                         assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED));
         verifyNoInteractions(service);
@@ -36,30 +37,32 @@ class AdminMarketMakerControllerTest {
     void metricsDelegatesForAdminIdentity() {
         MarketMakerService service = mock(MarketMakerService.class);
         MarketMakerAdminMetricsResponse response = emptyMetrics();
-        when(service.adminMetrics(25)).thenReturn(response);
+        when(service.adminMetrics(25, ProductLine.LINEAR_PERPETUAL)).thenReturn(response);
         AdminMarketMakerController controller = new AdminMarketMakerController(service);
 
-        MarketMakerAdminMetricsResponse result = controller.metrics("1001", 25);
+        MarketMakerAdminMetricsResponse result = controller.metrics("1001", null, "USDT_PERPETUAL", 25);
 
         assertThat(result).isSameAs(response);
-        verify(service).adminMetrics(25);
+        verify(service).adminMetrics(25, ProductLine.LINEAR_PERPETUAL);
     }
 
     @Test
     void strategyLogsDelegatesForAdminIdentity() {
         MarketMakerService service = mock(MarketMakerService.class);
         MarketMakerRunLogQueryResponse response = new MarketMakerRunLogQueryResponse(Instant.EPOCH, List.of());
-        when(service.runLogs("BTC-USDT-MM-A", "BTC-USDT", 900001L, "QUOTE_RECONCILED", 50,
+        when(service.runLogs(ProductLine.LINEAR_PERPETUAL,
+                "BTC-USDT-MM-A", "BTC-USDT", 900001L, "QUOTE_RECONCILED", 50,
                 "cursor", "createdAt.asc"))
                 .thenReturn(response);
         AdminMarketMakerController controller = new AdminMarketMakerController(service);
 
         MarketMakerRunLogQueryResponse result = controller.strategyLogs(
-                "1001", "BTC-USDT-MM-A", "BTC-USDT", 900001L, "QUOTE_RECONCILED", 50,
+                "1001", "linear-perp", null, "BTC-USDT-MM-A", "BTC-USDT", 900001L, "QUOTE_RECONCILED", 50,
                 "cursor", "createdAt.asc");
 
         assertThat(result).isSameAs(response);
-        verify(service).runLogs("BTC-USDT-MM-A", "BTC-USDT", 900001L, "QUOTE_RECONCILED", 50,
+        verify(service).runLogs(ProductLine.LINEAR_PERPETUAL,
+                "BTC-USDT-MM-A", "BTC-USDT", 900001L, "QUOTE_RECONCILED", 50,
                 "cursor", "createdAt.asc");
     }
 
@@ -69,15 +72,17 @@ class AdminMarketMakerControllerTest {
         MarketMakerPnlAttributionResponse response = new MarketMakerPnlAttributionResponse(
                 Instant.EPOCH, Instant.EPOCH.minusSeconds(3600), 1,
                 new MarketMakerPnlAttributionTotals(0, 0, 0, 0, 0, 0, 0), List.of());
-        when(service.pnlAttribution("BTC-USDT-MM-A", "BTC-USDT", 900001L, 24, 100))
+        when(service.pnlAttribution(ProductLine.LINEAR_PERPETUAL,
+                "BTC-USDT-MM-A", "BTC-USDT", 900001L, 24, 100))
                 .thenReturn(response);
         AdminMarketMakerController controller = new AdminMarketMakerController(service);
 
         MarketMakerPnlAttributionResponse result = controller.pnlAttribution(
-                "1001", "BTC-USDT-MM-A", "BTC-USDT", 900001L, 24, 100);
+                "1001", "LINEAR_PERPETUAL", null, "BTC-USDT-MM-A", "BTC-USDT", 900001L, 24, 100);
 
         assertThat(result).isSameAs(response);
-        verify(service).pnlAttribution("BTC-USDT-MM-A", "BTC-USDT", 900001L, 24, 100);
+        verify(service).pnlAttribution(ProductLine.LINEAR_PERPETUAL,
+                "BTC-USDT-MM-A", "BTC-USDT", 900001L, 24, 100);
     }
 
     private MarketMakerAdminMetricsResponse emptyMetrics() {

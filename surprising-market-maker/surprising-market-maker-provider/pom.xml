@@ -21,6 +21,10 @@
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
+            <artifactId>surprising-product-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
             <artifactId>surprising-trading-api</artifactId>
         </dependency>
         <dependency>

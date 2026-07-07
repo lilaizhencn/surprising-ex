@@ -1,5 +1,6 @@
 package com.surprising.marketmaker.provider.repository;
 
+import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
 
@@ -9,13 +10,15 @@ public interface MarketMakerAdminRepository {
 
     void recordReferenceSample(MarketMakerReferenceSampleWrite sample);
 
-    List<MarketMakerRunEventRecord> runEvents(String strategyId,
+    List<MarketMakerRunEventRecord> runEvents(ProductLine productLine,
+                                              String strategyId,
                                               String symbol,
                                               Long accountId,
                                               String eventType,
                                               int limit);
 
-    CursorPage<MarketMakerRunEventRecord> runEventsPage(String strategyId,
+    CursorPage<MarketMakerRunEventRecord> runEventsPage(ProductLine productLine,
+                                                        String strategyId,
                                                         String symbol,
                                                         Long accountId,
                                                         String eventType,
@@ -29,6 +32,7 @@ public interface MarketMakerAdminRepository {
 
     record MarketMakerRunEventWrite(
             String strategyId,
+            ProductLine productLine,
             String symbol,
             Long accountId,
             String nodeId,
@@ -45,6 +49,7 @@ public interface MarketMakerAdminRepository {
 
     record MarketMakerReferenceSampleWrite(
             String strategyId,
+            ProductLine productLine,
             String symbol,
             String nodeId,
             long cycleSequence,
@@ -64,6 +69,7 @@ public interface MarketMakerAdminRepository {
     record MarketMakerRunEventRecord(
             long eventId,
             String strategyId,
+            ProductLine productLine,
             String symbol,
             Long accountId,
             String nodeId,
@@ -88,6 +94,7 @@ public interface MarketMakerAdminRepository {
 
     record MarketMakerPnlScope(
             String strategyId,
+            ProductLine productLine,
             String symbol,
             long accountId,
             String marginMode,
@@ -96,6 +103,7 @@ public interface MarketMakerAdminRepository {
 
     record MarketMakerPnlAttributionRecord(
             String strategyId,
+            ProductLine productLine,
             String symbol,
             long accountId,
             String marginMode,

@@ -73,6 +73,7 @@ surprising:
       sources:
         - name: BINANCE_USDM
           enabled: true
+          product-line: LINEAR_PERPETUAL
           symbol: BTC-USDT
           external-symbol: BTCUSDT
           url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
@@ -81,6 +82,7 @@ surprising:
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: OKX_SWAP
           enabled: true
+          product-line: LINEAR_PERPETUAL
           symbol: BTC-USDT
           external-symbol: BTC-USDT-SWAP
           url: https://www.okx.com/api/v5/market/books?instId={symbol}&sz=20
@@ -90,6 +92,7 @@ surprising:
           websocket-parser: OKX_BOOKS_WS
         - name: BYBIT_LINEAR
           enabled: true
+          product-line: LINEAR_PERPETUAL
           symbol: BTC-USDT
           external-symbol: BTCUSDT
           url: https://api.bybit.com/v5/market/orderbook?category=linear&symbol={symbol}&limit=50
@@ -99,6 +102,7 @@ surprising:
           websocket-parser: BYBIT_ORDERBOOK_WS
     strategies:
       - strategy-id: btc-usdt-mm-a
+        product-line: LINEAR_PERPETUAL
         enabled: true
         account-ids: [900001, 900002]
         symbols: [BTC-USDT]

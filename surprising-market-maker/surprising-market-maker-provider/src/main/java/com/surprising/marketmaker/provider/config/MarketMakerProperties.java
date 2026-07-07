@@ -1,5 +1,6 @@
 package com.surprising.marketmaker.provider.config;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -451,6 +452,7 @@ public class MarketMakerProperties {
 
         public static class Source {
             private boolean enabled = true;
+            private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
             @NotBlank
             @Size(max = 64)
             private String name;
@@ -479,6 +481,14 @@ public class MarketMakerProperties {
 
             public void setEnabled(boolean enabled) {
                 this.enabled = enabled;
+            }
+
+            public ProductLine getProductLine() {
+                return productLine;
+            }
+
+            public void setProductLine(ProductLine productLine) {
+                this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
             }
 
             public String getName() {
@@ -551,6 +561,7 @@ public class MarketMakerProperties {
         @NotBlank
         @Size(max = 64)
         private String strategyId;
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
         private boolean enabled;
         @Size(min = 1)
         private List<@Positive Long> accountIds = new ArrayList<>();
@@ -577,6 +588,14 @@ public class MarketMakerProperties {
 
         public void setStrategyId(String strategyId) {
             this.strategyId = strategyId;
+        }
+
+        public ProductLine getProductLine() {
+            return productLine;
+        }
+
+        public void setProductLine(ProductLine productLine) {
+            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
         }
 
         public boolean isEnabled() {

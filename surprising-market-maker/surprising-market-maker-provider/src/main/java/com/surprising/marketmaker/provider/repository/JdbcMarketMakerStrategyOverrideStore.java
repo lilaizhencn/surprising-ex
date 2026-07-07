@@ -1,6 +1,7 @@
 package com.surprising.marketmaker.provider.repository;
 
 import com.surprising.marketmaker.provider.model.StrategyConfigOverride;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -23,23 +24,24 @@ public class JdbcMarketMakerStrategyOverrideStore implements MarketMakerStrategy
     @Override
     public List<StrategyConfigOverride> findAll() {
         return jdbcTemplate.query("""
-                SELECT strategy_id, enabled, base_quantity_steps, margin_mode, spread_ticks,
+                SELECT product_line, strategy_id, enabled, base_quantity_steps, margin_mode, spread_ticks,
                        level_spacing_ticks, max_inventory_steps, max_inventory_skew_ppm,
                        order_levels, updated_by_admin_user_id, reason, updated_at, version
                   FROM market_maker_strategy_overrides
-                 ORDER BY strategy_id ASC
+                 ORDER BY product_line ASC, strategy_id ASC
                 """, this::map);
     }
 
     @Override
-    public Optional<StrategyConfigOverride> find(String strategyId) {
+    public Optional<StrategyConfigOverride> find(ProductLine productLine, String strategyId) {
         return jdbcTemplate.query("""
-                SELECT strategy_id, enabled, base_quantity_steps, margin_mode, spread_ticks,
+                SELECT product_line, strategy_id, enabled, base_quantity_steps, margin_mode, spread_ticks,
                        level_spacing_ticks, max_inventory_steps, max_inventory_skew_ppm,
                        order_levels, updated_by_admin_user_id, reason, updated_at, version
                   FROM market_maker_strategy_overrides
-                 WHERE strategy_id = ?
-                """, this::map, strategyId).stream().findFirst();
+                 WHERE product_line = ?
+                   AND strategy_id = ?
+                """, this::map, productLine.name(), strategyId).stream().findFirst();
     }
 
     @Override
@@ -47,11 +49,11 @@ public class JdbcMarketMakerStrategyOverrideStore implements MarketMakerStrategy
         Instant now = Instant.now();
         return jdbcTemplate.query("""
                 INSERT INTO market_maker_strategy_overrides (
-                    strategy_id, enabled, base_quantity_steps, margin_mode, spread_ticks,
+                    product_line, strategy_id, enabled, base_quantity_steps, margin_mode, spread_ticks,
                     level_spacing_ticks, max_inventory_steps, max_inventory_skew_ppm,
                     order_levels, updated_by_admin_user_id, reason, updated_at, version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                ON CONFLICT (strategy_id) DO UPDATE
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                ON CONFLICT (product_line, strategy_id) DO UPDATE
                    SET enabled = EXCLUDED.enabled,
                        base_quantity_steps = EXCLUDED.base_quantity_steps,
                        margin_mode = EXCLUDED.margin_mode,
@@ -64,10 +66,11 @@ public class JdbcMarketMakerStrategyOverrideStore implements MarketMakerStrategy
                        reason = EXCLUDED.reason,
                        updated_at = EXCLUDED.updated_at,
                        version = market_maker_strategy_overrides.version + 1
-                RETURNING strategy_id, enabled, base_quantity_steps, margin_mode, spread_ticks,
+                RETURNING product_line, strategy_id, enabled, base_quantity_steps, margin_mode, spread_ticks,
                           level_spacing_ticks, max_inventory_steps, max_inventory_skew_ppm,
                           order_levels, updated_by_admin_user_id, reason, updated_at, version
                 """, this::map,
+                override.productLine().name(),
                 override.strategyId(),
                 override.enabled(),
                 override.baseQuantitySteps(),
@@ -83,8 +86,12 @@ public class JdbcMarketMakerStrategyOverrideStore implements MarketMakerStrategy
     }
 
     @Override
-    public void delete(String strategyId) {
-        jdbcTemplate.update("DELETE FROM market_maker_strategy_overrides WHERE strategy_id = ?", strategyId);
+    public void delete(ProductLine productLine, String strategyId) {
+        jdbcTemplate.update("""
+                DELETE FROM market_maker_strategy_overrides
+                 WHERE product_line = ?
+                   AND strategy_id = ?
+                """, productLine.name(), strategyId);
     }
 
     private StrategyConfigOverride map(ResultSet rs, int rowNum) throws SQLException {
@@ -92,6 +99,7 @@ public class JdbcMarketMakerStrategyOverrideStore implements MarketMakerStrategy
         Timestamp updatedAt = rs.getTimestamp("updated_at");
         return new StrategyConfigOverride(
                 rs.getString("strategy_id"),
+                ProductLine.valueOf(rs.getString("product_line")),
                 (Boolean) rs.getObject("enabled"),
                 longValue(rs, "base_quantity_steps"),
                 marginMode == null ? null : MarginMode.valueOf(marginMode),

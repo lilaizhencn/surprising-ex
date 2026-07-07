@@ -25,6 +25,7 @@ import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository
 import com.surprising.marketmaker.provider.repository.MarketMakerStrategyOverrideStore;
 import com.surprising.price.api.client.MarkPriceRpcApi;
 import com.surprising.price.api.model.MarkPriceResponse;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.MarginMode;
@@ -152,44 +153,72 @@ public class MarketMakerService {
     }
 
     public MarketMakerStrategyQueryResponse strategies() {
-        List<MarketMakerStrategyResponse> responses = strategiesSnapshot().stream()
+        return strategies(null);
+    }
+
+    public MarketMakerStrategyQueryResponse strategies(ProductLine productLine) {
+        List<MarketMakerStrategyResponse> responses = strategiesSnapshot(productLine).stream()
                 .map(this::response)
                 .toList();
         return new MarketMakerStrategyQueryResponse(responses.size(), responses);
     }
 
     public MarketMakerStrategyResponse strategy(String strategyId) {
-        return response(findStrategy(strategyId));
+        return strategy(strategyId, null);
+    }
+
+    public MarketMakerStrategyResponse strategy(String strategyId, ProductLine productLine) {
+        return response(findStrategy(strategyId, productLine));
     }
 
     public MarketMakerStrategyResponse pause(String strategyId) {
-        MarketMakerProperties.Strategy strategy = findStrategy(strategyId);
+        return pause(strategyId, null);
+    }
+
+    public MarketMakerStrategyResponse pause(String strategyId, ProductLine productLine) {
+        MarketMakerProperties.Strategy strategy = findStrategy(strategyId, productLine);
         state(strategy).pause();
         return response(strategy);
     }
 
     public MarketMakerStrategyResponse resume(String strategyId) {
-        MarketMakerProperties.Strategy strategy = findStrategy(strategyId);
+        return resume(strategyId, null);
+    }
+
+    public MarketMakerStrategyResponse resume(String strategyId, ProductLine productLine) {
+        MarketMakerProperties.Strategy strategy = findStrategy(strategyId, productLine);
         state(strategy).resume();
         return response(strategy);
     }
 
     public MarketMakerStrategyConfigResponse strategyConfig(String strategyId) {
-        MarketMakerProperties.Strategy configured = findConfiguredStrategy(strategyId);
-        StrategyConfigOverride override = strategyOverrides().get(strategyKey(configured.getStrategyId()));
+        return strategyConfig(strategyId, null);
+    }
+
+    public MarketMakerStrategyConfigResponse strategyConfig(String strategyId, ProductLine productLine) {
+        MarketMakerProperties.Strategy configured = findConfiguredStrategy(strategyId, productLine);
+        StrategyConfigOverride override = strategyOverrides().get(strategyKey(configured));
         return configResponse(configured, override);
     }
 
     public MarketMakerStrategyConfigResponse updateStrategyConfig(String strategyId,
                                                                   MarketMakerStrategyConfigUpdateRequest request,
                                                                   String adminUserId) {
-        MarketMakerProperties.Strategy configured = findConfiguredStrategy(strategyId);
+        return updateStrategyConfig(strategyId, null, request, adminUserId);
+    }
+
+    public MarketMakerStrategyConfigResponse updateStrategyConfig(String strategyId,
+                                                                  ProductLine productLine,
+                                                                  MarketMakerStrategyConfigUpdateRequest request,
+                                                                  String adminUserId) {
+        MarketMakerProperties.Strategy configured = findConfiguredStrategy(strategyId, productLine);
         MarketMakerStrategyConfigUpdateRequest safeRequest = request == null
                 ? new MarketMakerStrategyConfigUpdateRequest(null, null, null, null, null, null, null, null, null)
                 : request;
         String reason = normalizeReason(safeRequest.reason());
         StrategyConfigOverride override = new StrategyConfigOverride(
                 configured.getStrategyId(),
+                configured.getProductLine(),
                 safeRequest.enabled(),
                 positiveOrNull(safeRequest.baseQuantitySteps(), "baseQuantitySteps"),
                 parseMarginMode(safeRequest.marginMode()),
@@ -207,8 +236,8 @@ public class MarketMakerService {
             saved = overrideStore.save(override);
             putCachedOverride(saved);
         } else {
-            overrideStore.delete(configured.getStrategyId());
-            removeCachedOverride(configured.getStrategyId());
+            overrideStore.delete(configured.getProductLine(), configured.getStrategyId());
+            removeCachedOverride(configured);
         }
         return configResponse(configured, saved);
     }
@@ -217,8 +246,9 @@ public class MarketMakerService {
         String traceId = TraceContext.currentOrCreate();
         String requestedStrategyId = normalizeOptional(request == null ? null : request.strategyId());
         String requestedSymbol = normalizeOptional(request == null ? null : request.symbol());
+        ProductLine requestedProductLine = request == null ? null : request.productLine();
         try {
-            for (MarketMakerProperties.Strategy strategy : strategiesSnapshot()) {
+            for (MarketMakerProperties.Strategy strategy : strategiesSnapshot(requestedProductLine)) {
                 if (requestedStrategyId != null && !strategy.getStrategyId().equalsIgnoreCase(requestedStrategyId)) {
                     continue;
                 }
@@ -231,12 +261,16 @@ public class MarketMakerService {
     }
 
     public MarketMakerAdminMetricsResponse adminMetrics(int limit) {
+        return adminMetrics(limit, null);
+    }
+
+    public MarketMakerAdminMetricsResponse adminMetrics(int limit, ProductLine productLine) {
         int boundedLimit = Math.max(1, Math.min(limit, 500));
         Instant now = Instant.now();
         List<MarketMakerStrategyMetric> rows = new ArrayList<>();
         List<MarketMakerAnomaly> anomalies = new ArrayList<>();
         List<MarketMakerMetricWarning> warnings = new ArrayList<>();
-        for (MarketMakerProperties.Strategy strategy : strategiesSnapshot()) {
+        for (MarketMakerProperties.Strategy strategy : strategiesSnapshot(productLine)) {
             for (String configuredSymbol : strategy.getSymbols()) {
                 if (rows.size() >= boundedLimit) {
                     break;
@@ -250,7 +284,7 @@ public class MarketMakerService {
                 }
             }
         }
-        return new MarketMakerAdminMetricsResponse(now, nodeId, totals(rows, anomalies), rows, anomalies, warnings);
+        return new MarketMakerAdminMetricsResponse(now, nodeId, totals(productLine, rows, anomalies), rows, anomalies, warnings);
     }
 
     public MarketMakerRunLogQueryResponse runLogs(String strategyId,
@@ -258,9 +292,19 @@ public class MarketMakerService {
                                                   Long accountId,
                                                   String eventType,
                                                   int limit) {
+        return runLogs(null, strategyId, symbol, accountId, eventType, limit);
+    }
+
+    public MarketMakerRunLogQueryResponse runLogs(ProductLine productLine,
+                                                  String strategyId,
+                                                  String symbol,
+                                                  Long accountId,
+                                                  String eventType,
+                                                  int limit) {
         return new MarketMakerRunLogQueryResponse(
                 Instant.now(),
                 adminRepository.runEvents(
+                        productLine,
                         normalizeOptional(strategyId),
                         symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol),
                         accountId,
@@ -275,7 +319,19 @@ public class MarketMakerService {
                                                   int limit,
                                                   String cursor,
                                                   String sort) {
+        return runLogs(null, strategyId, symbol, accountId, eventType, limit, cursor, sort);
+    }
+
+    public MarketMakerRunLogQueryResponse runLogs(ProductLine productLine,
+                                                  String strategyId,
+                                                  String symbol,
+                                                  Long accountId,
+                                                  String eventType,
+                                                  int limit,
+                                                  String cursor,
+                                                  String sort) {
         CursorPage<MarketMakerRunEventRecord> page = adminRepository.runEventsPage(
+                productLine,
                 normalizeOptional(strategyId),
                 symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol),
                 accountId,
@@ -292,11 +348,20 @@ public class MarketMakerService {
                                                             Long accountId,
                                                             int windowHours,
                                                             int limit) {
+        return pnlAttribution(null, strategyId, symbol, accountId, windowHours, limit);
+    }
+
+    public MarketMakerPnlAttributionResponse pnlAttribution(ProductLine productLine,
+                                                            String strategyId,
+                                                            String symbol,
+                                                            Long accountId,
+                                                            int windowHours,
+                                                            int limit) {
         int boundedWindowHours = Math.max(1, Math.min(windowHours, 24 * 31));
         int boundedLimit = Math.max(1, Math.min(limit, 500));
         Instant until = Instant.now();
         Instant since = until.minus(Duration.ofHours(boundedWindowHours));
-        List<MarketMakerPnlScope> scopes = pnlScopes(strategyId, symbol, accountId, boundedLimit);
+        List<MarketMakerPnlScope> scopes = pnlScopes(productLine, strategyId, symbol, accountId, boundedLimit);
         List<MarketMakerPnlAttributionRecord> rows = adminRepository.pnlAttribution(scopes, since, until);
         long totalTrades = rows.stream().mapToLong(MarketMakerPnlAttributionRecord::totalTrades).sum();
         long makerTrades = rows.stream().mapToLong(MarketMakerPnlAttributionRecord::makerTrades).sum();
@@ -328,18 +393,19 @@ public class MarketMakerService {
         StrategyRuntimeState state = state(strategy);
         MarketMakerStrategyStatus strategyStatus = status(strategy, state);
         String strategyId = strategy.getStrategyId();
+        ProductLine productLine = strategy.getProductLine();
         String accountPrefix = accountPrefix(strategy, symbol, accountId);
         List<MarketMakerAnomaly> rowAnomalies = new ArrayList<>();
         if (!strategy.isEnabled()) {
-            rowAnomalies.add(anomaly("INFO", "STRATEGY_DISABLED", strategyId, symbol, accountId,
+            rowAnomalies.add(anomaly("INFO", "STRATEGY_DISABLED", strategyId, productLine, symbol, accountId,
                     0, 1, "strategy is disabled by configuration"));
         }
         if (state.paused()) {
-            rowAnomalies.add(anomaly("INFO", "STRATEGY_PAUSED", strategyId, symbol, accountId,
+            rowAnomalies.add(anomaly("INFO", "STRATEGY_PAUSED", strategyId, productLine, symbol, accountId,
                     1, 0, "strategy is paused at runtime"));
         }
         if (state.lastError() != null) {
-            rowAnomalies.add(anomaly("CRITICAL", "LAST_CYCLE_FAILED", strategyId, symbol, accountId,
+            rowAnomalies.add(anomaly("CRITICAL", "LAST_CYCLE_FAILED", strategyId, productLine, symbol, accountId,
                     1, 0, state.lastError()));
         }
         try {
@@ -355,8 +421,8 @@ public class MarketMakerService {
             OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
                     properties.getQuoting().getOrderBookDepth());
             MarkPriceResponse markPrice = latestMarkPrice(symbol);
-            ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol, instrument);
-            QuotePlan plan = instrument == null || instrument.status() != InstrumentStatus.TRADING
+            ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol, productLine, instrument);
+            QuotePlan plan = !isTradableForProduct(instrument, productLine)
                     ? new QuotePlan(0L, position.signedQuantitySteps(), List.of())
                     : quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
                     orderBook, markPrice, position.signedQuantitySteps(), referenceOrderBook);
@@ -384,35 +450,35 @@ public class MarketMakerService {
             long markTicks = markPriceTicks(instrument, markPrice);
 
             if (inventoryUsagePpm >= 1_000_000L) {
-                rowAnomalies.add(anomaly("CRITICAL", "INVENTORY_LIMIT_REACHED", strategyId, symbol, accountId,
+                rowAnomalies.add(anomaly("CRITICAL", "INVENTORY_LIMIT_REACHED", strategyId, productLine, symbol, accountId,
                         absInventory, maxInventory, "signed inventory reached configured limit"));
             } else if (inventoryUsagePpm >= Math.max(0L, effectiveInventorySkewPpm(strategy))) {
-                rowAnomalies.add(anomaly("WARN", "INVENTORY_SKEW_HIGH", strategyId, symbol, accountId,
+                rowAnomalies.add(anomaly("WARN", "INVENTORY_SKEW_HIGH", strategyId, productLine, symbol, accountId,
                         inventoryUsagePpm, effectiveInventorySkewPpm(strategy), "inventory usage exceeds skew threshold"));
             }
             if (desiredQuotes > 0 && missingDesired > 0) {
-                rowAnomalies.add(anomaly("WARN", "MISSING_DESIRED_QUOTES", strategyId, symbol, accountId,
+                rowAnomalies.add(anomaly("WARN", "MISSING_DESIRED_QUOTES", strategyId, productLine, symbol, accountId,
                         missingDesired, desiredQuotes, "some desired quote levels are not live"));
             }
             if (ownedLive.isEmpty() && strategy.isEnabled() && !state.paused()) {
-                rowAnomalies.add(anomaly("CRITICAL", "NO_LIVE_QUOTES", strategyId, symbol, accountId,
+                rowAnomalies.add(anomaly("CRITICAL", "NO_LIVE_QUOTES", strategyId, productLine, symbol, accountId,
                         0, desiredQuotes, "no owned live quotes are present"));
             }
             if (staleOwned > 0) {
-                rowAnomalies.add(anomaly("WARN", "STALE_QUOTES", strategyId, symbol, accountId,
+                rowAnomalies.add(anomaly("WARN", "STALE_QUOTES", strategyId, productLine, symbol, accountId,
                         staleOwned, 0, "owned live quotes exceed stale age"));
             }
             if (offTargetOwned > 0) {
-                rowAnomalies.add(anomaly("WARN", "OFF_TARGET_QUOTES", strategyId, symbol, accountId,
+                rowAnomalies.add(anomaly("WARN", "OFF_TARGET_QUOTES", strategyId, productLine, symbol, accountId,
                         offTargetOwned, 0, "owned live quotes do not match target levels"));
             }
-            if (instrument == null || instrument.status() != InstrumentStatus.TRADING) {
-                rowAnomalies.add(anomaly("CRITICAL", "INSTRUMENT_NOT_TRADING", strategyId, symbol, accountId,
+            if (!isTradableForProduct(instrument, productLine)) {
+                rowAnomalies.add(anomaly("CRITICAL", "INSTRUMENT_NOT_TRADING", strategyId, productLine, symbol, accountId,
                         1, 0, "instrument is unavailable or not TRADING"));
             }
             anomalies.addAll(rowAnomalies);
             return new MarketMakerStrategyMetric(
-                    strategyId, symbol, accountId, strategyStatus, qualityStatus(rowAnomalies),
+                    strategyId, productLine, symbol, accountId, strategyStatus, qualityStatus(rowAnomalies),
                     strategy.isEnabled(), state.paused(), state.cycleSequence(), state.submittedOrders(),
                     state.canceledOrders(), state.rejectedOrders(), state.skippedCycles(),
                     position.signedQuantitySteps(), absInventory, maxInventory, inventoryUsagePpm,
@@ -427,11 +493,11 @@ public class MarketMakerService {
                     state.lastError(), state.lastCycleTime(), null);
         } catch (RuntimeException ex) {
             String message = ex.getMessage();
-            anomalies.add(anomaly("CRITICAL", "METRIC_COLLECTION_FAILED", strategyId, symbol, accountId,
+            anomalies.add(anomaly("CRITICAL", "METRIC_COLLECTION_FAILED", strategyId, productLine, symbol, accountId,
                     1, 0, message));
-            warnings.add(new MarketMakerMetricWarning(strategyId, symbol, accountId, message));
+            warnings.add(new MarketMakerMetricWarning(strategyId, productLine, symbol, accountId, message));
             return new MarketMakerStrategyMetric(
-                    strategyId, symbol, accountId, strategyStatus, "CRITICAL", strategy.isEnabled(), state.paused(),
+                    strategyId, productLine, symbol, accountId, strategyStatus, "CRITICAL", strategy.isEnabled(), state.paused(),
                     state.cycleSequence(), state.submittedOrders(), state.canceledOrders(), state.rejectedOrders(),
                     state.skippedCycles(), 0, 0, effectiveMaxInventorySteps(strategy), 0, 0, null,
                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -439,8 +505,10 @@ public class MarketMakerService {
         }
     }
 
-    private MarketMakerMetricsTotals totals(List<MarketMakerStrategyMetric> rows, List<MarketMakerAnomaly> anomalies) {
-        List<MarketMakerStrategyResponse> strategies = strategies().strategies();
+    private MarketMakerMetricsTotals totals(ProductLine productLine,
+                                            List<MarketMakerStrategyMetric> rows,
+                                            List<MarketMakerAnomaly> anomalies) {
+        List<MarketMakerStrategyResponse> strategies = strategies(productLine).strategies();
         return new MarketMakerMetricsTotals(
                 strategies.size(),
                 strategies.stream().filter(MarketMakerStrategyResponse::configuredEnabled).count(),
@@ -458,11 +526,15 @@ public class MarketMakerService {
                 anomalies.stream().filter(item -> "WARN".equals(item.severity())).count());
     }
 
-    private List<MarketMakerPnlScope> pnlScopes(String strategyId, String symbol, Long accountId, int limit) {
+    private List<MarketMakerPnlScope> pnlScopes(ProductLine productLine,
+                                                String strategyId,
+                                                String symbol,
+                                                Long accountId,
+                                                int limit) {
         String requestedStrategyId = normalizeOptional(strategyId);
         String requestedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
         List<MarketMakerPnlScope> scopes = new ArrayList<>();
-        for (MarketMakerProperties.Strategy strategy : strategiesSnapshot()) {
+        for (MarketMakerProperties.Strategy strategy : strategiesSnapshot(productLine)) {
             if (requestedStrategyId != null && !strategy.getStrategyId().equalsIgnoreCase(requestedStrategyId)) {
                 continue;
             }
@@ -477,6 +549,7 @@ public class MarketMakerService {
                     }
                     scopes.add(new MarketMakerPnlScope(
                             strategy.getStrategyId(),
+                            strategy.getProductLine(),
                             normalizedSymbol,
                             configuredAccountId,
                             strategy.getMarginMode().name(),
@@ -518,12 +591,13 @@ public class MarketMakerService {
     private MarketMakerAnomaly anomaly(String severity,
                                        String type,
                                        String strategyId,
+                                       ProductLine productLine,
                                        String symbol,
                                        long accountId,
                                        long metricValue,
                                        long threshold,
                                        String summary) {
-        return new MarketMakerAnomaly(severity, type, strategyId, symbol, accountId, metricValue, threshold, summary);
+        return new MarketMakerAnomaly(severity, type, strategyId, productLine, symbol, accountId, metricValue, threshold, summary);
     }
 
     private void recordRunEvent(MarketMakerProperties.Strategy strategy,
@@ -541,6 +615,7 @@ public class MarketMakerService {
         try {
             adminRepository.recordRunEvent(new MarketMakerRunEventWrite(
                     strategy.getStrategyId(),
+                    strategy.getProductLine(),
                     symbol,
                     accountId,
                     nodeId,
@@ -571,6 +646,7 @@ public class MarketMakerService {
         try {
             adminRepository.recordReferenceSample(new MarketMakerReferenceSampleWrite(
                     strategy.getStrategyId(),
+                    strategy.getProductLine(),
                     symbol,
                     nodeId,
                     cycleSequence,
@@ -616,7 +692,7 @@ public class MarketMakerService {
                                    String symbol,
                                    String traceId) {
         if (properties.getCoordination().isEnabled()
-                && !leaseCoordinator.tryAcquire(strategy.getStrategyId(), symbol, nodeId,
+                && !leaseCoordinator.tryAcquire(strategy.getProductLine(), strategy.getStrategyId(), symbol, nodeId,
                 properties.getCoordination().getLeaseDuration())) {
             state.addSkipped(1L);
             recordRunEvent(strategy, symbol, null, cycleSequence, "SKIPPED",
@@ -626,11 +702,11 @@ public class MarketMakerService {
         Instant now = Instant.now();
         try {
             InstrumentResponse instrument = instrumentRpcApi.latest(symbol);
-            requireTradable(instrument);
+            requireTradable(instrument, strategy.getProductLine());
             OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
                     properties.getQuoting().getOrderBookDepth());
             MarkPriceResponse markPrice = latestMarkPrice(symbol);
-            ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol, instrument);
+            ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol, strategy.getProductLine(), instrument);
             recordReferenceSample(strategy, symbol, cycleSequence, referenceOrderBook, traceId, now);
             for (long accountId : strategy.getAccountIds()) {
                 quoteAccount(strategy, state, cycleSequence, symbol, instrument, orderBook, markPrice,
@@ -780,7 +856,7 @@ public class MarketMakerService {
         if (!trade.isEnabled()) {
             return;
         }
-        String tradeKey = strategy.getStrategyId() + ":" + symbol;
+        String tradeKey = strategy.getProductLine().name() + ":" + strategy.getStrategyId() + ":" + symbol;
         Instant lastTradeTime = lastTradeTimes.get(tradeKey);
         if (lastTradeTime != null && lastTradeTime.plusMillis(trade.getMinIntervalMs()).isAfter(now)) {
             return;
@@ -997,10 +1073,20 @@ public class MarketMakerService {
         }
     }
 
-    private void requireTradable(InstrumentResponse instrument) {
+    private void requireTradable(InstrumentResponse instrument, ProductLine productLine) {
         if (instrument == null || instrument.status() != InstrumentStatus.TRADING) {
             throw new IllegalStateException("instrument is not in TRADING status");
         }
+        if (instrument.contractType() == null || instrument.contractType().productLine() != productLine) {
+            throw new IllegalStateException("instrument product line mismatch");
+        }
+    }
+
+    private boolean isTradableForProduct(InstrumentResponse instrument, ProductLine productLine) {
+        return instrument != null
+                && instrument.status() == InstrumentStatus.TRADING
+                && instrument.contractType() != null
+                && instrument.contractType().productLine() == productLine;
     }
 
     private boolean ownsOrder(String accountPrefix, OrderResponse order) {
@@ -1008,7 +1094,8 @@ public class MarketMakerService {
     }
 
     private String accountPrefix(MarketMakerProperties.Strategy strategy, String symbol, long accountId) {
-        return "mm-" + stableToken(strategy.getStrategyId() + ":" + symbol) + "-" + accountId + "-";
+        return "mm-" + stableToken(strategy.getProductLine().name() + ":" + strategy.getStrategyId() + ":" + symbol)
+                + "-" + accountId + "-";
     }
 
     private String quotePrefix(String accountPrefix, OrderSide side, int level) {
@@ -1019,8 +1106,9 @@ public class MarketMakerService {
                                       String symbol,
                                       long accountId,
                                       long cycleSequence) {
-        return "mm-tk-" + stableToken(strategy.getStrategyId() + ":" + symbol) + "-" + accountId + "-"
-                + cycleSequence + "-" + Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36);
+        return "mm-tk-" + stableToken(strategy.getProductLine().name() + ":" + strategy.getStrategyId() + ":" + symbol)
+                + "-" + accountId + "-" + cycleSequence + "-"
+                + Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36);
     }
 
     private String stableToken(String value) {
@@ -1030,9 +1118,14 @@ public class MarketMakerService {
     }
 
     private List<MarketMakerProperties.Strategy> strategiesSnapshot() {
+        return strategiesSnapshot(null);
+    }
+
+    private List<MarketMakerProperties.Strategy> strategiesSnapshot(ProductLine productLine) {
         Map<String, StrategyConfigOverride> overrides = strategyOverrides();
         return properties.getStrategies().stream()
-                .map(strategy -> applyOverride(strategy, overrides.get(strategyKey(strategy.getStrategyId()))))
+                .filter(strategy -> productLine == null || strategy.getProductLine() == productLine)
+                .map(strategy -> applyOverride(strategy, overrides.get(strategyKey(strategy))))
                 .toList();
     }
 
@@ -1048,7 +1141,7 @@ public class MarketMakerService {
             try {
                 Map<String, StrategyConfigOverride> next = new HashMap<>();
                 for (StrategyConfigOverride override : overrideStore.findAll()) {
-                    next.put(strategyKey(override.strategyId()), override);
+                    next.put(strategyKey(override.productLine(), override.strategyId()), override);
                 }
                 strategyOverrides = Map.copyOf(next);
             } catch (RuntimeException ex) {
@@ -1062,14 +1155,14 @@ public class MarketMakerService {
 
     private void putCachedOverride(StrategyConfigOverride override) {
         Map<String, StrategyConfigOverride> next = new HashMap<>(strategyOverrides());
-        next.put(strategyKey(override.strategyId()), override);
+        next.put(strategyKey(override.productLine(), override.strategyId()), override);
         strategyOverrides = Map.copyOf(next);
         strategyOverridesLoadedAt = Instant.now();
     }
 
-    private void removeCachedOverride(String strategyId) {
+    private void removeCachedOverride(MarketMakerProperties.Strategy strategy) {
         Map<String, StrategyConfigOverride> next = new HashMap<>(strategyOverrides());
-        next.remove(strategyKey(strategyId));
+        next.remove(strategyKey(strategy));
         strategyOverrides = Map.copyOf(next);
         strategyOverridesLoadedAt = Instant.now();
     }
@@ -1078,6 +1171,7 @@ public class MarketMakerService {
                                                          StrategyConfigOverride override) {
         MarketMakerProperties.Strategy effective = new MarketMakerProperties.Strategy();
         effective.setStrategyId(configured.getStrategyId());
+        effective.setProductLine(configured.getProductLine());
         effective.setEnabled(override != null && override.enabled() != null ? override.enabled() : configured.isEnabled());
         effective.setAccountIds(new ArrayList<>(configured.getAccountIds()));
         effective.setSymbols(new ArrayList<>(configured.getSymbols()));
@@ -1114,7 +1208,7 @@ public class MarketMakerService {
     }
 
     private MarketMakerStrategyConfig strategyConfig(MarketMakerProperties.Strategy strategy) {
-        return new MarketMakerStrategyConfig(strategy.getStrategyId(), strategy.isEnabled(),
+        return new MarketMakerStrategyConfig(strategy.getStrategyId(), strategy.getProductLine(), strategy.isEnabled(),
                 List.copyOf(strategy.getAccountIds()), List.copyOf(strategy.getSymbols()),
                 strategy.getBaseQuantitySteps(), strategy.getMarginMode(), strategy.getSpreadTicks(),
                 strategy.getLevelSpacingTicks(), strategy.getMaxInventorySteps(), strategy.getMaxInventorySkewPpm(),
@@ -1122,29 +1216,39 @@ public class MarketMakerService {
     }
 
     private MarketMakerProperties.Strategy findStrategy(String strategyId) {
+        return findStrategy(strategyId, null);
+    }
+
+    private MarketMakerProperties.Strategy findStrategy(String strategyId, ProductLine productLine) {
         String normalized = normalizeRequired(strategyId, "strategyId");
-        return strategiesSnapshot().stream()
+        return strategiesSnapshot(productLine).stream()
                 .filter(strategy -> strategy.getStrategyId().equalsIgnoreCase(normalized))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("unknown market-maker strategy: " + strategyId));
     }
 
     private MarketMakerProperties.Strategy findConfiguredStrategy(String strategyId) {
+        return findConfiguredStrategy(strategyId, null);
+    }
+
+    private MarketMakerProperties.Strategy findConfiguredStrategy(String strategyId, ProductLine productLine) {
         String normalized = normalizeRequired(strategyId, "strategyId");
         return properties.getStrategies().stream()
+                .filter(strategy -> productLine == null || strategy.getProductLine() == productLine)
                 .filter(strategy -> strategy.getStrategyId().equalsIgnoreCase(normalized))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("unknown market-maker strategy: " + strategyId));
     }
 
     private StrategyRuntimeState state(MarketMakerProperties.Strategy strategy) {
-        return states.computeIfAbsent(strategy.getStrategyId(), ignored -> new StrategyRuntimeState());
+        return states.computeIfAbsent(strategyKey(strategy), ignored -> new StrategyRuntimeState());
     }
 
     private MarketMakerStrategyResponse response(MarketMakerProperties.Strategy strategy) {
         StrategyRuntimeState state = state(strategy);
         MarketMakerStrategyStatus status = status(strategy, state);
-        return new MarketMakerStrategyResponse(strategy.getStrategyId(), List.copyOf(strategy.getSymbols()),
+        return new MarketMakerStrategyResponse(strategy.getStrategyId(), strategy.getProductLine(),
+                List.copyOf(strategy.getSymbols()),
                 List.copyOf(strategy.getAccountIds()), status, strategy.isEnabled(), state.paused(),
                 state.cycleSequence(), state.submittedOrders(), state.canceledOrders(), state.rejectedOrders(),
                 state.skippedCycles(), state.lastTraceId(), state.lastError(), state.lastCycleTime());
@@ -1246,8 +1350,14 @@ public class MarketMakerService {
         return value;
     }
 
-    private String strategyKey(String strategyId) {
-        return strategyId == null ? "" : strategyId.trim().toLowerCase(Locale.ROOT);
+    private String strategyKey(MarketMakerProperties.Strategy strategy) {
+        return strategy == null ? strategyKey(null, null) : strategyKey(strategy.getProductLine(), strategy.getStrategyId());
+    }
+
+    private String strategyKey(ProductLine productLine, String strategyId) {
+        ProductLine safeProductLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        String safeStrategyId = strategyId == null ? "" : strategyId.trim().toLowerCase(Locale.ROOT);
+        return safeProductLine.name() + ":" + safeStrategyId;
     }
 
     private String resolveNodeId(String configuredNodeId) {
@@ -1303,6 +1413,7 @@ public class MarketMakerService {
     }
 
     public record MarketMakerStrategyConfig(String strategyId,
+                                            ProductLine productLine,
                                             boolean enabled,
                                             List<Long> accountIds,
                                             List<String> symbols,
@@ -1343,6 +1454,7 @@ public class MarketMakerService {
     }
 
     public record MarketMakerStrategyMetric(String strategyId,
+                                            ProductLine productLine,
                                             String symbol,
                                             long accountId,
                                             MarketMakerStrategyStatus strategyStatus,
@@ -1385,6 +1497,7 @@ public class MarketMakerService {
     public record MarketMakerAnomaly(String severity,
                                      String type,
                                      String strategyId,
+                                     ProductLine productLine,
                                      String symbol,
                                      long accountId,
                                      long metricValue,
@@ -1393,6 +1506,7 @@ public class MarketMakerService {
     }
 
     public record MarketMakerMetricWarning(String strategyId,
+                                           ProductLine productLine,
                                            String symbol,
                                            long accountId,
                                            String message) {
@@ -1414,7 +1528,8 @@ public class MarketMakerService {
         }
 
         @Override
-        public List<MarketMakerRunEventRecord> runEvents(String strategyId,
+        public List<MarketMakerRunEventRecord> runEvents(ProductLine productLine,
+                                                         String strategyId,
                                                          String symbol,
                                                          Long accountId,
                                                          String eventType,
@@ -1423,7 +1538,8 @@ public class MarketMakerService {
         }
 
         @Override
-        public CursorPage<MarketMakerRunEventRecord> runEventsPage(String strategyId,
+        public CursorPage<MarketMakerRunEventRecord> runEventsPage(ProductLine productLine,
+                                                                   String strategyId,
                                                                    String symbol,
                                                                    Long accountId,
                                                                    String eventType,

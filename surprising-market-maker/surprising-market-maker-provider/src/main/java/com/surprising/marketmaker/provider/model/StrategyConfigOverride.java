@@ -1,9 +1,11 @@
 package com.surprising.marketmaker.provider.model;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import java.time.Instant;
 
 public record StrategyConfigOverride(String strategyId,
+                                     ProductLine productLine,
                                      Boolean enabled,
                                      Long baseQuantitySteps,
                                      MarginMode marginMode,
