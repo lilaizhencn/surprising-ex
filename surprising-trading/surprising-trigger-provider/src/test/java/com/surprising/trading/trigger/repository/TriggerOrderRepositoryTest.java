@@ -289,20 +289,22 @@ class TriggerOrderRepositoryTest {
     }
 
     @Test
-    void triggerOrderMatchesContractTypeUsesCurrentInstrumentVersion() {
+    void triggerOrderMatchesContractTypeUsesOrderProductLine() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
         when(jdbcTemplate.queryForObject(any(String.class), any(Class.class), any(), any()))
                 .thenReturn(true);
 
-        boolean matched = repository.triggerOrderMatchesContractType(501L, "LINEAR_DELIVERY");
+        boolean matched = repository.triggerOrderMatchesContractType(501L, "COIN_PERPETUAL");
 
         assertThat(matched).isTrue();
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).queryForObject(sql.capture(), any(Class.class), any(), any());
+        ArgumentCaptor<Object> productLine = ArgumentCaptor.forClass(Object.class);
+        verify(jdbcTemplate).queryForObject(sql.capture(), any(Class.class), eq(501L), productLine.capture());
         assertThat(sql.getValue())
                 .contains("FROM trading_trigger_orders o")
                 .contains("o.product_line = ?");
+        assertThat(productLine.getValue()).isEqualTo("INVERSE_PERPETUAL");
     }
 
     @Test
@@ -313,7 +315,7 @@ class TriggerOrderRepositoryTest {
         when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
                 .thenReturn(List.of());
 
-        repository.openOrders(1001L, "BTC-USDT", 50, "LINEAR_DELIVERY");
+        repository.openOrders(1001L, "BTC-USDT", 50, "linear-delivery");
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);

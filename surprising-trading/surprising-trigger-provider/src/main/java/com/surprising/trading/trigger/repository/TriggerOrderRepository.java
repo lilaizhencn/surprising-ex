@@ -305,11 +305,10 @@ public class TriggerOrderRepository {
     }
 
     public boolean triggerOrderMatchesContractType(long triggerOrderId, String contractType) {
-        String normalizedContractType = emptyToNull(contractType);
-        if (normalizedContractType == null) {
+        ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
+        if (normalizedProductLine == null) {
             return true;
         }
-        ProductLine normalizedProductLine = ProductLine.requireContractTypeCode(normalizedContractType);
         Boolean matched = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
@@ -345,10 +344,7 @@ public class TriggerOrderRepository {
     public List<TriggerOrderRecord> openOrders(long userId, String symbol, int limit, String contractType) {
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         String normalizedSymbol = emptyToNull(symbol);
-        String normalizedContractType = emptyToNull(contractType);
-        ProductLine normalizedProductLine = normalizedContractType == null
-                ? null
-                : ProductLine.requireContractTypeCode(normalizedContractType);
+        ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_trigger_orders
@@ -372,10 +368,7 @@ public class TriggerOrderRepository {
     public List<TriggerOrderRecord> pendingCancelableOrders(long userId, String symbol, int limit, String contractType) {
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         String normalizedSymbol = emptyToNull(symbol);
-        String normalizedContractType = emptyToNull(contractType);
-        ProductLine normalizedProductLine = normalizedContractType == null
-                ? null
-                : ProductLine.requireContractTypeCode(normalizedContractType);
+        ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_trigger_orders
@@ -419,10 +412,7 @@ public class TriggerOrderRepository {
                                                                          String cursor,
                                                                          String sort) {
         String normalizedStatus = status == null ? null : status.name();
-        String normalizedContractType = emptyToNull(contractType);
-        ProductLine normalizedProductLine = normalizedContractType == null
-                ? null
-                : ProductLine.requireContractTypeCode(normalizedContractType);
+        ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
         int normalizedLimit = AdminCursorPage.limit(limit, 1000);
         AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
                 "createdAt", "created_at", "trigger_order_id", true);
@@ -530,11 +520,10 @@ public class TriggerOrderRepository {
     public boolean hasPendingOrdersForPriceType(String symbol,
                                                 TriggerPriceType triggerPriceType,
                                                 String contractType) {
-        String normalizedContractType = emptyToNull(contractType);
-        if (normalizedContractType == null) {
+        ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
+        if (normalizedProductLine == null) {
             return hasPendingOrdersForPriceType(symbol, triggerPriceType);
         }
-        ProductLine normalizedProductLine = ProductLine.requireContractTypeCode(normalizedContractType);
         Boolean result = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
@@ -567,10 +556,7 @@ public class TriggerOrderRepository {
                                                    int limit,
                                                    Instant now,
                                                    String contractType) {
-        String normalizedContractType = emptyToNull(contractType);
-        ProductLine normalizedProductLine = normalizedContractType == null
-                ? null
-                : ProductLine.requireContractTypeCode(normalizedContractType);
+        ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         Instant eventVisibleAt = triggeredAt.plusSeconds(1);
         String productFilter = normalizedProductLine == null ? "" : """
@@ -676,10 +662,7 @@ public class TriggerOrderRepository {
                                                            int limit,
                                                           Instant now,
                                                           String contractType) {
-        String normalizedContractType = emptyToNull(contractType);
-        ProductLine normalizedProductLine = normalizedContractType == null
-                ? null
-                : ProductLine.requireContractTypeCode(normalizedContractType);
+        ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         Instant eventVisibleAt = triggeredAt.plusSeconds(1);
         String productFilter = normalizedProductLine == null ? "" : """
@@ -892,11 +875,10 @@ public class TriggerOrderRepository {
     }
 
     public int expirePending(Instant now, int limit, String contractType) {
-        String normalizedContractType = emptyToNull(contractType);
-        if (normalizedContractType == null) {
+        ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
+        if (normalizedProductLine == null) {
             return expirePending(now, limit);
         }
-        ProductLine normalizedProductLine = ProductLine.requireContractTypeCode(normalizedContractType);
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         return jdbcTemplate.update("""
                 WITH expired AS (
@@ -940,11 +922,10 @@ public class TriggerOrderRepository {
     }
 
     public int resetStaleTriggering(Instant staleBefore, Instant now, int limit, String contractType) {
-        String normalizedContractType = emptyToNull(contractType);
-        if (normalizedContractType == null) {
+        ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
+        if (normalizedProductLine == null) {
             return resetStaleTriggering(staleBefore, now, limit);
         }
-        ProductLine normalizedProductLine = ProductLine.requireContractTypeCode(normalizedContractType);
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         return jdbcTemplate.update("""
                 WITH stale AS (
@@ -1029,6 +1010,11 @@ public class TriggerOrderRepository {
 
     private static String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static ProductLine productLineFromExternalFilter(String value) {
+        String normalizedFilter = emptyToNull(value);
+        return normalizedFilter == null ? null : ProductLine.requireExternalCode(normalizedFilter);
     }
 
     private static String truncate(String value, int limit) {
