@@ -2,6 +2,7 @@ package com.surprising.trading.order.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -76,7 +77,7 @@ class AlgoOrderRepositoryTest {
 
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
-    void openOrdersFiltersByContractTypeWhenProvided() {
+    void openOrdersFiltersByProductLineWhenContractTypeProvided() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         AlgoOrderRepository repository = new AlgoOrderRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
@@ -88,35 +89,36 @@ class AlgoOrderRepositoryTest {
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
         assertThat(sql.getValue())
-                .contains("FROM instrument_current_versions c")
-                .contains("i.symbol = c.symbol AND i.version = c.version")
-                .contains("i.contract_type = ?");
+                .contains("product_line = ?")
+                .doesNotContain("FROM instrument_current_versions c")
+                .doesNotContain("JOIN instruments");
         assertThat(args.getValue()).containsExactly(1001L, "BTC-USDT", "BTC-USDT",
-                "VANILLA_OPTION", "VANILLA_OPTION", 50);
+                "OPTION", "OPTION", 50);
     }
 
     @Test
-    void algoOrderMatchesContractTypeUsesCurrentInstrumentVersion() {
+    void algoOrderMatchesContractTypeUsesOrderProductLine() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         AlgoOrderRepository repository = new AlgoOrderRepository(jdbcTemplate);
         when(jdbcTemplate.queryForObject(any(String.class), any(Class.class), any(), any()))
                 .thenReturn(true);
 
-        boolean matched = repository.algoOrderMatchesContractType(77L, "LINEAR_DELIVERY");
+        boolean matched = repository.algoOrderMatchesContractType(77L, "COIN_PERPETUAL");
 
         assertThat(matched).isTrue();
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).queryForObject(sql.capture(), any(Class.class), any(), any());
+        ArgumentCaptor<Object> productLine = ArgumentCaptor.forClass(Object.class);
+        verify(jdbcTemplate).queryForObject(sql.capture(), any(Class.class), eq(77L), productLine.capture());
         assertThat(sql.getValue())
-                .contains("FROM trading_algo_orders o")
-                .contains("JOIN instrument_current_versions c")
-                .contains("i.symbol = c.symbol AND i.version = c.version")
-                .contains("i.contract_type = ?");
+                .contains("FROM trading_algo_orders")
+                .contains("product_line = ?")
+                .doesNotContain("JOIN instruments");
+        assertThat(productLine.getValue()).isEqualTo("INVERSE_PERPETUAL");
     }
 
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
-    void cancelableOpenOrdersFiltersByContractTypeWhenProvided() {
+    void cancelableOpenOrdersFiltersByProductLineWhenContractTypeProvided() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         AlgoOrderRepository repository = new AlgoOrderRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
@@ -128,9 +130,9 @@ class AlgoOrderRepositoryTest {
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
         assertThat(sql.getValue())
-                .contains("FROM instrument_current_versions c")
-                .contains("i.symbol = c.symbol AND i.version = c.version")
-                .contains("i.contract_type = ?")
+                .contains("product_line = ?")
+                .doesNotContain("FROM instrument_current_versions c")
+                .doesNotContain("JOIN instruments")
                 .contains("FOR UPDATE SKIP LOCKED");
         assertThat(args.getValue()).containsExactly(1001L, "BTC-USDT", "BTC-USDT",
                 "TWAP", "TWAP", "LINEAR_DELIVERY", "LINEAR_DELIVERY", 25);

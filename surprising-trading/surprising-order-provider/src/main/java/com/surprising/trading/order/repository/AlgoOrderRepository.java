@@ -84,22 +84,18 @@ public class AlgoOrderRepository {
     }
 
     public boolean algoOrderMatchesContractType(long algoOrderId, String contractType) {
-        String normalizedContractType = emptyToNull(contractType);
-        if (normalizedContractType == null) {
+        String productLine = productLineNameFromContractType(contractType);
+        if (productLine == null) {
             return true;
         }
         Boolean matched = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
-                      FROM trading_algo_orders o
-                      JOIN instrument_current_versions c
-                        ON c.symbol = o.symbol
-                      JOIN instruments i
-                        ON i.symbol = c.symbol AND i.version = c.version
-                     WHERE o.algo_order_id = ?
-                       AND i.contract_type = ?
+                      FROM trading_algo_orders
+                     WHERE algo_order_id = ?
+                       AND product_line = ?
                 )
-                """, Boolean.class, algoOrderId, normalizedContractType);
+                """, Boolean.class, algoOrderId, productLine);
         return Boolean.TRUE.equals(matched);
     }
 
@@ -109,25 +105,18 @@ public class AlgoOrderRepository {
 
     public List<AlgoOrderRecord> openOrders(long userId, String symbol, int limit, String contractType) {
         String normalizedSymbol = emptyToNull(symbol);
-        String normalizedContractType = emptyToNull(contractType);
+        String productLine = productLineNameFromContractType(contractType);
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_algo_orders
                  WHERE user_id = ?
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
-                   AND (CAST(? AS text) IS NULL OR EXISTS (
-                        SELECT 1
-                          FROM instrument_current_versions c
-                          JOIN instruments i
-                            ON i.symbol = c.symbol AND i.version = c.version
-                         WHERE c.symbol = trading_algo_orders.symbol
-                           AND i.contract_type = ?
-                   ))
+                   AND (CAST(? AS text) IS NULL OR product_line = ?)
                    AND status IN ('PENDING', 'RUNNING', 'CANCEL_REQUESTED')
                  ORDER BY created_at DESC, algo_order_id DESC
                  LIMIT ?
                 """, (rs, rowNum) -> toAlgoRecord(rs),
-                userId, normalizedSymbol, normalizedSymbol, normalizedContractType, normalizedContractType, limit);
+                userId, normalizedSymbol, normalizedSymbol, productLine, productLine, limit);
     }
 
     public List<AlgoOrderRecord> dueOrders(Instant now, int limit) {
@@ -155,27 +144,20 @@ public class AlgoOrderRepository {
             long userId, String symbol, AlgoOrderType algoType, int limit, String contractType) {
         String normalizedSymbol = emptyToNull(symbol);
         String normalizedType = algoType == null ? null : algoType.name();
-        String normalizedContractType = emptyToNull(contractType);
+        String productLine = productLineNameFromContractType(contractType);
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_algo_orders
                  WHERE user_id = ?
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
                    AND (CAST(? AS text) IS NULL OR algo_type = ?)
-                   AND (CAST(? AS text) IS NULL OR EXISTS (
-                        SELECT 1
-                          FROM instrument_current_versions c
-                          JOIN instruments i
-                            ON i.symbol = c.symbol AND i.version = c.version
-                         WHERE c.symbol = trading_algo_orders.symbol
-                           AND i.contract_type = ?
-                   ))
+                   AND (CAST(? AS text) IS NULL OR product_line = ?)
                    AND status IN ('PENDING', 'RUNNING')
                  ORDER BY created_at ASC, algo_order_id ASC
                  LIMIT ?
                  FOR UPDATE SKIP LOCKED
                 """, (rs, rowNum) -> toAlgoRecord(rs), userId, normalizedSymbol, normalizedSymbol,
-                normalizedType, normalizedType, normalizedContractType, normalizedContractType, limit);
+                normalizedType, normalizedType, productLine, productLine, limit);
     }
 
     public boolean markCancelRequested(long algoOrderId, Instant now) {
@@ -385,6 +367,16 @@ public class AlgoOrderRepository {
 
     private String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private String productLineNameFromContractType(String contractType) {
+        String normalizedContractType = emptyToNull(contractType);
+        return normalizedContractType == null
+                ? null
+                : ProductLine.fromContractTypeCode(normalizedContractType)
+                .or(() -> ProductLine.fromAccountTypeCode(normalizedContractType))
+                .orElseThrow(() -> new IllegalArgumentException("unsupported product filter: " + contractType))
+                .name();
     }
 
     private ProductLine productLine(ProductLine productLine) {
