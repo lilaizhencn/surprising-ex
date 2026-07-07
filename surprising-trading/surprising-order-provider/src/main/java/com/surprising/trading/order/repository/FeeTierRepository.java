@@ -1,6 +1,7 @@
 package com.surprising.trading.order.repository;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineSql;
 import com.surprising.trading.api.model.FeeScheduleSourceType;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeTierAssignmentResponse;
@@ -172,19 +173,12 @@ public class FeeTierRepository {
                       FROM user_fills t
                       JOIN instruments i
                         ON i.symbol = t.symbol AND i.version = t.instrument_version
-                     WHERE CASE i.contract_type
-                               WHEN 'SPOT' THEN 'SPOT'
-                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                               ELSE 'LINEAR_PERPETUAL'
-                           END = ?
+                     WHERE %s = ?
                 )
                 SELECT LEAST(COALESCE(SUM(notional_units), 0), 9223372036854775807)::bigint
                   FROM filled_notional
-                """, Number.class, userId, Timestamp.from(since), userId, Timestamp.from(since), productLineName));
+                """.formatted(productLineExpression("i")), Number.class, userId, Timestamp.from(since),
+                userId, Timestamp.from(since), productLineName));
         long assetBalance = number(jdbcTemplate.queryForObject("""
                 WITH raw_balances AS (
                     SELECT b.asset, b.available_units, b.locked_units
@@ -249,30 +243,14 @@ public class FeeTierRepository {
                           JOIN instruments i
                             ON i.symbol = t.symbol AND i.version = t.taker_instrument_version
                          WHERE t.event_time >= ?
-                           AND CASE i.contract_type
-                                   WHEN 'SPOT' THEN 'SPOT'
-                                   WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-                                   WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-                                   WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-                                   WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-                                   WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                                   ELSE 'LINEAR_PERPETUAL'
-                               END = ?
+                           AND %s = ?
                         UNION
                         SELECT t.maker_user_id AS user_id
                           FROM trading_match_trades t
                           JOIN instruments i
                             ON i.symbol = t.symbol AND i.version = t.maker_instrument_version
                          WHERE t.event_time >= ?
-                           AND CASE i.contract_type
-                                   WHEN 'SPOT' THEN 'SPOT'
-                                   WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-                                   WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-                                   WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-                                   WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-                                   WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                                   ELSE 'LINEAR_PERPETUAL'
-                               END = ?
+                           AND %s = ?
                         UNION
                         SELECT user_id
                           FROM account_balances
@@ -293,7 +271,8 @@ public class FeeTierRepository {
                  WHERE user_id > 0
                  ORDER BY user_id ASC
                  LIMIT ?
-                """, (rs, rowNum) -> rs.getLong("user_id"), Timestamp.from(since), productLineName,
+                """.formatted(productLineExpression("i"), productLineExpression("i")),
+                (rs, rowNum) -> rs.getLong("user_id"), Timestamp.from(since), productLineName,
                 Timestamp.from(since), productLineName, accountType, accountType, accountType, productLineName,
                 normalizedLimit);
     }
@@ -493,6 +472,10 @@ public class FeeTierRepository {
 
     private static String productLineName(ProductLine productLine) {
         return productLine(productLine).name();
+    }
+
+    private static String productLineExpression(String instrumentAlias) {
+        return ProductLineSql.contractTypeProductLineCase(instrumentAlias + ".contract_type");
     }
 
     private static void validateFeeRate(long feeRatePpm, String field) {
