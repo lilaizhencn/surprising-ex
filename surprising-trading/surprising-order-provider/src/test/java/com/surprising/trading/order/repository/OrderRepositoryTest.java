@@ -112,8 +112,28 @@ class OrderRepositoryTest {
     }
 
     @Test
+    void orderMatchesContractTypeUsesOrderProductLine() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OrderRepository repository = new OrderRepository(jdbcTemplate);
+        when(jdbcTemplate.queryForObject(any(String.class), eq(Boolean.class), any(Object[].class)))
+                .thenReturn(true);
+
+        boolean matched = repository.orderMatchesContractType(9001L, "VANILLA_OPTION");
+
+        assertThat(matched).isTrue();
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).queryForObject(sql.capture(), eq(Boolean.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("FROM trading_orders")
+                .contains("product_line = ?")
+                .doesNotContain("JOIN instruments");
+        assertThat(args.getValue()).containsExactly(9001L, "OPTION");
+    }
+
+    @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
-    void openOrdersFiltersByContractTypeWhenProvided() {
+    void openOrdersFiltersByProductLineWhenContractTypeProvided() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         OrderRepository repository = new OrderRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
@@ -125,16 +145,15 @@ class OrderRepositoryTest {
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
         assertThat(sql.getValue())
-                .contains("FROM instruments i")
-                .contains("i.version = trading_orders.instrument_version")
-                .contains("i.contract_type = ?");
+                .contains("product_line = ?")
+                .doesNotContain("FROM instruments i");
         assertThat(args.getValue()).containsExactly(1001L, "BTC-USDT", "BTC-USDT",
                 "LINEAR_DELIVERY", "LINEAR_DELIVERY", 50);
     }
 
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
-    void adminCancelableOrdersFiltersByContractTypeWhenProvided() {
+    void adminCancelableOrdersFiltersByProductLineWhenContractTypeProvided() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         OrderRepository repository = new OrderRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
@@ -146,17 +165,16 @@ class OrderRepositoryTest {
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
         assertThat(sql.getValue())
-                .contains("FROM instruments i")
-                .contains("i.version = trading_orders.instrument_version")
-                .contains("i.contract_type = ?")
+                .contains("product_line = ?")
+                .doesNotContain("FROM instruments i")
                 .contains("remaining_quantity_steps > 0");
         assertThat(args.getValue()).containsExactly(1001L, 1001L, "BTC-USDT", "BTC-USDT",
-                "COIN_PERPETUAL", "COIN_PERPETUAL", 25);
+                "INVERSE_PERPETUAL", "INVERSE_PERPETUAL", 25);
     }
 
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
-    void adminOrderPageFiltersByContractTypeWhenProvided() {
+    void adminOrderPageFiltersByProductLineWhenContractTypeProvided() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         OrderRepository repository = new OrderRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
@@ -168,14 +186,13 @@ class OrderRepositoryTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), any(Object[].class));
         assertThat(sql.getValue())
-                .contains("FROM instruments i")
-                .contains("i.version = trading_orders.instrument_version")
-                .contains("i.contract_type = ?");
+                .contains("product_line = ?")
+                .doesNotContain("FROM instruments i");
     }
 
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
-    void matchTradePageFiltersThroughOrderContractTypeWhenProvided() {
+    void matchTradePageFiltersByProductLineWhenContractTypeProvided() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         OrderRepository repository = new OrderRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
@@ -187,8 +204,7 @@ class OrderRepositoryTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), any(Object[].class));
         assertThat(sql.getValue())
-                .contains("FROM trading_orders o")
-                .contains("i.version = o.instrument_version")
-                .contains("i.contract_type = ?");
+                .contains("product_line = ?")
+                .doesNotContain("JOIN instruments i");
     }
 }

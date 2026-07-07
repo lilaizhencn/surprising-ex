@@ -187,20 +187,18 @@ public class OrderRepository {
     }
 
     public boolean orderMatchesContractType(long orderId, String contractType) {
-        String normalizedContractType = emptyToNull(contractType);
-        if (normalizedContractType == null) {
+        String productLine = productLineNameFromContractType(contractType);
+        if (productLine == null) {
             return true;
         }
         Boolean matched = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
-                      FROM trading_orders o
-                      JOIN instruments i
-                        ON i.symbol = o.symbol AND i.version = o.instrument_version
-                     WHERE o.order_id = ?
-                       AND i.contract_type = ?
+                      FROM trading_orders
+                     WHERE order_id = ?
+                       AND product_line = ?
                 )
-                """, Boolean.class, orderId, normalizedContractType);
+                """, Boolean.class, orderId, productLine);
         return Boolean.TRUE.equals(matched);
     }
 
@@ -222,25 +220,19 @@ public class OrderRepository {
 
     public List<OrderRecord> openOrders(long userId, String symbol, int limit, String contractType) {
         String normalizedSymbol = emptyToNull(symbol);
-        String normalizedContractType = emptyToNull(contractType);
+        String productLine = productLineNameFromContractType(contractType);
         String sql = """
                 SELECT *
                   FROM trading_orders
                  WHERE user_id = ?
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
-                   AND (CAST(? AS text) IS NULL OR EXISTS (
-                        SELECT 1
-                          FROM instruments i
-                         WHERE i.symbol = trading_orders.symbol
-                           AND i.version = trading_orders.instrument_version
-                           AND i.contract_type = ?
-                   ))
+                   AND (CAST(? AS text) IS NULL OR product_line = ?)
                    AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                  ORDER BY created_at DESC
                  LIMIT ?
                 """;
         return jdbcTemplate.query(sql, (rs, rowNum) -> toRecord(rs),
-                userId, normalizedSymbol, normalizedSymbol, normalizedContractType, normalizedContractType, limit);
+                userId, normalizedSymbol, normalizedSymbol, productLine, productLine, limit);
     }
 
     public List<OrderRecord> adminOrders(Long userId,
@@ -271,7 +263,7 @@ public class OrderRepository {
                                                                   String sort) {
         String normalizedSymbol = emptyToNull(symbol);
         String normalizedStatus = status == null ? null : status.name();
-        String normalizedContractType = emptyToNull(contractType);
+        String productLine = productLineNameFromContractType(contractType);
         int safeLimit = AdminCursorPage.limit(limit, 1000);
         AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
                 "createdAt", "created_at", "order_id", true);
@@ -289,8 +281,8 @@ public class OrderRepository {
         args.add(normalizedStatus);
         args.add(orderId);
         args.add(orderId);
-        args.add(normalizedContractType);
-        args.add(normalizedContractType);
+        args.add(productLine);
+        args.add(productLine);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(safeLimit + 1);
         List<OrderRecord> rows = jdbcTemplate.query("""
@@ -300,13 +292,7 @@ public class OrderRepository {
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
                    AND (CAST(? AS text) IS NULL OR status = ?)
                    AND (CAST(? AS text) IS NULL OR order_id = ?)
-                   AND (CAST(? AS text) IS NULL OR EXISTS (
-                        SELECT 1
-                          FROM instruments i
-                         WHERE i.symbol = trading_orders.symbol
-                           AND i.version = trading_orders.instrument_version
-                           AND i.contract_type = ?
-                   ))
+                   AND (CAST(? AS text) IS NULL OR product_line = ?)
                 %s
                  ORDER BY %s %s, %s %s
                  LIMIT ?
@@ -323,27 +309,21 @@ public class OrderRepository {
 
     public List<OrderRecord> adminCancelableOrders(Long userId, String symbol, String contractType, int limit) {
         String normalizedSymbol = emptyToNull(symbol);
-        String normalizedContractType = emptyToNull(contractType);
+        String productLine = productLineNameFromContractType(contractType);
         int safeLimit = Math.max(1, Math.min(limit, 1000));
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_orders
                  WHERE (CAST(? AS text) IS NULL OR user_id = ?)
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
-                   AND (CAST(? AS text) IS NULL OR EXISTS (
-                        SELECT 1
-                          FROM instruments i
-                         WHERE i.symbol = trading_orders.symbol
-                           AND i.version = trading_orders.instrument_version
-                           AND i.contract_type = ?
-                   ))
+                   AND (CAST(? AS text) IS NULL OR product_line = ?)
                    AND status IN ('ACCEPTED', 'PARTIALLY_FILLED')
                    AND remaining_quantity_steps > 0
                  ORDER BY created_at ASC, order_id ASC
                  LIMIT ?
                 """, (rs, rowNum) -> toRecord(rs),
                 userId, userId, normalizedSymbol, normalizedSymbol,
-                normalizedContractType, normalizedContractType, safeLimit);
+                productLine, productLine, safeLimit);
     }
 
     public Optional<ReduceOnlyPosition> lockedPosition(long userId,
@@ -370,22 +350,16 @@ public class OrderRepository {
 
     public CancelableOrderImpact adminCancelableImpact(Long userId, String symbol, String contractType) {
         String normalizedSymbol = emptyToNull(symbol);
-        String normalizedContractType = emptyToNull(contractType);
+        String productLine = productLineNameFromContractType(contractType);
         return jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)::int AS matched,
                        COALESCE(SUM(remaining_quantity_steps), 0)::bigint AS total_remaining_quantity_steps,
                        COUNT(*) FILTER (WHERE side = 'BUY')::int AS buy_orders,
                        COUNT(*) FILTER (WHERE side = 'SELL')::int AS sell_orders
-                  FROM trading_orders
+                 FROM trading_orders
                  WHERE (CAST(? AS text) IS NULL OR user_id = ?)
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
-                   AND (CAST(? AS text) IS NULL OR EXISTS (
-                        SELECT 1
-                          FROM instruments i
-                         WHERE i.symbol = trading_orders.symbol
-                           AND i.version = trading_orders.instrument_version
-                           AND i.contract_type = ?
-                   ))
+                   AND (CAST(? AS text) IS NULL OR product_line = ?)
                    AND status IN ('ACCEPTED', 'PARTIALLY_FILLED')
                    AND remaining_quantity_steps > 0
                 """, (rs, rowNum) -> new CancelableOrderImpact(
@@ -393,7 +367,7 @@ public class OrderRepository {
                 rs.getLong("total_remaining_quantity_steps"),
                 rs.getInt("buy_orders"),
                 rs.getInt("sell_orders")), userId, userId, normalizedSymbol, normalizedSymbol,
-                normalizedContractType, normalizedContractType);
+                productLine, productLine);
     }
 
     public List<AdminOrderEventResponse> orderEvents(long orderId, int limit) {
@@ -468,7 +442,7 @@ public class OrderRepository {
                                                                               String cursor,
                                                                               String sort) {
         String normalizedSymbol = emptyToNull(symbol);
-        String normalizedContractType = emptyToNull(contractType);
+        String productLine = productLineNameFromContractType(contractType);
         int safeLimit = AdminCursorPage.limit(limit, 1000);
         AdminCursorPage.SortSpec eventTimeDesc = new AdminCursorPage.SortSpec(
                 "eventTime", "event_time", "trade_id", true);
@@ -486,8 +460,8 @@ public class OrderRepository {
         args.add(orderId);
         args.add(normalizedSymbol);
         args.add(normalizedSymbol);
-        args.add(normalizedContractType);
-        args.add(normalizedContractType);
+        args.add(productLine);
+        args.add(productLine);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(safeLimit + 1);
         List<AdminMatchTradeResponse> rows = jdbcTemplate.query("""
@@ -500,15 +474,7 @@ public class OrderRepository {
                  WHERE (CAST(? AS text) IS NULL OR taker_user_id = ? OR maker_user_id = ?)
                    AND (CAST(? AS text) IS NULL OR taker_order_id = ? OR maker_order_id = ?)
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
-                   AND (CAST(? AS text) IS NULL OR EXISTS (
-                        SELECT 1
-                          FROM trading_orders o
-                          JOIN instruments i
-                            ON i.symbol = o.symbol AND i.version = o.instrument_version
-                         WHERE (o.order_id = trading_match_trades.taker_order_id
-                                OR o.order_id = trading_match_trades.maker_order_id)
-                           AND i.contract_type = ?
-                   ))
+                   AND (CAST(? AS text) IS NULL OR product_line = ?)
                 %s
                  ORDER BY %s %s, %s %s
                  LIMIT ?
@@ -567,6 +533,16 @@ public class OrderRepository {
 
     private String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private String productLineNameFromContractType(String contractType) {
+        String normalizedContractType = emptyToNull(contractType);
+        return normalizedContractType == null
+                ? null
+                : ProductLine.fromContractTypeCode(normalizedContractType)
+                .or(() -> ProductLine.fromAccountTypeCode(normalizedContractType))
+                .orElseThrow(() -> new IllegalArgumentException("unsupported product filter: " + contractType))
+                .name();
     }
 
     private Long nullableVersion(long version) {
