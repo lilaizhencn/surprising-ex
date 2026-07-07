@@ -122,6 +122,32 @@ class MatchTradeConsumerTest {
     }
 
     @Test
+    void rejectsTradeFromOtherProductTopicBeforeSettlement() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        RecordingAccountService accountService = new RecordingAccountService();
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        MatchTradeConsumer consumer = new MatchTradeConsumer(objectMapper, accountService,
+                new AccountSettlementMetrics(meterRegistry), properties);
+
+        assertThatThrownBy(() -> consumer.onTrade(new ConsumerRecord<>("surprising.linear-delivery.match.trades.v1",
+                1, 10L, "BTC-USDT", objectMapper.writeValueAsString(TRADE))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("failed to process match trade")
+                .satisfies(ex -> assertThat(ex.getCause())
+                        .hasMessageContaining("match trade topic must match current product line")
+                        .hasMessageContaining("surprising.option.match.trades.v1"));
+
+        assertThat(accountService.processed).isNull();
+        assertThat(meterRegistry.get("surprising.account.match_trade.events")
+                .tag("outcome", "failed")
+                .counter()
+                .count()).isEqualTo(1.0d);
+    }
+
+    @Test
     void recordsDuplicateTradeMetricWhenAccountServiceSkipsIdempotentReplay() {
         ObjectMapper objectMapper = new ObjectMapper();
         RecordingAccountService accountService = new RecordingAccountService();

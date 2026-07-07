@@ -59,6 +59,7 @@ public class MatchTradeConsumer {
         try {
             trade = objectMapper.readValue(record.value(), MatchTradeEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), trade.symbol(), "match trade");
+            requireCurrentProductTopic(record.topic());
             boolean processed = accountService.processTradeIfNew(trade);
             settlementMetrics.recordSuccess(trade.eventTime(), startedAtNanos, processed);
         } catch (Exception ex) {
@@ -74,5 +75,23 @@ public class MatchTradeConsumer {
 
     public String groupId() {
         return properties.getKafka().getGroupId();
+    }
+
+    private void requireCurrentProductTopic(String topic) {
+        AccountProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled()) {
+            return;
+        }
+        String expectedTopic = kafka.getMatchTradesTopic();
+        if (!expectedTopic.equals(topic)) {
+            throw new ProductTopicMismatchException("match trade topic must match current product line: expected="
+                    + expectedTopic + " actual=" + topic);
+        }
+    }
+
+    private static final class ProductTopicMismatchException extends RuntimeException {
+        private ProductTopicMismatchException(String message) {
+            super(message);
+        }
     }
 }
