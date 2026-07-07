@@ -342,6 +342,7 @@ public class LiquidationOrderRepository {
                          String eventType,
                          String payload,
                          Instant now) {
+        requireCurrentProductTopic(topic);
         long outboxId = sequenceRepository.nextTradingSequence("outbox");
         int rows = jdbcTemplate.update("""
                 INSERT INTO trading_outbox_events (
@@ -391,6 +392,19 @@ public class LiquidationOrderRepository {
         sql.append("   AND e.topic IN (?, ?)\n");
         args.add(properties.getKafka().getOrderEventsTopic());
         args.add(properties.getKafka().getOrderCommandsTopic());
+    }
+
+    private void requireCurrentProductTopic(String topic) {
+        LiquidationProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled()) {
+            return;
+        }
+        String orderEventsTopic = kafka.getOrderEventsTopic();
+        String orderCommandsTopic = kafka.getOrderCommandsTopic();
+        if (!orderEventsTopic.equals(topic) && !orderCommandsTopic.equals(topic)) {
+            throw new IllegalStateException("liquidation trading outbox topic must match current product line: "
+                    + "expected one of [" + orderEventsTopic + ", " + orderCommandsTopic + "] actual=" + topic);
+        }
     }
 
     private void requireSingleRow(int rows, String operation) {

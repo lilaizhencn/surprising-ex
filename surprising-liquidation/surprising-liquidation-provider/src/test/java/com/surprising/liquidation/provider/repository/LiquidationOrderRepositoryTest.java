@@ -15,6 +15,8 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.sql.ResultSet;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
@@ -234,6 +236,41 @@ class LiquidationOrderRepositoryTest {
     }
 
     @Test
+    void enqueueOutboxAllowsCurrentProductTopicWhenProductTopicsAreEnabled() throws Exception {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        LiquidationOrderRepository repository = new LiquidationOrderRepository(jdbcTemplate, sequenceRepository,
+                properties);
+        when(sequenceRepository.nextTradingSequence("outbox")).thenReturn(9301L);
+        when(jdbcTemplate.update(contains("INSERT INTO trading_outbox_events"), any(Object[].class))).thenReturn(1);
+
+        invokeEnqueue(repository, properties.getKafka().getOrderCommandsTopic());
+
+        verify(sequenceRepository).nextTradingSequence("outbox");
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(contains("INSERT INTO trading_outbox_events"), args.capture());
+        assertThat(args.getValue()[3]).isEqualTo("surprising.linear-delivery.order.commands.v1");
+    }
+
+    @Test
+    void enqueueOutboxRejectsOtherProductTopicBeforeWritingWhenProductTopicsAreEnabled() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        LiquidationOrderRepository repository = new LiquidationOrderRepository(jdbcTemplate, sequenceRepository,
+                properties);
+
+        assertThatThrownBy(() -> invokeEnqueue(repository, "surprising.linear-delivery.order.commands.v1"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("liquidation trading outbox topic must match current product line")
+                .hasMessageContaining("surprising.option.order.commands.v1");
+
+        verify(sequenceRepository, never()).nextTradingSequence("outbox");
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO trading_outbox_events"), any(Object[].class));
+    }
+
+    @Test
     void markFailedFailsWhenNoRowIsUpdated() {
         LiquidationOrderRepository repository = repository();
         when(jdbcTemplate.update(contains("SET attempts = attempts + 1"), any(), any(), any(), eq(901L)))
@@ -247,6 +284,22 @@ class LiquidationOrderRepositoryTest {
 
     private LiquidationOrderRepository repository() {
         return new LiquidationOrderRepository(jdbcTemplate, sequenceRepository, new LiquidationProperties());
+    }
+
+    private void invokeEnqueue(LiquidationOrderRepository repository, String topic) throws Exception {
+        Method enqueue = LiquidationOrderRepository.class.getDeclaredMethod("enqueue", String.class, long.class,
+                String.class, String.class, String.class, String.class, Instant.class);
+        enqueue.setAccessible(true);
+        try {
+            enqueue.invoke(repository, "LIQUIDATION_ORDER", 9401L, topic, "BTC-USDT", "PLACE", "{}",
+                    Instant.parse("2026-07-01T00:00:00Z"));
+        } catch (InvocationTargetException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof Exception exception) {
+                throw exception;
+            }
+            throw ex;
+        }
     }
 
     @SuppressWarnings("unchecked")
