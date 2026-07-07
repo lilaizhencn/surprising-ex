@@ -26,6 +26,7 @@ import com.surprising.account.provider.service.PnlSettlementMath;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineSql;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionMode;
@@ -750,17 +751,9 @@ public class AccountRepository {
                        AND i.version = COALESCE(p.instrument_version, c.version)
                      WHERE p.user_id = ?
                        AND p.signed_quantity_steps <> 0
-                       AND CASE i.contract_type
-                               WHEN 'SPOT' THEN 'SPOT'
-                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                               ELSE 'LINEAR_PERPETUAL'
-                           END = ?
+                       AND %s = ?
                 )
-                """, Boolean.class, userId, productLineName);
+                """.formatted(productLineExpression("i")), Boolean.class, userId, productLineName);
         if (Boolean.TRUE.equals(hasPositions)) {
             throw new IllegalStateException("position mode switch requires no open positions");
         }
@@ -776,17 +769,9 @@ public class AccountRepository {
                      WHERE o.user_id = ?
                        AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                        AND o.remaining_quantity_steps > 0
-                       AND CASE i.contract_type
-                               WHEN 'SPOT' THEN 'SPOT'
-                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                               ELSE 'LINEAR_PERPETUAL'
-                           END = ?
+                       AND %s = ?
                 )
-                """, Boolean.class, userId, productLineName);
+                """.formatted(productLineExpression("i")), Boolean.class, userId, productLineName);
         if (Boolean.TRUE.equals(hasOpenOrders)) {
             throw new IllegalStateException("position mode switch requires no active orders");
         }
@@ -796,21 +781,13 @@ public class AccountRepository {
                       FROM trading_trigger_orders t
                       JOIN instrument_current_versions c
                         ON c.symbol = t.symbol
-                      JOIN instruments i
-                        ON i.symbol = t.symbol AND i.version = c.version
+                     JOIN instruments i
+                       ON i.symbol = t.symbol AND i.version = c.version
                      WHERE t.user_id = ?
                        AND t.status IN ('PENDING', 'TRIGGERING')
-                       AND CASE i.contract_type
-                               WHEN 'SPOT' THEN 'SPOT'
-                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                               ELSE 'LINEAR_PERPETUAL'
-                           END = ?
+                       AND %s = ?
                 )
-                """, Boolean.class, userId, productLineName);
+                """.formatted(productLineExpression("i")), Boolean.class, userId, productLineName);
         if (Boolean.TRUE.equals(hasTriggerOrders)) {
             throw new IllegalStateException("position mode switch requires no pending trigger orders");
         }
@@ -820,21 +797,13 @@ public class AccountRepository {
                       FROM trading_algo_orders a
                       JOIN instrument_current_versions c
                         ON c.symbol = a.symbol
-                      JOIN instruments i
-                        ON i.symbol = a.symbol AND i.version = c.version
+                     JOIN instruments i
+                       ON i.symbol = a.symbol AND i.version = c.version
                      WHERE a.user_id = ?
                        AND a.status IN ('PENDING', 'RUNNING', 'CANCEL_REQUESTED')
-                       AND CASE i.contract_type
-                               WHEN 'SPOT' THEN 'SPOT'
-                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                               ELSE 'LINEAR_PERPETUAL'
-                           END = ?
+                       AND %s = ?
                 )
-                """, Boolean.class, userId, productLineName);
+                """.formatted(productLineExpression("i")), Boolean.class, userId, productLineName);
         if (Boolean.TRUE.equals(hasAlgoOrders)) {
             throw new IllegalStateException("position mode switch requires no active algo orders");
         }
@@ -853,17 +822,9 @@ public class AccountRepository {
                        AND pt.trade_id = mt.trade_id
                      WHERE (mt.taker_user_id = ? OR mt.maker_user_id = ?)
                        AND pt.trade_id IS NULL
-                       AND CASE i.contract_type
-                               WHEN 'SPOT' THEN 'SPOT'
-                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                               ELSE 'LINEAR_PERPETUAL'
-                           END = ?
+                       AND %s = ?
                 )
-                """, Boolean.class, userId, userId, userId, productLineName);
+                """.formatted(productLineExpression("i")), Boolean.class, userId, userId, userId, productLineName);
         if (Boolean.TRUE.equals(hasUnsettledTrades)) {
             throw new IllegalStateException("position mode switch requires all matched trades to be settled");
         }
@@ -2151,13 +2112,7 @@ public class AccountRepository {
                        m.margin_mode,
                        m.position_side,
                        m.margin_units,
-                       CASE i.contract_type
-                           WHEN 'INVERSE_PERPETUAL' THEN 'COIN_PERPETUAL'
-                           WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'
-                           WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'
-                           WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                           ELSE 'USDT_PERPETUAL'
-                       END AS account_type
+                       %s AS account_type
                   FROM account_position_margins m
                   JOIN account_positions p
                    ON p.user_id = m.user_id
@@ -2170,7 +2125,7 @@ public class AccountRepository {
                  WHERE m.user_id = ? AND m.symbol = ? AND m.margin_mode = ? AND m.position_side = ?
                    AND m.margin_units > 0
                  FOR UPDATE OF m
-                """, (rs, rowNum) -> new PositionMargin(symbol, rs.getString("asset"),
+                """.formatted(accountTypeExpression("i")), (rs, rowNum) -> new PositionMargin(symbol, rs.getString("asset"),
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 PositionSide.fromNullableDbValue(rs.getString("position_side")), rs.getLong("margin_units"),
                 accountTypeFromNullableDbValue(rs.getString("account_type"))),
@@ -3412,6 +3367,14 @@ public class AccountRepository {
 
     private ProductLine productLine(ProductLine productLine) {
         return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+    }
+
+    private static String productLineExpression(String instrumentAlias) {
+        return ProductLineSql.contractTypeProductLineCase(instrumentAlias + ".contract_type");
+    }
+
+    private static String accountTypeExpression(String instrumentAlias) {
+        return ProductLineSql.contractTypeAccountTypeCase(instrumentAlias + ".contract_type");
     }
 
     private void requireSingleRow(int rows, String operation) {
