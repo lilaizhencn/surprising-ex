@@ -350,7 +350,7 @@ public class TriggerOrderService {
     }
 
     public void onMarkPrice(MarkTrigger markTrigger) {
-        OptionalLong markPriceTicks = triggerOrderRepository.markPriceTicks(markTrigger.symbol(), markTrigger.sequence());
+        OptionalLong markPriceTicks = markPriceTicks(markTrigger);
         if (markPriceTicks.isEmpty()) {
             if (!hasPendingOrdersForPriceType(markTrigger.symbol(), TriggerPriceType.MARK_PRICE)) {
                 return;
@@ -362,8 +362,7 @@ public class TriggerOrderService {
     }
 
     public void onIndexPrice(MarkTrigger indexTrigger) {
-        OptionalLong indexPriceTicks = triggerOrderRepository.indexPriceTicks(indexTrigger.symbol(),
-                indexTrigger.sequence());
+        OptionalLong indexPriceTicks = indexPriceTicks(indexTrigger);
         if (indexPriceTicks.isEmpty()) {
             if (!hasPendingOrdersForPriceType(indexTrigger.symbol(), TriggerPriceType.INDEX_PRICE)) {
                 return;
@@ -377,6 +376,20 @@ public class TriggerOrderService {
     public void onLastPrice(LastPriceTrigger lastTrigger) {
         onTriggerPrice(TriggerPriceType.LAST_PRICE, new MarkTrigger(lastTrigger.symbol(), lastTrigger.sequence(),
                 lastTrigger.eventTime()), lastTrigger.priceTicks());
+    }
+
+    private OptionalLong markPriceTicks(MarkTrigger markTrigger) {
+        String contractType = currentProductContractType();
+        return contractType == null
+                ? triggerOrderRepository.markPriceTicks(markTrigger.symbol(), markTrigger.sequence())
+                : triggerOrderRepository.markPriceTicks(markTrigger.symbol(), markTrigger.sequence(), contractType);
+    }
+
+    private OptionalLong indexPriceTicks(MarkTrigger indexTrigger) {
+        String contractType = currentProductContractType();
+        return contractType == null
+                ? triggerOrderRepository.indexPriceTicks(indexTrigger.symbol(), indexTrigger.sequence())
+                : triggerOrderRepository.indexPriceTicks(indexTrigger.symbol(), indexTrigger.sequence(), contractType);
     }
 
     private void onTriggerPrice(TriggerPriceType triggerPriceType, MarkTrigger priceTrigger, long triggerPriceTicks) {

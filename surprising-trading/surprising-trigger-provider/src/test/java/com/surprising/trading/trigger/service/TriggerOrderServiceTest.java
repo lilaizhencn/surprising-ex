@@ -506,7 +506,7 @@ class TriggerOrderServiceTest {
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, properties);
         TriggerOrderRecord claimed = record(501L, TriggerOrderStatus.TRIGGERING);
-        when(repository.markPriceTicks("BTC-USDT", 42L)).thenReturn(OptionalLong.of(70_001L));
+        when(repository.markPriceTicks("BTC-USDT", 42L, "LINEAR_DELIVERY")).thenReturn(OptionalLong.of(70_001L));
         when(repository.claimTriggered(eq("BTC-USDT"), eq(TriggerPriceType.MARK_PRICE),
                 eq(70_001L), eq(42L), any(), anyInt(), any(), eq("LINEAR_DELIVERY")))
                 .thenReturn(List.of(claimed));
@@ -517,6 +517,7 @@ class TriggerOrderServiceTest {
 
         service.onMarkPrice(new MarkTrigger("BTC-USDT", 42L, Instant.parse("2026-07-01T00:00:00Z")));
 
+        verify(repository).markPriceTicks("BTC-USDT", 42L, "LINEAR_DELIVERY");
         verify(repository).claimTriggered(eq("BTC-USDT"), eq(TriggerPriceType.MARK_PRICE),
                 eq(70_001L), eq(42L), any(), anyInt(), any(), eq("LINEAR_DELIVERY"));
         verify(repository).claimTrailingTriggered(eq("BTC-USDT"), eq(TriggerPriceType.MARK_PRICE),
@@ -543,6 +544,32 @@ class TriggerOrderServiceTest {
         verify(orderRpcApi).place(orderCaptor.capture());
         assertThat(orderCaptor.getValue().clientOrderId()).isEqualTo("trigger-511");
         assertThat(orderCaptor.getValue().reduceOnly()).isTrue();
+        verify(repository).markTriggered(eq(511L), eq(9011L), any());
+    }
+
+    @Test
+    void productLineModeConvertsIndexPriceByContractTypeBeforeClaiming() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
+        TriggerProperties properties = new TriggerProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
+        TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, properties);
+        TriggerOrderRecord claimed = record(511L, TriggerPriceType.INDEX_PRICE, TriggerOrderStatus.TRIGGERING);
+        when(repository.indexPriceTicks("BTC-USDT", 77L, "INVERSE_DELIVERY")).thenReturn(OptionalLong.of(70_002L));
+        when(repository.claimTriggered(eq("BTC-USDT"), eq(TriggerPriceType.INDEX_PRICE),
+                eq(70_002L), eq(77L), any(), anyInt(), any(), eq("INVERSE_DELIVERY")))
+                .thenReturn(List.of(claimed));
+        when(repository.claimTrailingTriggered(eq("BTC-USDT"), eq(TriggerPriceType.INDEX_PRICE),
+                eq(70_002L), eq(77L), any(), anyInt(), any(), eq("INVERSE_DELIVERY")))
+                .thenReturn(List.of());
+        when(orderRpcApi.place(any())).thenReturn(orderResponse(9011L, OrderStatus.ACCEPTED, null));
+
+        service.onIndexPrice(new MarkTrigger("BTC-USDT", 77L, Instant.parse("2026-07-01T00:00:00Z")));
+
+        verify(repository).indexPriceTicks("BTC-USDT", 77L, "INVERSE_DELIVERY");
+        verify(repository).claimTriggered(eq("BTC-USDT"), eq(TriggerPriceType.INDEX_PRICE),
+                eq(70_002L), eq(77L), any(), anyInt(), any(), eq("INVERSE_DELIVERY"));
         verify(repository).markTriggered(eq(511L), eq(9011L), any());
     }
 

@@ -466,6 +466,20 @@ public class TriggerOrderRepository {
     }
 
     public OptionalLong markPriceTicks(String symbol, long sequence) {
+        return markPriceTicks(symbol, sequence, null);
+    }
+
+    public OptionalLong markPriceTicks(String symbol, long sequence, String contractType) {
+        ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
+        String productFilter = normalizedProductLine == null ? "" : """
+                   AND i.contract_type = ?
+                """;
+        List<Object> args = new ArrayList<>();
+        args.add(symbol);
+        args.add(sequence);
+        if (normalizedProductLine != null) {
+            args.add(normalizedProductLine.contractTypeCode());
+        }
         return jdbcTemplate.query("""
                 SELECT ((m.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_ticks
                   FROM price_mark_ticks m
@@ -475,7 +489,8 @@ public class TriggerOrderRepository {
                     ON i.symbol = c.symbol AND i.version = c.version
                  WHERE m.symbol = ?
                    AND m.sequence = ?
-                """, (rs, rowNum) -> rs.getLong("mark_ticks"), symbol, sequence)
+                %s
+                """.formatted(productFilter), (rs, rowNum) -> rs.getLong("mark_ticks"), args.toArray())
                 .stream()
                 .mapToLong(Long::longValue)
                 .filter(value -> value > 0)
@@ -483,6 +498,20 @@ public class TriggerOrderRepository {
     }
 
     public OptionalLong indexPriceTicks(String symbol, long sequence) {
+        return indexPriceTicks(symbol, sequence, null);
+    }
+
+    public OptionalLong indexPriceTicks(String symbol, long sequence, String contractType) {
+        ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
+        String productFilter = normalizedProductLine == null ? "" : """
+                   AND i.contract_type = ?
+                """;
+        List<Object> args = new ArrayList<>();
+        args.add(symbol);
+        args.add(sequence);
+        if (normalizedProductLine != null) {
+            args.add(normalizedProductLine.contractTypeCode());
+        }
         return jdbcTemplate.query("""
                 SELECT ((CAST(round(p.index_price * qs.scale_units) AS BIGINT) + i.price_tick_units / 2)
                         / i.price_tick_units) AS index_ticks
@@ -497,7 +526,8 @@ public class TriggerOrderRepository {
                    AND p.sequence = ?
                    AND p.index_price IS NOT NULL
                    AND p.status IN ('HEALTHY', 'DEGRADED', 'CLAMPED')
-                """, (rs, rowNum) -> rs.getLong("index_ticks"), symbol, sequence)
+                %s
+                """.formatted(productFilter), (rs, rowNum) -> rs.getLong("index_ticks"), args.toArray())
                 .stream()
                 .mapToLong(Long::longValue)
                 .filter(value -> value > 0)

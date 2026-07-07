@@ -31,7 +31,7 @@ class TriggerOrderRepositoryTest {
     void markPriceTicksUsesPersistedMarkUnitsAndCurrentTickSize() throws Exception {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
-        when(jdbcTemplate.query(contains("price_mark_ticks"), any(RowMapper.class), eq("BTC-USDT"), eq(42L)))
+        when(jdbcTemplate.query(contains("price_mark_ticks"), any(RowMapper.class), any(Object[].class)))
                 .thenAnswer(invocation -> {
                     RowMapper mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
@@ -42,8 +42,36 @@ class TriggerOrderRepositoryTest {
         OptionalLong markTicks = repository.markPriceTicks("BTC-USDT", 42L);
 
         assertThat(markTicks).hasValue(65_001L);
-        verify(jdbcTemplate).query(contains("i.price_tick_units"), any(RowMapper.class),
-                eq("BTC-USDT"), eq(42L));
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("i.price_tick_units")
+                .doesNotContain("i.contract_type = ?");
+        assertThat(args.getValue()).containsExactly("BTC-USDT", 42L);
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void markPriceTicksFiltersByContractTypeWhenProvided() throws Exception {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        when(jdbcTemplate.query(contains("price_mark_ticks"), any(RowMapper.class), any(Object[].class)))
+                .thenAnswer(invocation -> {
+                    RowMapper mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("mark_ticks")).thenReturn(65_001L);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+
+        OptionalLong markTicks = repository.markPriceTicks("BTC-USDT", 42L, "INVERSE_DELIVERY");
+
+        assertThat(markTicks).hasValue(65_001L);
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue()).contains("i.contract_type = ?");
+        assertThat(args.getValue()).containsExactly("BTC-USDT", 42L, "INVERSE_DELIVERY");
     }
 
     @Test
@@ -51,7 +79,7 @@ class TriggerOrderRepositoryTest {
     void indexPriceTicksUsesDecimalPriceAndCurrentTickSize() throws Exception {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
-        when(jdbcTemplate.query(contains("price_index_ticks"), any(RowMapper.class), eq("BTC-USDT"), eq(77L)))
+        when(jdbcTemplate.query(contains("price_index_ticks"), any(RowMapper.class), any(Object[].class)))
                 .thenAnswer(invocation -> {
                     RowMapper mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
@@ -62,8 +90,36 @@ class TriggerOrderRepositoryTest {
         OptionalLong indexTicks = repository.indexPriceTicks("BTC-USDT", 77L);
 
         assertThat(indexTicks).hasValue(650_001L);
-        verify(jdbcTemplate).query(contains("p.index_price * qs.scale_units"), any(RowMapper.class),
-                eq("BTC-USDT"), eq(77L));
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("p.index_price * qs.scale_units")
+                .doesNotContain("i.contract_type = ?");
+        assertThat(args.getValue()).containsExactly("BTC-USDT", 77L);
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void indexPriceTicksFiltersByContractTypeWhenProvided() throws Exception {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        when(jdbcTemplate.query(contains("price_index_ticks"), any(RowMapper.class), any(Object[].class)))
+                .thenAnswer(invocation -> {
+                    RowMapper mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("index_ticks")).thenReturn(650_001L);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
+
+        OptionalLong indexTicks = repository.indexPriceTicks("BTC-USDT", 77L, "VANILLA_OPTION");
+
+        assertThat(indexTicks).hasValue(650_001L);
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue()).contains("i.contract_type = ?");
+        assertThat(args.getValue()).containsExactly("BTC-USDT", 77L, "VANILLA_OPTION");
     }
 
     @Test
