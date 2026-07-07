@@ -172,6 +172,7 @@ public class AdlRepository {
 
     public long executeAdl(DeficitRow deficit, AdlCandidate candidate, long remainingDeficitUnits) {
         String accountType = normalizeAccountType(deficit.accountType());
+        requireProviderAccountType(accountType);
         if (remainingDeficitUnits <= 0 || insuranceBalance(accountType, candidate.asset()) > 0) {
             return remainingDeficitUnits;
         }
@@ -267,6 +268,13 @@ public class AdlRepository {
         return accountType == null || accountType.isBlank()
                 ? DEFAULT_ACCOUNT_TYPE
                 : accountType.trim().toUpperCase();
+    }
+
+    private void requireProviderAccountType(String accountType) {
+        if (productTopicsEnabled() && !accountType().equals(accountType)) {
+            throw new IllegalArgumentException("ADL deficit account type " + accountType
+                    + " does not match provider account type " + accountType());
+        }
     }
 
     private boolean productTopicsEnabled() {

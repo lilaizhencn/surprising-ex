@@ -214,6 +214,28 @@ class AdlRepositoryTest {
     }
 
     @Test
+    void productLineModeRejectsDeficitFromAnotherAccountTypeBeforeFundsMove() {
+        AdlRepository repository = new AdlRepository(jdbcTemplate, productProperties(ProductLine.LINEAR_DELIVERY));
+
+        assertThatThrownBy(() -> repository.executeAdl(
+                new DeficitRow("COIN_DELIVERY", 2002L, "USDT", 500L),
+                new AdlCandidate(1001L, "USDT", "BTC-USDT-260925", MarginMode.CROSS, PositionSide.LONG,
+                        AdlSide.LONG,
+                        10L, 10L, 100L, 200L, 100L,
+                        2_000L, 1_000L, 100L,
+                        500_000L, 20_000_000L, 10_000_000L),
+                500L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not match provider account type USDT_DELIVERY");
+
+        verify(jdbcTemplate, never()).update(contains("UPDATE account_positions"), any(Object[].class));
+        verify(jdbcTemplate, never()).update(contains("UPDATE account_product_balances"), any(Object[].class));
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO account_product_ledger_entries"),
+                any(Object[].class));
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO adl_events"), any(Object[].class));
+    }
+
+    @Test
     void executeAdlLocksInsuranceFundAndSkipsWhenFundHasBalance() {
         when(jdbcTemplate.query(contains("SELECT balance_units"), anyRowMapper(), eq("USDT_PERPETUAL"), eq("USDT")))
                 .thenReturn(List.of(1L));
