@@ -8,6 +8,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.funding.provider.config.FundingProperties;
+import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -64,6 +66,44 @@ class FundingOutboxRepositoryTest {
                 .contains("published_at IS NULL")
                 .contains("next_attempt_at <= now()")
                 .contains("FOR UPDATE SKIP LOCKED");
+    }
+
+    @Test
+    void lockPendingFiltersByFundingProductTopicWhenProductTopicsAreEnabled() {
+        FundingProperties properties = new FundingProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+        FundingOutboxRepository repository = new FundingOutboxRepository(jdbcTemplate, fundingRepository, properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(),
+                eq("surprising.inverse-perp.funding.rate.v1"),
+                eq(100))).thenReturn(List.of());
+
+        repository.lockPending(100);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
+                eq("surprising.inverse-perp.funding.rate.v1"),
+                eq(100));
+        assertThat(sql.getValue())
+                .contains("topic = ?")
+                .contains("next_attempt_at <= now()");
+    }
+
+    @Test
+    void lockPendingDoesNotClaimRowsForNonFundingProductLine() {
+        FundingProperties properties = new FundingProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        FundingOutboxRepository repository = new FundingOutboxRepository(jdbcTemplate, fundingRepository, properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(100))).thenReturn(List.of());
+
+        repository.lockPending(100);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(100));
+        assertThat(sql.getValue())
+                .contains("AND 1 = 0")
+                .doesNotContain("topic = ?");
     }
 
     @Test
