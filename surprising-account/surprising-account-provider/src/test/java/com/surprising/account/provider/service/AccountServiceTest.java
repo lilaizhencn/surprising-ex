@@ -23,6 +23,7 @@ import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.instrument.api.model.ContractSettlementMethod;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
+import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
@@ -261,7 +262,8 @@ class AccountServiceTest {
 
         int settled = service.processOptionExercise(new OptionExerciseEvent(
                 symbol, 6L, "BTC-USDT", 100L, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
-                EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME, null));
+                EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
+                optionInstrument(symbol, 6L, "BTC-USDT", 100L, OptionType.CALL)));
 
         assertThat(settled).isEqualTo(1);
         assertThat(repository.positionState(2002L, symbol))
@@ -270,6 +272,51 @@ class AccountServiceTest {
         assertThat(repository.lifecycleAccountTypes).containsExactly(AccountType.OPTION);
         assertThat(repository.lifecycleReferences).containsExactly(
                 "OPTION_EXERCISE:BTC-USDT-260925-70000-C:6:2002:CROSS:NET");
+    }
+
+    @Test
+    void optionExerciseRequiresInstrumentSnapshotBeforeFundsAreSettled() {
+        String symbol = "BTC-USDT-260925-70000-C";
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
+                "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
+        repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
+                new PositionState(2L, 6L, 20L, 0L));
+        repository.latestMarkPriceUnits.put("BTC-USDT", 150L);
+        AccountService service = new AccountService(repository, new PositionCalculator());
+
+        assertThatThrownBy(() -> service.processOptionExercise(new OptionExerciseEvent(
+                symbol, 6L, "BTC-USDT", 100L, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
+                EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME, null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("requires instrument snapshot");
+
+        assertThat(repository.positionState(2002L, symbol))
+                .isEqualTo(new PositionState(2L, 6L, 20L, 0L));
+        assertThat(repository.lifecyclePnlByUser).isEmpty();
+    }
+
+    @Test
+    void optionExerciseRejectsMismatchedInstrumentTermsBeforeFundsAreSettled() {
+        String symbol = "BTC-USDT-260925-70000-C";
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
+                "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
+        repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
+                new PositionState(2L, 6L, 20L, 0L));
+        repository.latestMarkPriceUnits.put("BTC-USDT", 150L);
+        AccountService service = new AccountService(repository, new PositionCalculator());
+
+        assertThatThrownBy(() -> service.processOptionExercise(new OptionExerciseEvent(
+                symbol, 6L, "BTC-USDT", 100L, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
+                EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
+                optionInstrument(symbol, 6L, "BTC-USDT", 120L, OptionType.CALL))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("strikePriceUnits does not match instrument");
+
+        assertThat(repository.positionState(2002L, symbol))
+                .isEqualTo(new PositionState(2L, 6L, 20L, 0L));
+        assertThat(repository.lifecyclePnlByUser).isEmpty();
     }
 
     @Test
@@ -1388,6 +1435,64 @@ class AccountServiceTest {
                     liquidationOrderId, candidateId, userId, symbol, marginMode, accountType, asset,
                     amountUnits, feeRatePpm, now, traceId);
         }
+    }
+
+    private static InstrumentResponse optionInstrument(String symbol,
+                                                       long version,
+                                                       String underlyingSymbol,
+                                                       long strikePriceUnits,
+                                                       OptionType optionType) {
+        return new InstrumentResponse(
+                symbol,
+                version,
+                InstrumentType.OPTION,
+                ContractType.VANILLA_OPTION,
+                "BTC",
+                "USDT",
+                "USDT",
+                1_000_000L,
+                "USDT",
+                1L,
+                1L,
+                1L,
+                100_000L,
+                1L,
+                1_000_000_000L,
+                1L,
+                1,
+                3,
+                List.of("LIMIT"),
+                List.of("GTC"),
+                true,
+                true,
+                false,
+                100_000_000L,
+                10_000L,
+                5_000L,
+                2L,
+                5L,
+                500_000_000_000_000L,
+                300_000L,
+                25_000_000_000_000L,
+                0,
+                0L,
+                0L,
+                0L,
+                1_000_000_000_000L,
+                2,
+                EVENT_TIME,
+                EVENT_TIME,
+                underlyingSymbol,
+                strikePriceUnits,
+                optionType,
+                OptionExerciseStyle.EUROPEAN,
+                ContractSettlementMethod.CASH,
+                InstrumentStatus.CLOSED,
+                EVENT_TIME.minusSeconds(600),
+                EVENT_TIME.minusSeconds(600),
+                EVENT_TIME,
+                List.of(),
+                List.of());
     }
 
     private record PositionUpdatedCall(String topic,

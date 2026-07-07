@@ -34,7 +34,9 @@ import com.surprising.instrument.api.model.ContractSettlementMethod;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.product.api.ProductLine;
+import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentType;
+import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.trading.api.TraceContext;
@@ -44,6 +46,7 @@ import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -445,6 +448,7 @@ public class AccountService {
         if (event == null) {
             throw new IllegalArgumentException("delivery settlement event is required");
         }
+        requireLifecycleClosed(event.status(), "delivery settlement");
         requireCashSettlement(event.settlementMethod());
         String symbol = normalizeSymbol(event.symbol());
         ContractSpec spec = contractSpec(symbol, event.version());
@@ -462,9 +466,11 @@ public class AccountService {
         if (event == null) {
             throw new IllegalArgumentException("option exercise event is required");
         }
+        requireLifecycleClosed(event.status(), "option exercise");
         requireCashSettlement(event.settlementMethod());
         String symbol = normalizeSymbol(event.symbol());
         ContractSpec spec = contractSpec(symbol, event.version());
+        requireMatchingOptionInstrument(event, spec);
         long settlementPriceTicks = optionIntrinsicPriceTicks(event, spec);
         return settleExpiringPositions(symbol, event.version(), settlementPriceTicks,
                 event.eventTime(), "OPTION_EXERCISE", "OPTION_EXERCISE");
@@ -568,6 +574,54 @@ public class AccountService {
     private void requireCashSettlement(ContractSettlementMethod settlementMethod) {
         if (settlementMethod != ContractSettlementMethod.CASH) {
             throw new IllegalArgumentException("only cash settlement is supported");
+        }
+    }
+
+    private void requireLifecycleClosed(InstrumentStatus status, String eventName) {
+        if (status != InstrumentStatus.CLOSED) {
+            throw new IllegalArgumentException(eventName + " event must be CLOSED");
+        }
+    }
+
+    private void requireMatchingOptionInstrument(OptionExerciseEvent event, ContractSpec spec) {
+        InstrumentResponse instrument = event.instrument();
+        if (instrument == null) {
+            throw new IllegalArgumentException("option exercise event requires instrument snapshot");
+        }
+        String eventSymbol = normalizeSymbol(event.symbol());
+        String instrumentSymbol = normalizeSymbol(instrument.symbol());
+        if (!eventSymbol.equals(instrumentSymbol)) {
+            throw new IllegalArgumentException("option exercise instrument symbol does not match event");
+        }
+        if (instrument.version() != event.version()) {
+            throw new IllegalArgumentException("option exercise instrument version does not match event");
+        }
+        if (instrument.instrumentType() != InstrumentType.OPTION) {
+            throw new IllegalArgumentException("option exercise instrument must be OPTION");
+        }
+        if (instrument.contractType() != spec.contractType()) {
+            throw new IllegalArgumentException("option exercise instrument contract type does not match account spec");
+        }
+        if (instrument.contractType() == null || !instrument.contractType().isOption()) {
+            throw new IllegalArgumentException("option exercise instrument must use an option contract type");
+        }
+        if (!Objects.equals(normalizeSymbol(event.underlyingSymbol()), normalizeSymbol(instrument.underlyingSymbol()))) {
+            throw new IllegalArgumentException("option exercise underlyingSymbol does not match instrument");
+        }
+        if (!Objects.equals(event.strikePriceUnits(), instrument.strikePriceUnits())) {
+            throw new IllegalArgumentException("option exercise strikePriceUnits does not match instrument");
+        }
+        if (event.optionType() != instrument.optionType()) {
+            throw new IllegalArgumentException("option exercise optionType does not match instrument");
+        }
+        if (event.optionExerciseStyle() != instrument.optionExerciseStyle()) {
+            throw new IllegalArgumentException("option exercise optionExerciseStyle does not match instrument");
+        }
+        if (event.settlementMethod() != instrument.settlementMethod()) {
+            throw new IllegalArgumentException("option exercise settlementMethod does not match instrument");
+        }
+        if (event.status() != instrument.status()) {
+            throw new IllegalArgumentException("option exercise status does not match instrument");
         }
     }
 
