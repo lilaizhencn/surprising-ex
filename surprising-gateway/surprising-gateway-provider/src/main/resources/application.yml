@@ -55,10 +55,36 @@ surprising:
         base-url: http://localhost:9081
         target-prefix: /api/v1/candlestick
         private-route: false
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_CANDLESTICK_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_CANDLESTICK_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_CANDLESTICK_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_CANDLESTICK_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_CANDLESTICK_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_CANDLESTICK_OPTION_BASE_URL:}
       price-index:
         base-url: http://localhost:9082
         target-prefix: /api/v1/price/index
         private-route: false
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_PRICE_INDEX_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_PRICE_INDEX_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_PRICE_INDEX_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_PRICE_INDEX_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_PRICE_INDEX_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_PRICE_INDEX_OPTION_BASE_URL:}
       price-fx:
         base-url: http://localhost:9082
         target-prefix: /api/v1/price/fx
@@ -67,50 +93,206 @@ surprising:
         base-url: http://localhost:9083
         target-prefix: /api/v1/price/mark
         private-route: false
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_PRICE_MARK_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_PRICE_MARK_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_PRICE_MARK_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_PRICE_MARK_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_PRICE_MARK_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_PRICE_MARK_OPTION_BASE_URL:}
       trading:
         base-url: http://localhost:9084
         target-prefix: /api/v1/trading/orders
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_TRADING_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_TRADING_OPTION_BASE_URL:}
       trading-market:
         base-url: http://localhost:9085
         target-prefix: /api/v1/trading/market
         private-route: false
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_OPTION_BASE_URL:}
       trading-trigger:
         base-url: http://localhost:9095
         target-prefix: /api/v1/trading/trigger-orders
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_OPTION_BASE_URL:}
       account:
         base-url: http://localhost:9086
         target-prefix: /api/v1/accounts
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_OPTION_BASE_URL:}
       risk:
         base-url: http://localhost:9087
         target-prefix: /api/v1/risk
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_RISK_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_RISK_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_RISK_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_RISK_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_RISK_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_RISK_OPTION_BASE_URL:}
       risk-admin:
         base-url: http://localhost:9087
         target-prefix: /api/v1/admin/risk
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_RISK_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_RISK_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_RISK_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_RISK_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_RISK_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_RISK_OPTION_BASE_URL:}
       liquidation:
         base-url: http://localhost:9088
         target-prefix: /api/v1/liquidations
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_OPTION_BASE_URL:}
       funding:
         base-url: http://localhost:9089
         target-prefix: /api/v1/funding
         private-route: false
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_FUNDING_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_FUNDING_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_FUNDING_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_FUNDING_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_FUNDING_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_FUNDING_OPTION_BASE_URL:}
       insurance:
         base-url: http://localhost:9090
         target-prefix: /api/v1/insurance
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_OPTION_BASE_URL:}
       adl:
         base-url: http://localhost:9091
         target-prefix: /api/v1/adl
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_ADL_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_ADL_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_ADL_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_ADL_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_ADL_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_ADL_OPTION_BASE_URL:}
       market-maker:
         base-url: http://localhost:9096
         target-prefix: /api/v1/market-maker
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_MARKET_MAKER_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_MARKET_MAKER_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_MARKET_MAKER_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_MARKET_MAKER_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_MARKET_MAKER_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_MARKET_MAKER_OPTION_BASE_URL:}
       wallet:
         base-url: http://localhost:8002
         target-prefix: /wallet/v1
@@ -132,10 +314,36 @@ surprising:
         base-url: http://localhost:9081
         target-prefix: /api/v1/candlestick
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_CANDLESTICK_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_CANDLESTICK_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_CANDLESTICK_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_CANDLESTICK_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_CANDLESTICK_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_CANDLESTICK_OPTION_BASE_URL:}
       price-index:
         base-url: http://localhost:9082
         target-prefix: /api/v1/price/index
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_PRICE_INDEX_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_PRICE_INDEX_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_PRICE_INDEX_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_PRICE_INDEX_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_PRICE_INDEX_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_PRICE_INDEX_OPTION_BASE_URL:}
       price-fx:
         base-url: http://localhost:9082
         target-prefix: /api/v1/price/fx
@@ -144,66 +352,274 @@ surprising:
         base-url: http://localhost:9083
         target-prefix: /api/v1/price/mark
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_PRICE_MARK_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_PRICE_MARK_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_PRICE_MARK_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_PRICE_MARK_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_PRICE_MARK_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_PRICE_MARK_OPTION_BASE_URL:}
       trading:
         base-url: http://localhost:9084
         target-prefix: /api/v1/admin/trading/orders
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_TRADING_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_TRADING_OPTION_BASE_URL:}
       trading-orders:
         base-url: http://localhost:9084
         target-prefix: /api/v1/admin/trading/orders
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_TRADING_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_TRADING_OPTION_BASE_URL:}
       trading-fees:
         base-url: http://localhost:9084
         target-prefix: /api/v1/admin/trading/fees
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_TRADING_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_TRADING_OPTION_BASE_URL:}
       trading-market:
         base-url: http://localhost:9085
         target-prefix: /api/v1/trading/market
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_TRADING_MARKET_OPTION_BASE_URL:}
       trading-trigger:
         base-url: http://localhost:9095
         target-prefix: /api/v1/admin/trading/trigger-orders
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_OPTION_BASE_URL:}
       account:
         base-url: http://localhost:9086
         target-prefix: /api/v1/admin/accounts
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_OPTION_BASE_URL:}
       account-public:
         base-url: http://localhost:9086
         target-prefix: /api/v1/accounts
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_ACCOUNT_OPTION_BASE_URL:}
       risk:
         base-url: http://localhost:9087
         target-prefix: /api/v1/risk
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_RISK_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_RISK_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_RISK_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_RISK_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_RISK_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_RISK_OPTION_BASE_URL:}
       liquidation:
         base-url: http://localhost:9088
         target-prefix: /api/v1/liquidations
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_OPTION_BASE_URL:}
       liquidation-admin:
         base-url: http://localhost:9088
         target-prefix: /api/v1/admin/liquidations
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_LIQUIDATION_OPTION_BASE_URL:}
       funding:
         base-url: http://localhost:9089
         target-prefix: /api/v1/funding
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_FUNDING_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_FUNDING_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_FUNDING_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_FUNDING_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_FUNDING_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_FUNDING_OPTION_BASE_URL:}
       insurance:
         base-url: http://localhost:9090
         target-prefix: /api/v1/insurance
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_OPTION_BASE_URL:}
       insurance-admin:
         base-url: http://localhost:9090
         target-prefix: /api/v1/insurance/admin
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_INSURANCE_OPTION_BASE_URL:}
       adl:
         base-url: http://localhost:9091
         target-prefix: /api/v1/adl
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_ADL_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_ADL_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_ADL_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_ADL_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_ADL_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_ADL_OPTION_BASE_URL:}
       market-maker:
         base-url: http://localhost:9096
         target-prefix: /api/v1/admin/market-maker
         private-route: true
+        product-routes:
+          SPOT:
+            base-url: ${GATEWAY_ROUTE_MARKET_MAKER_SPOT_BASE_URL:}
+          LINEAR_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_MARKET_MAKER_LINEAR_PERPETUAL_BASE_URL:}
+          INVERSE_PERPETUAL:
+            base-url: ${GATEWAY_ROUTE_MARKET_MAKER_INVERSE_PERPETUAL_BASE_URL:}
+          LINEAR_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_MARKET_MAKER_LINEAR_DELIVERY_BASE_URL:}
+          INVERSE_DELIVERY:
+            base-url: ${GATEWAY_ROUTE_MARKET_MAKER_INVERSE_DELIVERY_BASE_URL:}
+          OPTION:
+            base-url: ${GATEWAY_ROUTE_MARKET_MAKER_OPTION_BASE_URL:}
       wallet:
         base-url: http://localhost:8002
         target-prefix: /wallet/v1
