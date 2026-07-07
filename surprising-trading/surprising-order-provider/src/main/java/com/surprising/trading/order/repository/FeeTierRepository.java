@@ -1,5 +1,6 @@
 package com.surprising.trading.order.repository;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.FeeScheduleSourceType;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeTierAssignmentResponse;
@@ -137,9 +138,14 @@ public class FeeTierRepository {
     }
 
     public FeeTierMetrics metrics(long userId, Instant since) {
+        return metrics(ProductLine.LINEAR_PERPETUAL, userId, since);
+    }
+
+    public FeeTierMetrics metrics(ProductLine productLine, long userId, Instant since) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
+        String productLineName = productLineName(productLine);
         long trailingVolume = number(jdbcTemplate.queryForObject("""
                 WITH user_fills AS (
                     SELECT taker_user_id AS user_id, symbol, taker_instrument_version AS instrument_version,
@@ -164,10 +170,19 @@ public class FeeTierRepository {
                       FROM user_fills t
                       JOIN instruments i
                         ON i.symbol = t.symbol AND i.version = t.instrument_version
+                     WHERE CASE i.contract_type
+                               WHEN 'SPOT' THEN 'SPOT'
+                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                               ELSE 'LINEAR_PERPETUAL'
+                           END = ?
                 )
                 SELECT LEAST(COALESCE(SUM(notional_units), 0), 9223372036854775807)::bigint
                   FROM filled_notional
-                """, Number.class, userId, Timestamp.from(since), userId, Timestamp.from(since)));
+                """, Number.class, userId, Timestamp.from(since), userId, Timestamp.from(since), productLineName));
         long assetBalance = number(jdbcTemplate.queryForObject("""
                 WITH valued_balances AS (
                     SELECT CASE
@@ -204,17 +219,44 @@ public class FeeTierRepository {
     }
 
     public List<Long> candidateUsers(Instant since, int limit) {
+        return candidateUsers(ProductLine.LINEAR_PERPETUAL, since, limit);
+    }
+
+    public List<Long> candidateUsers(ProductLine productLine, Instant since, int limit) {
         int normalizedLimit = Math.max(1, Math.min(limit, 10_000));
+        String productLineName = productLineName(productLine);
         return jdbcTemplate.query("""
                 SELECT user_id
                   FROM (
-                        SELECT taker_user_id AS user_id
-                          FROM trading_match_trades
-                         WHERE event_time >= ?
+                        SELECT t.taker_user_id AS user_id
+                          FROM trading_match_trades t
+                          JOIN instruments i
+                            ON i.symbol = t.symbol AND i.version = t.taker_instrument_version
+                         WHERE t.event_time >= ?
+                           AND CASE i.contract_type
+                                   WHEN 'SPOT' THEN 'SPOT'
+                                   WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+                                   WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+                                   WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+                                   WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+                                   WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                                   ELSE 'LINEAR_PERPETUAL'
+                               END = ?
                         UNION
-                        SELECT maker_user_id AS user_id
-                          FROM trading_match_trades
-                         WHERE event_time >= ?
+                        SELECT t.maker_user_id AS user_id
+                          FROM trading_match_trades t
+                          JOIN instruments i
+                            ON i.symbol = t.symbol AND i.version = t.maker_instrument_version
+                         WHERE t.event_time >= ?
+                           AND CASE i.contract_type
+                                   WHEN 'SPOT' THEN 'SPOT'
+                                   WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+                                   WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+                                   WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+                                   WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+                                   WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                                   ELSE 'LINEAR_PERPETUAL'
+                               END = ?
                         UNION
                         SELECT user_id
                           FROM account_balances
@@ -222,34 +264,44 @@ public class FeeTierRepository {
                         UNION
                         SELECT user_id
                           FROM trading_user_fee_tiers
-                         WHERE status = 'ACTIVE'
+                         WHERE product_line = ?
+                           AND status = 'ACTIVE'
                        ) u
                  WHERE user_id > 0
                  ORDER BY user_id ASC
                  LIMIT ?
-                """, (rs, rowNum) -> rs.getLong("user_id"), Timestamp.from(since), Timestamp.from(since),
-                normalizedLimit);
+                """, (rs, rowNum) -> rs.getLong("user_id"), Timestamp.from(since), productLineName,
+                Timestamp.from(since), productLineName, productLineName, normalizedLimit);
     }
 
     public FeeTierAssignmentRecord lockAssignment(long userId, long proposedFeeScheduleId, Instant now) {
+        return lockAssignment(ProductLine.LINEAR_PERPETUAL, userId, proposedFeeScheduleId, now);
+    }
+
+    public FeeTierAssignmentRecord lockAssignment(ProductLine productLine,
+                                                  long userId,
+                                                  long proposedFeeScheduleId,
+                                                  Instant now) {
         if (userId <= 0 || proposedFeeScheduleId <= 0) {
             throw new IllegalArgumentException("userId and feeScheduleId must be positive");
         }
+        String productLineName = productLineName(productLine);
         jdbcTemplate.update("""
                 INSERT INTO trading_user_fee_tiers (
-                    user_id, fee_schedule_id, maker_fee_rate_ppm, taker_fee_rate_ppm,
+                    product_line, user_id, fee_schedule_id, maker_fee_rate_ppm, taker_fee_rate_ppm,
                     trailing_30d_volume_units, total_asset_balance_units, status,
                     effective_time, calculated_at, created_at, updated_at
-                ) VALUES (?, ?, 0, 0, 0, 0, 'DISABLED', ?, ?, ?, ?)
-                ON CONFLICT (user_id) DO NOTHING
-                """, userId, proposedFeeScheduleId, Timestamp.from(now), Timestamp.from(now),
+                ) VALUES (?, ?, ?, 0, 0, 0, 0, 'DISABLED', ?, ?, ?, ?)
+                ON CONFLICT (product_line, user_id) DO NOTHING
+                """, productLineName, userId, proposedFeeScheduleId, Timestamp.from(now), Timestamp.from(now),
                 Timestamp.from(now), Timestamp.from(now));
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_user_fee_tiers
-                 WHERE user_id = ?
+                 WHERE product_line = ?
+                   AND user_id = ?
                  FOR UPDATE
-                """, (rs, rowNum) -> toAssignmentRecord(rs), userId).stream().findFirst()
+                """, (rs, rowNum) -> toAssignmentRecord(rs), productLineName, userId).stream().findFirst()
                 .orElseThrow(() -> new IllegalStateException("fee tier assignment row missing: " + userId));
     }
 
@@ -259,6 +311,17 @@ public class FeeTierRepository {
                                    FeeTierMetrics metrics,
                                    Instant effectiveTime,
                                    Instant now) {
+        activateAssignment(ProductLine.LINEAR_PERPETUAL, userId, tier, feeScheduleId, metrics, effectiveTime, now);
+    }
+
+    public void activateAssignment(ProductLine productLine,
+                                   long userId,
+                                   FeeTierResponse tier,
+                                   long feeScheduleId,
+                                   FeeTierMetrics metrics,
+                                   Instant effectiveTime,
+                                   Instant now) {
+        String productLineName = productLineName(productLine);
         int rows = jdbcTemplate.update("""
                 UPDATE trading_user_fee_tiers
                    SET tier_code = ?,
@@ -271,15 +334,21 @@ public class FeeTierRepository {
                        effective_time = ?,
                        calculated_at = ?,
                        updated_at = ?
-                 WHERE user_id = ?
+                 WHERE product_line = ?
+                   AND user_id = ?
                    AND fee_schedule_id = ?
                 """, tier.tierCode(), tier.sourceType().name(), tier.makerFeeRatePpm(), tier.takerFeeRatePpm(),
                 metrics.trailing30dVolumeUnits(), metrics.totalAssetBalanceUnits(), Timestamp.from(effectiveTime),
-                Timestamp.from(now), Timestamp.from(now), userId, feeScheduleId);
+                Timestamp.from(now), Timestamp.from(now), productLineName, userId, feeScheduleId);
         requireSingleRow(rows, "fee tier assignment activation");
     }
 
     public void disableAssignment(long userId, FeeTierMetrics metrics, Instant now) {
+        disableAssignment(ProductLine.LINEAR_PERPETUAL, userId, metrics, now);
+    }
+
+    public void disableAssignment(ProductLine productLine, long userId, FeeTierMetrics metrics, Instant now) {
+        String productLineName = productLineName(productLine);
         int rows = jdbcTemplate.update("""
                 UPDATE trading_user_fee_tiers
                    SET status = 'DISABLED',
@@ -292,18 +361,25 @@ public class FeeTierRepository {
                        effective_time = ?,
                        calculated_at = ?,
                        updated_at = ?
-                 WHERE user_id = ?
+                 WHERE product_line = ?
+                   AND user_id = ?
                 """, metrics.trailing30dVolumeUnits(), metrics.totalAssetBalanceUnits(), Timestamp.from(now),
-                Timestamp.from(now), Timestamp.from(now), userId);
+                Timestamp.from(now), Timestamp.from(now), productLineName, userId);
         requireSingleRow(rows, "fee tier assignment disable");
     }
 
     public Optional<FeeTierAssignmentResponse> currentAssignment(long userId) {
+        return currentAssignment(ProductLine.LINEAR_PERPETUAL, userId);
+    }
+
+    public Optional<FeeTierAssignmentResponse> currentAssignment(ProductLine productLine, long userId) {
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_user_fee_tiers
-                 WHERE user_id = ?
-                """, (rs, rowNum) -> toAssignmentResponse(rs), userId).stream().findFirst();
+                 WHERE product_line = ?
+                   AND user_id = ?
+                """, (rs, rowNum) -> toAssignmentResponse(rs), productLineName(productLine), userId)
+                .stream().findFirst();
     }
 
     public static void validateTier(FeeTierUpsertRequest request) {
@@ -345,6 +421,7 @@ public class FeeTierRepository {
 
     private FeeTierAssignmentRecord toAssignmentRecord(ResultSet rs) throws SQLException {
         return new FeeTierAssignmentRecord(
+                ProductLine.valueOf(rs.getString("product_line")),
                 rs.getLong("user_id"),
                 stringOrNull(rs, "tier_code"),
                 sourceTypeOrNull(rs, "source_type"),
@@ -384,6 +461,14 @@ public class FeeTierRepository {
 
     private static FeeScheduleStatus status(FeeScheduleStatus status) {
         return status == null ? FeeScheduleStatus.ACTIVE : status;
+    }
+
+    private static ProductLine productLine(ProductLine productLine) {
+        return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+    }
+
+    private static String productLineName(ProductLine productLine) {
+        return productLine(productLine).name();
     }
 
     private static void validateFeeRate(long feeRatePpm, String field) {
@@ -506,6 +591,7 @@ public class FeeTierRepository {
     }
 
     public record FeeTierAssignmentRecord(
+            ProductLine productLine,
             long userId,
             String tierCode,
             FeeScheduleSourceType sourceType,
@@ -518,10 +604,26 @@ public class FeeTierRepository {
             Instant effectiveTime,
             Instant calculatedAt) {
 
-        public FeeTierAssignmentResponse toResponse() {
-            return new FeeTierAssignmentResponse(userId, tierCode, sourceType, feeScheduleId, makerFeeRatePpm,
+        public FeeTierAssignmentRecord(long userId,
+                                       String tierCode,
+                                       FeeScheduleSourceType sourceType,
+                                       long feeScheduleId,
+                                       long makerFeeRatePpm,
+                                       long takerFeeRatePpm,
+                                       long trailing30dVolumeUnits,
+                                       long totalAssetBalanceUnits,
+                                       FeeScheduleStatus status,
+                                       Instant effectiveTime,
+                                       Instant calculatedAt) {
+            this(ProductLine.LINEAR_PERPETUAL, userId, tierCode, sourceType, feeScheduleId, makerFeeRatePpm,
                     takerFeeRatePpm, trailing30dVolumeUnits, totalAssetBalanceUnits, status, effectiveTime,
                     calculatedAt);
+        }
+
+        public FeeTierAssignmentResponse toResponse() {
+            return new FeeTierAssignmentResponse(productLine, userId, tierCode, sourceType, feeScheduleId,
+                    makerFeeRatePpm, takerFeeRatePpm, trailing30dVolumeUnits, totalAssetBalanceUnits, status,
+                    effectiveTime, calculatedAt);
         }
     }
 }

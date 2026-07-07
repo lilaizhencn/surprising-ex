@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.FeeScheduleSourceType;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
@@ -35,6 +36,7 @@ class OrderFeeRepositoryTest {
                 Instant.parse("2026-07-01T00:00:00Z"));
 
         assertThat(snapshot).isPresent();
+        assertThat(snapshot.orElseThrow().productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
         assertThat(snapshot.orElseThrow().makerFeeRatePpm()).isEqualTo(200L);
         assertThat(snapshot.orElseThrow().takerFeeRatePpm()).isEqualTo(500L);
         assertThat(snapshot.orElseThrow().source()).isEqualTo("INSTRUMENT");
@@ -93,6 +95,25 @@ class OrderFeeRepositoryTest {
     }
 
     @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void resolvesProductLineFromInstrumentFee() throws Exception {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        OrderFeeRepository repository = new OrderFeeRepository(jdbcTemplate);
+        when(jdbcTemplate.query(contains("AND product_line = (SELECT product_line FROM instrument_fee)"),
+                any(RowMapper.class), eq("BTC-USDT"), eq(1L), eq("BTC-USDT"), eq(1001L),
+                eq("BTC-USDT"), any(), any())).thenAnswer(invocation -> {
+                    RowMapper mapper = invocation.getArgument(1);
+                    return List.of(mapper.mapRow(row(ProductLine.INVERSE_DELIVERY, 120L, 420L, "VIP_SYMBOL"), 0));
+                });
+
+        var snapshot = repository.snapshot(1001L, "BTC-USDT", 1L,
+                Instant.parse("2026-07-01T00:00:00Z"));
+
+        assertThat(snapshot).isPresent();
+        assertThat(snapshot.orElseThrow().productLine()).isEqualTo(ProductLine.INVERSE_DELIVERY);
+    }
+
+    @Test
     void validatesVipScheduleWithMakerRebate() {
         FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(null, 1001L, "BTC-USDT",
                 -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip fee tier",
@@ -113,7 +134,15 @@ class OrderFeeRepositoryTest {
     }
 
     private ResultSet row(long makerFeeRatePpm, long takerFeeRatePpm, String source) throws Exception {
+        return row(ProductLine.LINEAR_PERPETUAL, makerFeeRatePpm, takerFeeRatePpm, source);
+    }
+
+    private ResultSet row(ProductLine productLine,
+                          long makerFeeRatePpm,
+                          long takerFeeRatePpm,
+                          String source) throws Exception {
         ResultSet rs = mock(ResultSet.class);
+        when(rs.getString("product_line")).thenReturn(productLine.name());
         when(rs.getLong("maker_fee_rate_ppm")).thenReturn(makerFeeRatePpm);
         when(rs.getLong("taker_fee_rate_ppm")).thenReturn(takerFeeRatePpm);
         when(rs.getString("source")).thenReturn(source);

@@ -2,6 +2,7 @@ package com.surprising.trading.api.client;
 
 import com.surprising.trading.api.TradingApiPaths;
 import com.surprising.trading.api.model.EffectiveTradingFeeResponse;
+import com.surprising.product.api.ProductLine;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 import org.springframework.cloud.openfeign.FeignClient;
@@ -19,5 +20,11 @@ public interface TradingFeeRpcApi {
     EffectiveTradingFeeResponse effective(@RequestParam("userId") @Positive long userId,
                                           @RequestParam("symbol") @NotBlank String symbol,
                                           @RequestParam(value = "instrumentVersion", defaultValue = "0")
-                                          long instrumentVersion);
+                                          long instrumentVersion,
+                                          @RequestParam(value = "productLine", required = false)
+                                          ProductLine productLine);
+
+    default EffectiveTradingFeeResponse effective(long userId, String symbol, long instrumentVersion) {
+        return effective(userId, symbol, instrumentVersion, null);
+    }
 }

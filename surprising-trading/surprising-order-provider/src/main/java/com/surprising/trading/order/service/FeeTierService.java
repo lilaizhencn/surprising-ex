@@ -1,5 +1,6 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
@@ -59,22 +60,29 @@ public class FeeTierService {
 
     @Transactional
     public FeeTierAssignmentResponse refreshUserTier(long userId) {
+        return refreshUserTier(currentProductLine(), userId);
+    }
+
+    @Transactional
+    public FeeTierAssignmentResponse refreshUserTier(ProductLine productLine, long userId) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
+        ProductLine resolvedProductLine = productLine(productLine);
         Instant now = Instant.now();
         Instant since = lookbackStart(now);
-        FeeTierMetrics metrics = feeTierRepository.metrics(userId, since);
+        FeeTierMetrics metrics = feeTierRepository.metrics(resolvedProductLine, userId, since);
         long proposedFeeScheduleId = orderRepository.nextSequence("fee-schedule");
-        FeeTierAssignmentRecord assignment = feeTierRepository.lockAssignment(userId, proposedFeeScheduleId, now);
+        FeeTierAssignmentRecord assignment = feeTierRepository.lockAssignment(
+                resolvedProductLine, userId, proposedFeeScheduleId, now);
         Optional<FeeTierResponse> eligibleTier = feeTierRepository.eligibleTier(
                 metrics.trailing30dVolumeUnits(), metrics.totalAssetBalanceUnits());
         if (eligibleTier.isEmpty()) {
             if (assignment.status() == FeeScheduleStatus.ACTIVE) {
-                orderFeeRepository.disableSchedule(assignment.feeScheduleId(), now);
+                orderFeeRepository.disableSchedule(assignment.feeScheduleId(), resolvedProductLine, now);
             }
-            feeTierRepository.disableAssignment(userId, metrics, now);
-            return feeTierRepository.currentAssignment(userId)
+            feeTierRepository.disableAssignment(resolvedProductLine, userId, metrics, now);
+            return feeTierRepository.currentAssignment(resolvedProductLine, userId)
                     .orElseThrow(() -> new IllegalStateException("fee tier assignment missing after disable"));
         }
 
@@ -82,32 +90,44 @@ public class FeeTierService {
         boolean sameTier = sameActiveTier(assignment, tier);
         Instant effectiveTime = sameTier ? assignment.effectiveTime() : now;
         if (!sameTier) {
-            upsertVipSchedule(userId, assignment.feeScheduleId(), tier, effectiveTime, now);
+            upsertVipSchedule(resolvedProductLine, userId, assignment.feeScheduleId(), tier, effectiveTime, now);
         }
-        feeTierRepository.activateAssignment(userId, tier, assignment.feeScheduleId(), metrics, effectiveTime, now);
-        return feeTierRepository.currentAssignment(userId)
+        feeTierRepository.activateAssignment(resolvedProductLine, userId, tier, assignment.feeScheduleId(), metrics,
+                effectiveTime, now);
+        return feeTierRepository.currentAssignment(resolvedProductLine, userId)
                 .orElseThrow(() -> new IllegalStateException("fee tier assignment missing after refresh"));
     }
 
     public FeeTierAssignmentResponse currentUserTier(long userId) {
+        return currentUserTier(currentProductLine(), userId);
+    }
+
+    public FeeTierAssignmentResponse currentUserTier(ProductLine productLine, long userId) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        return feeTierRepository.currentAssignment(userId)
-                .orElseGet(() -> new FeeTierAssignmentResponse(userId, null, null, 0L, 0L, 0L,
+        ProductLine resolvedProductLine = productLine(productLine);
+        return feeTierRepository.currentAssignment(resolvedProductLine, userId)
+                .orElseGet(() -> new FeeTierAssignmentResponse(resolvedProductLine, userId, null, null, 0L, 0L, 0L,
                         0L, 0L, FeeScheduleStatus.DISABLED, Instant.EPOCH, Instant.EPOCH));
     }
 
     @Transactional
     public FeeTierRefreshResponse refreshActiveUserTiers(int limit) {
+        return refreshActiveUserTiers(currentProductLine(), limit);
+    }
+
+    @Transactional
+    public FeeTierRefreshResponse refreshActiveUserTiers(ProductLine productLine, int limit) {
+        ProductLine resolvedProductLine = productLine(productLine);
         Instant now = Instant.now();
         Instant since = lookbackStart(now);
-        List<Long> users = feeTierRepository.candidateUsers(since, limit);
+        List<Long> users = feeTierRepository.candidateUsers(resolvedProductLine, since, limit);
         List<FeeTierAssignmentResponse> assignments = new ArrayList<>();
         int changed = 0;
         for (Long userId : users) {
-            FeeTierAssignmentResponse before = currentUserTier(userId);
-            FeeTierAssignmentResponse after = refreshUserTier(userId);
+            FeeTierAssignmentResponse before = currentUserTier(resolvedProductLine, userId);
+            FeeTierAssignmentResponse after = refreshUserTier(resolvedProductLine, userId);
             assignments.add(after);
             if (!sameAssignment(before, after)) {
                 changed++;
@@ -132,12 +152,22 @@ public class FeeTierService {
                                    FeeTierResponse tier,
                                    Instant effectiveTime,
                                    Instant now) {
-        FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(feeScheduleId, userId, null,
+        upsertVipSchedule(currentProductLine(), userId, feeScheduleId, tier, effectiveTime, now);
+    }
+
+    private void upsertVipSchedule(ProductLine productLine,
+                                   long userId,
+                                   long feeScheduleId,
+                                   FeeTierResponse tier,
+                                   Instant effectiveTime,
+                                   Instant now) {
+        FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(feeScheduleId,
+                productLine(productLine), userId, null,
                 tier.makerFeeRatePpm(), tier.takerFeeRatePpm(), tier.sourceType(), tier.tierCode(),
                 "automatic " + tier.sourceType().name().toLowerCase() + " fee tier " + tier.tierCode(),
                 FeeScheduleStatus.ACTIVE, effectiveTime, null);
         orderFeeRepository.upsertSchedule(request, feeScheduleId, now);
-        FeeScheduleResponse persisted = orderFeeRepository.findSchedule(feeScheduleId)
+        FeeScheduleResponse persisted = orderFeeRepository.findSchedule(feeScheduleId, productLine(productLine))
                 .orElseThrow(() -> new IllegalStateException("fee schedule upsert failed: " + feeScheduleId));
         if (persisted.status() != FeeScheduleStatus.ACTIVE) {
             throw new IllegalStateException("fee schedule did not become active: " + feeScheduleId);
@@ -162,6 +192,14 @@ public class FeeTierService {
     private Instant lookbackStart(Instant now) {
         long lookbackDays = Math.max(1L, properties.getFeeTier().getLookbackDays());
         return now.minus(lookbackDays, ChronoUnit.DAYS);
+    }
+
+    private ProductLine currentProductLine() {
+        return productLine(properties.getKafka().getProductLine());
+    }
+
+    private ProductLine productLine(ProductLine productLine) {
+        return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
     }
 
     private boolean stringEquals(String left, String right) {

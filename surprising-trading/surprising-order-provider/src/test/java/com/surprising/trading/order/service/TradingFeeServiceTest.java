@@ -1,6 +1,7 @@
 package com.surprising.trading.order.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -8,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.FeeScheduleQueryResponse;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleSourceType;
@@ -40,11 +42,28 @@ class TradingFeeServiceTest {
         var response = service.effectiveFee(1001L, "btc-usdt", 0L);
 
         assertThat(response.userId()).isEqualTo(1001L);
+        assertThat(response.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
         assertThat(response.symbol()).isEqualTo("BTC-USDT");
         assertThat(response.instrumentVersion()).isEqualTo(7L);
         assertThat(response.makerFeeRatePpm()).isEqualTo(-50L);
         assertThat(response.takerFeeRatePpm()).isEqualTo(350L);
         assertThat(response.source()).isEqualTo("VIP_SYMBOL");
+    }
+
+    @Test
+    void effectiveFeeRejectsRequestedProductLineMismatch() {
+        OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
+        OrderRepository orderRepository = mock(OrderRepository.class);
+        InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
+        TradingFeeService service = new TradingFeeService(feeRepository, orderRepository, instrumentRuleLookup);
+
+        when(feeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(ProductLine.INVERSE_PERPETUAL,
+                        -50L, 350L, "VIP_SYMBOL")));
+
+        assertThatThrownBy(() -> service.effectiveFee(1001L, "btc-usdt", 7L, ProductLine.LINEAR_PERPETUAL))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("fee schedule unavailable for productLine");
     }
 
     @Test
@@ -71,7 +90,7 @@ class TradingFeeServiceTest {
     }
 
     @Test
-    void querySchedulesWithCursorNormalizesSymbolAndDelegatesToRepositoryPage() {
+    void querySchedulesWithCursorNormalizesSymbolAndDelegatesProductLineToRepositoryPage() {
         OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
         OrderRepository orderRepository = mock(OrderRepository.class);
         InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
@@ -79,15 +98,15 @@ class TradingFeeServiceTest {
         FeeScheduleQueryResponse expected = new FeeScheduleQueryResponse(0, List.of(), "next", true,
                 "updatedAt.asc", 50);
 
-        when(feeRepository.querySchedulesPage(1001L, "BTC-USDT", FeeScheduleStatus.ACTIVE, 50,
-                "cursor", "updatedAt.asc")).thenReturn(expected);
+        when(feeRepository.querySchedulesPage(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT",
+                FeeScheduleStatus.ACTIVE, 50, "cursor", "updatedAt.asc")).thenReturn(expected);
 
-        FeeScheduleQueryResponse response = service.querySchedules(1001L, "btc-usdt",
+        FeeScheduleQueryResponse response = service.querySchedules(ProductLine.LINEAR_DELIVERY, 1001L, "btc-usdt",
                 FeeScheduleStatus.ACTIVE, 50, "cursor", "updatedAt.asc");
 
         assertThat(response).isEqualTo(expected);
-        verify(feeRepository).querySchedulesPage(1001L, "BTC-USDT", FeeScheduleStatus.ACTIVE, 50,
-                "cursor", "updatedAt.asc");
+        verify(feeRepository).querySchedulesPage(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT",
+                FeeScheduleStatus.ACTIVE, 50, "cursor", "updatedAt.asc");
     }
 
     private InstrumentRule rule(long version) {

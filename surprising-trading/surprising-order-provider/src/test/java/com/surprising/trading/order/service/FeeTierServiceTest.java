@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleSourceType;
 import com.surprising.trading.api.model.FeeScheduleStatus;
@@ -72,37 +73,45 @@ class FeeTierServiceTest {
         FeeTierRepository tierRepository = mock(FeeTierRepository.class);
         OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
         OrderRepository orderRepository = mock(OrderRepository.class);
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
         FeeTierService service = new FeeTierService(tierRepository, feeRepository, orderRepository,
-                new TradingOrderProperties());
+                properties);
         FeeTierMetrics metrics = new FeeTierMetrics(50_000_000_000_000L, 1_000_000_000L);
         FeeTierResponse tier = tier("VIP2", 160L, 400L, 20);
         Instant existingTime = Instant.parse("2026-07-01T00:00:00Z");
-        FeeTierAssignmentRecord locked = new FeeTierAssignmentRecord(1001L, null, null, 777L,
+        FeeTierAssignmentRecord locked = new FeeTierAssignmentRecord(ProductLine.INVERSE_DELIVERY,
+                1001L, null, null, 777L,
                 0L, 0L, 0L, 0L, FeeScheduleStatus.DISABLED, existingTime, existingTime);
-        FeeTierAssignmentResponse persisted = new FeeTierAssignmentResponse(1001L, "VIP2",
+        FeeTierAssignmentResponse persisted = new FeeTierAssignmentResponse(ProductLine.INVERSE_DELIVERY, 1001L, "VIP2",
                 FeeScheduleSourceType.VIP, 777L, 160L, 400L, metrics.trailing30dVolumeUnits(),
                 metrics.totalAssetBalanceUnits(), FeeScheduleStatus.ACTIVE, existingTime, existingTime);
 
-        when(tierRepository.metrics(eq(1001L), any())).thenReturn(metrics);
+        when(tierRepository.metrics(eq(ProductLine.INVERSE_DELIVERY), eq(1001L), any())).thenReturn(metrics);
         when(orderRepository.nextSequence("fee-schedule")).thenReturn(777L);
-        when(tierRepository.lockAssignment(eq(1001L), eq(777L), any())).thenReturn(locked);
+        when(tierRepository.lockAssignment(eq(ProductLine.INVERSE_DELIVERY), eq(1001L), eq(777L), any()))
+                .thenReturn(locked);
         when(tierRepository.eligibleTier(metrics.trailing30dVolumeUnits(), metrics.totalAssetBalanceUnits()))
                 .thenReturn(Optional.of(tier));
-        when(feeRepository.findSchedule(777L)).thenReturn(Optional.of(new FeeScheduleResponse(777L, 1001L, null,
-                160L, 400L, FeeScheduleSourceType.VIP, "VIP2", "automatic vip fee tier VIP2",
-                FeeScheduleStatus.ACTIVE, existingTime, null, existingTime, existingTime)));
-        when(tierRepository.currentAssignment(1001L)).thenReturn(Optional.of(persisted));
+        when(feeRepository.findSchedule(777L, ProductLine.INVERSE_DELIVERY))
+                .thenReturn(Optional.of(new FeeScheduleResponse(777L, ProductLine.INVERSE_DELIVERY, 1001L, null,
+                        160L, 400L, FeeScheduleSourceType.VIP, "VIP2", "automatic vip fee tier VIP2",
+                        FeeScheduleStatus.ACTIVE, existingTime, null, existingTime, existingTime)));
+        when(tierRepository.currentAssignment(ProductLine.INVERSE_DELIVERY, 1001L)).thenReturn(Optional.of(persisted));
 
         FeeTierAssignmentResponse response = service.refreshUserTier(1001L);
 
         assertThat(response.tierCode()).isEqualTo("VIP2");
+        assertThat(response.productLine()).isEqualTo(ProductLine.INVERSE_DELIVERY);
         ArgumentCaptor<FeeScheduleUpsertRequest> scheduleCaptor =
                 ArgumentCaptor.forClass(FeeScheduleUpsertRequest.class);
         verify(feeRepository).upsertSchedule(scheduleCaptor.capture(), eq(777L), any());
+        assertThat(scheduleCaptor.getValue().productLine()).isEqualTo(ProductLine.INVERSE_DELIVERY);
         assertThat(scheduleCaptor.getValue().sourceType()).isEqualTo(FeeScheduleSourceType.VIP);
         assertThat(scheduleCaptor.getValue().tierCode()).isEqualTo("VIP2");
         assertThat(scheduleCaptor.getValue().makerFeeRatePpm()).isEqualTo(160L);
-        verify(tierRepository).activateAssignment(eq(1001L), eq(tier), eq(777L), eq(metrics), any(), any());
+        verify(tierRepository).activateAssignment(eq(ProductLine.INVERSE_DELIVERY), eq(1001L), eq(tier),
+                eq(777L), eq(metrics), any(), any());
     }
 
     @Test
@@ -120,18 +129,19 @@ class FeeTierServiceTest {
                 null, 777L, 0L, 0L, 0L, 0L, FeeScheduleStatus.DISABLED,
                 existingTime, existingTime);
 
-        when(tierRepository.metrics(eq(1001L), any())).thenReturn(metrics);
+        when(tierRepository.metrics(eq(ProductLine.LINEAR_PERPETUAL), eq(1001L), any())).thenReturn(metrics);
         when(orderRepository.nextSequence("fee-schedule")).thenReturn(778L);
-        when(tierRepository.lockAssignment(eq(1001L), eq(778L), any())).thenReturn(locked);
+        when(tierRepository.lockAssignment(eq(ProductLine.LINEAR_PERPETUAL), eq(1001L), eq(778L), any()))
+                .thenReturn(locked);
         when(tierRepository.eligibleTier(0L, 0L)).thenReturn(Optional.empty());
-        when(tierRepository.currentAssignment(1001L)).thenReturn(Optional.of(disabled));
+        when(tierRepository.currentAssignment(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(Optional.of(disabled));
 
         FeeTierAssignmentResponse response = service.refreshUserTier(1001L);
 
         assertThat(response.status()).isEqualTo(FeeScheduleStatus.DISABLED);
         assertThat(response.tierCode()).isNull();
-        verify(feeRepository).disableSchedule(eq(777L), any());
-        verify(tierRepository).disableAssignment(eq(1001L), eq(metrics), any());
+        verify(feeRepository).disableSchedule(eq(777L), eq(ProductLine.LINEAR_PERPETUAL), any());
+        verify(tierRepository).disableAssignment(eq(ProductLine.LINEAR_PERPETUAL), eq(1001L), eq(metrics), any());
     }
 
     @Test
@@ -150,11 +160,13 @@ class FeeTierServiceTest {
                 0L, 0L, 0L, 0L, FeeScheduleStatus.DISABLED, existingTime, existingTime);
         ArgumentCaptor<Instant> sinceCaptor = ArgumentCaptor.forClass(Instant.class);
 
-        when(tierRepository.metrics(eq(1001L), sinceCaptor.capture())).thenReturn(metrics);
+        when(tierRepository.metrics(eq(ProductLine.LINEAR_PERPETUAL), eq(1001L), sinceCaptor.capture()))
+                .thenReturn(metrics);
         when(orderRepository.nextSequence("fee-schedule")).thenReturn(777L);
-        when(tierRepository.lockAssignment(eq(1001L), eq(777L), any())).thenReturn(locked);
+        when(tierRepository.lockAssignment(eq(ProductLine.LINEAR_PERPETUAL), eq(1001L), eq(777L), any()))
+                .thenReturn(locked);
         when(tierRepository.eligibleTier(0L, 0L)).thenReturn(Optional.empty());
-        when(tierRepository.currentAssignment(1001L)).thenReturn(Optional.of(disabled));
+        when(tierRepository.currentAssignment(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(Optional.of(disabled));
 
         Instant before = Instant.now();
         service.refreshUserTier(1001L);

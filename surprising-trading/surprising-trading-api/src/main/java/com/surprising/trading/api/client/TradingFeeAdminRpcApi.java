@@ -10,6 +10,7 @@ import com.surprising.trading.api.model.FeeScheduleQueryResponse;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
+import com.surprising.product.api.ProductLine;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -32,14 +33,27 @@ public interface TradingFeeAdminRpcApi {
     FeeScheduleResponse upsert(@Valid @RequestBody FeeScheduleUpsertRequest request);
 
     @PostMapping("/schedules/{feeScheduleId}/disable")
-    FeeScheduleResponse disable(@PathVariable("feeScheduleId") @Positive long feeScheduleId);
+    FeeScheduleResponse disable(@PathVariable("feeScheduleId") @Positive long feeScheduleId,
+                                @RequestParam(value = "productLine", required = false) ProductLine productLine);
+
+    default FeeScheduleResponse disable(long feeScheduleId) {
+        return disable(feeScheduleId, null);
+    }
 
     @GetMapping("/schedules")
     FeeScheduleQueryResponse query(@RequestParam(value = "userId", defaultValue = "0") long userId,
                                    @RequestParam(value = "symbol", required = false) String symbol,
                                    @RequestParam(value = "status", required = false) FeeScheduleStatus status,
                                    @RequestParam(value = "limit", defaultValue = "100")
-                                   @Min(1) @Max(500) int limit);
+                                   @Min(1) @Max(500) int limit,
+                                   @RequestParam(value = "productLine", required = false) ProductLine productLine);
+
+    default FeeScheduleQueryResponse query(long userId,
+                                           String symbol,
+                                           FeeScheduleStatus status,
+                                           int limit) {
+        return query(userId, symbol, status, limit, null);
+    }
 
     @PostMapping("/tiers")
     FeeTierResponse upsertTier(@Valid @RequestBody FeeTierUpsertRequest request);
@@ -50,12 +64,30 @@ public interface TradingFeeAdminRpcApi {
                                     @Min(1) @Max(500) int limit);
 
     @PostMapping("/tiers/refresh")
-    FeeTierAssignmentResponse refreshUserTier(@RequestParam("userId") @Positive long userId);
+    FeeTierAssignmentResponse refreshUserTier(@RequestParam("userId") @Positive long userId,
+                                             @RequestParam(value = "productLine", required = false)
+                                             ProductLine productLine);
+
+    default FeeTierAssignmentResponse refreshUserTier(long userId) {
+        return refreshUserTier(userId, null);
+    }
 
     @PostMapping("/tiers/refresh-active")
     FeeTierRefreshResponse refreshActiveUserTiers(@RequestParam(value = "limit", defaultValue = "1000")
-                                                  @Min(1) @Max(10000) int limit);
+                                                  @Min(1) @Max(10000) int limit,
+                                                  @RequestParam(value = "productLine", required = false)
+                                                  ProductLine productLine);
+
+    default FeeTierRefreshResponse refreshActiveUserTiers(int limit) {
+        return refreshActiveUserTiers(limit, null);
+    }
 
     @GetMapping("/tiers/users/{userId}")
-    FeeTierAssignmentResponse currentUserTier(@PathVariable("userId") @Positive long userId);
+    FeeTierAssignmentResponse currentUserTier(@PathVariable("userId") @Positive long userId,
+                                             @RequestParam(value = "productLine", required = false)
+                                             ProductLine productLine);
+
+    default FeeTierAssignmentResponse currentUserTier(long userId) {
+        return currentUserTier(userId, null);
+    }
 }

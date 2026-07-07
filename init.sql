@@ -683,6 +683,7 @@ CREATE SEQUENCE IF NOT EXISTS trading_algo_order_seq AS BIGINT START WITH 1 INCR
 
 CREATE TABLE IF NOT EXISTS trading_fee_schedules (
     fee_schedule_id     BIGINT PRIMARY KEY,
+    product_line        TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     user_id             BIGINT NOT NULL,
     symbol              TEXT,
     maker_fee_rate_ppm  BIGINT NOT NULL,
@@ -695,6 +696,10 @@ CREATE TABLE IF NOT EXISTS trading_fee_schedules (
     expire_time         TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL,
     updated_at          TIMESTAMPTZ NOT NULL,
+    CONSTRAINT trading_fee_schedules_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT trading_fee_schedules_user_positive CHECK (user_id > 0),
     CONSTRAINT trading_fee_schedules_symbol_format CHECK (
         symbol IS NULL OR symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'
@@ -715,11 +720,26 @@ CREATE TABLE IF NOT EXISTS trading_fee_schedules (
     )
 );
 
-CREATE INDEX IF NOT EXISTS trading_fee_schedules_user_symbol_idx
-    ON trading_fee_schedules (user_id, symbol, status, effective_time DESC, fee_schedule_id DESC);
+DO $$
+BEGIN
+    ALTER TABLE trading_fee_schedules
+        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+    ALTER TABLE trading_fee_schedules
+        DROP CONSTRAINT IF EXISTS trading_fee_schedules_product_line_check;
+    ALTER TABLE trading_fee_schedules
+        ADD CONSTRAINT trading_fee_schedules_product_line_check CHECK (
+            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+        );
+END $$;
 
+DROP INDEX IF EXISTS trading_fee_schedules_user_symbol_idx;
+CREATE INDEX IF NOT EXISTS trading_fee_schedules_user_symbol_idx
+    ON trading_fee_schedules (product_line, user_id, symbol, status, effective_time DESC, fee_schedule_id DESC);
+
+DROP INDEX IF EXISTS trading_fee_schedules_user_global_idx;
 CREATE INDEX IF NOT EXISTS trading_fee_schedules_user_global_idx
-    ON trading_fee_schedules (user_id, status, effective_time DESC, fee_schedule_id DESC)
+    ON trading_fee_schedules (product_line, user_id, status, effective_time DESC, fee_schedule_id DESC)
     WHERE symbol IS NULL;
 
 CREATE TABLE IF NOT EXISTS trading_fee_tiers (
@@ -773,7 +793,8 @@ ON CONFLICT (tier_code) DO UPDATE SET
     updated_at = EXCLUDED.updated_at;
 
 CREATE TABLE IF NOT EXISTS trading_user_fee_tiers (
-    user_id                   BIGINT PRIMARY KEY,
+    product_line              TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
+    user_id                   BIGINT NOT NULL,
     tier_code                 TEXT,
     source_type               TEXT,
     fee_schedule_id           BIGINT NOT NULL UNIQUE,
@@ -786,6 +807,11 @@ CREATE TABLE IF NOT EXISTS trading_user_fee_tiers (
     calculated_at             TIMESTAMPTZ NOT NULL,
     created_at                TIMESTAMPTZ NOT NULL,
     updated_at                TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (product_line, user_id),
+    CONSTRAINT trading_user_fee_tiers_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT trading_user_fee_tiers_user_positive CHECK (user_id > 0),
     CONSTRAINT trading_user_fee_tiers_tier_fk
         FOREIGN KEY (tier_code) REFERENCES trading_fee_tiers(tier_code),
@@ -803,8 +829,26 @@ CREATE TABLE IF NOT EXISTS trading_user_fee_tiers (
     )
 );
 
+DO $$
+BEGIN
+    ALTER TABLE trading_user_fee_tiers
+        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+    ALTER TABLE trading_user_fee_tiers
+        DROP CONSTRAINT IF EXISTS trading_user_fee_tiers_product_line_check;
+    ALTER TABLE trading_user_fee_tiers
+        ADD CONSTRAINT trading_user_fee_tiers_product_line_check CHECK (
+            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+        );
+    ALTER TABLE trading_user_fee_tiers
+        DROP CONSTRAINT IF EXISTS trading_user_fee_tiers_pkey;
+    ALTER TABLE trading_user_fee_tiers
+        ADD CONSTRAINT trading_user_fee_tiers_pkey PRIMARY KEY (product_line, user_id);
+END $$;
+
+DROP INDEX IF EXISTS trading_user_fee_tiers_status_idx;
 CREATE INDEX IF NOT EXISTS trading_user_fee_tiers_status_idx
-    ON trading_user_fee_tiers (status, updated_at DESC);
+    ON trading_user_fee_tiers (product_line, status, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS trading_leverage_settings (
     user_id             BIGINT NOT NULL,

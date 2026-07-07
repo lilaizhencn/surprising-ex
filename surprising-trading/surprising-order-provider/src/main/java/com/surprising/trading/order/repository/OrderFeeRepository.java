@@ -6,6 +6,7 @@ import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleSourceType;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -42,7 +43,17 @@ public class OrderFeeRepository {
     public Optional<OrderFeeSnapshot> snapshot(long userId, String symbol, long instrumentVersion, Instant now) {
         return jdbcTemplate.query("""
                 WITH instrument_fee AS (
-                    SELECT maker_fee_rate_ppm, taker_fee_rate_ppm
+                    SELECT maker_fee_rate_ppm,
+                           taker_fee_rate_ppm,
+                           CASE contract_type
+                               WHEN 'SPOT' THEN 'SPOT'
+                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                               ELSE 'LINEAR_PERPETUAL'
+                           END AS product_line
                       FROM instruments
                      WHERE symbol = ?
                        AND version = ?
@@ -68,6 +79,7 @@ public class OrderFeeRepository {
                            fee_schedule_id
                       FROM trading_fee_schedules
                      WHERE user_id = ?
+                       AND product_line = (SELECT product_line FROM instrument_fee)
                        AND status = 'ACTIVE'
                        AND (symbol = ? OR symbol IS NULL)
                        AND effective_time <= ?
@@ -77,10 +89,12 @@ public class OrderFeeRepository {
                 )
                 SELECT COALESCE(u.maker_fee_rate_ppm, i.maker_fee_rate_ppm) AS maker_fee_rate_ppm,
                        COALESCE(u.taker_fee_rate_ppm, i.taker_fee_rate_ppm) AS taker_fee_rate_ppm,
+                       i.product_line,
                        COALESCE(u.source, 'INSTRUMENT') AS source
                   FROM instrument_fee i
              LEFT JOIN active_user_fee u ON TRUE
                 """, (rs, rowNum) -> new OrderFeeSnapshot(
+                ProductLine.valueOf(rs.getString("product_line")),
                 rs.getLong("maker_fee_rate_ppm"),
                 rs.getLong("taker_fee_rate_ppm"),
                 rs.getString("source")), symbol, instrumentVersion, symbol, userId, symbol,
@@ -89,12 +103,14 @@ public class OrderFeeRepository {
 
     public void upsertSchedule(FeeScheduleUpsertRequest request, long feeScheduleId, Instant now) {
         Instant effectiveTime = request.effectiveTime() == null ? now : request.effectiveTime();
+        ProductLine productLine = productLine(request.productLine());
         jdbcTemplate.update("""
                 INSERT INTO trading_fee_schedules (
-                    fee_schedule_id, user_id, symbol, maker_fee_rate_ppm, taker_fee_rate_ppm,
+                    fee_schedule_id, product_line, user_id, symbol, maker_fee_rate_ppm, taker_fee_rate_ppm,
                     source_type, tier_code, reason, status, effective_time, expire_time, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (fee_schedule_id) DO UPDATE SET
+                    product_line = EXCLUDED.product_line,
                     user_id = EXCLUDED.user_id,
                     symbol = EXCLUDED.symbol,
                     maker_fee_rate_ppm = EXCLUDED.maker_fee_rate_ppm,
@@ -106,7 +122,7 @@ public class OrderFeeRepository {
                     effective_time = EXCLUDED.effective_time,
                     expire_time = EXCLUDED.expire_time,
                     updated_at = EXCLUDED.updated_at
-                """, feeScheduleId, request.userId(), emptyToNull(request.symbol()),
+                """, feeScheduleId, productLine.name(), request.userId(), emptyToNull(request.symbol()),
                 request.makerFeeRatePpm(), request.takerFeeRatePpm(), sourceType(request.sourceType()).name(),
                 emptyToNull(request.tierCode()), request.reason().trim(), status(request.status()).name(),
                 Timestamp.from(effectiveTime), timestampOrNull(request.expireTime()),
@@ -114,41 +130,77 @@ public class OrderFeeRepository {
     }
 
     public boolean disableSchedule(long feeScheduleId, Instant now) {
+        return disableSchedule(feeScheduleId, null, now);
+    }
+
+    public boolean disableSchedule(long feeScheduleId, ProductLine productLine, Instant now) {
         return jdbcTemplate.update("""
                 UPDATE trading_fee_schedules
                    SET status = 'DISABLED',
                        updated_at = ?
                  WHERE fee_schedule_id = ?
+                   AND (CAST(? AS text) IS NULL OR product_line = ?)
                    AND status <> 'DISABLED'
-                """, Timestamp.from(now), feeScheduleId) == 1;
+                """, Timestamp.from(now), feeScheduleId,
+                productLine == null ? null : productLine.name(),
+                productLine == null ? null : productLine.name()) == 1;
     }
 
     public Optional<FeeScheduleResponse> findSchedule(long feeScheduleId) {
+        return findSchedule(feeScheduleId, null);
+    }
+
+    public Optional<FeeScheduleResponse> findSchedule(long feeScheduleId, ProductLine productLine) {
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_fee_schedules
                  WHERE fee_schedule_id = ?
-                """, (rs, rowNum) -> toResponse(rs), feeScheduleId).stream().findFirst();
+                   AND (CAST(? AS text) IS NULL OR product_line = ?)
+                """, (rs, rowNum) -> toResponse(rs), feeScheduleId,
+                productLine == null ? null : productLine.name(),
+                productLine == null ? null : productLine.name()).stream().findFirst();
     }
 
     public FeeScheduleQueryResponse querySchedules(long userId, String symbol, FeeScheduleStatus status, int limit) {
+        return querySchedules(null, userId, symbol, status, limit);
+    }
+
+    public FeeScheduleQueryResponse querySchedules(ProductLine productLine,
+                                                   long userId,
+                                                   String symbol,
+                                                   FeeScheduleStatus status,
+                                                   int limit) {
         int normalizedLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
         String normalizedSymbol = emptyToNull(symbol);
         String statusName = status == null ? null : status.name();
         List<FeeScheduleResponse> schedules = jdbcTemplate.query("""
                 SELECT *
                   FROM trading_fee_schedules
-                 WHERE (? <= 0 OR user_id = ?)
+                 WHERE (CAST(? AS text) IS NULL OR product_line = ?)
+                   AND (? <= 0 OR user_id = ?)
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
                    AND (CAST(? AS text) IS NULL OR status = ?)
-                 ORDER BY user_id ASC, symbol ASC NULLS FIRST, effective_time DESC, fee_schedule_id DESC
+                 ORDER BY product_line ASC, user_id ASC, symbol ASC NULLS FIRST, effective_time DESC, fee_schedule_id DESC
                  LIMIT ?
-                """, (rs, rowNum) -> toResponse(rs), userId, userId, normalizedSymbol, normalizedSymbol,
+                """, (rs, rowNum) -> toResponse(rs),
+                productLine == null ? null : productLine.name(),
+                productLine == null ? null : productLine.name(),
+                userId, userId, normalizedSymbol, normalizedSymbol,
                 statusName, statusName, normalizedLimit);
         return new FeeScheduleQueryResponse(schedules.size(), schedules);
     }
 
     public FeeScheduleQueryResponse querySchedulesPage(long userId,
+                                                       String symbol,
+                                                       FeeScheduleStatus status,
+                                                       int limit,
+                                                       String cursor,
+                                                       String sort) {
+        return querySchedulesPage(null, userId, symbol, status, limit, cursor, sort);
+    }
+
+    public FeeScheduleQueryResponse querySchedulesPage(ProductLine productLine,
+                                                       long userId,
                                                        String symbol,
                                                        FeeScheduleStatus status,
                                                        int limit,
@@ -160,6 +212,8 @@ public class OrderFeeRepository {
         AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, SCHEDULE_UPDATED_DESC, SCHEDULE_SORTS);
         AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
         List<Object> args = new ArrayList<>();
+        args.add(productLine == null ? null : productLine.name());
+        args.add(productLine == null ? null : productLine.name());
         args.add(userId);
         args.add(userId);
         args.add(normalizedSymbol);
@@ -169,7 +223,8 @@ public class OrderFeeRepository {
         String sql = """
                 SELECT *
                   FROM trading_fee_schedules
-                 WHERE (? <= 0 OR user_id = ?)
+                 WHERE (CAST(? AS text) IS NULL OR product_line = ?)
+                   AND (? <= 0 OR user_id = ?)
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
                    AND (CAST(? AS text) IS NULL OR status = ?)
                 """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
@@ -197,6 +252,7 @@ public class OrderFeeRepository {
         if (request.userId() <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
+        productLine(request.productLine());
         validateSymbol(request.symbol());
         validateFeeRate(request.makerFeeRatePpm(), "makerFeeRatePpm");
         validateFeeRate(request.takerFeeRatePpm(), "takerFeeRatePpm");
@@ -220,6 +276,7 @@ public class OrderFeeRepository {
     private FeeScheduleResponse toResponse(ResultSet rs) throws SQLException {
         return new FeeScheduleResponse(
                 rs.getLong("fee_schedule_id"),
+                ProductLine.valueOf(rs.getString("product_line")),
                 rs.getLong("user_id"),
                 rs.getString("symbol"),
                 rs.getLong("maker_fee_rate_ppm"),
@@ -240,6 +297,10 @@ public class OrderFeeRepository {
 
     private static FeeScheduleStatus status(FeeScheduleStatus status) {
         return status == null ? FeeScheduleStatus.ACTIVE : status;
+    }
+
+    private static ProductLine productLine(ProductLine productLine) {
+        return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
     }
 
     private static void validateFeeRate(long feeRatePpm, String field) {

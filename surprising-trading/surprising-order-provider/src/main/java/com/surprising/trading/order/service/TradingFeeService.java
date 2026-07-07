@@ -5,6 +5,7 @@ import com.surprising.trading.api.model.FeeScheduleQueryResponse;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.InstrumentRuleLookup;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
@@ -32,6 +33,13 @@ public class TradingFeeService {
     }
 
     public EffectiveTradingFeeResponse effectiveFee(long userId, String symbol, long instrumentVersion) {
+        return effectiveFee(userId, symbol, instrumentVersion, null);
+    }
+
+    public EffectiveTradingFeeResponse effectiveFee(long userId,
+                                                    String symbol,
+                                                    long instrumentVersion,
+                                                    ProductLine productLine) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
@@ -40,7 +48,10 @@ public class TradingFeeService {
         Instant now = Instant.now();
         OrderFeeSnapshot snapshot = orderFeeRepository.snapshot(userId, normalizedSymbol, resolvedVersion, now)
                 .orElseThrow(() -> new IllegalStateException("fee schedule unavailable"));
-        return new EffectiveTradingFeeResponse(userId, normalizedSymbol, resolvedVersion,
+        if (productLine != null && snapshot.productLine() != productLine) {
+            throw new IllegalStateException("fee schedule unavailable for productLine: " + productLine);
+        }
+        return new EffectiveTradingFeeResponse(userId, snapshot.productLine(), normalizedSymbol, resolvedVersion,
                 snapshot.makerFeeRatePpm(), snapshot.takerFeeRatePpm(), snapshot.source(), now);
     }
 
@@ -61,16 +72,29 @@ public class TradingFeeService {
 
     @Transactional
     public FeeScheduleResponse disableSchedule(long feeScheduleId) {
+        return disableSchedule(feeScheduleId, null);
+    }
+
+    @Transactional
+    public FeeScheduleResponse disableSchedule(long feeScheduleId, ProductLine productLine) {
         if (feeScheduleId <= 0) {
             throw new IllegalArgumentException("feeScheduleId must be positive");
         }
-        orderFeeRepository.disableSchedule(feeScheduleId, Instant.now());
-        return orderFeeRepository.findSchedule(feeScheduleId)
+        orderFeeRepository.disableSchedule(feeScheduleId, productLine, Instant.now());
+        return orderFeeRepository.findSchedule(feeScheduleId, productLine)
                 .orElseThrow(() -> new IllegalStateException("fee schedule not found: " + feeScheduleId));
     }
 
     public FeeScheduleQueryResponse querySchedules(long userId, String symbol, FeeScheduleStatus status, int limit) {
-        return orderFeeRepository.querySchedules(userId, normalizeOptionalSymbol(symbol), status,
+        return querySchedules(null, userId, symbol, status, limit);
+    }
+
+    public FeeScheduleQueryResponse querySchedules(ProductLine productLine,
+                                                   long userId,
+                                                   String symbol,
+                                                   FeeScheduleStatus status,
+                                                   int limit) {
+        return orderFeeRepository.querySchedules(productLine, userId, normalizeOptionalSymbol(symbol), status,
                 limit <= 0 ? DEFAULT_LIMIT : limit);
     }
 
@@ -81,6 +105,17 @@ public class TradingFeeService {
                                                    String cursor,
                                                    String sort) {
         return orderFeeRepository.querySchedulesPage(userId, normalizeOptionalSymbol(symbol), status,
+                limit <= 0 ? DEFAULT_LIMIT : limit, cursor, sort);
+    }
+
+    public FeeScheduleQueryResponse querySchedules(ProductLine productLine,
+                                                   long userId,
+                                                   String symbol,
+                                                   FeeScheduleStatus status,
+                                                   int limit,
+                                                   String cursor,
+                                                   String sort) {
+        return orderFeeRepository.querySchedulesPage(productLine, userId, normalizeOptionalSymbol(symbol), status,
                 limit <= 0 ? DEFAULT_LIMIT : limit, cursor, sort);
     }
 
