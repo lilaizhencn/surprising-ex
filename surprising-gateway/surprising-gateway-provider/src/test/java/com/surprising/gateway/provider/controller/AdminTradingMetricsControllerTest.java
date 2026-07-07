@@ -10,6 +10,8 @@ import com.surprising.gateway.provider.auth.AuthService;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,7 +28,7 @@ class AdminTradingMetricsControllerTest {
                 .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), now.plusSeconds(60)));
         AdminTradingMetricsController controller = new AdminTradingMetricsController(authService, new FakeJdbcTemplate(now));
 
-        var response = controller.metrics("Bearer admin", 1440, 10);
+        var response = controller.metrics("Bearer admin", null, null, 1440, 10);
 
         assertThat(response.windowMinutes()).isEqualTo(1440);
         assertThat(response.orders().submitted()).isEqualTo(100);
@@ -48,8 +50,27 @@ class AdminTradingMetricsControllerTest {
         verify(authService).requireAdminPermission("Bearer admin", "admin.trading.read");
     }
 
+    @Test
+    void metricsFilterByProductLine() {
+        AuthService authService = mock(AuthService.class);
+        Instant now = Instant.parse("2026-07-03T00:00:00Z");
+        when(authService.requireAdminPermission("Bearer admin", "admin.trading.read"))
+                .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), now.plusSeconds(60)));
+        FakeJdbcTemplate jdbcTemplate = new FakeJdbcTemplate(now);
+        AdminTradingMetricsController controller = new AdminTradingMetricsController(authService, jdbcTemplate);
+
+        controller.metrics("Bearer admin", null, "LINEAR_DELIVERY", 60, 5);
+
+        assertThat(jdbcTemplate.sqls)
+                .anySatisfy(sql -> assertThat(sql).contains("i.contract_type = ?"));
+        assertThat(jdbcTemplate.arguments)
+                .anySatisfy(args -> assertThat(args).contains("LINEAR_DELIVERY"));
+    }
+
     private static final class FakeJdbcTemplate extends JdbcTemplate {
         private final Instant now;
+        private final List<String> sqls = new ArrayList<>();
+        private final List<List<Object>> arguments = new ArrayList<>();
 
         private FakeJdbcTemplate(Instant now) {
             this.now = now;
@@ -62,6 +83,7 @@ class AdminTradingMetricsControllerTest {
 
         @Override
         public Map<String, Object> queryForMap(String sql, Object... args) {
+            record(sql, args);
             if (sql.contains("unique_participants")) {
                 return row("unique_participants", 44L);
             }
@@ -130,6 +152,7 @@ class AdminTradingMetricsControllerTest {
 
         @Override
         public List<Map<String, Object>> queryForList(String sql, Object... args) {
+            record(sql, args);
             if (sql.contains("GROUP BY status")) {
                 return List.of(
                         row("status", "FILLED", "total", 55L),
@@ -164,6 +187,11 @@ class AdminTradingMetricsControllerTest {
                         "last_updated_at", Timestamp.from(now.minusSeconds(15))));
             }
             throw new IllegalArgumentException(sql);
+        }
+
+        private void record(String sql, Object... args) {
+            sqls.add(sql);
+            arguments.add(Arrays.asList(args));
         }
 
         private Map<String, Object> row(Object... values) {

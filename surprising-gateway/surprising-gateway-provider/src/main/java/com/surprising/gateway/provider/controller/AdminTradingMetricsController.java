@@ -1,12 +1,14 @@
 package com.surprising.gateway.provider.controller;
 
 import com.surprising.gateway.provider.auth.AuthService;
+import com.surprising.product.api.ProductLine;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpHeaders;
@@ -33,24 +35,29 @@ public class AdminTradingMetricsController {
 
     @GetMapping("/metrics")
     public TradingMetricsResponse metrics(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+                                          @RequestHeader(value = "X-Product-Line", required = false)
+                                          String productLineHeader,
+                                          @RequestParam(value = "productLine", required = false)
+                                          String productLineValue,
                                           @RequestParam(value = "windowMinutes", defaultValue = "1440") int windowMinutes,
                                           @RequestParam(value = "limit", defaultValue = "20") int limit) {
         try {
             authService.requireAdminPermission(authorization, "admin.trading.read");
             int boundedWindow = Math.max(1, Math.min(windowMinutes, 43_200));
             int boundedLimit = Math.max(1, Math.min(limit, 100));
+            String contractType = contractType(productLine(productLineValue, productLineHeader));
             Instant now = Instant.now();
             Instant since = now.minus(Duration.ofMinutes(boundedWindow));
             List<TradingMetricWarning> warnings = new ArrayList<>();
             return new TradingMetricsResponse(
                     now,
                     boundedWindow,
-                    orderMetrics(since, warnings),
-                    tradeMetrics(since, warnings),
-                    matchingMetrics(since, warnings),
-                    triggerMetrics(now, since, warnings),
-                    positionMetrics(warnings),
-                    symbolMetrics(since, boundedLimit, warnings),
+                    orderMetrics(since, contractType, warnings),
+                    tradeMetrics(since, contractType, warnings),
+                    matchingMetrics(since, contractType, warnings),
+                    triggerMetrics(now, since, contractType, warnings),
+                    positionMetrics(contractType, warnings),
+                    symbolMetrics(since, boundedLimit, contractType, warnings),
                     warnings);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
@@ -59,7 +66,7 @@ public class AdminTradingMetricsController {
         }
     }
 
-    private OrderMetrics orderMetrics(Instant since, List<TradingMetricWarning> warnings) {
+    private OrderMetrics orderMetrics(Instant since, String contractType, List<TradingMetricWarning> warnings) {
         try {
             Map<String, Object> row = jdbcTemplate.queryForMap("""
                     SELECT COUNT(*) FILTER (WHERE created_at >= ?) AS submitted,
@@ -81,17 +88,32 @@ public class AdminTradingMetricsController {
                                WHERE status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                            ) AS last_open_updated_at
                       FROM trading_orders
+                     WHERE (CAST(? AS text) IS NULL OR EXISTS (
+                            SELECT 1
+                              FROM instruments i
+                             WHERE i.symbol = trading_orders.symbol
+                               AND i.version = trading_orders.instrument_version
+                               AND i.contract_type = ?
+                     ))
                     """, timestamp(since), timestamp(since), timestamp(since), timestamp(since), timestamp(since),
-                    timestamp(since), timestamp(since), timestamp(since), timestamp(since));
+                    timestamp(since), timestamp(since), timestamp(since), timestamp(since),
+                    contractType, contractType);
             long submitted = longValue(row.get("submitted"));
             long rejected = longValue(row.get("rejected"));
             List<OrderStatusMetric> statuses = jdbcTemplate.queryForList("""
                     SELECT status, COUNT(*) AS total
                       FROM trading_orders
                      WHERE created_at >= ?
+                       AND (CAST(? AS text) IS NULL OR EXISTS (
+                            SELECT 1
+                              FROM instruments i
+                             WHERE i.symbol = trading_orders.symbol
+                               AND i.version = trading_orders.instrument_version
+                               AND i.contract_type = ?
+                       ))
                      GROUP BY status
                      ORDER BY total DESC, status
-                    """, timestamp(since)).stream()
+                    """, timestamp(since), contractType, contractType).stream()
                     .map(status -> new OrderStatusMetric(stringValue(status.get("status")), longValue(status.get("total"))))
                     .toList();
             return new OrderMetrics(
@@ -117,7 +139,7 @@ public class AdminTradingMetricsController {
         }
     }
 
-    private TradeMetrics tradeMetrics(Instant since, List<TradingMetricWarning> warnings) {
+    private TradeMetrics tradeMetrics(Instant since, String contractType, List<TradingMetricWarning> warnings) {
         try {
             Map<String, Object> row = jdbcTemplate.queryForMap("""
                     SELECT COUNT(*) AS trades,
@@ -128,19 +150,41 @@ public class AdminTradingMetricsController {
                            MAX(event_time) AS last_trade_at
                       FROM trading_match_trades
                      WHERE event_time >= ?
-                    """, timestamp(since));
+                       AND (CAST(? AS text) IS NULL OR EXISTS (
+                            SELECT 1
+                              FROM instruments i
+                             WHERE i.symbol = trading_match_trades.symbol
+                               AND i.version = trading_match_trades.taker_instrument_version
+                               AND i.contract_type = ?
+                       ))
+                    """, timestamp(since), contractType, contractType);
             Map<String, Object> participants = jdbcTemplate.queryForMap("""
                     SELECT COUNT(DISTINCT user_id) AS unique_participants
                       FROM (
                             SELECT taker_user_id AS user_id
                               FROM trading_match_trades
                              WHERE event_time >= ?
+                               AND (CAST(? AS text) IS NULL OR EXISTS (
+                                    SELECT 1
+                                      FROM instruments i
+                                     WHERE i.symbol = trading_match_trades.symbol
+                                       AND i.version = trading_match_trades.taker_instrument_version
+                                       AND i.contract_type = ?
+                               ))
                             UNION
                             SELECT maker_user_id AS user_id
                               FROM trading_match_trades
                              WHERE event_time >= ?
+                               AND (CAST(? AS text) IS NULL OR EXISTS (
+                                    SELECT 1
+                                      FROM instruments i
+                                     WHERE i.symbol = trading_match_trades.symbol
+                                       AND i.version = trading_match_trades.maker_instrument_version
+                                       AND i.contract_type = ?
+                               ))
                       ) participants
-                    """, timestamp(since), timestamp(since));
+                    """, timestamp(since), contractType, contractType,
+                    timestamp(since), contractType, contractType);
             return new TradeMetrics(
                     longValue(row.get("trades")),
                     longValue(row.get("volume_steps")),
@@ -156,7 +200,7 @@ public class AdminTradingMetricsController {
         }
     }
 
-    private MatchingMetrics matchingMetrics(Instant since, List<TradingMetricWarning> warnings) {
+    private MatchingMetrics matchingMetrics(Instant since, String contractType, List<TradingMetricWarning> warnings) {
         try {
             Map<String, Object> row = jdbcTemplate.queryForMap("""
                     SELECT COUNT(*) AS commands,
@@ -167,7 +211,14 @@ public class AdminTradingMetricsController {
                            MAX(event_time) AS last_result_at
                       FROM trading_match_results
                      WHERE event_time >= ?
-                    """, timestamp(since));
+                       AND (CAST(? AS text) IS NULL OR EXISTS (
+                            SELECT 1
+                              FROM instruments i
+                             WHERE i.symbol = trading_match_results.symbol
+                               AND i.version = trading_match_results.instrument_version
+                               AND i.contract_type = ?
+                       ))
+                    """, timestamp(since), contractType, contractType);
             long commands = longValue(row.get("commands"));
             long rejected = longValue(row.get("rejected_commands"));
             return new MatchingMetrics(
@@ -185,7 +236,7 @@ public class AdminTradingMetricsController {
         }
     }
 
-    private TriggerMetrics triggerMetrics(Instant now, Instant since, List<TradingMetricWarning> warnings) {
+    private TriggerMetrics triggerMetrics(Instant now, Instant since, String contractType, List<TradingMetricWarning> warnings) {
         try {
             Map<String, Object> row = jdbcTemplate.queryForMap("""
                     SELECT COUNT(*) FILTER (WHERE created_at >= ?) AS created,
@@ -198,8 +249,14 @@ public class AdminTradingMetricsController {
                            COUNT(*) FILTER (WHERE status = 'PENDING' AND expires_at <= ?) AS expired_pending,
                            MAX(updated_at) AS last_updated_at
                       FROM trading_trigger_orders
+                     WHERE (CAST(? AS text) IS NULL OR EXISTS (
+                            SELECT 1
+                              FROM instruments i
+                             WHERE i.symbol = trading_trigger_orders.symbol
+                               AND i.contract_type = ?
+                     ))
                     """, timestamp(since), timestamp(since), timestamp(since), timestamp(since), timestamp(since),
-                    timestamp(now));
+                    timestamp(now), contractType, contractType);
             return new TriggerMetrics(
                     longValue(row.get("created")),
                     longValue(row.get("pending")),
@@ -217,7 +274,7 @@ public class AdminTradingMetricsController {
         }
     }
 
-    private PositionMetrics positionMetrics(List<TradingMetricWarning> warnings) {
+    private PositionMetrics positionMetrics(String contractType, List<TradingMetricWarning> warnings) {
         try {
             Map<String, Object> row = jdbcTemplate.queryForMap("""
                     SELECT COUNT(*) FILTER (WHERE signed_quantity_steps <> 0) AS open_positions,
@@ -228,7 +285,14 @@ public class AdminTradingMetricsController {
                            COALESCE(SUM(ABS(LEAST(signed_quantity_steps, 0))), 0) AS short_quantity_steps,
                            MAX(updated_at) FILTER (WHERE signed_quantity_steps <> 0) AS last_position_updated_at
                       FROM account_positions
-                    """);
+                     WHERE (CAST(? AS text) IS NULL OR EXISTS (
+                            SELECT 1
+                              FROM instruments i
+                             WHERE i.symbol = account_positions.symbol
+                               AND i.version = account_positions.instrument_version
+                               AND i.contract_type = ?
+                     ))
+                    """, contractType, contractType);
             List<PositionSymbolMetric> symbols = jdbcTemplate.queryForList("""
                     SELECT symbol,
                            COUNT(*) AS open_positions,
@@ -240,6 +304,13 @@ public class AdminTradingMetricsController {
                            MAX(updated_at) AS last_updated_at
                       FROM account_positions
                      WHERE signed_quantity_steps <> 0
+                       AND (CAST(? AS text) IS NULL OR EXISTS (
+                            SELECT 1
+                              FROM instruments i
+                             WHERE i.symbol = account_positions.symbol
+                               AND i.version = account_positions.instrument_version
+                               AND i.contract_type = ?
+                       ))
                      GROUP BY symbol
                      ORDER BY GREATEST(
                               COALESCE(SUM(GREATEST(signed_quantity_steps, 0)), 0),
@@ -248,7 +319,7 @@ public class AdminTradingMetricsController {
                               open_positions DESC,
                               symbol
                      LIMIT 20
-                    """).stream()
+                    """, contractType, contractType).stream()
                     .map(symbol -> new PositionSymbolMetric(
                             stringValue(symbol.get("symbol")),
                             longValue(symbol.get("open_positions")),
@@ -275,7 +346,10 @@ public class AdminTradingMetricsController {
         }
     }
 
-    private List<SymbolTradingMetric> symbolMetrics(Instant since, int limit, List<TradingMetricWarning> warnings) {
+    private List<SymbolTradingMetric> symbolMetrics(Instant since,
+                                                    int limit,
+                                                    String contractType,
+                                                    List<TradingMetricWarning> warnings) {
         try {
             return jdbcTemplate.queryForList("""
                     WITH order_stats AS (
@@ -290,8 +364,15 @@ public class AdminTradingMetricsController {
                                    WHERE status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                                ), 0) AS open_quantity_steps
                           FROM trading_orders
-                         WHERE created_at >= ?
-                            OR status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                         WHERE (created_at >= ?
+                            OR status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED'))
+                           AND (CAST(? AS text) IS NULL OR EXISTS (
+                                SELECT 1
+                                  FROM instruments i
+                                 WHERE i.symbol = trading_orders.symbol
+                                   AND i.version = trading_orders.instrument_version
+                                   AND i.contract_type = ?
+                           ))
                          GROUP BY symbol
                     ),
                     trade_stats AS (
@@ -303,11 +384,25 @@ public class AdminTradingMetricsController {
                                (ARRAY_AGG(price_ticks ORDER BY event_time DESC, trade_id DESC))[1] AS last_trade_price_ticks
                           FROM trading_match_trades
                          WHERE event_time >= ?
+                           AND (CAST(? AS text) IS NULL OR EXISTS (
+                                SELECT 1
+                                  FROM instruments i
+                                 WHERE i.symbol = trading_match_trades.symbol
+                                   AND i.version = trading_match_trades.taker_instrument_version
+                                   AND i.contract_type = ?
+                           ))
                          GROUP BY symbol
                     ),
                     open_interest AS (
                         SELECT symbol, long_quantity_steps, short_quantity_steps, open_quantity_steps
                           FROM trading_symbol_open_interest
+                         WHERE (CAST(? AS text) IS NULL OR EXISTS (
+                                SELECT 1
+                                  FROM instrument_current_versions cv
+                                  JOIN instruments i ON i.symbol = cv.symbol AND i.version = cv.version
+                                 WHERE cv.symbol = trading_symbol_open_interest.symbol
+                                   AND i.contract_type = ?
+                         ))
                     )
                     SELECT COALESCE(trade_stats.symbol, order_stats.symbol, open_interest.symbol) AS symbol,
                            COALESCE(order_stats.submitted_orders, 0) AS submitted_orders,
@@ -330,10 +425,11 @@ public class AdminTradingMetricsController {
                      ORDER BY COALESCE(trade_stats.notional_ticks_steps, 0) DESC,
                               COALESCE(trade_stats.trades, 0) DESC,
                               COALESCE(order_stats.open_orders, 0) DESC,
-                              symbol
+                             symbol
                      LIMIT ?
-                    """, timestamp(since), timestamp(since), timestamp(since), timestamp(since), timestamp(since),
-                    limit).stream()
+                    """, timestamp(since), timestamp(since), timestamp(since), timestamp(since),
+                    contractType, contractType, timestamp(since), contractType, contractType,
+                    contractType, contractType, limit).stream()
                     .map(row -> new SymbolTradingMetric(
                             stringValue(row.get("symbol")),
                             longValue(row.get("submitted_orders")),
@@ -358,6 +454,47 @@ public class AdminTradingMetricsController {
 
     private Timestamp timestamp(Instant value) {
         return Timestamp.from(value);
+    }
+
+    private ProductLine productLine(String queryValue, String headerValue) {
+        String value = firstNonBlank(queryValue, headerValue);
+        if (value == null) {
+            return null;
+        }
+        ProductLine byAccountType = ProductLine.fromAccountTypeCode(value).orElse(null);
+        if (byAccountType != null) {
+            return byAccountType;
+        }
+        ProductLine byContractType = ProductLine.fromContractTypeCode(value).orElse(null);
+        if (byContractType != null) {
+            return byContractType;
+        }
+        String enumName = value.toUpperCase(Locale.ROOT)
+                .replace('-', '_')
+                .replace('.', '_');
+        for (ProductLine productLine : ProductLine.values()) {
+            if (productLine.name().equals(enumName)
+                    || productLine.topicSegment().equalsIgnoreCase(value)) {
+                return productLine;
+            }
+        }
+        throw new IllegalArgumentException("unsupported productLine: " + value);
+    }
+
+    private String contractType(ProductLine productLine) {
+        return productLine == null ? null : productLine.contractTypeCode();
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     private long failureRatePpm(long total, long failed) {
