@@ -464,6 +464,33 @@ public class TriggerOrderRepository {
         return Boolean.TRUE.equals(result);
     }
 
+    public boolean hasPendingOrdersForPriceType(String symbol,
+                                                TriggerPriceType triggerPriceType,
+                                                String contractType) {
+        String normalizedContractType = emptyToNull(contractType);
+        if (normalizedContractType == null) {
+            return hasPendingOrdersForPriceType(symbol, triggerPriceType);
+        }
+        Boolean result = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM trading_trigger_orders o
+                     WHERE o.symbol = ?
+                       AND o.status = 'PENDING'
+                       AND o.trigger_price_type = ?
+                       AND EXISTS (
+                            SELECT 1
+                              FROM instrument_current_versions c
+                              JOIN instruments i
+                                ON i.symbol = c.symbol AND i.version = c.version
+                             WHERE c.symbol = o.symbol
+                               AND i.contract_type = ?
+                       )
+                )
+                """, Boolean.class, symbol, triggerPriceType.name(), normalizedContractType);
+        return Boolean.TRUE.equals(result);
+    }
+
     public List<TriggerOrderRecord> claimTriggered(String symbol,
                                                    TriggerPriceType triggerPriceType,
                                                    long triggerPriceTicks,
@@ -471,8 +498,47 @@ public class TriggerOrderRepository {
                                                    Instant triggeredAt,
                                                    int limit,
                                                    Instant now) {
+        return claimTriggered(symbol, triggerPriceType, triggerPriceTicks, triggerSequence, triggeredAt, limit, now,
+                null);
+    }
+
+    public List<TriggerOrderRecord> claimTriggered(String symbol,
+                                                   TriggerPriceType triggerPriceType,
+                                                   long triggerPriceTicks,
+                                                   long triggerSequence,
+                                                   Instant triggeredAt,
+                                                   int limit,
+                                                   Instant now,
+                                                   String contractType) {
+        String normalizedContractType = emptyToNull(contractType);
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         Instant eventVisibleAt = triggeredAt.plusSeconds(1);
+        String productFilter = normalizedContractType == null ? "" : """
+                       AND EXISTS (
+                            SELECT 1
+                              FROM instrument_current_versions c
+                              JOIN instruments i
+                                ON i.symbol = c.symbol AND i.version = c.version
+                             WHERE c.symbol = trading_trigger_orders.symbol
+                               AND i.contract_type = ?
+                       )
+                """;
+        List<Object> args = new ArrayList<>();
+        args.add(symbol);
+        args.add(triggerPriceType.name());
+        if (normalizedContractType != null) {
+            args.add(normalizedContractType);
+        }
+        args.add(Timestamp.from(eventVisibleAt));
+        args.add(Timestamp.from(now));
+        args.add(triggerPriceTicks);
+        args.add(triggerPriceTicks);
+        args.add(normalizedLimit);
+        args.add(triggerSequence);
+        args.add(triggerPriceTicks);
+        args.add(Timestamp.from(triggeredAt));
+        args.add(Timestamp.from(now));
+        args.add(Timestamp.from(now));
         return jdbcTemplate.query("""
                 -- Claim first, then update, so concurrent trigger nodes skip rows already owned by peers.
                 WITH due AS (
@@ -486,6 +552,7 @@ public class TriggerOrderRepository {
                        AND status = 'PENDING'
                        AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
                        AND trigger_price_type = ?
+                %s
                        AND created_at <= ?
                        AND (expires_at IS NULL OR expires_at > ?)
                        AND (
@@ -534,11 +601,7 @@ public class TriggerOrderRepository {
                  RETURNING sibling.trigger_order_id
                 )
                 SELECT * FROM claimed
-                """, (rs, rowNum) -> toRecord(rs), symbol, triggerPriceType.name(),
-                Timestamp.from(eventVisibleAt), Timestamp.from(now),
-                triggerPriceTicks, triggerPriceTicks, normalizedLimit, triggerSequence, triggerPriceTicks,
-                Timestamp.from(triggeredAt),
-                Timestamp.from(now), Timestamp.from(now));
+                """.formatted(productFilter), (rs, rowNum) -> toRecord(rs), args.toArray());
     }
 
     public List<TriggerOrderRecord> claimTrailingTriggered(String symbol,
@@ -548,8 +611,56 @@ public class TriggerOrderRepository {
                                                            Instant triggeredAt,
                                                            int limit,
                                                            Instant now) {
+        return claimTrailingTriggered(symbol, triggerPriceType, priceTicks, triggerSequence, triggeredAt, limit, now,
+                null);
+    }
+
+    public List<TriggerOrderRecord> claimTrailingTriggered(String symbol,
+                                                           TriggerPriceType triggerPriceType,
+                                                           long priceTicks,
+                                                           long triggerSequence,
+                                                           Instant triggeredAt,
+                                                           int limit,
+                                                           Instant now,
+                                                           String contractType) {
+        String normalizedContractType = emptyToNull(contractType);
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         Instant eventVisibleAt = triggeredAt.plusSeconds(1);
+        String productFilter = normalizedContractType == null ? "" : """
+                       AND EXISTS (
+                            SELECT 1
+                              FROM instrument_current_versions c
+                              JOIN instruments i
+                                ON i.symbol = c.symbol AND i.version = c.version
+                             WHERE c.symbol = trading_trigger_orders.symbol
+                               AND i.contract_type = ?
+                       )
+                """;
+        List<Object> args = new ArrayList<>();
+        args.add(priceTicks);
+        args.add(priceTicks);
+        args.add(symbol);
+        args.add(triggerPriceType.name());
+        if (normalizedContractType != null) {
+            args.add(normalizedContractType);
+        }
+        args.add(Timestamp.from(eventVisibleAt));
+        args.add(Timestamp.from(now));
+        args.add(normalizedLimit);
+        args.add(priceTicks);
+        args.add(priceTicks);
+        args.add(priceTicks);
+        args.add(priceTicks);
+        args.add(priceTicks);
+        args.add(priceTicks);
+        args.add(Timestamp.from(triggeredAt));
+        args.add(Timestamp.from(now));
+        args.add(triggerSequence);
+        args.add(priceTicks);
+        args.add(Timestamp.from(triggeredAt));
+        args.add(Timestamp.from(triggeredAt));
+        args.add(Timestamp.from(now));
+        args.add(Timestamp.from(now));
         return jdbcTemplate.query("""
                 WITH locked AS (
                     SELECT *,
@@ -564,6 +675,7 @@ public class TriggerOrderRepository {
                        AND status = 'PENDING'
                        AND trigger_type = 'TRAILING_STOP'
                        AND trigger_price_type = ?
+                %s
                        AND created_at <= ?
                        AND (expires_at IS NULL OR expires_at > ?)
                      ORDER BY trigger_order_id ASC
@@ -680,13 +792,7 @@ public class TriggerOrderRepository {
                  RETURNING sibling.trigger_order_id
                 )
                 SELECT * FROM claimed
-                """, (rs, rowNum) -> toRecord(rs),
-                priceTicks, priceTicks, symbol, triggerPriceType.name(), Timestamp.from(eventVisibleAt),
-                Timestamp.from(now), normalizedLimit,
-                priceTicks, priceTicks, priceTicks, priceTicks, priceTicks, priceTicks,
-                Timestamp.from(triggeredAt), Timestamp.from(now), triggerSequence, priceTicks,
-                Timestamp.from(triggeredAt), Timestamp.from(triggeredAt), Timestamp.from(now),
-                Timestamp.from(now));
+                """.formatted(productFilter), (rs, rowNum) -> toRecord(rs), args.toArray());
     }
 
     public void markTriggered(long triggerOrderId, long placedOrderId, Instant now) {
@@ -736,6 +842,39 @@ public class TriggerOrderRepository {
                 """, Timestamp.from(now), normalizedLimit, Timestamp.from(now));
     }
 
+    public int expirePending(Instant now, int limit, String contractType) {
+        String normalizedContractType = emptyToNull(contractType);
+        if (normalizedContractType == null) {
+            return expirePending(now, limit);
+        }
+        int normalizedLimit = Math.max(1, Math.min(limit, 1000));
+        return jdbcTemplate.update("""
+                WITH expired AS (
+                    SELECT o.trigger_order_id
+                      FROM trading_trigger_orders o
+                     WHERE o.status = 'PENDING'
+                       AND o.expires_at IS NOT NULL
+                       AND o.expires_at <= ?
+                       AND EXISTS (
+                            SELECT 1
+                              FROM instrument_current_versions c
+                              JOIN instruments i
+                                ON i.symbol = c.symbol AND i.version = c.version
+                             WHERE c.symbol = o.symbol
+                               AND i.contract_type = ?
+                       )
+                     ORDER BY o.expires_at ASC, o.trigger_order_id ASC
+                     LIMIT ?
+                     FOR UPDATE SKIP LOCKED
+                )
+                UPDATE trading_trigger_orders o
+                   SET status = 'EXPIRED',
+                       updated_at = ?
+                  FROM expired e
+                 WHERE o.trigger_order_id = e.trigger_order_id
+                """, Timestamp.from(now), normalizedContractType, normalizedLimit, Timestamp.from(now));
+    }
+
     public int resetStaleTriggering(Instant staleBefore, Instant now, int limit) {
         int normalizedLimit = Math.max(1, Math.min(limit, 1000));
         return jdbcTemplate.update("""
@@ -755,6 +894,39 @@ public class TriggerOrderRepository {
                  WHERE o.trigger_order_id = s.trigger_order_id
                    AND o.placed_order_id IS NULL
                 """, Timestamp.from(staleBefore), normalizedLimit, Timestamp.from(now));
+    }
+
+    public int resetStaleTriggering(Instant staleBefore, Instant now, int limit, String contractType) {
+        String normalizedContractType = emptyToNull(contractType);
+        if (normalizedContractType == null) {
+            return resetStaleTriggering(staleBefore, now, limit);
+        }
+        int normalizedLimit = Math.max(1, Math.min(limit, 1000));
+        return jdbcTemplate.update("""
+                WITH stale AS (
+                    SELECT o.trigger_order_id
+                      FROM trading_trigger_orders o
+                     WHERE o.status = 'TRIGGERING'
+                       AND o.updated_at < ?
+                       AND EXISTS (
+                            SELECT 1
+                              FROM instrument_current_versions c
+                              JOIN instruments i
+                                ON i.symbol = c.symbol AND i.version = c.version
+                             WHERE c.symbol = o.symbol
+                               AND i.contract_type = ?
+                       )
+                     ORDER BY o.updated_at ASC, o.trigger_order_id ASC
+                     LIMIT ?
+                     FOR UPDATE SKIP LOCKED
+                )
+                UPDATE trading_trigger_orders o
+                   SET status = 'PENDING',
+                       updated_at = ?
+                  FROM stale s
+                 WHERE o.trigger_order_id = s.trigger_order_id
+                   AND o.placed_order_id IS NULL
+                """, Timestamp.from(staleBefore), normalizedContractType, normalizedLimit, Timestamp.from(now));
     }
 
     private TriggerOrderRecord toRecord(ResultSet rs) throws SQLException {

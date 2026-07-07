@@ -351,7 +351,7 @@ public class TriggerOrderService {
     public void onMarkPrice(MarkTrigger markTrigger) {
         OptionalLong markPriceTicks = triggerOrderRepository.markPriceTicks(markTrigger.symbol(), markTrigger.sequence());
         if (markPriceTicks.isEmpty()) {
-            if (!triggerOrderRepository.hasPendingOrdersForPriceType(markTrigger.symbol(), TriggerPriceType.MARK_PRICE)) {
+            if (!hasPendingOrdersForPriceType(markTrigger.symbol(), TriggerPriceType.MARK_PRICE)) {
                 return;
             }
             throw new IllegalStateException("mark price ticks unavailable: " + markTrigger.symbol()
@@ -364,7 +364,7 @@ public class TriggerOrderService {
         OptionalLong indexPriceTicks = triggerOrderRepository.indexPriceTicks(indexTrigger.symbol(),
                 indexTrigger.sequence());
         if (indexPriceTicks.isEmpty()) {
-            if (!triggerOrderRepository.hasPendingOrdersForPriceType(indexTrigger.symbol(), TriggerPriceType.INDEX_PRICE)) {
+            if (!hasPendingOrdersForPriceType(indexTrigger.symbol(), TriggerPriceType.INDEX_PRICE)) {
                 return;
             }
             throw new IllegalStateException("index price ticks unavailable: " + indexTrigger.symbol()
@@ -380,10 +380,10 @@ public class TriggerOrderService {
 
     private void onTriggerPrice(TriggerPriceType triggerPriceType, MarkTrigger priceTrigger, long triggerPriceTicks) {
         Instant now = Instant.now();
-        List<TriggerOrderRecord> orders = new ArrayList<>(triggerOrderRepository.claimTriggered(priceTrigger.symbol(),
+        List<TriggerOrderRecord> orders = new ArrayList<>(claimTriggered(priceTrigger.symbol(),
                 triggerPriceType, triggerPriceTicks, priceTrigger.sequence(), priceTrigger.eventTime(),
                 properties.getExecution().getTriggerBatchSize(), now));
-        orders.addAll(triggerOrderRepository.claimTrailingTriggered(priceTrigger.symbol(), triggerPriceType,
+        orders.addAll(claimTrailingTriggered(priceTrigger.symbol(), triggerPriceType,
                 triggerPriceTicks, priceTrigger.sequence(), priceTrigger.eventTime(),
                 properties.getExecution().getTriggerBatchSize(), now));
         for (TriggerOrderRecord order : orders) {
@@ -394,9 +394,66 @@ public class TriggerOrderService {
     @Scheduled(fixedDelayString = "${surprising.trading.trigger.execution.maintenance-delay-ms:1000}")
     public void maintenance() {
         Instant now = Instant.now();
-        triggerOrderRepository.expirePending(now, properties.getExecution().getTriggerBatchSize());
+        expirePending(now, properties.getExecution().getTriggerBatchSize());
         Instant staleBefore = now.minus(properties.getExecution().getStaleTriggeringAfter());
-        triggerOrderRepository.resetStaleTriggering(staleBefore, now, properties.getExecution().getTriggerBatchSize());
+        resetStaleTriggering(staleBefore, now, properties.getExecution().getTriggerBatchSize());
+    }
+
+    private boolean hasPendingOrdersForPriceType(String symbol, TriggerPriceType triggerPriceType) {
+        String contractType = currentProductContractType();
+        return contractType == null
+                ? triggerOrderRepository.hasPendingOrdersForPriceType(symbol, triggerPriceType)
+                : triggerOrderRepository.hasPendingOrdersForPriceType(symbol, triggerPriceType, contractType);
+    }
+
+    private List<TriggerOrderRecord> claimTriggered(String symbol,
+                                                    TriggerPriceType triggerPriceType,
+                                                    long triggerPriceTicks,
+                                                    long triggerSequence,
+                                                    Instant triggeredAt,
+                                                    int limit,
+                                                    Instant now) {
+        String contractType = currentProductContractType();
+        if (contractType == null) {
+            return triggerOrderRepository.claimTriggered(symbol, triggerPriceType, triggerPriceTicks, triggerSequence,
+                    triggeredAt, limit, now);
+        }
+        return triggerOrderRepository.claimTriggered(symbol, triggerPriceType, triggerPriceTicks, triggerSequence,
+                triggeredAt, limit, now, contractType);
+    }
+
+    private List<TriggerOrderRecord> claimTrailingTriggered(String symbol,
+                                                            TriggerPriceType triggerPriceType,
+                                                            long triggerPriceTicks,
+                                                            long triggerSequence,
+                                                            Instant triggeredAt,
+                                                            int limit,
+                                                            Instant now) {
+        String contractType = currentProductContractType();
+        if (contractType == null) {
+            return triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceType, triggerPriceTicks,
+                    triggerSequence, triggeredAt, limit, now);
+        }
+        return triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceType, triggerPriceTicks,
+                triggerSequence, triggeredAt, limit, now, contractType);
+    }
+
+    private void expirePending(Instant now, int limit) {
+        String contractType = currentProductContractType();
+        if (contractType == null) {
+            triggerOrderRepository.expirePending(now, limit);
+        } else {
+            triggerOrderRepository.expirePending(now, limit, contractType);
+        }
+    }
+
+    private void resetStaleTriggering(Instant staleBefore, Instant now, int limit) {
+        String contractType = currentProductContractType();
+        if (contractType == null) {
+            triggerOrderRepository.resetStaleTriggering(staleBefore, now, limit);
+        } else {
+            triggerOrderRepository.resetStaleTriggering(staleBefore, now, limit, contractType);
+        }
     }
 
     private void executeTriggeredOrder(TriggerOrderRecord order) {

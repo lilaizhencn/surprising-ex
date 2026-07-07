@@ -495,6 +495,33 @@ class TriggerOrderServiceTest {
     }
 
     @Test
+    void productLineModeClaimsTriggeredOrdersByContractType() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
+        TriggerProperties properties = new TriggerProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, properties);
+        TriggerOrderRecord claimed = record(501L, TriggerOrderStatus.TRIGGERING);
+        when(repository.markPriceTicks("BTC-USDT", 42L)).thenReturn(OptionalLong.of(70_001L));
+        when(repository.claimTriggered(eq("BTC-USDT"), eq(TriggerPriceType.MARK_PRICE),
+                eq(70_001L), eq(42L), any(), anyInt(), any(), eq("LINEAR_DELIVERY")))
+                .thenReturn(List.of(claimed));
+        when(repository.claimTrailingTriggered(eq("BTC-USDT"), eq(TriggerPriceType.MARK_PRICE),
+                eq(70_001L), eq(42L), any(), anyInt(), any(), eq("LINEAR_DELIVERY")))
+                .thenReturn(List.of());
+        when(orderRpcApi.place(any())).thenReturn(orderResponse(9001L, OrderStatus.ACCEPTED, null));
+
+        service.onMarkPrice(new MarkTrigger("BTC-USDT", 42L, Instant.parse("2026-07-01T00:00:00Z")));
+
+        verify(repository).claimTriggered(eq("BTC-USDT"), eq(TriggerPriceType.MARK_PRICE),
+                eq(70_001L), eq(42L), any(), anyInt(), any(), eq("LINEAR_DELIVERY"));
+        verify(repository).claimTrailingTriggered(eq("BTC-USDT"), eq(TriggerPriceType.MARK_PRICE),
+                eq(70_001L), eq(42L), any(), anyInt(), any(), eq("LINEAR_DELIVERY"));
+        verify(repository).markTriggered(eq(501L), eq(9001L), any());
+    }
+
+    @Test
     void onIndexPricePlacesReduceOnlyOrderAndMarksTriggered() {
         TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);

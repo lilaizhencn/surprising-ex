@@ -80,6 +80,26 @@ class TriggerOrderRepositoryTest {
     }
 
     @Test
+    void hasPendingOrdersForPriceTypeFiltersByContractTypeWhenProvided() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        when(jdbcTemplate.queryForObject(any(String.class), eq(Boolean.class),
+                eq("ETH-USDT"), eq("INDEX_PRICE"), eq("LINEAR_DELIVERY"))).thenReturn(true);
+
+        boolean result = repository.hasPendingOrdersForPriceType("ETH-USDT", TriggerPriceType.INDEX_PRICE,
+                "LINEAR_DELIVERY");
+
+        assertThat(result).isTrue();
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).queryForObject(sql.capture(), eq(Boolean.class),
+                eq("ETH-USDT"), eq("INDEX_PRICE"), eq("LINEAR_DELIVERY"));
+        assertThat(sql.getValue())
+                .contains("FROM instrument_current_versions c")
+                .contains("i.symbol = c.symbol AND i.version = c.version")
+                .contains("i.contract_type = ?");
+    }
+
+    @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
     void claimTriggeredUsesRowLocksAndSymbolPriceCondition() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
@@ -108,6 +128,29 @@ class TriggerOrderRepositoryTest {
 
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
+    void claimTriggeredFiltersByContractTypeWhenProvided() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(List.of());
+
+        var rows = repository.claimTriggered("BTC-USDT", TriggerPriceType.MARK_PRICE, 70_000L, 9L,
+                Instant.parse("2026-07-01T00:00:00Z"), 100,
+                Instant.parse("2026-07-01T00:00:01Z"), "LINEAR_DELIVERY");
+
+        assertThat(rows).isEmpty();
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')")
+                .contains("FROM instrument_current_versions c")
+                .contains("i.contract_type = ?");
+        assertThat(args.getValue()).contains("LINEAR_DELIVERY");
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
     void claimTrailingTriggeredTracksExtremaAndUsesRowLocks() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
@@ -132,6 +175,65 @@ class TriggerOrderRepositoryTest {
                 eq(60_100L), eq(60_100L), eq("BTC-USDT"), eq("MARK_PRICE"), any(), any(), eq(100),
                 eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L),
                 any(), any(), eq(52L), eq(60_100L), any(), any(), any(), any());
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void claimTrailingTriggeredFiltersByContractTypeWhenProvided() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(List.of());
+
+        var rows = repository.claimTrailingTriggered("BTC-USDT", TriggerPriceType.MARK_PRICE, 60_100L, 52L,
+                Instant.parse("2026-07-01T00:00:00Z"), 100,
+                Instant.parse("2026-07-01T00:00:01Z"), "LINEAR_DELIVERY");
+
+        assertThat(rows).isEmpty();
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("trigger_type = 'TRAILING_STOP'")
+                .contains("FROM instrument_current_versions c")
+                .contains("i.contract_type = ?");
+        assertThat(args.getValue()).contains("LINEAR_DELIVERY");
+    }
+
+    @Test
+    void expirePendingFiltersByContractTypeWhenProvided() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+
+        repository.expirePending(now, 100, "LINEAR_DELIVERY");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(sql.capture(), args.capture());
+        assertThat(sql.getValue())
+                .contains("o.status = 'PENDING'")
+                .contains("FROM instrument_current_versions c")
+                .contains("i.contract_type = ?");
+        assertThat(args.getValue()).contains("LINEAR_DELIVERY");
+    }
+
+    @Test
+    void resetStaleTriggeringFiltersByContractTypeWhenProvided() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+
+        repository.resetStaleTriggering(now.minusSeconds(30), now, 100, "LINEAR_DELIVERY");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(sql.capture(), args.capture());
+        assertThat(sql.getValue())
+                .contains("o.status = 'TRIGGERING'")
+                .contains("FROM instrument_current_versions c")
+                .contains("i.contract_type = ?");
+        assertThat(args.getValue()).contains("LINEAR_DELIVERY");
     }
 
     @Test
