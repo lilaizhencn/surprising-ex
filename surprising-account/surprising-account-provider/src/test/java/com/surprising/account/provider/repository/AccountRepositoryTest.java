@@ -181,6 +181,31 @@ class AccountRepositoryTest {
         assertThat(response.positionMode()).isEqualTo(PositionMode.HEDGE);
         verify(jdbcTemplate).update(contains("INSERT INTO account_position_modes"),
                 eq("INVERSE_DELIVERY"), eq(1001L), eq("HEDGE"), any(Timestamp.class));
+        verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.argThat(sql ->
+                        sql.contains("FROM account_positions")
+                                && sql.contains("p.product_line = ?")
+                                && !sql.contains("JOIN instruments")),
+                eq(Boolean.class), eq(1001L), eq("INVERSE_DELIVERY"));
+        verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.argThat(sql ->
+                        sql.contains("FROM trading_orders")
+                                && sql.contains("o.product_line = ?")
+                                && !sql.contains("JOIN instruments")),
+                eq(Boolean.class), eq(1001L), eq("INVERSE_DELIVERY"));
+        verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.argThat(sql ->
+                        sql.contains("FROM trading_trigger_orders")
+                                && sql.contains("t.product_line = ?")
+                                && !sql.contains("JOIN instruments")),
+                eq(Boolean.class), eq(1001L), eq("INVERSE_DELIVERY"));
+        verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.argThat(sql ->
+                        sql.contains("FROM trading_algo_orders")
+                                && sql.contains("a.product_line = ?")
+                                && !sql.contains("JOIN instruments")),
+                eq(Boolean.class), eq(1001L), eq("INVERSE_DELIVERY"));
+        verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.argThat(sql ->
+                        sql.contains("FROM trading_match_trades")
+                                && sql.contains("mt.product_line = ?")
+                                && !sql.contains("JOIN instruments")),
+                eq(Boolean.class), eq(1001L), eq(1001L), eq("INVERSE_DELIVERY"));
     }
 
     @Test
@@ -1074,7 +1099,7 @@ class AccountRepositoryTest {
                 eq(1001L), eq(productLine.name())))
                 .thenReturn(hasActiveAlgoOrders);
         when(jdbcTemplate.queryForObject(contains("FROM trading_match_trades"), eq(Boolean.class),
-                eq(1001L), eq(1001L), eq(1001L), eq(productLine.name()), eq(productLine.name())))
+                eq(1001L), eq(1001L), eq(productLine.name())))
                 .thenReturn(hasUnsettledTrades);
         when(jdbcTemplate.queryForObject(contains("FROM account_margin_reservations"), eq(Boolean.class),
                 eq(1001L), eq(productLine.accountTypeCode()))).thenReturn(hasActiveReservations);

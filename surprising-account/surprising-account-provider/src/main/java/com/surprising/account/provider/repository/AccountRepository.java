@@ -744,16 +744,11 @@ public class AccountRepository {
                 SELECT EXISTS (
                     SELECT 1
                       FROM account_positions p
-                      JOIN instrument_current_versions c
-                        ON c.symbol = p.symbol
-                      JOIN instruments i
-                        ON i.symbol = p.symbol
-                       AND i.version = COALESCE(p.instrument_version, c.version)
                      WHERE p.user_id = ?
                        AND p.signed_quantity_steps <> 0
-                       AND %s = ?
+                       AND p.product_line = ?
                 )
-                """.formatted(productLineExpression("i")), Boolean.class, userId, productLineName);
+                """, Boolean.class, userId, productLineName);
         if (Boolean.TRUE.equals(hasPositions)) {
             throw new IllegalStateException("position mode switch requires no open positions");
         }
@@ -761,17 +756,12 @@ public class AccountRepository {
                 SELECT EXISTS (
                     SELECT 1
                       FROM trading_orders o
-                      JOIN instrument_current_versions c
-                        ON c.symbol = o.symbol
-                      JOIN instruments i
-                        ON i.symbol = o.symbol
-                       AND i.version = COALESCE(o.instrument_version, c.version)
                      WHERE o.user_id = ?
                        AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                        AND o.remaining_quantity_steps > 0
-                       AND %s = ?
+                       AND o.product_line = ?
                 )
-                """.formatted(productLineExpression("i")), Boolean.class, userId, productLineName);
+                """, Boolean.class, userId, productLineName);
         if (Boolean.TRUE.equals(hasOpenOrders)) {
             throw new IllegalStateException("position mode switch requires no active orders");
         }
@@ -779,15 +769,11 @@ public class AccountRepository {
                 SELECT EXISTS (
                     SELECT 1
                       FROM trading_trigger_orders t
-                      JOIN instrument_current_versions c
-                        ON c.symbol = t.symbol
-                     JOIN instruments i
-                       ON i.symbol = t.symbol AND i.version = c.version
                      WHERE t.user_id = ?
                        AND t.status IN ('PENDING', 'TRIGGERING')
-                       AND %s = ?
+                       AND t.product_line = ?
                 )
-                """.formatted(productLineExpression("i")), Boolean.class, userId, productLineName);
+                """, Boolean.class, userId, productLineName);
         if (Boolean.TRUE.equals(hasTriggerOrders)) {
             throw new IllegalStateException("position mode switch requires no pending trigger orders");
         }
@@ -795,15 +781,11 @@ public class AccountRepository {
                 SELECT EXISTS (
                     SELECT 1
                       FROM trading_algo_orders a
-                      JOIN instrument_current_versions c
-                        ON c.symbol = a.symbol
-                     JOIN instruments i
-                       ON i.symbol = a.symbol AND i.version = c.version
                      WHERE a.user_id = ?
                        AND a.status IN ('PENDING', 'RUNNING', 'CANCEL_REQUESTED')
-                       AND %s = ?
+                       AND a.product_line = ?
                 )
-                """.formatted(productLineExpression("i")), Boolean.class, userId, productLineName);
+                """, Boolean.class, userId, productLineName);
         if (Boolean.TRUE.equals(hasAlgoOrders)) {
             throw new IllegalStateException("position mode switch requires no active algo orders");
         }
@@ -811,12 +793,6 @@ public class AccountRepository {
                 SELECT EXISTS (
                     SELECT 1
                       FROM trading_match_trades mt
-                      JOIN instruments i
-                        ON i.symbol = mt.symbol
-                       AND i.version = CASE
-                               WHEN mt.taker_user_id = ? THEN mt.taker_instrument_version
-                               ELSE mt.maker_instrument_version
-                           END
                       LEFT JOIN account_processed_trades pt
                         ON pt.product_line = mt.product_line
                        AND pt.symbol = mt.symbol
@@ -824,10 +800,8 @@ public class AccountRepository {
                      WHERE (mt.taker_user_id = ? OR mt.maker_user_id = ?)
                        AND pt.trade_id IS NULL
                        AND mt.product_line = ?
-                       AND %s = ?
                 )
-                """.formatted(productLineExpression("i")),
-                Boolean.class, userId, userId, userId, productLineName, productLineName);
+                """, Boolean.class, userId, userId, productLineName);
         if (Boolean.TRUE.equals(hasUnsettledTrades)) {
             throw new IllegalStateException("position mode switch requires all matched trades to be settled");
         }
