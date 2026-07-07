@@ -77,13 +77,6 @@ public class ReduceOnlyOrderPruner {
                   FROM trading_orders o
                 """);
         List<Object> args = new ArrayList<>();
-        if (properties.getKafka().isProductTopicsEnabled()) {
-            sql.append("""
-                  JOIN instruments i
-                    ON i.symbol = o.symbol
-                   AND i.version = o.instrument_version
-                """);
-        }
         sql.append("""
                  WHERE o.user_id = ?
                    AND o.symbol = ?
@@ -96,8 +89,8 @@ public class ReduceOnlyOrderPruner {
         args.add(symbol);
         args.add(PositionSide.defaultIfNull(positionSide).name());
         if (properties.getKafka().isProductTopicsEnabled()) {
-            sql.append("   AND i.contract_type = ?\n");
-            args.add(properties.getKafka().getProductLine().contractTypeCode());
+            sql.append("   AND o.product_line = ?\n");
+            args.add(properties.getKafka().getProductLine().name());
         }
         sql.append("""
                  ORDER BY o.created_at ASC, o.order_id ASC

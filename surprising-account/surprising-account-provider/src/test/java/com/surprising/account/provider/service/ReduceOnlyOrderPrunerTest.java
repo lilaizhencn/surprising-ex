@@ -37,7 +37,7 @@ class ReduceOnlyOrderPrunerTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    void productTopicsScopeOpenReduceOnlyOrdersByContractType() {
+    void productTopicsScopeOpenReduceOnlyOrdersByProductLine() {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
@@ -52,9 +52,8 @@ class ReduceOnlyOrderPrunerTest {
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
                 eq(1001L), eq("BTC-USDT-240927"), eq("NET"), eq("LINEAR_DELIVERY"));
         assertThat(sql.getValue())
-                .contains("JOIN instruments i")
-                .contains("i.version = o.instrument_version")
-                .contains("i.contract_type = ?");
+                .doesNotContain("JOIN instruments i")
+                .contains("o.product_line = ?");
     }
 
     @Test
