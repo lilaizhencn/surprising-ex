@@ -156,12 +156,14 @@ public class FeeTierRepository {
                       FROM trading_match_trades
                      WHERE taker_user_id = ?
                        AND event_time >= ?
+                       AND product_line = ?
                     UNION ALL
                     SELECT maker_user_id AS user_id, symbol, maker_instrument_version AS instrument_version,
                            price_ticks, quantity_steps, event_time
                       FROM trading_match_trades
                      WHERE maker_user_id = ?
                        AND event_time >= ?
+                       AND product_line = ?
                 ),
                 filled_notional AS (
                     SELECT CASE
@@ -178,7 +180,7 @@ public class FeeTierRepository {
                 SELECT LEAST(COALESCE(SUM(notional_units), 0), 9223372036854775807)::bigint
                   FROM filled_notional
                 """.formatted(productLineExpression("i")), Number.class, userId, Timestamp.from(since),
-                userId, Timestamp.from(since), productLineName));
+                productLineName, userId, Timestamp.from(since), productLineName, productLineName));
         long assetBalance = number(jdbcTemplate.queryForObject("""
                 WITH raw_balances AS (
                     SELECT b.asset, b.available_units, b.locked_units
@@ -243,6 +245,7 @@ public class FeeTierRepository {
                           JOIN instruments i
                             ON i.symbol = t.symbol AND i.version = t.taker_instrument_version
                          WHERE t.event_time >= ?
+                           AND t.product_line = ?
                            AND %s = ?
                         UNION
                         SELECT t.maker_user_id AS user_id
@@ -250,6 +253,7 @@ public class FeeTierRepository {
                           JOIN instruments i
                             ON i.symbol = t.symbol AND i.version = t.maker_instrument_version
                          WHERE t.event_time >= ?
+                           AND t.product_line = ?
                            AND %s = ?
                         UNION
                         SELECT user_id
@@ -272,9 +276,9 @@ public class FeeTierRepository {
                  ORDER BY user_id ASC
                  LIMIT ?
                 """.formatted(productLineExpression("i"), productLineExpression("i")),
-                (rs, rowNum) -> rs.getLong("user_id"), Timestamp.from(since), productLineName,
-                Timestamp.from(since), productLineName, accountType, accountType, accountType, productLineName,
-                normalizedLimit);
+                (rs, rowNum) -> rs.getLong("user_id"), Timestamp.from(since), productLineName, productLineName,
+                Timestamp.from(since), productLineName, productLineName, accountType, accountType, accountType,
+                productLineName, normalizedLimit);
     }
 
     public FeeTierAssignmentRecord lockAssignment(long userId, long proposedFeeScheduleId, Instant now) {

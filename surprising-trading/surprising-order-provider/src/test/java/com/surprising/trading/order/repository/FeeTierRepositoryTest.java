@@ -22,6 +22,13 @@ class FeeTierRepositoryTest {
         repository.metrics(ProductLine.INVERSE_DELIVERY, 1001L, since);
 
         assertThat(jdbcTemplate.queryForObjectSql).hasSize(2);
+        assertThat(jdbcTemplate.queryForObjectSql.get(0))
+                .contains("AND product_line = ?")
+                .contains("CASE i.contract_type");
+        assertThat(jdbcTemplate.queryForObjectArgs.get(0))
+                .containsExactly(1001L, Timestamp.from(since), "INVERSE_DELIVERY",
+                        1001L, Timestamp.from(since), "INVERSE_DELIVERY",
+                        "INVERSE_DELIVERY");
         assertThat(jdbcTemplate.queryForObjectSql.get(1))
                 .contains("FROM account_product_balances b")
                 .contains("b.account_type = ?");
@@ -38,11 +45,12 @@ class FeeTierRepositoryTest {
         repository.candidateUsers(ProductLine.INVERSE_DELIVERY, since, 100);
 
         assertThat(jdbcTemplate.querySql)
+                .contains("t.product_line = ?")
                 .contains("FROM account_product_balances")
                 .contains("account_type = ?");
         assertThat(jdbcTemplate.queryArgs)
-                .containsExactly(Timestamp.from(since), "INVERSE_DELIVERY",
-                        Timestamp.from(since), "INVERSE_DELIVERY",
+                .containsExactly(Timestamp.from(since), "INVERSE_DELIVERY", "INVERSE_DELIVERY",
+                        Timestamp.from(since), "INVERSE_DELIVERY", "INVERSE_DELIVERY",
                         "COIN_DELIVERY", "COIN_DELIVERY", "COIN_DELIVERY",
                         "INVERSE_DELIVERY", 100);
     }
