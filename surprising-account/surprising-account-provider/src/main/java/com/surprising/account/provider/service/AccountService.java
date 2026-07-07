@@ -552,9 +552,9 @@ public class AccountService {
                 continue;
             }
             long closeSteps = Math.absExact(position.signedQuantitySteps());
-            accountRepository.releasePositionMargin(position.userId(), symbol, position.marginMode(),
+            accountRepository.releasePositionMargin(productLine, position.userId(), symbol, position.marginMode(),
                     closeSteps, position.positionSide(), closeSteps, eventTime);
-            PositionResponse updated = accountRepository.updatePosition(position.userId(), symbol,
+            PositionResponse updated = accountRepository.updatePosition(productLine, position.userId(), symbol,
                     position.marginMode(), position.positionSide(), change.next(), position.signedQuantitySteps(),
                     eventTime);
             if (outboxRepository != null) {

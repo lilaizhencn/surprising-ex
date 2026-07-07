@@ -249,6 +249,8 @@ class AccountServiceTest {
                 "DELIVERY_SETTLEMENT:BTC-USDT-DELIVERY:4:2002:CROSS:NET");
         assertThat(repository.releasedPositionMargin)
                 .containsEntry(new PositionKey(2002L, symbol, MarginMode.CROSS), 3L);
+        assertThat(repository.scopedPositionMarginReleaseLines).containsExactly(ProductLine.LINEAR_DELIVERY);
+        assertThat(repository.scopedPositionUpdateLines).containsExactly(ProductLine.LINEAR_DELIVERY);
         assertThat(repository.lastSettlementMarkPriceTime).isEqualTo(EVENT_TIME);
         assertThat(repository.lastSettlementPriceWindow).isEqualTo(Duration.ofMinutes(30));
     }
@@ -323,6 +325,8 @@ class AccountServiceTest {
         assertThat(repository.lifecycleAccountTypes).containsExactly(AccountType.OPTION);
         assertThat(repository.lifecycleReferences).containsExactly(
                 "OPTION_EXERCISE:BTC-USDT-260925-70000-C:6:2002:CROSS:NET");
+        assertThat(repository.scopedPositionMarginReleaseLines).containsExactly(ProductLine.OPTION);
+        assertThat(repository.scopedPositionUpdateLines).containsExactly(ProductLine.OPTION);
         assertThat(repository.lastSettlementMarkPriceTime).isEqualTo(EVENT_TIME);
         assertThat(repository.lastSettlementPriceWindow).isEqualTo(Duration.ofMinutes(30));
     }
@@ -986,6 +990,8 @@ class AccountServiceTest {
         private final List<ProductLine> scopedPositionsLines = new ArrayList<>();
         private final List<ProductLine> scopedPositionMarginLines = new ArrayList<>();
         private final List<ProductLine> scopedPositionMarginAdjustmentLines = new ArrayList<>();
+        private final List<ProductLine> scopedPositionMarginReleaseLines = new ArrayList<>();
+        private final List<ProductLine> scopedPositionUpdateLines = new ArrayList<>();
         private final Set<ProcessedTradeKey> processedTradeIds = new HashSet<>();
         private Instant lastSettlementMarkPriceTime;
         private Duration lastSettlementPriceWindow;
@@ -1293,6 +1299,7 @@ class AccountServiceTest {
                                           PositionSide positionSide,
                                           long positionAbsSteps,
                                           Instant now) {
+            scopedPositionMarginReleaseLines.add(productLine);
             releasePositionMargin(userId, symbol, marginMode, closeSteps, positionSide, positionAbsSteps, now);
         }
 
@@ -1524,6 +1531,7 @@ class AccountServiceTest {
                                                PositionState state,
                                                long previousSignedQuantitySteps,
                                                Instant now) {
+            scopedPositionUpdateLines.add(productLine);
             return updatePosition(userId, symbol, marginMode, positionSide, state, previousSignedQuantitySteps, now);
         }
 
