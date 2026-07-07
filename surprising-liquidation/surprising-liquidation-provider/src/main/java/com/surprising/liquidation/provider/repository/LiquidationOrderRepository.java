@@ -2,6 +2,7 @@ package com.surprising.liquidation.provider.repository;
 
 import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.liquidation.provider.model.TradingOutboxRecord;
+import com.surprising.product.api.ProductLineSql;
 import com.surprising.trading.api.model.OrderCommandEvent;
 import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderEvent;
@@ -117,15 +118,7 @@ public class LiquidationOrderRepository {
                 WITH instrument_fee AS (
                     SELECT maker_fee_rate_ppm,
                            taker_fee_rate_ppm,
-                           CASE contract_type
-                               WHEN 'SPOT' THEN 'SPOT'
-                               WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-                               WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-                               WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-                               WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-                               WHEN 'VANILLA_OPTION' THEN 'OPTION'
-                               ELSE 'LINEAR_PERPETUAL'
-                           END AS product_line
+                           %s AS product_line
                       FROM instruments
                      WHERE symbol = ?
                        AND version = ?
@@ -158,7 +151,8 @@ public class LiquidationOrderRepository {
                        COALESCE(u.taker_fee_rate_ppm, i.taker_fee_rate_ppm) AS taker_fee_rate_ppm
                   FROM instrument_fee i
              LEFT JOIN active_user_fee u ON TRUE
-                """, (rs, rowNum) -> new FeeSnapshot(
+                """.formatted(ProductLineSql.contractTypeProductLineCase("contract_type")),
+                (rs, rowNum) -> new FeeSnapshot(
                 rs.getLong("maker_fee_rate_ppm"),
                 rs.getLong("taker_fee_rate_ppm")), symbol, instrumentVersion, symbol, userId, symbol,
                 Timestamp.from(now), Timestamp.from(now)).stream().findFirst()
