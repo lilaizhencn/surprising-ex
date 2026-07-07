@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -28,6 +29,41 @@ class RiskOutboxRepositoryTest {
 
     @Mock
     private RiskSequenceRepository sequenceRepository;
+
+    @Test
+    void enqueueAllowsCurrentProductTopicWhenProductTopicsAreEnabled() {
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        RiskOutboxRepository repository = new RiskOutboxRepository(jdbcTemplate, sequenceRepository, properties);
+        when(sequenceRepository.nextSequence("risk-outbox")).thenReturn(901L);
+        when(jdbcTemplate.update(contains("INSERT INTO risk_outbox_events"), any(Object[].class)))
+                .thenReturn(1);
+
+        repository.enqueue("surprising.linear-delivery.risk.position.events.v1",
+                "BTC-USDT-260925", "POSITION_RISK_UPDATED", "{}", Instant.parse("2026-07-01T00:00:00Z"));
+
+        verify(sequenceRepository).nextSequence("risk-outbox");
+        verify(jdbcTemplate).update(contains("INSERT INTO risk_outbox_events"), any(Object[].class));
+    }
+
+    @Test
+    void enqueueRejectsOtherProductTopicBeforeWritingWhenProductTopicsAreEnabled() {
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        RiskOutboxRepository repository = new RiskOutboxRepository(jdbcTemplate, sequenceRepository, properties);
+
+        assertThatThrownBy(() -> repository.enqueue("surprising.linear-delivery.risk.position.events.v1",
+                "BTC-USDT-260925-70000-C", "POSITION_RISK_UPDATED", "{}",
+                Instant.parse("2026-07-01T00:00:00Z")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("risk outbox topic must match current product line")
+                .hasMessageContaining("surprising.option.risk.position.events.v1");
+
+        verify(sequenceRepository, never()).nextSequence("risk-outbox");
+        verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
+    }
 
     @Test
     void enqueueFailsWhenOutboxInsertIsSkipped() {

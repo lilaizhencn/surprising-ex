@@ -31,6 +31,7 @@ public class RiskOutboxRepository {
     }
 
     public void enqueue(String topic, String eventKey, String eventType, String payload, Instant now) {
+        requireCurrentProductTopic(topic);
         long id = sequenceRepository.nextSequence("risk-outbox");
         int rows = jdbcTemplate.update("""
                 INSERT INTO risk_outbox_events (
@@ -103,6 +104,23 @@ public class RiskOutboxRepository {
         args.add(kafka.getAccountRiskEventsTopic());
         args.add(kafka.getPositionRiskEventsTopic());
         args.add(kafka.getLiquidationCandidatesTopic());
+    }
+
+    private void requireCurrentProductTopic(String topic) {
+        RiskProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled()) {
+            return;
+        }
+        String accountRiskEventsTopic = kafka.getAccountRiskEventsTopic();
+        String positionRiskEventsTopic = kafka.getPositionRiskEventsTopic();
+        String liquidationCandidatesTopic = kafka.getLiquidationCandidatesTopic();
+        if (!accountRiskEventsTopic.equals(topic)
+                && !positionRiskEventsTopic.equals(topic)
+                && !liquidationCandidatesTopic.equals(topic)) {
+            throw new IllegalStateException("risk outbox topic must match current product line: expected one of ["
+                    + accountRiskEventsTopic + ", " + positionRiskEventsTopic + ", "
+                    + liquidationCandidatesTopic + "] actual=" + topic);
+        }
     }
 
     private void requireSingleRow(int rows, String operation) {
