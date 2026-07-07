@@ -76,6 +76,26 @@ public class AlgoOrderRepository {
                 """, (rs, rowNum) -> toAlgoRecord(rs), userId, clientAlgoOrderId).stream().findFirst();
     }
 
+    public boolean algoOrderMatchesContractType(long algoOrderId, String contractType) {
+        String normalizedContractType = emptyToNull(contractType);
+        if (normalizedContractType == null) {
+            return true;
+        }
+        Boolean matched = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM trading_algo_orders o
+                      JOIN instrument_current_versions c
+                        ON c.symbol = o.symbol
+                      JOIN instruments i
+                        ON i.symbol = c.symbol AND i.version = c.version
+                     WHERE o.algo_order_id = ?
+                       AND i.contract_type = ?
+                )
+                """, Boolean.class, algoOrderId, normalizedContractType);
+        return Boolean.TRUE.equals(matched);
+    }
+
     public List<AlgoOrderRecord> openOrders(long userId, String symbol, int limit) {
         return openOrders(userId, symbol, limit, null);
     }

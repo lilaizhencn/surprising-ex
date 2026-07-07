@@ -9,6 +9,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AlgoOrderStatus;
 import com.surprising.trading.api.model.AlgoOrderType;
 import com.surprising.trading.api.model.CancelAlgoOrderRequest;
@@ -127,10 +128,38 @@ class AlgoOrderServiceTest {
         verify(repository).markCanceled(eq(record.algoOrderId()), any());
     }
 
+    @Test
+    void cancelRejectsAlgoOrderOutsideCurrentProductLineBeforeMutating() {
+        AlgoOrderRepository repository = mock(AlgoOrderRepository.class);
+        OrderService orderService = mock(OrderService.class);
+        AlgoOrderService service = service(ProductLine.OPTION, repository, orderService);
+        AlgoOrderRecord record = twapRecord();
+        when(repository.findByAlgoOrderId(record.algoOrderId())).thenReturn(Optional.of(record));
+        when(repository.algoOrderMatchesContractType(record.algoOrderId(), "VANILLA_OPTION")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.cancel(new CancelAlgoOrderRequest(record.userId(), record.algoOrderId())))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("algo order not found: 77");
+
+        verify(repository, never()).markCancelRequested(eq(record.algoOrderId()), any());
+        verify(orderService, never()).cancel(any(CancelOrderRequest.class));
+    }
+
     private AlgoOrderService service(AlgoOrderRepository repository, OrderService orderService) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getAlgo().setMinDurationSeconds(1L);
         properties.getAlgo().setMinIntervalSeconds(1L);
+        return new AlgoOrderService(properties, repository, orderService);
+    }
+
+    private AlgoOrderService service(ProductLine productLine,
+                                     AlgoOrderRepository repository,
+                                     OrderService orderService) {
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getAlgo().setMinDurationSeconds(1L);
+        properties.getAlgo().setMinIntervalSeconds(1L);
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(productLine);
         return new AlgoOrderService(properties, repository, orderService);
     }
 

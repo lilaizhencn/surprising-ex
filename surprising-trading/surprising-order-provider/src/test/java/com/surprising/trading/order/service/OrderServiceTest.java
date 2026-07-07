@@ -22,6 +22,7 @@ import com.surprising.trading.api.model.AdminCursorPage;
 import com.surprising.trading.api.model.BatchAmendOrdersRequest;
 import com.surprising.trading.api.model.BatchPlaceOrderRequest;
 import com.surprising.trading.api.model.CancelOpenOrdersRequest;
+import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.ClosePositionRequest;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderCommandEvent;
@@ -693,6 +694,32 @@ class OrderServiceTest {
     }
 
     @Test
+    void getRejectsOrderOutsideCurrentProductLine() {
+        OrderService service = service(ProductLine.LINEAR_DELIVERY);
+        OrderRecord accepted = order(9001L, "wrong-product", OrderStatus.ACCEPTED, null);
+        when(orderRepository.findByOrderId(9001L)).thenReturn(Optional.of(accepted));
+        when(orderRepository.orderMatchesContractType(9001L, "LINEAR_DELIVERY")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.get(9001L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("order not found: 9001");
+    }
+
+    @Test
+    void cancelRejectsOrderOutsideCurrentProductLineBeforeMutating() {
+        OrderService service = service(ProductLine.LINEAR_DELIVERY);
+        OrderRecord accepted = order(9001L, "cancel-wrong-product", OrderStatus.ACCEPTED, null);
+        when(orderRepository.findByOrderId(9001L)).thenReturn(Optional.of(accepted));
+        when(orderRepository.orderMatchesContractType(9001L, "LINEAR_DELIVERY")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.cancel(new CancelOrderRequest(1001L, 9001L)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("order not found: 9001");
+
+        verify(orderRepository, never()).requestCancel(eq(9001L), any());
+    }
+
+    @Test
     void adminCancelOrderPublishesCancelEventAndCommand() throws Exception {
         TraceContext.set("trace-admin-cancel");
         OrderService service = service();
@@ -867,7 +894,18 @@ class OrderServiceTest {
     }
 
     private OrderService service() {
-        return new OrderService(new ObjectMapper(), new TradingOrderProperties(), orderValidator,
+        return service(new TradingOrderProperties());
+    }
+
+    private OrderService service(ProductLine productLine) {
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(productLine);
+        return service(properties);
+    }
+
+    private OrderService service(TradingOrderProperties properties) {
+        return new OrderService(new ObjectMapper(), properties, orderValidator,
                 reduceOnlyValidator, orderRepository, orderFeeRepository, orderMarginRepository,
                 spotOrderReservationRepository, outboxRepository);
     }

@@ -36,6 +36,25 @@ class AlgoOrderRepositoryTest {
     }
 
     @Test
+    void algoOrderMatchesContractTypeUsesCurrentInstrumentVersion() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        AlgoOrderRepository repository = new AlgoOrderRepository(jdbcTemplate);
+        when(jdbcTemplate.queryForObject(any(String.class), any(Class.class), any(), any()))
+                .thenReturn(true);
+
+        boolean matched = repository.algoOrderMatchesContractType(77L, "LINEAR_DELIVERY");
+
+        assertThat(matched).isTrue();
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).queryForObject(sql.capture(), any(Class.class), any(), any());
+        assertThat(sql.getValue())
+                .contains("FROM trading_algo_orders o")
+                .contains("JOIN instrument_current_versions c")
+                .contains("i.symbol = c.symbol AND i.version = c.version")
+                .contains("i.contract_type = ?");
+    }
+
+    @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
     void cancelableOpenOrdersFiltersByContractTypeWhenProvided() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);

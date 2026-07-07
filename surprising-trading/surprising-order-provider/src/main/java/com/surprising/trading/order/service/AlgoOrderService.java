@@ -58,7 +58,9 @@ public class AlgoOrderService {
             var existing = algoOrderRepository.findByClientAlgoOrderId(
                     normalized.userId(), normalized.clientAlgoOrderId().trim());
             if (existing.isPresent()) {
-                return toResponse(existing.get());
+                AlgoOrderRecord existingOrder = existing.get();
+                requireAlgoOrderCurrentProductLine(existingOrder);
+                return toResponse(existingOrder);
             }
         }
         Instant now = Instant.now();
@@ -95,7 +97,10 @@ public class AlgoOrderService {
         boolean inserted = algoOrderRepository.insert(record);
         if (!inserted && record.clientAlgoOrderId() != null) {
             return algoOrderRepository.findByClientAlgoOrderId(record.userId(), record.clientAlgoOrderId())
-                    .map(this::toResponse)
+                    .map(existing -> {
+                        requireAlgoOrderCurrentProductLine(existing);
+                        return toResponse(existing);
+                    })
                     .orElseThrow(() -> new IllegalStateException("duplicate clientAlgoOrderId but algo order not found"));
         }
         if (!inserted) {
@@ -111,6 +116,7 @@ public class AlgoOrderService {
         }
         AlgoOrderRecord record = algoOrderRepository.findByAlgoOrderId(request.algoOrderId())
                 .orElseThrow(() -> new IllegalStateException("algo order not found: " + request.algoOrderId()));
+        requireAlgoOrderCurrentProductLine(record);
         if (record.userId() != request.userId()) {
             throw new IllegalArgumentException("algo order does not belong to user");
         }
@@ -157,7 +163,10 @@ public class AlgoOrderService {
 
     public AlgoOrderResponse get(long algoOrderId) {
         return algoOrderRepository.findByAlgoOrderId(algoOrderId)
-                .map(this::toResponse)
+                .map(order -> {
+                    requireAlgoOrderCurrentProductLine(order);
+                    return toResponse(order);
+                })
                 .orElseThrow(() -> new IllegalStateException("algo order not found: " + algoOrderId));
     }
 
@@ -422,5 +431,15 @@ public class AlgoOrderService {
 
     private ProductLine currentProductLine() {
         return properties.getKafka().getProductLine();
+    }
+
+    private void requireAlgoOrderCurrentProductLine(AlgoOrderRecord order) {
+        String contractType = currentProductContractType();
+        if (contractType == null) {
+            return;
+        }
+        if (!algoOrderRepository.algoOrderMatchesContractType(order.algoOrderId(), contractType)) {
+            throw new IllegalStateException("algo order not found: " + order.algoOrderId());
+        }
     }
 }

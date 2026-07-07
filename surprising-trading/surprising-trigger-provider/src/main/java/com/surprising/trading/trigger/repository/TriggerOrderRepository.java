@@ -249,8 +249,10 @@ public class TriggerOrderRepository {
                 SELECT EXISTS (
                     SELECT 1
                       FROM trading_trigger_orders o
+                      JOIN instrument_current_versions c
+                        ON c.symbol = o.symbol
                       JOIN instruments i
-                        ON i.symbol = o.symbol
+                        ON i.symbol = c.symbol AND i.version = c.version
                      WHERE o.trigger_order_id = ?
                        AND i.contract_type = ?
                 )

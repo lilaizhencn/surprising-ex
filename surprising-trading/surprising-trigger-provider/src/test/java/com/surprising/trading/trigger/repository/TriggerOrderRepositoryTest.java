@@ -166,6 +166,25 @@ class TriggerOrderRepositoryTest {
     }
 
     @Test
+    void triggerOrderMatchesContractTypeUsesCurrentInstrumentVersion() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        when(jdbcTemplate.queryForObject(any(String.class), any(Class.class), any(), any()))
+                .thenReturn(true);
+
+        boolean matched = repository.triggerOrderMatchesContractType(501L, "LINEAR_DELIVERY");
+
+        assertThat(matched).isTrue();
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).queryForObject(sql.capture(), any(Class.class), any(), any());
+        assertThat(sql.getValue())
+                .contains("FROM trading_trigger_orders o")
+                .contains("JOIN instrument_current_versions c")
+                .contains("i.symbol = c.symbol AND i.version = c.version")
+                .contains("i.contract_type = ?");
+    }
+
+    @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
     void openOrdersFiltersByContractTypeWhenProvided() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);

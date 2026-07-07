@@ -107,7 +107,9 @@ public class OrderService {
         if (hasClientOrderId(normalized)) {
             var existing = orderRepository.findByClientOrderId(normalized.userId(), normalized.clientOrderId());
             if (existing.isPresent()) {
-                return toResponse(existing.get());
+                OrderRecord existingOrder = existing.get();
+                requireOrderCurrentProductLine(existingOrder);
+                return toResponse(existingOrder);
             }
         }
 
@@ -169,7 +171,10 @@ public class OrderService {
         boolean inserted = orderRepository.insert(order);
         if (!inserted && hasClientOrderId(normalized)) {
             return orderRepository.findByClientOrderId(normalized.userId(), normalized.clientOrderId())
-                    .map(this::toResponse)
+                    .map(existing -> {
+                        requireOrderCurrentProductLine(existing);
+                        return toResponse(existing);
+                    })
                     .orElseThrow(() -> new IllegalStateException("duplicate clientOrderId but order not found"));
         }
         if (!inserted) {
@@ -252,10 +257,12 @@ public class OrderService {
                 normalized.userId(), normalized.newClientOrderId());
         OrderRecord original = orderRepository.findByOrderId(normalized.orderId())
                 .orElseThrow(() -> new IllegalStateException("order not found: " + normalized.orderId()));
+        requireOrderCurrentProductLine(original);
         if (original.userId() != normalized.userId()) {
             throw new IllegalArgumentException("order does not belong to user");
         }
         if (existingReplacement.isPresent()) {
+            requireOrderCurrentProductLine(existingReplacement.get());
             return new AmendOrderResponse(toResponse(original), toResponse(existingReplacement.get()),
                     false, "replacement order already exists");
         }
@@ -488,6 +495,7 @@ public class OrderService {
         }
         OrderRecord order = orderRepository.findByOrderId(request.orderId())
                 .orElseThrow(() -> new IllegalStateException("order not found: " + request.orderId()));
+        requireOrderCurrentProductLine(order);
         if (order.userId() != request.userId()) {
             throw new IllegalArgumentException("order does not belong to user");
         }
@@ -547,7 +555,10 @@ public class OrderService {
 
     public OrderResponse get(long orderId) {
         return orderRepository.findByOrderId(orderId)
-                .map(this::toResponse)
+                .map(order -> {
+                    requireOrderCurrentProductLine(order);
+                    return toResponse(order);
+                })
                 .orElseThrow(() -> new IllegalStateException("order not found: " + orderId));
     }
 
@@ -556,7 +567,10 @@ public class OrderService {
             throw new IllegalArgumentException("userId must be positive");
         }
         return orderRepository.findByClientOrderId(userId, normalizeClientOrderId(clientOrderId))
-                .map(this::toResponse)
+                .map(order -> {
+                    requireOrderCurrentProductLine(order);
+                    return toResponse(order);
+                })
                 .orElseThrow(() -> new IllegalStateException("order not found for clientOrderId: " + clientOrderId));
     }
 
@@ -817,7 +831,14 @@ public class OrderService {
     }
 
     private void requireOrderProductLine(OrderRecord order, ProductLine productLine) {
-        String contractType = contractType(productLine);
+        requireOrderContractType(order, contractType(productLine));
+    }
+
+    private void requireOrderCurrentProductLine(OrderRecord order) {
+        requireOrderContractType(order, currentProductContractType());
+    }
+
+    private void requireOrderContractType(OrderRecord order, String contractType) {
         if (contractType == null) {
             return;
         }

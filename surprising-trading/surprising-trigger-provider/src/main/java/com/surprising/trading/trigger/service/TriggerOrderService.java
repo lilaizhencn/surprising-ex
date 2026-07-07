@@ -78,7 +78,9 @@ public class TriggerOrderService {
             var existing = triggerOrderRepository.findByClientTriggerOrderId(
                     normalized.userId(), normalized.clientTriggerOrderId());
             if (existing.isPresent()) {
-                return toResponse(existing.get());
+                TriggerOrderRecord existingOrder = existing.get();
+                requireTriggerOrderCurrentProductLine(existingOrder);
+                return toResponse(existingOrder);
             }
         }
 
@@ -133,7 +135,10 @@ public class TriggerOrderService {
         if (!inserted && hasClientTriggerOrderId(normalized)) {
             return triggerOrderRepository.findByClientTriggerOrderId(normalized.userId(),
                             normalized.clientTriggerOrderId())
-                    .map(this::toResponse)
+                    .map(existing -> {
+                        requireTriggerOrderCurrentProductLine(existing);
+                        return toResponse(existing);
+                    })
                     .orElseThrow(() -> new IllegalStateException("duplicate trigger id but order not found"));
         }
         if (!inserted) {
@@ -180,7 +185,7 @@ public class TriggerOrderService {
     }
 
     public TriggerOrderResponse get(long triggerOrderId) {
-        return get(triggerOrderId, null);
+        return get(triggerOrderId, currentProductLineFilter());
     }
 
     public TriggerOrderResponse get(long triggerOrderId, ProductLine productLine) {
@@ -202,6 +207,7 @@ public class TriggerOrderService {
         }
         TriggerOrderRecord current = triggerOrderRepository.findById(request.triggerOrderId())
                 .orElseThrow(() -> new IllegalStateException("trigger order not found: " + request.triggerOrderId()));
+        requireTriggerOrderCurrentProductLine(current);
         if (current.userId() != request.userId()) {
             throw new IllegalArgumentException("trigger order does not belong to user");
         }
@@ -591,7 +597,14 @@ public class TriggerOrderService {
     }
 
     private void requireTriggerOrderProductLine(TriggerOrderRecord order, ProductLine productLine) {
-        String contractType = contractType(productLine);
+        requireTriggerOrderContractType(order, contractType(productLine));
+    }
+
+    private void requireTriggerOrderCurrentProductLine(TriggerOrderRecord order) {
+        requireTriggerOrderContractType(order, currentProductContractType());
+    }
+
+    private void requireTriggerOrderContractType(TriggerOrderRecord order, String contractType) {
         if (contractType == null) {
             return;
         }
@@ -606,6 +619,10 @@ public class TriggerOrderService {
 
     private String currentProductContractType() {
         return properties.getKafka().isProductTopicsEnabled() ? contractType(currentProductLine()) : null;
+    }
+
+    private ProductLine currentProductLineFilter() {
+        return properties.getKafka().isProductTopicsEnabled() ? currentProductLine() : null;
     }
 
     private TriggerOrderResponse toResponse(TriggerOrderRecord order) {

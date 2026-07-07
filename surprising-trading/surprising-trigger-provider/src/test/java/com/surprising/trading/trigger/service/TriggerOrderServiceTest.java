@@ -454,6 +454,24 @@ class TriggerOrderServiceTest {
     }
 
     @Test
+    void cancelRejectsTriggerOrderOutsideCurrentProductLineBeforeMutating() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerProperties properties = new TriggerProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class), properties);
+        TriggerOrderRecord row = record(501L, TriggerOrderStatus.PENDING);
+        when(repository.findById(501L)).thenReturn(Optional.of(row));
+        when(repository.triggerOrderMatchesContractType(501L, "LINEAR_DELIVERY")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.cancel(new CancelTriggerOrderRequest(1001L, 501L)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("trigger order not found: 501");
+
+        verify(repository, never()).cancel(eq(1001L), eq(501L), any());
+    }
+
+    @Test
     void onMarkPricePlacesReduceOnlyOrderAndMarksTriggered() {
         TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
