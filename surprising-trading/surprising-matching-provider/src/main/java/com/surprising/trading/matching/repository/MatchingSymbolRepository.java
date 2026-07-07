@@ -41,7 +41,7 @@ public class MatchingSymbolRepository {
                   FROM instruments i
                   JOIN instrument_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
-                 WHERE i.status IN ('TRADING', 'HALT', 'SETTLING')
+                 WHERE i.status IN ('TRADING', 'HALT')
                 """);
         List<Object> args = new ArrayList<>();
         productContractTypeFilter().ifPresent(contractType -> {
@@ -58,7 +58,7 @@ public class MatchingSymbolRepository {
                   FROM instruments i
                   JOIN instrument_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
-                 WHERE i.symbol = ? AND i.status IN ('TRADING', 'HALT', 'SETTLING')
+                 WHERE i.symbol = ? AND i.status IN ('TRADING', 'HALT')
                 """);
         List<Object> args = new ArrayList<>();
         args.add(symbol);

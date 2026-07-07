@@ -12,6 +12,7 @@ public class AccountProperties {
     private Outbox outbox = new Outbox();
     private Cache cache = new Cache();
     private PositionMargin positionMargin = new PositionMargin();
+    private ExpiringSettlement expiringSettlement = new ExpiringSettlement();
 
     public Kafka getKafka() {
         return kafka;
@@ -43,6 +44,14 @@ public class AccountProperties {
 
     public void setPositionMargin(PositionMargin positionMargin) {
         this.positionMargin = positionMargin;
+    }
+
+    public ExpiringSettlement getExpiringSettlement() {
+        return expiringSettlement;
+    }
+
+    public void setExpiringSettlement(ExpiringSettlement expiringSettlement) {
+        this.expiringSettlement = expiringSettlement;
     }
 
     public static class Kafka {
@@ -267,6 +276,20 @@ public class AccountProperties {
 
         public void setLiquidationFeeContextMaxEntries(int liquidationFeeContextMaxEntries) {
             this.liquidationFeeContextMaxEntries = liquidationFeeContextMaxEntries;
+        }
+    }
+
+    public static class ExpiringSettlement {
+        private Duration settlementPriceWindow = Duration.ofMinutes(30);
+
+        public Duration getSettlementPriceWindow() {
+            return settlementPriceWindow;
+        }
+
+        public void setSettlementPriceWindow(Duration settlementPriceWindow) {
+            this.settlementPriceWindow = settlementPriceWindow == null
+                    ? Duration.ZERO
+                    : settlementPriceWindow;
         }
     }
 

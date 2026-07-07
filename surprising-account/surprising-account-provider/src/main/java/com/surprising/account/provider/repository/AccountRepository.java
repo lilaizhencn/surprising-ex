@@ -1881,6 +1881,54 @@ public class AccountRepository {
                 .orElseThrow(() -> new IllegalStateException("latest mark price not found for " + symbol));
     }
 
+    public long settlementMarkPriceTicks(String symbol,
+                                         long instrumentVersion,
+                                         Instant settlementTime,
+                                         Duration priceWindow) {
+        if (settlementTime == null) {
+            return latestMarkPriceTicks(symbol, instrumentVersion);
+        }
+        Instant windowStart = settlementWindowStart(settlementTime, priceWindow);
+        return jdbcTemplate.query("""
+                SELECT ((m.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_price_ticks
+                  FROM instruments i
+                  JOIN LATERAL (
+                      SELECT COALESCE(
+                          (
+                              SELECT ROUND(AVG(mark_price_units))::BIGINT
+                                FROM price_mark_ticks
+                               WHERE symbol = i.symbol
+                                 AND event_time >= ?
+                                 AND event_time <= ?
+                          ),
+                          (
+                              SELECT mark_price_units
+                                FROM price_mark_ticks
+                               WHERE symbol = i.symbol
+                                 AND event_time <= ?
+                               ORDER BY event_time DESC
+                               LIMIT 1
+                          ),
+                          (
+                              SELECT mark_price_units
+                                FROM price_mark_ticks
+                               WHERE symbol = i.symbol
+                               ORDER BY event_time DESC
+                               LIMIT 1
+                          )
+                      ) AS mark_price_units
+                  ) m ON TRUE
+                 WHERE i.symbol = ?
+                   AND i.version = ?
+                   AND m.mark_price_units IS NOT NULL
+                """, (rs, rowNum) -> rs.getLong("mark_price_ticks"),
+                Timestamp.from(windowStart), Timestamp.from(settlementTime), Timestamp.from(settlementTime),
+                symbol, instrumentVersion)
+                .stream()
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("settlement mark price not found for " + symbol));
+    }
+
     public long latestMarkPriceUnits(String symbol) {
         return jdbcTemplate.query("""
                 SELECT mark_price_units
@@ -1892,6 +1940,54 @@ public class AccountRepository {
                 .stream()
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("latest mark price not found for " + symbol));
+    }
+
+    public long settlementMarkPriceUnits(String symbol, Instant settlementTime, Duration priceWindow) {
+        if (settlementTime == null) {
+            return latestMarkPriceUnits(symbol);
+        }
+        Instant windowStart = settlementWindowStart(settlementTime, priceWindow);
+        return jdbcTemplate.query("""
+                SELECT m.mark_price_units
+                  FROM (SELECT 1) anchor
+                  JOIN LATERAL (
+                      SELECT COALESCE(
+                          (
+                              SELECT ROUND(AVG(mark_price_units))::BIGINT
+                                FROM price_mark_ticks
+                               WHERE symbol = ?
+                                 AND event_time >= ?
+                                 AND event_time <= ?
+                          ),
+                          (
+                              SELECT mark_price_units
+                                FROM price_mark_ticks
+                               WHERE symbol = ?
+                                 AND event_time <= ?
+                               ORDER BY event_time DESC
+                               LIMIT 1
+                          ),
+                          (
+                              SELECT mark_price_units
+                                FROM price_mark_ticks
+                               WHERE symbol = ?
+                               ORDER BY event_time DESC
+                               LIMIT 1
+                          )
+                      ) AS mark_price_units
+                  ) m ON TRUE
+                 WHERE m.mark_price_units IS NOT NULL
+                """, (rs, rowNum) -> rs.getLong("mark_price_units"),
+                symbol, Timestamp.from(windowStart), Timestamp.from(settlementTime),
+                symbol, Timestamp.from(settlementTime), symbol)
+                .stream()
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("settlement mark price not found for " + symbol));
+    }
+
+    private Instant settlementWindowStart(Instant settlementTime, Duration priceWindow) {
+        Duration normalized = priceWindow == null || priceWindow.isNegative() ? Duration.ZERO : priceWindow;
+        return settlementTime.minus(normalized);
     }
 
     public SpotInstrumentSpec spotInstrumentSpec(String symbol, long instrumentVersion) {

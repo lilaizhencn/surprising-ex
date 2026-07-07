@@ -38,7 +38,7 @@ public class MatchingOrderBookRecoveryRepository {
                   FROM trading_orders o
                   JOIN instruments i
                     ON i.symbol = o.symbol AND i.version = o.instrument_version
-                 WHERE i.status IN ('TRADING', 'HALT', 'SETTLING')
+                 WHERE i.status IN ('TRADING', 'HALT')
                    AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                    AND o.order_type = 'LIMIT'
                    AND o.time_in_force IN ('GTC', 'GTX')

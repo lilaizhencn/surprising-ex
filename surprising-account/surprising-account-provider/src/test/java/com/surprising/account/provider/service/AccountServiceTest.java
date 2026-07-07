@@ -34,6 +34,7 @@ import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -224,7 +225,7 @@ class AccountServiceTest {
     }
 
     @Test
-    void deliverySettlementClosesOpenPositionsAtLatestMark() {
+    void deliverySettlementClosesOpenPositionsAtSettlementWindowMark() {
         String symbol = "BTC-USDT-DELIVERY";
         FakeAccountRepository repository = new FakeAccountRepository();
         repository.contractSpecs.put(symbol + ":4", new ContractSpec(4L, ContractType.LINEAR_DELIVERY,
@@ -248,6 +249,8 @@ class AccountServiceTest {
                 "DELIVERY_SETTLEMENT:BTC-USDT-DELIVERY:4:2002:CROSS:NET");
         assertThat(repository.releasedPositionMargin)
                 .containsEntry(new PositionKey(2002L, symbol, MarginMode.CROSS), 3L);
+        assertThat(repository.lastSettlementMarkPriceTime).isEqualTo(EVENT_TIME);
+        assertThat(repository.lastSettlementPriceWindow).isEqualTo(Duration.ofMinutes(30));
     }
 
     @Test
@@ -295,6 +298,8 @@ class AccountServiceTest {
         assertThat(repository.lifecycleAccountTypes).containsExactly(AccountType.OPTION);
         assertThat(repository.lifecycleReferences).containsExactly(
                 "OPTION_EXERCISE:BTC-USDT-260925-70000-C:6:2002:CROSS:NET");
+        assertThat(repository.lastSettlementMarkPriceTime).isEqualTo(EVENT_TIME);
+        assertThat(repository.lastSettlementPriceWindow).isEqualTo(Duration.ofMinutes(30));
     }
 
     @Test
@@ -932,6 +937,8 @@ class AccountServiceTest {
         private final List<ProductLine> scopedPositionMarginLines = new ArrayList<>();
         private final List<ProductLine> scopedPositionMarginAdjustmentLines = new ArrayList<>();
         private final Set<ProcessedTradeKey> processedTradeIds = new HashSet<>();
+        private Instant lastSettlementMarkPriceTime;
+        private Duration lastSettlementPriceWindow;
         private int tradeProcessingAttempts;
         private int positionUpdates;
         private int positionMarginAdjustmentCalls;
@@ -970,9 +977,26 @@ class AccountServiceTest {
         }
 
         @Override
+        public long settlementMarkPriceTicks(String symbol,
+                                             long instrumentVersion,
+                                             Instant settlementTime,
+                                             Duration priceWindow) {
+            lastSettlementMarkPriceTime = settlementTime;
+            lastSettlementPriceWindow = priceWindow;
+            return latestMarkPriceTicks(symbol, instrumentVersion);
+        }
+
+        @Override
         public long latestMarkPriceUnits(String symbol) {
             return Optional.ofNullable(latestMarkPriceUnits.get(symbol))
                     .orElseThrow(() -> new IllegalStateException("missing mark price units " + symbol));
+        }
+
+        @Override
+        public long settlementMarkPriceUnits(String symbol, Instant settlementTime, Duration priceWindow) {
+            lastSettlementMarkPriceTime = settlementTime;
+            lastSettlementPriceWindow = priceWindow;
+            return latestMarkPriceUnits(symbol);
         }
 
         @Override

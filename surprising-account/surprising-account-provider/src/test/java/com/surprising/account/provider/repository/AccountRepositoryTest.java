@@ -77,6 +77,57 @@ class AccountRepositoryTest {
     }
 
     @Test
+    void settlementMarkPriceTicksUsesWindowAverageBeforeFallingBackToLatestMark() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant settlementTime = Instant.parse("2026-07-01T08:00:00Z");
+        Duration window = Duration.ofMinutes(30);
+        when(jdbcTemplate.query(contains("ROUND(AVG(mark_price_units))::BIGINT"), anyRowMapper(),
+                eq(Timestamp.from(settlementTime.minus(window))), eq(Timestamp.from(settlementTime)),
+                eq(Timestamp.from(settlementTime)), eq("BTC-USDT-260626"), eq(4L)))
+                .thenReturn(List.of(600_000L));
+
+        long priceTicks = repository.settlementMarkPriceTicks("BTC-USDT-260626", 4L, settlementTime, window);
+
+        assertThat(priceTicks).isEqualTo(600_000L);
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
+                eq(Timestamp.from(settlementTime.minus(window))), eq(Timestamp.from(settlementTime)),
+                eq(Timestamp.from(settlementTime)), eq("BTC-USDT-260626"), eq(4L));
+        assertThat(sql.getValue())
+                .contains("FROM price_mark_ticks")
+                .contains("AVG(mark_price_units)")
+                .contains("event_time >= ?")
+                .contains("event_time <= ?")
+                .contains("ORDER BY event_time DESC");
+    }
+
+    @Test
+    void settlementMarkPriceUnitsUsesUnderlyingWindowAverageForOptionExercise() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        Instant settlementTime = Instant.parse("2026-07-01T08:00:00Z");
+        Duration window = Duration.ofMinutes(15);
+        when(jdbcTemplate.query(contains("SELECT m.mark_price_units"), anyRowMapper(),
+                eq("BTC-USDT"), eq(Timestamp.from(settlementTime.minus(window))),
+                eq(Timestamp.from(settlementTime)), eq("BTC-USDT"), eq(Timestamp.from(settlementTime)),
+                eq("BTC-USDT")))
+                .thenReturn(List.of(150L));
+
+        long priceUnits = repository.settlementMarkPriceUnits("BTC-USDT", settlementTime, window);
+
+        assertThat(priceUnits).isEqualTo(150L);
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
+                eq("BTC-USDT"), eq(Timestamp.from(settlementTime.minus(window))),
+                eq(Timestamp.from(settlementTime)), eq("BTC-USDT"), eq(Timestamp.from(settlementTime)),
+                eq("BTC-USDT"));
+        assertThat(sql.getValue())
+                .contains("AVG(mark_price_units)")
+                .contains("event_time >= ?")
+                .contains("event_time <= ?")
+                .contains("ORDER BY event_time DESC");
+    }
+
+    @Test
     void duplicateBalanceAdjustmentReturnsCurrentBalanceWhenPayloadMatches() throws Exception {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
 

@@ -25,8 +25,15 @@ import com.surprising.account.provider.service.MarginTransferMath;
 import com.surprising.account.provider.service.PnlSettlementMath;
 import com.surprising.account.provider.service.PositionCalculator;
 import com.surprising.instrument.api.math.PerpetualContractMath;
+import com.surprising.instrument.api.model.ContractSettlementMethod;
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.DeliverySettlementEvent;
+import com.surprising.instrument.api.model.InstrumentResponse;
+import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
+import com.surprising.instrument.api.model.OptionExerciseEvent;
+import com.surprising.instrument.api.model.OptionExerciseStyle;
+import com.surprising.instrument.api.model.OptionType;
 import com.surprising.liquidation.api.model.LiquidationOrderResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderStatus;
 import com.surprising.liquidation.provider.config.LiquidationProperties;
@@ -56,6 +63,7 @@ import com.surprising.risk.provider.repository.RiskOutboxRepository;
 import com.surprising.risk.provider.repository.RiskRepository;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
 import com.surprising.risk.provider.service.RiskService;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MatchTradeEvent;
@@ -221,6 +229,73 @@ class PerpetualTradingChainIntegrationTest {
             assertThat(harness.state.position(2002L)).isEqualTo(new PositionState(0L, 0L, 0L, 0L));
             assertThat(harness.accountOutbox.positionEvents).isEmpty();
         }
+    }
+
+    @Test
+    void linearDeliveryTradeSettlesCashAtExpiryAndIsIdempotent() {
+        try (Harness harness = Harness.linearDelivery()) {
+            harness.state.setBalance(1001L, 30_000L);
+            harness.state.setBalance(2002L, 30_000L);
+
+            harness.place(1001L, "delivery-maker-sell-100", OrderSide.SELL, OrderType.LIMIT,
+                    TimeInForce.GTC, 100L, 4L, false);
+            harness.place(2002L, "delivery-taker-buy-100", OrderSide.BUY, OrderType.LIMIT,
+                    TimeInForce.IOC, 100L, 4L, false);
+            harness.processNewOrderCommands();
+
+            assertThat(harness.state.position(2002L)).isEqualTo(new PositionState(4L, VERSION, 100L, 0L));
+            assertThat(harness.state.position(1001L)).isEqualTo(new PositionState(-4L, VERSION, 100L, 0L));
+            assertThat(harness.state.positionMargin(2002L)).isEqualTo(400L);
+            assertThat(harness.state.positionMargin(1001L)).isEqualTo(400L);
+
+            harness.state.markPriceTicks = 120L;
+            assertThat(harness.settleDelivery()).isEqualTo(2);
+            assertThat(harness.settleDelivery()).isZero();
+
+            assertThat(harness.state.position(2002L)).isEqualTo(new PositionState(0L, 0L, 0L, 8_000L));
+            assertThat(harness.state.position(1001L)).isEqualTo(new PositionState(0L, 0L, 0L, -8_000L));
+            assertBalance(harness.state.balance(2002L), 38_000L, 0L, 0L);
+            assertBalance(harness.state.balance(1001L), 22_000L, 0L, 0L);
+        }
+    }
+
+    @Test
+    void optionPremiumTradeThenEuropeanExerciseMovesCashOnce() {
+        try (Harness harness = Harness.option()) {
+            harness.state.setBalance(1001L, 10_000L);
+            harness.state.setBalance(2002L, 10_000L);
+
+            harness.place(2002L, "option-maker-sell-5", OrderSide.SELL, OrderType.LIMIT,
+                    TimeInForce.GTC, 5L, 2L, false);
+            harness.place(1001L, "option-taker-buy-5", OrderSide.BUY, OrderType.LIMIT,
+                    TimeInForce.IOC, 5L, 2L, false);
+            harness.processNewOrderCommands();
+
+            assertThat(harness.state.position(1001L)).isEqualTo(new PositionState(2L, VERSION, 5L, 0L));
+            assertThat(harness.state.position(2002L)).isEqualTo(new PositionState(-2L, VERSION, 5L, 0L));
+            assertBalance(harness.state.balance(1001L), 9_000L, 0L, 0L);
+            assertBalance(harness.state.balance(2002L), 9_900L, 1_100L, 0L);
+            assertThat(harness.state.positionMargin(1001L)).isZero();
+            assertThat(harness.state.positionMargin(2002L)).isEqualTo(1_100L);
+
+            harness.state.underlyingMarkPriceUnits = 120L;
+            assertThat(harness.exerciseCallOption(100L)).isEqualTo(2);
+            assertThat(harness.exerciseCallOption(100L)).isZero();
+
+            assertThat(harness.state.position(1001L)).isEqualTo(new PositionState(0L, 0L, 0L, 3_000L));
+            assertThat(harness.state.position(2002L)).isEqualTo(new PositionState(0L, 0L, 0L, -3_000L));
+            assertBalance(harness.state.balance(1001L), 13_000L, 0L, 0L);
+            assertBalance(harness.state.balance(2002L), 7_000L, 0L, 0L);
+        }
+    }
+
+    private static void assertBalance(BalanceState actual,
+                                      long availableUnits,
+                                      long lockedUnits,
+                                      long deficitUnits) {
+        assertThat(actual.availableUnits).isEqualTo(availableUnits);
+        assertThat(actual.lockedUnits).isEqualTo(lockedUnits);
+        assertThat(actual.deficitUnits).isEqualTo(deficitUnits);
     }
 
     @Test
@@ -481,6 +556,20 @@ class PerpetualTradingChainIntegrationTest {
             return new Harness(0L, state);
         }
 
+        private static Harness linearDelivery() {
+            SharedState state = SharedState.delivery(ContractType.LINEAR_DELIVERY, "USDT",
+                    NOTIONAL_MULTIPLIER, PRICE_TICK_UNITS, SETTLE_SCALE_UNITS, INITIAL_MARGIN_RATE_PPM);
+            state.markPriceTicks = 100L;
+            return new Harness(0L, state);
+        }
+
+        private static Harness option() {
+            SharedState state = SharedState.option();
+            state.markPriceTicks = 5L;
+            state.underlyingMarkPriceUnits = 120L;
+            return new Harness(0L, state);
+        }
+
         private Harness(long marketMaxSlippagePpm, SharedState state) {
             this.state = state;
             orderRepository = new FakeOrderRepository(state);
@@ -501,6 +590,8 @@ class PerpetualTradingChainIntegrationTest {
                     1L, 1_000_000L, 1L, Long.MAX_VALUE / 4, state.notionalMultiplierUnits,
                     100_000_000L, state.initialMarginRatePpm);
             TradingOrderProperties orderProperties = new TradingOrderProperties();
+            orderProperties.getKafka().setProductLine(state.productLine());
+            orderProperties.getKafka().setProductTopicsEnabled(true);
             orderProperties.getRisk().setMarketMaxSlippagePpm(marketMaxSlippagePpm);
             OrderValidator orderValidator = new OrderValidator(symbol -> SYMBOL.equals(symbol)
                     ? Optional.of(rule)
@@ -516,6 +607,8 @@ class PerpetualTradingChainIntegrationTest {
                     spotReservationRepository, orderOutbox);
 
             MatchingProperties matchingProperties = new MatchingProperties();
+            matchingProperties.getKafka().setProductLine(state.productLine());
+            matchingProperties.getKafka().setProductTopicsEnabled(true);
             matchingProperties.getEngine().setExchangeId("integration-" + System.nanoTime());
             matchingProperties.getRecovery().setOpenOrderBookRestoreEnabled(false);
             matchingProperties.getProtection().setSelfTradePreventionEnabled(false);
@@ -527,9 +620,15 @@ class PerpetualTradingChainIntegrationTest {
                     matchingResultRepository, new FakeMatchingOutboxRepository(state));
             engine.start();
 
+            AccountProperties accountProperties = new AccountProperties();
+            accountProperties.getKafka().setProductLine(state.productLine());
+            accountProperties.getKafka().setProductTopicsEnabled(true);
             accountService = new AccountService(new FakeAccountRepository(state), new PositionCalculator(),
-                    null, new AccountProperties(), accountOutbox);
-            riskService = new RiskService(objectMapper, new RiskProperties(), new FakeRiskRepository(state),
+                    null, accountProperties, accountOutbox);
+            RiskProperties riskProperties = new RiskProperties();
+            riskProperties.getKafka().setProductLine(state.productLine());
+            riskProperties.getKafka().setProductTopicsEnabled(true);
+            riskService = new RiskService(objectMapper, riskProperties, new FakeRiskRepository(state),
                     new FakeRiskSequenceRepository(state), riskOutbox, transactionManager());
             liquidationService = new LiquidationService(objectMapper, new LiquidationProperties(),
                     liquidationRepository, liquidationOrderRepository, new FakeLiquidationSequenceRepository(state),
@@ -590,6 +689,87 @@ class PerpetualTradingChainIntegrationTest {
             }
         }
 
+        private int settleDelivery() {
+            return accountService.processDeliverySettlement(new DeliverySettlementEvent(
+                    SYMBOL, VERSION, state.contractType, Instant.now(), Instant.now(),
+                    ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, Instant.now(),
+                    instrument(InstrumentStatus.CLOSED)));
+        }
+
+        private int exerciseCallOption(long strikePriceUnits) {
+            return accountService.processOptionExercise(new OptionExerciseEvent(
+                    SYMBOL, VERSION, SYMBOL, strikePriceUnits, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
+                    Instant.now(), Instant.now(), ContractSettlementMethod.CASH, InstrumentStatus.CLOSED,
+                    Instant.now(), optionInstrument(strikePriceUnits, InstrumentStatus.CLOSED)));
+        }
+
+        private InstrumentResponse optionInstrument(long strikePriceUnits, InstrumentStatus status) {
+            return instrument(status, SYMBOL, strikePriceUnits, OptionType.CALL);
+        }
+
+        private InstrumentResponse instrument(InstrumentStatus status) {
+            return instrument(status, null, null, null);
+        }
+
+        private InstrumentResponse instrument(InstrumentStatus status,
+                                              String underlyingSymbol,
+                                              Long strikePriceUnits,
+                                              OptionType optionType) {
+            return new InstrumentResponse(
+                    SYMBOL,
+                    VERSION,
+                    state.instrumentType,
+                    state.contractType,
+                    state.baseAsset,
+                    state.quoteAsset,
+                    state.settleAsset,
+                    1_000_000L,
+                    state.settleAsset,
+                    state.priceTickUnits,
+                    state.quantityStepUnits,
+                    1L,
+                    1_000_000L,
+                    1L,
+                    Long.MAX_VALUE / 4,
+                    state.notionalMultiplierUnits,
+                    1,
+                    3,
+                    List.of(OrderType.LIMIT.name(), OrderType.MARKET.name()),
+                    List.of(TimeInForce.GTC.name(), TimeInForce.IOC.name()),
+                    true,
+                    state.instrumentType != InstrumentType.SPOT,
+                    state.instrumentType != InstrumentType.SPOT,
+                    100_000_000L,
+                    state.initialMarginRatePpm,
+                    state.maintenanceMarginRatePpm,
+                    state.makerFeeRatePpm,
+                    state.takerFeeRatePpm,
+                    Long.MAX_VALUE / 4,
+                    300_000L,
+                    Long.MAX_VALUE / 8,
+                    state.contractType.isPerpetual() ? 8 : 0,
+                    0L,
+                    0L,
+                    0L,
+                    Long.MAX_VALUE / 8,
+                    2,
+                    Instant.now(),
+                    Instant.now(),
+                    underlyingSymbol,
+                    strikePriceUnits,
+                    optionType,
+                    optionType == null ? null : OptionExerciseStyle.EUROPEAN,
+                    state.contractType.isDelivery() || state.contractType.isOption()
+                            ? ContractSettlementMethod.CASH
+                            : null,
+                    status,
+                    Instant.now(),
+                    Instant.now(),
+                    Instant.now(),
+                    List.of(),
+                    List.of());
+        }
+
         @Override
         public void close() {
             engine.stop();
@@ -621,8 +801,10 @@ class PerpetualTradingChainIntegrationTest {
         private final Map<Long, LiquidationOrderResponse> liquidationOrders = new LinkedHashMap<>();
         private final Map<String, PositionMarginAdjustmentResponse> positionMarginAdjustmentReferences = new HashMap<>();
         private final Set<String> liquidationFeeReferences = new HashSet<>();
+        private final Set<String> lifecycleReferences = new HashSet<>();
         private final Set<Long> processedTrades = new HashSet<>();
         private long markPriceTicks = 100L;
+        private long underlyingMarkPriceUnits = 100L;
 
         private SharedState(ContractType contractType,
                             String settleAsset,
@@ -637,6 +819,21 @@ class PerpetualTradingChainIntegrationTest {
         private static SharedState spot() {
             return new SharedState(InstrumentType.SPOT, ContractType.SPOT, "BTC", "USDT", "USDT",
                     1L, 100L, 1L, 1L, 0L);
+        }
+
+        private static SharedState delivery(ContractType contractType,
+                                            String settleAsset,
+                                            long notionalMultiplierUnits,
+                                            long priceTickUnits,
+                                            long settleScaleUnits,
+                                            long initialMarginRatePpm) {
+            return new SharedState(InstrumentType.DELIVERY, contractType, "BTC", "USDT", settleAsset, 1L,
+                    notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm);
+        }
+
+        private static SharedState option() {
+            return new SharedState(InstrumentType.OPTION, ContractType.VANILLA_OPTION, "BTC", "USDT", "USDT",
+                    1L, 100L, 1L, 1L, 100_000L);
         }
 
         private SharedState(InstrumentType instrumentType,
@@ -686,8 +883,12 @@ class PerpetualTradingChainIntegrationTest {
                     ignored -> new BalanceState(0L, 0L, 0L));
         }
 
-        private String perpetualAccountType() {
-            return contractType == ContractType.INVERSE_PERPETUAL ? "COIN_PERPETUAL" : "USDT_PERPETUAL";
+        private String productAccountType() {
+            return productLine().accountTypeCode();
+        }
+
+        private ProductLine productLine() {
+            return contractType.productLine();
         }
 
         private PositionState position(long userId) {
@@ -750,7 +951,8 @@ class PerpetualTradingChainIntegrationTest {
             if (state.orders.containsKey(order.orderId())) {
                 return false;
             }
-            if (order.clientOrderId() != null && findByClientOrderId(order.userId(), order.clientOrderId()).isPresent()) {
+            if (order.clientOrderId() != null
+                    && findByClientOrderId(order.productLine(), order.userId(), order.clientOrderId()).isPresent()) {
                 return false;
             }
             state.orders.put(order.orderId(), order);
@@ -762,7 +964,16 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public void lockUserPositionMode(ProductLine productLine, long userId) {
+        }
+
+        @Override
         public PositionMode positionMode(long userId) {
+            return PositionMode.ONE_WAY;
+        }
+
+        @Override
+        public PositionMode positionMode(ProductLine productLine, long userId) {
             return PositionMode.ONE_WAY;
         }
 
@@ -814,8 +1025,25 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public boolean orderMatchesContractType(long orderId, String contractType) {
+            OrderRecord order = state.orders.get(orderId);
+            if (order == null || contractType == null) {
+                return true;
+            }
+            return order.productLine() == ProductLine.requireContractTypeCode(contractType);
+        }
+
+        @Override
         public Optional<OrderRecord> findByClientOrderId(long userId, String clientOrderId) {
             return state.orders.values().stream()
+                    .filter(order -> order.userId() == userId && clientOrderId.equals(order.clientOrderId()))
+                    .findFirst();
+        }
+
+        @Override
+        public Optional<OrderRecord> findByClientOrderId(ProductLine productLine, long userId, String clientOrderId) {
+            return state.orders.values().stream()
+                    .filter(order -> order.productLine() == productLine)
                     .filter(order -> order.userId() == userId && clientOrderId.equals(order.clientOrderId()))
                     .findFirst();
         }
@@ -911,7 +1139,7 @@ class PerpetualTradingChainIntegrationTest {
             long marginUnits = OrderMarginMath.initialMarginUnits(state.contractType, side, orderType,
                     priceTicks, quantitySteps, state.markPriceTicks, marketMaxSlippagePpm, state.notionalMultiplierUnits,
                     state.priceTickUnits, state.settleScaleUnits, state.initialMarginRatePpm);
-            return Optional.of(new MarginRequirement(state.perpetualAccountType(), state.settleAsset, marginUnits));
+            return Optional.of(new MarginRequirement(state.productAccountType(), state.settleAsset, marginUnits));
         }
 
         public boolean reserve(long userId,
@@ -953,7 +1181,7 @@ class PerpetualTradingChainIntegrationTest {
                                MarginMode marginMode,
                                long amountUnits,
                                Instant now) {
-            assertThat(accountType).isEqualTo(state.perpetualAccountType());
+            assertThat(accountType).isEqualTo(state.productAccountType());
             return reserve(userId, accountType, asset, orderId, symbol, marginMode, PositionSide.NET, amountUnits, now);
         }
 
@@ -967,7 +1195,7 @@ class PerpetualTradingChainIntegrationTest {
                                PositionSide positionSide,
                                long amountUnits,
                                Instant now) {
-            assertThat(accountType).isEqualTo(state.perpetualAccountType());
+            assertThat(accountType).isEqualTo(state.productAccountType());
             return reserve(userId, asset, orderId, symbol, marginMode, positionSide, amountUnits, now);
         }
     }
@@ -1361,8 +1589,56 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public boolean markTradeProcessing(ProductLine productLine, long tradeId, String symbol) {
+            assertThat(productLine).isEqualTo(state.productLine());
+            return state.processedTrades.add(tradeId);
+        }
+
+        @Override
+        public long settlementMarkPriceTicks(String symbol,
+                                             long instrumentVersion,
+                                             Instant settlementTime,
+                                             Duration priceWindow) {
+            assertThat(symbol).isEqualTo(SYMBOL);
+            assertThat(instrumentVersion).isEqualTo(VERSION);
+            return state.markPriceTicks;
+        }
+
+        @Override
+        public long settlementMarkPriceUnits(String symbol, Instant settlementTime, Duration priceWindow) {
+            assertThat(symbol).isEqualTo(SYMBOL);
+            return state.underlyingMarkPriceUnits;
+        }
+
+        @Override
+        public List<PositionResponse> openPositionsForSettlement(String symbol, long instrumentVersion) {
+            assertThat(symbol).isEqualTo(SYMBOL);
+            assertThat(instrumentVersion).isEqualTo(VERSION);
+            return state.positions.entrySet().stream()
+                    .filter(entry -> entry.getKey().symbol().equals(symbol))
+                    .filter(entry -> entry.getValue().instrumentVersion() == instrumentVersion)
+                    .filter(entry -> entry.getValue().signedQuantitySteps() != 0L)
+                    .map(entry -> new PositionResponse(entry.getKey().userId(), symbol,
+                            entry.getValue().instrumentVersion(), entry.getKey().marginMode(),
+                            entry.getKey().positionSide(), entry.getValue().signedQuantitySteps(),
+                            entry.getValue().entryPriceTicks(), entry.getValue().realizedPnlUnits(), Instant.now()))
+                    .sorted(Comparator.comparingLong(PositionResponse::userId))
+                    .toList();
+        }
+
+        @Override
         public PositionState lockPosition(long userId, String symbol, MarginMode marginMode) {
             return state.position(userId, marginMode);
+        }
+
+        @Override
+        public PositionState lockPosition(ProductLine productLine,
+                                          long userId,
+                                          String symbol,
+                                          MarginMode marginMode,
+                                          PositionSide positionSide) {
+            assertThat(productLine).isEqualTo(state.productLine());
+            return state.position(userId, marginMode, positionSide);
         }
 
         @Override
@@ -1391,6 +1667,16 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public Optional<PositionResponse> position(ProductLine productLine,
+                                                   long userId,
+                                                   String symbol,
+                                                   MarginMode marginMode,
+                                                   PositionSide positionSide) {
+            assertThat(productLine).isEqualTo(state.productLine());
+            return position(userId, symbol, marginMode, positionSide);
+        }
+
+        @Override
         public Optional<PositionMarginResponse> positionMargin(long userId, String symbol, MarginMode marginMode) {
             return positionMargin(userId, symbol, marginMode, PositionSide.NET);
         }
@@ -1408,6 +1694,16 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public Optional<PositionMarginResponse> positionMargin(ProductLine productLine,
+                                                               long userId,
+                                                               String symbol,
+                                                               MarginMode marginMode,
+                                                               PositionSide positionSide) {
+            assertThat(productLine).isEqualTo(state.productLine());
+            return positionMargin(userId, symbol, marginMode, positionSide);
+        }
+
+        @Override
         public PositionMarginAdjustmentResponse adjustIsolatedPositionMargin(long userId,
                                                                              String symbol,
                                                                              long amountUnits,
@@ -1416,6 +1712,35 @@ class PerpetualTradingChainIntegrationTest {
                                                                              Duration maxRiskSnapshotAge,
                                                                              long removalBufferPpm) {
             return adjustIsolatedPositionMargin(userId, symbol, PositionSide.NET, amountUnits, referenceId, reason,
+                    maxRiskSnapshotAge, removalBufferPpm);
+        }
+
+        @Override
+        public PositionMarginAdjustmentResponse adjustIsolatedPositionMargin(ProductLine productLine,
+                                                                             long userId,
+                                                                             String symbol,
+                                                                             long amountUnits,
+                                                                             String referenceId,
+                                                                             String reason,
+                                                                             Duration maxRiskSnapshotAge,
+                                                                             long removalBufferPpm) {
+            assertThat(productLine).isEqualTo(state.productLine());
+            return adjustIsolatedPositionMargin(userId, symbol, PositionSide.NET, amountUnits, referenceId, reason,
+                    maxRiskSnapshotAge, removalBufferPpm);
+        }
+
+        @Override
+        public PositionMarginAdjustmentResponse adjustIsolatedPositionMargin(ProductLine productLine,
+                                                                             long userId,
+                                                                             String symbol,
+                                                                             PositionSide positionSide,
+                                                                             long amountUnits,
+                                                                             String referenceId,
+                                                                             String reason,
+                                                                             Duration maxRiskSnapshotAge,
+                                                                             long removalBufferPpm) {
+            assertThat(productLine).isEqualTo(state.productLine());
+            return adjustIsolatedPositionMargin(userId, symbol, positionSide, amountUnits, referenceId, reason,
                     maxRiskSnapshotAge, removalBufferPpm);
         }
 
@@ -1493,6 +1818,20 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public void consumeOrderMargin(ProductLine productLine,
+                                       long orderId,
+                                       long userId,
+                                       String symbol,
+                                       MarginMode marginMode,
+                                       long openSteps,
+                                       long actualMarginUnits,
+                                       boolean sweepRemainder,
+                                       Instant now) {
+            assertThat(productLine).isEqualTo(state.productLine());
+            consumeOrderMargin(orderId, userId, symbol, marginMode, openSteps, actualMarginUnits, sweepRemainder, now);
+        }
+
+        @Override
         public void releaseOrderMargin(long orderId,
                                        long userId,
                                        String symbol,
@@ -1540,6 +1879,19 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public void releasePositionMargin(ProductLine productLine,
+                                          long userId,
+                                          String symbol,
+                                          MarginMode marginMode,
+                                          long closeSteps,
+                                          PositionSide positionSide,
+                                          long positionAbsSteps,
+                                          Instant now) {
+            assertThat(productLine).isEqualTo(state.productLine());
+            releasePositionMargin(userId, symbol, marginMode, closeSteps, positionSide, positionAbsSteps, now);
+        }
+
+        @Override
         public void settleRealizedPnl(long userId,
                                       String asset,
                                       long orderId,
@@ -1573,6 +1925,63 @@ class PerpetualTradingChainIntegrationTest {
                                       Instant now) {
             assertThat(accountType).isEqualTo(expectedAccountType());
             settleRealizedPnl(userId, asset, orderId, tradeId, symbol, marginMode, realizedPnlDeltaUnits, now);
+        }
+
+        @Override
+        public boolean settleLifecyclePnl(AccountType accountType,
+                                          long userId,
+                                          String asset,
+                                          String referenceType,
+                                          String referenceId,
+                                          String reason,
+                                          String symbol,
+                                          MarginMode marginMode,
+                                          long realizedPnlDeltaUnits,
+                                          Instant now) {
+            assertThat(accountType).isEqualTo(expectedAccountType());
+            assertThat(asset).isEqualTo(state.settleAsset);
+            assertThat(referenceType).isIn("DELIVERY_SETTLEMENT", "OPTION_EXERCISE");
+            assertThat(reason).isEqualTo(referenceType);
+            if (!state.lifecycleReferences.add(referenceId)) {
+                return false;
+            }
+            applyBalanceSettlement(userId, symbol, marginMode, realizedPnlDeltaUnits);
+            return true;
+        }
+
+        @Override
+        public void settleOptionPremium(AccountType accountType,
+                                        OrderSide side,
+                                        long userId,
+                                        String asset,
+                                        long orderId,
+                                        long tradeId,
+                                        String symbol,
+                                        MarginMode marginMode,
+                                        long premiumUnits,
+                                        boolean orderCompleted,
+                                        Instant now) {
+            assertThat(accountType).isEqualTo(AccountType.OPTION);
+            assertThat(asset).isEqualTo(state.settleAsset);
+            assertThat(symbol).isEqualTo(SYMBOL);
+            if (side == OrderSide.BUY) {
+                MarginReservationState reservation = state.reservations.get(orderId);
+                assertThat(reservation).isNotNull();
+                long unreleased = reservation.reservedUnits - reservation.releasedUnits - reservation.positionMarginUnits;
+                assertThat(unreleased).isGreaterThanOrEqualTo(premiumUnits);
+                BalanceState balance = state.balance(userId);
+                assertThat(balance.lockedUnits).isGreaterThanOrEqualTo(premiumUnits);
+                balance.lockedUnits = Math.subtractExact(balance.lockedUnits, premiumUnits);
+                reservation.releasedUnits = Math.addExact(reservation.releasedUnits, premiumUnits);
+                long remaining = reservation.reservedUnits - reservation.releasedUnits - reservation.positionMarginUnits;
+                if (orderCompleted && remaining > 0L) {
+                    reservation.releasedUnits = Math.addExact(reservation.releasedUnits, remaining);
+                    releaseBalanceLock(userId, remaining);
+                }
+                return;
+            }
+            BalanceState balance = state.balance(userId);
+            balance.availableUnits = Math.addExact(balance.availableUnits, premiumUnits);
         }
 
         @Override
@@ -1840,6 +2249,19 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public PositionResponse updatePosition(ProductLine productLine,
+                                               long userId,
+                                               String symbol,
+                                               MarginMode marginMode,
+                                               PositionSide positionSide,
+                                               PositionState next,
+                                               long previousSignedQuantitySteps,
+                                               Instant now) {
+            assertThat(productLine).isEqualTo(state.productLine());
+            return updatePosition(userId, symbol, marginMode, positionSide, next, previousSignedQuantitySteps, now);
+        }
+
+        @Override
         public Optional<BalanceResponse> balance(long userId, String asset) {
             BalanceState balance = state.balance(userId);
             return Optional.of(new BalanceResponse(userId, asset, balance.availableUnits, balance.lockedUnits,
@@ -1872,9 +2294,7 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         private AccountType expectedAccountType() {
-            return state.contractType == ContractType.INVERSE_PERPETUAL
-                    ? AccountType.COIN_PERPETUAL
-                    : AccountType.USDT_PERPETUAL;
+            return AccountType.valueOf(state.productAccountType());
         }
     }
 
@@ -1911,6 +2331,7 @@ class PerpetualTradingChainIntegrationTest {
                                                                        long userId,
                                                                        String symbol,
                                                                        MarginMode marginMode,
+                                                                       String accountType,
                                                                        String asset,
                                                                        long amountUnits,
                                                                        long feeRatePpm,
@@ -1918,7 +2339,7 @@ class PerpetualTradingChainIntegrationTest {
                                                                        String traceId) {
             LiquidationFeeSettledEvent event = new LiquidationFeeSettledEvent(
                     state.next("account-liquidation-fee-event"), tradeId, orderId, liquidationOrderId, candidateId,
-                    userId, symbol, marginMode, asset, amountUnits, feeRatePpm, now, traceId);
+                    userId, symbol, marginMode, accountType, asset, amountUnits, feeRatePpm, now, traceId);
             liquidationFeeEvents.add(event);
             return event;
         }
@@ -2139,6 +2560,14 @@ class PerpetualTradingChainIntegrationTest {
 
         @Override
         public RiskStatus latestRiskStatus(long userId, String settleAsset, java.time.Duration maxSnapshotAge) {
+            return RiskStatus.LIQUIDATION;
+        }
+
+        @Override
+        public RiskStatus latestRiskStatus(long userId,
+                                           String accountType,
+                                           String settleAsset,
+                                           java.time.Duration maxSnapshotAge) {
             return RiskStatus.LIQUIDATION;
         }
 

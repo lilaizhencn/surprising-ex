@@ -44,6 +44,7 @@ import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -457,7 +458,8 @@ public class AccountService {
         if (!spec.contractType().isDelivery()) {
             throw new IllegalArgumentException("delivery settlement event must reference a delivery contract");
         }
-        long settlementPriceTicks = accountRepository.latestMarkPriceTicks(symbol, event.version());
+        long settlementPriceTicks = accountRepository.settlementMarkPriceTicks(symbol, event.version(),
+                settlementTime(event.deliveryTime(), event.eventTime()), settlementPriceWindow());
         return settleExpiringPositions(symbol, event.version(), settlementPriceTicks,
                 event.eventTime(), "DELIVERY_SETTLEMENT", "DELIVERY_SETTLEMENT");
     }
@@ -559,7 +561,8 @@ public class AccountService {
             throw new IllegalArgumentException("option exercise event must reference an option contract");
         }
         String underlyingSymbol = normalizeSymbol(event.underlyingSymbol());
-        long underlyingPriceUnits = accountRepository.latestMarkPriceUnits(underlyingSymbol);
+        long underlyingPriceUnits = accountRepository.settlementMarkPriceUnits(underlyingSymbol,
+                settlementTime(event.deliveryTime(), event.eventTime()), settlementPriceWindow());
         long strikePriceUnits = event.strikePriceUnits();
         if (strikePriceUnits <= 0) {
             throw new IllegalArgumentException("strikePriceUnits must be positive");
@@ -579,6 +582,19 @@ public class AccountService {
         if (settlementMethod != ContractSettlementMethod.CASH) {
             throw new IllegalArgumentException("only cash settlement is supported");
         }
+    }
+
+    private Duration settlementPriceWindow() {
+        AccountProperties.ExpiringSettlement settlementProperties = properties.getExpiringSettlement();
+        if (settlementProperties == null) {
+            return Duration.ZERO;
+        }
+        Duration window = settlementProperties.getSettlementPriceWindow();
+        return window == null || window.isNegative() ? Duration.ZERO : window;
+    }
+
+    private Instant settlementTime(Instant deliveryTime, Instant eventTime) {
+        return deliveryTime != null ? deliveryTime : eventTime;
     }
 
     private void requireLifecycleClosed(InstrumentStatus status, String eventName) {

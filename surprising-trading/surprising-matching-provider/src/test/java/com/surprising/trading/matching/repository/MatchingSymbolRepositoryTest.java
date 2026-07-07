@@ -18,6 +18,8 @@ class MatchingSymbolRepositoryTest {
 
         repository.currentTradingSymbols();
 
+        assertThat(jdbcTemplate.sql).contains("i.status IN ('TRADING', 'HALT')");
+        assertThat(jdbcTemplate.sql).doesNotContain("SETTLING");
         assertThat(jdbcTemplate.sql).doesNotContain("i.contract_type = ?");
         assertThat(jdbcTemplate.args).isEmpty();
     }
@@ -46,6 +48,8 @@ class MatchingSymbolRepositoryTest {
 
         repository.currentTradingSymbol("BTC-USD-240927");
 
+        assertThat(jdbcTemplate.sql).contains("i.status IN ('TRADING', 'HALT')");
+        assertThat(jdbcTemplate.sql).doesNotContain("SETTLING");
         assertThat(jdbcTemplate.sql).contains("i.symbol = ?").contains("i.contract_type = ?");
         assertThat(jdbcTemplate.args).containsExactly("BTC-USD-240927", "INVERSE_DELIVERY");
     }
