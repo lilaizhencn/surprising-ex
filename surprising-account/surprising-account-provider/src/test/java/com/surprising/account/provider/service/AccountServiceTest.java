@@ -236,7 +236,8 @@ class AccountServiceTest {
 
         int settled = service.processDeliverySettlement(new DeliverySettlementEvent(
                 symbol, 4L, ContractType.LINEAR_DELIVERY, EVENT_TIME, EVENT_TIME,
-                ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME, null));
+                ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
+                deliveryInstrument(symbol, 4L, ContractType.LINEAR_DELIVERY)));
 
         assertThat(settled).isEqualTo(1);
         assertThat(repository.positionState(2002L, symbol))
@@ -247,6 +248,28 @@ class AccountServiceTest {
                 "DELIVERY_SETTLEMENT:BTC-USDT-DELIVERY:4:2002:CROSS:NET");
         assertThat(repository.releasedPositionMargin)
                 .containsEntry(new PositionKey(2002L, symbol, MarginMode.CROSS), 3L);
+    }
+
+    @Test
+    void deliverySettlementRequiresInstrumentSnapshotBeforeFundsAreSettled() {
+        String symbol = "BTC-USDT-DELIVERY";
+        FakeAccountRepository repository = new FakeAccountRepository();
+        repository.contractSpecs.put(symbol + ":4", new ContractSpec(4L, ContractType.LINEAR_DELIVERY,
+                "USDT", 1L, 100_000_000L, 100_000_000L, 10_000L, 2L, 5L));
+        repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
+                new PositionState(3L, 4L, 500_000L, 0L));
+        repository.latestMarkPriceTicks.put(symbol + ":4", 600_000L);
+        AccountService service = new AccountService(repository, new PositionCalculator());
+
+        assertThatThrownBy(() -> service.processDeliverySettlement(new DeliverySettlementEvent(
+                symbol, 4L, ContractType.LINEAR_DELIVERY, EVENT_TIME, EVENT_TIME,
+                ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME, null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("requires instrument snapshot");
+
+        assertThat(repository.positionState(2002L, symbol))
+                .isEqualTo(new PositionState(3L, 4L, 500_000L, 0L));
+        assertThat(repository.lifecyclePnlByUser).isEmpty();
     }
 
     @Test
@@ -1486,6 +1509,60 @@ class AccountServiceTest {
                 strikePriceUnits,
                 optionType,
                 OptionExerciseStyle.EUROPEAN,
+                ContractSettlementMethod.CASH,
+                InstrumentStatus.CLOSED,
+                EVENT_TIME.minusSeconds(600),
+                EVENT_TIME.minusSeconds(600),
+                EVENT_TIME,
+                List.of(),
+                List.of());
+    }
+
+    private static InstrumentResponse deliveryInstrument(String symbol, long version, ContractType contractType) {
+        return new InstrumentResponse(
+                symbol,
+                version,
+                InstrumentType.DELIVERY,
+                contractType,
+                "BTC",
+                "USDT",
+                "USDT",
+                1_000_000L,
+                "USDT",
+                100_000_000L,
+                1L,
+                1L,
+                100_000L,
+                1L,
+                1_000_000_000L,
+                10_000L,
+                1,
+                3,
+                List.of("LIMIT"),
+                List.of("GTC"),
+                true,
+                true,
+                true,
+                100_000_000L,
+                10_000L,
+                5_000L,
+                2L,
+                5L,
+                500_000_000_000_000L,
+                300_000L,
+                25_000_000_000_000L,
+                0,
+                0L,
+                0L,
+                0L,
+                1_000_000_000_000L,
+                2,
+                EVENT_TIME,
+                EVENT_TIME,
+                null,
+                null,
+                null,
+                null,
                 ContractSettlementMethod.CASH,
                 InstrumentStatus.CLOSED,
                 EVENT_TIME.minusSeconds(600),

@@ -452,6 +452,7 @@ public class AccountService {
         requireCashSettlement(event.settlementMethod());
         String symbol = normalizeSymbol(event.symbol());
         ContractSpec spec = contractSpec(symbol, event.version());
+        requireMatchingDeliveryInstrument(event, spec);
         requireMatchingContractType(event.contractType(), spec.contractType(), "delivery settlement");
         if (!spec.contractType().isDelivery()) {
             throw new IllegalArgumentException("delivery settlement event must reference a delivery contract");
@@ -622,6 +623,40 @@ public class AccountService {
         }
         if (event.status() != instrument.status()) {
             throw new IllegalArgumentException("option exercise status does not match instrument");
+        }
+    }
+
+    private void requireMatchingDeliveryInstrument(DeliverySettlementEvent event, ContractSpec spec) {
+        InstrumentResponse instrument = event.instrument();
+        if (instrument == null) {
+            throw new IllegalArgumentException("delivery settlement event requires instrument snapshot");
+        }
+        String eventSymbol = normalizeSymbol(event.symbol());
+        String instrumentSymbol = normalizeSymbol(instrument.symbol());
+        if (!eventSymbol.equals(instrumentSymbol)) {
+            throw new IllegalArgumentException("delivery settlement instrument symbol does not match event");
+        }
+        if (instrument.version() != event.version()) {
+            throw new IllegalArgumentException("delivery settlement instrument version does not match event");
+        }
+        if (instrument.instrumentType() != InstrumentType.DELIVERY) {
+            throw new IllegalArgumentException("delivery settlement instrument must be DELIVERY");
+        }
+        if (instrument.contractType() != spec.contractType()) {
+            throw new IllegalArgumentException(
+                    "delivery settlement instrument contract type does not match account spec");
+        }
+        if (event.contractType() != null && event.contractType() != instrument.contractType()) {
+            throw new IllegalArgumentException("delivery settlement contract type does not match instrument");
+        }
+        if (instrument.contractType() == null || !instrument.contractType().isDelivery()) {
+            throw new IllegalArgumentException("delivery settlement instrument must use a delivery contract type");
+        }
+        if (event.settlementMethod() != instrument.settlementMethod()) {
+            throw new IllegalArgumentException("delivery settlement settlementMethod does not match instrument");
+        }
+        if (event.status() != instrument.status()) {
+            throw new IllegalArgumentException("delivery settlement status does not match instrument");
         }
     }
 
