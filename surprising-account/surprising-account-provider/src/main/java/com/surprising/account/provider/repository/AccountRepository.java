@@ -2413,17 +2413,8 @@ public class AccountRepository {
                        m.margin_mode,
                        m.position_side,
                        m.margin_units,
-                       %s AS account_type
+                       ? AS account_type
                   FROM account_position_margins m
-                  JOIN account_positions p
-                   ON p.product_line = m.product_line
-                   AND p.user_id = m.user_id
-                   AND p.symbol = m.symbol
-                   AND p.margin_mode = m.margin_mode
-                   AND p.position_side = m.position_side
-                  JOIN instruments i
-                    ON i.symbol = p.symbol
-                   AND i.version = p.instrument_version
                  WHERE m.product_line = ?
                    AND m.user_id = ?
                    AND m.symbol = ?
@@ -2431,11 +2422,12 @@ public class AccountRepository {
                    AND m.position_side = ?
                    AND m.margin_units > 0
                  FOR UPDATE OF m
-                """.formatted(accountTypeExpression("i")), (rs, rowNum) -> new PositionMargin(symbol, rs.getString("asset"),
+                """, (rs, rowNum) -> new PositionMargin(symbol, rs.getString("asset"),
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 PositionSide.fromNullableDbValue(rs.getString("position_side")), rs.getLong("margin_units"),
                 accountTypeFromNullableDbValue(rs.getString("account_type"))),
-                resolvedProductLine.name(), userId, symbol, normalizedMarginMode.name(), normalizedPositionSide.name());
+                resolvedProductLine.accountTypeCode(), resolvedProductLine.name(), userId, symbol,
+                normalizedMarginMode.name(), normalizedPositionSide.name());
         for (PositionMargin margin : margins) {
             long amountUnits = MarginTransferMath.positionMarginReleaseAmount(margin.marginUnits(),
                     closeSteps, positionAbsSteps);

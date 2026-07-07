@@ -270,6 +270,28 @@ class AccountRepositoryTest {
     }
 
     @Test
+    void releasePositionMarginUsesProductLineAccountType() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.query(contains("FROM account_position_margins m"), anyRowMapper(),
+                eq("COIN_PERPETUAL"), eq("INVERSE_PERPETUAL"), eq(1001L), eq("BTC-USD"),
+                eq("ISOLATED"), eq("SHORT"))).thenReturn(List.of());
+
+        repository.releasePositionMargin(ProductLine.INVERSE_PERPETUAL, 1001L, "BTC-USD",
+                MarginMode.ISOLATED, 3L, PositionSide.SHORT, 10L,
+                Instant.parse("2026-07-01T00:00:00Z"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
+                eq("COIN_PERPETUAL"), eq("INVERSE_PERPETUAL"), eq(1001L), eq("BTC-USD"),
+                eq("ISOLATED"), eq("SHORT"));
+        assertThat(sql.getValue())
+                .contains("? AS account_type")
+                .contains("m.product_line = ?")
+                .doesNotContain("JOIN account_positions")
+                .doesNotContain("JOIN instruments");
+    }
+
+    @Test
     void productPositionMarginAdjustmentUsesProductBalanceAndLedger() throws Exception {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         when(sequenceRepository.nextSequence("product-ledger-entry")).thenReturn(7101L);
