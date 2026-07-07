@@ -50,6 +50,26 @@ class PositionRiskTriggerConsumerTest {
     }
 
     @Test
+    void rejectsPositionEventFromOtherProductTopicBeforeRiskScan() {
+        RiskService riskService = mock(RiskService.class);
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        PositionRiskTriggerConsumer consumer = new PositionRiskTriggerConsumer(new ObjectMapper(), riskService,
+                properties);
+
+        assertThatThrownBy(() -> consumer.onPositionUpdated(new ConsumerRecord<>(
+                "surprising.linear-delivery.account.position.events.v1", 0, 1L, "BTC-USDT",
+                positionPayload("BTC-USDT"))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("failed to process position risk trigger")
+                .satisfies(ex -> assertThat(ex.getCause())
+                        .hasMessageContaining("position update topic must match current product line")
+                        .hasMessageContaining("surprising.option.account.position.events.v1"));
+        verifyNoInteractions(riskService);
+    }
+
+    @Test
     void resolvesPositionTopicAndGroupFromProductLine() {
         RiskProperties properties = new RiskProperties();
         properties.getKafka().setProductLine(ProductLine.OPTION);

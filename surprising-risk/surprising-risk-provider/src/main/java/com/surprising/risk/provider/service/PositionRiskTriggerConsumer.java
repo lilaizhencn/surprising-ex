@@ -43,6 +43,7 @@ public class PositionRiskTriggerConsumer {
         try {
             PositionUpdatedEvent event = objectMapper.readValue(record.value(), PositionUpdatedEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "position update");
+            requireCurrentProductTopic(record.topic());
             riskService.scanPositionUpdate(event.userId(), event.symbol(), event.marginMode(), event.positionSide(),
                     event.instrumentVersion(), event.traceId());
         } catch (Exception ex) {
@@ -57,5 +58,23 @@ public class PositionRiskTriggerConsumer {
 
     public String groupId() {
         return properties.getKafka().getGroupId();
+    }
+
+    private void requireCurrentProductTopic(String topic) {
+        RiskProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled()) {
+            return;
+        }
+        String expectedTopic = kafka.getPositionEventsTopic();
+        if (!expectedTopic.equals(topic)) {
+            throw new ProductTopicMismatchException("position update topic must match current product line: expected="
+                    + expectedTopic + " actual=" + topic);
+        }
+    }
+
+    private static final class ProductTopicMismatchException extends RuntimeException {
+        private ProductTopicMismatchException(String message) {
+            super(message);
+        }
     }
 }
