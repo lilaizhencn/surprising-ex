@@ -1235,13 +1235,19 @@ CREATE INDEX IF NOT EXISTS trading_algo_order_children_order_idx
     ON trading_algo_order_children (order_id);
 
 CREATE TABLE IF NOT EXISTS trading_symbol_open_interest (
-    symbol                  TEXT PRIMARY KEY,
+    product_line            TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
+    symbol                  TEXT NOT NULL,
     long_quantity_steps     BIGINT NOT NULL DEFAULT 0,
     short_quantity_steps    BIGINT NOT NULL DEFAULT 0,
     open_quantity_steps     BIGINT NOT NULL DEFAULT 0,
     updated_at              TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (product_line, symbol),
     CONSTRAINT trading_symbol_open_interest_symbol_fk
         FOREIGN KEY (symbol) REFERENCES instrument_current_versions(symbol),
+    CONSTRAINT trading_symbol_open_interest_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT trading_symbol_open_interest_non_negative CHECK (
         long_quantity_steps >= 0
         AND short_quantity_steps >= 0
@@ -1601,6 +1607,39 @@ CREATE TABLE IF NOT EXISTS trading_match_results (
         order_status IN ('ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED', 'CANCELED', 'PARTIALLY_FILLED', 'FILLED')
     )
 );
+
+ALTER TABLE trading_symbol_open_interest
+    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+
+UPDATE trading_symbol_open_interest oi
+   SET product_line = CASE i.contract_type
+       WHEN 'SPOT' THEN 'SPOT'
+       WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+       WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+       WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+       WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+       WHEN 'VANILLA_OPTION' THEN 'OPTION'
+       ELSE oi.product_line
+   END
+  FROM instruments i
+  JOIN instrument_current_versions c
+    ON c.symbol = i.symbol AND c.version = i.version
+ WHERE i.symbol = oi.symbol;
+
+ALTER TABLE trading_symbol_open_interest
+    DROP CONSTRAINT IF EXISTS trading_symbol_open_interest_pkey;
+
+ALTER TABLE trading_symbol_open_interest
+    DROP CONSTRAINT IF EXISTS trading_symbol_open_interest_product_line_check;
+
+ALTER TABLE trading_symbol_open_interest
+    ADD CONSTRAINT trading_symbol_open_interest_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    );
+
+ALTER TABLE trading_symbol_open_interest
+    ADD CONSTRAINT trading_symbol_open_interest_pkey PRIMARY KEY (product_line, symbol);
 
 ALTER TABLE trading_match_results
     ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';

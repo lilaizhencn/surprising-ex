@@ -77,7 +77,8 @@ public class OrderMarginRepository {
                   JOIN account_asset_scales ss
                     ON ss.asset = i.settle_asset
              LEFT JOIN trading_symbol_open_interest oi
-                    ON oi.symbol = i.symbol
+                    ON oi.product_line = %s
+                   AND oi.symbol = i.symbol
              LEFT JOIN trading_leverage_settings ls
                     ON ls.user_id = ?
                    AND ls.symbol = i.symbol
@@ -88,11 +89,13 @@ public class OrderMarginRepository {
                    AND p.symbol = i.symbol
                    AND p.margin_mode = ?
                    AND p.position_side = ?
+                   AND p.product_line = %s
                   LEFT JOIN LATERAL (
                       SELECT COALESCE(SUM(o.remaining_quantity_steps), 0) AS pending_same_side_steps
                         FROM trading_orders o
                        WHERE o.user_id = ?
                          AND o.symbol = i.symbol
+                         AND o.product_line = %s
                          AND o.margin_mode = ?
                          AND o.position_side = ?
                          AND o.side = ?
@@ -110,7 +113,10 @@ public class OrderMarginRepository {
                  WHERE i.symbol = ?
                    AND i.version = ?
                    AND (? <> 'MARKET' OR pm.mark_ticks IS NOT NULL)
-                """.formatted(ProductLineSql.contractTypeProductLineCase("i.contract_type"));
+                """.formatted(ProductLineSql.contractTypeProductLineCase("i.contract_type"),
+                ProductLineSql.contractTypeProductLineCase("i.contract_type"),
+                ProductLineSql.contractTypeProductLineCase("i.contract_type"),
+                ProductLineSql.contractTypeProductLineCase("i.contract_type"));
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
         return jdbcTemplate.query(sql, (rs, rowNum) -> {

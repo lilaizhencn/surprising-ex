@@ -57,8 +57,11 @@ class OrderMarginRepositoryTest {
                 eq("BUY"), eq(5_000L),
                 eq("BTC-USDT-240927"), eq(1L), eq("LIMIT"));
         assertThat(sql.getValue())
+                .contains("oi.product_line = CASE i.contract_type")
                 .contains("LEFT JOIN trading_leverage_settings ls")
                 .contains("ls.product_line = CASE i.contract_type")
+                .contains("p.product_line = CASE i.contract_type")
+                .contains("o.product_line = CASE i.contract_type")
                 .contains("WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'")
                 .contains("WHEN 'VANILLA_OPTION' THEN 'OPTION'");
     }

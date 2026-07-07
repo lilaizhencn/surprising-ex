@@ -701,7 +701,7 @@ class AccountRepositoryTest {
         assertThat(response.signedQuantitySteps()).isEqualTo(-4L);
         verify(jdbcTemplate).update(contains("UPDATE trading_symbol_open_interest"),
                 eq(-10L), eq(4L), eq(-10L), eq(4L), any(Timestamp.class), eq("BTC-USDT"),
-                eq(-10L), eq(4L));
+                eq("LINEAR_PERPETUAL"), eq(-10L), eq(4L));
     }
 
     @Test
@@ -724,7 +724,7 @@ class AccountRepositoryTest {
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET"));
         verify(jdbcTemplate).update(contains("UPDATE trading_symbol_open_interest"),
                 eq(6L), eq(-4L), eq(6L), eq(-4L), any(Timestamp.class), eq("BTC-USDT"),
-                eq(6L), eq(-4L));
+                eq("LINEAR_PERPETUAL"), eq(6L), eq(-4L));
     }
 
     @Test

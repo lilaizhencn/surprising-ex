@@ -1772,7 +1772,7 @@ public class AccountRepository {
                 Timestamp.from(now), resolvedProductLine.name(), userId, symbol, normalizedMarginMode.name(),
                 normalizedPositionSide.name());
         requireSingleRow(rows, "account position update");
-        updateSymbolOpenInterest(symbol, previousSignedQuantitySteps, state.signedQuantitySteps(), now);
+        updateSymbolOpenInterest(resolvedProductLine, symbol, previousSignedQuantitySteps, state.signedQuantitySteps(), now);
         return new PositionResponse(userId, symbol, state.instrumentVersion(), normalizedMarginMode,
                 normalizedPositionSide,
                 state.signedQuantitySteps(), state.entryPriceTicks(), state.realizedPnlUnits(), now);
@@ -1804,10 +1804,12 @@ public class AccountRepository {
                 .orElseThrow(() -> new IllegalStateException("position not found before update"));
     }
 
-    private void updateSymbolOpenInterest(String symbol,
+    private void updateSymbolOpenInterest(ProductLine productLine,
+                                          String symbol,
                                           long previousSignedQuantitySteps,
                                           long nextSignedQuantitySteps,
                                           Instant now) {
+        ProductLine resolvedProductLine = productLine(productLine);
         long longDelta = Math.subtractExact(longQuantitySteps(nextSignedQuantitySteps),
                 longQuantitySteps(previousSignedQuantitySteps));
         long shortDelta = Math.subtractExact(shortQuantitySteps(nextSignedQuantitySteps),
@@ -1817,10 +1819,10 @@ public class AccountRepository {
         }
         jdbcTemplate.update("""
                 INSERT INTO trading_symbol_open_interest (
-                    symbol, long_quantity_steps, short_quantity_steps, open_quantity_steps, updated_at
-                ) VALUES (?, 0, 0, 0, ?)
-                ON CONFLICT (symbol) DO NOTHING
-                """, symbol, Timestamp.from(now));
+                    product_line, symbol, long_quantity_steps, short_quantity_steps, open_quantity_steps, updated_at
+                ) VALUES (?, ?, 0, 0, 0, ?)
+                ON CONFLICT (product_line, symbol) DO NOTHING
+                """, resolvedProductLine.name(), symbol, Timestamp.from(now));
         int rows = jdbcTemplate.update("""
                 UPDATE trading_symbol_open_interest
                    SET long_quantity_steps = long_quantity_steps + ?,
@@ -1828,9 +1830,10 @@ public class AccountRepository {
                        open_quantity_steps = GREATEST(long_quantity_steps + ?, short_quantity_steps + ?),
                        updated_at = ?
                  WHERE symbol = ?
+                   AND product_line = ?
                    AND long_quantity_steps + ? >= 0
                    AND short_quantity_steps + ? >= 0
-                """, longDelta, shortDelta, longDelta, shortDelta, Timestamp.from(now), symbol,
+                """, longDelta, shortDelta, longDelta, shortDelta, Timestamp.from(now), symbol, resolvedProductLine.name(),
                 longDelta, shortDelta);
         requireSingleRow(rows, "symbol open interest update");
     }
