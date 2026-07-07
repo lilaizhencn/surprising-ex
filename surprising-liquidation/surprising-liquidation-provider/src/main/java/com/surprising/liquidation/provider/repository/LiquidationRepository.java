@@ -57,13 +57,10 @@ public class LiquidationRepository {
                 """);
         if (properties.getKafka().isProductTopicsEnabled()) {
             sql.append("""
-                  FROM instruments i
                  WHERE c.candidate_id = ?
                    AND c.status = 'NEW'
-                   AND i.symbol = c.symbol
-                   AND i.version = c.instrument_version
                 """);
-            sql.append(productLineFilter("i", args)).append('\n');
+            sql.append(candidateProductLineFilter("c", args)).append('\n');
         } else {
             sql.append("""
                  WHERE c.candidate_id = ?
@@ -100,8 +97,9 @@ public class LiquidationRepository {
                                        Duration maxSnapshotAge) {
         return jdbcTemplate.query("""
                 SELECT status
-                  FROM risk_position_snapshots
+                 FROM risk_position_snapshots
                  WHERE user_id = ?
+                   AND product_line = ?
                    AND symbol = ?
                    AND margin_mode = ?
                    AND position_side = ?
@@ -110,7 +108,7 @@ public class LiquidationRepository {
                  ORDER BY event_time DESC
                  LIMIT 1
                 """, (rs, rowNum) -> RiskStatus.valueOf(rs.getString("status")),
-                userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                userId, currentProductLine().name(), symbol, MarginMode.defaultIfNull(marginMode).name(),
                 PositionSide.defaultIfNull(positionSide).name(), instrumentVersion,
                 Math.max(1L, maxSnapshotAge.toMillis()))
                 .stream()
@@ -136,15 +134,17 @@ public class LiquidationRepository {
                                        Duration maxSnapshotAge) {
         return jdbcTemplate.query("""
                 SELECT status
-                  FROM risk_account_snapshots
+                 FROM risk_account_snapshots
                  WHERE user_id = ?
+                   AND product_line = ?
                    AND account_type = ?
                    AND settle_asset = ?
                    AND event_time >= now() - (? * INTERVAL '1 millisecond')
                  ORDER BY event_time DESC
                  LIMIT 1
                 """, (rs, rowNum) -> RiskStatus.valueOf(rs.getString("status")),
-                userId, normalizeAccountType(accountType), settleAsset, Math.max(1L, maxSnapshotAge.toMillis()))
+                userId, productLineForAccountType(accountType).name(), normalizeAccountType(accountType),
+                settleAsset, Math.max(1L, maxSnapshotAge.toMillis()))
                 .stream()
                 .findFirst()
                 .orElse(RiskStatus.NORMAL);
@@ -157,11 +157,13 @@ public class LiquidationRepository {
                                                           long instrumentVersion) {
         return jdbcTemplate.query("""
                 SELECT signed_quantity_steps
-                  FROM account_positions
-                 WHERE user_id = ? AND symbol = ? AND margin_mode = ? AND position_side = ? AND instrument_version = ?
+                 FROM account_positions
+                 WHERE user_id = ? AND product_line = ? AND symbol = ? AND margin_mode = ?
+                   AND position_side = ? AND instrument_version = ?
                  FOR UPDATE
                 """, (rs, rowNum) -> new LiquidationCloseState(
-                rs.getLong("signed_quantity_steps")), userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                rs.getLong("signed_quantity_steps")), userId, currentProductLine().name(), symbol,
+                MarginMode.defaultIfNull(marginMode).name(),
                 PositionSide.defaultIfNull(positionSide).name(), instrumentVersion).stream().findFirst();
     }
 
@@ -242,6 +244,7 @@ public class LiquidationRepository {
                   ) pm ON TRUE
                  WHERE p.user_id = ? AND p.symbol = ? AND p.margin_mode = ? AND p.position_side = ?
                    AND p.instrument_version = ?
+                   AND p.product_line = ?
                    AND p.signed_quantity_steps <> 0
                    AND pm.mark_price_ticks > 0
                 """;
@@ -263,7 +266,7 @@ public class LiquidationRepository {
                             notionalUnits,
                             notionalPerStepUnits);
                 }, userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
-                PositionSide.defaultIfNull(positionSide).name(), instrumentVersion)
+                PositionSide.defaultIfNull(positionSide).name(), instrumentVersion, currentProductLine().name())
                 .stream()
                 .findFirst()
                 .map(row -> new LiquidationSizingInput(
@@ -305,6 +308,7 @@ public class LiquidationRepository {
                   JOIN risk_account_snapshots acc
                     ON acc.snapshot_id = ps.snapshot_id
                    AND acc.user_id = ps.user_id
+                   AND acc.product_line = ps.product_line
                    AND acc.settle_asset = ps.settle_asset
                   JOIN instruments i
                     ON i.symbol = ps.symbol
@@ -312,6 +316,7 @@ public class LiquidationRepository {
                   JOIN account_asset_scales ss
                     ON ss.asset = i.settle_asset
                  WHERE ps.user_id = ?
+                   AND ps.product_line = ?
                    AND ps.symbol = ?
                    AND ps.margin_mode = ?
                    AND ps.position_side = ?
@@ -328,7 +333,7 @@ public class LiquidationRepository {
                 rs.getLong("maintenance_margin_units"),
                 rs.getLong("notional_multiplier_units"),
                 rs.getLong("price_tick_units"),
-                rs.getLong("settle_scale_units")), userId, symbol,
+                rs.getLong("settle_scale_units")), userId, currentProductLine().name(), symbol,
                 MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name(),
                 instrumentVersion,
                 Math.max(1L, maxSnapshotAge.toMillis())).stream().findFirst();
@@ -369,11 +374,10 @@ public class LiquidationRepository {
                    SET status = ?,
                        updated_at = now()
                 """);
-        appendCandidateScope(sql, args);
         sql.append("""
                  WHERE c.candidate_id = ?
                 """);
-        appendCandidateProductLineFilter(sql, args);
+        appendCandidateProductLineFilter(sql, "c", args);
         int rows = jdbcTemplate.update(sql.toString(), args.toArray());
         requireSingleRow(rows, "liquidation candidate status update");
     }
@@ -411,12 +415,11 @@ public class LiquidationRepository {
                    SET status = ?,
                        updated_at = now()
                 """);
-        appendCandidateScope(candidateSql, candidateArgs);
         candidateSql.append("""
                  WHERE c.candidate_id = ?
                    AND c.status = 'PROCESSING'
                 """);
-        appendCandidateProductLineFilter(candidateSql, candidateArgs);
+        appendCandidateProductLineFilter(candidateSql, "c", candidateArgs);
         int rows = jdbcTemplate.update(candidateSql.toString(), candidateArgs.toArray());
         requireSingleRow(rows, "liquidation candidate lifecycle update");
         return Optional.of(candidateId);
@@ -509,7 +512,7 @@ public class LiquidationRepository {
         sql.append("""
                  WHERE (CAST(? AS text) IS NULL OR lo.user_id = ?)
                 """);
-        appendProductLineFilter(sql, "i", args);
+        appendCandidateProductLineFilter(sql, "c", args);
         sql.append("""
                  ORDER BY lo.created_at DESC
                  LIMIT ?
@@ -537,7 +540,7 @@ public class LiquidationRepository {
         sql.append("""
                  WHERE (CAST(? AS text) IS NULL OR lo.user_id = ?)
                 """);
-        appendProductLineFilter(sql, "i", args);
+        appendCandidateProductLineFilter(sql, "c", args);
         sql.append(AdminCursorPage.seekCondition(sortSpec, decodedCursor));
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         sql.append("""
@@ -562,7 +565,7 @@ public class LiquidationRepository {
         sql.append("""
                  WHERE lo.candidate_id = ?
                 """);
-        appendProductLineFilter(sql, "i", args);
+        appendCandidateProductLineFilter(sql, "c", args);
         sql.append("""
                  ORDER BY lo.created_at DESC
                 """);
@@ -589,11 +592,10 @@ public class LiquidationRepository {
                   FROM risk_liquidation_candidates c
                   LEFT JOIN risk_account_snapshots a ON a.snapshot_id = c.snapshot_id
                 """);
-        appendCandidateInstrumentJoin(sql, args);
         sql.append("""
                  WHERE c.candidate_id = ?
                 """);
-        appendProductLineFilter(sql, "i", args);
+        appendCandidateProductLineFilter(sql, "c", args);
         return jdbcTemplate.queryForList(sql.toString(), args.toArray()).stream().findFirst().map(this::normalizedRow);
     }
 
@@ -626,6 +628,8 @@ public class LiquidationRepository {
                    AND c.user_id = p.user_id
                    AND c.symbol = p.symbol
                    AND c.margin_mode = p.margin_mode
+                   AND c.position_side = p.position_side
+                   AND c.product_line = p.product_line
                  WHERE c.candidate_id = ?
                 """, candidateId);
         addRows(events, "liquidation", "LIQUIDATION_AUDIT", "created_at", "liquidation_order_id", "status", """
@@ -695,7 +699,6 @@ public class LiquidationRepository {
                    SET status = 'CANCELED',
                        updated_at = ?
                 """);
-        appendCandidateScope(sql, args);
         sql.append("""
                  WHERE c.candidate_id = ?
                    AND c.status IN ('NEW', 'PROCESSING')
@@ -706,7 +709,7 @@ public class LiquidationRepository {
                           AND lo.status IN ('SUBMITTED', 'PARTIALLY_FILLED')
                    )
                 """);
-        appendCandidateProductLineFilter(sql, args);
+        appendCandidateProductLineFilter(sql, "c", args);
         sql.append("""
                 RETURNING c.candidate_id, c.status, c.updated_at
                 """);
@@ -817,46 +820,30 @@ public class LiquidationRepository {
                                          Instant createdAt) {
     }
 
-    private String productLineFilter(String alias, List<Object> args) {
-        ProductLine productLine = properties.getKafka().getProductLine();
+    private ProductLine currentProductLine() {
+        return properties.getKafka().isProductTopicsEnabled()
+                ? properties.getKafka().getProductLine()
+                : ProductLine.LINEAR_PERPETUAL;
+    }
+
+    private ProductLine productLineForAccountType(String accountType) {
+        return ProductLine.fromAccountTypeCode(normalizeAccountType(accountType))
+                .orElse(currentProductLine());
+    }
+
+    private String candidateProductLineFilter(String alias, List<Object> args) {
+        ProductLine productLine = currentProductLine();
         if (!productLine.isMarginProduct()) {
             return "AND 1 = 0";
         }
-        args.add(productLine.contractTypeCode());
-        return "AND " + alias + ".contract_type = ?";
+        args.add(productLine.name());
+        String prefix = alias == null || alias.isBlank() ? "" : alias + ".";
+        return "AND " + prefix + "product_line = ?";
     }
 
-    private void appendProductLineFilter(StringBuilder sql, String alias, List<Object> args) {
+    private void appendCandidateProductLineFilter(StringBuilder sql, String alias, List<Object> args) {
         if (properties.getKafka().isProductTopicsEnabled()) {
-            sql.append(productLineFilter(alias, args)).append('\n');
-        }
-    }
-
-    private void appendCandidateProductLineFilter(StringBuilder sql, List<Object> args) {
-        if (properties.getKafka().isProductTopicsEnabled()) {
-            sql.append("""
-                   AND i.symbol = c.symbol
-                   AND i.version = c.instrument_version
-                """);
-            sql.append(productLineFilter("i", args)).append('\n');
-        }
-    }
-
-    private void appendCandidateScope(StringBuilder sql, List<Object> args) {
-        if (properties.getKafka().isProductTopicsEnabled()) {
-            sql.append("""
-                  FROM instruments i
-                """);
-        }
-    }
-
-    private void appendCandidateInstrumentJoin(StringBuilder sql, List<Object> args) {
-        if (properties.getKafka().isProductTopicsEnabled()) {
-            sql.append("""
-                  JOIN instruments i
-                    ON i.symbol = c.symbol
-                   AND i.version = c.instrument_version
-                """);
+            sql.append(candidateProductLineFilter(alias, args)).append('\n');
         }
     }
 
@@ -865,9 +852,6 @@ public class LiquidationRepository {
             sql.append("""
                   JOIN risk_liquidation_candidates c
                     ON c.candidate_id = lo.candidate_id
-                  JOIN instruments i
-                    ON i.symbol = c.symbol
-                   AND i.version = c.instrument_version
                 """);
         }
     }
@@ -876,9 +860,6 @@ public class LiquidationRepository {
         if (properties.getKafka().isProductTopicsEnabled()) {
             sql.append("""
                   FROM risk_liquidation_candidates c
-                  JOIN instruments i
-                    ON i.symbol = c.symbol
-                   AND i.version = c.instrument_version
                 """);
         }
     }
@@ -888,7 +869,7 @@ public class LiquidationRepository {
             sql.append("""
                    AND c.candidate_id = lo.candidate_id
                 """);
-            sql.append(productLineFilter("i", args)).append('\n');
+            sql.append(candidateProductLineFilter("c", args)).append('\n');
         }
     }
 

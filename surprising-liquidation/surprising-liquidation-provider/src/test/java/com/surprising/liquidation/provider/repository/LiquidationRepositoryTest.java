@@ -41,7 +41,8 @@ class LiquidationRepositoryTest {
     @Test
     void latestRiskStatusRequiresFreshSnapshot() {
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("USDT_PERPETUAL"),
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("LINEAR_PERPETUAL"),
+                eq("USDT_PERPETUAL"),
                 eq("USDT"), eq(7000L)))
                 .thenReturn(List.of(RiskStatus.LIQUIDATION));
 
@@ -49,15 +50,17 @@ class LiquidationRepositoryTest {
 
         assertThat(status).isEqualTo(RiskStatus.LIQUIDATION);
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("USDT_PERPETUAL"),
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("LINEAR_PERPETUAL"), eq("USDT_PERPETUAL"),
                 eq("USDT"), eq(7000L));
-        assertThat(sql.getValue()).contains("event_time >= now() - (? * INTERVAL '1 millisecond')");
+        assertThat(sql.getValue())
+                .contains("product_line = ?")
+                .contains("event_time >= now() - (? * INTERVAL '1 millisecond')");
     }
 
     @Test
     void staleOrMissingRiskSnapshotIsTreatedAsNormal() {
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("USDT_PERPETUAL"),
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("LINEAR_PERPETUAL"), eq("USDT_PERPETUAL"),
                 eq("USDT"), eq(5000L)))
                 .thenReturn(List.of());
 
@@ -68,7 +71,7 @@ class LiquidationRepositoryTest {
     @Test
     void latestRiskStatusFiltersByAccountType() {
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("USDT_DELIVERY"),
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("LINEAR_DELIVERY"), eq("USDT_DELIVERY"),
                 eq("USDT"), eq(5000L)))
                 .thenReturn(List.of(RiskStatus.WARNING));
 
@@ -76,9 +79,11 @@ class LiquidationRepositoryTest {
 
         assertThat(status).isEqualTo(RiskStatus.WARNING);
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("USDT_DELIVERY"),
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("LINEAR_DELIVERY"), eq("USDT_DELIVERY"),
                 eq("USDT"), eq(5000L));
-        assertThat(sql.getValue()).contains("account_type = ?");
+        assertThat(sql.getValue())
+                .contains("product_line = ?")
+                .contains("account_type = ?");
     }
 
     @Test
@@ -92,7 +97,7 @@ class LiquidationRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(9401L));
         assertThat(sql.getValue())
                 .doesNotContain("FROM instruments i")
-                .doesNotContain("i.contract_type = ?");
+                .doesNotContain("c.product_line = ?");
     }
 
     @Test
@@ -101,18 +106,16 @@ class LiquidationRepositoryTest {
         properties.getKafka().setProductLine(ProductLine.OPTION);
         properties.getKafka().setProductTopicsEnabled(true);
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate, properties);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(9401L), eq("VANILLA_OPTION")))
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(9401L), eq("OPTION")))
                 .thenReturn(List.of());
 
         repository.claimCandidate(9401L);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(9401L), eq("VANILLA_OPTION"));
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(9401L), eq("OPTION"));
         assertThat(sql.getValue())
-                .contains("FROM instruments i")
-                .contains("i.symbol = c.symbol")
-                .contains("i.version = c.instrument_version")
-                .contains("i.contract_type = ?");
+                .doesNotContain("FROM instruments i")
+                .contains("c.product_line = ?");
     }
 
     @Test
@@ -132,8 +135,8 @@ class LiquidationRepositoryTest {
         assertThat(sql.getValue())
                 .contains("SELECT lo.*")
                 .contains("JOIN risk_liquidation_candidates c")
-                .contains("JOIN instruments i")
-                .contains("i.contract_type = ?")
+                .doesNotContain("JOIN instruments i")
+                .contains("c.product_line = ?")
                 .contains("ORDER BY lo.created_at DESC");
     }
 
@@ -153,8 +156,8 @@ class LiquidationRepositoryTest {
                 eq("INVERSE_DELIVERY"), eq(26));
         assertThat(sql.getValue())
                 .contains("JOIN risk_liquidation_candidates c")
-                .contains("JOIN instruments i")
-                .contains("i.contract_type = ?")
+                .doesNotContain("JOIN instruments i")
+                .contains("c.product_line = ?")
                 .contains("ORDER BY lo.created_at ASC, lo.liquidation_order_id ASC");
     }
 
@@ -164,18 +167,18 @@ class LiquidationRepositoryTest {
         properties.getKafka().setProductLine(ProductLine.OPTION);
         properties.getKafka().setProductTopicsEnabled(true);
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate, properties);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(9401L), eq("VANILLA_OPTION")))
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(9401L), eq("OPTION")))
                 .thenReturn(List.of());
 
         repository.ordersByCandidate(9401L);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(9401L), eq("VANILLA_OPTION"));
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(9401L), eq("OPTION"));
         assertThat(sql.getValue())
                 .contains("WHERE lo.candidate_id = ?")
                 .contains("JOIN risk_liquidation_candidates c")
-                .contains("JOIN instruments i")
-                .contains("i.contract_type = ?");
+                .doesNotContain("JOIN instruments i")
+                .contains("c.product_line = ?");
     }
 
     @Test
@@ -184,18 +187,16 @@ class LiquidationRepositoryTest {
         properties.getKafka().setProductLine(ProductLine.OPTION);
         properties.getKafka().setProductTopicsEnabled(true);
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate, properties);
-        when(jdbcTemplate.queryForList(any(String.class), eq(9401L), eq("VANILLA_OPTION")))
+        when(jdbcTemplate.queryForList(any(String.class), eq(9401L), eq("OPTION")))
                 .thenReturn(List.of());
 
         repository.candidate(9401L);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).queryForList(sql.capture(), eq(9401L), eq("VANILLA_OPTION"));
+        verify(jdbcTemplate).queryForList(sql.capture(), eq(9401L), eq("OPTION"));
         assertThat(sql.getValue())
-                .contains("JOIN instruments i")
-                .contains("i.symbol = c.symbol")
-                .contains("i.version = c.instrument_version")
-                .contains("i.contract_type = ?");
+                .doesNotContain("JOIN instruments i")
+                .contains("c.product_line = ?");
     }
 
     @Test
@@ -225,7 +226,8 @@ class LiquidationRepositoryTest {
     void sizingInputCalculatesNotionalWithSharedLongMathAndLongBracketLookup() throws Exception {
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("FROM account_positions p"), anyRowMapper(),
-                eq(2002L), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(7L))).thenAnswer(invocation -> {
+                eq(2002L), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(7L),
+                eq("LINEAR_PERPETUAL"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getString("symbol")).thenReturn("BTC-USDT");
@@ -247,8 +249,9 @@ class LiquidationRepositoryTest {
         assertThat(input).isEqualTo(new LiquidationSizingInput(10L, 6L, 20_000L, 2_000L, 10_000L));
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(2002L), eq("BTC-USDT"), eq("CROSS"),
-                eq("NET"), eq(7L));
+                eq("NET"), eq(7L), eq("LINEAR_PERPETUAL"));
         assertThat(sql.getValue())
+                .contains("p.product_line = ?")
                 .doesNotContain("::NUMERIC")
                 .doesNotContain("abs(");
     }
@@ -257,7 +260,8 @@ class LiquidationRepositoryTest {
     void latestPricingInputUsesFreshRiskPositionAndAccountSnapshot() throws Exception {
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("FROM risk_position_snapshots ps"), anyRowMapper(),
-                eq(2002L), eq("BTC-USDT"), eq("ISOLATED"), eq("NET"), eq(8L), eq(5000L))).thenAnswer(invocation -> {
+                eq(2002L), eq("LINEAR_PERPETUAL"), eq("BTC-USDT"), eq("ISOLATED"), eq("NET"), eq(8L),
+                eq(5000L))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getString("contract_type")).thenReturn("LINEAR_PERPETUAL");
@@ -277,9 +281,11 @@ class LiquidationRepositoryTest {
         assertThat(input).isEqualTo(new LiquidationPricingInput(ContractType.LINEAR_PERPETUAL,
                 10L, 100L, 200L, 50L, 1L, 1L, 100_000_000L));
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(2002L), eq("BTC-USDT"),
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(2002L), eq("LINEAR_PERPETUAL"), eq("BTC-USDT"),
                 eq("ISOLATED"), eq("NET"), eq(8L), eq(5000L));
         assertThat(sql.getValue())
+                .contains("ps.product_line = ?")
+                .contains("acc.product_line = ps.product_line")
                 .contains("ps.event_time >= now() - (? * INTERVAL '1 millisecond')")
                 .contains("ps.position_margin_units + ps.unrealized_pnl_units")
                 .contains("acc.equity_units");
@@ -337,9 +343,9 @@ class LiquidationRepositoryTest {
                 eq("INVERSE_DELIVERY"));
         assertThat(sql.getValue())
                 .contains("FROM risk_liquidation_candidates c")
-                .contains("JOIN instruments i")
                 .contains("c.candidate_id = lo.candidate_id")
-                .contains("i.contract_type = ?");
+                .contains("c.product_line = ?")
+                .doesNotContain("JOIN instruments i");
     }
 
     @Test
@@ -358,10 +364,8 @@ class LiquidationRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(Timestamp.from(now)), eq(9401L),
                 eq("LINEAR_PERPETUAL"));
         assertThat(sql.getValue())
-                .contains("FROM instruments i")
-                .contains("i.symbol = c.symbol")
-                .contains("i.version = c.instrument_version")
-                .contains("i.contract_type = ?");
+                .doesNotContain("FROM instruments i")
+                .contains("c.product_line = ?");
     }
 
     @SuppressWarnings("unchecked")
