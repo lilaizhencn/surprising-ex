@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -35,6 +36,32 @@ class OrderMarginRepositoryTest {
 
     @Mock
     private OrderRepository orderRepository;
+
+    @Test
+    void requirementScopesLeverageSettingsByInstrumentProductLine() {
+        OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
+        when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
+                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
+                eq(1001L), eq("CROSS"), eq("NET"),
+                eq("BUY"), eq(5_000L),
+                eq("BTC-USDT-240927"), eq(1L), eq("LIMIT")))
+                .thenReturn(List.of());
+
+        repository.requirement("BTC-USDT-240927", 1L, 1001L, MarginMode.CROSS,
+                OrderSide.BUY, OrderType.LIMIT, 100L, 4L, 10_000L, 5_000L);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
+                eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
+                eq(1001L), eq("CROSS"), eq("NET"),
+                eq("BUY"), eq(5_000L),
+                eq("BTC-USDT-240927"), eq(1L), eq("LIMIT"));
+        assertThat(sql.getValue())
+                .contains("LEFT JOIN trading_leverage_settings ls")
+                .contains("ls.product_line = CASE i.contract_type")
+                .contains("WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'")
+                .contains("WHEN 'VANILLA_OPTION' THEN 'OPTION'");
+    }
 
     @Test
     void requirementRejectsProjectedPositionAboveInstrumentLimit() throws Exception {

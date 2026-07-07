@@ -81,6 +81,15 @@ public class OrderMarginRepository {
                     ON ls.user_id = ?
                    AND ls.symbol = i.symbol
                    AND ls.margin_mode = ?
+                   AND ls.product_line = CASE i.contract_type
+                           WHEN 'SPOT' THEN 'SPOT'
+                           WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+                           WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+                           WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+                           WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+                           WHEN 'VANILLA_OPTION' THEN 'OPTION'
+                           ELSE 'LINEAR_PERPETUAL'
+                       END
              LEFT JOIN account_positions p
                     ON p.user_id = ?
                    AND p.symbol = i.symbol
