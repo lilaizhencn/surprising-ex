@@ -10,6 +10,7 @@ import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.api.model.OptionExerciseStyle;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.instrument.api.model.RiskLimitBracket;
+import com.surprising.product.api.ProductLine;
 import java.nio.charset.StandardCharsets;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
@@ -132,6 +133,16 @@ public class InstrumentRepository {
                 """, symbol, version, Timestamp.from(now));
     }
 
+    public void setCurrentVersion(ProductLine productLine, String symbol, long version, Instant now) {
+        jdbcTemplate.update("""
+                INSERT INTO instrument_product_current_versions (product_line, symbol, version, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (product_line, symbol) DO UPDATE SET
+                    version = EXCLUDED.version,
+                    updated_at = EXCLUDED.updated_at
+                """, productLine.name(), symbol, version, Timestamp.from(now));
+    }
+
     public Optional<InstrumentResponse> latest(String symbol) {
         String sql = """
                 SELECT i.*
@@ -143,20 +154,34 @@ public class InstrumentRepository {
         return jdbcTemplate.query(sql, (rs, rowNum) -> toResponse(rs), symbol).stream().findFirst();
     }
 
+    public Optional<InstrumentResponse> latest(String symbol, ProductLine productLine) {
+        String sql = """
+                SELECT i.*
+                  FROM instruments i
+                  JOIN instrument_product_current_versions c
+                    ON c.product_line = ? AND c.symbol = i.symbol AND c.version = i.version
+                 WHERE i.symbol = ?
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> toResponse(rs), productLine.name(), symbol).stream().findFirst();
+    }
+
     public Optional<InstrumentResponse> version(String symbol, long version) {
         return jdbcTemplate.query("SELECT * FROM instruments WHERE symbol = ? AND version = ?",
                 (rs, rowNum) -> toResponse(rs), symbol, version).stream().findFirst();
     }
 
     public List<InstrumentResponse> list(InstrumentType type, InstrumentStatus status) {
+        return list(null, type, status);
+    }
+
+    public List<InstrumentResponse> list(ProductLine productLine, InstrumentType type, InstrumentStatus status) {
+        List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
                 SELECT i.*
                   FROM instruments i
-                  JOIN instrument_current_versions c
-                    ON c.symbol = i.symbol AND c.version = i.version
-                 WHERE 1 = 1
                 """);
-        List<Object> args = new ArrayList<>();
+        appendCurrentVersionJoin(sql, args, productLine);
+        sql.append(" WHERE 1 = 1\n");
         if (type != null) {
             sql.append(" AND i.instrument_type = ?");
             args.add(type.name());
@@ -170,17 +195,25 @@ public class InstrumentRepository {
     }
 
     public InstrumentPage listPage(InstrumentType type, InstrumentStatus status, int limit, String cursor, String sort) {
+        return listPage(null, type, status, limit, cursor, sort);
+    }
+
+    public InstrumentPage listPage(ProductLine productLine,
+                                   InstrumentType type,
+                                   InstrumentStatus status,
+                                   int limit,
+                                   String cursor,
+                                   String sort) {
         int safeLimit = limit(limit);
         InstrumentSort sortSpec = parseInstrumentSort(sort);
         InstrumentCursor decodedCursor = decodeInstrumentCursor(cursor);
+        List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
                 SELECT i.*
                   FROM instruments i
-                  JOIN instrument_current_versions c
-                    ON c.symbol = i.symbol AND c.version = i.version
-                 WHERE 1 = 1
                 """);
-        List<Object> args = new ArrayList<>();
+        appendCurrentVersionJoin(sql, args, productLine);
+        sql.append(" WHERE 1 = 1\n");
         if (type != null) {
             sql.append(" AND i.instrument_type = ?");
             args.add(type.name());
@@ -201,6 +234,10 @@ public class InstrumentRepository {
     }
 
     public InstrumentPage versionsPage(String symbol, int limit, String cursor, String sort) {
+        return versionsPage(symbol, null, limit, cursor, sort);
+    }
+
+    public InstrumentPage versionsPage(String symbol, ProductLine productLine, int limit, String cursor, String sort) {
         int safeLimit = limit(limit);
         VersionSort sortSpec = parseVersionSort(sort);
         Long decodedCursor = decodeVersionCursor(cursor);
@@ -211,6 +248,10 @@ public class InstrumentRepository {
                 """);
         List<Object> args = new ArrayList<>();
         args.add(symbol);
+        if (productLine != null) {
+            sql.append(" AND contract_type = ?");
+            args.add(productLine.contractTypeCode());
+        }
         if (decodedCursor != null) {
             sql.append(" AND version ").append(sortSpec.descending() ? "<" : ">").append(" ?");
             args.add(decodedCursor);
@@ -226,9 +267,10 @@ public class InstrumentRepository {
         return jdbcTemplate.query("""
                 SELECT i.*
                   FROM instruments i
-                  JOIN instrument_current_versions c
+                  JOIN instrument_product_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
                  WHERE i.instrument_type IN ('DELIVERY', 'OPTION')
+                   AND c.product_line IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
                    AND i.status IN ('PRE_TRADING', 'TRADING', 'HALT')
                    AND i.expiry_time IS NOT NULL
                    AND i.expiry_time <= ?
@@ -241,15 +283,31 @@ public class InstrumentRepository {
         return jdbcTemplate.query("""
                 SELECT i.*
                   FROM instruments i
-                  JOIN instrument_current_versions c
+                  JOIN instrument_product_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
                  WHERE i.instrument_type IN ('DELIVERY', 'OPTION')
+                   AND c.product_line IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
                    AND i.status = 'SETTLING'
                    AND i.delivery_time IS NOT NULL
                    AND i.delivery_time <= ?
                  ORDER BY i.delivery_time ASC, i.symbol ASC
                  LIMIT ?
                 """, (rs, rowNum) -> toResponse(rs), Timestamp.from(now), limit(limit));
+    }
+
+    private void appendCurrentVersionJoin(StringBuilder sql, List<Object> args, ProductLine productLine) {
+        if (productLine == null) {
+            sql.append("""
+                  JOIN instrument_current_versions c
+                    ON c.symbol = i.symbol AND c.version = i.version
+                """);
+            return;
+        }
+        sql.append("""
+                  JOIN instrument_product_current_versions c
+                    ON c.product_line = ? AND c.symbol = i.symbol AND c.version = i.version
+                """);
+        args.add(productLine.name());
     }
 
     private void insertBrackets(String symbol, long version, List<RiskLimitBracket> brackets) {

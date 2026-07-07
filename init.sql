@@ -242,6 +242,24 @@ CREATE TABLE IF NOT EXISTS instrument_current_versions (
         FOREIGN KEY (symbol, version) REFERENCES instruments(symbol, version)
 );
 
+CREATE TABLE IF NOT EXISTS instrument_product_current_versions (
+    product_line        TEXT NOT NULL,
+    symbol              TEXT NOT NULL,
+    version             BIGINT NOT NULL,
+    updated_at          TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (product_line, symbol),
+    CONSTRAINT instrument_product_current_versions_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
+    CONSTRAINT instrument_product_current_versions_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT instrument_product_current_versions_symbol_version_fk
+        FOREIGN KEY (symbol, version) REFERENCES instruments(symbol, version)
+);
+
+CREATE INDEX IF NOT EXISTS instrument_product_current_versions_symbol_idx
+    ON instrument_product_current_versions (symbol, product_line);
+
 CREATE TABLE IF NOT EXISTS instrument_symbol_sequences (
     symbol              TEXT PRIMARY KEY,
     version             BIGINT NOT NULL,
@@ -338,6 +356,25 @@ ON CONFLICT (symbol, version) DO NOTHING;
 INSERT INTO instrument_current_versions (symbol, version, updated_at)
 VALUES ('BTC-USDT', 1, now()), ('ETH-USDT', 1, now())
 ON CONFLICT (symbol) DO UPDATE SET version = EXCLUDED.version, updated_at = EXCLUDED.updated_at;
+
+INSERT INTO instrument_product_current_versions (product_line, symbol, version, updated_at)
+SELECT CASE i.contract_type
+           WHEN 'SPOT' THEN 'SPOT'
+           WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
+           WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
+           WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
+           WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
+           WHEN 'VANILLA_OPTION' THEN 'OPTION'
+           ELSE 'LINEAR_PERPETUAL'
+       END,
+       c.symbol,
+       c.version,
+       c.updated_at
+  FROM instrument_current_versions c
+  JOIN instruments i ON i.symbol = c.symbol AND i.version = c.version
+ON CONFLICT (product_line, symbol) DO UPDATE SET
+    version = EXCLUDED.version,
+    updated_at = EXCLUDED.updated_at;
 
 INSERT INTO instrument_symbol_sequences (symbol, version, updated_at)
 VALUES ('BTC-USDT', 1, now()), ('ETH-USDT', 1, now())

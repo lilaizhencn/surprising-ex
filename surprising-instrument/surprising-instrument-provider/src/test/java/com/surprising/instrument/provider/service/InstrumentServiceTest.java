@@ -80,23 +80,38 @@ class InstrumentServiceTest {
         InstrumentRepository repository = mock(InstrumentRepository.class);
         InstrumentService service = service(repository);
         InstrumentResponse instrument = option("BTC-USDT-260327-50000-C", InstrumentStatus.TRADING);
-        when(repository.latest("BTC-USDT-260327-50000-C")).thenReturn(Optional.of(instrument));
+        when(repository.latest("BTC-USDT-260327-50000-C", ProductLine.OPTION)).thenReturn(Optional.of(instrument));
 
         InstrumentResponse response = service.latest("BTC-USDT-260327-50000-C", ProductLine.OPTION);
 
         assertThat(response).isSameAs(instrument);
+        verify(repository).latest("BTC-USDT-260327-50000-C", ProductLine.OPTION);
     }
 
     @Test
     void latestRejectsMismatchedProductLine() {
         InstrumentRepository repository = mock(InstrumentRepository.class);
         InstrumentService service = service(repository);
+        when(repository.latest("BTC-USDT-260327", ProductLine.LINEAR_PERPETUAL))
+                .thenReturn(Optional.empty());
         when(repository.latest("BTC-USDT-260327"))
                 .thenReturn(Optional.of(delivery("BTC-USDT-260327", InstrumentStatus.TRADING)));
 
         assertThatThrownBy(() -> service.latest("BTC-USDT-260327", ProductLine.LINEAR_PERPETUAL))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("instrument not found for productLine");
+    }
+
+    @Test
+    void latestRejectsCorruptProductCurrentVersion() {
+        InstrumentRepository repository = mock(InstrumentRepository.class);
+        InstrumentService service = service(repository);
+        when(repository.latest("BTC-USDT-260327", ProductLine.OPTION))
+                .thenReturn(Optional.of(delivery("BTC-USDT-260327", InstrumentStatus.TRADING)));
+
+        assertThatThrownBy(() -> service.latest("BTC-USDT-260327", ProductLine.OPTION))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("instrument product current mismatch");
     }
 
     private InstrumentService service(KafkaTemplate<String, Object> kafkaTemplate, InstrumentProperties properties) {

@@ -43,8 +43,21 @@ public class InstrumentService {
     }
 
     public InstrumentResponse latest(String symbol, ProductLine productLine) {
-        InstrumentResponse response = latest(symbol);
-        if (productLine == null || response.contractType().productLine() == productLine) {
+        String normalizedSymbol = normalizeSymbol(symbol);
+        if (productLine == null) {
+            return latest(normalizedSymbol);
+        }
+        Optional<InstrumentResponse> productCurrent = instrumentRepository.latest(normalizedSymbol, productLine);
+        if (productCurrent.isPresent()) {
+            InstrumentResponse response = productCurrent.get();
+            if (response.contractType().productLine() == productLine) {
+                return response;
+            }
+            throw new IllegalStateException("instrument product current mismatch: "
+                    + symbol + ":" + productLine.name() + ":" + response.contractType().name());
+        }
+        InstrumentResponse response = latest(normalizedSymbol);
+        if (response.contractType().productLine() == productLine) {
             return response;
         }
         throw new IllegalStateException("instrument not found for productLine: " + symbol + ":" + productLine.name());
@@ -60,14 +73,34 @@ public class InstrumentService {
         return new InstrumentQueryResponse(rows.size(), rows);
     }
 
+    public InstrumentQueryResponse list(ProductLine productLine, InstrumentType type, InstrumentStatus status) {
+        var rows = instrumentRepository.list(productLine, type, status);
+        return new InstrumentQueryResponse(rows.size(), rows);
+    }
+
     public InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status, int limit, String cursor, String sort) {
         var page = instrumentRepository.listPage(type, status, limit, cursor, sort);
         return new InstrumentQueryResponse(page.instruments().size(), page.instruments(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
 
+    public InstrumentQueryResponse list(ProductLine productLine,
+                                        InstrumentType type,
+                                        InstrumentStatus status,
+                                        int limit,
+                                        String cursor,
+                                        String sort) {
+        var page = instrumentRepository.listPage(productLine, type, status, limit, cursor, sort);
+        return new InstrumentQueryResponse(page.instruments().size(), page.instruments(), page.nextCursor(),
+                page.hasMore(), page.sort(), page.limit());
+    }
+
     public InstrumentQueryResponse versions(String symbol, int limit, String cursor, String sort) {
-        var page = instrumentRepository.versionsPage(normalizeSymbol(symbol), limit, cursor, sort);
+        return versions(symbol, null, limit, cursor, sort);
+    }
+
+    public InstrumentQueryResponse versions(String symbol, ProductLine productLine, int limit, String cursor, String sort) {
+        var page = instrumentRepository.versionsPage(normalizeSymbol(symbol), productLine, limit, cursor, sort);
         return new InstrumentQueryResponse(page.instruments().size(), page.instruments(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
@@ -83,6 +116,7 @@ public class InstrumentService {
         Instant now = Instant.now();
         long version = instrumentRepository.nextVersion(symbol);
         instrumentRepository.insert(symbol, version, request, now);
+        instrumentRepository.setCurrentVersion(request.contractType().productLine(), symbol, version, now);
         instrumentRepository.setCurrentVersion(symbol, version, now);
         InstrumentResponse response = instrumentRepository.version(symbol, version)
                 .orElseThrow(() -> new IllegalStateException("instrument insert failed: " + symbol));
@@ -92,7 +126,12 @@ public class InstrumentService {
 
     @Transactional
     public InstrumentResponse updateStatus(String symbol, InstrumentStatus status) {
-        InstrumentResponse current = latest(symbol);
+        return updateStatus(symbol, null, status);
+    }
+
+    @Transactional
+    public InstrumentResponse updateStatus(String symbol, ProductLine productLine, InstrumentStatus status) {
+        InstrumentResponse current = latest(symbol, productLine);
         InstrumentUpsertRequest request = new InstrumentUpsertRequest(
                 current.symbol(), current.instrumentType(), current.contractType(), current.baseAsset(),
                 current.quoteAsset(), current.settleAsset(), current.contractMultiplierPpm(), current.contractValueAsset(),

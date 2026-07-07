@@ -56,14 +56,26 @@ public class InstrumentController {
 
     @GetMapping(InstrumentApiPaths.BASE_PATH + "/list")
     public InstrumentQueryResponse list(@RequestParam(value = "type", required = false) InstrumentType type,
-                                        @RequestParam(value = "status", required = false) InstrumentStatus status) {
-        return instrumentService.list(type, status);
+                                        @RequestParam(value = "status", required = false) InstrumentStatus status,
+                                        @RequestHeader(value = "X-Product-Line", required = false)
+                                        String productLineHeader,
+                                        @RequestParam(value = "productLine", required = false)
+                                        String productLineValue) {
+        try {
+            return instrumentService.list(productLine(productLineValue, productLineHeader), type, status);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
     }
 
     @GetMapping(InstrumentApiPaths.ADMIN_BASE_PATH + "/{symbol}")
-    public InstrumentResponse adminLatest(@PathVariable("symbol") String symbol) {
+    public InstrumentResponse adminLatest(@PathVariable("symbol") String symbol,
+                                          @RequestHeader(value = "X-Product-Line", required = false)
+                                          String productLineHeader,
+                                          @RequestParam(value = "productLine", required = false)
+                                          String productLineValue) {
         try {
-            return instrumentService.latest(symbol);
+            return instrumentService.latest(symbol, productLine(productLineValue, productLineHeader));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -76,9 +88,14 @@ public class InstrumentController {
                                              @RequestParam(value = "status", required = false) InstrumentStatus status,
                                              @RequestParam(value = "limit", defaultValue = "100") int limit,
                                              @RequestParam(value = "cursor", required = false) String cursor,
-                                             @RequestParam(value = "sort", required = false) String sort) {
+                                             @RequestParam(value = "sort", required = false) String sort,
+                                             @RequestHeader(value = "X-Product-Line", required = false)
+                                             String productLineHeader,
+                                             @RequestParam(value = "productLine", required = false)
+                                             String productLineValue) {
         try {
-            return instrumentService.list(type, status, limit, cursor, sort);
+            return instrumentService.list(productLine(productLineValue, productLineHeader), type, status,
+                    limit, cursor, sort);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -88,9 +105,14 @@ public class InstrumentController {
     public InstrumentQueryResponse versions(@PathVariable("symbol") String symbol,
                                             @RequestParam(value = "limit", defaultValue = "100") int limit,
                                             @RequestParam(value = "cursor", required = false) String cursor,
-                                            @RequestParam(value = "sort", required = false) String sort) {
+                                            @RequestParam(value = "sort", required = false) String sort,
+                                            @RequestHeader(value = "X-Product-Line", required = false)
+                                            String productLineHeader,
+                                            @RequestParam(value = "productLine", required = false)
+                                            String productLineValue) {
         try {
-            return instrumentService.versions(symbol, limit, cursor, sort);
+            return instrumentService.versions(symbol, productLine(productLineValue, productLineHeader),
+                    limit, cursor, sort);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -107,9 +129,13 @@ public class InstrumentController {
 
     @PostMapping(InstrumentApiPaths.ADMIN_BASE_PATH + "/{symbol}/status")
     public InstrumentResponse updateStatus(@PathVariable("symbol") String symbol,
-                                           @RequestParam("status") InstrumentStatus status) {
+                                           @RequestParam("status") InstrumentStatus status,
+                                           @RequestHeader(value = "X-Product-Line", required = false)
+                                           String productLineHeader,
+                                           @RequestParam(value = "productLine", required = false)
+                                           String productLineValue) {
         try {
-            return instrumentService.updateStatus(symbol, status);
+            return instrumentService.updateStatus(symbol, productLine(productLineValue, productLineHeader), status);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

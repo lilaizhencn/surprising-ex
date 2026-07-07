@@ -628,7 +628,7 @@ class MarketMakerServiceTest {
 
     private static final class FakeInstrumentRpc implements InstrumentRpcApi {
         @Override
-        public InstrumentResponse latest(String symbol) {
+        public InstrumentResponse latest(String symbol, ProductLine productLine) {
             Instant now = Instant.parse("2026-01-01T00:00:00Z");
             return new InstrumentResponse(symbol, 1L, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL,
                     "BTC", "USDT", "USDT", 1_000_000L, "BTC", 100L, 1L, 1L, 1_000_000L,
@@ -641,11 +641,11 @@ class MarketMakerServiceTest {
 
         @Override
         public InstrumentResponse version(String symbol, long version) {
-            return latest(symbol);
+            return latest(symbol, null);
         }
 
         @Override
-        public InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status) {
+        public InstrumentQueryResponse list(ProductLine productLine, InstrumentType type, InstrumentStatus status) {
             throw new UnsupportedOperationException();
         }
     }

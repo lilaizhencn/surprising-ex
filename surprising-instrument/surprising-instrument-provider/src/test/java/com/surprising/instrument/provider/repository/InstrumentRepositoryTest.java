@@ -17,6 +17,7 @@ import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.api.model.OptionExerciseStyle;
 import com.surprising.instrument.api.model.OptionType;
+import com.surprising.product.api.ProductLine;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -81,6 +82,47 @@ class InstrumentRepositoryTest {
         assertThat(args.getValue()).containsExactly("BTC-USDT", 2);
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    @Test
+    void latestWithProductLineUsesProductCurrentVersion() {
+        repository.latest("BTC-USDT", ProductLine.OPTION);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("instrument_product_current_versions")
+                .contains("c.product_line = ?");
+        assertThat(args.getValue()).containsExactly("OPTION", "BTC-USDT");
+    }
+
+    @Test
+    void setProductCurrentVersionWritesProductLineKey() {
+        Instant now = Instant.parse("2026-01-01T00:00:00Z");
+
+        repository.setCurrentVersion(ProductLine.LINEAR_DELIVERY, "BTC-USDT-260327", 4L, now);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(sql.capture(), args.capture());
+        assertThat(sql.getValue()).contains("instrument_product_current_versions");
+        assertThat(args.getValue()).containsExactly("LINEAR_DELIVERY", "BTC-USDT-260327", 4L, Timestamp.from(now));
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    @Test
+    void versionsPageCanFilterByProductLine() {
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(List.of());
+
+        repository.versionsPage("BTC-USDT", ProductLine.OPTION, 10, null, "version.desc");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue()).contains("contract_type = ?");
+        assertThat(args.getValue()).containsExactly("BTC-USDT", "VANILLA_OPTION", 11);
+    }
+
     @Test
     void listPageRejectsUnsupportedSort() {
         assertThatThrownBy(() -> repository.listPage(null, null, 10, null, "status.desc"))
@@ -99,7 +141,8 @@ class InstrumentRepositoryTest {
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
         assertThat(sql.getValue())
-                .contains("instrument_current_versions")
+                .contains("instrument_product_current_versions")
+                .contains("c.product_line IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')")
                 .contains("i.instrument_type IN ('DELIVERY', 'OPTION')")
                 .contains("i.status IN ('PRE_TRADING', 'TRADING', 'HALT')")
                 .contains("i.expiry_time <= ?");
@@ -117,7 +160,8 @@ class InstrumentRepositoryTest {
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
         assertThat(sql.getValue())
-                .contains("instrument_current_versions")
+                .contains("instrument_product_current_versions")
+                .contains("c.product_line IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')")
                 .contains("i.instrument_type IN ('DELIVERY', 'OPTION')")
                 .contains("i.status = 'SETTLING'")
                 .contains("i.delivery_time <= ?");
