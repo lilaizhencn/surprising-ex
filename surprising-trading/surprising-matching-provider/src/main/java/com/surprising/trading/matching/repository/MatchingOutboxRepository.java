@@ -37,6 +37,7 @@ public class MatchingOutboxRepository {
                         String eventType,
                         String payload,
                         Instant now) {
+        requireCurrentProductTopic(aggregateType, topic);
         long id = sequenceRepository.nextSequence("outbox");
         int rows = jdbcTemplate.update("""
                 INSERT INTO trading_outbox_events (
@@ -167,6 +168,26 @@ public class MatchingOutboxRepository {
         args.add(kafka.getMatchResultsTopic());
         args.add(kafka.getMatchTradesTopic());
         args.add(kafka.getOrderBookDepthTopic());
+    }
+
+    private void requireCurrentProductTopic(String aggregateType, String topic) {
+        MatchingProperties.Kafka kafka = properties.getKafka();
+        if (!kafka.isProductTopicsEnabled() || !isMatchingAggregate(aggregateType)) {
+            return;
+        }
+        String matchResultsTopic = kafka.getMatchResultsTopic();
+        String matchTradesTopic = kafka.getMatchTradesTopic();
+        String orderBookDepthTopic = kafka.getOrderBookDepthTopic();
+        if (!matchResultsTopic.equals(topic) && !matchTradesTopic.equals(topic) && !orderBookDepthTopic.equals(topic)) {
+            throw new IllegalStateException("matching outbox topic must match current product line: expected one of ["
+                    + matchResultsTopic + ", " + matchTradesTopic + ", " + orderBookDepthTopic + "] actual=" + topic);
+        }
+    }
+
+    private boolean isMatchingAggregate(String aggregateType) {
+        return "MATCH_TRADE".equals(aggregateType)
+                || "MATCH_RESULT".equals(aggregateType)
+                || "ORDER_BOOK_DEPTH".equals(aggregateType);
     }
 
     private void requireSingleRow(int rows, String operation) {

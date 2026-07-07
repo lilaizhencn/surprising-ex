@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -29,6 +30,43 @@ class MatchingOutboxRepositoryTest {
 
     @Mock
     private MatchingSequenceRepository sequenceRepository;
+
+    @Test
+    void enqueueAllowsCurrentProductTopicsWhenProductTopicsAreEnabled() {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository,
+                properties);
+        when(sequenceRepository.nextSequence("outbox")).thenReturn(901L);
+        when(jdbcTemplate.update(contains("INSERT INTO trading_outbox_events"), any(Object[].class)))
+                .thenReturn(1);
+
+        repository.enqueue("MATCH_RESULT", 11L, "surprising.inverse-delivery.match.results.v1",
+                "BTC-USD-260925", "PLACE", "{}", Instant.parse("2026-07-01T00:00:00Z"));
+
+        verify(sequenceRepository).nextSequence("outbox");
+        verify(jdbcTemplate).update(contains("INSERT INTO trading_outbox_events"), any(Object[].class));
+    }
+
+    @Test
+    void enqueueRejectsOtherProductTopicBeforeWritingWhenProductTopicsAreEnabled() {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository,
+                properties);
+
+        assertThatThrownBy(() -> repository.enqueue("MATCH_TRADE", 11L,
+                "surprising.linear-delivery.match.trades.v1", "BTC-USDT-260925-70000-C", "TRADE", "{}",
+                Instant.parse("2026-07-01T00:00:00Z")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("matching outbox topic must match current product line")
+                .hasMessageContaining("surprising.option.match.trades.v1");
+
+        verify(sequenceRepository, never()).nextSequence("outbox");
+        verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
+    }
 
     @Test
     void enqueueFailsWhenOutboxInsertIsSkipped() {
