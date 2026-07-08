@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README_CN.md)
 
-Surprising Exchange 账户和合约持仓模块。当前实现 long-based 余额、余额流水、成交幂等处理、净持仓更新、成交后订单保证金到持仓保证金的迁移、maker/taker 手续费结算，以及强平成交后的实际强平费收取和保险基金入账事件。
+Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础余额、产品账户、余额流水、成交幂等处理、现货资产结算、衍生品持仓更新、成交后订单保证金到持仓保证金的迁移、maker/taker 手续费结算、资金费结算、交割/行权流水，以及强平成交后的实际强平费收取和保险基金入账事件。
 
 ## 模块
 
@@ -29,7 +29,7 @@ Surprising Exchange 账户和合约持仓模块。当前实现 long-based 余额
 `surprising-account-provider` 消费：
 
 ```text
-surprising.perp.match.trades.v1
+surprising.<product-segment>.match.trades.v1
 ```
 
 每条 `MatchTradeEvent` 会同时更新：
@@ -41,7 +41,7 @@ surprising.perp.match.trades.v1
 - 平仓产生的已实现盈亏会写入 `account_ledger_entries`，`reference_type = TRADE_PNL`。
 - 每笔成交的 maker/taker 手续费会写入 `account_ledger_entries`，`reference_type = TRADE_FEE`，并保存 `trade_id`、`order_id`、`symbol`、`fee_rate_ppm` 方便对账。
 - 如果成交订单是强平订单，account-provider 还会写 `reference_type = LIQUIDATION_FEE` 的强平费流水。扣款按实际可收 collateral 封顶：全仓可使用同结算资产的可用余额和全仓持仓保证金；逐仓只使用该逐仓持仓保证金。收不上的部分不会生成新的 deficit，也不会进入保险基金。
-- 强平费收取成功后会通过 account transactional outbox 发送到 `surprising.account.liquidation-fee.events.v1`，Kafka key 是结算资产。insurance-provider 消费后按 `tradeId:orderId` 幂等写入 `insurance_fund_ledger(reference_type = LIQUIDATION_FEE)`。
+- 强平费收取成功后会通过 account transactional outbox 发送到 `surprising.<product-segment>.account.liquidation-fee.events.v1`，Kafka key 是结算资产。insurance-provider 消费后按 `tradeId:orderId` 幂等写入 `insurance_fund_ledger(reference_type = LIQUIDATION_FEE)`。
 - 翻仓成交先平旧仓，再把剩余成交数量作为新仓处理。
 - 如果成交导致翻仓，已实现盈亏使用旧持仓版本计算，翻仓后剩余新仓使用成交的 `instrumentVersion`。
 - 开仓成交必须找到对应的 `account_margin_reservations` 并成功迁移订单保证金；缺失 reservation、reduce-only 订单出现开仓数量、或迁移写入返回 0 都会失败并回滚整笔成交处理。
@@ -149,9 +149,11 @@ admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Use
 surprising:
   account:
     kafka:
-      match-trades-topic: surprising.perp.match.trades.v1
-      position-events-topic: surprising.account.position.events.v1
-      liquidation-fee-events-topic: surprising.account.liquidation-fee.events.v1
+      product-line: LINEAR_PERPETUAL
+      product-topics-enabled: true
+      match-trades-topic: surprising.linear-perp.match.trades.v1
+      position-events-topic: surprising.linear-perp.account.position.events.v1
+      liquidation-fee-events-topic: surprising.linear-perp.account.liquidation-fee.events.v1
       concurrency: 2
       max-poll-records: 500
     outbox:
@@ -162,6 +164,8 @@ surprising:
       contract-spec-max-entries: 4096
       order-fee-snapshot-max-entries: 200000
 ```
+
+启动独立产品线实例时，把 `product-line` 设置为 `SPOT`、`LINEAR_PERPETUAL`、`LINEAR_DELIVERY` 或 `OPTION`。`product-topics-enabled=false` 时仍可使用 legacy topic。
 
 本地缓存只用于不可变读快照：
 

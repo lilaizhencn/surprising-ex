@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README_CN.md)
 
-Surprising Exchange perpetual trading module. The current implementation contains `surprising-order-provider`, `surprising-trigger-provider`, and `surprising-matching-provider`: order entry, take-profit/stop-loss trigger orders, instrument-rule validation, idempotent persistence, Kafka matching-command publishing, real exchange-core order-book matching, matching results, and trade events.
+Surprising Exchange trading module for spot, perpetual, delivery, and option product lines. The current implementation contains `surprising-order-provider`, `surprising-trigger-provider`, and `surprising-matching-provider`: order entry, take-profit/stop-loss trigger orders, instrument-rule validation, idempotent persistence, product-line Kafka command publishing, real exchange-core order-book matching, matching results, and trade events.
 
 ## Modules
 
@@ -44,10 +44,10 @@ client / internal gateway
   -> surprising-order-provider
   -> PostgreSQL trading_orders + trading_order_events + trading_outbox_events
   -> outbox publisher
-  -> surprising.perp.order.commands.v1
+  -> surprising.<product-segment>.order.commands.v1
   -> surprising-matching-provider / exchange-core
   -> trading_match_results / trading_match_trades
-  -> surprising.perp.match.results.v1 / surprising.perp.match.trades.v1
+  -> surprising.<product-segment>.match.results.v1 / surprising.<product-segment>.match.trades.v1
 ```
 
 Trigger orders use a separate path:
@@ -57,12 +57,12 @@ client / internal gateway
   -> POST /api/v1/trading/trigger-orders
   -> surprising-trigger-provider
   -> PostgreSQL trading_trigger_orders
-  -> consume surprising.perp.mark.price.v1
+  -> consume surprising.<product-segment>.mark.price.v1
   -> submit reduceOnly order through surprising-order-provider
   -> normal order / matching / account / WebSocket flow
 ```
 
-The order provider does not match orders and does not own WebSocket fanout. Order-state push should be a separate service consuming `surprising.perp.order.events.v1` and `surprising.perp.match.results.v1`.
+The order provider does not match orders and does not own WebSocket fanout. Order-state push should be a separate service consuming product-line order and match topics. Legacy `surprising.perp.*` topics remain available when product-topic routing is disabled.
 
 ## Margin Mode
 
@@ -151,7 +151,7 @@ Large exchanges implement TP/SL as conditional orders outside the live order boo
 - `MARK_PRICE`, `INDEX_PRICE`, and `LAST_PRICE` trigger sources are supported. `LAST_PRICE` consumes the real match-trade stream and is available for user TP/SL/trailing orders, but it remains riskier than mark/index in thin books and is not used for liquidation.
 - Direction is derived from close side and trigger type: long TP is `SELL + TAKE_PROFIT` and triggers when the selected trigger source is greater than or equal to the trigger; long SL is `SELL + STOP_LOSS` and triggers when the selected source is less than or equal to the trigger. Short closes use the inverse conditions with `BUY`.
 - `TRAILING_STOP` requires `MARKET` execution, `callbackRatePpm` in `[1000, 100000]` (`0.1%` to `10%`), and optional `activationPriceTicks`. A SELL trailing stop activates when the source reaches the activation price, tracks the highest post-activation price, and triggers when the source falls by the callback. A BUY trailing stop tracks the lowest price and triggers after an upward callback.
-- The trigger provider consumes `surprising.perp.mark.price.v1` for `MARK_PRICE`, `surprising.perp.index.price.v1` for `INDEX_PRICE`, and `surprising.perp.match.trades.v1` for `LAST_PRICE`; it validates Kafka key = payload `symbol`, converts persisted mark/index rows to current instrument ticks, and claims due rows with PostgreSQL `FOR UPDATE SKIP LOCKED`.
+- The trigger provider consumes the current product line's mark-price topic for `MARK_PRICE`, index-price topic for `INDEX_PRICE`, and match-trades topic for `LAST_PRICE`; it validates Kafka key = payload `symbol`, converts persisted mark/index rows to current instrument ticks, and claims due rows with PostgreSQL `FOR UPDATE SKIP LOCKED`. Legacy `surprising.perp.*` topics are used only when product-topic routing is disabled.
 - Multiple trigger-provider nodes can run at the same time. Only one node can claim a due trigger row, and stale `TRIGGERING` rows are reset after `surprising.trading.trigger.execution.stale-triggering-after` so downstream failures retry on later mark events.
 - When triggered, it calls order-provider with `reduceOnly=true`, `postOnly=false`, and `clientOrderId=trigger-<triggerOrderId>`. The order-provider idempotency key protects retries from creating duplicate close orders.
 - Triggered orders go through the same order, matching, account, fee, PnL, risk, liquidation, and WebSocket flow as user-submitted close orders. The trigger service never mutates balances or positions directly.
@@ -277,12 +277,14 @@ The trading Java module remains long-only.
 
 ## Kafka
 
-- `surprising.perp.order.commands.v1`: matching commands, key = `symbol`.
-- `surprising.perp.order.events.v1`: order entry events, key = `symbol`.
-- `surprising.perp.match.results.v1`: matching results, key = `symbol`.
-- `surprising.perp.match.trades.v1`: matching trades, key = `symbol`, with prices and quantities still represented as long ticks/steps.
-- `surprising.perp.orderbook.depth.v1`: L2 order book depth updates, key = `symbol`.
-- `surprising.perp.mark.price.v1`: mark-price stream consumed by trigger-provider, key = `symbol`.
+- `surprising.<product-segment>.order.commands.v1`: matching commands, key = `symbol`.
+- `surprising.<product-segment>.order.events.v1`: order entry events, key = `symbol`.
+- `surprising.<product-segment>.match.results.v1`: matching results, key = `symbol`.
+- `surprising.<product-segment>.match.trades.v1`: matching trades, key = `symbol`, with prices and quantities still represented as long ticks/steps.
+- `surprising.<product-segment>.orderbook.depth.v1`: L2 order book depth updates, key = `symbol`.
+- `surprising.<product-segment>.mark.price.v1`: mark-price stream consumed by trigger-provider, key = `symbol`.
+
+Legacy `surprising.perp.*` topics remain available for backward-compatible single-line perpetual startup.
 
 Partitions should continue to scale by symbol. All commands for the same symbol must route to the same matching shard/order book.
 `surprising.trading.matching.kafka.max-poll-records` defaults to `500`; tune it with Kafka lag and command processing latency instead of changing code.
@@ -357,7 +359,7 @@ This is DB open-order reconstruction, not native exchange-core journal replay. I
 
 ### Multi-Node Matching
 
-`surprising.perp.order.commands.v1` must be keyed by `symbol`. Kafka assigns each partition to one consumer in the `surprising-matching-v1` group, so one live matcher owns a symbol partition at a time.
+The product-line order command topic must be keyed by `symbol`. Kafka assigns each partition to one consumer in that product line's matching consumer group, so one live matcher owns a symbol partition at a time.
 
 The matching consumer uses cooperative sticky assignment and `MatchingPartitionAssignmentGuard`:
 

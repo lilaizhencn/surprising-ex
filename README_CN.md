@@ -2,26 +2,28 @@
 
 [English](README.md) | [简体中文](README_CN.md)
 
-Surprising 交易所后端服务。
+Surprising 多产品线交易所后端服务。
 
-这个仓库是交易所后端模块的根聚合工程。每个业务模块维护自己的详细 README 和部署说明。
+这个仓库是交易所后端模块的根聚合工程。当前在同一套服务架构下支持按产品线隔离运行的现货、U 本位永续、U 本位交割和欧式普通期权链路。每个业务模块维护自己的详细 README 和部署说明。
 
 ## 项目解读
 
-如果想了解项目整体架构和实现细节，可以阅读 Surprising Ex 永续合约交易所源码深度解读文章：
+如果想了解项目整体架构和实现细节，可以阅读 Surprising-EX 源码和产品线文章：
 
-- [中文](https://tokdou.com/tutorials/surprising-ex-perpetual-contract-exchange-source-code-deep-dive)
-- [English](https://tokdou.com/en/tutorials/surprising-ex-perpetual-contract-exchange-source-code-deep-dive)
+- 源码深度解读：[中文](https://tokdou.com/tutorials/surprising-ex-perpetual-contract-exchange-source-code-deep-dive) / [English](https://tokdou.com/en/tutorials/surprising-ex-perpetual-contract-exchange-source-code-deep-dive)
+- 四产品线架构方案：[中文](https://tokdou.com/tutorials/surprising-ex-four-product-line-architecture-okx-binance-comparison) / [English](https://tokdou.com/en/tutorials/surprising-ex-four-product-line-architecture-okx-binance-comparison)
+- 交割合约和期权小白指南：[中文](https://tokdou.com/tutorials/delivery-contract-and-options-beginner-guide) / [English](https://tokdou.com/en/tutorials/delivery-contract-and-options-beginner-guide)
 
 ## 模块
 
 - `surprising-dependencies`：从 `surprising-wallet` 复制过来的统一依赖版本管理模块。
 - `surprising-parent`：从 `surprising-wallet` 复制过来的公共父 POM。
-- `surprising-instrument`：合约基础配置和产品规则中心。
-- `surprising-candlestick`：合约 K 线服务。
-- `surprising-price`：合约指数价格和标记价格服务。
-- `surprising-trading`：合约订单入口、止盈止损条件单和 exchange-core 撮合。
-- `surprising-account`：账户余额、余额流水和合约持仓服务。
+- `surprising-product-api`：公共产品线枚举、账户类型映射和产品线 topic 命名。
+- `surprising-instrument`：现货、永续、交割和期权的基础配置和产品规则中心。
+- `surprising-candlestick`：按产品线隔离的 K 线服务。
+- `surprising-price`：衍生品指数价格和标记价格服务。
+- `surprising-trading`：订单入口、止盈止损条件单、算法单、产品线 Kafka 路由和 exchange-core 撮合。
+- `surprising-account`：账户余额、余额流水、产品账户、产品流水、持仓、保证金、现货结算、衍生品结算、交割和期权行权账务。
 - `surprising-risk`：保证金率、风险快照和爆仓候选服务。
 - `surprising-liquidation`：强平候选执行和 reduce-only 平仓订单服务。
 - `surprising-funding`：永续合约资金费率发布和结算服务。
@@ -32,8 +34,21 @@ Surprising 交易所后端服务。
 - `surprising-market-maker`：内网做市商报价和交易链路压测策略服务。
 - `surprising-integration-test`：订单、撮合、账户、风控、强平、资金费、保险基金和 ADL 链路的跨模块验证。
 
+## 支持的产品线
+
+| 产品线 | `ProductLine` | 账户类型 | 合约类型 | 资金费 | 生命周期 |
+| --- | --- | --- | --- | --- | --- |
+| 现货 | `SPOT` | `SPOT` | `SPOT` | 否 | 即时资产互换，无持仓 |
+| U 本位永续 | `LINEAR_PERPETUAL` | `USDT_PERPETUAL` | `LINEAR_PERPETUAL` | 是 | 无到期日 |
+| U 本位交割 | `LINEAR_DELIVERY` | `USDT_DELIVERY` | `LINEAR_DELIVERY` | 否 | 到期现金交割 |
+| 欧式普通期权 | `OPTION` | `OPTION` | `VANILLA_OPTION` | 否 | 到期现金行权 |
+
+`INVERSE_PERPETUAL` 和 `INVERSE_DELIVERY` 已经存在于公共产品线 API 和 topic 映射里；当前进程级 smoke 主覆盖集中在上面四条产品线。
+
 ## 模块文档
 
+- [产品线拆分与交割/期权落地方案](docs/product-line-split-plan_CN.md)
+- [产品线资金守恒与账账核对](docs/product-line-testing-and-funds-reconciliation_CN.md)
 - [永续合约交易教程和系统实现说明](docs/perpetual-contract-tutorial_CN.md)
 - [交易接口补齐与全链路压测报告](docs/order-api-production-test-report.md)
 - [market-maker provider 持续做市全链路 smoke](docs/market-maker-provider-continuous-report.md)
@@ -131,7 +146,9 @@ mvn -pl :surprising-market-maker-provider -am spring-boot:run
 
 - `surprising.instrument.events.v1`：合约配置变更事件。
 - `surprising.perp.candle.events.v1`：K 线快照输出。
-- `surprising.perp.order.commands.v1`：订单撮合命令。
+Legacy 永续 topic 仍保留用于兼容单线启动。产品线实例使用 `surprising.<product-segment>.*.v1`，例如 `surprising.spot.order.commands.v1`、`surprising.linear-perp.match.trades.v1`、`surprising.linear-delivery.delivery.settlements.v1` 和 `surprising.option.option.exercises.v1`。
+
+- `surprising.perp.order.commands.v1`：legacy 永续订单撮合命令。
 - `surprising.perp.order.events.v1`：订单入口事件。
 - `surprising.perp.match.results.v1`：撮合结果事件。
 - `surprising.perp.match.trades.v1`：撮合成交事件，long 定点数，供 K 线和公开成交推送消费。
@@ -179,6 +196,17 @@ mvn -pl :surprising-integration-test -am test
 脚本会导入 [init.sql](init.sql)，验证 instrument version 锁定、U 本位线性合约、币本位反向合约、资金费 notional 折算、风险快照、强平候选幂等、保险基金亏损覆盖和 ADL 亏损转移记账。设置 `RUN_MAVEN=true` 可以在同一次执行里顺带运行单元测试。
 integration-test 模块使用真实 exchange-core 和内存 Kafka/DB adapter，验证下单、撮合、账户结算、U 本位线性和币本位反向用户 reduce-only 主动平仓、风险候选生成、强平单生成、强平成交回写、资金费结算、保险基金覆盖和 ADL 剩余亏损转移这些 Java 链路。
 
+逐线运行真实进程级产品线 API flow：
+
+```bash
+PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=LINEAR_DELIVERY BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=OPTION BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=SPOT BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+```
+
+产品线 smoke 每次只启动当前线所需 provider，让做市商保持运行，模拟普通用户通过 API 下单，覆盖持仓形成、用户主动平仓、强平、风控、撮合、适用产品线的资金费、交割/行权，结束后执行 `scripts/product-line-funds-reconcile.sh`。资金核对会把期初、充值/调整、成交、手续费、资金费、强平费、交割/行权流水和期末余额用整数单位逐项对平。
+
 可以直接运行真实 Kafka/PostgreSQL 进程级交易 smoke：
 
 ```bash
@@ -205,6 +233,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - 每个 provider 至少部署 2 个实例。
 - Kafka topic replication factor 生产建议为 `3`。
 - Instrument 是全系统唯一 symbol 和交易规则配置源。
+- 产品线实例必须使用独立的 Kafka topic、consumer group、matching client id、price/risk/funding 协调 id 和 gateway route。详见 [docs/deployment.md](docs/deployment.md)。
 - Trading 订单入口使用 long 定点数：`priceTicks`、`quantitySteps` 和资产 `units` 对齐 exchange-core；订单、撮合、账户、风控、强平、资金费、保险基金和 ADL 核心链路都不使用 BigDecimal。小数只允许存在于外部行情/汇率解析、后台录入、展示和报表边界。
 - Matching 使用 `exchange-core` 真实订单簿消费订单命令，输出 long 定点数撮合结果和成交事件。
 - Matching 启动时从 PostgreSQL 恢复开放的 `LIMIT` + `GTC/GTX` 订单簿；遇到不安全的 Kafka partition 重新分配会重启，让 failover 走新鲜 DB 恢复。

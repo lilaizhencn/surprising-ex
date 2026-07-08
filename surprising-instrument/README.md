@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README_CN.md)
 
-Perpetual instrument configuration module for Surprising Exchange. It is the product-rule center for matching, risk, account, candlestick, index price, mark price, and funding-rate services.
+Instrument configuration module for Surprising Exchange. It is the product-rule center for spot, perpetual, delivery, and option matching, risk, account, candlestick, index price, mark price, funding-rate, delivery, and exercise services.
 
 ## Modules
 
@@ -11,12 +11,13 @@ Perpetual instrument configuration module for Surprising Exchange. It is the pro
 
 ## Responsibilities
 
-- Base contract metadata: `symbol`, base/quote/settle asset, contract type, contract size.
+- Base product metadata: `symbol`, product line, instrument type, base/quote/settle asset, contract type, contract size.
 - Price and quantity rules: tick size, step size, min/max order quantity, notional limits, precision.
 - Order rules: supported order types, time in force, post-only, reduce-only, market-order switches.
 - Risk rules: maximum leverage, initial margin rate, maintenance margin rate, risk limit brackets.
 - Default trading fee schedule: maker/taker fee rates in ppm. Positive values charge the user; negative values represent rebates. User/VIP/market-maker/promotion overrides are resolved from order-provider `trading_fee_schedules` and snapshotted on the order.
-- Funding configuration: interval, interest rate, cap/floor, impact notional.
+- Funding configuration: interval, interest rate, cap/floor, impact notional for perpetual products.
+- Lifecycle metadata: expiry time, delivery time, settlement method, underlying symbol, strike price, option type, and option exercise style for delivery and option products.
 - Index components: external spot source REST/WS config, weights, USD/USDT conversion rules.
 - Versioning: every change creates a new `version`; `instrument_current_versions` switches the current snapshot.
 - Multi-node safety: `instrument_symbol_sequences` atomically allocates versions per symbol and prevents version conflicts during concurrent admin requests.

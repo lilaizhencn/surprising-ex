@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README_CN.md)
 
-Surprising Exchange account and perpetual position module. The current implementation provides long-based balances, ledger entries, idempotent trade processing, net position updates, order-margin to position-margin migration, maker/taker fee settlement after trades, and actual liquidation-fee collection for insurance-fund funding.
+Surprising Exchange account and product settlement module. The current implementation provides long-based basic balances, product balances, ledger entries, idempotent trade processing, spot asset settlement, derivative position updates, order-margin to position-margin migration, maker/taker fee settlement, funding settlement, delivery/exercise ledger entries, and actual liquidation-fee collection for insurance-fund funding.
 
 ## Modules
 
@@ -31,7 +31,7 @@ Surprising Exchange account and perpetual position module. The current implement
 `surprising-account-provider` consumes:
 
 ```text
-surprising.perp.match.trades.v1
+surprising.<product-segment>.match.trades.v1
 ```
 
 Each `MatchTradeEvent` updates:
@@ -43,7 +43,7 @@ Each `MatchTradeEvent` updates:
 - Realized PnL from closing fills is written to `account_ledger_entries` with `reference_type = TRADE_PNL`.
 - Maker/taker fees from every fill are written to `account_ledger_entries` with `reference_type = TRADE_FEE`, including `trade_id`, `order_id`, `symbol`, and `fee_rate_ppm` audit fields.
 - If the filled order is a liquidation order, account-provider also writes `reference_type = LIQUIDATION_FEE` for the actual collected liquidation fee. The charge is capped by collectible collateral: cross margin can use available balance plus cross position margin in the same asset; isolated margin can use only that isolated position margin. Any uncollectible amount is not turned into a deficit and is not credited to the insurance fund.
-- Successful liquidation-fee collection writes an account transactional outbox event to `surprising.account.liquidation-fee.events.v1` keyed by settlement asset. Insurance-provider consumes this event and credits `insurance_fund_ledger(reference_type = LIQUIDATION_FEE)` idempotently by `tradeId:orderId`.
+- Successful liquidation-fee collection writes an account transactional outbox event to `surprising.<product-segment>.account.liquidation-fee.events.v1` keyed by settlement asset. Insurance-provider consumes this event and credits `insurance_fund_ledger(reference_type = LIQUIDATION_FEE)` idempotently by `tradeId:orderId`.
 - Flip trades close old exposure first, then treat the remaining fill as new exposure.
 - If a trade flips a position, realized PnL uses the old position version and the new remainder adopts the fill's `instrumentVersion`.
 - Opening fills must find the matching `account_margin_reservations` row and migrate order margin successfully. Missing reservations, reduce-only orders producing opening quantity, or skipped migration writes fail and roll back the whole trade.
@@ -156,9 +156,11 @@ Core indexes:
 surprising:
   account:
     kafka:
-      match-trades-topic: surprising.perp.match.trades.v1
-      position-events-topic: surprising.account.position.events.v1
-      liquidation-fee-events-topic: surprising.account.liquidation-fee.events.v1
+      product-line: LINEAR_PERPETUAL
+      product-topics-enabled: true
+      match-trades-topic: surprising.linear-perp.match.trades.v1
+      position-events-topic: surprising.linear-perp.account.position.events.v1
+      liquidation-fee-events-topic: surprising.linear-perp.account.liquidation-fee.events.v1
       concurrency: 2
       max-poll-records: 500
     outbox:
@@ -169,6 +171,8 @@ surprising:
       contract-spec-max-entries: 4096
       order-fee-snapshot-max-entries: 200000
 ```
+
+Set `product-line` to `SPOT`, `LINEAR_PERPETUAL`, `LINEAR_DELIVERY`, or `OPTION` when running isolated product-line instances. Legacy topics remain available when `product-topics-enabled=false`.
 
 The local cache is intentionally limited to immutable read snapshots:
 

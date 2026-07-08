@@ -2,26 +2,28 @@
 
 [English](README.md) | [简体中文](README_CN.md)
 
-Exchange backend services for Surprising.
+Multi-product exchange backend services for Surprising.
 
-This repository is the root reactor for exchange backend modules. Each business module keeps its own detailed README and deployment notes.
+This repository is the root reactor for exchange backend modules. It currently supports product-line-isolated spot, USDT perpetual, USDT delivery futures, and European vanilla options flows while keeping one shared service architecture. Each business module keeps its own detailed README and deployment notes.
 
 ## Project Deep Dive
 
-To understand the project architecture and implementation details, read the Surprising Ex perpetual contract exchange source code deep dive:
+To understand the project architecture and implementation details, read the Surprising-EX source code and product-line articles:
 
-- [English](https://tokdou.com/en/tutorials/surprising-ex-perpetual-contract-exchange-source-code-deep-dive)
-- [简体中文](https://tokdou.com/tutorials/surprising-ex-perpetual-contract-exchange-source-code-deep-dive)
+- Source deep dive: [English](https://tokdou.com/en/tutorials/surprising-ex-perpetual-contract-exchange-source-code-deep-dive) / [简体中文](https://tokdou.com/tutorials/surprising-ex-perpetual-contract-exchange-source-code-deep-dive)
+- Four product-line architecture: [English](https://tokdou.com/en/tutorials/surprising-ex-four-product-line-architecture-okx-binance-comparison) / [简体中文](https://tokdou.com/tutorials/surprising-ex-four-product-line-architecture-okx-binance-comparison)
+- Delivery futures and options beginner guide: [English](https://tokdou.com/en/tutorials/delivery-contract-and-options-beginner-guide) / [简体中文](https://tokdou.com/tutorials/delivery-contract-and-options-beginner-guide)
 
 ## Modules
 
 - `surprising-dependencies`: centralized dependency versions copied from `surprising-wallet`.
 - `surprising-parent`: shared parent POM copied from `surprising-wallet`.
-- `surprising-instrument`: perpetual instrument configuration and product-rule center.
-- `surprising-candlestick`: perpetual candlestick service.
-- `surprising-price`: perpetual index price and mark price services.
-- `surprising-trading`: perpetual order entry, trigger orders, and exchange-core matching.
-- `surprising-account`: account balances, ledger, and perpetual positions.
+- `surprising-product-api`: shared product-line enum, account-type mapping, and product-topic naming.
+- `surprising-instrument`: instrument configuration and product-rule center for spot, perpetual, delivery, and option instruments.
+- `surprising-candlestick`: product-line-aware candlestick service.
+- `surprising-price`: index price and mark price services for derivative product lines.
+- `surprising-trading`: order entry, trigger orders, algo orders, product-line Kafka routing, and exchange-core matching.
+- `surprising-account`: account balances, ledgers, product balances, positions, margin, spot settlement, derivative settlement, delivery, and option exercise accounting.
 - `surprising-risk`: margin ratio, risk snapshots, and liquidation candidate service.
 - `surprising-liquidation`: liquidation candidate executor and reduce-only close order service.
 - `surprising-funding`: perpetual funding-rate publishing and settlement service.
@@ -32,8 +34,21 @@ To understand the project architecture and implementation details, read the Surp
 - `surprising-market-maker`: internal market-maker quoting and exchange-chain stress strategy service.
 - `surprising-integration-test`: cross-module verification for order, matching, account, risk, liquidation, funding, insurance, and ADL flows.
 
+## Supported Product Lines
+
+| Product line | `ProductLine` | Account type | Contract type | Funding | Lifecycle |
+| --- | --- | --- | --- | --- | --- |
+| Spot | `SPOT` | `SPOT` | `SPOT` | No | Immediate asset exchange, no position |
+| USDT perpetual | `LINEAR_PERPETUAL` | `USDT_PERPETUAL` | `LINEAR_PERPETUAL` | Yes | No expiry |
+| USDT delivery futures | `LINEAR_DELIVERY` | `USDT_DELIVERY` | `LINEAR_DELIVERY` | No | Cash delivery at expiry |
+| European vanilla option | `OPTION` | `OPTION` | `VANILLA_OPTION` | No | Cash exercise at expiry |
+
+`INVERSE_PERPETUAL` and `INVERSE_DELIVERY` are represented in shared product-line APIs and topic mapping, but the current process-level smoke suite focuses on the four product lines above.
+
 ## Module Documentation
 
+- [Product-line split and delivery/options plan](docs/product-line-split-plan.md)
+- [Product-line funds conservation and account reconciliation](docs/product-line-testing-and-funds-reconciliation.md)
 - [Order API completion and full-chain stress report](docs/order-api-production-test-report.md)
 - [Market-maker provider continuous full-stack smoke](docs/market-maker-provider-continuous-report.md)
 - [Market-maker provider scheduled engine smoke](docs/market-maker-provider-engine-report.md)
@@ -130,7 +145,8 @@ Ports:
 
 - `surprising.instrument.events.v1`: instrument configuration change events.
 - `surprising.perp.candle.events.v1`: candlestick snapshot output.
-- `surprising.perp.order.commands.v1`: order matching commands.
+- Legacy perpetual topics remain available for backward-compatible single-line startup. Product-line instances use `surprising.<product-segment>.*.v1`, for example `surprising.spot.order.commands.v1`, `surprising.linear-perp.match.trades.v1`, `surprising.linear-delivery.delivery.settlements.v1`, and `surprising.option.option.exercises.v1`.
+- `surprising.perp.order.commands.v1`: legacy perpetual order matching commands.
 - `surprising.perp.order.events.v1`: order entry events.
 - `surprising.perp.match.results.v1`: matching result events.
 - `surprising.perp.match.trades.v1`: matching trade events with long fixed-point values, consumed by candlestick and public trade fanout.
@@ -178,6 +194,17 @@ mvn -pl :surprising-integration-test -am test
 The script applies [init.sql](init.sql), verifies instrument version pinning, linear and inverse perpetual calculations, funding notional conversion, risk snapshots, liquidation candidate idempotency, insurance deficit coverage, and ADL deficit transfer accounting. Set `RUN_MAVEN=true` to also run unit tests in the same pass.
 The integration-test module runs real exchange-core with in-memory Kafka/DB adapters and verifies order entry, matching, account settlement, linear and inverse user reduce-only close, risk candidate creation, liquidation order generation, liquidation close settlement, funding settlement, insurance coverage, and ADL residual-deficit transfer in Java chains.
 
+Run one process-level product-line API flow at a time:
+
+```bash
+PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=LINEAR_DELIVERY BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=OPTION BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=SPOT BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+```
+
+The product-line smoke starts only the current line's required providers, keeps the market maker running, simulates API order flow from ordinary users, covers position creation, user close, liquidation, risk, matching, funding where applicable, delivery/exercise where applicable, and then runs `scripts/product-line-funds-reconcile.sh`. The reconciliation compares opening balance, adjustments, trades, fees, funding, liquidation fees, delivery/exercise ledgers, and final balance exactly in integer units.
+
 When Docker is available, run the real Kafka/PostgreSQL process-level trading smoke:
 
 ```bash
@@ -204,6 +231,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Run at least two instances of each provider.
 - Use Kafka topic replication factor `3` in production.
 - Instrument is the single source for symbols and trading rules.
+- Product-line instances must use product-specific Kafka topics, consumer groups, matching client ids, price/risk/funding coordination ids, and gateway routes. See [docs/deployment.md](docs/deployment.md).
 - Trading order entry uses long fixed-point values: `priceTicks`, `quantitySteps`, and asset `units` align with exchange-core and avoid BigDecimal on the core order, matching, account, risk, liquidation, funding, insurance, and ADL paths. Decimal values are only allowed at external market-data/FX parsing, admin input, display, and reporting boundaries.
 - Matching uses the real `exchange-core` order book to consume order commands and emit long-based matching results and trade events.
 - Matching restores open `LIMIT` + `GTC/GTX` books from PostgreSQL on startup and restarts on unsafe Kafka partition reassignment so failover uses a fresh DB recovery.

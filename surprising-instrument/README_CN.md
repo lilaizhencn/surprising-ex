@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README_CN.md)
 
-Surprising Exchange 合约基础配置模块。它是交易系统的产品规则中心，后续撮合、风控、账户、K 线、指数价格、标记价格、资金费率都应该从这里获取 symbol 和交易规则。
+Surprising Exchange 产品基础配置模块。它是现货、永续、交割和期权交易系统的产品规则中心，后续撮合、风控、账户、K 线、指数价格、标记价格、资金费率、交割和行权都应该从这里获取 symbol 和交易规则。
 
 ## 模块
 
@@ -11,12 +11,13 @@ Surprising Exchange 合约基础配置模块。它是交易系统的产品规则
 
 ## 核心职责
 
-- 合约基础信息：`symbol`、base/quote/settle asset、合约类型、合约面值。
+- 产品基础信息：`symbol`、产品线、instrument 类型、base/quote/settle asset、合约类型、合约面值。
 - 价格/数量规则：tick size、step size、最小/最大下单数量、notional 限制、精度。
 - 下单规则：支持的订单类型、time in force、post-only、reduce-only、market order 开关。
 - 风险规则：最大杠杆、初始保证金率、维持保证金率、风险限额档位。
 - 交易手续费默认配置：maker/taker 费率使用 ppm。正数表示向用户收费，负数表示返佣；用户/VIP/做市/活动覆盖由 order provider 的 `trading_fee_schedules` 解析后写入订单快照。
-- 资金费率配置：funding interval、interest rate、cap/floor、impact notional。
+- 资金费率配置：永续产品的 funding interval、interest rate、cap/floor、impact notional。
+- 生命周期字段：交割和期权产品的到期时间、交割时间、结算方式、标的 symbol、行权价、期权类型和行权风格。
 - 指数价格成分源：外部现货源 REST/WS 配置、权重、USD/USDT 换算规则。
 - 版本管理：每次变更生成新 `version`，通过 `instrument_current_versions` 切换当前版本。
 - 多节点安全：`instrument_symbol_sequences` 为同一个 symbol 原子分配版本号，避免多个 admin 请求并发时 version 冲突。
