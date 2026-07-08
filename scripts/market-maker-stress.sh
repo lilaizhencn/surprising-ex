@@ -9,7 +9,11 @@ RUN_ID="${RUN_ID:-$(date +%s%N)}"
 RUN_SEQ=$((RUN_ID % 1000000000))
 START_INFRA="${START_INFRA:-false}"
 RESET_STATE="${RESET_STATE:-true}"
-RESET_KAFKA_MODE="${RESET_KAFKA_MODE:-recreate}"
+RESET_KAFKA_MODE="${RESET_KAFKA_MODE:-recreate-product-line}"
+KAFKA_PRODUCT_TOPIC_LINES="${KAFKA_PRODUCT_TOPIC_LINES:-linear-perp}"
+KAFKA_CREATE_PRODUCT_TOPICS="${KAFKA_CREATE_PRODUCT_TOPICS:-false}"
+KAFKA_INCLUDE_SHARED_TOPICS="${KAFKA_INCLUDE_SHARED_TOPICS:-true}"
+KAFKA_INCLUDE_LEGACY_PERP_TOPICS="${KAFKA_INCLUDE_LEGACY_PERP_TOPICS:-true}"
 START_PROVIDERS="${START_PROVIDERS:-true}"
 STOP_PROVIDERS="${STOP_PROVIDERS:-true}"
 BUILD_SERVICES="${BUILD_SERVICES:-true}"
@@ -33,6 +37,8 @@ MAKER_LOAD_CONCURRENCY="${MAKER_LOAD_CONCURRENCY:-8}"
 TAKER_ORDER_COUNT="${TAKER_ORDER_COUNT:-1000}"
 TAKER_QUANTITY_STEPS="${TAKER_QUANTITY_STEPS:-2}"
 LOAD_CONCURRENCY="${LOAD_CONCURRENCY:-64}"
+CLOSE_POSITION_COUNT="${CLOSE_POSITION_COUNT:-0}"
+CLOSE_LOAD_CONCURRENCY="${CLOSE_LOAD_CONCURRENCY:-${LOAD_CONCURRENCY}}"
 ORDER_HTTP_RETRIES="${ORDER_HTTP_RETRIES:-3}"
 ORDER_HTTP_RETRY_DELAY_SECONDS="${ORDER_HTTP_RETRY_DELAY_SECONDS:-1}"
 ORDER_HTTP_RETRY_MAX_SECONDS="${ORDER_HTTP_RETRY_MAX_SECONDS:-45}"
@@ -48,8 +54,16 @@ WS_FANOUT_USER_COUNT="${WS_FANOUT_USER_COUNT:-1}"
 WEBSOCKET_PORT="${WEBSOCKET_PORT:-9097}"
 ORDER_HIKARI_MAX_POOL_SIZE="${ORDER_HIKARI_MAX_POOL_SIZE:-30}"
 ORDER_HIKARI_CONNECTION_TIMEOUT_MS="${ORDER_HIKARI_CONNECTION_TIMEOUT_MS:-3000}"
+ORDER_OUTBOX_BATCH_SIZE="${ORDER_OUTBOX_BATCH_SIZE:-1000}"
+ORDER_OUTBOX_PUBLISH_DELAY_MS="${ORDER_OUTBOX_PUBLISH_DELAY_MS:-20}"
+ORDER_OUTBOX_ASYNC_ENABLED="${ORDER_OUTBOX_ASYNC_ENABLED:-true}"
+ORDER_OUTBOX_MAX_IN_FLIGHT="${ORDER_OUTBOX_MAX_IN_FLIGHT:-64}"
 MATCHING_HIKARI_MAX_POOL_SIZE="${MATCHING_HIKARI_MAX_POOL_SIZE:-20}"
 MATCHING_HIKARI_CONNECTION_TIMEOUT_MS="${MATCHING_HIKARI_CONNECTION_TIMEOUT_MS:-3000}"
+MATCHING_OUTBOX_BATCH_SIZE="${MATCHING_OUTBOX_BATCH_SIZE:-1000}"
+MATCHING_OUTBOX_PUBLISH_DELAY_MS="${MATCHING_OUTBOX_PUBLISH_DELAY_MS:-20}"
+MATCHING_OUTBOX_ASYNC_ENABLED="${MATCHING_OUTBOX_ASYNC_ENABLED:-true}"
+MATCHING_OUTBOX_MAX_IN_FLIGHT="${MATCHING_OUTBOX_MAX_IN_FLIGHT:-64}"
 ACCOUNT_HIKARI_MAX_POOL_SIZE="${ACCOUNT_HIKARI_MAX_POOL_SIZE:-20}"
 ACCOUNT_HIKARI_CONNECTION_TIMEOUT_MS="${ACCOUNT_HIKARI_CONNECTION_TIMEOUT_MS:-3000}"
 GATEWAY_HIKARI_MAX_POOL_SIZE="${GATEWAY_HIKARI_MAX_POOL_SIZE:-10}"
@@ -74,6 +88,12 @@ PROVIDER_PIDS=()
 PIDS=()
 RUN_FAILURES=0
 FAILURE_SCENARIO_SUMMARY="- Node failure scenario：none"
+CLOSE_SUBMIT_MS=0
+CLOSE_SUBMIT_TPS=0
+CLOSE_TRADE_COUNT=0
+CLOSE_SETTLED_TRADE_COUNT=0
+CLOSE_MATCHED_LATENCY="0 0 0 0 0 0"
+CLOSE_ACCOUNT_LATENCY="0 0 0 0 0 0"
 
 add_failure_summary() {
   local line="$1"
@@ -285,6 +305,187 @@ delete_surprising_topics() {
   done
 }
 
+shared_kafka_topics() {
+  cat <<'EOF'
+surprising.instrument.events.v1
+surprising.account.position.events.v1
+surprising.account.liquidation-fee.events.v1
+surprising.risk.account.events.v1
+surprising.risk.position.events.v1
+EOF
+}
+
+legacy_perp_kafka_topics() {
+  cat <<'EOF'
+surprising.perp.trade.events.v1
+surprising.perp.candle.events.v1
+surprising.perp.order.commands.v1
+surprising.perp.order.events.v1
+surprising.perp.match.results.v1
+surprising.perp.match.trades.v1
+surprising.perp.orderbook.depth.v1
+surprising.perp.liquidation.candidates.v1
+surprising.perp.index.price.v1
+surprising.perp.index.components.v1
+surprising.perp.book.ticker.v1
+surprising.perp.funding.rate.v1
+surprising.perp.mark.price.v1
+surprising.perp.mark.price.audit.v1
+EOF
+}
+
+product_line_kafka_topics() {
+  local product_line="$1"
+  local prefix="surprising.${product_line}"
+  cat <<EOF
+${prefix}.trade.events.v1
+${prefix}.candle.events.v1
+${prefix}.order.commands.v1
+${prefix}.order.events.v1
+${prefix}.match.results.v1
+${prefix}.match.trades.v1
+${prefix}.orderbook.depth.v1
+EOF
+  case "${product_line}" in
+    linear-perp|inverse-perp|linear-delivery|inverse-delivery|option)
+      cat <<EOF
+${prefix}.index.price.v1
+${prefix}.index.components.v1
+${prefix}.book.ticker.v1
+${prefix}.mark.price.v1
+${prefix}.mark.price.audit.v1
+${prefix}.account.position.events.v1
+${prefix}.risk.account.events.v1
+${prefix}.risk.position.events.v1
+${prefix}.liquidation.candidates.v1
+EOF
+      ;;
+  esac
+  case "${product_line}" in
+    linear-perp|inverse-perp)
+      echo "${prefix}.funding.rate.v1"
+      ;;
+    linear-delivery|inverse-delivery)
+      echo "${prefix}.delivery.settlements.v1"
+      ;;
+    option)
+      echo "${prefix}.option.exercises.v1"
+      ;;
+  esac
+}
+
+target_kafka_topics() {
+  {
+    if [[ "${KAFKA_INCLUDE_SHARED_TOPICS}" == "true" ]]; then
+      shared_kafka_topics
+    fi
+    if [[ "${KAFKA_INCLUDE_LEGACY_PERP_TOPICS}" == "true" ]]; then
+      legacy_perp_kafka_topics
+    fi
+    if [[ "${KAFKA_CREATE_PRODUCT_TOPICS}" == "true" ]]; then
+      local product_line
+      for product_line in ${KAFKA_PRODUCT_TOPIC_LINES}; do
+        product_line_kafka_topics "${product_line}"
+      done
+    fi
+  } | awk 'NF && !seen[$0]++ {print}'
+}
+
+existing_target_kafka_topics() {
+  local existing
+  existing="$(compose_exec kafka kafka-topics.sh --bootstrap-server localhost:9092 --list)"
+  target_kafka_topics | while IFS= read -r topic; do
+    [[ -n "${topic}" ]] && grep -Fxq "${topic}" <<<"${existing}" && echo "${topic}"
+  done
+  return 0
+}
+
+delete_target_topics() {
+  local topics
+  topics="$(existing_target_kafka_topics)"
+  if [[ -z "${topics}" ]]; then
+    return
+  fi
+  while IFS= read -r topic; do
+    [[ -z "${topic}" ]] && continue
+    compose_exec kafka kafka-topics.sh --bootstrap-server localhost:9092 --delete --if-exists --topic "${topic}" >/dev/null 2>&1 || true
+  done <<<"${topics}"
+  local deadline=$((SECONDS + 90))
+  while true; do
+    topics="$(existing_target_kafka_topics)"
+    if [[ -z "${topics}" ]]; then
+      return
+    fi
+    if ((SECONDS >= deadline)); then
+      echo "Timed out waiting for scoped Kafka topics to be deleted" >&2
+      echo "${topics}" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+}
+
+truncate_target_topics() {
+  local topics
+  topics="$(existing_target_kafka_topics)"
+  if [[ -z "${topics}" ]]; then
+    return
+  fi
+  local offsets_file="${TMP_DIR}/kafka-delete-records.json"
+  local partition_count=0
+  printf '{"partitions":[' >"${offsets_file}"
+  while IFS= read -r topic; do
+    [[ -z "${topic}" ]] && continue
+    local offsets
+    offsets="$(compose_exec kafka kafka-run-class.sh kafka.tools.GetOffsetShell \
+      --broker-list localhost:9092 --topic "${topic}" --time -1 2>/dev/null || true)"
+    while IFS=: read -r topic_name partition offset; do
+      [[ -z "${topic_name}" || -z "${partition}" || -z "${offset}" ]] && continue
+      if ((partition_count > 0)); then
+        printf ',' >>"${offsets_file}"
+      fi
+      printf '{"topic":"%s","partition":%s,"offset":%s}' \
+        "${topic_name}" "${partition}" "${offset}" >>"${offsets_file}"
+      partition_count=$((partition_count + 1))
+    done <<<"${offsets}"
+  done <<<"${topics}"
+  printf '],"version":1}\n' >>"${offsets_file}"
+  if ((partition_count == 0)); then
+    return
+  fi
+  if [[ "${INFRA_MODE}" == "local" ]]; then
+    compose_exec kafka kafka-delete-records.sh --bootstrap-server localhost:9092 \
+      --offset-json-file "${offsets_file}" >/dev/null
+  else
+    docker cp "${offsets_file}" surprising-ex-kafka:/tmp/surprising-delete-records.json >/dev/null
+    compose_exec kafka kafka-delete-records.sh --bootstrap-server localhost:9092 \
+      --offset-json-file /tmp/surprising-delete-records.json >/dev/null
+  fi
+}
+
+reset_consumer_group_topic_to_latest() {
+  local group="$1"
+  local topic="$2"
+  compose_exec kafka kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+    --group "${group}" --topic "${topic}" --reset-offsets --to-latest --execute >/dev/null 2>&1 || true
+}
+
+reset_target_consumer_offsets_to_latest() {
+  if [[ "${KAFKA_INCLUDE_LEGACY_PERP_TOPICS}" == "true" ]]; then
+    reset_consumer_group_topic_to_latest "surprising-matching-v1" "surprising.perp.order.commands.v1"
+    reset_consumer_group_topic_to_latest "surprising-account-v1" "surprising.perp.match.trades.v1"
+  fi
+  if [[ "${KAFKA_CREATE_PRODUCT_TOPICS}" == "true" ]]; then
+    local product_line
+    for product_line in ${KAFKA_PRODUCT_TOPIC_LINES}; do
+      reset_consumer_group_topic_to_latest "surprising-${product_line}-matching-v1" \
+        "surprising.${product_line}.order.commands.v1"
+      reset_consumer_group_topic_to_latest "surprising-${product_line}-account-v1" \
+        "surprising.${product_line}.match.trades.v1"
+    done
+  fi
+}
+
 recreate_kafka() {
   if [[ "${INFRA_MODE}" == "local" ]]; then
     delete_surprising_topics
@@ -323,7 +524,12 @@ fi
 exec docker exec -i surprising-ex-kafka /opt/kafka/bin/kafka-topics.sh "$@"
 EOF
   chmod +x "${TMP_DIR}/bin/kafka-topics.sh"
-  PATH="${TMP_DIR}/bin:${PATH}" "${ROOT_DIR}/scripts/create-topics.sh" >/dev/null
+  PATH="${TMP_DIR}/bin:${PATH}" \
+    INCLUDE_SHARED_TOPICS="${KAFKA_INCLUDE_SHARED_TOPICS}" \
+    INCLUDE_LEGACY_PERP_TOPICS="${KAFKA_INCLUDE_LEGACY_PERP_TOPICS}" \
+    INCLUDE_PRODUCT_TOPICS="${KAFKA_CREATE_PRODUCT_TOPICS}" \
+    PRODUCT_TOPIC_LINES="${KAFKA_PRODUCT_TOPIC_LINES}" \
+    "${ROOT_DIR}/scripts/create-topics.sh" >/dev/null
 }
 
 seed_mark_prices() {
@@ -588,6 +794,10 @@ start_matching_provider() {
     "surprising-trading/surprising-matching-provider" "surprising-matching-provider" \
     "--spring.datasource.hikari.maximum-pool-size=${MATCHING_HIKARI_MAX_POOL_SIZE}" \
     "--spring.datasource.hikari.connection-timeout=${MATCHING_HIKARI_CONNECTION_TIMEOUT_MS}" \
+    "--surprising.trading.matching.outbox.batch-size=${MATCHING_OUTBOX_BATCH_SIZE}" \
+    "--surprising.trading.matching.outbox.publish-delay-ms=${MATCHING_OUTBOX_PUBLISH_DELAY_MS}" \
+    "--surprising.trading.matching.outbox.async-enabled=${MATCHING_OUTBOX_ASYNC_ENABLED}" \
+    "--surprising.trading.matching.outbox.max-in-flight=${MATCHING_OUTBOX_MAX_IN_FLIGHT}" \
     "--surprising.trading.matching.kafka.client-id=mm-stress-${RUN_ID}-matching-${node}" \
     "--surprising.trading.matching.kafka.concurrency=${MATCHING_CONSUMERS_PER_NODE}"
 }
@@ -780,6 +990,21 @@ place_order_command() {
   printf "curl --retry %s --retry-delay %s --retry-max-time %s --retry-all-errors -fsS -X POST '%s' -H 'Content-Type: application/json' %s -H 'X-Trace-Id: %s' -d '{\"userId\": %s, \"clientOrderId\": \"%s\", \"symbol\": \"%s\", \"side\": \"%s\", \"orderType\": \"LIMIT\", \"timeInForce\": \"%s\", \"priceTicks\": %s, \"quantitySteps\": %s, \"reduceOnly\": false, \"postOnly\": false}' >/dev/null" \
     "${ORDER_HTTP_RETRIES}" "${ORDER_HTTP_RETRY_DELAY_SECONDS}" "${ORDER_HTTP_RETRY_MAX_SECONDS}" \
     "${url}" "${extra_header}" "${trace}" "${user_id}" "${client_order_id}" "${symbol}" "${side}" "${tif}" "${price_ticks}" "${quantity_steps}"
+}
+
+close_position_command() {
+  local url="$1"
+  local user_id="$2"
+  local client_order_id="$3"
+  local symbol="$4"
+  local trace="$5"
+  local extra_header=""
+  if [[ "${url}" == *"/gateway/"* ]]; then
+    extra_header="-H 'X-User-Id: ${user_id}'"
+  fi
+  printf "curl --retry %s --retry-delay %s --retry-max-time %s --retry-all-errors -fsS -X POST '%s/close-position' -H 'Content-Type: application/json' %s -H 'X-Trace-Id: %s' -d '{\"userId\": %s, \"clientOrderId\": \"%s\", \"symbol\": \"%s\", \"marginMode\": \"CROSS\", \"positionSide\": \"NET\"}' >/dev/null" \
+    "${ORDER_HTTP_RETRIES}" "${ORDER_HTTP_RETRY_DELAY_SECONDS}" "${ORDER_HTTP_RETRY_MAX_SECONDS}" \
+    "${url}" "${extra_header}" "${trace}" "${user_id}" "${client_order_id}" "${symbol}"
 }
 
 order_payload() {
@@ -1343,6 +1568,62 @@ run_matching_node_failure_after_open_book() {
   add_failure_summary "- Matching node failure after open book：stopped ${owner_provider} owning ${target_symbol} partition ${partition}, restarted it, recovered owner clientId=${new_owner_client}, and filled a taker order against pre-failure maker liquidity."
 }
 
+run_close_position_phase() {
+  if ((CLOSE_POSITION_COUNT == 0)); then
+    return
+  fi
+
+  echo "Running concurrent close-position phase: users=${CLOSE_POSITION_COUNT} concurrency=${CLOSE_LOAD_CONCURRENCY}"
+  local close_commands=()
+  local i
+  for ((i = 0; i < CLOSE_POSITION_COUNT; i++)); do
+    local user_id=$((TAKER_USER_START + i))
+    local symbol
+    if ((i % 2 == 0)); then
+      symbol="${BTC_SYMBOL}"
+    else
+      symbol="${ETH_SYMBOL}"
+    fi
+    close_commands+=("$(close_position_command "http://localhost:9094/api/v1/gateway/trading" \
+      "${user_id}" "stress-close-${RUN_ID}-${i}" "${symbol}" "mm-stress-${RUN_ID}-close-${i}")")
+  done
+
+  local close_start_ns close_end_ns
+  close_start_ns="$(date +%s%N)"
+  run_with_concurrency "${CLOSE_LOAD_CONCURRENCY}" "${close_commands[@]}"
+  close_end_ns="$(date +%s%N)"
+  if ((RUN_FAILURES > 0)); then
+    echo "Concurrent close-position placement failed: ${RUN_FAILURES} requests" >&2
+    exit 1
+  fi
+
+  CLOSE_SUBMIT_MS="$(python3 - "${close_start_ns}" "${close_end_ns}" <<'PY'
+import sys
+print(round((int(sys.argv[2]) - int(sys.argv[1])) / 1_000_000, 3))
+PY
+)"
+  CLOSE_SUBMIT_TPS="$(python3 - "${CLOSE_POSITION_COUNT}" "${CLOSE_SUBMIT_MS}" <<'PY'
+import sys
+orders = int(sys.argv[1])
+ms = float(sys.argv[2])
+print(round(orders / (ms / 1000), 2) if ms > 0 else "inf")
+PY
+)"
+
+  wait_sql_equals "close-position orders filled" \
+    "SELECT count(*) FROM trading_orders WHERE client_order_id LIKE 'stress-close-${RUN_ID}-%' AND status = 'FILLED'" \
+    "${CLOSE_POSITION_COUNT}" "${TAKER_FILL_WAIT_SECONDS}"
+  wait_sql_equals "close-position trades written" \
+    "SELECT count(*) FROM trading_match_trades WHERE trace_id LIKE 'mm-stress-${RUN_ID}-close-%'" \
+    "${CLOSE_POSITION_COUNT}" "${TAKER_TRADE_WAIT_SECONDS}"
+  wait_sql_equals "close-position trades settled by account" \
+    "SELECT count(*) FROM account_processed_trades p JOIN trading_match_trades t ON t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.trace_id LIKE 'mm-stress-${RUN_ID}-close-%'" \
+    "${CLOSE_POSITION_COUNT}" "${ACCOUNT_SETTLEMENT_WAIT_SECONDS}"
+  wait_sql_equals "closed taker positions are flat" \
+    "SELECT count(*) FROM account_positions WHERE product_line = 'LINEAR_PERPETUAL' AND user_id >= ${TAKER_USER_START} AND user_id < $((TAKER_USER_START + CLOSE_POSITION_COUNT)) AND signed_quantity_steps <> 0" \
+    "0" "${ACCOUNT_SETTLEMENT_WAIT_SECONDS}"
+}
+
 collect_account_metrics() {
   local metrics_files=()
   local failed_ports=()
@@ -1674,6 +1955,288 @@ for arg in sys.argv[1:]:
 PY
 }
 
+collect_settlement_reconciliation_summary() {
+  local open_orders open_trades open_settled close_orders close_trades close_settled closed_open_positions
+  local liquidation_orders total_expected total_actual
+  open_orders="$(query_value "SELECT count(*) FROM trading_orders WHERE client_order_id LIKE 'stress-user-${RUN_ID}-%' AND status = 'FILLED'")"
+  open_trades="$(query_value "SELECT count(*) FROM trading_match_trades WHERE trace_id LIKE 'mm-stress-${RUN_ID}-user-%'")"
+  open_settled="$(query_value "SELECT count(*) FROM account_processed_trades p JOIN trading_match_trades t ON t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.trace_id LIKE 'mm-stress-${RUN_ID}-user-%'")"
+  close_orders="$(query_value "SELECT count(*) FROM trading_orders WHERE client_order_id LIKE 'stress-close-${RUN_ID}-%' AND status = 'FILLED'")"
+  close_trades="$(query_value "SELECT count(*) FROM trading_match_trades WHERE trace_id LIKE 'mm-stress-${RUN_ID}-close-%'")"
+  close_settled="$(query_value "SELECT count(*) FROM account_processed_trades p JOIN trading_match_trades t ON t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.trace_id LIKE 'mm-stress-${RUN_ID}-close-%'")"
+  closed_open_positions="$(query_value "SELECT count(*) FROM account_positions WHERE product_line = 'LINEAR_PERPETUAL' AND user_id >= ${TAKER_USER_START} AND user_id < $((TAKER_USER_START + CLOSE_POSITION_COUNT)) AND signed_quantity_steps <> 0")"
+  liquidation_orders="$(query_value "SELECT count(*) FROM liquidation_orders lo JOIN risk_liquidation_candidates c ON c.candidate_id = lo.candidate_id WHERE c.product_line = 'LINEAR_PERPETUAL' AND c.user_id >= ${TAKER_USER_START} AND c.user_id < $((TAKER_USER_START + TOTAL_TAKER_ORDER_COUNT))")"
+  total_expected=$((TOTAL_TAKER_ORDER_COUNT + CLOSE_POSITION_COUNT))
+  total_actual=$((open_settled + close_settled))
+
+  row() {
+    local label="$1"
+    local expected="$2"
+    local actual="$3"
+    local diff=$((actual - expected))
+    local result="OK"
+    if ((diff != 0)); then
+      result="FAIL"
+    fi
+    printf '| %s | %s | %s | %s | %s |\n' "${label}" "${expected}" "${actual}" "${diff}" "${result}"
+  }
+
+  {
+    echo "| 项目 | 应为 | 实际 | 差额 | 结果 |"
+    echo "|---|---:|---:|---:|---|"
+    row "并发开仓用户订单 FILLED" "${TOTAL_TAKER_ORDER_COUNT}" "${open_orders}"
+    row "开仓撮合成交" "${TOTAL_TAKER_ORDER_COUNT}" "${open_trades}"
+    row "开仓 account 结算" "${TOTAL_TAKER_ORDER_COUNT}" "${open_settled}"
+    row "并发平仓持仓 FILLED" "${CLOSE_POSITION_COUNT}" "${close_orders}"
+    row "平仓撮合成交" "${CLOSE_POSITION_COUNT}" "${close_trades}"
+    row "平仓 account 结算" "${CLOSE_POSITION_COUNT}" "${close_settled}"
+    row "已平仓用户剩余持仓" 0 "${closed_open_positions}"
+    row "并发强平持仓" 0 "${liquidation_orders}"
+    row "大量账户结算总成交" "${total_expected}" "${total_actual}"
+  }
+}
+
+collect_stress_funds_summary() {
+  {
+    echo "| 范围 | 资产 | 期初 | 充值/调整 | 成交/权利金净额 | 成交/权利金发生额 | 手续费 | 资金费净额 | 资金费发生额 | 强平费 | 交割/行权净额 | 交割/行权发生额 | 其他净额 | 期末应为 | 期末实际 | 差额 | 结果 |"
+    echo "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"
+    psql_exec -At <<SQL
+WITH scoped_users AS (
+    SELECT (${MM_USER_START} + gs)::bigint AS user_id, 'maker'::text AS role
+      FROM generate_series(0, ${MM_ACCOUNT_COUNT} - 1) AS gs
+    UNION ALL
+    SELECT (${TAKER_USER_START} + gs)::bigint AS user_id, 'taker'::text AS role
+      FROM generate_series(0, ${TOTAL_TAKER_ORDER_COUNT} - 1) AS gs
+),
+ordered AS (
+    SELECT s.role,
+           l.*,
+           FIRST_VALUE(l.balance_after_units - l.amount_units) OVER (
+               PARTITION BY s.role, l.user_id, l.asset
+               ORDER BY l.entry_id
+           ) AS opening_units,
+           ROW_NUMBER() OVER (
+               PARTITION BY s.role, l.user_id, l.asset
+               ORDER BY l.entry_id DESC
+           ) AS reverse_rn
+      FROM account_ledger_entries l
+      JOIN scoped_users s ON s.user_id = l.user_id
+     WHERE l.asset = 'USDT'
+),
+per_account AS (
+    SELECT role,
+           user_id,
+           asset,
+           COALESCE(MAX(opening_units), 0) AS opening_units,
+           COALESCE(SUM(amount_units) FILTER (WHERE reference_type = 'BALANCE_ADJUSTMENT'), 0) AS adjustment_units,
+           COALESCE(SUM(amount_units) FILTER (WHERE reference_type IN ('TRADE_PNL', 'OPTION_PREMIUM')), 0) AS trade_units,
+           COALESCE(SUM(abs(amount_units)) FILTER (WHERE reference_type IN ('TRADE_PNL', 'OPTION_PREMIUM')), 0) AS trade_gross_units,
+           COALESCE(SUM(amount_units) FILTER (WHERE reference_type = 'TRADE_FEE'), 0) AS fee_units,
+           COALESCE(SUM(amount_units) FILTER (WHERE reference_type = 'FUNDING'), 0) AS funding_units,
+           COALESCE(SUM(abs(amount_units)) FILTER (WHERE reference_type = 'FUNDING'), 0) AS funding_gross_units,
+           COALESCE(SUM(amount_units) FILTER (WHERE reference_type = 'LIQUIDATION_FEE'), 0) AS liquidation_fee_units,
+           COALESCE(SUM(amount_units) FILTER (WHERE reference_type IN ('DELIVERY_SETTLEMENT', 'OPTION_EXERCISE')), 0) AS delivery_exercise_units,
+           COALESCE(SUM(abs(amount_units)) FILTER (WHERE reference_type IN ('DELIVERY_SETTLEMENT', 'OPTION_EXERCISE')), 0) AS delivery_exercise_gross_units,
+           COALESCE(SUM(amount_units), 0) AS ledger_delta_units,
+           COALESCE(MAX(balance_after_units) FILTER (WHERE reverse_rn = 1), 0) AS final_ledger_units
+      FROM ordered
+     GROUP BY role, user_id, asset
+),
+role_ledger AS (
+    SELECT role,
+           asset,
+           SUM(opening_units) AS opening_units,
+           SUM(adjustment_units) AS adjustment_units,
+           SUM(trade_units) AS trade_units,
+           SUM(trade_gross_units) AS trade_gross_units,
+           SUM(fee_units) AS fee_units,
+           SUM(funding_units) AS funding_units,
+           SUM(funding_gross_units) AS funding_gross_units,
+           SUM(liquidation_fee_units) AS liquidation_fee_units,
+           SUM(delivery_exercise_units) AS delivery_exercise_units,
+           SUM(delivery_exercise_gross_units) AS delivery_exercise_gross_units,
+           SUM(ledger_delta_units) AS ledger_delta_units,
+           SUM(final_ledger_units) AS final_ledger_units
+      FROM per_account
+     GROUP BY role, asset
+),
+role_balances AS (
+    SELECT s.role,
+           b.asset,
+           SUM(b.available_units + b.locked_units - COALESCE(d.deficit_units, 0)) AS actual_final_units
+      FROM scoped_users s
+      JOIN account_balances b ON b.user_id = s.user_id AND b.asset = 'USDT'
+      LEFT JOIN account_deficits d ON d.user_id = b.user_id AND d.asset = b.asset
+     GROUP BY s.role, b.asset
+),
+role_rows AS (
+    SELECT l.role,
+           l.asset,
+           l.opening_units,
+           l.adjustment_units,
+           l.trade_units,
+           l.trade_gross_units,
+           l.fee_units,
+           l.funding_units,
+           l.funding_gross_units,
+           l.liquidation_fee_units,
+           l.delivery_exercise_units,
+           l.delivery_exercise_gross_units,
+           l.ledger_delta_units - l.adjustment_units - l.trade_units - l.fee_units - l.funding_units
+             - l.liquidation_fee_units - l.delivery_exercise_units AS other_units,
+           l.opening_units + l.ledger_delta_units AS expected_final_units,
+           COALESCE(b.actual_final_units, 0) AS actual_final_units
+      FROM role_ledger l
+      LEFT JOIN role_balances b ON b.role = l.role AND b.asset = l.asset
+),
+all_rows AS (
+    SELECT role, asset, opening_units, adjustment_units, trade_units, trade_gross_units, fee_units,
+           funding_units, funding_gross_units, liquidation_fee_units, delivery_exercise_units,
+           delivery_exercise_gross_units, other_units, expected_final_units, actual_final_units
+      FROM role_rows
+    UNION ALL
+    SELECT 'TOTAL',
+           asset,
+           SUM(opening_units),
+           SUM(adjustment_units),
+           SUM(trade_units),
+           SUM(trade_gross_units),
+           SUM(fee_units),
+           SUM(funding_units),
+           SUM(funding_gross_units),
+           SUM(liquidation_fee_units),
+           SUM(delivery_exercise_units),
+           SUM(delivery_exercise_gross_units),
+           SUM(other_units),
+           SUM(expected_final_units),
+           SUM(actual_final_units)
+      FROM role_rows
+     GROUP BY asset
+)
+SELECT '| ' || role || ' | ' || asset || ' | ' || opening_units || ' | ' || adjustment_units || ' | '
+    || trade_units || ' | ' || trade_gross_units || ' | ' || fee_units || ' | ' || funding_units || ' | '
+    || funding_gross_units || ' | ' || liquidation_fee_units || ' | ' || delivery_exercise_units || ' | '
+    || delivery_exercise_gross_units || ' | ' || other_units || ' | ' || expected_final_units || ' | '
+    || actual_final_units || ' | ' || (actual_final_units - expected_final_units) || ' | '
+    || CASE WHEN actual_final_units = expected_final_units THEN 'OK' ELSE 'FAIL' END || ' |'
+  FROM all_rows
+ ORDER BY CASE role WHEN 'maker' THEN 1 WHEN 'taker' THEN 2 ELSE 3 END, asset;
+SQL
+    echo
+    echo "| 核对项 | 范围 | 资产 | 应为 | 实际 | 差额 | 结果 |"
+    echo "|---|---|---|---:|---:|---:|---|"
+    psql_exec -At <<SQL
+WITH scoped_users AS (
+    SELECT (${MM_USER_START} + gs)::bigint AS user_id, 'maker'::text AS role
+      FROM generate_series(0, ${MM_ACCOUNT_COUNT} - 1) AS gs
+    UNION ALL
+    SELECT (${TAKER_USER_START} + gs)::bigint AS user_id, 'taker'::text AS role
+      FROM generate_series(0, ${TOTAL_TAKER_ORDER_COUNT} - 1) AS gs
+),
+ledger_totals AS (
+    SELECT s.role,
+           l.asset,
+           COALESCE(SUM(l.amount_units) FILTER (WHERE l.reference_type = 'BALANCE_ADJUSTMENT'), 0) AS adjustment_units,
+           COALESCE(SUM(l.amount_units) FILTER (WHERE l.reference_type = 'TRADE_FEE'), 0) AS fee_units,
+           COALESCE(SUM(l.amount_units) FILTER (WHERE l.reference_type = 'FUNDING'), 0) AS funding_units,
+           COALESCE(SUM(l.amount_units) FILTER (WHERE l.reference_type = 'LIQUIDATION_FEE'), 0) AS liquidation_fee_units,
+           COALESCE(SUM(l.amount_units) FILTER (WHERE l.reference_type IN ('DELIVERY_SETTLEMENT', 'OPTION_EXERCISE')), 0) AS delivery_exercise_units
+      FROM account_ledger_entries l
+      JOIN scoped_users s ON s.user_id = l.user_id
+     WHERE l.asset = 'USDT'
+     GROUP BY s.role, l.asset
+),
+expected_adjustments AS (
+    SELECT 'maker'::text AS role, 'USDT'::text AS asset, (${MM_ACCOUNT_COUNT}::numeric * 100000000000000)::numeric AS expected_units
+    UNION ALL
+    SELECT 'taker', 'USDT', (${TOTAL_TAKER_ORDER_COUNT}::numeric * 100000000000000)::numeric
+),
+trade_sides AS (
+    SELECT s.role,
+           t.symbol,
+           t.taker_instrument_version AS instrument_version,
+           t.price_ticks,
+           t.quantity_steps,
+           o.taker_fee_rate_ppm AS fee_rate_ppm
+      FROM trading_match_trades t
+      JOIN scoped_users s ON s.user_id = t.taker_user_id
+      JOIN trading_orders o ON o.order_id = t.taker_order_id
+     WHERE t.trace_id LIKE 'mm-stress-${RUN_ID}-%'
+    UNION ALL
+    SELECT s.role,
+           t.symbol,
+           t.maker_instrument_version AS instrument_version,
+           t.price_ticks,
+           t.quantity_steps,
+           o.maker_fee_rate_ppm AS fee_rate_ppm
+      FROM trading_match_trades t
+      JOIN scoped_users s ON s.user_id = t.maker_user_id
+      JOIN trading_orders o ON o.order_id = t.maker_order_id
+     WHERE t.trace_id LIKE 'mm-stress-${RUN_ID}-%'
+),
+expected_fees AS (
+    SELECT ts.role,
+           i.settle_asset AS asset,
+           COALESCE(SUM(CASE
+               WHEN ts.fee_rate_ppm = 0 THEN 0
+               WHEN ts.fee_rate_ppm > 0 THEN -ceil(
+                   ts.price_ticks::numeric * ts.quantity_steps::numeric * i.notional_multiplier_units::numeric
+                   * abs(ts.fee_rate_ppm)::numeric / 1000000
+               )::numeric
+               ELSE ceil(
+                   ts.price_ticks::numeric * ts.quantity_steps::numeric * i.notional_multiplier_units::numeric
+                   * abs(ts.fee_rate_ppm)::numeric / 1000000
+               )::numeric
+           END), 0) AS expected_units
+      FROM trade_sides ts
+      JOIN instruments i ON i.symbol = ts.symbol AND i.version = ts.instrument_version
+     GROUP BY ts.role, i.settle_asset
+),
+role_keys AS (
+    SELECT role, asset FROM ledger_totals
+    UNION SELECT role, asset FROM expected_adjustments
+    UNION SELECT role, asset FROM expected_fees
+),
+checks AS (
+    SELECT '充值/调整'::text AS item,
+           k.role,
+           k.asset,
+           COALESCE(e.expected_units, 0) AS expected_units,
+           COALESCE(l.adjustment_units, 0)::numeric AS actual_units
+      FROM role_keys k
+      LEFT JOIN expected_adjustments e ON e.role = k.role AND e.asset = k.asset
+      LEFT JOIN ledger_totals l ON l.role = k.role AND l.asset = k.asset
+    UNION ALL
+    SELECT '手续费', k.role, k.asset, COALESCE(e.expected_units, 0), COALESCE(l.fee_units, 0)::numeric
+      FROM role_keys k
+      LEFT JOIN expected_fees e ON e.role = k.role AND e.asset = k.asset
+      LEFT JOIN ledger_totals l ON l.role = k.role AND l.asset = k.asset
+    UNION ALL
+    SELECT '资金费', role, asset, 0, funding_units::numeric FROM ledger_totals
+    UNION ALL
+    SELECT '强平费', role, asset, 0, liquidation_fee_units::numeric FROM ledger_totals
+    UNION ALL
+    SELECT '交割/行权', role, asset, 0, delivery_exercise_units::numeric FROM ledger_totals
+),
+with_total AS (
+    SELECT item, role, asset, expected_units, actual_units FROM checks
+    UNION ALL
+    SELECT item, 'TOTAL', asset, SUM(expected_units), SUM(actual_units)
+      FROM checks
+     GROUP BY item, asset
+)
+SELECT '| ' || item || ' | ' || role || ' | ' || asset || ' | ' || expected_units::bigint || ' | '
+    || actual_units::bigint || ' | ' || (actual_units - expected_units)::bigint || ' | '
+    || CASE WHEN actual_units = expected_units THEN 'OK' ELSE 'FAIL' END || ' |'
+  FROM with_total
+ ORDER BY CASE item WHEN '充值/调整' THEN 1 WHEN '手续费' THEN 2 WHEN '资金费' THEN 3
+                    WHEN '强平费' THEN 4 ELSE 5 END,
+          CASE role WHEN 'maker' THEN 1 WHEN 'taker' THEN 2 ELSE 3 END,
+          asset;
+SQL
+  }
+}
+
 write_report() {
   local submit_ms="$1"
   local submit_tps="$2"
@@ -1696,6 +2259,8 @@ write_report() {
   local db_stat_delta="${19}"
   local table_counts_summary="${20}"
   local provider_metrics_summary="${21}"
+  local settlement_reconciliation_summary="${22}"
+  local funds_reconciliation_summary="${23}"
   local infra_summary
   if [[ "${INFRA_MODE}" == "local" ]]; then
     infra_summary="Homebrew/local services: PostgreSQL localhost:5432, Kafka localhost:9092, Redis localhost:6379"
@@ -1736,10 +2301,14 @@ ${FAILURE_SCENARIO_SUMMARY}
 - 普通用户订单数：${taker_count}
 - 普通用户每单数量：${TAKER_QUANTITY_STEPS} steps
 - 并发度：${LOAD_CONCURRENCY}
+- 并发平仓持仓数：${CLOSE_POSITION_COUNT}
+- 并发平仓请求并发度：${CLOSE_LOAD_CONCURRENCY}
 - WebSocket 私有 fanout 订阅用户数：${WS_FANOUT_USER_COUNT}
 - WebSocket 捕获窗口：${WS_CAPTURE_TIMEOUT}s
 - Consumer 并发：matching 每节点 ${MATCHING_CONSUMERS_PER_NODE}，account 每节点 ${ACCOUNT_CONSUMERS_PER_NODE}
 - Hikari：order ${ORDER_HIKARI_MAX_POOL_SIZE}/${ORDER_HIKARI_CONNECTION_TIMEOUT_MS}ms，matching ${MATCHING_HIKARI_MAX_POOL_SIZE}/${MATCHING_HIKARI_CONNECTION_TIMEOUT_MS}ms，account ${ACCOUNT_HIKARI_MAX_POOL_SIZE}/${ACCOUNT_HIKARI_CONNECTION_TIMEOUT_MS}ms，gateway ${GATEWAY_HIKARI_MAX_POOL_SIZE}/${GATEWAY_HIKARI_CONNECTION_TIMEOUT_MS}ms
+- Outbox：order batch=${ORDER_OUTBOX_BATCH_SIZE}, delay=${ORDER_OUTBOX_PUBLISH_DELAY_MS}ms, async=${ORDER_OUTBOX_ASYNC_ENABLED}, maxInFlight=${ORDER_OUTBOX_MAX_IN_FLIGHT}; matching batch=${MATCHING_OUTBOX_BATCH_SIZE}, delay=${MATCHING_OUTBOX_PUBLISH_DELAY_MS}ms, async=${MATCHING_OUTBOX_ASYNC_ENABLED}, maxInFlight=${MATCHING_OUTBOX_MAX_IN_FLIGHT}
+- Kafka reset：mode=${RESET_KAFKA_MODE}, shared=${KAFKA_INCLUDE_SHARED_TOPICS}, legacyPerp=${KAFKA_INCLUDE_LEGACY_PERP_TOPICS}, productTopics=${KAFKA_CREATE_PRODUCT_TOPICS}, productLines=${KAFKA_PRODUCT_TOPIC_LINES}
 - 等待窗口：takerFilled=${TAKER_FILL_WAIT_SECONDS}s，tradesWritten=${TAKER_TRADE_WAIT_SECONDS}s，accountSettled=${ACCOUNT_SETTLEMENT_WAIT_SECONDS}s
 - Symbols：${BTC_SYMBOL}, ${ETH_SYMBOL}
 
@@ -1750,8 +2319,13 @@ ${FAILURE_SCENARIO_SUMMARY}
 - 普通用户 taker 订单：${taker_count}
 - 撮合成交笔数：${trades}
 - account 已结算普通用户成交：${settled_count}
+- 并发平仓成交笔数：${CLOSE_TRADE_COUNT}
+- account 已结算平仓成交：${CLOSE_SETTLED_TRADE_COUNT}
+- 并发强平持仓数：0（本脚本不启动 risk/liquidation provider，强平另由产品线全链路脚本覆盖）
 - 客户端并发提交耗时：${submit_ms} ms
 - 客户端提交吞吐：${submit_tps} orders/s
+- 平仓并发提交耗时：${CLOSE_SUBMIT_MS} ms
+- 平仓提交吞吐：${CLOSE_SUBMIT_TPS} orders/s
 - matching event-time 吞吐：${match_span_tps} trades/s
 - WebSocket：${websocket_summary}
 
@@ -1777,6 +2351,16 @@ ${FAILURE_SCENARIO_SUMMARY}
 
 - order accepted -> matching result：${matched_latency}
 - order accepted -> account processed trade：${account_latency}
+- close accepted -> matching result：${CLOSE_MATCHED_LATENCY}
+- close accepted -> account processed trade：${CLOSE_ACCOUNT_LATENCY}
+
+## 交易和结算数量核对
+
+${settlement_reconciliation_summary}
+
+## 资金核对
+
+${funds_reconciliation_summary}
 
 ## Account Prometheus 指标
 
@@ -1839,6 +2423,10 @@ require_command psql
 require_command pg_isready
 require_command kafka-topics
 require_command kafka-consumer-groups
+if [[ "${RESET_KAFKA_MODE}" == "truncate" || "${RESET_KAFKA_MODE}" == "truncate-product-line" || "${RESET_KAFKA_MODE}" == "clear-product-line" ]]; then
+  require_command kafka-delete-records
+  require_command kafka-run-class
+fi
 if [[ "${INFRA_MODE}" != "local" ]]; then
   require_command docker
 fi
@@ -1871,6 +2459,16 @@ if ((MATCHING_CONSUMERS_PER_NODE <= 0 || ACCOUNT_CONSUMERS_PER_NODE <= 0)); then
   echo "MATCHING_CONSUMERS_PER_NODE and ACCOUNT_CONSUMERS_PER_NODE must be positive" >&2
   exit 1
 fi
+for product_line in ${KAFKA_PRODUCT_TOPIC_LINES}; do
+  case "${product_line}" in
+    spot|linear-perp|inverse-perp|linear-delivery|inverse-delivery|option)
+      ;;
+    *)
+      echo "Unsupported KAFKA_PRODUCT_TOPIC_LINES entry: ${product_line}" >&2
+      exit 1
+      ;;
+  esac
+done
 if [[ "${ACCOUNT_NODE_FAILURE_DURING_SETTLEMENT}" == "true" ]] && ((EXTRA_ACCOUNT_NODES <= 0)); then
   echo "ACCOUNT_NODE_FAILURE_DURING_SETTLEMENT=true requires EXTRA_ACCOUNT_NODES > 0" >&2
   exit 1
@@ -1892,6 +2490,18 @@ if ((WS_FANOUT_USER_COUNT > TOTAL_TAKER_ORDER_COUNT)); then
   echo "WS_FANOUT_USER_COUNT cannot exceed total taker users (${TOTAL_TAKER_ORDER_COUNT})" >&2
   exit 1
 fi
+if ! [[ "${CLOSE_POSITION_COUNT}" =~ ^[0-9]+$ ]]; then
+  echo "CLOSE_POSITION_COUNT must be a non-negative integer" >&2
+  exit 1
+fi
+if ! [[ "${CLOSE_LOAD_CONCURRENCY}" =~ ^[0-9]+$ ]] || ((CLOSE_LOAD_CONCURRENCY < 1)); then
+  echo "CLOSE_LOAD_CONCURRENCY must be a positive integer" >&2
+  exit 1
+fi
+if ((CLOSE_POSITION_COUNT > TOTAL_TAKER_ORDER_COUNT)); then
+  echo "CLOSE_POSITION_COUNT cannot exceed total taker users (${TOTAL_TAKER_ORDER_COUNT})" >&2
+  exit 1
+fi
 
 if [[ "${START_INFRA}" == "true" ]]; then
   echo "Starting ${INFRA_MODE} infrastructure"
@@ -1901,15 +2511,35 @@ wait_until "PostgreSQL" 120 compose_exec postgres pg_isready -U "${DB_USER}"
 wait_until "Kafka" 120 compose_exec kafka kafka-topics.sh --bootstrap-server localhost:9092 --list
 
 if [[ "${RESET_STATE}" == "true" ]]; then
-  echo "Resetting PostgreSQL schema and Kafka topics"
+  echo "Resetting PostgreSQL schema and Kafka topics (mode=${RESET_KAFKA_MODE})"
   reset_database
   seed_mark_prices
-  if [[ "${RESET_KAFKA_MODE}" == "recreate" ]]; then
-    recreate_kafka
-  else
-    delete_surprising_topics
-  fi
-  create_topics
+  case "${RESET_KAFKA_MODE}" in
+    recreate|recreate-product-line|scoped-recreate)
+      delete_target_topics
+      create_topics
+      ;;
+    truncate|truncate-product-line|clear-product-line)
+      create_topics
+      truncate_target_topics
+      reset_target_consumer_offsets_to_latest
+      ;;
+    recreate-all|all)
+      recreate_kafka
+      create_topics
+      ;;
+    delete-all)
+      delete_surprising_topics
+      create_topics
+      ;;
+    reuse|none|false)
+      create_topics
+      ;;
+    *)
+      echo "Unknown RESET_KAFKA_MODE=${RESET_KAFKA_MODE}; use recreate-product-line, truncate-product-line, reuse, recreate-all, or delete-all" >&2
+      exit 1
+      ;;
+  esac
   rm -rf "${ROOT_DIR}/data/kafka-streams"
 fi
 
@@ -1931,6 +2561,10 @@ if [[ "${START_PROVIDERS}" == "true" ]]; then
   start_provider "order" 9084 "surprising-trading/surprising-order-provider" "surprising-order-provider" \
     "--spring.datasource.hikari.maximum-pool-size=${ORDER_HIKARI_MAX_POOL_SIZE}" \
     "--spring.datasource.hikari.connection-timeout=${ORDER_HIKARI_CONNECTION_TIMEOUT_MS}" \
+    "--surprising.trading.order.outbox.batch-size=${ORDER_OUTBOX_BATCH_SIZE}" \
+    "--surprising.trading.order.outbox.publish-delay-ms=${ORDER_OUTBOX_PUBLISH_DELAY_MS}" \
+    "--surprising.trading.order.outbox.async-enabled=${ORDER_OUTBOX_ASYNC_ENABLED}" \
+    "--surprising.trading.order.outbox.max-in-flight=${ORDER_OUTBOX_MAX_IN_FLIGHT}" \
     "--surprising.trading.order.risk.market-max-mark-age-ms=15000"
   start_provider "gateway" 9094 "surprising-gateway/surprising-gateway-provider" "surprising-gateway-provider" \
     "--spring.datasource.hikari.maximum-pool-size=${GATEWAY_HIKARI_MAX_POOL_SIZE}" \
@@ -2085,6 +2719,7 @@ fi
 wait_sql_equals "ordinary user trades settled by account" \
   "SELECT count(*) FROM account_processed_trades p JOIN trading_match_trades t ON t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.trace_id LIKE 'mm-stress-${RUN_ID}-user-%'" \
   "${TOTAL_TAKER_ORDER_COUNT}" "${ACCOUNT_SETTLEMENT_WAIT_SECONDS}"
+run_close_position_phase
 wait_sql_equals "no negative stress balances" \
   "SELECT count(*) FROM account_balances WHERE user_id BETWEEN ${MM_USER_START} AND $((TAKER_USER_START + TOTAL_TAKER_ORDER_COUNT + 100)) AND (available_units < 0 OR locked_units < 0)" \
   "0" 60
@@ -2171,6 +2806,40 @@ SELECT count(*) || ' ' || round(min(ms)::numeric, 3) || ' ' ||
        round(max(ms)::numeric, 3)
   FROM lat")"
 
+if ((CLOSE_POSITION_COUNT > 0)); then
+  CLOSE_MATCHED_LATENCY="$(sql_scalar "
+WITH lat AS (
+  SELECT EXTRACT(EPOCH FROM (r.event_time - e.event_time)) * 1000 AS ms
+    FROM trading_orders o
+    JOIN trading_order_events e ON e.order_id = o.order_id AND e.event_type = 'ACCEPTED'
+    JOIN trading_match_results r ON r.order_id = o.order_id AND r.command_type = 'PLACE'
+   WHERE o.client_order_id LIKE 'stress-close-${RUN_ID}-%'
+)
+SELECT count(*) || ' ' || round(min(ms)::numeric, 3) || ' ' ||
+       round(percentile_disc(0.50) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' ' ||
+       round(percentile_disc(0.95) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' ' ||
+       round(percentile_disc(0.99) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' ' ||
+       round(max(ms)::numeric, 3)
+  FROM lat")"
+  CLOSE_ACCOUNT_LATENCY="$(sql_scalar "
+WITH lat AS (
+  SELECT EXTRACT(EPOCH FROM (p.processed_at - e.event_time)) * 1000 AS ms
+    FROM trading_orders o
+    JOIN trading_order_events e ON e.order_id = o.order_id AND e.event_type = 'ACCEPTED'
+    JOIN trading_match_trades t ON t.taker_order_id = o.order_id
+    JOIN account_processed_trades p ON p.symbol = t.symbol AND p.trade_id = t.trade_id
+   WHERE o.client_order_id LIKE 'stress-close-${RUN_ID}-%'
+)
+SELECT count(*) || ' ' || round(min(ms)::numeric, 3) || ' ' ||
+       round(percentile_disc(0.50) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' ' ||
+       round(percentile_disc(0.95) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' ' ||
+       round(percentile_disc(0.99) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' ' ||
+       round(max(ms)::numeric, 3)
+  FROM lat")"
+  CLOSE_TRADE_COUNT="$(query_value "SELECT count(*) FROM trading_match_trades WHERE trace_id LIKE 'mm-stress-${RUN_ID}-close-%'")"
+  CLOSE_SETTLED_TRADE_COUNT="$(query_value "SELECT count(*) FROM account_processed_trades p JOIN trading_match_trades t ON t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.trace_id LIKE 'mm-stress-${RUN_ID}-close-%'")"
+fi
+
 match_span_tps="$(sql_scalar "
 WITH span AS (
   SELECT count(*) AS c,
@@ -2192,6 +2861,8 @@ touch "${KAFKA_LAG_STOP_FILE}" >/dev/null 2>&1 || true
 sleep 1
 kafka_lag_summary="$(collect_kafka_lag_summary)"
 provider_topology_summary="$(collect_provider_topology_summary)"
+settlement_reconciliation_summary="$(collect_settlement_reconciliation_summary)"
+funds_reconciliation_summary="$(collect_stress_funds_summary)"
 machine_cpu="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo unknown) cores"
 machine_mem="$(python3 - <<'PY'
 import subprocess
@@ -2210,7 +2881,8 @@ write_report "${submit_ms}" "${submit_tps}" "${initial_maker_count}" "${refresh_
   "${match_span_tps}" "${websocket_summary}" "${machine_cpu}" "${machine_mem}" \
   "${java_version}" "${git_head}" "${account_metrics}" "${kafka_lag_summary}" \
   "${provider_topology_summary}" "${settled_trade_count}" "${db_stat_delta}" \
-  "${table_counts_summary}" "${provider_metrics_summary}"
+  "${table_counts_summary}" "${provider_metrics_summary}" "${settlement_reconciliation_summary}" \
+  "${funds_reconciliation_summary}"
 
 echo "Market-maker stress passed"
 echo "report=${REPORT_FILE}"

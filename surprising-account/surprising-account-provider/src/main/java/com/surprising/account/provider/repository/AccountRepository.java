@@ -19,6 +19,7 @@ import com.surprising.account.provider.model.ContractSpec;
 import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.account.provider.model.LiquidationFeeSettlement;
 import com.surprising.account.provider.model.OrderFeeSnapshot;
+import com.surprising.account.provider.model.PositionSettlementState;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.account.provider.service.MarginTransferMath;
@@ -899,6 +900,19 @@ public class AccountRepository {
                 """, (rs, rowNum) -> toPositionResponse(rs), symbol, instrumentVersion);
     }
 
+    public List<PositionSettlementState> openPositionStatesForSettlement(String symbol, long instrumentVersion) {
+        return jdbcTemplate.query("""
+                SELECT user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
+                       entry_price_ticks, entry_value_ticks, realized_pnl_units, updated_at
+                  FROM account_positions
+                 WHERE symbol = ?
+                   AND instrument_version = ?
+                   AND signed_quantity_steps <> 0
+                 ORDER BY user_id ASC, margin_mode ASC, position_side ASC
+                 FOR UPDATE
+                """, (rs, rowNum) -> toPositionSettlementState(rs), symbol, instrumentVersion);
+    }
+
     public List<PositionResponse> openPositionsForSettlement(ProductLine productLine, String symbol) {
         ProductLine resolvedProductLine = productLine(productLine);
         return jdbcTemplate.query("""
@@ -911,6 +925,20 @@ public class AccountRepository {
                  ORDER BY user_id ASC, margin_mode ASC, position_side ASC, instrument_version ASC
                  FOR UPDATE
                 """, (rs, rowNum) -> toPositionResponse(rs), resolvedProductLine.name(), symbol);
+    }
+
+    public List<PositionSettlementState> openPositionStatesForSettlement(ProductLine productLine, String symbol) {
+        ProductLine resolvedProductLine = productLine(productLine);
+        return jdbcTemplate.query("""
+                SELECT user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
+                       entry_price_ticks, entry_value_ticks, realized_pnl_units, updated_at
+                  FROM account_positions
+                 WHERE product_line = ?
+                   AND symbol = ?
+                   AND signed_quantity_steps <> 0
+                 ORDER BY user_id ASC, margin_mode ASC, position_side ASC, instrument_version ASC
+                 FOR UPDATE
+                """, (rs, rowNum) -> toPositionSettlementState(rs), resolvedProductLine.name(), symbol);
     }
 
     public Optional<PositionMarginResponse> positionMargin(long userId, String symbol, MarginMode marginMode) {
@@ -1153,13 +1181,14 @@ public class AccountRepository {
         jdbcTemplate.update("""
                 INSERT INTO account_positions (
                     product_line, user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
-                    entry_price_ticks, realized_pnl_units, updated_at
-                ) VALUES (?, ?, ?, ?, ?, NULL, 0, 0, 0, ?)
+                    entry_price_ticks, entry_value_ticks, realized_pnl_units, updated_at
+                ) VALUES (?, ?, ?, ?, ?, NULL, 0, 0, 0, 0, ?)
                 ON CONFLICT (product_line, user_id, symbol, margin_mode, position_side) DO NOTHING
                 """, resolvedProductLine.name(), userId, symbol, normalizedMarginMode.name(),
                 normalizedPositionSide.name(), Timestamp.from(now));
         return jdbcTemplate.queryForObject("""
-                SELECT instrument_version, signed_quantity_steps, entry_price_ticks, realized_pnl_units
+                SELECT instrument_version, signed_quantity_steps, entry_price_ticks, entry_value_ticks,
+                       realized_pnl_units
                   FROM account_positions
                  WHERE product_line = ?
                    AND user_id = ?
@@ -1171,6 +1200,7 @@ public class AccountRepository {
                 rs.getLong("signed_quantity_steps"),
                 longOrZero(rs, "instrument_version"),
                 rs.getLong("entry_price_ticks"),
+                rs.getLong("entry_value_ticks"),
                 rs.getLong("realized_pnl_units")), resolvedProductLine.name(), userId, symbol, normalizedMarginMode.name(),
                 normalizedPositionSide.name());
     }
@@ -1748,6 +1778,7 @@ public class AccountRepository {
                    SET signed_quantity_steps = ?,
                        instrument_version = ?,
                        entry_price_ticks = ?,
+                       entry_value_ticks = ?,
                        realized_pnl_units = ?,
                        updated_at = ?
                  WHERE product_line = ?
@@ -1756,7 +1787,7 @@ public class AccountRepository {
                    AND margin_mode = ?
                    AND position_side = ?
                 """, state.signedQuantitySteps(), nullableVersion(state.instrumentVersion()),
-                state.entryPriceTicks(), state.realizedPnlUnits(),
+                state.entryPriceTicks(), state.entryValueTicks(), state.realizedPnlUnits(),
                 Timestamp.from(now), resolvedProductLine.name(), userId, symbol, normalizedMarginMode.name(),
                 normalizedPositionSide.name());
         requireSingleRow(rows, "account position update");
@@ -3715,6 +3746,21 @@ public class AccountRepository {
                 rs.getLong("signed_quantity_steps"),
                 rs.getLong("entry_price_ticks"),
                 rs.getLong("realized_pnl_units"),
+                rs.getTimestamp("updated_at").toInstant());
+    }
+
+    private PositionSettlementState toPositionSettlementState(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new PositionSettlementState(
+                rs.getLong("user_id"),
+                rs.getString("symbol"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                PositionSide.fromNullableDbValue(rs.getString("position_side")),
+                new PositionState(
+                        rs.getLong("signed_quantity_steps"),
+                        longOrZero(rs, "instrument_version"),
+                        rs.getLong("entry_price_ticks"),
+                        rs.getLong("entry_value_ticks"),
+                        rs.getLong("realized_pnl_units")),
                 rs.getTimestamp("updated_at").toInstant());
     }
 

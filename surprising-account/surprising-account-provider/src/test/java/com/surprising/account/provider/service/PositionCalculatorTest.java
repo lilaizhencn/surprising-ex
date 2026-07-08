@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.account.provider.model.ContractSpec;
+import com.surprising.account.provider.model.PositionChange;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.trading.api.model.OrderSide;
@@ -27,6 +28,25 @@ class PositionCalculatorTest {
                 linear(), linear());
 
         assertThat(change.next()).isEqualTo(new PositionState(10L, 1L, 110L, 0L));
+    }
+
+    @Test
+    void linearRoundTripConservesPnlWhenAveragePriceHasRemainder() {
+        PositionState state = calculator.apply(new PositionState(0L, 0L, 0L, 0L), OrderSide.BUY, 100L, 1L,
+                linear(), linear()).next();
+        state = calculator.apply(state, OrderSide.BUY, 101L, 2L, linear(), linear()).next();
+
+        assertThat(state).isEqualTo(new PositionState(3L, 1L, 100L, 302L, 0L));
+
+        PositionChange firstClose = calculator.apply(state, OrderSide.SELL, 100L, 1L, linear(), linear());
+        PositionChange secondClose = calculator.apply(firstClose.next(), OrderSide.SELL, 101L, 2L,
+                linear(), linear());
+
+        assertThat(firstClose.realizedPnlDeltaUnits()).isZero();
+        assertThat(firstClose.next()).isEqualTo(new PositionState(2L, 1L, 101L, 202L, 0L));
+        assertThat(secondClose.realizedPnlDeltaUnits()).isZero();
+        assertThat(secondClose.next()).isEqualTo(new PositionState(0L, 0L, 0L, 0L, 0L));
+        assertThat(firstClose.realizedPnlDeltaUnits() + secondClose.realizedPnlDeltaUnits()).isZero();
     }
 
     @Test
@@ -103,6 +123,15 @@ class PositionCalculatorTest {
 
         assertThat(change.next()).isEqualTo(new PositionState(0L, 0L, 0L, 300L));
         assertThat(change.realizedPnlDeltaUnits()).isEqualTo(300L);
+    }
+
+    @Test
+    void settlementReleasesResidualLinearEntryValue() {
+        var change = calculator.closeAtSettlement(new PositionState(3L, 4L, 100L, 302L, 0L),
+                101L, linearDelivery());
+
+        assertThat(change.next()).isEqualTo(new PositionState(0L, 0L, 0L, 0L, 1L));
+        assertThat(change.realizedPnlDeltaUnits()).isEqualTo(1L);
     }
 
     @Test

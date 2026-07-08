@@ -2,11 +2,13 @@ package com.surprising.trading.matching.repository;
 
 import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.StoredOutboxRecord;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -138,6 +140,40 @@ public class MatchingOutboxRepository {
                  WHERE id = ?
                 """, Timestamp.from(now), Timestamp.from(now), id);
         requireSingleRow(rows, "matching outbox publish mark");
+    }
+
+    public void markPublished(List<Long> ids, Instant now) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        Timestamp timestamp = Timestamp.from(now);
+        int[] rows = jdbcTemplate.batchUpdate("""
+                UPDATE trading_outbox_events
+                   SET published_at = ?,
+                       updated_at = ?,
+                       last_error = NULL
+                 WHERE id = ?
+                """, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(java.sql.PreparedStatement ps, int i) throws java.sql.SQLException {
+                ps.setTimestamp(1, timestamp);
+                ps.setTimestamp(2, timestamp);
+                ps.setLong(3, ids.get(i));
+            }
+
+            @Override
+            public int getBatchSize() {
+                return ids.size();
+            }
+        });
+        if (rows.length != ids.size()) {
+            throw new IllegalStateException("failed to mark matching outbox events published");
+        }
+        for (int i = 0; i < rows.length; i++) {
+            if (rows[i] != 1 && rows[i] != Statement.SUCCESS_NO_INFO) {
+                throw new IllegalStateException("failed to mark matching outbox event published " + ids.get(i));
+            }
+        }
     }
 
     public void markFailed(long id, String error, Instant now) {

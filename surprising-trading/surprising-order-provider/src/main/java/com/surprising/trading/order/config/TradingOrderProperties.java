@@ -107,9 +107,11 @@ public class TradingOrderProperties {
     }
 
     public static class Outbox {
-        private int batchSize = 200;
-        private long publishDelayMs = 200L;
+        private int batchSize = 1000;
+        private long publishDelayMs = 20L;
         private Duration sendTimeout = Duration.ofSeconds(3);
+        private boolean asyncEnabled = true;
+        private int maxInFlight = 64;
 
         public int getBatchSize() {
             return batchSize;
@@ -133,6 +135,22 @@ public class TradingOrderProperties {
 
         public void setSendTimeout(Duration sendTimeout) {
             this.sendTimeout = sendTimeout;
+        }
+
+        public boolean isAsyncEnabled() {
+            return asyncEnabled;
+        }
+
+        public void setAsyncEnabled(boolean asyncEnabled) {
+            this.asyncEnabled = asyncEnabled;
+        }
+
+        public int getMaxInFlight() {
+            return maxInFlight;
+        }
+
+        public void setMaxInFlight(int maxInFlight) {
+            this.maxInFlight = maxInFlight;
         }
     }
 

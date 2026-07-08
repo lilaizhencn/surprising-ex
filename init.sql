@@ -2217,6 +2217,7 @@ CREATE TABLE IF NOT EXISTS account_positions (
     instrument_version      BIGINT,
     signed_quantity_steps   BIGINT NOT NULL,
     entry_price_ticks       BIGINT NOT NULL,
+    entry_value_ticks       BIGINT NOT NULL DEFAULT 0,
     realized_pnl_units      BIGINT NOT NULL,
     updated_at              TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (product_line, user_id, symbol, margin_mode, position_side),
@@ -2231,8 +2232,10 @@ CREATE TABLE IF NOT EXISTS account_positions (
     CONSTRAINT account_positions_instrument_fk
         FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT account_positions_entry_price_check CHECK (
-        (signed_quantity_steps = 0 AND entry_price_ticks = 0 AND instrument_version IS NULL)
-        OR (signed_quantity_steps <> 0 AND entry_price_ticks > 0 AND instrument_version IS NOT NULL)
+        (signed_quantity_steps = 0 AND entry_price_ticks = 0 AND entry_value_ticks = 0
+            AND instrument_version IS NULL)
+        OR (signed_quantity_steps <> 0 AND entry_price_ticks > 0 AND entry_value_ticks > 0
+            AND instrument_version IS NOT NULL)
     )
 );
 
@@ -2250,6 +2253,19 @@ DO $$
 BEGIN
     IF to_regclass('public.account_positions') IS NOT NULL THEN
         ALTER TABLE account_positions ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+        ALTER TABLE account_positions ADD COLUMN IF NOT EXISTS entry_value_ticks BIGINT NOT NULL DEFAULT 0;
+        UPDATE account_positions
+           SET entry_value_ticks = abs(signed_quantity_steps) * entry_price_ticks
+         WHERE signed_quantity_steps <> 0
+           AND entry_value_ticks = 0;
+        ALTER TABLE account_positions DROP CONSTRAINT IF EXISTS account_positions_entry_price_check;
+        ALTER TABLE account_positions
+            ADD CONSTRAINT account_positions_entry_price_check CHECK (
+                (signed_quantity_steps = 0 AND entry_price_ticks = 0 AND entry_value_ticks = 0
+                    AND instrument_version IS NULL)
+                OR (signed_quantity_steps <> 0 AND entry_price_ticks > 0 AND entry_value_ticks > 0
+                    AND instrument_version IS NOT NULL)
+            );
         ALTER TABLE account_positions DROP CONSTRAINT IF EXISTS account_positions_product_line_check;
         ALTER TABLE account_positions
             ADD CONSTRAINT account_positions_product_line_check CHECK (

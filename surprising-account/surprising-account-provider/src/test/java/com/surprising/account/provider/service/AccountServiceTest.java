@@ -16,6 +16,7 @@ import com.surprising.account.provider.model.ContractSpec;
 import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.account.provider.model.LiquidationFeeSettlement;
 import com.surprising.account.provider.model.OrderFeeSnapshot;
+import com.surprising.account.provider.model.PositionSettlementState;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
@@ -1269,6 +1270,24 @@ class AccountServiceTest {
                         return new PositionResponse(key.userId(), key.symbol(), state.instrumentVersion(),
                                 key.marginMode(), key.positionSide(), state.signedQuantitySteps(),
                                 state.entryPriceTicks(), state.realizedPnlUnits(), EVENT_TIME);
+                    })
+                    .toList();
+        }
+
+        @Override
+        public List<PositionSettlementState> openPositionStatesForSettlement(ProductLine productLine, String symbol) {
+            return positions.entrySet().stream()
+                    .filter(entry -> entry.getKey().symbol().equals(symbol))
+                    .filter(entry -> entry.getValue().signedQuantitySteps() != 0L)
+                    .filter(entry -> {
+                        ContractSpec spec = contractSpecs.get(symbol + ":" + entry.getValue().instrumentVersion());
+                        return spec != null && spec.contractType().productLine() == productLine;
+                    })
+                    .map(entry -> {
+                        PositionKey key = entry.getKey();
+                        PositionState state = entry.getValue();
+                        return new PositionSettlementState(key.userId(), key.symbol(), key.marginMode(),
+                                key.positionSide(), state, EVENT_TIME);
                     })
                     .toList();
         }

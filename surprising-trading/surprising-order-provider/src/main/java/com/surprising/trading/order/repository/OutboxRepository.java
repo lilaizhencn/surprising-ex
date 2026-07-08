@@ -2,11 +2,13 @@ package com.surprising.trading.order.repository;
 
 import com.surprising.trading.order.model.OutboxRecord;
 import com.surprising.trading.order.config.TradingOrderProperties;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -143,6 +145,40 @@ public class OutboxRepository {
                 """, Timestamp.from(now), Timestamp.from(now), id);
         if (rows != 1) {
             throw new IllegalStateException("failed to mark trading outbox event published " + id);
+        }
+    }
+
+    public void markPublished(List<Long> ids, Instant now) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        Timestamp timestamp = Timestamp.from(now);
+        int[] rows = jdbcTemplate.batchUpdate("""
+                UPDATE trading_outbox_events
+                   SET published_at = ?,
+                       updated_at = ?,
+                       last_error = NULL
+                 WHERE id = ?
+                """, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(java.sql.PreparedStatement ps, int i) throws java.sql.SQLException {
+                ps.setTimestamp(1, timestamp);
+                ps.setTimestamp(2, timestamp);
+                ps.setLong(3, ids.get(i));
+            }
+
+            @Override
+            public int getBatchSize() {
+                return ids.size();
+            }
+        });
+        if (rows.length != ids.size()) {
+            throw new IllegalStateException("failed to mark trading outbox events published");
+        }
+        for (int i = 0; i < rows.length; i++) {
+            if (rows[i] != 1 && rows[i] != Statement.SUCCESS_NO_INFO) {
+                throw new IllegalStateException("failed to mark trading outbox event published " + ids.get(i));
+            }
         }
     }
 

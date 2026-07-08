@@ -10,6 +10,8 @@ STREAM_THREADS="${STREAM_THREADS:-2}"
 MIN_PARTITIONS="${MIN_PARTITIONS:-24}"
 MAX_PARTITIONS="${MAX_PARTITIONS:-384}"
 PARTITION_STEP="${PARTITION_STEP:-12}"
+INCLUDE_SHARED_TOPICS="${INCLUDE_SHARED_TOPICS:-true}"
+INCLUDE_LEGACY_PERP_TOPICS="${INCLUDE_LEGACY_PERP_TOPICS:-true}"
 INCLUDE_PRODUCT_TOPICS="${INCLUDE_PRODUCT_TOPICS:-true}"
 PRODUCT_TOPIC_LINES="${PRODUCT_TOPIC_LINES:-spot linear-perp inverse-perp linear-delivery inverse-delivery option}"
 
@@ -111,25 +113,30 @@ create_product_topics() {
   esac
 }
 
-create_topic surprising.instrument.events.v1
-create_topic surprising.perp.trade.events.v1
-create_topic surprising.perp.candle.events.v1
-create_topic surprising.perp.order.commands.v1
-create_topic surprising.perp.order.events.v1
-create_topic surprising.perp.match.results.v1
-create_topic surprising.perp.match.trades.v1
-create_topic surprising.perp.orderbook.depth.v1
-create_topic surprising.account.position.events.v1
-create_topic surprising.account.liquidation-fee.events.v1
-create_topic surprising.risk.account.events.v1
-create_topic surprising.risk.position.events.v1
-create_topic surprising.perp.liquidation.candidates.v1
-create_topic surprising.perp.index.price.v1
-create_topic surprising.perp.index.components.v1
-create_topic surprising.perp.book.ticker.v1
-create_topic surprising.perp.funding.rate.v1
-create_topic surprising.perp.mark.price.v1
-create_topic surprising.perp.mark.price.audit.v1
+if [[ "${INCLUDE_SHARED_TOPICS}" == "true" ]]; then
+  create_topic surprising.instrument.events.v1
+  create_topic surprising.account.position.events.v1
+  create_topic surprising.account.liquidation-fee.events.v1
+  create_topic surprising.risk.account.events.v1
+  create_topic surprising.risk.position.events.v1
+fi
+
+if [[ "${INCLUDE_LEGACY_PERP_TOPICS}" == "true" ]]; then
+  create_topic surprising.perp.trade.events.v1
+  create_topic surprising.perp.candle.events.v1
+  create_topic surprising.perp.order.commands.v1
+  create_topic surprising.perp.order.events.v1
+  create_topic surprising.perp.match.results.v1
+  create_topic surprising.perp.match.trades.v1
+  create_topic surprising.perp.orderbook.depth.v1
+  create_topic surprising.perp.liquidation.candidates.v1
+  create_topic surprising.perp.index.price.v1
+  create_topic surprising.perp.index.components.v1
+  create_topic surprising.perp.book.ticker.v1
+  create_topic surprising.perp.funding.rate.v1
+  create_topic surprising.perp.mark.price.v1
+  create_topic surprising.perp.mark.price.audit.v1
+fi
 
 if [[ "${INCLUDE_PRODUCT_TOPICS}" == "true" ]]; then
   for product_line in ${PRODUCT_TOPIC_LINES}; do

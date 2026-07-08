@@ -27,10 +27,12 @@ surprising:
         product-topics-enabled: false
         order-commands-topic: surprising.perp.order.commands.v1
         order-events-topic: surprising.perp.order.events.v1
-      outbox:
-        batch-size: 200
-        publish-delay-ms: 200
-        send-timeout: 3s
+    outbox:
+      batch-size: 1000
+      publish-delay-ms: 20
+      async-enabled: true
+      max-in-flight: 64
+      send-timeout: 3s
       risk:
         market-max-slippage-ppm: 10000
         market-max-mark-age-ms: 5000

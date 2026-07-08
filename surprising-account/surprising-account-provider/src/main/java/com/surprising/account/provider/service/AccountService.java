@@ -26,6 +26,7 @@ import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.account.provider.model.LiquidationFeeSettlement;
 import com.surprising.account.provider.model.OrderFeeSnapshot;
 import com.surprising.account.provider.model.PositionChange;
+import com.surprising.account.provider.model.PositionSettlementState;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
@@ -526,9 +527,9 @@ public class AccountService {
                                         String referenceType,
                                         String reason,
                                         SettlementPriceResolver settlementPriceResolver) {
-        List<PositionResponse> positions = accountRepository.openPositionsForSettlement(productLine, symbol);
+        List<PositionSettlementState> positions = accountRepository.openPositionStatesForSettlement(productLine, symbol);
         int settled = 0;
-        for (PositionResponse position : positions) {
+        for (PositionSettlementState position : positions) {
             if (position.signedQuantitySteps() == 0L) {
                 continue;
             }
@@ -539,8 +540,7 @@ public class AccountService {
             }
             AccountType accountType = derivativeAccountType(spec);
             long settlementPriceTicks = settlementPriceResolver.settlementPriceTicks(position, spec);
-            PositionState current = new PositionState(position.signedQuantitySteps(), position.instrumentVersion(),
-                    position.entryPriceTicks(), position.realizedPnlUnits());
+            PositionState current = position.state();
             PositionChange change = positionCalculator.closeAtSettlement(current, settlementPriceTicks, spec);
             String referenceId = lifecycleReferenceId(referenceType, symbol, position.instrumentVersion(), position);
             long ledgerDeltaUnits = lifecycleLedgerDeltaUnits(referenceType, settlementPriceTicks, spec, position,
@@ -586,7 +586,7 @@ public class AccountService {
     }
 
     private interface SettlementPriceResolver {
-        long settlementPriceTicks(PositionResponse position, ContractSpec spec);
+        long settlementPriceTicks(PositionSettlementState position, ContractSpec spec);
     }
 
     private void requireCashSettlement(ContractSettlementMethod settlementMethod) {
@@ -701,7 +701,7 @@ public class AccountService {
     private long lifecycleLedgerDeltaUnits(String referenceType,
                                            long settlementPriceTicks,
                                            ContractSpec spec,
-                                           PositionResponse position,
+                                           PositionSettlementState position,
                                            PositionChange change) {
         if (spec.contractType().isOption() && "OPTION_EXERCISE".equals(referenceType)) {
             return MarginTransferMath.optionExercisePayoffUnits(spec, settlementPriceTicks,
@@ -713,7 +713,7 @@ public class AccountService {
     private String lifecycleReferenceId(String referenceType,
                                         String symbol,
                                         long instrumentVersion,
-                                        PositionResponse position) {
+                                        PositionSettlementState position) {
         return referenceType + ":" + symbol + ":" + instrumentVersion + ":" + position.userId()
                 + ":" + position.marginMode().name() + ":" + position.positionSide().name();
     }

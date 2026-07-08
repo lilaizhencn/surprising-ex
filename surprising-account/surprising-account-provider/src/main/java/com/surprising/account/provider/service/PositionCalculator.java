@@ -28,6 +28,7 @@ public class PositionCalculator {
         long signedDelta = side == OrderSide.BUY ? quantitySteps : -quantitySteps;
         if (current.signedQuantitySteps() == 0) {
             return new PositionChange(new PositionState(signedDelta, fillSpec.version(), priceTicks,
+                    entryValueTicks(Math.absExact(signedDelta), priceTicks),
                     current.realizedPnlUnits()), 0L);
         }
 
@@ -39,22 +40,54 @@ public class PositionCalculator {
             }
             long oldAbs = Math.absExact(currentQty);
             long addAbs = Math.absExact(signedDelta);
-            long weightedPrice = averageEntryPriceTicks(positionSpec.contractType(), oldAbs,
-                    current.entryPriceTicks(), addAbs, priceTicks);
+            long newAbs = Math.addExact(oldAbs, addAbs);
+            long newEntryValueTicks;
+            long weightedPrice;
+            if (positionSpec.contractType().isLinear()) {
+                newEntryValueTicks = Math.addExact(current.entryValueTicks(), entryValueTicks(addAbs, priceTicks));
+                weightedPrice = averageEntryPriceTicks(newEntryValueTicks, newAbs);
+            } else {
+                weightedPrice = averageEntryPriceTicks(positionSpec.contractType(), oldAbs,
+                        current.entryPriceTicks(), addAbs, priceTicks);
+                newEntryValueTicks = entryValueTicks(newAbs, weightedPrice);
+            }
             return new PositionChange(new PositionState(Math.addExact(currentQty, signedDelta), current.instrumentVersion(),
-                    weightedPrice,
+                    weightedPrice, newEntryValueTicks,
                     current.realizedPnlUnits()), 0L);
         }
 
-        long closeQty = Math.min(Math.absExact(currentQty), Math.absExact(signedDelta));
-        long pnlDelta = realizedPnlUnits(currentQty, current.entryPriceTicks(), priceTicks, closeQty, positionSpec);
+        long currentAbs = Math.absExact(currentQty);
+        long closeQty = Math.min(currentAbs, Math.absExact(signedDelta));
+        long releasedEntryValueTicks = positionSpec.contractType().isLinear()
+                ? releasedEntryValueTicks(current.entryValueTicks(), currentAbs, closeQty)
+                : 0L;
+        long pnlDelta = realizedPnlUnits(currentQty, current.entryPriceTicks(), priceTicks, closeQty, positionSpec,
+                releasedEntryValueTicks);
         long newQty = Math.addExact(currentQty, signedDelta);
         long newRealizedPnl = Math.addExact(current.realizedPnlUnits(), pnlDelta);
-        long newEntryPrice = newQty == 0 ? 0L
-                : Long.signum(newQty) == Long.signum(currentQty) ? current.entryPriceTicks() : priceTicks;
-        long newInstrumentVersion = newQty == 0 ? 0L
-                : Long.signum(newQty) == Long.signum(currentQty) ? current.instrumentVersion() : fillSpec.version();
-        return new PositionChange(new PositionState(newQty, newInstrumentVersion, newEntryPrice, newRealizedPnl),
+        long newEntryPrice;
+        long newEntryValueTicks;
+        long newInstrumentVersion;
+        if (newQty == 0L) {
+            newEntryPrice = 0L;
+            newEntryValueTicks = 0L;
+            newInstrumentVersion = 0L;
+        } else if (Long.signum(newQty) == Long.signum(currentQty)) {
+            newInstrumentVersion = current.instrumentVersion();
+            if (positionSpec.contractType().isLinear()) {
+                newEntryValueTicks = Math.subtractExact(current.entryValueTicks(), releasedEntryValueTicks);
+                newEntryPrice = averageEntryPriceTicks(newEntryValueTicks, Math.absExact(newQty));
+            } else {
+                newEntryPrice = current.entryPriceTicks();
+                newEntryValueTicks = entryValueTicks(Math.absExact(newQty), newEntryPrice);
+            }
+        } else {
+            newEntryPrice = priceTicks;
+            newEntryValueTicks = entryValueTicks(Math.absExact(newQty), priceTicks);
+            newInstrumentVersion = fillSpec.version();
+        }
+        return new PositionChange(new PositionState(newQty, newInstrumentVersion, newEntryPrice, newEntryValueTicks,
+                newRealizedPnl),
                 pnlDelta);
     }
 
@@ -74,9 +107,10 @@ public class PositionCalculator {
             throw new IllegalArgumentException("settlementPriceTicks must be non-negative");
         }
         long closeQty = Math.absExact(current.signedQuantitySteps());
+        long releasedEntryValueTicks = contractSpec.contractType().isLinear() ? current.entryValueTicks() : 0L;
         long pnlDelta = realizedPnlUnits(current.signedQuantitySteps(), current.entryPriceTicks(),
-                settlementPriceTicks, closeQty, contractSpec);
-        return new PositionChange(new PositionState(0L, 0L, 0L,
+                settlementPriceTicks, closeQty, contractSpec, releasedEntryValueTicks);
+        return new PositionChange(new PositionState(0L, 0L, 0L, 0L,
                 Math.addExact(current.realizedPnlUnits(), pnlDelta)), pnlDelta);
     }
 
@@ -100,19 +134,30 @@ public class PositionCalculator {
         return Math.max(1L, toLongRounded(numerator, denominator));
     }
 
+    private long averageEntryPriceTicks(long entryValueTicks, long quantitySteps) {
+        if (quantitySteps <= 0) {
+            throw new IllegalArgumentException("quantitySteps must be positive");
+        }
+        if (entryValueTicks <= 0) {
+            throw new IllegalArgumentException("entryValueTicks must be positive");
+        }
+        return Math.max(1L, entryValueTicks / quantitySteps);
+    }
+
     private long realizedPnlUnits(long currentSignedQty,
                                   long entryPriceTicks,
                                   long exitPriceTicks,
                                   long closeQty,
-                                  ContractSpec contractSpec) {
+                                  ContractSpec contractSpec,
+                                  long releasedEntryValueTicks) {
         ContractType contractType = contractSpec.contractType();
         requireLinearOrInverse(contractType);
         if (contractType.isLinear()) {
-            long priceDiff = currentSignedQty > 0
-                    ? Math.subtractExact(exitPriceTicks, entryPriceTicks)
-                    : Math.subtractExact(entryPriceTicks, exitPriceTicks);
-            return Math.multiplyExact(Math.multiplyExact(priceDiff, closeQty),
-                    contractSpec.notionalMultiplierUnits());
+            BigInteger exitValueTicks = big(exitPriceTicks).multiply(big(closeQty));
+            BigInteger pnlTicks = currentSignedQty > 0
+                    ? exitValueTicks.subtract(big(releasedEntryValueTicks))
+                    : big(releasedEntryValueTicks).subtract(exitValueTicks);
+            return pnlTicks.multiply(big(contractSpec.notionalMultiplierUnits())).longValueExact();
         }
         BigInteger signedQuantity = big(closeQty).multiply(BigInteger.valueOf(currentSignedQty > 0 ? 1L : -1L));
         BigInteger numerator = signedQuantity
@@ -123,6 +168,19 @@ public class PositionCalculator {
                 .multiply(big(exitPriceTicks))
                 .multiply(big(contractSpec.priceTickUnits()));
         return toLongRounded(numerator, denominator);
+    }
+
+    private long entryValueTicks(long quantitySteps, long priceTicks) {
+        return Math.multiplyExact(quantitySteps, priceTicks);
+    }
+
+    private long releasedEntryValueTicks(long entryValueTicks, long currentQuantitySteps, long closeQuantitySteps) {
+        if (closeQuantitySteps == currentQuantitySteps) {
+            return entryValueTicks;
+        }
+        return big(entryValueTicks).multiply(big(closeQuantitySteps))
+                .divide(big(currentQuantitySteps))
+                .longValueExact();
     }
 
     private void requireLinearOrInverse(ContractType contractType) {

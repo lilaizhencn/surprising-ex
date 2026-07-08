@@ -51,7 +51,9 @@ surprising:
         self-trade-prevention-bypass-user-ids: [900001, 900002, 910001]
         market-max-slippage-ppm: 10000
         market-max-mark-age-ms: 5000
-      outbox:
-        batch-size: 500
-        publish-delay-ms: 100
-        send-timeout: 3s
+    outbox:
+      batch-size: 1000
+      publish-delay-ms: 20
+      async-enabled: true
+      max-in-flight: 64
+      send-timeout: 3s
