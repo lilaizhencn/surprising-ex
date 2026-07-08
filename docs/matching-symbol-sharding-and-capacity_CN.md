@@ -11,6 +11,42 @@
 - `exchange-core2` 内部把所有命令发布到同一个 Disruptor RingBuffer，底层 producer 类型是 `ProducerType.MULTI`。
 - `exchange-core2` 创建固定数量的 `MatchingEngineRouter`，每个 router 持有一组 `symbolId -> orderBook`。路由规则是 `symbolId & shardMask == shardId`。
 
+## shard 的含义
+
+这里的 shard 指 `exchange-core2` 内部的 matching engine shard，也就是一个 `MatchingEngineRouter` 实例。它不是 Kafka partition，也不是每个 symbol 一个独立队列。
+
+`exchange-core2` 内部仍然是单个 Disruptor RingBuffer。所有命令先进入这个共享 RingBuffer，然后经过处理链路：
+
+```text
+ExchangeApi
+  -> single Disruptor RingBuffer
+    -> GroupingProcessor
+    -> RiskEngine R1
+    -> MatchingEngineRouter[0..N-1]
+    -> RiskEngine R2
+    -> ResultsHandler
+```
+
+多个 `MatchingEngineRouter` 都会接收同一个 RingBuffer 上的命令事件，但只有负责该 `symbolId` 的 router 会真正处理这个 order book。底层判断逻辑等价于：
+
+```java
+private boolean symbolForThisHandler(final long symbol) {
+    return (shardMask == 0) || ((symbol & shardMask) == shardId);
+}
+```
+
+例如 `matchingEnginesNum = 4` 时，`shardMask = 3`：
+
+```text
+symbolId=100 -> 100 & 3 = 0 -> shard 0
+symbolId=101 -> 101 & 3 = 1 -> shard 1
+symbolId=102 -> 102 & 3 = 2 -> shard 2
+symbolId=103 -> 103 & 3 = 3 -> shard 3
+symbolId=104 -> 104 & 3 = 0 -> shard 0
+```
+
+每个 `MatchingEngineRouter` 内部维护自己的 `symbolId -> orderBook` map。同一个 symbol 只归属一个 matching shard，所以这个 symbol 的 order book 修改是串行的；多个 symbol 如果落在不同 shard，可以在 matching 阶段并行；如果落在同一个 shard，仍然会在同一个 router 上排队。
+
 相关源码：
 
 - `surprising-trading/surprising-order-provider/src/main/java/com/surprising/trading/order/service/OrderService.java`
