@@ -25,10 +25,7 @@ To understand the project architecture and implementation details, read the Surp
 - `surprising-trading`: order entry, trigger orders, algo orders, product-line Kafka routing, and exchange-core matching.
 - `surprising-account`: account balances, ledgers, product balances, positions, margin, spot settlement, derivative settlement, delivery, and option exercise accounting.
 - `surprising-risk`: margin ratio, risk snapshots, and liquidation candidate service.
-- `surprising-liquidation`: liquidation candidate executor and reduce-only close order service.
-- `surprising-funding`: perpetual funding-rate publishing and settlement service.
-- `surprising-insurance`: insurance fund and bankruptcy deficit coverage service.
-- `surprising-adl`: auto-deleveraging service for residual deficits after insurance is depleted.
+- `surprising-margin-ops`: liquidation, funding, insurance, and ADL APIs/providers, plus a combined deployable provider.
 - `surprising-websocket`: horizontally scalable client WebSocket fanout for market data, orders, matches, and positions.
 - `surprising-gateway`: allowlisted public REST gateway for frontend/BFF traffic.
 - `surprising-market-maker`: internal market-maker quoting and exchange-chain stress strategy service.
@@ -62,6 +59,7 @@ To understand the project architecture and implementation details, read the Surp
 - [surprising-trading](surprising-trading/README.md)
 - [surprising-account](surprising-account/README.md)
 - [surprising-risk](surprising-risk/README.md)
+- [surprising-margin-ops](surprising-margin-ops/README.md)
 - [surprising-liquidation](surprising-liquidation/README.md)
 - [surprising-funding](surprising-funding/README.md)
 - [surprising-insurance](surprising-insurance/README.md)
@@ -112,10 +110,7 @@ JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=ja
 mvn -pl :surprising-matching-provider -am spring-boot:run
 mvn -pl :surprising-account-provider -am spring-boot:run
 mvn -pl :surprising-risk-provider -am spring-boot:run
-mvn -pl :surprising-liquidation-provider -am spring-boot:run
-mvn -pl :surprising-funding-provider -am spring-boot:run
-mvn -pl :surprising-insurance-provider -am spring-boot:run
-mvn -pl :surprising-adl-provider -am spring-boot:run
+mvn -pl :surprising-margin-ops-provider -am spring-boot:run
 mvn -pl :surprising-websocket-provider -am spring-boot:run
 mvn -pl :surprising-trigger-provider -am spring-boot:run
 mvn -pl :surprising-gateway-provider -am spring-boot:run
@@ -132,10 +127,10 @@ Ports:
 - `9085`: exchange-core matching service.
 - `9086`: account and position service.
 - `9087`: risk service.
-- `9088`: liquidation execution service.
-- `9089`: funding service.
-- `9090`: insurance fund service.
-- `9091`: ADL service.
+- `9088`: margin-ops combined service, or liquidation execution service in split mode.
+- `9089`: funding service in split mode.
+- `9090`: insurance fund service in split mode.
+- `9091`: ADL service in split mode.
 - `9093`: client WebSocket fanout service.
 - `9094`: public REST API gateway.
 - `9095`: take-profit and stop-loss trigger order service.

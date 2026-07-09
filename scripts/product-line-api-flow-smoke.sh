@@ -985,9 +985,9 @@ provider_module() {
     matching) echo "surprising-trading/surprising-matching-provider" ;;
     account) echo "surprising-account/surprising-account-provider" ;;
     risk) echo "surprising-risk/surprising-risk-provider" ;;
-    liquidation) echo "surprising-liquidation/surprising-liquidation-provider" ;;
-    insurance) echo "surprising-insurance/surprising-insurance-provider" ;;
-    funding) echo "surprising-funding/surprising-funding-provider" ;;
+    liquidation) echo "surprising-margin-ops/surprising-liquidation-provider" ;;
+    insurance) echo "surprising-margin-ops/surprising-insurance-provider" ;;
+    funding) echo "surprising-margin-ops/surprising-funding-provider" ;;
     gateway) echo "surprising-gateway/surprising-gateway-provider" ;;
     market-maker) echo "surprising-market-maker/surprising-market-maker-provider" ;;
     *) echo "unknown provider: $1" >&2; exit 1 ;;

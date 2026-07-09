@@ -54,7 +54,7 @@ The matching provider still uses the same `exchange-core` wrapper, but a product
 - `surprising-instrument`: unified `SPOT`, `PERPETUAL`, `DELIVERY`, and `OPTION` instrument metadata, including expiry, delivery, strike, and option type fields.
 - `surprising-trading`: order entry, trigger orders, algo orders, exchange-core wrapper, and product-line topic routing.
 - `surprising-account`: basic balances, product balances, ledgers, product ledgers, positions, margin, funding, delivery, and exercise accounting.
-- `surprising-risk` / `surprising-liquidation` / `surprising-insurance` / `surprising-adl`: shared margin-product risk, liquidation, and deficit handling, isolated by product line and account type.
+- `surprising-risk` / `surprising-margin-ops`: shared margin-product risk, liquidation, funding, insurance, and ADL handling, isolated by product line and account type.
 - `surprising-gateway` / `surprising-websocket`: client-facing REST routing and realtime subscriptions by `productLine`.
 
 ## Delivery Futures Model

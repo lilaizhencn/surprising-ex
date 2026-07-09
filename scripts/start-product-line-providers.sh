@@ -52,8 +52,11 @@ module_for() {
     trigger) echo "surprising-trading/surprising-trigger-provider" ;;
     account) echo "surprising-account/surprising-account-provider" ;;
     risk) echo "surprising-risk/surprising-risk-provider" ;;
-    liquidation) echo "surprising-liquidation/surprising-liquidation-provider" ;;
-    funding) echo "surprising-funding/surprising-funding-provider" ;;
+    margin-ops) echo "surprising-margin-ops/surprising-margin-ops-provider" ;;
+    liquidation) echo "surprising-margin-ops/surprising-liquidation-provider" ;;
+    funding) echo "surprising-margin-ops/surprising-funding-provider" ;;
+    insurance) echo "surprising-margin-ops/surprising-insurance-provider" ;;
+    adl) echo "surprising-margin-ops/surprising-adl-provider" ;;
     websocket) echo "surprising-websocket/surprising-websocket-provider" ;;
     market-maker) echo "surprising-market-maker/surprising-market-maker-provider" ;;
     *)
@@ -77,8 +80,11 @@ base_port_for() {
     matching) echo 9085 ;;
     account) echo 9086 ;;
     risk) echo 9087 ;;
+    margin-ops) echo 9088 ;;
     liquidation) echo 9088 ;;
     funding) echo 9089 ;;
+    insurance) echo 9090 ;;
+    adl) echo 9091 ;;
     websocket) echo 9093 ;;
     trigger) echo 9095 ;;
     market-maker) echo 9096 ;;
@@ -223,6 +229,23 @@ service_env() {
         "SURPRISING_RISK_KAFKA_GROUP_ID=surprising-risk-${slug}-v1" \
         "SURPRISING_RISK_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-risk"
       ;;
+    margin-ops)
+      printf '%s\n' \
+        "SURPRISING_LIQUIDATION_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
+        "SURPRISING_LIQUIDATION_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
+        "SURPRISING_LIQUIDATION_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
+        "SURPRISING_LIQUIDATION_KAFKA_GROUP_ID=surprising-liquidation-${slug}-v1" \
+        "SURPRISING_FUNDING_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
+        "SURPRISING_FUNDING_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
+        "SURPRISING_FUNDING_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
+        "SURPRISING_FUNDING_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-funding" \
+        "SURPRISING_INSURANCE_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
+        "SURPRISING_INSURANCE_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
+        "SURPRISING_INSURANCE_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
+        "SURPRISING_INSURANCE_KAFKA_GROUP_ID=surprising-insurance-${slug}-v1" \
+        "SURPRISING_ADL_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
+        "SURPRISING_ADL_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}"
+      ;;
     liquidation)
       printf '%s\n' \
         "SURPRISING_LIQUIDATION_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
@@ -236,6 +259,18 @@ service_env() {
         "SURPRISING_FUNDING_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
         "SURPRISING_FUNDING_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
         "SURPRISING_FUNDING_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-funding"
+      ;;
+    insurance)
+      printf '%s\n' \
+        "SURPRISING_INSURANCE_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
+        "SURPRISING_INSURANCE_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
+        "SURPRISING_INSURANCE_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
+        "SURPRISING_INSURANCE_KAFKA_GROUP_ID=surprising-insurance-${slug}-v1"
+      ;;
+    adl)
+      printf '%s\n' \
+        "SURPRISING_ADL_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
+        "SURPRISING_ADL_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}"
       ;;
     websocket)
       printf '%s\n' \
@@ -294,7 +329,7 @@ wait_health() {
 
 start_service() {
   local service="$1"
-  if [[ "${service}" =~ ^(price|index-price|mark-price|risk|liquidation)$ ]] && ! supports_margin_services; then
+  if [[ "${service}" =~ ^(price|index-price|mark-price|risk|margin-ops|liquidation|insurance|adl)$ ]] && ! supports_margin_services; then
     echo "${service}: skipped for ${PRODUCT_LINE}"
     return
   fi

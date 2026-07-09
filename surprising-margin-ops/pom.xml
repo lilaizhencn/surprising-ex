@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.surprising</groupId>
+        <artifactId>surprising-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../surprising-parent/pom.xml</relativePath>
+    </parent>
+
+    <artifactId>surprising-margin-ops</artifactId>
+    <packaging>pom</packaging>
+    <name>surprising-margin-ops</name>
+    <description>Margin operations APIs and providers for liquidation, funding, insurance, and ADL</description>
+
+    <modules>
+        <module>surprising-liquidation-api</module>
+        <module>surprising-funding-api</module>
+        <module>surprising-insurance-api</module>
+        <module>surprising-adl-api</module>
+        <module>surprising-liquidation-provider</module>
+        <module>surprising-funding-provider</module>
+        <module>surprising-insurance-provider</module>
+        <module>surprising-adl-provider</module>
+        <module>surprising-margin-ops-provider</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-liquidation-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-funding-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-insurance-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-adl-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-instrument-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>

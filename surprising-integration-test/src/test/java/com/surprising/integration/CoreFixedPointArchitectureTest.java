@@ -17,10 +17,7 @@ class CoreFixedPointArchitectureTest {
             "surprising-trading",
             "surprising-account",
             "surprising-risk",
-            "surprising-liquidation",
-            "surprising-funding",
-            "surprising-insurance",
-            "surprising-adl"
+            "surprising-margin-ops"
     );
     private static final Pattern DECIMAL_CORE_TYPE = Pattern.compile("\\b(BigDecimal|Double|Float|double|float)\\b");
 

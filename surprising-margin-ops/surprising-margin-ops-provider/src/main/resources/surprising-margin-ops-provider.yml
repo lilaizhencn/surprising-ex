@@ -1,0 +1,91 @@
+server:
+  port: 9088
+
+spring:
+  application:
+    name: surprising-margin-ops-provider
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 4
+      connection-timeout: 3000
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  liquidation:
+    kafka:
+      bootstrap-servers: localhost:9092
+      product-line: LINEAR_PERPETUAL
+      product-topics-enabled: false
+      group-id: surprising-liquidation-v1
+      liquidation-candidates-topic: surprising.perp.liquidation.candidates.v1
+      match-results-topic: surprising.perp.match.results.v1
+      order-commands-topic: surprising.perp.order.commands.v1
+      order-events-topic: surprising.perp.order.events.v1
+      concurrency: 2
+      max-poll-records: 500
+    outbox:
+      batch-size: 200
+      publish-delay-ms: 100
+      send-timeout: 3s
+    sizing:
+      normal-close-ratio-ppm: 500000
+      severe-margin-ratio-ppm: 1500000
+      severe-close-ratio-ppm: 750000
+      full-close-margin-ratio-ppm: 3000000
+      min-close-steps: 1
+    risk:
+      max-snapshot-age: 5s
+    execution:
+      enabled: true
+      liquidation-fee-rate-ppm: 3000
+  funding:
+    kafka:
+      bootstrap-servers: localhost:9092
+      product-line: LINEAR_PERPETUAL
+      product-topics-enabled: false
+      funding-rate-topic: surprising.perp.funding.rate.v1
+    calculation:
+      publish-delay-ms: 1000
+      max-mark-age: 10s
+    settlement:
+      settle-delay-ms: 1000
+      batch-size: 20
+    outbox:
+      batch-size: 200
+      publish-delay-ms: 200
+      send-timeout: 3s
+    coordination:
+      enabled: true
+      node-id:
+      lease-duration: 15s
+  insurance:
+    kafka:
+      bootstrap-servers: localhost:9092
+      product-line: LINEAR_PERPETUAL
+      product-topics-enabled: false
+      group-id: surprising-insurance-v1
+      liquidation-fee-events-topic: surprising.account.liquidation-fee.events.v1
+      concurrency: 2
+      max-poll-records: 500
+    coverage:
+      scan-delay-ms: 1000
+      batch-size: 100
+  adl:
+    kafka:
+      product-line: LINEAR_PERPETUAL
+      product-topics-enabled: false
+    scanner:
+      scan-delay-ms: 1000
+      min-deficit-age-ms: 10000
+      max-mark-age-ms: 5000
+      batch-size: 50
+      max-deleverages-per-deficit: 20
+      candidate-multiplier: 5

@@ -25,10 +25,7 @@ Surprising 多产品线交易所后端服务。
 - `surprising-trading`：订单入口、止盈止损条件单、算法单、产品线 Kafka 路由和 exchange-core 撮合。
 - `surprising-account`：账户余额、余额流水、产品账户、产品流水、持仓、保证金、现货结算、衍生品结算、交割和期权行权账务。
 - `surprising-risk`：保证金率、风险快照和爆仓候选服务。
-- `surprising-liquidation`：强平候选执行和 reduce-only 平仓订单服务。
-- `surprising-funding`：永续合约资金费率发布和结算服务。
-- `surprising-insurance`：保险基金和穿仓亏损覆盖服务。
-- `surprising-adl`：保险基金耗尽后的自动减仓亏损分摊服务。
+- `surprising-margin-ops`：强平、资金费、保险基金和 ADL 的 API/provider，以及合并部署 provider。
 - `surprising-websocket`：面向前端的水平扩展 WebSocket 推送服务，负责行情、订单、成交和持仓实时推送。
 - `surprising-gateway`：面向前端/BFF 的统一 REST API 网关。
 - `surprising-market-maker`：内网做市商报价和交易链路压测策略服务。
@@ -63,6 +60,7 @@ Surprising 多产品线交易所后端服务。
 - [surprising-trading](surprising-trading/README_CN.md)
 - [surprising-account](surprising-account/README_CN.md)
 - [surprising-risk](surprising-risk/README_CN.md)
+- [surprising-margin-ops](surprising-margin-ops/README_CN.md)
 - [surprising-liquidation](surprising-liquidation/README_CN.md)
 - [surprising-funding](surprising-funding/README_CN.md)
 - [surprising-insurance](surprising-insurance/README_CN.md)
@@ -113,10 +111,7 @@ JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=ja
 mvn -pl :surprising-matching-provider -am spring-boot:run
 mvn -pl :surprising-account-provider -am spring-boot:run
 mvn -pl :surprising-risk-provider -am spring-boot:run
-mvn -pl :surprising-liquidation-provider -am spring-boot:run
-mvn -pl :surprising-funding-provider -am spring-boot:run
-mvn -pl :surprising-insurance-provider -am spring-boot:run
-mvn -pl :surprising-adl-provider -am spring-boot:run
+mvn -pl :surprising-margin-ops-provider -am spring-boot:run
 mvn -pl :surprising-websocket-provider -am spring-boot:run
 mvn -pl :surprising-trigger-provider -am spring-boot:run
 mvn -pl :surprising-gateway-provider -am spring-boot:run
@@ -133,10 +128,10 @@ mvn -pl :surprising-market-maker-provider -am spring-boot:run
 - `9085`：exchange-core 撮合服务。
 - `9086`：账户和持仓服务。
 - `9087`：风险服务。
-- `9088`：强平执行服务。
-- `9089`：资金费率服务。
-- `9090`：保险基金服务。
-- `9091`：ADL 服务。
+- `9088`：margin-ops 合并服务；拆分部署时为强平执行服务。
+- `9089`：拆分部署时的资金费率服务。
+- `9090`：拆分部署时的保险基金服务。
+- `9091`：拆分部署时的 ADL 服务。
 - `9093`：前端 WebSocket 推送服务。
 - `9094`：统一 REST API 网关。
 - `9095`：止盈止损条件单服务。
