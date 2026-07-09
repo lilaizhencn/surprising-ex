@@ -3,6 +3,7 @@ package com.surprising.account.provider.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -13,10 +14,12 @@ import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
+import java.sql.Statement;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import tools.jackson.databind.ObjectMapper;
@@ -104,6 +107,64 @@ class AccountOutboxRepositoryTest {
         assertThat(sql.getValue())
                 .contains("topic IN (?, ?)")
                 .contains("next_attempt_at <= now()");
+    }
+
+    @Test
+    void claimPendingLeasesDuePrefixesPerTopicKey() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        AccountProperties properties = new AccountProperties();
+        properties.getOutbox().setMaxInFlight(3);
+        properties.getOutbox().setMaxRowsPerKey(25);
+        AccountOutboxRepository repository = new AccountOutboxRepository(jdbcTemplate, null, new ObjectMapper(),
+                properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Object[].class))).thenReturn(List.of());
+
+        repository.claimPending(100, Instant.parse("2026-07-01T00:00:30Z"),
+                Instant.parse("2026-07-01T00:00:00Z"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
+        assertThat(sql.getValue())
+                .contains("SELECT DISTINCT ON (topic, event_key)")
+                .contains("pg_try_advisory_xact_lock(hashtext(topic), hashtext(event_key))")
+                .contains("CROSS JOIN LATERAL")
+                .contains("row_number() OVER (ORDER BY prefix.id) AS key_rank")
+                .contains("bool_or(prefix.next_attempt_at > ?)")
+                .contains("ORDER BY due_prefix.key_rank, k.first_id, due_prefix.id")
+                .contains("UPDATE account_outbox_events e")
+                .contains("RETURNING e.id, e.topic, e.event_key");
+        assertThat(args.getValue()[1]).isEqualTo(12);
+        assertThat(args.getValue()[3]).isEqualTo(25);
+        assertThat(args.getValue()[5]).isEqualTo(100);
+    }
+
+    @Test
+    void markPublishedBatchAcceptsSuccessfulRows() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        AccountOutboxRepository repository = new AccountOutboxRepository(jdbcTemplate, null, new ObjectMapper());
+        when(jdbcTemplate.batchUpdate(any(String.class), any(BatchPreparedStatementSetter.class)))
+                .thenReturn(new int[] {1, Statement.SUCCESS_NO_INFO});
+
+        repository.markPublished(List.of(901L, 902L), Instant.parse("2026-07-01T00:00:00Z"));
+
+        ArgumentCaptor<BatchPreparedStatementSetter> setter =
+                ArgumentCaptor.forClass(BatchPreparedStatementSetter.class);
+        verify(jdbcTemplate).batchUpdate(contains("SET published_at"), setter.capture());
+        assertThat(setter.getValue().getBatchSize()).isEqualTo(2);
+    }
+
+    @Test
+    void markPublishedBatchFailsWhenAnyRowIsSkipped() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        AccountOutboxRepository repository = new AccountOutboxRepository(jdbcTemplate, null, new ObjectMapper());
+        when(jdbcTemplate.batchUpdate(any(String.class), any(BatchPreparedStatementSetter.class)))
+                .thenReturn(new int[] {1, 0});
+
+        assertThatThrownBy(() -> repository.markPublished(List.of(901L, 902L),
+                Instant.parse("2026-07-01T00:00:00Z")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("account outbox event published 902");
     }
 
     @SuppressWarnings("unchecked")

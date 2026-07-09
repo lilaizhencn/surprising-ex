@@ -142,6 +142,7 @@ admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Use
 - `account_position_margins_user_idx`
 - `account_positions_user_idx`
 - `account_processed_trades_symbol_idx`
+- `account_outbox_pending_key_idx`
 
 ## 配置
 
@@ -161,6 +162,9 @@ surprising:
     outbox:
       batch-size: 200
       publish-delay-ms: 200
+      async-enabled: true
+      max-in-flight: 32
+      max-rows-per-key: 32
       send-timeout: 3s
     cache:
       contract-spec-max-entries: 4096
@@ -175,6 +179,9 @@ surprising:
 - `order-fee-snapshot-max-entries` 缓存订单接受时已经快照下来的 maker/taker 费率。
 
 余额、持仓、保证金冻结、成交幂等、ledger 和 outbox 状态不会缓存，仍然以 PostgreSQL 为准。
+
+account outbox 发布不改变 Kafka key，并按 `topic + event_key` claim 有界连续到期前缀。
+同 key 仍按 id 顺序发送，不同 key 可以并发发送。
 
 account match-trade consumer 会通过 Actuator/Prometheus 暴露以下指标：
 

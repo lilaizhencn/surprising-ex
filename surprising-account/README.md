@@ -149,6 +149,7 @@ Core indexes:
 - `account_position_margins_user_idx`
 - `account_positions_user_idx`
 - `account_processed_trades_symbol_idx`
+- `account_outbox_pending_key_idx`
 
 ## Configuration
 
@@ -168,6 +169,9 @@ surprising:
     outbox:
       batch-size: 200
       publish-delay-ms: 200
+      async-enabled: true
+      max-in-flight: 32
+      max-rows-per-key: 32
       send-timeout: 3s
     cache:
       contract-spec-max-entries: 4096
@@ -182,6 +186,9 @@ The local cache is intentionally limited to immutable read snapshots:
 - `order-fee-snapshot-max-entries` caches maker/taker fee rates snapshotted on accepted orders.
 
 Balances, positions, margin reservations, processed-trade idempotency, ledgers, and outbox state are never cached and remain PostgreSQL-authoritative.
+
+Account outbox publishing keeps the Kafka key unchanged and claims a bounded contiguous due prefix per `topic + event_key`.
+Rows with the same key are still sent in id order; different keys can publish concurrently.
 
 Account match-trade consumer metrics are exposed through Actuator/Prometheus:
 

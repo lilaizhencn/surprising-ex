@@ -40,6 +40,9 @@ surprising:
     outbox:
       batch-size: 200
       publish-delay-ms: 200
+      async-enabled: true
+      max-in-flight: 32
+      max-rows-per-key: 32
       send-timeout: 3s
     cache:
       contract-spec-max-entries: 4096

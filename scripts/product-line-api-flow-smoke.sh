@@ -37,6 +37,10 @@ STRESS_WAIT_SECONDS="${STRESS_WAIT_SECONDS:-420}"
 STRESS_REPORT_FILE="${STRESS_REPORT_FILE:-${ROOT_DIR}/docs/product-line-multi-symbol-stress-report.md}"
 STRESS_MATCHING_KAFKA_CONCURRENCY="${STRESS_MATCHING_KAFKA_CONCURRENCY:-4}"
 STRESS_ACCOUNT_KAFKA_CONCURRENCY="${STRESS_ACCOUNT_KAFKA_CONCURRENCY:-4}"
+STRESS_ACCOUNT_OUTBOX_BATCH_SIZE="${STRESS_ACCOUNT_OUTBOX_BATCH_SIZE:-1000}"
+STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS="${STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS:-20}"
+STRESS_ACCOUNT_OUTBOX_MAX_IN_FLIGHT="${STRESS_ACCOUNT_OUTBOX_MAX_IN_FLIGHT:-32}"
+STRESS_ACCOUNT_OUTBOX_MAX_ROWS_PER_KEY="${STRESS_ACCOUNT_OUTBOX_MAX_ROWS_PER_KEY:-32}"
 STRESS_RISK_KAFKA_CONCURRENCY="${STRESS_RISK_KAFKA_CONCURRENCY:-4}"
 STRESS_RISK_OUTBOX_BATCH_SIZE="${STRESS_RISK_OUTBOX_BATCH_SIZE:-1000}"
 STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS="${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS:-20}"
@@ -1099,8 +1103,14 @@ product_provider_args() {
       ;;
     account)
       local account_concurrency=1
+      local account_outbox_batch_size=200 account_outbox_publish_delay_ms=200
+      local account_outbox_max_in_flight=32 account_outbox_max_rows_per_key=32
       if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
         account_concurrency="${STRESS_ACCOUNT_KAFKA_CONCURRENCY}"
+        account_outbox_batch_size="${STRESS_ACCOUNT_OUTBOX_BATCH_SIZE}"
+        account_outbox_publish_delay_ms="${STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS}"
+        account_outbox_max_in_flight="${STRESS_ACCOUNT_OUTBOX_MAX_IN_FLIGHT}"
+        account_outbox_max_rows_per_key="${STRESS_ACCOUNT_OUTBOX_MAX_ROWS_PER_KEY}"
       fi
       printf '%s\n' \
         "--surprising.account.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
@@ -1109,6 +1119,10 @@ product_provider_args() {
         "--surprising.account.kafka.group-id=product-smoke-${RUN_ID}-${slug}-account" \
         "--surprising.account.kafka.client-id=product-smoke-${RUN_ID}-${slug}-account" \
         "--surprising.account.kafka.concurrency=${account_concurrency}" \
+        "--surprising.account.outbox.batch-size=${account_outbox_batch_size}" \
+        "--surprising.account.outbox.publish-delay-ms=${account_outbox_publish_delay_ms}" \
+        "--surprising.account.outbox.max-in-flight=${account_outbox_max_in_flight}" \
+        "--surprising.account.outbox.max-rows-per-key=${account_outbox_max_rows_per_key}" \
         "--surprising.account.expiring-settlement.settlement-price-window=PT0S"
       ;;
     risk)
@@ -2238,6 +2252,30 @@ SELECT count(*) || ' ' || round(min(ms)::numeric, 3) || ' ' ||
   FROM lat"
 }
 
+stress_account_consumer_lag_summary() {
+  local product_line="$1"
+  local phase="$2"
+  local slug
+  slug="$(stress_product_slug "${product_line}")"
+  query_value "
+WITH lag AS (
+  SELECT EXTRACT(EPOCH FROM (p.processed_at - t.event_time)) * 1000 AS ms
+    FROM trading_match_trades t
+    JOIN account_processed_trades p
+      ON p.product_line = t.product_line
+     AND p.symbol = t.symbol
+     AND p.trade_id = t.trade_id
+   WHERE t.product_line = '${product_line}'
+     AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'
+)
+SELECT count(*) || ' ' || round(min(ms)::numeric, 3) || ' ' ||
+       round(percentile_disc(0.50) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' ' ||
+       round(percentile_disc(0.95) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' ' ||
+       round(percentile_disc(0.99) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' ' ||
+       round(max(ms)::numeric, 3)
+  FROM lag"
+}
+
 stress_phase_throughput_summary() {
   local product_line="$1"
   local phase="$2"
@@ -2467,6 +2505,7 @@ run_multi_symbol_stress_flow() {
   local open_latency close_latency open_trades close_trades settled_open settled_close active_symbols maker_users
   local maker_orders maker_place_success open_accepted_tps open_matched_tps open_account_tps
   local close_accepted_tps close_matched_tps close_account_tps trading_outbox_tps account_outbox_tps risk_outbox_tps
+  local open_account_lag close_account_lag
   slug="$(stress_product_slug "${product_line}")"
   echo "Scenario ${product_line}: multi-symbol high-frequency stress symbols=${STRESS_SYMBOL_COUNT} users=${STRESS_USER_COUNT}"
   seed_stress_prices "${product_line}"
@@ -2535,6 +2574,8 @@ PY
 )"
   open_latency="$(stress_latency_summary "${product_line}" "open")"
   close_latency="$(stress_latency_summary "${product_line}" "close")"
+  open_account_lag="$(stress_account_consumer_lag_summary "${product_line}" "open")"
+  close_account_lag="$(stress_account_consumer_lag_summary "${product_line}" "close")"
   open_accepted_tps="$(stress_phase_throughput_summary "${product_line}" "open" "accepted")"
   open_matched_tps="$(stress_phase_throughput_summary "${product_line}" "open" "matched")"
   open_account_tps="$(stress_phase_throughput_summary "${product_line}" "open" "account")"
@@ -2568,8 +2609,9 @@ PY
     echo "- Open phase：orders=${STRESS_USER_COUNT}, trades=${open_trades}, settledOrders=${settled_open}, submitMs=${open_ms}, concurrency=${STRESS_LOAD_CONCURRENCY}"
     echo "- Close/sell phase：orders=${STRESS_USER_COUNT}, trades=${close_trades}, settledOrders=${settled_close}, submitMs=${close_ms}, concurrency=${STRESS_LOAD_CONCURRENCY}"
     echo "- Account settlement latency ms \`count min p50 p95 p99 max\`：open=${open_latency}; close=${close_latency}"
+    echo "- Account consumer lag ms \`matchEventTime -> accountProcessedAt count min p50 p95 p99 max\`：open=${open_account_lag}; close=${close_account_lag}"
     echo "- Phase throughput \`count durationSeconds tps\`：openAccepted=${open_accepted_tps}; openMatched=${open_matched_tps}; openAccount=${open_account_tps}; closeAccepted=${close_accepted_tps}; closeMatched=${close_matched_tps}; closeAccount=${close_account_tps}"
-    echo "- Outbox publish \`published pending durationSeconds tps\`：trading=${trading_outbox_tps}; account=${account_outbox_tps}; risk=${risk_outbox_tps}"
+    echo "- Outbox end-to-end publish \`published pending eventToPublishedSpanSeconds effectiveTps\`：trading=${trading_outbox_tps}; account=${account_outbox_tps}; risk=${risk_outbox_tps}"
     echo
     echo "| 产品线 | 资产 | 期初 | 充值/调整 | 成交/权利金净额 | 成交/权利金发生额 | 手续费 | 资金费净额/发生额 | 强平费 | 交割/行权净额/发生额 | 期末应有 | 期末实际 | 结果 |"
     echo "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"
@@ -3031,6 +3073,7 @@ main() {
       echo "- Maker accounts：${STRESS_SYMBOL_COUNT}，每个 symbol 一个 maker account；market-maker provider 同时配置 ${STRESS_SYMBOL_COUNT} 个 strategy。"
       echo "- Maker 高频：初始 ${STRESS_MAKER_DEPTH_LEVELS} 档，压测阶段每个 phase 刷新 ${STRESS_MAKER_REFRESH_CYCLES} 轮，每轮 ${STRESS_MAKER_REFRESH_LEVELS} 档。"
       echo "- 用户：每个产品线 ${STRESS_USER_COUNT} 个 taker 用户，经 gateway 单笔真实下单；open 与 close/sell 两阶段均按并发 ${STRESS_LOAD_CONCURRENCY} 提交。"
+      echo "- Account outbox：batchSize=${STRESS_ACCOUNT_OUTBOX_BATCH_SIZE}，publishDelayMs=${STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS}，maxInFlight=${STRESS_ACCOUNT_OUTBOX_MAX_IN_FLIGHT}，maxRowsPerKey=${STRESS_ACCOUNT_OUTBOX_MAX_ROWS_PER_KEY}。"
       echo "- Risk outbox：batchSize=${STRESS_RISK_OUTBOX_BATCH_SIZE}，publishDelayMs=${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS}，maxRowsPerKey=${STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY}。"
       echo "- 资金准备：批量 fixture 写入 balance、ledger 和 admin adjustment；下单、撮合、Kafka、account 结算全部走真实 provider 链路。"
       echo "- 临时日志目录：\`${TMP_DIR}\`"

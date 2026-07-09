@@ -2394,6 +2394,10 @@ CREATE INDEX IF NOT EXISTS account_outbox_pending_idx
     ON account_outbox_events (next_attempt_at, id)
     WHERE published_at IS NULL;
 
+CREATE INDEX IF NOT EXISTS account_outbox_pending_key_idx
+    ON account_outbox_events (topic, event_key, id)
+    WHERE published_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS account_outbox_aggregate_idx
     ON account_outbox_events (aggregate_type, aggregate_id);
 

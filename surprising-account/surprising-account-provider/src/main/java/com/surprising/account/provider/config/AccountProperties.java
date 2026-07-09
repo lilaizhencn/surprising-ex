@@ -214,6 +214,9 @@ public class AccountProperties {
         private int batchSize = 200;
         private long publishDelayMs = 200L;
         private Duration sendTimeout = Duration.ofSeconds(3);
+        private boolean asyncEnabled = true;
+        private int maxInFlight = 32;
+        private int maxRowsPerKey = 32;
 
         public int getBatchSize() {
             return batchSize;
@@ -237,6 +240,30 @@ public class AccountProperties {
 
         public void setSendTimeout(Duration sendTimeout) {
             this.sendTimeout = sendTimeout;
+        }
+
+        public boolean isAsyncEnabled() {
+            return asyncEnabled;
+        }
+
+        public void setAsyncEnabled(boolean asyncEnabled) {
+            this.asyncEnabled = asyncEnabled;
+        }
+
+        public int getMaxInFlight() {
+            return maxInFlight;
+        }
+
+        public void setMaxInFlight(int maxInFlight) {
+            this.maxInFlight = maxInFlight;
+        }
+
+        public int getMaxRowsPerKey() {
+            return maxRowsPerKey;
+        }
+
+        public void setMaxRowsPerKey(int maxRowsPerKey) {
+            this.maxRowsPerKey = maxRowsPerKey;
         }
     }
 
