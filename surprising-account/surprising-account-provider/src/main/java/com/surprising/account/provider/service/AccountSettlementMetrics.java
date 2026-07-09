@@ -19,6 +19,7 @@ public class AccountSettlementMetrics {
     private final Map<String, Counter> eventCounters;
     private final Map<String, Timer> processingTimers;
     private final Map<String, Timer> eventLagTimers;
+    private final Timer userLockWaitTimer;
 
     @Autowired
     public AccountSettlementMetrics(MeterRegistry meterRegistry) {
@@ -34,18 +35,21 @@ public class AccountSettlementMetrics {
                 OUTCOME_PROCESSED, eventLagTimer(meterRegistry, OUTCOME_PROCESSED),
                 OUTCOME_DUPLICATE, eventLagTimer(meterRegistry, OUTCOME_DUPLICATE),
                 OUTCOME_FAILED, eventLagTimer(meterRegistry, OUTCOME_FAILED));
+        this.userLockWaitTimer = userLockWaitTimer(meterRegistry);
     }
 
     private AccountSettlementMetrics(Map<String, Counter> eventCounters,
                                      Map<String, Timer> processingTimers,
-                                     Map<String, Timer> eventLagTimers) {
+                                     Map<String, Timer> eventLagTimers,
+                                     Timer userLockWaitTimer) {
         this.eventCounters = eventCounters;
         this.processingTimers = processingTimers;
         this.eventLagTimers = eventLagTimers;
+        this.userLockWaitTimer = userLockWaitTimer;
     }
 
     public static AccountSettlementMetrics noop() {
-        return new AccountSettlementMetrics(Map.of(), Map.of(), Map.of());
+        return new AccountSettlementMetrics(Map.of(), Map.of(), Map.of(), null);
     }
 
     public void recordSuccess(Instant eventTime, long startedAtNanos, boolean processed) {
@@ -54,6 +58,12 @@ public class AccountSettlementMetrics {
 
     public void recordFailure(Instant eventTime, long startedAtNanos) {
         record(OUTCOME_FAILED, eventTime, startedAtNanos);
+    }
+
+    public void recordUserLockWait(long startedAtNanos) {
+        if (userLockWaitTimer != null) {
+            userLockWaitTimer.record(Duration.ofNanos(Math.max(0L, System.nanoTime() - startedAtNanos)));
+        }
     }
 
     private void record(String outcome, Instant eventTime, long startedAtNanos) {
@@ -90,6 +100,12 @@ public class AccountSettlementMetrics {
         return Timer.builder("surprising.account.match_trade.event_lag")
                 .description("Lag from match-trade event time to account consumer observation")
                 .tag("outcome", outcome)
+                .register(meterRegistry);
+    }
+
+    private static Timer userLockWaitTimer(MeterRegistry meterRegistry) {
+        return Timer.builder("surprising.account.match_trade.user_lock_wait")
+                .description("Time spent waiting for per-user match-trade settlement locks")
                 .register(meterRegistry);
     }
 }

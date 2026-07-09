@@ -21,6 +21,7 @@ public class MatchTradeConsumer {
     private final AccountService accountService;
     private final AccountSettlementMetrics settlementMetrics;
     private final AccountProperties properties;
+    private final AccountSettlementConcurrencyGuard concurrencyGuard;
 
     public MatchTradeConsumer(ObjectMapper objectMapper, AccountService accountService) {
         this(objectMapper, accountService, AccountSettlementMetrics.noop());
@@ -32,15 +33,25 @@ public class MatchTradeConsumer {
         this(objectMapper, accountService, settlementMetrics, new AccountProperties());
     }
 
-    @Autowired
     public MatchTradeConsumer(ObjectMapper objectMapper,
                               AccountService accountService,
                               AccountSettlementMetrics settlementMetrics,
                               AccountProperties properties) {
+        this(objectMapper, accountService, settlementMetrics, properties,
+                new AccountSettlementConcurrencyGuard(properties));
+    }
+
+    @Autowired
+    public MatchTradeConsumer(ObjectMapper objectMapper,
+                              AccountService accountService,
+                              AccountSettlementMetrics settlementMetrics,
+                              AccountProperties properties,
+                              AccountSettlementConcurrencyGuard concurrencyGuard) {
         this.objectMapper = objectMapper;
         this.accountService = accountService;
         this.settlementMetrics = settlementMetrics;
         this.properties = properties;
+        this.concurrencyGuard = concurrencyGuard;
     }
 
     @KafkaListener(
@@ -60,7 +71,13 @@ public class MatchTradeConsumer {
             trade = objectMapper.readValue(record.value(), MatchTradeEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), trade.symbol(), "match trade");
             requireCurrentProductTopic(record.topic());
-            boolean processed = accountService.processTradeIfNew(trade);
+            MatchTradeEvent settledTrade = trade;
+            long lockWaitStartedAtNanos = System.nanoTime();
+            boolean processed = concurrencyGuard.withTradeUserLocks(settledTrade,
+                    () -> {
+                        settlementMetrics.recordUserLockWait(lockWaitStartedAtNanos);
+                        return accountService.processTradeIfNew(settledTrade);
+                    });
             settlementMetrics.recordSuccess(trade.eventTime(), startedAtNanos, processed);
         } catch (Exception ex) {
             settlementMetrics.recordFailure(trade == null ? null : trade.eventTime(), startedAtNanos);

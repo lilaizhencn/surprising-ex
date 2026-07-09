@@ -156,6 +156,8 @@ surprising:
       liquidation-fee-events-topic: surprising.linear-perp.account.liquidation-fee.events.v1
       concurrency: 2
       max-poll-records: 500
+    settlement:
+      match-trade-user-lock-stripes: 4096
     outbox:
       batch-size: 200
       publish-delay-ms: 200
@@ -179,9 +181,11 @@ account match-trade consumer 会通过 Actuator/Prometheus 暴露以下指标：
 - `surprising.account.match_trade.events{outcome=processed|duplicate|failed}`
 - `surprising.account.match_trade.processing{outcome=...}`
 - `surprising.account.match_trade.event_lag{outcome=...}`
+- `surprising.account.match_trade.user_lock_wait`
 
 压测和生产排障时，把这些指标与 Kafka consumer lag、PostgreSQL 延迟一起看，才能区分瓶颈是在 Kafka fetch、account 结算 SQL、重复重放，还是下游 outbox/fanout。consumer 并行度仍受 Kafka 分区限制：match trade 按 `symbol` 做 key，同一个热门 symbol 必须在一个分区内有序结算，不同 symbol 才能并行。
-match-trade listener 使用 Spring Kafka batch delivery 和 `AckMode.BATCH`，减少每条记录单独提交 offset 的开销。批次里的每条记录仍然独立调用 `processTradeIfNew(...)`，所以 PostgreSQL 事务、`(symbol, trade_id)` 幂等和 symbol 内顺序仍是正确性边界。批次中某条失败时 Kafka 会重投整个批次，已经结算成功的成交会被 processed-trade key 跳过。
+进入 `processTradeIfNew(...)` 前，listener 会对 taker/maker 做确定性用户级 stripe 锁。这样同一用户跨不同 symbol 的 match-trade 结算不会并发执行，不相关用户仍然可以并行结算。`surprising.account.match_trade.user_lock_wait` 应保持低位；如果持续升高，说明热点用户或做市账号已经在 account 结算层排队。
+match-trade listener 使用 Spring Kafka batch delivery 和 `AckMode.BATCH`，减少每条记录单独提交 offset 的开销。批次里的每条记录仍然独立调用 `processTradeIfNew(...)`，所以 PostgreSQL 事务、`(symbol, trade_id)` 幂等、symbol 内顺序和用户级结算锁仍是正确性边界。批次中某条失败时 Kafka 会重投整个批次，已经结算成功的成交会被 processed-trade key 跳过。
 `surprising.account.kafka.client-id` 要给每个 account-provider pod 配成稳定且唯一的值。`surprising.account.kafka.group-id` 仍然要在同一服务副本间保持一致；唯一 client id 只用于 consumer group 观测和节点级故障排查。
 
 ## 本地运行
@@ -203,6 +207,7 @@ mvn -pl :surprising-account-provider -am spring-boot:run
 
 - 余额调整必须携带全局唯一 `referenceId`，防止充值/冲正重复入账。同一 reference 的重放只有在 `amountUnits` 和 `reason` 与原流水一致时才会幂等返回；payload 不一致会在改余额前失败。
 - 账户 provider 消费撮合成交时必须按 `(symbol, trade_id)` 幂等，不能只按裸 `tradeId` 去重。
+- 调高 `surprising.account.kafka.concurrency` 时不能移除 match-trade 用户级结算保护。同一用户跨 symbol 的资金结算必须在 account-provider 层串行；PostgreSQL 行锁和非负约束是最后防线，不应该作为主要排队机制。
 - 订单入口会在发布撮合命令前冻结初始保证金。账户 provider 消费成交后，按实际成交价计算开仓保证金并迁移为持仓保证金，委托价或市价保护价多冻结的部分释放回可用余额。
 - `account_positions`、`account_position_margins`、`account_margin_reservations` 都会持久化 `margin_mode`。不要从事件或查询里丢掉这个字段；后续逐仓风控依赖它。
 - 用户逐仓保证金调整按 `referenceId` 幂等，并写入 `account_ledger_entries.reference_type = POSITION_MARGIN_ADJUSTMENT`。正向调整只把可用余额转入持仓保证金；负向调整必须先校验最新逐仓风险快照，再释放持仓保证金。

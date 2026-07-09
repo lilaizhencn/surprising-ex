@@ -58,6 +58,9 @@ class MatchTradeConsumerTest {
                 .tag("outcome", "processed")
                 .timer()
                 .count()).isEqualTo(1L);
+        assertThat(meterRegistry.get("surprising.account.match_trade.user_lock_wait")
+                .timer()
+                .count()).isEqualTo(1L);
     }
 
     @Test

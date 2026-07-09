@@ -10,6 +10,7 @@ public class AccountProperties {
 
     private Kafka kafka = new Kafka();
     private Outbox outbox = new Outbox();
+    private Settlement settlement = new Settlement();
     private Cache cache = new Cache();
     private PositionMargin positionMargin = new PositionMargin();
     private ExpiringSettlement expiringSettlement = new ExpiringSettlement();
@@ -28,6 +29,14 @@ public class AccountProperties {
 
     public void setOutbox(Outbox outbox) {
         this.outbox = outbox;
+    }
+
+    public Settlement getSettlement() {
+        return settlement;
+    }
+
+    public void setSettlement(Settlement settlement) {
+        this.settlement = settlement;
     }
 
     public Cache getCache() {
@@ -228,6 +237,21 @@ public class AccountProperties {
 
         public void setSendTimeout(Duration sendTimeout) {
             this.sendTimeout = sendTimeout;
+        }
+    }
+
+    public static class Settlement {
+        private int matchTradeUserLockStripes = 4096;
+
+        public int getMatchTradeUserLockStripes() {
+            return matchTradeUserLockStripes;
+        }
+
+        public void setMatchTradeUserLockStripes(int matchTradeUserLockStripes) {
+            if (matchTradeUserLockStripes <= 0) {
+                throw new IllegalArgumentException("matchTradeUserLockStripes must be positive");
+            }
+            this.matchTradeUserLockStripes = matchTradeUserLockStripes;
         }
     }
 

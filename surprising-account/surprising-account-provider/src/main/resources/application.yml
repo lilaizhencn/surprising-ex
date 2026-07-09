@@ -35,6 +35,8 @@ surprising:
       option-exercises-topic: surprising.option.option.exercises.v1
       concurrency: 2
       max-poll-records: 500
+    settlement:
+      match-trade-user-lock-stripes: 4096
     outbox:
       batch-size: 200
       publish-delay-ms: 200

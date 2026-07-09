@@ -163,6 +163,8 @@ surprising:
       liquidation-fee-events-topic: surprising.linear-perp.account.liquidation-fee.events.v1
       concurrency: 2
       max-poll-records: 500
+    settlement:
+      match-trade-user-lock-stripes: 4096
     outbox:
       batch-size: 200
       publish-delay-ms: 200
@@ -186,9 +188,11 @@ Account match-trade consumer metrics are exposed through Actuator/Prometheus:
 - `surprising.account.match_trade.events{outcome=processed|duplicate|failed}`
 - `surprising.account.match_trade.processing{outcome=...}`
 - `surprising.account.match_trade.event_lag{outcome=...}`
+- `surprising.account.match_trade.user_lock_wait`
 
 Use these metrics with Kafka consumer lag and PostgreSQL latency to identify whether the bottleneck is Kafka fetch, account settlement SQL, duplicate replay, or downstream outbox/fanout. Consumer parallelism is still bounded by Kafka partitions: because match trades are keyed by `symbol`, one hot symbol remains ordered on one partition while different symbols can settle in parallel.
-The match-trade listener uses Spring Kafka batch delivery and `AckMode.BATCH` to reduce per-record offset commit overhead. Each record in the batch still calls `processTradeIfNew(...)` independently, so PostgreSQL transactions, `(symbol, trade_id)` idempotency, and per-symbol ordering remain the correctness boundary. If one record fails, Kafka redelivers the batch and already-settled rows are skipped by the processed-trade key.
+Before entering `processTradeIfNew(...)`, the listener also takes deterministic per-user striped locks for the taker and maker. This keeps the same user's match-trade settlement from running concurrently across different symbols while still allowing unrelated users to settle in parallel. `surprising.account.match_trade.user_lock_wait` should stay low; a sustained increase means hot users or maker accounts are becoming the account-settlement queue.
+The match-trade listener uses Spring Kafka batch delivery and `AckMode.BATCH` to reduce per-record offset commit overhead. Each record in the batch still calls `processTradeIfNew(...)` independently, so PostgreSQL transactions, `(symbol, trade_id)` idempotency, per-symbol ordering, and per-user settlement locks remain the correctness boundary. If one record fails, Kafka redelivers the batch and already-settled rows are skipped by the processed-trade key.
 Set `surprising.account.kafka.client-id` to a stable unique value per account-provider pod. Keep `surprising.account.kafka.group-id` identical across replicas; use the unique client id only for consumer-group observability and node-level failover diagnosis.
 
 ## Local Run
@@ -210,6 +214,7 @@ Port:
 
 - Balance adjustments must include a globally unique `referenceId` to prevent duplicate deposits or reversals. A replay with the same reference is accepted only when `amountUnits` and `reason` match the original ledger row; conflicting payloads fail before mutating balances.
 - Account provider must deduplicate match trades by `(symbol, trade_id)`, not by bare `tradeId`.
+- Do not remove the match-trade per-user settlement guard when raising `surprising.account.kafka.concurrency`. Cross-symbol settlement for the same user must remain serialized at the account-provider layer; PostgreSQL row locks and non-negative constraints are the final safety net, not the primary queueing mechanism.
 - Order entry reserves initial margin before publishing to matching. Account provider consumes match trades, calculates opening collateral from the actual fill price, migrates that amount into position margin, and releases any order-price or market-protection excess.
 - `account_positions`, `account_position_margins`, and `account_margin_reservations` persist `margin_mode`. Do not drop this field from events or queries; later isolated-margin risk depends on it.
 - User isolated margin adjustments are idempotent by `referenceId` and write `account_ledger_entries.reference_type = POSITION_MARGIN_ADJUSTMENT`. A positive adjustment only moves available balance into position collateral; a negative adjustment only releases position collateral after checking the latest isolated risk snapshot.
