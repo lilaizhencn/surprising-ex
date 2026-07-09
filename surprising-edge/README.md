@@ -1,12 +1,14 @@
 # surprising-edge
 
-Combined frontend edge deployment for development and small installations.
+Frontend access layer modules.
 
-- REST gateway: `/api/v1/gateway/**` and `/api/v1/admin/**`
-- WebSocket fanout: `/ws/v1`
-- Default port: `9094`
+- `surprising-gateway`: standalone REST gateway provider.
+- `surprising-websocket`: standalone WebSocket fanout API/provider.
+- `surprising-edge-provider`: combined REST gateway and WebSocket fanout deployment for development and small installations.
 
-The module does not replace `surprising-gateway-provider` or `surprising-websocket-provider`. For production deployments with many long-lived WebSocket connections, keep REST gateway and WebSocket as separate providers so WebSocket fanout can scale independently.
+`surprising-edge-provider` exposes REST gateway routes on `/api/v1/gateway/**` and `/api/v1/admin/**`, WebSocket fanout on `/ws/v1`, and uses port `9094` by default.
+
+For production deployments with many long-lived WebSocket connections, keep `surprising-gateway-provider` and `surprising-websocket-provider` as separate deployables under this module so WebSocket fanout can scale independently.
 
 Run locally:
 

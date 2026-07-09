@@ -59,8 +59,8 @@ module_for() {
     insurance) echo "surprising-margin-ops/surprising-insurance-provider" ;;
     adl) echo "surprising-margin-ops/surprising-adl-provider" ;;
     edge) echo "surprising-edge/surprising-edge-provider" ;;
-    websocket) echo "surprising-websocket/surprising-websocket-provider" ;;
-    gateway) echo "surprising-gateway/surprising-gateway-provider" ;;
+    websocket) echo "surprising-edge/surprising-websocket/surprising-websocket-provider" ;;
+    gateway) echo "surprising-edge/surprising-gateway/surprising-gateway-provider" ;;
     market-maker) echo "surprising-market-maker/surprising-market-maker-provider" ;;
     *)
       echo "Unknown service: $1" >&2

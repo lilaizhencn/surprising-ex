@@ -25,9 +25,7 @@ Surprising 多产品线交易所后端服务。
 - `surprising-trading`：订单入口、止盈止损条件单、算法单、产品线 Kafka 路由和 exchange-core 撮合。
 - `surprising-account`：账户余额、余额流水、产品账户、产品流水、持仓、保证金、现货结算、衍生品结算、交割和期权行权账务。
 - `surprising-margin-ops`：风险快照、爆仓候选、强平、资金费、保险基金和 ADL 的 API/provider，以及合并部署 provider。
-- `surprising-websocket`：面向前端的水平扩展 WebSocket 推送服务，负责行情、订单、成交和持仓实时推送。
-- `surprising-gateway`：面向前端/BFF 的统一 REST API 网关。
-- `surprising-edge`：面向前端接入层的合并 provider，包含 REST gateway 和 WebSocket fanout。
+- `surprising-edge`：面向前端的接入层模块，内部包含 REST gateway、WebSocket fanout 和开发/小规模部署用的合并 edge provider。
 - `surprising-market-maker`：内网做市商报价和交易链路压测策略服务。
 - `surprising-integration-test`：订单、撮合、账户、风控、强平、资金费、保险基金和 ADL 链路的跨模块验证。
 
@@ -60,9 +58,9 @@ Surprising 多产品线交易所后端服务。
 - [surprising-trading](surprising-trading/README_CN.md)
 - [surprising-account](surprising-account/README_CN.md)
 - [surprising-margin-ops](surprising-margin-ops/README_CN.md)
-- [surprising-websocket](surprising-websocket/README_CN.md)
-- [surprising-gateway](surprising-gateway/README_CN.md)
 - [surprising-edge](surprising-edge/README_CN.md)
+- [surprising-edge/surprising-websocket](surprising-edge/surprising-websocket/README_CN.md)
+- [surprising-edge/surprising-gateway](surprising-edge/surprising-gateway/README_CN.md)
 - [surprising-market-maker](surprising-market-maker/README_CN.md)
 
 ## 构建

@@ -201,6 +201,7 @@ Recommended production settings:
 ## Gateway And WebSocket
 
 - Development and small deployments can run `surprising-edge-provider` on port `9094`; it exposes both REST gateway routes and `/ws/v1` WebSocket fanout in one process.
+- `surprising-gateway` and `surprising-websocket` live under the `surprising-edge` Maven module, but their provider artifacts remain independently deployable.
 - Production deployments with many long-lived WebSocket connections should keep `surprising-gateway-provider` and `surprising-websocket-provider` split so WebSocket fanout can scale independently.
 - Public REST clients should use the edge/gateway endpoint on `/api/v1/gateway/{service}` instead of calling each provider directly.
 - Internal modules still own their APIs. The gateway is an allowlisted edge/BFF proxy, not the source of business logic.

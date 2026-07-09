@@ -868,7 +868,7 @@ start_extra_nodes() {
   done
   for ((i = 1; i <= EXTRA_WEBSOCKET_NODES; i++)); do
     start_provider "websocket-$((i + 1))" "$((WEBSOCKET_PORT + i * 100))" \
-      "surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider" \
+      "surprising-edge/surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider" \
       "--surprising.websocket.kafka.group-id=surprising-websocket-mm-${RUN_ID}-$((i + 1))"
   done
 }
@@ -2551,7 +2551,7 @@ if [[ "${START_PROVIDERS}" == "true" ]]; then
     "--spring.datasource.hikari.connection-timeout=${ACCOUNT_HIKARI_CONNECTION_TIMEOUT_MS}" \
     "--surprising.account.kafka.client-id=mm-stress-${RUN_ID}-account-1" \
     "--surprising.account.kafka.concurrency=${ACCOUNT_CONSUMERS_PER_NODE}"
-  start_provider "websocket" "${WEBSOCKET_PORT}" "surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider"
+  start_provider "websocket" "${WEBSOCKET_PORT}" "surprising-edge/surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider"
   start_extra_nodes
   wait_consumer_members "surprising-matching-v1" "surprising.perp.order.commands.v1" $(((1 + EXTRA_MATCHING_NODES) * MATCHING_CONSUMERS_PER_NODE))
   wait_consumer_members "surprising-account-v1" "surprising.perp.match.trades.v1" $(((1 + EXTRA_ACCOUNT_NODES) * ACCOUNT_CONSUMERS_PER_NODE))
@@ -2566,7 +2566,7 @@ if [[ "${START_PROVIDERS}" == "true" ]]; then
     "--surprising.trading.order.outbox.async-enabled=${ORDER_OUTBOX_ASYNC_ENABLED}" \
     "--surprising.trading.order.outbox.max-in-flight=${ORDER_OUTBOX_MAX_IN_FLIGHT}" \
     "--surprising.trading.order.risk.market-max-mark-age-ms=15000"
-  start_provider "gateway" 9094 "surprising-gateway/surprising-gateway-provider" "surprising-gateway-provider" \
+  start_provider "gateway" 9094 "surprising-edge/surprising-gateway/surprising-gateway-provider" "surprising-gateway-provider" \
     "--spring.datasource.hikari.maximum-pool-size=${GATEWAY_HIKARI_MAX_POOL_SIZE}" \
     "--spring.datasource.hikari.connection-timeout=${GATEWAY_HIKARI_CONNECTION_TIMEOUT_MS}"
 else

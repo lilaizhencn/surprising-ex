@@ -800,8 +800,8 @@ provider_module() {
     insurance) echo "surprising-margin-ops/surprising-insurance-provider" ;;
     adl) echo "surprising-margin-ops/surprising-adl-provider" ;;
     edge) echo "surprising-edge/surprising-edge-provider" ;;
-    websocket) echo "surprising-websocket/surprising-websocket-provider" ;;
-    gateway) echo "surprising-gateway/surprising-gateway-provider" ;;
+    websocket) echo "surprising-edge/surprising-websocket/surprising-websocket-provider" ;;
+    gateway) echo "surprising-edge/surprising-gateway/surprising-gateway-provider" ;;
     market-maker) echo "surprising-market-maker/surprising-market-maker-provider" ;;
     *) echo "unknown provider: ${name}" >&2; exit 1 ;;
   esac
@@ -3308,8 +3308,8 @@ register_provider "funding" 9089 "surprising-margin-ops/surprising-funding-provi
 register_provider "insurance" 9090 "surprising-margin-ops/surprising-insurance-provider" "surprising-insurance-provider"
 register_provider "adl" 9091 "surprising-margin-ops/surprising-adl-provider" "surprising-adl-provider"
 register_provider "edge" 9094 "surprising-edge/surprising-edge-provider" "surprising-edge-provider"
-register_provider "websocket" "${WEBSOCKET_PORT}" "surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider"
-register_provider "gateway" 9094 "surprising-gateway/surprising-gateway-provider" "surprising-gateway-provider"
+register_provider "websocket" "${WEBSOCKET_PORT}" "surprising-edge/surprising-websocket/surprising-websocket-provider" "surprising-websocket-provider"
+register_provider "gateway" 9094 "surprising-edge/surprising-gateway/surprising-gateway-provider" "surprising-gateway-provider"
 register_provider "trigger" 9095 "surprising-trading/surprising-trigger-provider" "surprising-trigger-provider"
 register_provider "market-maker" 9096 "surprising-market-maker/surprising-market-maker-provider" "surprising-market-maker-provider"
 

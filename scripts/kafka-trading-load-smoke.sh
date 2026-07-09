@@ -749,7 +749,7 @@ start_provider "matching" 9085 "surprising-trading/surprising-matching-provider"
   "surprising-matching-provider" "SURPRISING_TRADING_MATCHING_KAFKA_BOOTSTRAP_SERVERS"
 start_provider "account" 9086 "surprising-account/surprising-account-provider" \
   "surprising-account-provider" "SURPRISING_ACCOUNT_KAFKA_BOOTSTRAP_SERVERS"
-start_provider "websocket" "${WEBSOCKET_PORT}" "surprising-websocket/surprising-websocket-provider" \
+start_provider "websocket" "${WEBSOCKET_PORT}" "surprising-edge/surprising-websocket/surprising-websocket-provider" \
   "surprising-websocket-provider" "SURPRISING_WEBSOCKET_KAFKA_BOOTSTRAP_SERVERS"
 start_provider "order" 9084 "surprising-trading/surprising-order-provider" \
   "surprising-order-provider" "SURPRISING_TRADING_ORDER_KAFKA_BOOTSTRAP_SERVERS"

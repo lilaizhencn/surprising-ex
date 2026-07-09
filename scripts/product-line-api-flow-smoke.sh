@@ -988,7 +988,7 @@ provider_module() {
     liquidation) echo "surprising-margin-ops/surprising-liquidation-provider" ;;
     insurance) echo "surprising-margin-ops/surprising-insurance-provider" ;;
     funding) echo "surprising-margin-ops/surprising-funding-provider" ;;
-    gateway) echo "surprising-gateway/surprising-gateway-provider" ;;
+    gateway) echo "surprising-edge/surprising-gateway/surprising-gateway-provider" ;;
     market-maker) echo "surprising-market-maker/surprising-market-maker-provider" ;;
     *) echo "unknown provider: $1" >&2; exit 1 ;;
   esac

@@ -22,8 +22,6 @@
         <module>surprising-trading</module>
         <module>surprising-account</module>
         <module>surprising-margin-ops</module>
-        <module>surprising-websocket</module>
-        <module>surprising-gateway</module>
         <module>surprising-edge</module>
         <module>surprising-market-maker</module>
         <module>surprising-integration-test</module>

@@ -14,9 +14,11 @@
     <artifactId>surprising-edge</artifactId>
     <packaging>pom</packaging>
     <name>surprising-edge</name>
-    <description>Combined frontend edge provider for REST gateway and WebSocket fanout</description>
+    <description>Frontend edge modules for REST gateway and WebSocket fanout</description>
 
     <modules>
+        <module>surprising-websocket</module>
+        <module>surprising-gateway</module>
         <module>surprising-edge-provider</module>
     </modules>
 </project>

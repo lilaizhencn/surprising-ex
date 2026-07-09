@@ -25,9 +25,7 @@ To understand the project architecture and implementation details, read the Surp
 - `surprising-trading`: order entry, trigger orders, algo orders, product-line Kafka routing, and exchange-core matching.
 - `surprising-account`: account balances, ledgers, product balances, positions, margin, spot settlement, derivative settlement, delivery, and option exercise accounting.
 - `surprising-margin-ops`: risk snapshots, liquidation candidates, liquidation, funding, insurance, and ADL APIs/providers, plus a combined deployable provider.
-- `surprising-websocket`: horizontally scalable client WebSocket fanout for market data, orders, matches, and positions.
-- `surprising-gateway`: allowlisted public REST gateway for frontend/BFF traffic.
-- `surprising-edge`: combined frontend edge provider for REST gateway and WebSocket fanout.
+- `surprising-edge`: frontend access layer. It contains the REST gateway module, the WebSocket fanout module, and a combined edge provider for development and small deployments.
 - `surprising-market-maker`: internal market-maker quoting and exchange-chain stress strategy service.
 - `surprising-integration-test`: cross-module verification for order, matching, account, risk, liquidation, funding, insurance, and ADL flows.
 
@@ -59,9 +57,9 @@ To understand the project architecture and implementation details, read the Surp
 - [surprising-trading](surprising-trading/README.md)
 - [surprising-account](surprising-account/README.md)
 - [surprising-margin-ops](surprising-margin-ops/README.md)
-- [surprising-websocket](surprising-websocket/README.md)
-- [surprising-gateway](surprising-gateway/README.md)
 - [surprising-edge](surprising-edge/README.md)
+- [surprising-edge/surprising-websocket](surprising-edge/surprising-websocket/README.md)
+- [surprising-edge/surprising-gateway](surprising-edge/surprising-gateway/README.md)
 - [surprising-market-maker](surprising-market-maker/README.md)
 
 ## Build
