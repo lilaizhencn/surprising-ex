@@ -4,6 +4,14 @@ server:
 spring:
   application:
     name: surprising-price-provider
+  task:
+    scheduling:
+      pool:
+        size: 8
+      thread-name-prefix: price-scheduler-
+      shutdown:
+        await-termination: true
+        await-termination-period: 10s
   datasource:
     url: jdbc:postgresql://localhost:5432/surprising_exchange
     username: surprising

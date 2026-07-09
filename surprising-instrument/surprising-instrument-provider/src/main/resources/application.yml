@@ -4,6 +4,14 @@ server:
 spring:
   application:
     name: surprising-instrument-provider
+  task:
+    scheduling:
+      pool:
+        size: 2
+      thread-name-prefix: instrument-scheduler-
+      shutdown:
+        await-termination: true
+        await-termination-period: 10s
   datasource:
     url: jdbc:postgresql://localhost:5432/surprising_exchange
     username: surprising

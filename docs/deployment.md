@@ -221,6 +221,12 @@ Recommended production settings:
 - Set `surprising.websocket.security.allowed-origins` to exact production HTTPS origins. The wildcard default is for local development only.
 - Configure `surprising.gateway.http-client.connect-timeout` and `read-timeout` so unhealthy backends cannot exhaust gateway worker threads.
 
+## Scheduled Worker Pools
+
+- Providers that use `@Scheduled` must run on an application-local Spring scheduling pool, configured by `spring.task.scheduling.*`, not on the fallback single scheduler.
+- The default configs set dedicated thread-name prefixes per provider, for example `order-scheduler-`, `matching-scheduler-`, `risk-scheduler-`, and larger pools for combined providers such as `trading-entry`, `price`, and `margin-ops`.
+- In production, tune `SPRING_TASK_SCHEDULING_POOL_SIZE` per process when scheduled work becomes heavier. Do not use one undersized shared scheduler for outbox publishing, risk scans, funding settlement, and market-maker refresh loops.
+
 ## Risk Provider Coordination
 
 - Keep `surprising.risk.coordination.enabled=true` when more than one risk-provider instance is running.
