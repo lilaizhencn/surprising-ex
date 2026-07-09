@@ -132,8 +132,11 @@ class RiskOutboxRepositoryTest {
     }
 
     @Test
-    void claimPendingLeasesEarliestDueRowsPerTopicKey() {
-        RiskOutboxRepository repository = new RiskOutboxRepository(jdbcTemplate, sequenceRepository);
+    void claimPendingLeasesDuePrefixesPerTopicKey() {
+        RiskProperties properties = new RiskProperties();
+        properties.getOutbox().setMaxInFlight(3);
+        properties.getOutbox().setMaxRowsPerKey(25);
+        RiskOutboxRepository repository = new RiskOutboxRepository(jdbcTemplate, sequenceRepository, properties);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         Instant leaseUntil = Instant.parse("2026-07-01T00:00:30Z");
         when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Object[].class))).thenReturn(List.of());
@@ -141,13 +144,20 @@ class RiskOutboxRepositoryTest {
         repository.claimPending(100, leaseUntil, now);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), any(Object[].class));
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
         assertThat(sql.getValue())
                 .contains("SELECT DISTINCT ON (topic, event_key)")
-                .contains("pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))")
-                .contains("FOR UPDATE OF e SKIP LOCKED")
+                .contains("pg_try_advisory_xact_lock(hashtext(topic), hashtext(event_key))")
+                .contains("CROSS JOIN LATERAL")
+                .contains("row_number() OVER (ORDER BY prefix.id) AS key_rank")
+                .contains("bool_or(prefix.next_attempt_at > ?)")
+                .contains("ORDER BY due_prefix.key_rank, k.first_id, due_prefix.id")
                 .contains("SET next_attempt_at = ?")
                 .contains("RETURNING e.id, e.topic, e.event_key");
+        assertThat(args.getValue()[1]).isEqualTo(12);
+        assertThat(args.getValue()[3]).isEqualTo(25);
+        assertThat(args.getValue()[5]).isEqualTo(100);
     }
 
     @Test
@@ -164,7 +174,7 @@ class RiskOutboxRepositoryTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), any(Object[].class));
         assertThat(sql.getValue())
-                .contains("e.topic IN (?, ?, ?)")
+                .contains("topic IN (?, ?, ?)")
                 .contains("next_attempt_at <= ?");
     }
 

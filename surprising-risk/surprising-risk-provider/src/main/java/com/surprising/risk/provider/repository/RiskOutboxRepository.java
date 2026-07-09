@@ -69,28 +69,60 @@ public class RiskOutboxRepository {
     }
 
     public List<RiskOutboxRecord> claimPending(int limit, Instant leaseUntil, Instant now) {
+        int effectiveLimit = Math.max(1, limit);
+        int perKeyLimit = Math.max(1, Math.min(properties.getOutbox().getMaxRowsPerKey(), effectiveLimit));
+        int lockedKeyLimit = lockedKeyLimit(effectiveLimit, perKeyLimit);
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
                 WITH earliest AS (
                     SELECT DISTINCT ON (topic, event_key)
-                           id
+                           topic, event_key, id AS first_id, next_attempt_at
                       FROM risk_outbox_events
                      WHERE published_at IS NULL
+                """);
+        appendTopicScope(sql, args);
+        sql.append("""
                      ORDER BY topic, event_key, id
                 ),
-                candidates AS (
-                    SELECT e.id
-                      FROM risk_outbox_events e
-                      JOIN earliest c ON c.id = e.id
-                     WHERE e.published_at IS NULL
-                """);
-        appendTopicScope(sql, "e", args);
-        sql.append("""
-                       AND e.next_attempt_at <= ?
-                       AND pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))
-                     ORDER BY e.topic, e.event_key, e.id
+                locked_keys AS (
+                    SELECT topic, event_key, first_id
+                      FROM earliest
+                     WHERE next_attempt_at <= ?
+                       AND pg_try_advisory_xact_lock(hashtext(topic), hashtext(event_key))
+                     ORDER BY first_id
                      LIMIT ?
-                     FOR UPDATE OF e SKIP LOCKED
+                ),
+                candidates AS (
+                    SELECT due_prefix.id
+                      FROM locked_keys k
+                      CROSS JOIN LATERAL (
+                          SELECT ranked.id, ranked.key_rank
+                            FROM (
+                                SELECT prefix.id,
+                                       prefix.next_attempt_at,
+                                       row_number() OVER (ORDER BY prefix.id) AS key_rank,
+                                       bool_or(prefix.next_attempt_at > ?) OVER (
+                                           ORDER BY prefix.id
+                                           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                                       ) AS blocked_by_retry
+                                  FROM (
+                                      SELECT e.id, e.next_attempt_at
+                                        FROM risk_outbox_events e
+                                       WHERE e.topic = k.topic
+                                         AND e.event_key = k.event_key
+                                         AND e.published_at IS NULL
+                                       ORDER BY e.id
+                                       LIMIT ?
+                                  ) prefix
+                            ) ranked
+                           WHERE ranked.next_attempt_at <= ?
+                             AND NOT ranked.blocked_by_retry
+                           ORDER BY ranked.id
+                      ) due_prefix
+                     ORDER BY due_prefix.key_rank, k.first_id, due_prefix.id
+                     LIMIT ?
+                """);
+        sql.append("""
                 )
                 UPDATE risk_outbox_events e
                    SET next_attempt_at = ?,
@@ -100,7 +132,11 @@ public class RiskOutboxRepository {
              RETURNING e.id, e.topic, e.event_key, e.payload::text AS payload, e.next_attempt_at
                 """);
         args.add(Timestamp.from(now));
-        args.add(Math.max(1, limit));
+        args.add(lockedKeyLimit);
+        args.add(Timestamp.from(now));
+        args.add(perKeyLimit);
+        args.add(Timestamp.from(now));
+        args.add(effectiveLimit);
         args.add(Timestamp.from(leaseUntil));
         args.add(Timestamp.from(now));
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new RiskOutboxRecord(
@@ -109,6 +145,12 @@ public class RiskOutboxRepository {
                 rs.getString("event_key"),
                 rs.getString("payload"),
                 rs.getTimestamp("next_attempt_at").toInstant()), args.toArray());
+    }
+
+    private int lockedKeyLimit(int limit, int perKeyLimit) {
+        int groupsToFillBatch = (limit + perKeyLimit - 1) / perKeyLimit;
+        int concurrencyWindow = Math.max(1, properties.getOutbox().getMaxInFlight()) * 4;
+        return Math.max(1, Math.min(limit, Math.max(groupsToFillBatch, concurrencyWindow)));
     }
 
     public void markPublished(long id, Instant now) {

@@ -40,6 +40,7 @@ STRESS_ACCOUNT_KAFKA_CONCURRENCY="${STRESS_ACCOUNT_KAFKA_CONCURRENCY:-4}"
 STRESS_RISK_KAFKA_CONCURRENCY="${STRESS_RISK_KAFKA_CONCURRENCY:-4}"
 STRESS_RISK_OUTBOX_BATCH_SIZE="${STRESS_RISK_OUTBOX_BATCH_SIZE:-1000}"
 STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS="${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS:-20}"
+STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY="${STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY:-32}"
 
 BASE_USER=$((6000000000 + RUN_SEQ * 1000))
 MM_USER_A=$((BASE_USER + 1))
@@ -1112,10 +1113,12 @@ product_provider_args() {
       ;;
     risk)
       local risk_concurrency=1 risk_outbox_batch_size=200 risk_outbox_publish_delay_ms=200
+      local risk_outbox_max_rows_per_key=32
       if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
         risk_concurrency="${STRESS_RISK_KAFKA_CONCURRENCY}"
         risk_outbox_batch_size="${STRESS_RISK_OUTBOX_BATCH_SIZE}"
         risk_outbox_publish_delay_ms="${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS}"
+        risk_outbox_max_rows_per_key="${STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY}"
       fi
       printf '%s\n' \
         "--surprising.risk.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
@@ -1126,7 +1129,8 @@ product_provider_args() {
         "--surprising.risk.coordination.node-id=product-smoke-${RUN_ID}-${slug}-risk" \
         "--surprising.risk.calculation.scan-delay-ms=500" \
         "--surprising.risk.outbox.batch-size=${risk_outbox_batch_size}" \
-        "--surprising.risk.outbox.publish-delay-ms=${risk_outbox_publish_delay_ms}"
+        "--surprising.risk.outbox.publish-delay-ms=${risk_outbox_publish_delay_ms}" \
+        "--surprising.risk.outbox.max-rows-per-key=${risk_outbox_max_rows_per_key}"
       ;;
     liquidation)
       printf '%s\n' \
@@ -3007,9 +3011,16 @@ main() {
       echo "STRESS_SYMBOL_COUNT must be at least 20 for multi-symbol stress" >&2
       exit 1
     fi
+    local product_line_count report_scope
+    product_line_count="$(wc -w <<<"${PRODUCT_LINES}" | tr -d '[:space:]')"
+    if ((product_line_count == 4)); then
+      report_scope="四产品线"
+    else
+      report_scope="${PRODUCT_LINES}"
+    fi
     mkdir -p "$(dirname "${STRESS_REPORT_FILE}")"
     {
-      echo "# 四产品线 ${STRESS_SYMBOL_COUNT} Symbol / ${STRESS_USER_COUNT} 用户真实链路压测报告"
+      echo "# ${report_scope} ${STRESS_SYMBOL_COUNT} Symbol / ${STRESS_USER_COUNT} 用户真实链路压测报告"
       echo
       echo "时间：$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
       echo
@@ -3020,6 +3031,7 @@ main() {
       echo "- Maker accounts：${STRESS_SYMBOL_COUNT}，每个 symbol 一个 maker account；market-maker provider 同时配置 ${STRESS_SYMBOL_COUNT} 个 strategy。"
       echo "- Maker 高频：初始 ${STRESS_MAKER_DEPTH_LEVELS} 档，压测阶段每个 phase 刷新 ${STRESS_MAKER_REFRESH_CYCLES} 轮，每轮 ${STRESS_MAKER_REFRESH_LEVELS} 档。"
       echo "- 用户：每个产品线 ${STRESS_USER_COUNT} 个 taker 用户，经 gateway 单笔真实下单；open 与 close/sell 两阶段均按并发 ${STRESS_LOAD_CONCURRENCY} 提交。"
+      echo "- Risk outbox：batchSize=${STRESS_RISK_OUTBOX_BATCH_SIZE}，publishDelayMs=${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS}，maxRowsPerKey=${STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY}。"
       echo "- 资金准备：批量 fixture 写入 balance、ledger 和 admin adjustment；下单、撮合、Kafka、account 结算全部走真实 provider 链路。"
       echo "- 临时日志目录：\`${TMP_DIR}\`"
       echo

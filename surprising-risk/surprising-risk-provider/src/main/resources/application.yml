@@ -46,4 +46,5 @@ surprising:
       publish-delay-ms: 20
       async-enabled: true
       max-in-flight: 32
+      max-rows-per-key: 32
       send-timeout: 3s

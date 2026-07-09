@@ -90,6 +90,8 @@ events preserve that event's `traceId`; scheduled fallback scans may emit events
   websocket-provider for private `accountRisk` pushes.
 - `surprising.risk.position.events.v1`: position risk snapshot updates, key = `symbol`; consumed by websocket-provider
   for private `positionRisk` pushes.
+  The risk outbox claims a contiguous due prefix per `topic + event_key` without changing the Kafka key, which avoids
+  one-row-per-symbol publish tails when a symbol has a large backlog.
 - `surprising.perp.liquidation.candidates.v1`: liquidation candidate events, key = `symbol`.
 
 `surprising-liquidation-provider` consumes this topic, claims candidates, and submits reduce-only liquidation orders.
@@ -162,6 +164,7 @@ Core indexes:
 - `risk_liquidation_candidates_status_idx`
 - `risk_liquidation_candidates_active_uidx`
 - `risk_outbox_pending_idx`
+- `risk_outbox_pending_key_idx`
 
 ## Multi-Node Coordination
 
@@ -187,6 +190,7 @@ Configuration:
 | `surprising.risk.outbox.publish-delay-ms` | `20` | Delay between risk outbox drain attempts. |
 | `surprising.risk.outbox.async-enabled` | `true` | Enables bounded parallel publishing after rows are claimed with a short DB lease. |
 | `surprising.risk.outbox.max-in-flight` | `32` | Maximum concurrent topic/key publish groups per node. Keep this below Kafka and DB capacity. |
+| `surprising.risk.outbox.max-rows-per-key` | `32` | Maximum contiguous due rows claimed per `topic + event_key` in one round. Raise it to reduce same-symbol backlog tail; lower it to reduce per-key Kafka/DB bursts. |
 | `surprising.risk.outbox.send-timeout` | `3s` | Per Kafka send wait timeout before the outbox row is marked failed and retried with backoff. |
 
 ## Local Run

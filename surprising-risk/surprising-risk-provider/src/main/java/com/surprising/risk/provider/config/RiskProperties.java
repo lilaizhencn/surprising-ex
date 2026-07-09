@@ -205,6 +205,7 @@ public class RiskProperties {
         private Duration sendTimeout = Duration.ofSeconds(3);
         private boolean asyncEnabled = true;
         private int maxInFlight = 32;
+        private int maxRowsPerKey = 32;
 
         public int getBatchSize() {
             return batchSize;
@@ -244,6 +245,14 @@ public class RiskProperties {
 
         public void setMaxInFlight(int maxInFlight) {
             this.maxInFlight = maxInFlight;
+        }
+
+        public int getMaxRowsPerKey() {
+            return maxRowsPerKey;
+        }
+
+        public void setMaxRowsPerKey(int maxRowsPerKey) {
+            this.maxRowsPerKey = maxRowsPerKey;
         }
     }
 
