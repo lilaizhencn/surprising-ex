@@ -113,6 +113,58 @@
 | Funds reconcile SQL | 原费用引用校验含 maker/taker OR JOIN，交割曾 5 分钟未返回 | 改成 `match_trade_order_refs` 临时展开表 + 临时索引，重跑通过 |
 | Kafka topic 创建 | 旧脚本容易全量检查/创建 topic，RESET 时删除面过大 | 已改为按产品线创建；`RESET_KAFKA=true` 时默认只删当前产品线 topic |
 
+## 下一档：永续高 Maker 刷新
+
+目的：解释上一轮用户提交 TPS 偏低，并验证生产级高 maker 刷新下资金是否仍能对平。
+
+参数：
+
+- 产品线：`LINEAR_PERPETUAL`
+- RUN_ID：`20260709153000`
+- Symbol：20
+- Maker accounts：20
+- 用户：5000
+- 用户订单：open 5000 + close 5000，共 10000 笔
+- Maker：初始 6 档；open/close 每阶段刷新 20 轮，每轮 4 档；maker 并发 128
+- Maker 订单：6640，place success 6640
+- 用户并发：256
+
+结果：
+
+| 指标 | Open | Close |
+|---|---:|---:|
+| 用户订单 | 5000 | 5000 |
+| 成交 | 5000 | 5000 |
+| Account settled | 5000 | 5000 |
+| 拒单/撤单 | 0 / 0 | 0 / 0 |
+| Client accepted TPS | 110.141/s | 111.862/s |
+| Matched TPS | 34.152/s | 31.880/s |
+| Account settled TPS | 34.430/s | 29.638/s |
+| Account latency p95 | 121101.964 ms | 125766.357 ms |
+| Account latency p99 | 131038.342 ms | 130995.539 ms |
+
+Outbox 发布：
+
+| Outbox | Published | Duration | TPS |
+|---|---:|---:|---:|
+| trading | 273455 | 1006.039s | 271.814/s |
+| account | 20000 | 325.510s | 61.442/s |
+| risk | 80529 | 986.607s | 81.622/s |
+
+资金核对：
+
+| 产品线 | 资产 | 期初 | 充值/调整 | 成交/权利金净额 | 成交/权利金发生额 | 手续费 | 资金费净额/发生额 | 强平费 | 交割/行权净额/发生额 | 期末应有 | 期末实际 | 结果 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| LINEAR_PERPETUAL | USDT | 0 | 1004000000000000000 | 0 | 200000000 | -2290732187 | 0 / 0 | 0 | 0 / 0 | 1003999997709267813 | 1003999997709267813 | OK |
+
+结论：
+
+- 上一轮表里的 90-148/s 是客户端提交阶段口径，不是撮合内部极限。
+- 高频 maker 下，用户请求被 gateway/order 接收约 110/s，但真实 match/account TPS 只有约 30-34/s。
+- account 能最终对平，资金无异常，但 p95/p99 延迟已经超过 120s。
+- `risk_outbox_events` 是最明显 tail：close 后峰值约 7.1 万 pending，发布约 81.6/s。
+- 如果生产 maker 刷新频率更高，当前本地单机链路不能只看撮合；必须重点优化 matching result fanout、account consumer 并行度、risk outbox 发布和 Kafka topic/partition/consumer group 配置。
+
 ## Topic 创建方案
 
 后续压测不需要每次重建 Kafka topic：
@@ -130,6 +182,8 @@
   - 支持 20 symbol、20 maker account、2000 用户并发 open/close。
   - 增加 maker book 预铺和处理等待，避免 taker IOC 先到导致取消。
   - 增加 stress 状态校验、资金汇总和报告输出。
+  - 增加 accepted/matched/account/outbox TPS 细分指标。
+  - Stress 交易阶段结束后先停止 maker/price refresher，再采样 outbox，避免后台新事件污染 pending 指标。
   - Kafka topic reset/create 改为产品线范围。
 - `scripts/product-line-funds-reconcile.sh`
   - 费用引用校验改为临时 maker/taker order refs 等值 JOIN。

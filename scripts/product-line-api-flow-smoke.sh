@@ -2234,6 +2234,77 @@ SELECT count(*) || ' ' || round(min(ms)::numeric, 3) || ' ' ||
   FROM lat"
 }
 
+stress_phase_throughput_summary() {
+  local product_line="$1"
+  local phase="$2"
+  local source="$3"
+  local slug sql
+  slug="$(stress_product_slug "${product_line}")"
+  case "${source}" in
+    accepted)
+      sql="
+WITH events AS (
+  SELECT e.event_time AS ts
+    FROM trading_orders o
+    JOIN trading_order_events e ON e.order_id = o.order_id AND e.event_type = 'ACCEPTED'
+   WHERE o.product_line = '${product_line}'
+     AND o.client_order_id LIKE 'stress-user-${RUN_ID}-${slug}-${phase}-%'
+)"
+      ;;
+    matched)
+      sql="
+WITH events AS (
+  SELECT t.event_time AS ts
+    FROM trading_match_trades t
+   WHERE t.product_line = '${product_line}'
+     AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'
+)"
+      ;;
+    account)
+      sql="
+WITH events AS (
+  SELECT p.processed_at AS ts
+    FROM account_processed_trades p
+    JOIN trading_match_trades t
+      ON t.product_line = p.product_line
+     AND t.symbol = p.symbol
+     AND t.trade_id = p.trade_id
+   WHERE t.product_line = '${product_line}'
+     AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'
+)"
+      ;;
+    *)
+      echo "unknown throughput source ${source}" >&2
+      exit 1
+      ;;
+  esac
+  query_value "${sql}
+, summary AS (
+  SELECT count(*)::numeric AS event_count,
+         COALESCE(EXTRACT(EPOCH FROM max(ts) - min(ts)), 0)::numeric AS duration_seconds
+    FROM events
+)
+SELECT event_count::bigint || ' ' ||
+       round(duration_seconds, 3) || ' ' ||
+       round(event_count / GREATEST(duration_seconds, 0.001), 3)
+  FROM summary"
+}
+
+stress_outbox_publish_summary() {
+  local table_name="$1"
+  query_value "
+WITH summary AS (
+  SELECT count(*) FILTER (WHERE published_at IS NOT NULL)::numeric AS published_count,
+         count(*) FILTER (WHERE published_at IS NULL)::bigint AS pending_count,
+         COALESCE(EXTRACT(EPOCH FROM max(published_at) - min(created_at)), 0)::numeric AS duration_seconds
+    FROM ${table_name}
+)
+SELECT published_count::bigint || ' ' || pending_count || ' ' ||
+       round(duration_seconds, 3) || ' ' ||
+       round(published_count / GREATEST(duration_seconds, 0.001), 3)
+  FROM summary"
+}
+
 collect_stress_funds_rows() {
   local product_line="$1"
   local type scope
@@ -2388,7 +2459,10 @@ assert_stress_state() {
 
 run_multi_symbol_stress_flow() {
   local product_line="$1"
-  local slug commands=() maker_pid open_start open_end close_start close_end open_ms close_ms open_latency close_latency open_trades close_trades settled_open settled_close active_symbols maker_users
+  local slug commands=() maker_pid open_start open_end close_start close_end open_ms close_ms
+  local open_latency close_latency open_trades close_trades settled_open settled_close active_symbols maker_users
+  local maker_orders maker_place_success open_accepted_tps open_matched_tps open_account_tps
+  local close_accepted_tps close_matched_tps close_account_tps trading_outbox_tps account_outbox_tps risk_outbox_tps
   slug="$(stress_product_slug "${product_line}")"
   echo "Scenario ${product_line}: multi-symbol high-frequency stress symbols=${STRESS_SYMBOL_COUNT} users=${STRESS_USER_COUNT}"
   seed_stress_prices "${product_line}"
@@ -2442,6 +2516,8 @@ run_multi_symbol_stress_flow() {
   wait "${maker_pid}"
   close_end="$(date +%s%N)"
   wait_stress_phase_settled "${product_line}" "close"
+  stop_provider_by_name market-maker
+  stop_provider_by_name price-refresher
 
   open_ms="$(python3 - "${open_start}" "${open_end}" <<'PY'
 import sys
@@ -2455,16 +2531,27 @@ PY
 )"
   open_latency="$(stress_latency_summary "${product_line}" "open")"
   close_latency="$(stress_latency_summary "${product_line}" "close")"
+  open_accepted_tps="$(stress_phase_throughput_summary "${product_line}" "open" "accepted")"
+  open_matched_tps="$(stress_phase_throughput_summary "${product_line}" "open" "matched")"
+  open_account_tps="$(stress_phase_throughput_summary "${product_line}" "open" "account")"
+  close_accepted_tps="$(stress_phase_throughput_summary "${product_line}" "close" "accepted")"
+  close_matched_tps="$(stress_phase_throughput_summary "${product_line}" "close" "matched")"
+  close_account_tps="$(stress_phase_throughput_summary "${product_line}" "close" "account")"
   open_trades="$(query_value "SELECT count(*) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-open-%'")"
   close_trades="$(query_value "SELECT count(*) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-close-%'")"
   settled_open="$(query_value "SELECT count(DISTINCT t.taker_order_id) FROM account_processed_trades p JOIN trading_match_trades t ON t.product_line = p.product_line AND t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.product_line = '${product_line}' AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-open-%'")"
   settled_close="$(query_value "SELECT count(DISTINCT t.taker_order_id) FROM account_processed_trades p JOIN trading_match_trades t ON t.product_line = p.product_line AND t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.product_line = '${product_line}' AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-close-%'")"
   active_symbols="$(query_value "SELECT count(DISTINCT symbol) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-%'")"
   maker_users="$(query_value "SELECT count(DISTINCT user_id) FROM trading_orders WHERE product_line = '${product_line}' AND client_order_id LIKE 'stress-mm-${RUN_ID}-${slug}-%'")"
+  maker_orders="$(query_value "SELECT count(*) FROM trading_orders WHERE product_line = '${product_line}' AND client_order_id LIKE 'stress-mm-${RUN_ID}-${slug}-%'")"
+  maker_place_success="$(query_value "SELECT count(*) FROM trading_match_results r JOIN trading_orders o ON o.product_line = r.product_line AND o.order_id = r.order_id WHERE r.product_line = '${product_line}' AND r.command_type = 'PLACE' AND r.result_code = 'SUCCESS' AND o.client_order_id LIKE 'stress-mm-${RUN_ID}-${slug}-%'")"
 
   assert_stress_state "${product_line}"
   assert_no_negative_balances "${product_line}"
   assert_outbox_drained "${product_line}"
+  trading_outbox_tps="$(stress_outbox_publish_summary "trading_outbox_events")"
+  account_outbox_tps="$(stress_outbox_publish_summary "account_outbox_events")"
+  risk_outbox_tps="$(stress_outbox_publish_summary "risk_outbox_events")"
 
   STRESS_LAST_SUMMARY_FILE="${TMP_DIR}/${product_line}-stress-summary.md"
   {
@@ -2472,10 +2559,13 @@ PY
     echo
     echo "- Symbols active：${active_symbols}/${STRESS_SYMBOL_COUNT}"
     echo "- Maker accounts：${maker_users}/${STRESS_SYMBOL_COUNT}"
+    echo "- Maker orders：orders=${maker_orders}, placeSuccess=${maker_place_success}, initialLevels=${STRESS_MAKER_DEPTH_LEVELS}, refreshCycles=${STRESS_MAKER_REFRESH_CYCLES}, refreshLevels=${STRESS_MAKER_REFRESH_LEVELS}, concurrency=${STRESS_MAKER_LOAD_CONCURRENCY}"
     echo "- Users：${STRESS_USER_COUNT}"
     echo "- Open phase：orders=${STRESS_USER_COUNT}, trades=${open_trades}, settledOrders=${settled_open}, submitMs=${open_ms}, concurrency=${STRESS_LOAD_CONCURRENCY}"
     echo "- Close/sell phase：orders=${STRESS_USER_COUNT}, trades=${close_trades}, settledOrders=${settled_close}, submitMs=${close_ms}, concurrency=${STRESS_LOAD_CONCURRENCY}"
     echo "- Account settlement latency ms \`count min p50 p95 p99 max\`：open=${open_latency}; close=${close_latency}"
+    echo "- Phase throughput \`count durationSeconds tps\`：openAccepted=${open_accepted_tps}; openMatched=${open_matched_tps}; openAccount=${open_account_tps}; closeAccepted=${close_accepted_tps}; closeMatched=${close_matched_tps}; closeAccount=${close_account_tps}"
+    echo "- Outbox publish \`published pending durationSeconds tps\`：trading=${trading_outbox_tps}; account=${account_outbox_tps}; risk=${risk_outbox_tps}"
     echo
     echo "| 产品线 | 资产 | 期初 | 充值/调整 | 成交/权利金净额 | 成交/权利金发生额 | 手续费 | 资金费净额/发生额 | 强平费 | 交割/行权净额/发生额 | 期末应有 | 期末实际 | 结果 |"
     echo "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"
