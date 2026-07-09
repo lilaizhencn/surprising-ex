@@ -19,6 +19,38 @@ management:
         include: health,info,metrics,prometheus
 
 surprising:
+  clients:
+    risk:
+      base-url: http://localhost:9088
+  risk:
+    kafka:
+      bootstrap-servers: localhost:9092
+      product-line: LINEAR_PERPETUAL
+      product-topics-enabled: false
+      group-id: surprising-risk-v1
+      position-events-topic: surprising.account.position.events.v1
+      account-risk-events-topic: surprising.risk.account.events.v1
+      position-risk-events-topic: surprising.risk.position.events.v1
+      liquidation-candidates-topic: surprising.perp.liquidation.candidates.v1
+      concurrency: 2
+      max-poll-records: 500
+    calculation:
+      scan-delay-ms: 1000
+      warning-margin-ratio-ppm: 800000
+      liquidation-margin-ratio-ppm: 1000000
+      max-mark-age: 10s
+      scan-batch-size: 500
+    coordination:
+      enabled: true
+      node-id:
+      lease-duration: 15s
+    outbox:
+      batch-size: 1000
+      publish-delay-ms: 20
+      async-enabled: true
+      max-in-flight: 32
+      max-rows-per-key: 32
+      send-timeout: 3s
   liquidation:
     kafka:
       bootstrap-servers: localhost:9092

@@ -96,7 +96,7 @@ public class GatewayProperties {
         routes.put("trading-market", new BackendRoute("http://localhost:9085", "/api/v1/trading/market", false));
         routes.put("trading-trigger", new BackendRoute("http://localhost:9095", "/api/v1/trading/trigger-orders", true));
         routes.put("account", new BackendRoute("http://localhost:9086", "/api/v1/accounts", true));
-        routes.put("risk", new BackendRoute("http://localhost:9087", "/api/v1/risk", true));
+        routes.put("risk", new BackendRoute("http://localhost:9088", "/api/v1/risk", true));
         routes.put("liquidation", new BackendRoute("http://localhost:9088", "/api/v1/liquidations", true));
         routes.put("funding", new BackendRoute("http://localhost:9089", "/api/v1/funding", false));
         routes.put("insurance", new BackendRoute("http://localhost:9090", "/api/v1/insurance", true));
@@ -122,8 +122,8 @@ public class GatewayProperties {
         routes.put("trading-trigger", new BackendRoute("http://localhost:9095", "/api/v1/admin/trading/trigger-orders", true));
         routes.put("account", new BackendRoute("http://localhost:9086", "/api/v1/admin/accounts", true));
         routes.put("account-public", new BackendRoute("http://localhost:9086", "/api/v1/accounts", true));
-        routes.put("risk", new BackendRoute("http://localhost:9087", "/api/v1/risk", true));
-        routes.put("risk-admin", new BackendRoute("http://localhost:9087", "/api/v1/admin/risk", true));
+        routes.put("risk", new BackendRoute("http://localhost:9088", "/api/v1/risk", true));
+        routes.put("risk-admin", new BackendRoute("http://localhost:9088", "/api/v1/admin/risk", true));
         routes.put("liquidation", new BackendRoute("http://localhost:9088", "/api/v1/liquidations", true));
         routes.put("liquidation-admin", new BackendRoute("http://localhost:9088", "/api/v1/admin/liquidations", true));
         routes.put("funding", new BackendRoute("http://localhost:9089", "/api/v1/funding", true));

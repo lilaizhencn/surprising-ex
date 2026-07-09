@@ -12,9 +12,14 @@
 
     <artifactId>surprising-margin-ops-provider</artifactId>
     <name>surprising-margin-ops-provider</name>
-    <description>Combined deployable provider for liquidation, funding, insurance, and ADL workers</description>
+    <description>Combined deployable provider for risk, liquidation, funding, insurance, and ADL workers</description>
 
     <dependencies>
+        <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-risk-provider</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-liquidation-provider</artifactId>

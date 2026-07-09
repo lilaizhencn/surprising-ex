@@ -7,6 +7,7 @@ import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -34,7 +35,8 @@ public class RiskKafkaConfiguration {
     }
 
     @Bean
-    public KafkaTemplate<String, String> riskKafkaTemplate(ProducerFactory<String, String> riskProducerFactory) {
+    public KafkaTemplate<String, String> riskKafkaTemplate(
+            @Qualifier("riskProducerFactory") ProducerFactory<String, String> riskProducerFactory) {
         return new KafkaTemplate<>(riskProducerFactory);
     }
 
@@ -54,7 +56,7 @@ public class RiskKafkaConfiguration {
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> riskKafkaListenerContainerFactory(
-            ConsumerFactory<String, String> riskConsumerFactory,
+            @Qualifier("riskConsumerFactory") ConsumerFactory<String, String> riskConsumerFactory,
             RiskProperties properties) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(riskConsumerFactory);

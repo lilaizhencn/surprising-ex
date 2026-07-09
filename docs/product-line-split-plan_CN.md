@@ -54,7 +54,7 @@ OPTION:
 - `surprising-instrument`：统一管理 `SPOT`、`PERPETUAL`、`DELIVERY`、`OPTION` instrument，包含到期、交割、行权价、期权类型等字段。
 - `surprising-trading`：订单入口、条件单、算法单、exchange-core 撮合封装和产品线 topic 路由。
 - `surprising-account`：基础账户、产品账户、余额流水、产品流水、持仓、保证金、资金费、交割/行权账务。
-- `surprising-risk` / `surprising-margin-ops`：保证金产品共用的风控、强平、资金费、保险基金和 ADL 链路，按产品线和账户类型隔离。
+- `surprising-margin-ops`：保证金产品共用的风控、强平、资金费、保险基金和 ADL 链路，按产品线和账户类型隔离。
 - `surprising-gateway` / `surprising-websocket`：客户端使用 `productLine` 路由 REST 和订阅实时推送。
 
 ## 交割合约执行模型

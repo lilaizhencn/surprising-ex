@@ -21,7 +21,6 @@
         <module>surprising-price</module>
         <module>surprising-trading</module>
         <module>surprising-account</module>
-        <module>surprising-risk</module>
         <module>surprising-margin-ops</module>
         <module>surprising-websocket</module>
         <module>surprising-gateway</module>

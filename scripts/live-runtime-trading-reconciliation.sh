@@ -544,7 +544,7 @@ main() {
   require_health order 9084
   require_health matching 9085
   require_health account 9086
-  require_health risk 9087
+  require_health margin-ops 9088
   require_health gateway 9094
   require_health market-maker 9096
 

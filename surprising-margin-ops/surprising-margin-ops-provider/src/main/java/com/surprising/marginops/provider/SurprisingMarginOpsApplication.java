@@ -8,6 +8,8 @@ import com.surprising.insurance.provider.SurprisingInsuranceApplication;
 import com.surprising.insurance.provider.config.InsuranceProperties;
 import com.surprising.liquidation.provider.SurprisingLiquidationApplication;
 import com.surprising.liquidation.provider.config.LiquidationProperties;
+import com.surprising.risk.provider.SurprisingRiskApplication;
+import com.surprising.risk.provider.config.RiskProperties;
 import java.util.Map;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.SpringBootConfiguration;
@@ -23,6 +25,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableAutoConfiguration
 @ComponentScan(
         basePackages = {
+                "com.surprising.risk.provider",
                 "com.surprising.liquidation.provider",
                 "com.surprising.funding.provider",
                 "com.surprising.insurance.provider",
@@ -31,6 +34,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         excludeFilters = @ComponentScan.Filter(
                 type = FilterType.ASSIGNABLE_TYPE,
                 classes = {
+                        SurprisingRiskApplication.class,
                         SurprisingLiquidationApplication.class,
                         SurprisingFundingApplication.class,
                         SurprisingInsuranceApplication.class,
@@ -42,6 +46,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableKafka
 @EnableScheduling
 @EnableConfigurationProperties({
+        RiskProperties.class,
         LiquidationProperties.class,
         FundingProperties.class,
         InsuranceProperties.class,

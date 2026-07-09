@@ -6,7 +6,7 @@ ACTION="${ACTION:-start}"
 PRODUCT_LINE="${PRODUCT_LINE:-LINEAR_PERPETUAL}"
 PRODUCT_TOPICS_ENABLED="${PRODUCT_TOPICS_ENABLED:-true}"
 PORT_OFFSET="${PORT_OFFSET:-0}"
-SERVICES="${SERVICES:-candlestick index-price mark-price order matching trigger account risk liquidation websocket}"
+SERVICES="${SERVICES:-candlestick index-price mark-price order matching trigger account margin-ops websocket}"
 BUILD_SERVICES="${BUILD_SERVICES:-false}"
 WAIT_HEALTH="${WAIT_HEALTH:-true}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-180}"
@@ -51,7 +51,7 @@ module_for() {
     matching) echo "surprising-trading/surprising-matching-provider" ;;
     trigger) echo "surprising-trading/surprising-trigger-provider" ;;
     account) echo "surprising-account/surprising-account-provider" ;;
-    risk) echo "surprising-risk/surprising-risk-provider" ;;
+    risk) echo "surprising-margin-ops/surprising-risk-provider" ;;
     margin-ops) echo "surprising-margin-ops/surprising-margin-ops-provider" ;;
     liquidation) echo "surprising-margin-ops/surprising-liquidation-provider" ;;
     funding) echo "surprising-margin-ops/surprising-funding-provider" ;;
@@ -230,7 +230,19 @@ service_env() {
         "SURPRISING_RISK_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-risk"
       ;;
     margin-ops)
+      local funding_enabled=false
+      if supports_funding; then
+        funding_enabled=true
+      fi
+      local margin_ops_port
+      margin_ops_port=$(( $(base_port_for margin-ops) + PORT_OFFSET ))
       printf '%s\n' \
+        "SURPRISING_CLIENTS_RISK_BASE_URL=http://localhost:${margin_ops_port}" \
+        "SURPRISING_RISK_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
+        "SURPRISING_RISK_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
+        "SURPRISING_RISK_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
+        "SURPRISING_RISK_KAFKA_GROUP_ID=surprising-risk-${slug}-v1" \
+        "SURPRISING_RISK_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-risk" \
         "SURPRISING_LIQUIDATION_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
         "SURPRISING_LIQUIDATION_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
         "SURPRISING_LIQUIDATION_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
@@ -238,6 +250,8 @@ service_env() {
         "SURPRISING_FUNDING_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
         "SURPRISING_FUNDING_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
         "SURPRISING_FUNDING_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
+        "SURPRISING_FUNDING_CALCULATION_ENABLED=${funding_enabled}" \
+        "SURPRISING_FUNDING_SETTLEMENT_ENABLED=${funding_enabled}" \
         "SURPRISING_FUNDING_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-funding" \
         "SURPRISING_INSURANCE_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
         "SURPRISING_INSURANCE_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \

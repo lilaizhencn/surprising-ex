@@ -984,7 +984,7 @@ provider_module() {
     order) echo "surprising-trading/surprising-order-provider" ;;
     matching) echo "surprising-trading/surprising-matching-provider" ;;
     account) echo "surprising-account/surprising-account-provider" ;;
-    risk) echo "surprising-risk/surprising-risk-provider" ;;
+    risk) echo "surprising-margin-ops/surprising-risk-provider" ;;
     liquidation) echo "surprising-margin-ops/surprising-liquidation-provider" ;;
     insurance) echo "surprising-margin-ops/surprising-insurance-provider" ;;
     funding) echo "surprising-margin-ops/surprising-funding-provider" ;;

@@ -14,13 +14,15 @@
     <artifactId>surprising-margin-ops</artifactId>
     <packaging>pom</packaging>
     <name>surprising-margin-ops</name>
-    <description>Margin operations APIs and providers for liquidation, funding, insurance, and ADL</description>
+    <description>Margin operations APIs and providers for risk, liquidation, funding, insurance, and ADL</description>
 
     <modules>
+        <module>surprising-risk-api</module>
         <module>surprising-liquidation-api</module>
         <module>surprising-funding-api</module>
         <module>surprising-insurance-api</module>
         <module>surprising-adl-api</module>
+        <module>surprising-risk-provider</module>
         <module>surprising-liquidation-provider</module>
         <module>surprising-funding-provider</module>
         <module>surprising-insurance-provider</module>
@@ -30,6 +32,11 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-risk-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
             <dependency>
                 <groupId>com.surprising</groupId>
                 <artifactId>surprising-liquidation-api</artifactId>
@@ -53,6 +60,16 @@
             <dependency>
                 <groupId>com.surprising</groupId>
                 <artifactId>surprising-instrument-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-account-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-trading-api</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

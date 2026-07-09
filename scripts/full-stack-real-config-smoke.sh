@@ -792,7 +792,7 @@ provider_module() {
     matching) echo "surprising-trading/surprising-matching-provider" ;;
     trigger) echo "surprising-trading/surprising-trigger-provider" ;;
     account) echo "surprising-account/surprising-account-provider" ;;
-    risk) echo "surprising-risk/surprising-risk-provider" ;;
+    risk) echo "surprising-margin-ops/surprising-risk-provider" ;;
     liquidation) echo "surprising-margin-ops/surprising-liquidation-provider" ;;
     funding) echo "surprising-margin-ops/surprising-funding-provider" ;;
     insurance) echo "surprising-margin-ops/surprising-insurance-provider" ;;
@@ -3297,7 +3297,7 @@ register_provider "mark-price" 9083 "surprising-price/surprising-mark-price-prov
 register_provider "order" 9084 "surprising-trading/surprising-order-provider" "surprising-order-provider"
 register_provider "matching" 9085 "surprising-trading/surprising-matching-provider" "surprising-matching-provider"
 register_provider "account" 9086 "surprising-account/surprising-account-provider" "surprising-account-provider"
-register_provider "risk" 9087 "surprising-risk/surprising-risk-provider" "surprising-risk-provider"
+register_provider "risk" 9087 "surprising-margin-ops/surprising-risk-provider" "surprising-risk-provider"
 register_provider "liquidation" 9088 "surprising-margin-ops/surprising-liquidation-provider" "surprising-liquidation-provider"
 register_provider "funding" 9089 "surprising-margin-ops/surprising-funding-provider" "surprising-funding-provider"
 register_provider "insurance" 9090 "surprising-margin-ops/surprising-insurance-provider" "surprising-insurance-provider"

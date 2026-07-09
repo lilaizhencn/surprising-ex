@@ -175,7 +175,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_ACCOUNT_OPTION_BASE_URL:}
       risk:
-        base-url: http://localhost:9087
+        base-url: ${GATEWAY_ROUTE_RISK_BASE_URL:http://localhost:9088}
         target-prefix: /api/v1/risk
         private-route: true
         product-routes:
@@ -192,7 +192,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_RISK_OPTION_BASE_URL:}
       risk-admin:
-        base-url: http://localhost:9087
+        base-url: ${GATEWAY_ROUTE_RISK_BASE_URL:http://localhost:9088}
         target-prefix: /api/v1/admin/risk
         private-route: true
         product-routes:
@@ -485,7 +485,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_ACCOUNT_OPTION_BASE_URL:}
       risk:
-        base-url: http://localhost:9087
+        base-url: ${GATEWAY_ROUTE_RISK_BASE_URL:http://localhost:9088}
         target-prefix: /api/v1/risk
         private-route: true
         product-routes:
