@@ -19,6 +19,9 @@ management:
         include: health,info,metrics,prometheus
 
 surprising:
+  clients:
+    order:
+      base-url: http://localhost:9084
   trading:
     trigger:
       kafka:

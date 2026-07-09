@@ -2,13 +2,14 @@
 
 [English](README.md) | [简体中文](README_CN.md)
 
-Surprising Exchange trading module for spot, perpetual, delivery, and option product lines. The current implementation contains `surprising-order-provider`, `surprising-trigger-provider`, and `surprising-matching-provider`: order entry, take-profit/stop-loss trigger orders, instrument-rule validation, idempotent persistence, product-line Kafka command publishing, real exchange-core order-book matching, matching results, and trade events.
+Surprising Exchange trading module for spot, perpetual, delivery, and option product lines. The current implementation contains `surprising-order-provider`, `surprising-trigger-provider`, `surprising-trading-entry-provider`, and `surprising-matching-provider`: order entry, take-profit/stop-loss trigger orders, instrument-rule validation, idempotent persistence, product-line Kafka command publishing, real exchange-core order-book matching, matching results, and trade events.
 
 ## Modules
 
 - `surprising-trading-api`: order RPC contracts, DTOs, and Kafka command/event models.
 - `surprising-order-provider`: order entry provider.
 - `surprising-trigger-provider`: take-profit and stop-loss conditional order provider.
+- `surprising-trading-entry-provider`: combined deployable provider for order entry and trigger orders.
 - `surprising-matching-provider`: `exchange-core` based matching provider.
 
 ## Long Fixed-Point Model
@@ -41,7 +42,7 @@ Critical core-path aggregations use checked long addition. Matching filled quant
 ```text
 client / internal gateway
   -> POST /api/v1/trading/orders
-  -> surprising-order-provider
+  -> surprising-trading-entry-provider / surprising-order-provider
   -> PostgreSQL trading_orders + trading_order_events + trading_outbox_events
   -> outbox publisher
   -> surprising.<product-segment>.order.commands.v1
@@ -55,10 +56,10 @@ Trigger orders use a separate path:
 ```text
 client / internal gateway
   -> POST /api/v1/trading/trigger-orders
-  -> surprising-trigger-provider
+  -> surprising-trading-entry-provider / surprising-trigger-provider
   -> PostgreSQL trading_trigger_orders
   -> consume surprising.<product-segment>.mark.price.v1
-  -> submit reduceOnly order through surprising-order-provider
+  -> submit reduceOnly order through the order-entry API
   -> normal order / matching / account / WebSocket flow
 ```
 
@@ -163,7 +164,7 @@ Large exchanges implement TP/SL as conditional orders outside the live order boo
 REST endpoints:
 
 ```bash
-curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders' \
+curl -X POST 'http://localhost:9084/api/v1/trading/trigger-orders' \
   -H 'Content-Type: application/json' \
   -H 'X-Trace-Id: trace-tp-1001' \
   -d '{
@@ -182,11 +183,11 @@ curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders' \
     "marginMode": "CROSS"
   }'
 
-curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders/cancel' \
+curl -X POST 'http://localhost:9084/api/v1/trading/trigger-orders/cancel' \
   -H 'Content-Type: application/json' \
   -d '{"userId":1001,"triggerOrderId":1}'
 
-curl 'http://localhost:9095/api/v1/trading/trigger-orders/open?userId=1001&symbol=BTC-USDT&limit=100'
+curl 'http://localhost:9084/api/v1/trading/trigger-orders/open?userId=1001&symbol=BTC-USDT&limit=100'
 curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symbol=BTC-USDT&limit=100' -H 'X-User-Id: 1001'
 ```
 
@@ -490,22 +491,22 @@ brew services start redis
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
 mvn -pl :surprising-instrument-provider -am spring-boot:run
-mvn -pl :surprising-order-provider -am spring-boot:run
+mvn -pl :surprising-trading-entry-provider -am spring-boot:run
 JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED" \
 mvn -pl :surprising-matching-provider -am spring-boot:run
-mvn -pl :surprising-trigger-provider -am spring-boot:run
 ```
 
 Port:
 
-- `9084`: order entry service.
+- `9084`: trading-entry combined service for order entry and trigger orders.
 - `9085`: matching service.
-- `9095`: take-profit and stop-loss trigger service.
+- `9095`: trigger service in split mode.
 
 ## Production Notes
 
-- `surprising-order-provider` can run multiple instances, sharing the same PostgreSQL and Kafka clusters.
-- `surprising-trigger-provider` can also run multiple instances. Scale it by Kafka partitions and database claim batches; do not create one worker per symbol.
+- `surprising-trading-entry-provider` is the default deployable entry process for order and trigger traffic.
+- `surprising-order-provider` and `surprising-trigger-provider` remain available for split deployment. Both can run multiple instances, sharing the same PostgreSQL and Kafka clusters. Scale trigger by Kafka partitions and database claim batches; do not create one worker per symbol.
+- Keep `surprising-matching-provider` independent from trading-entry; it owns exchange-core order books and should be scaled/restarted separately.
 - Run the matching provider on JDK 21. Chronicle/OpenHFT dependencies used by exchange-core require explicit Java module opens/exports; set the same `JAVA_TOOL_OPTIONS` shown in local run for production pods.
 - A new symbol must first be enabled in instrument, Kafka partitions must be checked, and only then should order entry be opened.
 - MARKET orders require fresh mark price at order entry and matching. Order entry enforces min/max notional with the configured mark-derived execution band before publishing a matching command; linear max-notional and initial-margin checks use the upper bound to avoid under-collateralized market SELL opens. Tune `surprising.trading.*.market-max-slippage-ppm` per product liquidity.
@@ -525,6 +526,7 @@ Port:
 
 ```bash
 mvn -pl :surprising-order-provider -am test
+mvn -pl :surprising-trading-entry-provider -am test
 mvn -pl :surprising-matching-provider -am test
 mvn -pl :surprising-trigger-provider -am test
 rg -n "BigDecimal" surprising-trading -g '*.java'

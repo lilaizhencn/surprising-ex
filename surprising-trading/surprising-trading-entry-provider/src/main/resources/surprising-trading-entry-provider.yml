@@ -3,14 +3,14 @@ server:
 
 spring:
   application:
-    name: surprising-order-provider
+    name: surprising-trading-entry-provider
   datasource:
     url: jdbc:postgresql://localhost:5432/surprising_exchange
     username: surprising
     password: surprising
     hikari:
-      maximum-pool-size: 30
-      minimum-idle: 5
+      maximum-pool-size: 40
+      minimum-idle: 6
       connection-timeout: 3000
 management:
   endpoints:
@@ -20,8 +20,10 @@ management:
 
 surprising:
   clients:
+    order:
+      base-url: http://localhost:9084
     trigger:
-      base-url: http://localhost:9095
+      base-url: http://localhost:9084
   trading:
     order:
       kafka:
@@ -30,12 +32,12 @@ surprising:
         product-topics-enabled: false
         order-commands-topic: surprising.perp.order.commands.v1
         order-events-topic: surprising.perp.order.events.v1
-    outbox:
-      batch-size: 1000
-      publish-delay-ms: 20
-      async-enabled: true
-      max-in-flight: 64
-      send-timeout: 3s
+      outbox:
+        batch-size: 1000
+        publish-delay-ms: 20
+        async-enabled: true
+        max-in-flight: 64
+        send-timeout: 3s
       risk:
         market-max-slippage-ppm: 10000
         market-max-mark-age-ms: 5000
@@ -56,3 +58,18 @@ surprising:
         max-interval-seconds: 86400
         min-duration-seconds: 5
         max-duration-seconds: 86400
+    trigger:
+      kafka:
+        bootstrap-servers: localhost:9092
+        product-line: LINEAR_PERPETUAL
+        product-topics-enabled: false
+        group-id: surprising-trigger-v1
+        mark-price-topic: surprising.perp.mark.price.v1
+        index-price-topic: surprising.perp.index.price.v1
+        last-price-topic: surprising.perp.match.trades.v1
+        concurrency: 2
+        max-poll-records: 500
+      execution:
+        trigger-batch-size: 200
+        stale-triggering-after: 30s
+        maintenance-delay-ms: 1000

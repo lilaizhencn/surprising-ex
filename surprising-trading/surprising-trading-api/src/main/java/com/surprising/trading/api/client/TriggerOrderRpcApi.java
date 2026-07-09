@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RequestParam;
         name = "surprising-trigger-provider",
         contextId = "triggerOrderRpcApi",
         path = TradingApiPaths.TRIGGER_ORDER_BASE_PATH,
-        url = "${surprising.clients.trigger.base-url:http://localhost:9095}")
+        url = "${surprising.clients.trigger.base-url:http://localhost:9084}")
 public interface TriggerOrderRpcApi {
 
     @PostMapping

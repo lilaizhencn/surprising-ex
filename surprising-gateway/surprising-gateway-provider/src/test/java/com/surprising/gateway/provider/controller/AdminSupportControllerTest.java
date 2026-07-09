@@ -193,7 +193,7 @@ class AdminSupportControllerTest {
         adminRoutes.put("trading-orders", new GatewayProperties.BackendRoute(
                 "http://order:9084", "/api/v1/admin/trading/orders", true));
         adminRoutes.put("trading-trigger", new GatewayProperties.BackendRoute(
-                "http://trigger:9095", "/api/v1/admin/trading/trigger-orders", true));
+                "http://trading-entry:9084", "/api/v1/admin/trading/trigger-orders", true));
         adminRoutes.put("risk", new GatewayProperties.BackendRoute(
                 "http://risk:9087", "/api/v1/risk", true));
         properties.setAdminRoutes(adminRoutes);

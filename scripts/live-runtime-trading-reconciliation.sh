@@ -541,7 +541,7 @@ run_market_maker_flow() {
 
 main() {
   require_health instrument 9080
-  require_health order 9084
+  require_health trading-entry 9084
   require_health matching 9085
   require_health account 9086
   require_health margin-ops 9088

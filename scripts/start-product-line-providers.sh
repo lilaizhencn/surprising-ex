@@ -6,7 +6,7 @@ ACTION="${ACTION:-start}"
 PRODUCT_LINE="${PRODUCT_LINE:-LINEAR_PERPETUAL}"
 PRODUCT_TOPICS_ENABLED="${PRODUCT_TOPICS_ENABLED:-true}"
 PORT_OFFSET="${PORT_OFFSET:-0}"
-SERVICES="${SERVICES:-candlestick index-price mark-price order matching trigger account margin-ops websocket}"
+SERVICES="${SERVICES:-candlestick index-price mark-price trading-entry matching account margin-ops websocket}"
 BUILD_SERVICES="${BUILD_SERVICES:-false}"
 WAIT_HEALTH="${WAIT_HEALTH:-true}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-180}"
@@ -47,6 +47,7 @@ module_for() {
     price) echo "surprising-price/surprising-price-provider" ;;
     index-price) echo "surprising-price/surprising-index-price-provider" ;;
     mark-price) echo "surprising-price/surprising-mark-price-provider" ;;
+    trading-entry) echo "surprising-trading/surprising-trading-entry-provider" ;;
     order) echo "surprising-trading/surprising-order-provider" ;;
     matching) echo "surprising-trading/surprising-matching-provider" ;;
     trigger) echo "surprising-trading/surprising-trigger-provider" ;;
@@ -76,6 +77,7 @@ base_port_for() {
     price) echo 9082 ;;
     index-price) echo 9082 ;;
     mark-price) echo 9083 ;;
+    trading-entry) echo 9084 ;;
     order) echo 9084 ;;
     matching) echo 9085 ;;
     account) echo 9086 ;;
@@ -190,6 +192,20 @@ service_env() {
         "SURPRISING_PRICE_MARK_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
         "SURPRISING_PRICE_MARK_KAFKA_GROUP_ID=surprising-mark-price-${slug}-v1" \
         "SURPRISING_PRICE_MARK_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-mark"
+      ;;
+    trading-entry)
+      local entry_port
+      entry_port=$(( $(base_port_for trading-entry) + PORT_OFFSET ))
+      printf '%s\n' \
+        "SURPRISING_CLIENTS_ORDER_BASE_URL=http://localhost:${entry_port}" \
+        "SURPRISING_CLIENTS_TRIGGER_BASE_URL=http://localhost:${entry_port}" \
+        "SURPRISING_TRADING_ORDER_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
+        "SURPRISING_TRADING_ORDER_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
+        "SURPRISING_TRADING_ORDER_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
+        "SURPRISING_TRADING_TRIGGER_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
+        "SURPRISING_TRADING_TRIGGER_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
+        "SURPRISING_TRADING_TRIGGER_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
+        "SURPRISING_TRADING_TRIGGER_KAFKA_GROUP_ID=surprising-trigger-${slug}-v1"
       ;;
     order)
       printf '%s\n' \

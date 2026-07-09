@@ -12,13 +12,15 @@ public class OrderFeignConfiguration {
     @Bean
     public RequestInterceptor orderTraceRequestInterceptor(TradingOrderProperties properties) {
         return template -> {
-            template.header(TraceContext.TRACE_ID_HEADER, TraceContext.currentOrCreate());
+            if (!template.headers().containsKey(TraceContext.TRACE_ID_HEADER)) {
+                template.header(TraceContext.TRACE_ID_HEADER, TraceContext.currentOrCreate());
+            }
             TradingOrderProperties.Kafka kafka = properties == null || properties.getKafka() == null
                     ? new TradingOrderProperties.Kafka()
                     : properties.getKafka();
             if (kafka.isProductTopicsEnabled()) {
                 ProductLine productLine = kafka.getProductLine();
-                if (productLine != null) {
+                if (productLine != null && !template.headers().containsKey("X-Product-Line")) {
                     template.header("X-Product-Line", productLine.name());
                 }
             }

@@ -195,7 +195,7 @@ PIDS=()
 RISK_BACKGROUND_LOAD_PID=""
 SMOKE_PROVIDERS=(
   instrument candlestick index-price mark-price matching account risk liquidation
-  funding insurance adl websocket order trigger gateway market-maker
+  funding insurance adl websocket trading-entry gateway market-maker
 )
 
 cleanup() {
@@ -765,7 +765,7 @@ provider_port() {
     candlestick) echo 9081 ;;
     index-price) echo 9082 ;;
     mark-price) echo 9083 ;;
-    order) echo 9084 ;;
+    order|trading-entry) echo 9084 ;;
     matching) echo 9085 ;;
     account) echo 9086 ;;
     risk) echo 9087 ;;
@@ -789,6 +789,7 @@ provider_module() {
     index-price) echo "surprising-price/surprising-index-price-provider" ;;
     mark-price) echo "surprising-price/surprising-mark-price-provider" ;;
     order) echo "surprising-trading/surprising-order-provider" ;;
+    trading-entry) echo "surprising-trading/surprising-trading-entry-provider" ;;
     matching) echo "surprising-trading/surprising-matching-provider" ;;
     trigger) echo "surprising-trading/surprising-trigger-provider" ;;
     account) echo "surprising-account/surprising-account-provider" ;;
@@ -812,6 +813,7 @@ provider_artifact() {
     index-price) echo "surprising-index-price-provider" ;;
     mark-price) echo "surprising-mark-price-provider" ;;
     order) echo "surprising-order-provider" ;;
+    trading-entry) echo "surprising-trading-entry-provider" ;;
     matching) echo "surprising-matching-provider" ;;
     trigger) echo "surprising-trigger-provider" ;;
     account) echo "surprising-account-provider" ;;
@@ -3294,7 +3296,7 @@ register_provider "instrument" 9080 "surprising-instrument/surprising-instrument
 register_provider "candlestick" 9081 "surprising-candlestick/surprising-candlestick-provider" "surprising-candlestick-provider"
 register_provider "index-price" 9082 "surprising-price/surprising-index-price-provider" "surprising-index-price-provider"
 register_provider "mark-price" 9083 "surprising-price/surprising-mark-price-provider" "surprising-mark-price-provider"
-register_provider "order" 9084 "surprising-trading/surprising-order-provider" "surprising-order-provider"
+register_provider "trading-entry" 9084 "surprising-trading/surprising-trading-entry-provider" "surprising-trading-entry-provider"
 register_provider "matching" 9085 "surprising-trading/surprising-matching-provider" "surprising-matching-provider"
 register_provider "account" 9086 "surprising-account/surprising-account-provider" "surprising-account-provider"
 register_provider "risk" 9087 "surprising-margin-ops/surprising-risk-provider" "surprising-risk-provider"
@@ -3355,12 +3357,12 @@ fi
 if [[ "${START_PROVIDERS}" == "true" ]]; then
   package_services
 
-  for provider in instrument candlestick index-price mark-price matching account risk liquidation funding insurance adl websocket order trigger gateway market-maker; do
+  for provider in instrument candlestick index-price mark-price matching account risk liquidation funding insurance adl websocket trading-entry gateway market-maker; do
     start_provider "${provider}"
   done
 else
   echo "Reusing already running providers"
-  for provider in instrument candlestick index-price mark-price matching account risk liquidation funding insurance adl websocket order trigger gateway market-maker; do
+  for provider in instrument candlestick index-price mark-price matching account risk liquidation funding insurance adl websocket trading-entry gateway market-maker; do
     wait_http "${provider}" "$(provider_port "${provider}")"
   done
 fi

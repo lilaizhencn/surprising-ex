@@ -55,7 +55,7 @@ curl 'http://localhost:9094/api/v1/admin/system/metrics?windowMinutes=60' \
 | `price-mark` | `http://localhost:9083/api/v1/price/mark` | 否 |
 | `trading` | `http://localhost:9084/api/v1/trading/orders` | 是 |
 | `trading-market` | `http://localhost:9085/api/v1/trading/market` | 否 |
-| `trading-trigger` | `http://localhost:9095/api/v1/trading/trigger-orders` | 是 |
+| `trading-trigger` | `http://localhost:9084/api/v1/trading/trigger-orders` | 是 |
 | `account` | `http://localhost:9086/api/v1/accounts` | 是 |
 | `risk` | `http://localhost:9088/api/v1/risk` | 是 |
 | `liquidation` | `http://localhost:9088/api/v1/liquidations` | 是 |
@@ -158,7 +158,7 @@ surprising:
         target-prefix: /api/v1/accounts
         private-route: true
       trading-trigger:
-        base-url: http://surprising-trigger:9095
+        base-url: http://surprising-trading-entry:9084
         target-prefix: /api/v1/trading/trigger-orders
         private-route: true
 ```

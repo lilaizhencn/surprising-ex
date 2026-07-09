@@ -71,7 +71,7 @@ class GatewayProxyControllerTest {
                 properties.getRoutes().get("trading-trigger"), request);
 
         assertThat(target.toString())
-                .isEqualTo("http://trigger:9095/api/v1/trading/trigger-orders/open?userId=42&symbol=BTC-USDT");
+                .isEqualTo("http://trading-entry:9084/api/v1/trading/trigger-orders/open?userId=42&symbol=BTC-USDT");
         assertThat(properties.getRoutes().get("trading-trigger").isPrivateRoute()).isTrue();
     }
 
@@ -116,7 +116,7 @@ class GatewayProxyControllerTest {
                 properties.getAdminRoutes().get("trading-trigger"), request);
 
         assertThat(target.toString())
-                .isEqualTo("http://trigger:9095/api/v1/admin/trading/trigger-orders?userId=42&symbol=BTC-USDT");
+                .isEqualTo("http://trading-entry:9084/api/v1/admin/trading/trigger-orders?userId=42&symbol=BTC-USDT");
     }
 
     @Test
@@ -396,7 +396,7 @@ class GatewayProxyControllerTest {
         routes.put("trading-market", new GatewayProperties.BackendRoute(
                 "http://matching:9085", "/api/v1/trading/market", false));
         routes.put("trading-trigger", new GatewayProperties.BackendRoute(
-                "http://trigger:9095", "/api/v1/trading/trigger-orders", true));
+                "http://trading-entry:9084", "/api/v1/trading/trigger-orders", true));
         routes.put("trading", new GatewayProperties.BackendRoute(
                 "http://order:9084", "/api/v1/trading/orders", true));
         routes.put("account", new GatewayProperties.BackendRoute(
@@ -410,7 +410,7 @@ class GatewayProxyControllerTest {
         adminRoutes.put("account", new GatewayProperties.BackendRoute(
                 "http://account:9086", "/api/v1/admin/accounts", true));
         adminRoutes.put("trading-trigger", new GatewayProperties.BackendRoute(
-                "http://trigger:9095", "/api/v1/admin/trading/trigger-orders", true));
+                "http://trading-entry:9084", "/api/v1/admin/trading/trigger-orders", true));
         adminRoutes.put("risk-admin", new GatewayProperties.BackendRoute(
                 "http://risk:9087", "/api/v1/admin/risk", true));
         properties.setAdminRoutes(adminRoutes);

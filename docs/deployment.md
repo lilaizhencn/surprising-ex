@@ -78,7 +78,7 @@ PRODUCT_LINE=OPTION PORT_OFFSET=200 ./scripts/start-product-line-providers.sh
 PRODUCT_LINE=OPTION PORT_OFFSET=200 ACTION=stop ./scripts/start-product-line-providers.sh
 ```
 
-`PORT_OFFSET` is added to each provider's default port. For example, order/matching/account/margin-ops use `9084/9085/9086/9088` for `LINEAR_PERPETUAL`, `9184/9185/9186/9188` for `LINEAR_DELIVERY`, and `9284/9285/9286/9288` for `OPTION`. Standalone split-mode risk still uses base port `9087`.
+`PORT_OFFSET` is added to each provider's default port. For example, trading-entry/matching/account/margin-ops use `9084/9085/9086/9088` for `LINEAR_PERPETUAL`, `9184/9185/9186/9188` for `LINEAR_DELIVERY`, and `9284/9285/9286/9288` for `OPTION`. Standalone split-mode risk still uses base port `9087`.
 
 The startup script sets product-line Kafka topic routing, product-specific consumer groups, unique client ids, and unique coordination node ids where a provider needs them. Index price, mark price, risk, liquidation, and funding are skipped automatically for `SPOT`; funding is also skipped for delivery and option product lines. Use `BUILD_SERVICES=true` when jars are not already built, `SERVICES="order matching account"` for a subset, and `WAIT_HEALTH=false` for CI environments where Actuator health is not exposed.
 

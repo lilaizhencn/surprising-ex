@@ -75,7 +75,7 @@ mvn -DskipTests package
 export JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
 ```
 
-Provider packaging keeps the normal jar as a dependency artifact and attaches the executable Spring Boot jar with the `exec` classifier, for example `surprising-order-provider-1.0.0-SNAPSHOT-exec.jar`.
+Provider packaging keeps the normal jar as a dependency artifact and attaches the executable Spring Boot jar with the `exec` classifier, for example `surprising-trading-entry-provider-1.0.0-SNAPSHOT-exec.jar`.
 
 ## Database Initialization
 
@@ -99,13 +99,12 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 mvn -pl :surprising-candlestick-provider -am spring-boot:run
 mvn -pl :surprising-index-price-provider -am spring-boot:run
 mvn -pl :surprising-mark-price-provider -am spring-boot:run
-mvn -pl :surprising-order-provider -am spring-boot:run
+mvn -pl :surprising-trading-entry-provider -am spring-boot:run
 JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED" \
 mvn -pl :surprising-matching-provider -am spring-boot:run
 mvn -pl :surprising-account-provider -am spring-boot:run
 mvn -pl :surprising-margin-ops-provider -am spring-boot:run
 mvn -pl :surprising-websocket-provider -am spring-boot:run
-mvn -pl :surprising-trigger-provider -am spring-boot:run
 mvn -pl :surprising-gateway-provider -am spring-boot:run
 mvn -pl :surprising-market-maker-provider -am spring-boot:run
 ```
@@ -116,7 +115,7 @@ Ports:
 - `9081`: candlestick service.
 - `9082`: index price and FX service.
 - `9083`: mark price service.
-- `9084`: order entry service.
+- `9084`: trading-entry combined service for order entry and trigger orders.
 - `9085`: exchange-core matching service.
 - `9086`: account and position service.
 - `9087`: risk service in split mode.
@@ -126,7 +125,7 @@ Ports:
 - `9091`: ADL service in split mode.
 - `9093`: client WebSocket fanout service.
 - `9094`: public REST API gateway.
-- `9095`: take-profit and stop-loss trigger order service.
+- `9095`: trigger order service in split mode.
 - `9096`: internal market-maker service.
 
 ## Kafka Topics
@@ -159,7 +158,7 @@ curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
 curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
 curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
 curl -X POST 'http://localhost:9084/api/v1/trading/orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientOrderId":"cli-1001-1","symbol":"BTC-USDT","side":"BUY","orderType":"LIMIT","timeInForce":"GTC","priceTicks":650000,"quantitySteps":10,"reduceOnly":false,"postOnly":false}'
-curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientTriggerOrderId":"tp-1001-1","ocoGroupId":"bracket-1001-1","symbol":"BTC-USDT","side":"SELL","triggerType":"TAKE_PROFIT","triggerPriceType":"MARK_PRICE","triggerPriceTicks":700000,"orderType":"MARKET","timeInForce":"IOC","priceTicks":0,"quantitySteps":10,"marginMode":"CROSS"}'
+curl -X POST 'http://localhost:9084/api/v1/trading/trigger-orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientTriggerOrderId":"tp-1001-1","ocoGroupId":"bracket-1001-1","symbol":"BTC-USDT","side":"SELL","triggerType":"TAKE_PROFIT","triggerPriceType":"MARK_PRICE","triggerPriceTicks":700000,"orderType":"MARKET","timeInForce":"IOC","priceTicks":0,"quantitySteps":10,"marginMode":"CROSS"}'
 curl 'http://localhost:9089/api/v1/funding/rates/latest?symbol=BTC-USDT'
 curl 'http://localhost:9090/api/v1/insurance/balances?asset=USDT'
 curl 'http://localhost:9091/api/v1/adl/queue?asset=USDT&limit=100'

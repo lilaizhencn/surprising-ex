@@ -76,7 +76,7 @@ mvn -DskipTests package
 export JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
 ```
 
-Provider 打包会保留普通 jar 作为模块依赖产物，并额外生成带 `exec` classifier 的 Spring Boot 可执行 jar，例如 `surprising-order-provider-1.0.0-SNAPSHOT-exec.jar`。
+Provider 打包会保留普通 jar 作为模块依赖产物，并额外生成带 `exec` classifier 的 Spring Boot 可执行 jar，例如 `surprising-trading-entry-provider-1.0.0-SNAPSHOT-exec.jar`。
 
 ## 数据库初始化
 
@@ -100,13 +100,12 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 mvn -pl :surprising-candlestick-provider -am spring-boot:run
 mvn -pl :surprising-index-price-provider -am spring-boot:run
 mvn -pl :surprising-mark-price-provider -am spring-boot:run
-mvn -pl :surprising-order-provider -am spring-boot:run
+mvn -pl :surprising-trading-entry-provider -am spring-boot:run
 JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED" \
 mvn -pl :surprising-matching-provider -am spring-boot:run
 mvn -pl :surprising-account-provider -am spring-boot:run
 mvn -pl :surprising-margin-ops-provider -am spring-boot:run
 mvn -pl :surprising-websocket-provider -am spring-boot:run
-mvn -pl :surprising-trigger-provider -am spring-boot:run
 mvn -pl :surprising-gateway-provider -am spring-boot:run
 mvn -pl :surprising-market-maker-provider -am spring-boot:run
 ```
@@ -117,7 +116,7 @@ mvn -pl :surprising-market-maker-provider -am spring-boot:run
 - `9081`：K 线服务。
 - `9082`：指数价格和法币汇率服务。
 - `9083`：标记价格服务。
-- `9084`：订单入口服务。
+- `9084`：trading-entry 合并服务，包含普通订单入口和条件单。
 - `9085`：exchange-core 撮合服务。
 - `9086`：账户和持仓服务。
 - `9087`：拆分部署时的风险服务。
@@ -127,7 +126,7 @@ mvn -pl :surprising-market-maker-provider -am spring-boot:run
 - `9091`：拆分部署时的 ADL 服务。
 - `9093`：前端 WebSocket 推送服务。
 - `9094`：统一 REST API 网关。
-- `9095`：止盈止损条件单服务。
+- `9095`：拆分部署时的止盈止损条件单服务。
 - `9096`：内网做市商服务。
 
 ## Kafka Topics
@@ -161,7 +160,7 @@ curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
 curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
 curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
 curl -X POST 'http://localhost:9084/api/v1/trading/orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientOrderId":"cli-1001-1","symbol":"BTC-USDT","side":"BUY","orderType":"LIMIT","timeInForce":"GTC","priceTicks":650000,"quantitySteps":10,"reduceOnly":false,"postOnly":false}'
-curl -X POST 'http://localhost:9095/api/v1/trading/trigger-orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientTriggerOrderId":"tp-1001-1","ocoGroupId":"bracket-1001-1","symbol":"BTC-USDT","side":"SELL","triggerType":"TAKE_PROFIT","triggerPriceType":"MARK_PRICE","triggerPriceTicks":700000,"orderType":"MARKET","timeInForce":"IOC","priceTicks":0,"quantitySteps":10,"marginMode":"CROSS"}'
+curl -X POST 'http://localhost:9084/api/v1/trading/trigger-orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientTriggerOrderId":"tp-1001-1","ocoGroupId":"bracket-1001-1","symbol":"BTC-USDT","side":"SELL","triggerType":"TAKE_PROFIT","triggerPriceType":"MARK_PRICE","triggerPriceTicks":700000,"orderType":"MARKET","timeInForce":"IOC","priceTicks":0,"quantitySteps":10,"marginMode":"CROSS"}'
 curl 'http://localhost:9089/api/v1/funding/rates/latest?symbol=BTC-USDT'
 curl 'http://localhost:9090/api/v1/insurance/balances?asset=USDT'
 curl 'http://localhost:9091/api/v1/adl/queue?asset=USDT&limit=100'

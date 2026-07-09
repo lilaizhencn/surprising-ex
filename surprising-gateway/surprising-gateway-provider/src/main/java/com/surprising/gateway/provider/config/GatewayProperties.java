@@ -94,7 +94,7 @@ public class GatewayProperties {
         routes.put("price-mark", new BackendRoute("http://localhost:9083", "/api/v1/price/mark", false));
         routes.put("trading", new BackendRoute("http://localhost:9084", "/api/v1/trading/orders", true));
         routes.put("trading-market", new BackendRoute("http://localhost:9085", "/api/v1/trading/market", false));
-        routes.put("trading-trigger", new BackendRoute("http://localhost:9095", "/api/v1/trading/trigger-orders", true));
+        routes.put("trading-trigger", new BackendRoute("http://localhost:9084", "/api/v1/trading/trigger-orders", true));
         routes.put("account", new BackendRoute("http://localhost:9086", "/api/v1/accounts", true));
         routes.put("risk", new BackendRoute("http://localhost:9088", "/api/v1/risk", true));
         routes.put("liquidation", new BackendRoute("http://localhost:9088", "/api/v1/liquidations", true));
@@ -119,7 +119,7 @@ public class GatewayProperties {
         routes.put("trading-orders", new BackendRoute("http://localhost:9084", "/api/v1/admin/trading/orders", true));
         routes.put("trading-fees", new BackendRoute("http://localhost:9084", "/api/v1/admin/trading/fees", true));
         routes.put("trading-market", new BackendRoute("http://localhost:9085", "/api/v1/trading/market", true));
-        routes.put("trading-trigger", new BackendRoute("http://localhost:9095", "/api/v1/admin/trading/trigger-orders", true));
+        routes.put("trading-trigger", new BackendRoute("http://localhost:9084", "/api/v1/admin/trading/trigger-orders", true));
         routes.put("account", new BackendRoute("http://localhost:9086", "/api/v1/admin/accounts", true));
         routes.put("account-public", new BackendRoute("http://localhost:9086", "/api/v1/accounts", true));
         routes.put("risk", new BackendRoute("http://localhost:9088", "/api/v1/risk", true));

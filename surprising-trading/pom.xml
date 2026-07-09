@@ -19,6 +19,7 @@
     <modules>
         <module>surprising-trading-api</module>
         <module>surprising-order-provider</module>
+        <module>surprising-trading-entry-provider</module>
         <module>surprising-matching-provider</module>
         <module>surprising-trigger-provider</module>
     </modules>
