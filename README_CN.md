@@ -27,6 +27,7 @@ Surprising 多产品线交易所后端服务。
 - `surprising-margin-ops`：风险快照、爆仓候选、强平、资金费、保险基金和 ADL 的 API/provider，以及合并部署 provider。
 - `surprising-websocket`：面向前端的水平扩展 WebSocket 推送服务，负责行情、订单、成交和持仓实时推送。
 - `surprising-gateway`：面向前端/BFF 的统一 REST API 网关。
+- `surprising-edge`：面向前端接入层的合并 provider，包含 REST gateway 和 WebSocket fanout。
 - `surprising-market-maker`：内网做市商报价和交易链路压测策略服务。
 - `surprising-integration-test`：订单、撮合、账户、风控、强平、资金费、保险基金和 ADL 链路的跨模块验证。
 
@@ -61,6 +62,7 @@ Surprising 多产品线交易所后端服务。
 - [surprising-margin-ops](surprising-margin-ops/README_CN.md)
 - [surprising-websocket](surprising-websocket/README_CN.md)
 - [surprising-gateway](surprising-gateway/README_CN.md)
+- [surprising-edge](surprising-edge/README_CN.md)
 - [surprising-market-maker](surprising-market-maker/README_CN.md)
 
 ## 构建
@@ -105,8 +107,7 @@ JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=ja
 mvn -pl :surprising-matching-provider -am spring-boot:run
 mvn -pl :surprising-account-provider -am spring-boot:run
 mvn -pl :surprising-margin-ops-provider -am spring-boot:run
-mvn -pl :surprising-websocket-provider -am spring-boot:run
-mvn -pl :surprising-gateway-provider -am spring-boot:run
+mvn -pl :surprising-edge-provider -am spring-boot:run
 mvn -pl :surprising-market-maker-provider -am spring-boot:run
 ```
 
@@ -124,8 +125,8 @@ mvn -pl :surprising-market-maker-provider -am spring-boot:run
 - `9089`：拆分部署时的资金费率服务。
 - `9090`：拆分部署时的保险基金服务。
 - `9091`：拆分部署时的 ADL 服务。
-- `9093`：前端 WebSocket 推送服务。
-- `9094`：统一 REST API 网关。
+- `9093`：拆分部署时的前端 WebSocket 推送服务。
+- `9094`：edge 合并服务，包含统一 REST API gateway 和 `/ws/v1`；拆分部署时也可以作为独立 REST gateway。
 - `9095`：拆分部署时的止盈止损条件单服务。
 - `9096`：内网做市商服务。
 
@@ -168,8 +169,8 @@ curl 'http://localhost:9094/api/v1/gateway/candlestick/candles/latest?symbol=BTC
 curl 'http://localhost:9094/api/v1/gateway/account/1001/positions' -H 'X-User-Id: 1001'
 ```
 
-前端 REST 流量默认走 `surprising-gateway` 的 `9094` 端口。
-实时流量走 `surprising-websocket` 的 `/ws/v1`；公共频道包括 K 线、成交、盘口深度、指数价格、标记价格和资金费率，私有频道包括订单、撮合成交和持仓。
+前端流量默认走 `surprising-edge` 的 `9094` 端口：REST 使用 `/api/v1/gateway/**`，实时流量使用 `/ws/v1`。
+生产环境如果 WebSocket 长连接很多，继续拆分 `surprising-gateway-provider` 和 `surprising-websocket-provider`，让 WebSocket fanout 独立扩容。
 
 ## 本地集成 Smoke
 

@@ -156,8 +156,8 @@ Risk, liquidation, and ADL admin lists use the same `limit/cursor/sort` response
 
 Do not expose internal provider ports directly to the internet. Public clients should use:
 
-- REST: `surprising-gateway`
-- Realtime: `surprising-websocket` or an ingress route to `/ws/v1`
+- Development/small deployment: `surprising-edge-provider` on `9094` for both REST and `/ws/v1`.
+- Split production deployment: `surprising-gateway-provider` for REST and `surprising-websocket-provider` or an ingress route to `/ws/v1` for realtime.
 
 ## Horizontal Scaling
 

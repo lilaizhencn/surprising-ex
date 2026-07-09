@@ -200,13 +200,15 @@ Recommended production settings:
 
 ## Gateway And WebSocket
 
-- Public REST clients should use `surprising-gateway` on `/api/v1/gateway/{service}` instead of calling each provider directly.
+- Development and small deployments can run `surprising-edge-provider` on port `9094`; it exposes both REST gateway routes and `/ws/v1` WebSocket fanout in one process.
+- Production deployments with many long-lived WebSocket connections should keep `surprising-gateway-provider` and `surprising-websocket-provider` split so WebSocket fanout can scale independently.
+- Public REST clients should use the edge/gateway endpoint on `/api/v1/gateway/{service}` instead of calling each provider directly.
 - Internal modules still own their APIs. The gateway is an allowlisted edge/BFF proxy, not the source of business logic.
 - Private gateway routes require identity (`X-User-Id` or `Authorization` in the current implementation). In production, inject `X-User-Id` only after token/session validation at the auth or ingress layer.
 - The gateway accepts `X-Trace-Id`, normalizes it, returns it to the client, and forwards the normalized value to backend providers. If the client omits it, the gateway generates one.
 - Do not generate a new trace id inside asynchronous trading stages. Order entry writes the trace id into order events and command payloads; matching copies the command trace id into result/trade events; account settlement copies the trade trace id into position outbox events.
 - Include `trace_id`, `order_id`, `command_id`, `trade_id`, Kafka topic/partition/offset, and `symbol` in operational logs and dashboards. Database audit tables `trading_order_events`, `trading_match_results`, and `trading_match_trades` also store `trace_id`.
-- Realtime clients should connect to `surprising-websocket` on `/ws/v1`.
+- Realtime clients should connect to the edge/WebSocket endpoint on `/ws/v1`.
 - Use REST first for snapshots, then WebSocket for deltas. L2 book snapshots are exposed through `GET /api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50`.
 - WebSocket public channels: `candles`, `trades`, `depth`, `index`, `mark`, `funding`.
 - WebSocket private channels: `orders`, `matches`, `positions`, `positionRisk`, `accountRisk`.
@@ -255,8 +257,8 @@ Recommended production settings:
 9. Start order, matching, account, risk, and liquidation providers.
 10. Start insurance providers after account tables are initialized and the fund is seeded.
 11. Start ADL providers after account, liquidation, and insurance providers.
-12. Start WebSocket/fanout services that consume candle, index, mark, order, match, funding, and position topics.
-13. Start gateway providers after the internal REST services they expose are reachable.
+12. Start `surprising-edge-provider`, or start WebSocket/fanout and gateway providers separately when WebSocket needs independent scaling.
+13. If split, start gateway providers after the internal REST services they expose are reachable.
 14. Start market-maker providers last. They should see healthy order, matching, account, mark, and gateway services before `surprising.market-maker.engine.enabled=true` is rolled out.
 
 ## Operational Kill Switches

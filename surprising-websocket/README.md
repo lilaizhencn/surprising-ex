@@ -131,6 +131,8 @@ If the same user is connected on two devices through two different nodes, both n
 
 ## Horizontal Scaling
 
+- Development and small deployments can use `surprising-edge-provider` for REST and `/ws/v1` in one process.
+- Keep `surprising-websocket-provider` separate in production when long-lived WebSocket connections need independent scaling.
 - Deploy at least two WebSocket nodes.
 - Every WebSocket node must use a unique Kafka consumer group id, for example the default `surprising-websocket-${HOSTNAME:${random.uuid}}`.
 - Do not share one group id across all WebSocket pods. A shared group would deliver each Kafka record to only one pod, and clients connected to other pods would miss public market updates.

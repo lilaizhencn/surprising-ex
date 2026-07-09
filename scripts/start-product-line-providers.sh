@@ -6,7 +6,7 @@ ACTION="${ACTION:-start}"
 PRODUCT_LINE="${PRODUCT_LINE:-LINEAR_PERPETUAL}"
 PRODUCT_TOPICS_ENABLED="${PRODUCT_TOPICS_ENABLED:-true}"
 PORT_OFFSET="${PORT_OFFSET:-0}"
-SERVICES="${SERVICES:-candlestick index-price mark-price trading-entry matching account margin-ops websocket}"
+SERVICES="${SERVICES:-candlestick index-price mark-price trading-entry matching account margin-ops edge}"
 BUILD_SERVICES="${BUILD_SERVICES:-false}"
 WAIT_HEALTH="${WAIT_HEALTH:-true}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-180}"
@@ -58,7 +58,9 @@ module_for() {
     funding) echo "surprising-margin-ops/surprising-funding-provider" ;;
     insurance) echo "surprising-margin-ops/surprising-insurance-provider" ;;
     adl) echo "surprising-margin-ops/surprising-adl-provider" ;;
+    edge) echo "surprising-edge/surprising-edge-provider" ;;
     websocket) echo "surprising-websocket/surprising-websocket-provider" ;;
+    gateway) echo "surprising-gateway/surprising-gateway-provider" ;;
     market-maker) echo "surprising-market-maker/surprising-market-maker-provider" ;;
     *)
       echo "Unknown service: $1" >&2
@@ -87,7 +89,9 @@ base_port_for() {
     funding) echo 9089 ;;
     insurance) echo 9090 ;;
     adl) echo 9091 ;;
+    edge) echo 9094 ;;
     websocket) echo 9093 ;;
+    gateway) echo 9094 ;;
     trigger) echo 9095 ;;
     market-maker) echo 9096 ;;
     *)
@@ -308,6 +312,13 @@ service_env() {
         "SURPRISING_WEBSOCKET_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
         "SURPRISING_WEBSOCKET_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
         "SURPRISING_WEBSOCKET_KAFKA_GROUP_ID=surprising-websocket-${slug}-${HOSTNAME:-local}-$$"
+      ;;
+    edge)
+      printf '%s\n' \
+        "SURPRISING_WEBSOCKET_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
+        "SURPRISING_WEBSOCKET_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
+        "SURPRISING_WEBSOCKET_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
+        "SURPRISING_WEBSOCKET_KAFKA_GROUP_ID=surprising-edge-websocket-${slug}-${HOSTNAME:-local}-$$"
       ;;
     market-maker)
       local mark_price_port=9083

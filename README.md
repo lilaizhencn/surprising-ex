@@ -27,6 +27,7 @@ To understand the project architecture and implementation details, read the Surp
 - `surprising-margin-ops`: risk snapshots, liquidation candidates, liquidation, funding, insurance, and ADL APIs/providers, plus a combined deployable provider.
 - `surprising-websocket`: horizontally scalable client WebSocket fanout for market data, orders, matches, and positions.
 - `surprising-gateway`: allowlisted public REST gateway for frontend/BFF traffic.
+- `surprising-edge`: combined frontend edge provider for REST gateway and WebSocket fanout.
 - `surprising-market-maker`: internal market-maker quoting and exchange-chain stress strategy service.
 - `surprising-integration-test`: cross-module verification for order, matching, account, risk, liquidation, funding, insurance, and ADL flows.
 
@@ -60,6 +61,7 @@ To understand the project architecture and implementation details, read the Surp
 - [surprising-margin-ops](surprising-margin-ops/README.md)
 - [surprising-websocket](surprising-websocket/README.md)
 - [surprising-gateway](surprising-gateway/README.md)
+- [surprising-edge](surprising-edge/README.md)
 - [surprising-market-maker](surprising-market-maker/README.md)
 
 ## Build
@@ -104,8 +106,7 @@ JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=ja
 mvn -pl :surprising-matching-provider -am spring-boot:run
 mvn -pl :surprising-account-provider -am spring-boot:run
 mvn -pl :surprising-margin-ops-provider -am spring-boot:run
-mvn -pl :surprising-websocket-provider -am spring-boot:run
-mvn -pl :surprising-gateway-provider -am spring-boot:run
+mvn -pl :surprising-edge-provider -am spring-boot:run
 mvn -pl :surprising-market-maker-provider -am spring-boot:run
 ```
 
@@ -123,8 +124,8 @@ Ports:
 - `9089`: funding service in split mode.
 - `9090`: insurance fund service in split mode.
 - `9091`: ADL service in split mode.
-- `9093`: client WebSocket fanout service.
-- `9094`: public REST API gateway.
+- `9093`: client WebSocket fanout service in split mode.
+- `9094`: edge combined service for public REST API gateway and `/ws/v1`, or standalone REST gateway in split mode.
 - `9095`: trigger order service in split mode.
 - `9096`: internal market-maker service.
 
@@ -166,8 +167,8 @@ curl 'http://localhost:9094/api/v1/gateway/candlestick/candles/latest?symbol=BTC
 curl 'http://localhost:9094/api/v1/gateway/account/1001/positions' -H 'X-User-Id: 1001'
 ```
 
-Frontend REST traffic should normally enter through `surprising-gateway` on port `9094`.
-Realtime traffic should use `surprising-websocket` on `/ws/v1`; public channels include candles/trades/depth/index/mark/funding, and private channels include orders/matches/positions.
+Frontend traffic should normally enter through `surprising-edge` on port `9094`: REST uses `/api/v1/gateway/**`, and realtime traffic uses `/ws/v1`.
+For production deployments with many long-lived WebSocket connections, keep `surprising-gateway-provider` and `surprising-websocket-provider` split so WebSocket fanout can scale independently.
 
 ## Local Integration Smoke
 

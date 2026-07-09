@@ -123,8 +123,8 @@ TraceId 查询接口位于 `/api/v1/admin/traces/{traceId}`，使用 `admin.trac
 
 不要把内部 provider 端口直接暴露到公网。公共客户端应使用：
 
-- REST：`surprising-gateway`
-- 实时：`surprising-websocket`，或 ingress 把 `/ws/v1` 转到 WebSocket 服务
+- 开发/小规模部署：`surprising-edge-provider` 的 `9094` 同时提供 REST 和 `/ws/v1`。
+- 拆分生产部署：`surprising-gateway-provider` 提供 REST，`surprising-websocket-provider` 或 ingress 到 `/ws/v1` 提供实时推送。
 
 ## 水平扩展
 

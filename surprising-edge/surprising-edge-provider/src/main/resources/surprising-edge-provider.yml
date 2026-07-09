@@ -1,0 +1,48 @@
+server:
+  port: 9094
+
+spring:
+  application:
+    name: surprising-edge-provider
+  main:
+    keep-alive: true
+  threads:
+    virtual:
+      enabled: true
+  task:
+    scheduling:
+      pool:
+        size: 4
+      thread-name-prefix: edge-scheduler-
+      shutdown:
+        await-termination: true
+        await-termination-period: 10s
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 12
+      minimum-idle: 2
+      connection-timeout: 3000
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  edge:
+    local-base-url: http://localhost:9094
+  websocket:
+    kafka:
+      bootstrap-servers: localhost:9092
+      product-line: LINEAR_PERPETUAL
+      product-topics-enabled: false
+      group-id: surprising-edge-websocket-${HOSTNAME:${random.uuid}}
+      concurrency: 2
+      max-poll-records: 1000
+    security:
+      jwt-secret: ${SURPRISING_WEBSOCKET_JWT_SECRET:local-dev-change-me-surprising-ex-gateway-secret-2026}
+      allowed-origins:
+        - "*"

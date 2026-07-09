@@ -131,6 +131,8 @@ position event on Kafka
 
 ## 水平扩展
 
+- 开发和小规模部署可以使用 `surprising-edge-provider`，在一个进程里同时提供 REST 和 `/ws/v1`。
+- 生产环境如果长连接很多，继续单独部署 `surprising-websocket-provider`，让 WebSocket 独立扩容。
 - WebSocket 节点至少部署 2 个。
 - 每个 WebSocket 节点必须使用唯一 Kafka consumer group，例如默认值 `surprising-websocket-${HOSTNAME:${random.uuid}}`。
 - 不要让所有 WebSocket pod 共用一个 group。共用 group 会导致每条 Kafka 记录只被一个 pod 收到，连接在其他 pod 上的客户端会漏掉公共行情。
