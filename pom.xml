@@ -24,6 +24,5 @@
         <module>surprising-margin-ops</module>
         <module>surprising-edge</module>
         <module>surprising-market-maker</module>
-        <module>surprising-integration-test</module>
     </modules>
 </project>

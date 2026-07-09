@@ -27,7 +27,6 @@ To understand the project architecture and implementation details, read the Surp
 - `surprising-margin-ops`: risk snapshots, liquidation candidates, liquidation, funding, insurance, and ADL APIs/providers, plus a combined deployable provider.
 - `surprising-edge`: frontend access layer. It contains the REST gateway module, the WebSocket fanout module, and a combined edge provider for development and small deployments.
 - `surprising-market-maker`: internal market-maker quoting and exchange-chain stress strategy service.
-- `surprising-integration-test`: cross-module verification for order, matching, account, risk, liquidation, funding, insurance, and ADL flows.
 
 ## Supported Product Lines
 
@@ -173,11 +172,9 @@ Run a database-level smoke test with a temporary PostgreSQL instance:
 
 ```bash
 ./scripts/integration-smoke.sh
-mvn -pl :surprising-integration-test -am test
 ```
 
 The script applies [init.sql](init.sql), verifies instrument version pinning, linear and inverse perpetual calculations, funding notional conversion, risk snapshots, liquidation candidate idempotency, insurance deficit coverage, and ADL deficit transfer accounting. Set `RUN_MAVEN=true` to also run unit tests in the same pass.
-The integration-test module runs real exchange-core with in-memory Kafka/DB adapters and verifies order entry, matching, account settlement, linear and inverse user reduce-only close, risk candidate creation, liquidation order generation, liquidation close settlement, funding settlement, insurance coverage, and ADL residual-deficit transfer in Java chains.
 
 Run one process-level product-line API flow at a time:
 

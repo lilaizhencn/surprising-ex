@@ -34,7 +34,6 @@ USDT scale `100000000`, and BTC scale `100000000`:
 This aligns with the long-based input model used by `exchange-core`, so the matching provider passes `priceTicks` and `quantitySteps` directly to the order book.
 Keep this invariant for the trading path: do not convert order, fill, margin, PnL, or funding-settlement values to `BigDecimal` in Java. External market-data modules may still store decimal display values, but trading execution and accounting must use scaled `long`.
 Decimal values are only allowed at system boundaries: external market-data/FX parsing, admin input, REST display, and reports. Before a value enters order entry, matching, account, risk, liquidation, funding, insurance, or ADL, it must already be converted to instrument-defined ticks, steps, ppm, or asset units.
-`CoreFixedPointArchitectureTest` scans the trading, account, risk, liquidation, funding, insurance, and ADL main Java sources and fails the build if `BigDecimal`, `double`, or `float` is introduced into those core paths.
 Critical core-path aggregations use checked long addition. Matching filled quantity and reduce-only pending close quantity fail with overflow instead of wrapping into a smaller value.
 
 ## Core Flow

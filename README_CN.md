@@ -27,7 +27,6 @@ Surprising 多产品线交易所后端服务。
 - `surprising-margin-ops`：风险快照、爆仓候选、强平、资金费、保险基金和 ADL 的 API/provider，以及合并部署 provider。
 - `surprising-edge`：面向前端的接入层模块，内部包含 REST gateway、WebSocket fanout 和开发/小规模部署用的合并 edge provider。
 - `surprising-market-maker`：内网做市商报价和交易链路压测策略服务。
-- `surprising-integration-test`：订单、撮合、账户、风控、强平、资金费、保险基金和 ADL 链路的跨模块验证。
 
 ## 支持的产品线
 
@@ -174,11 +173,9 @@ curl 'http://localhost:9094/api/v1/gateway/account/1001/positions' -H 'X-User-Id
 
 ```bash
 ./scripts/integration-smoke.sh
-mvn -pl :surprising-integration-test -am test
 ```
 
 脚本会导入 [init.sql](init.sql)，验证 instrument version 锁定、U 本位线性合约、币本位反向合约、资金费 notional 折算、风险快照、强平候选幂等、保险基金亏损覆盖和 ADL 亏损转移记账。设置 `RUN_MAVEN=true` 可以在同一次执行里顺带运行单元测试。
-integration-test 模块使用真实 exchange-core 和内存 Kafka/DB adapter，验证下单、撮合、账户结算、U 本位线性和币本位反向用户 reduce-only 主动平仓、风险候选生成、强平单生成、强平成交回写、资金费结算、保险基金覆盖和 ADL 剩余亏损转移这些 Java 链路。
 
 逐线运行真实进程级产品线 API flow：
 

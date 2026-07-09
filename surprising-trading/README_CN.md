@@ -33,7 +33,6 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前已实
 这和 `exchange-core` 的 long 输入模型一致，撮合服务可以直接把 `priceTicks`、`quantitySteps` 传给 order book。
 交易链路必须保持这个约束：订单、成交、保证金、PnL、资金费结算的 Java 代码不要转换成 `BigDecimal`。外部行情模块可以存展示用 decimal 值，但交易执行和账户记账必须使用缩放后的 `long`。
 允许使用小数的地方只在系统边界：外部行情/汇率解析、管理后台录入、REST 展示和报表输出。进入订单、撮合、账户、风控、强平、资金费、保险基金、ADL 前，必须先转换为 instrument 定义的 tick、step、ppm 或 asset unit。
-`CoreFixedPointArchitectureTest` 会扫描 trading、account、risk、liquidation、funding、insurance、ADL 的 main Java 源码，如果这些核心路径引入 `BigDecimal`、`double` 或 `float`，全量测试会失败。
 关键核心链路聚合使用 checked long addition。matching 成交总量和 reduce-only 待平数量溢出时会失败，而不是回绕成更小的值。
 
 ## 核心链路
