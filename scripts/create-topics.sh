@@ -13,6 +13,43 @@ PARTITION_STEP="${PARTITION_STEP:-12}"
 INCLUDE_SHARED_TOPICS="${INCLUDE_SHARED_TOPICS:-true}"
 INCLUDE_LEGACY_PERP_TOPICS="${INCLUDE_LEGACY_PERP_TOPICS:-true}"
 INCLUDE_PRODUCT_TOPICS="${INCLUDE_PRODUCT_TOPICS:-true}"
+PRODUCT_LINES="${PRODUCT_LINES:-}"
+PRODUCT_TOPIC_LINES="${PRODUCT_TOPIC_LINES:-}"
+
+product_topic_line() {
+  case "$1" in
+    SPOT|spot)
+      echo spot
+      ;;
+    LINEAR_PERPETUAL|linear-perp|linear_perp)
+      echo linear-perp
+      ;;
+    INVERSE_PERPETUAL|inverse-perp|inverse_perp)
+      echo inverse-perp
+      ;;
+    LINEAR_DELIVERY|linear-delivery|linear_delivery)
+      echo linear-delivery
+      ;;
+    INVERSE_DELIVERY|inverse-delivery|inverse_delivery)
+      echo inverse-delivery
+      ;;
+    OPTION|option)
+      echo option
+      ;;
+    *)
+      echo "Unsupported product line for topics: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+if [[ -z "${PRODUCT_TOPIC_LINES}" && -n "${PRODUCT_LINES}" ]]; then
+  for product_line in ${PRODUCT_LINES}; do
+    PRODUCT_TOPIC_LINES+="$(product_topic_line "${product_line}") "
+  done
+  PRODUCT_TOPIC_LINES="${PRODUCT_TOPIC_LINES% }"
+fi
+
 PRODUCT_TOPIC_LINES="${PRODUCT_TOPIC_LINES:-spot linear-perp inverse-perp linear-delivery inverse-delivery option}"
 
 if [[ "${DRY_RUN:-false}" != "true" ]]; then

@@ -254,6 +254,40 @@ SELECT 'LEGACY'::text AS ledger_scope,
        balance_units
   FROM legacy_balance_scope;
 
+CREATE TEMP TABLE match_trade_order_refs AS
+SELECT mt.product_line,
+       mt.trade_id,
+       mt.taker_order_id AS order_id,
+       mt.taker_user_id AS user_id
+  FROM trading_match_trades mt
+  JOIN target_product_lines t
+    ON t.product_line = mt.product_line
+UNION ALL
+SELECT mt.product_line,
+       mt.trade_id,
+       mt.maker_order_id AS order_id,
+       mt.maker_user_id AS user_id
+  FROM trading_match_trades mt
+  JOIN target_product_lines t
+    ON t.product_line = mt.product_line;
+
+CREATE INDEX idx_product_ledger_scope_account_asset_entry
+    ON product_ledger_scope(account_type, user_id, asset, entry_id);
+CREATE INDEX idx_legacy_ledger_scope_account_asset_entry
+    ON legacy_ledger_scope(user_id, asset, entry_id);
+CREATE INDEX idx_product_ledger_scope_fee_reference
+    ON product_ledger_scope(reference_type, reference_id);
+CREATE INDEX idx_legacy_ledger_scope_fee_reference
+    ON legacy_ledger_scope(reference_type, trade_id, order_id, user_id);
+CREATE INDEX idx_match_trade_order_refs_lookup
+    ON match_trade_order_refs(product_line, trade_id, order_id, user_id);
+
+ANALYZE product_ledger_scope;
+ANALYZE legacy_ledger_scope;
+ANALYZE product_balance_scope;
+ANALYZE legacy_balance_scope;
+ANALYZE match_trade_order_refs;
+
 INSERT INTO reconcile_violations(area, detail)
 SELECT 'unexpected_legacy_product_rows',
        format('product_line=%s account_type=%s user=%s asset=%s has product-account row for legacy-ledger product line',
@@ -874,11 +908,11 @@ matched_refs AS (
     SELECT f.entry_id,
            mt.trade_id
       FROM product_fee_refs f
-      JOIN trading_match_trades mt
+      JOIN match_trade_order_refs mt
         ON mt.product_line = f.product_line
        AND mt.trade_id = f.trade_id
-       AND (mt.taker_order_id = f.order_id OR mt.maker_order_id = f.order_id)
-       AND (mt.taker_user_id = f.user_id OR mt.maker_user_id = f.user_id)
+       AND mt.order_id = f.order_id
+       AND mt.user_id = f.user_id
 )
 INSERT INTO reconcile_violations(area, detail)
 SELECT 'product_fee_trade_reference_missing',
@@ -908,11 +942,11 @@ matched_refs AS (
     SELECT f.entry_id,
            mt.trade_id
       FROM legacy_fee_refs f
-      JOIN trading_match_trades mt
+      JOIN match_trade_order_refs mt
         ON mt.product_line = f.product_line
        AND mt.trade_id = f.trade_id
-       AND (mt.taker_order_id = f.order_id OR mt.maker_order_id = f.order_id)
-       AND (mt.taker_user_id = f.user_id OR mt.maker_user_id = f.user_id)
+       AND mt.order_id = f.order_id
+       AND mt.user_id = f.user_id
 )
 INSERT INTO reconcile_violations(area, detail)
 SELECT 'legacy_fee_trade_reference_missing',
@@ -1035,7 +1069,7 @@ SELECT product_line,
   FROM target_product_lines
  ORDER BY product_line;
 
-\\echo '[funds-reconcile] Per account conservation report'
+\\echo '[funds-reconcile] Per account conservation report (limited by MAX_REPORT_ROWS)'
 WITH ordered AS (
     SELECT l.*,
            FIRST_VALUE(balance_after_units - amount_units) OVER (
@@ -1118,7 +1152,8 @@ SELECT k.ledger_scope,
    AND b.account_type = k.account_type
    AND b.user_id = k.user_id
    AND b.asset = k.asset
- ORDER BY k.product_line, k.account_type, k.user_id, k.asset;
+ ORDER BY k.product_line, k.account_type, k.user_id, k.asset
+ LIMIT ${MAX_REPORT_ROWS};
 
 \\echo '[funds-reconcile] Product-line totals'
 SELECT product_line,

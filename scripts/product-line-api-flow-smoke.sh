@@ -13,11 +13,33 @@ BUILD_SERVICES="${BUILD_SERVICES:-true}"
 KEEP_TMP="${KEEP_TMP:-true}"
 RESET_KAFKA="${RESET_KAFKA:-false}"
 CREATE_KAFKA_TOPICS="${CREATE_KAFKA_TOPICS:-false}"
+KAFKA_INCLUDE_SHARED_TOPICS="${KAFKA_INCLUDE_SHARED_TOPICS:-true}"
+KAFKA_INCLUDE_LEGACY_PERP_TOPICS="${KAFKA_INCLUDE_LEGACY_PERP_TOPICS:-false}"
+KAFKA_RESET_SHARED_TOPICS="${KAFKA_RESET_SHARED_TOPICS:-false}"
+KAFKA_RESET_LEGACY_PERP_TOPICS="${KAFKA_RESET_LEGACY_PERP_TOPICS:-false}"
 RECONCILE_FUNDS="${RECONCILE_FUNDS:-true}"
 RUN_ID="${RUN_ID:-$(date +%s%N)}"
 RUN_SEQ=$((RUN_ID % 1000000000))
 RUN_SEQUENCE_BASE=$((500000000 + (RUN_SEQ % 500000) * 3000))
 TMP_DIR="$(mktemp -d /tmp/surprising-product-line-api.XXXXXX)"
+MULTI_SYMBOL_STRESS="${MULTI_SYMBOL_STRESS:-false}"
+STRESS_SYMBOL_COUNT="${STRESS_SYMBOL_COUNT:-20}"
+STRESS_USER_COUNT="${STRESS_USER_COUNT:-2000}"
+STRESS_LOAD_CONCURRENCY="${STRESS_LOAD_CONCURRENCY:-128}"
+STRESS_MAKER_LOAD_CONCURRENCY="${STRESS_MAKER_LOAD_CONCURRENCY:-32}"
+STRESS_MAKER_DEPTH_LEVELS="${STRESS_MAKER_DEPTH_LEVELS:-6}"
+STRESS_MAKER_REFRESH_CYCLES="${STRESS_MAKER_REFRESH_CYCLES:-3}"
+STRESS_MAKER_REFRESH_LEVELS="${STRESS_MAKER_REFRESH_LEVELS:-2}"
+STRESS_MAKER_LEVEL_QUANTITY_STEPS="${STRESS_MAKER_LEVEL_QUANTITY_STEPS:-250}"
+STRESS_MAKER_BATCH_SIZE="${STRESS_MAKER_BATCH_SIZE:-12}"
+STRESS_TAKER_QUANTITY_STEPS="${STRESS_TAKER_QUANTITY_STEPS:-1}"
+STRESS_WAIT_SECONDS="${STRESS_WAIT_SECONDS:-420}"
+STRESS_REPORT_FILE="${STRESS_REPORT_FILE:-${ROOT_DIR}/docs/product-line-multi-symbol-stress-report.md}"
+STRESS_MATCHING_KAFKA_CONCURRENCY="${STRESS_MATCHING_KAFKA_CONCURRENCY:-4}"
+STRESS_ACCOUNT_KAFKA_CONCURRENCY="${STRESS_ACCOUNT_KAFKA_CONCURRENCY:-4}"
+STRESS_RISK_KAFKA_CONCURRENCY="${STRESS_RISK_KAFKA_CONCURRENCY:-4}"
+STRESS_RISK_OUTBOX_BATCH_SIZE="${STRESS_RISK_OUTBOX_BATCH_SIZE:-1000}"
+STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS="${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS:-20}"
 
 BASE_USER=$((6000000000 + RUN_SEQ * 1000))
 MM_USER_A=$((BASE_USER + 1))
@@ -35,6 +57,8 @@ LIFECYCLE_USER=$((BASE_USER + 100))
 LIFECYCLE_MAKER_USER=$((BASE_USER + 110))
 FUNDING_USER=$((BASE_USER + 120))
 FUNDING_MAKER_USER=$((BASE_USER + 130))
+STRESS_MM_USER_START=$((BASE_USER + 10000))
+STRESS_TAKER_USER_START=$((BASE_USER + 20000))
 
 PROVIDER_NAMES=()
 PROVIDER_PIDS=()
@@ -112,6 +136,10 @@ kafka_producer_cmd() {
   else
     echo kafka-console-producer.sh
   fi
+}
+
+kafka_ready() {
+  "$(kafka_topics_cmd)" --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" --list >/dev/null
 }
 
 psql_exec() {
@@ -377,6 +405,7 @@ ensure_database() {
 }
 
 reset_database() {
+  local product_line="${1:-}"
   psql_exec <<'SQL' >/dev/null
 DROP SCHEMA IF EXISTS public CASCADE;
 CREATE SCHEMA public;
@@ -384,6 +413,9 @@ SQL
   psql_exec -f "${ROOT_DIR}/init.sql" >/dev/null
   reset_runtime_sequences
   seed_product_instruments
+  if [[ "${MULTI_SYMBOL_STRESS}" == "true" && -n "${product_line}" ]]; then
+    seed_stress_symbols "${product_line}"
+  fi
 }
 
 reset_runtime_sequences() {
@@ -483,11 +515,419 @@ ON CONFLICT (symbol, version, bracket_no) DO NOTHING;
 SQL
 }
 
+stress_symbol_for_index() {
+  local product_line="$1"
+  local index="$2"
+  python3 - "${product_line}" "${index}" <<'PY'
+import sys
+
+product_line = sys.argv[1]
+i = int(sys.argv[2])
+bases = [
+    "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "TRX", "TON", "AVAX",
+    "LINK", "BCH", "DOT", "LTC", "NEAR", "UNI", "AAVE", "ETC", "FIL", "OP",
+]
+base = bases[i % len(bases)]
+if product_line == "SPOT":
+    print(f"{base}-USDT-SPOT")
+elif product_line == "LINEAR_PERPETUAL":
+    print(f"{base}-USDT")
+elif product_line == "LINEAR_DELIVERY":
+    print(f"{base}-USDT-260925")
+elif product_line == "OPTION":
+    strike = 59000 + i * 500
+    option_type = "C" if i % 2 == 0 else "P"
+    print(f"{base}-USDT-260925-{strike}-{option_type}")
+else:
+    raise SystemExit(f"unsupported stress product line {product_line}")
+PY
+}
+
+stress_price_ticks_for_index() {
+  local product_line="$1"
+  local index="$2"
+  python3 - "${product_line}" "${index}" <<'PY'
+import sys
+
+product_line = sys.argv[1]
+i = int(sys.argv[2])
+underlying_prices = [
+    600000, 30000, 1500, 1000, 6000, 1000, 1200, 1000, 3000, 3000,
+    1500, 4500, 1000, 8500, 1000, 1000, 9000, 2000, 1000, 1000,
+]
+if product_line == "OPTION":
+    print(1000 + i * 25)
+else:
+    print(underlying_prices[i % len(underlying_prices)])
+PY
+}
+
+seed_stress_symbols() {
+  local product_line="$1"
+  python3 - "${product_line}" "${STRESS_SYMBOL_COUNT}" <<'PY' | psql_exec >/dev/null
+import sys
+
+product_line = sys.argv[1]
+count = int(sys.argv[2])
+bases = [
+    "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "TRX", "TON", "AVAX",
+    "LINK", "BCH", "DOT", "LTC", "NEAR", "UNI", "AAVE", "ETC", "FIL", "OP",
+]
+underlying_prices = [
+    600000, 30000, 1500, 1000, 6000, 1000, 1200, 1000, 3000, 3000,
+    1500, 4500, 1000, 8500, 1000, 1000, 9000, 2000, 1000, 1000,
+]
+
+def quote(value):
+    if value is None:
+        return "NULL"
+    return "'" + str(value).replace("'", "''") + "'"
+
+def instrument(product_line, i):
+    base = bases[i % len(bases)]
+    underlying_ticks = underlying_prices[i % len(underlying_prices)]
+    if product_line == "SPOT":
+        return {
+            "symbol": f"{base}-USDT-SPOT",
+            "instrument_type": "SPOT",
+            "contract_type": "SPOT",
+            "base": base,
+            "quote": "USDT",
+            "settle": "USDT",
+            "price_ticks": underlying_ticks,
+            "price_tick_units": 10000000,
+            "reduce_only": "FALSE",
+            "market_order": "FALSE",
+            "expiry": "NULL",
+            "delivery": "NULL",
+            "underlying": None,
+            "strike": "NULL",
+            "option_type": None,
+            "exercise": None,
+            "settlement": "NULL",
+        }
+    if product_line == "LINEAR_PERPETUAL":
+        return {
+            "symbol": f"{base}-USDT",
+            "instrument_type": "PERPETUAL",
+            "contract_type": "LINEAR_PERPETUAL",
+            "base": base,
+            "quote": "USDT",
+            "settle": "USDT",
+            "price_ticks": underlying_ticks,
+            "price_tick_units": 10000000,
+            "reduce_only": "TRUE",
+            "market_order": "TRUE",
+            "expiry": "NULL",
+            "delivery": "NULL",
+            "underlying": None,
+            "strike": "NULL",
+            "option_type": None,
+            "exercise": None,
+            "settlement": "NULL",
+        }
+    if product_line == "LINEAR_DELIVERY":
+        return {
+            "symbol": f"{base}-USDT-260925",
+            "instrument_type": "DELIVERY",
+            "contract_type": "LINEAR_DELIVERY",
+            "base": base,
+            "quote": "USDT",
+            "settle": "USDT",
+            "price_ticks": underlying_ticks,
+            "price_tick_units": 10000000,
+            "reduce_only": "TRUE",
+            "market_order": "TRUE",
+            "expiry": "now() + interval '30 days'",
+            "delivery": "now() + interval '30 days'",
+            "underlying": None,
+            "strike": "NULL",
+            "option_type": None,
+            "exercise": None,
+            "settlement": "'CASH'",
+        }
+    if product_line == "OPTION":
+        strike = 59000 + i * 500
+        option_type = "CALL" if i % 2 == 0 else "PUT"
+        return {
+            "symbol": f"{base}-USDT-260925-{strike}-{'C' if option_type == 'CALL' else 'P'}",
+            "instrument_type": "OPTION",
+            "contract_type": "VANILLA_OPTION",
+            "base": base,
+            "quote": "USDT",
+            "settle": "USDT",
+            "price_ticks": 1000 + i * 25,
+            "price_tick_units": 10000000,
+            "reduce_only": "TRUE",
+            "market_order": "TRUE",
+            "expiry": "now() + interval '30 days'",
+            "delivery": "now() + interval '30 days'",
+            "underlying": f"{base}-USDT",
+            "strike": str(strike * 100000000),
+            "option_type": option_type,
+            "exercise": "EUROPEAN",
+            "settlement": "'CASH'",
+            "underlying_ticks": underlying_ticks,
+        }
+    raise SystemExit(f"unsupported stress product line {product_line}")
+
+rows = [instrument(product_line, i) for i in range(count)]
+print("INSERT INTO instruments (")
+print("    symbol, version, instrument_type, contract_type, base_asset, quote_asset, settle_asset,")
+print("    contract_multiplier_ppm, contract_value_asset, price_tick_units, quantity_step_units,")
+print("    min_quantity_steps, max_quantity_steps, min_notional_units, max_notional_units,")
+print("    notional_multiplier_units, price_precision, quantity_precision,")
+print("    supported_order_types, supported_time_in_force, post_only_enabled, reduce_only_enabled, market_order_enabled,")
+print("    max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm,")
+print("    maker_fee_rate_ppm, taker_fee_rate_ppm, max_position_notional_units,")
+print("    user_open_interest_limit_rate_ppm, user_open_interest_limit_floor_units,")
+print("    funding_interval_hours, interest_rate_ppm, funding_rate_cap_ppm, funding_rate_floor_ppm,")
+print("    impact_notional_units, min_valid_index_sources,")
+print("    expiry_time, delivery_time, underlying_symbol, strike_price_units, option_type, option_exercise_style,")
+print("    settlement_method, status, effective_time, created_at, updated_at")
+print(") VALUES")
+values = []
+for r in rows:
+    values.append(
+        "("
+        f"{quote(r['symbol'])}, 1, {quote(r['instrument_type'])}, {quote(r['contract_type'])}, "
+        f"{quote(r['base'])}, {quote(r['quote'])}, {quote(r['settle'])}, "
+        "1000000, 'USDT', "
+        f"{r['price_tick_units']}, 100000, 1, 1000000, 1, 1000000000000000, "
+        "10000, 1, 3, 'LIMIT,MARKET', 'GTC,IOC,FOK,GTX', TRUE, "
+        f"{r['reduce_only']}, {r['market_order']}, "
+        "100000000, 10000, 5000, 200, 500, 1000000000000000000, 1000000, 1000000000000000000, "
+        "8, 0, 0, 0, 1000000000000, 1, "
+        f"{r['expiry']}, {r['delivery']}, {quote(r['underlying'])}, {r['strike']}, "
+        f"{quote(r['option_type'])}, {quote(r['exercise'])}, {r['settlement']}, "
+        "'TRADING', now(), now(), now())"
+    )
+print(",\n".join(values))
+print("""ON CONFLICT (symbol, version) DO UPDATE SET
+    instrument_type = EXCLUDED.instrument_type,
+    contract_type = EXCLUDED.contract_type,
+    base_asset = EXCLUDED.base_asset,
+    quote_asset = EXCLUDED.quote_asset,
+    settle_asset = EXCLUDED.settle_asset,
+    contract_multiplier_ppm = EXCLUDED.contract_multiplier_ppm,
+    contract_value_asset = EXCLUDED.contract_value_asset,
+    price_tick_units = EXCLUDED.price_tick_units,
+    quantity_step_units = EXCLUDED.quantity_step_units,
+    min_quantity_steps = EXCLUDED.min_quantity_steps,
+    max_quantity_steps = EXCLUDED.max_quantity_steps,
+    min_notional_units = EXCLUDED.min_notional_units,
+    max_notional_units = EXCLUDED.max_notional_units,
+    notional_multiplier_units = EXCLUDED.notional_multiplier_units,
+    supported_order_types = EXCLUDED.supported_order_types,
+    supported_time_in_force = EXCLUDED.supported_time_in_force,
+    post_only_enabled = EXCLUDED.post_only_enabled,
+    reduce_only_enabled = EXCLUDED.reduce_only_enabled,
+    market_order_enabled = EXCLUDED.market_order_enabled,
+    max_leverage_ppm = EXCLUDED.max_leverage_ppm,
+    initial_margin_rate_ppm = EXCLUDED.initial_margin_rate_ppm,
+    maintenance_margin_rate_ppm = EXCLUDED.maintenance_margin_rate_ppm,
+    maker_fee_rate_ppm = EXCLUDED.maker_fee_rate_ppm,
+    taker_fee_rate_ppm = EXCLUDED.taker_fee_rate_ppm,
+    max_position_notional_units = EXCLUDED.max_position_notional_units,
+    user_open_interest_limit_rate_ppm = EXCLUDED.user_open_interest_limit_rate_ppm,
+    user_open_interest_limit_floor_units = EXCLUDED.user_open_interest_limit_floor_units,
+    funding_interval_hours = EXCLUDED.funding_interval_hours,
+    interest_rate_ppm = EXCLUDED.interest_rate_ppm,
+    funding_rate_cap_ppm = EXCLUDED.funding_rate_cap_ppm,
+    funding_rate_floor_ppm = EXCLUDED.funding_rate_floor_ppm,
+    impact_notional_units = EXCLUDED.impact_notional_units,
+    min_valid_index_sources = EXCLUDED.min_valid_index_sources,
+    expiry_time = EXCLUDED.expiry_time,
+    delivery_time = EXCLUDED.delivery_time,
+    underlying_symbol = EXCLUDED.underlying_symbol,
+    strike_price_units = EXCLUDED.strike_price_units,
+    option_type = EXCLUDED.option_type,
+    option_exercise_style = EXCLUDED.option_exercise_style,
+    settlement_method = EXCLUDED.settlement_method,
+    status = EXCLUDED.status,
+    updated_at = now();""")
+
+print("INSERT INTO instrument_current_versions (symbol, version, updated_at) VALUES")
+print(",\n".join(f"({quote(r['symbol'])}, 1, now())" for r in rows))
+print("ON CONFLICT (symbol) DO UPDATE SET version = EXCLUDED.version, updated_at = EXCLUDED.updated_at;")
+
+print("INSERT INTO instrument_product_current_versions (product_line, symbol, version, updated_at) VALUES")
+print(",\n".join(f"({quote(product_line)}, {quote(r['symbol'])}, 1, now())" for r in rows))
+print("ON CONFLICT (product_line, symbol) DO UPDATE SET version = EXCLUDED.version, updated_at = EXCLUDED.updated_at;")
+
+print("INSERT INTO instrument_symbol_sequences (symbol, version, updated_at) VALUES")
+print(",\n".join(f"({quote(r['symbol'])}, 1, now())" for r in rows))
+print("ON CONFLICT (symbol) DO UPDATE SET version = GREATEST(instrument_symbol_sequences.version, EXCLUDED.version), updated_at = EXCLUDED.updated_at;")
+
+print("INSERT INTO instrument_risk_brackets (symbol, version, bracket_no, notional_floor_units, notional_cap_units, max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm) VALUES")
+print(",\n".join(
+    f"({quote(r['symbol'])}, 1, 1, 0, 1000000000000000000, "
+    f"{'1000000' if product_line == 'SPOT' else '100000000'}, "
+    f"{'1000000' if product_line == 'SPOT' else '10000'}, "
+    f"{'1000000' if product_line == 'SPOT' else '5000'})"
+    for r in rows
+))
+print("ON CONFLICT (symbol, version, bracket_no) DO NOTHING;")
+PY
+  seed_stress_prices "${product_line}"
+}
+
+stress_rules_json() {
+  local product_line="$1"
+  psql_exec -At <<SQL
+SELECT COALESCE(jsonb_object_agg(i.symbol, jsonb_build_object(
+           'minQuantitySteps', i.min_quantity_steps,
+           'maxQuantitySteps', i.max_quantity_steps,
+           'minNotionalUnits', i.min_notional_units,
+           'notionalMultiplierUnits', i.notional_multiplier_units
+       ))::text, '{}')
+  FROM instrument_product_current_versions pcv
+  JOIN instruments i ON i.symbol = pcv.symbol AND i.version = pcv.version
+ WHERE pcv.product_line = '${product_line}';
+SQL
+}
+
+stress_quantity_steps_for_symbol() {
+  local product_line="$1"
+  local symbol="$2"
+  local price_ticks="$3"
+  local configured_steps="$4"
+  query_value "
+SELECT GREATEST(
+           ${configured_steps},
+           min_quantity_steps,
+           CEIL(min_notional_units::numeric / GREATEST(1, ${price_ticks}::numeric * notional_multiplier_units::numeric))::bigint
+       )
+  FROM instruments i
+  JOIN instrument_product_current_versions pcv ON pcv.symbol = i.symbol AND pcv.version = i.version
+ WHERE pcv.product_line = '${product_line}'
+   AND i.symbol = '${symbol}'"
+}
+
+seed_stress_prices() {
+  local product_line="$1"
+  python3 - "${product_line}" "${STRESS_SYMBOL_COUNT}" "${RUN_SEQ}" <<'PY' | psql_exec >/dev/null
+import decimal
+import sys
+
+product_line = sys.argv[1]
+count = int(sys.argv[2])
+run_seq = int(sys.argv[3])
+bases = [
+    "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "TRX", "TON", "AVAX",
+    "LINK", "BCH", "DOT", "LTC", "NEAR", "UNI", "AAVE", "ETC", "FIL", "OP",
+]
+underlying_prices = [
+    600000, 30000, 1500, 1000, 6000, 1000, 1200, 1000, 3000, 3000,
+    1500, 4500, 1000, 8500, 1000, 1000, 9000, 2000, 1000, 1000,
+]
+
+def quote(value):
+    return "'" + str(value).replace("'", "''") + "'"
+
+def decimal_price(ticks, tick_units=10000000):
+    price = decimal.Decimal(ticks) * decimal.Decimal(tick_units) / decimal.Decimal(100000000)
+    return str(price.quantize(decimal.Decimal("0.00000001")))
+
+def symbol_and_price(i):
+    base = bases[i % len(bases)]
+    underlying_ticks = underlying_prices[i % len(underlying_prices)]
+    if product_line == "SPOT":
+        return f"{base}-USDT-SPOT", underlying_ticks, None, None
+    if product_line == "LINEAR_PERPETUAL":
+        return f"{base}-USDT", underlying_ticks, None, None
+    if product_line == "LINEAR_DELIVERY":
+        return f"{base}-USDT-260925", underlying_ticks, None, None
+    if product_line == "OPTION":
+        strike = 59000 + i * 500
+        option_type = "C" if i % 2 == 0 else "P"
+        return f"{base}-USDT-260925-{strike}-{option_type}", 1000 + i * 25, f"{base}-USDT", underlying_ticks
+    raise SystemExit(f"unsupported stress product line {product_line}")
+
+price_rows = []
+for i in range(count):
+    symbol, ticks, underlying, underlying_ticks = symbol_and_price(i)
+    price_rows.append((symbol, ticks, 500000 + run_seq % 100000 + i))
+    if underlying:
+        price_rows.append((underlying, underlying_ticks, 600000 + run_seq % 100000 + i))
+
+deduped = {}
+for symbol, ticks, sequence in price_rows:
+    deduped[symbol] = (ticks, sequence)
+
+print("INSERT INTO price_index_ticks (symbol, sequence, index_price, status, component_count, valid_component_count, total_configured_weight, event_time) VALUES")
+index_values = []
+mark_values = []
+for symbol, (ticks, sequence) in deduped.items():
+    price = decimal_price(ticks)
+    bid = decimal_price(max(1, ticks - 1))
+    ask = decimal_price(ticks + 1)
+    units = ticks * 10000000
+    index_values.append(f"({quote(symbol)}, {sequence}, {price}, 'HEALTHY', 5, 5, 5.000000000000000000, now())")
+    mark_values.append(
+        f"({quote(symbol)}, {sequence}, {price}, {units}, {price}, {price}, {price}, "
+        f"{price}, {bid}, {ask}, 0.000000000000000000, now() + interval '8 hours', "
+        "28800, 0.000000000000000000, 60, "
+        f"({price} * 0.970000000000000000), ({price} * 1.030000000000000000), 'HEALTHY', now())"
+    )
+print(",\n".join(index_values))
+print("""ON CONFLICT (symbol, sequence) DO UPDATE SET
+    index_price = EXCLUDED.index_price,
+    status = EXCLUDED.status,
+    component_count = EXCLUDED.component_count,
+    valid_component_count = EXCLUDED.valid_component_count,
+    total_configured_weight = EXCLUDED.total_configured_weight,
+    event_time = EXCLUDED.event_time;""")
+print("INSERT INTO price_mark_ticks (symbol, sequence, mark_price, mark_price_units, index_price, price1, price2, last_trade_price, best_bid_price, best_ask_price, funding_rate, next_funding_time, time_until_funding_seconds, basis_average, basis_window_seconds, clamp_low, clamp_high, status, event_time) VALUES")
+print(",\n".join(mark_values))
+print("""ON CONFLICT (symbol, sequence) DO UPDATE SET
+    mark_price = EXCLUDED.mark_price,
+    mark_price_units = EXCLUDED.mark_price_units,
+    index_price = EXCLUDED.index_price,
+    price1 = EXCLUDED.price1,
+    price2 = EXCLUDED.price2,
+    last_trade_price = EXCLUDED.last_trade_price,
+    best_bid_price = EXCLUDED.best_bid_price,
+    best_ask_price = EXCLUDED.best_ask_price,
+    funding_rate = EXCLUDED.funding_rate,
+    next_funding_time = EXCLUDED.next_funding_time,
+    time_until_funding_seconds = EXCLUDED.time_until_funding_seconds,
+    basis_average = EXCLUDED.basis_average,
+    basis_window_seconds = EXCLUDED.basis_window_seconds,
+    clamp_low = EXCLUDED.clamp_low,
+    clamp_high = EXCLUDED.clamp_high,
+    status = EXCLUDED.status,
+    event_time = EXCLUDED.event_time;""")
+PY
+}
+
 delete_surprising_topics() {
+  local product_line="${1:-}"
   local topics_cmd
   topics_cmd="$(kafka_topics_cmd)"
   local topics
   topics="$("${topics_cmd}" --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" --list 2>/dev/null | grep '^surprising\.' || true)"
+  if [[ -n "${product_line}" ]]; then
+    local product_topic_line
+    product_topic_line="$(product_slug "${product_line}")"
+    topics="$(printf '%s\n' "${topics}" | grep -E "^surprising\\.${product_topic_line}\\." || true)"
+    if [[ "${KAFKA_RESET_SHARED_TOPICS}" == "true" ]]; then
+      topics+=$'\n'
+      topics+="surprising.instrument.events.v1"$'\n'
+      topics+="surprising.account.position.events.v1"$'\n'
+      topics+="surprising.account.liquidation-fee.events.v1"$'\n'
+      topics+="surprising.risk.account.events.v1"$'\n'
+      topics+="surprising.risk.position.events.v1"
+    fi
+    if [[ "${product_line}" == "LINEAR_PERPETUAL" && "${KAFKA_RESET_LEGACY_PERP_TOPICS}" == "true" ]]; then
+      local legacy_topics
+      legacy_topics="$("${topics_cmd}" --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" --list 2>/dev/null | grep '^surprising\.perp\.' || true)"
+      if [[ -n "${legacy_topics}" ]]; then
+        topics+=$'\n'
+        topics+="${legacy_topics}"
+      fi
+    fi
+  fi
   if [[ -z "${topics}" ]]; then
     return
   fi
@@ -503,6 +943,8 @@ create_topics() {
   product_topic_line="$(product_slug "${product_line}")"
   BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS}" \
     REPLICATION_FACTOR=1 \
+    INCLUDE_SHARED_TOPICS="${KAFKA_INCLUDE_SHARED_TOPICS}" \
+    INCLUDE_LEGACY_PERP_TOPICS="${KAFKA_INCLUDE_LEGACY_PERP_TOPICS}" \
     INCLUDE_PRODUCT_TOPICS=true \
     PRODUCT_TOPIC_LINES="${product_topic_line}" \
     "${ROOT_DIR}/scripts/create-topics.sh" >/dev/null
@@ -511,7 +953,7 @@ create_topics() {
 reset_kafka_topics() {
   local product_line="$1"
   if [[ "${RESET_KAFKA}" == "true" ]]; then
-    delete_surprising_topics
+    delete_surprising_topics "${product_line}"
     sleep 2
   fi
   if [[ "${CREATE_KAFKA_TOPICS}" == "true" ]]; then
@@ -641,33 +1083,50 @@ product_provider_args() {
         "--surprising.trading.order.risk.market-max-mark-age-ms=30000"
       ;;
     matching)
+      local matching_concurrency=1
+      if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+        matching_concurrency="${STRESS_MATCHING_KAFKA_CONCURRENCY}"
+      fi
       printf '%s\n' \
         "--surprising.trading.matching.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.trading.matching.kafka.product-line=${product_line}" \
         "--surprising.trading.matching.kafka.product-topics-enabled=true" \
         "--surprising.trading.matching.kafka.group-id=product-smoke-${RUN_ID}-${slug}-matching" \
         "--surprising.trading.matching.kafka.client-id=product-smoke-${RUN_ID}-${slug}-matching" \
+        "--surprising.trading.matching.kafka.concurrency=${matching_concurrency}" \
         "--surprising.trading.matching.engine.exchange-id=product-smoke-${slug}"
       ;;
     account)
+      local account_concurrency=1
+      if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+        account_concurrency="${STRESS_ACCOUNT_KAFKA_CONCURRENCY}"
+      fi
       printf '%s\n' \
         "--surprising.account.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.account.kafka.product-line=${product_line}" \
         "--surprising.account.kafka.product-topics-enabled=true" \
         "--surprising.account.kafka.group-id=product-smoke-${RUN_ID}-${slug}-account" \
         "--surprising.account.kafka.client-id=product-smoke-${RUN_ID}-${slug}-account" \
-        "--surprising.account.kafka.concurrency=1" \
+        "--surprising.account.kafka.concurrency=${account_concurrency}" \
         "--surprising.account.expiring-settlement.settlement-price-window=PT0S"
       ;;
     risk)
+      local risk_concurrency=1 risk_outbox_batch_size=200 risk_outbox_publish_delay_ms=200
+      if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+        risk_concurrency="${STRESS_RISK_KAFKA_CONCURRENCY}"
+        risk_outbox_batch_size="${STRESS_RISK_OUTBOX_BATCH_SIZE}"
+        risk_outbox_publish_delay_ms="${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS}"
+      fi
       printf '%s\n' \
         "--surprising.risk.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.risk.kafka.product-line=${product_line}" \
         "--surprising.risk.kafka.product-topics-enabled=true" \
         "--surprising.risk.kafka.group-id=product-smoke-${RUN_ID}-${slug}-risk" \
-        "--surprising.risk.kafka.concurrency=1" \
+        "--surprising.risk.kafka.concurrency=${risk_concurrency}" \
         "--surprising.risk.coordination.node-id=product-smoke-${RUN_ID}-${slug}-risk" \
-        "--surprising.risk.calculation.scan-delay-ms=500"
+        "--surprising.risk.calculation.scan-delay-ms=500" \
+        "--surprising.risk.outbox.batch-size=${risk_outbox_batch_size}" \
+        "--surprising.risk.outbox.publish-delay-ms=${risk_outbox_publish_delay_ms}"
       ;;
     liquidation)
       printf '%s\n' \
@@ -722,16 +1181,36 @@ product_provider_args() {
         "--surprising.market-maker.quoting.min-spread-ticks=20" \
         "--surprising.market-maker.quoting.level-spacing-ticks=10" \
         "--surprising.market-maker.quoting.max-open-orders-per-account-symbol=12" \
-        "--surprising.market-maker.trade.enabled=false" \
-        "--surprising.market-maker.strategies[0].strategy-id=product-smoke-mm" \
-        "--surprising.market-maker.strategies[0].product-line=${product_line}" \
-        "--surprising.market-maker.strategies[0].enabled=true" \
-        "--surprising.market-maker.strategies[0].account-ids[0]=${MM_USER_A}" \
-        "--surprising.market-maker.strategies[0].account-ids[1]=${MM_USER_B}" \
-        "--surprising.market-maker.strategies[0].symbols[0]=${symbol}" \
-        "--surprising.market-maker.strategies[0].base-quantity-steps=2" \
-        "--surprising.market-maker.strategies[0].margin-mode=CROSS" \
-        "--surprising.market-maker.strategies[0].order-levels=2"
+        "--surprising.market-maker.trade.enabled=false"
+      if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+        local i stress_symbol stress_price maker_user maker_quantity_steps
+        for ((i = 0; i < STRESS_SYMBOL_COUNT; i++)); do
+          stress_symbol="$(stress_symbol_for_index "${product_line}" "${i}")"
+          stress_price="$(stress_price_ticks_for_index "${product_line}" "${i}")"
+          maker_user=$((STRESS_MM_USER_START + i))
+          maker_quantity_steps="$(stress_quantity_steps_for_symbol "${product_line}" "${stress_symbol}" "${stress_price}" "${STRESS_TAKER_QUANTITY_STEPS}")"
+          printf '%s\n' \
+            "--surprising.market-maker.strategies[${i}].strategy-id=stress-mm-${i}" \
+            "--surprising.market-maker.strategies[${i}].product-line=${product_line}" \
+            "--surprising.market-maker.strategies[${i}].enabled=true" \
+            "--surprising.market-maker.strategies[${i}].account-ids[0]=${maker_user}" \
+            "--surprising.market-maker.strategies[${i}].symbols[0]=${stress_symbol}" \
+            "--surprising.market-maker.strategies[${i}].base-quantity-steps=${maker_quantity_steps}" \
+            "--surprising.market-maker.strategies[${i}].margin-mode=CROSS" \
+            "--surprising.market-maker.strategies[${i}].order-levels=2"
+        done
+      else
+        printf '%s\n' \
+          "--surprising.market-maker.strategies[0].strategy-id=product-smoke-mm" \
+          "--surprising.market-maker.strategies[0].product-line=${product_line}" \
+          "--surprising.market-maker.strategies[0].enabled=true" \
+          "--surprising.market-maker.strategies[0].account-ids[0]=${MM_USER_A}" \
+          "--surprising.market-maker.strategies[0].account-ids[1]=${MM_USER_B}" \
+          "--surprising.market-maker.strategies[0].symbols[0]=${symbol}" \
+          "--surprising.market-maker.strategies[0].base-quantity-steps=2" \
+          "--surprising.market-maker.strategies[0].margin-mode=CROSS" \
+          "--surprising.market-maker.strategies[0].order-levels=2"
+      fi
       ;;
   esac
 }
@@ -794,7 +1273,11 @@ start_price_refresher() {
   echo "Starting ${product_line} synthetic mark-price refresher"
   (
     while true; do
-      seed_prices_for_line "${product_line}" >/dev/null 2>&1 || true
+      if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+        seed_stress_prices "${product_line}" >/dev/null 2>&1 || true
+      else
+        seed_prices_for_line "${product_line}" >/dev/null 2>&1 || true
+      fi
       sleep 5
     done
   ) >"${log_file}" 2>&1 &
@@ -1157,16 +1640,20 @@ assert_liquidation_fees_insured() {
 
 assert_outbox_drained() {
   local product_line="$1"
+  local outbox_timeout=180
+  if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+    outbox_timeout="${STRESS_WAIT_SECONDS}"
+  fi
   wait_sql_equals "trading outbox drained ${product_line}" \
     "SELECT count(*) FROM trading_outbox_events WHERE published_at IS NULL" \
-    "0"
+    "0" "${outbox_timeout}"
   wait_sql_equals "account outbox drained ${product_line}" \
     "SELECT count(*) FROM account_outbox_events WHERE published_at IS NULL" \
-    "0"
+    "0" "${outbox_timeout}"
   if is_margin_product "${product_line}"; then
     wait_sql_equals "risk outbox drained ${product_line}" \
       "SELECT count(*) FROM risk_outbox_events WHERE published_at IS NULL" \
-      "0"
+      "0" "${outbox_timeout}"
     assert_liquidation_fees_insured "${product_line}"
   fi
 }
@@ -1183,6 +1670,818 @@ reconcile_funds() {
     DB_NAME="${DB_NAME}" \
     POSTGRES_PORT="${POSTGRES_PORT}" \
     "${ROOT_DIR}/scripts/product-line-funds-reconcile.sh"
+}
+
+stress_product_slug() {
+  product_slug "$1"
+}
+
+stress_user_scope_predicate() {
+  echo "((user_id >= ${STRESS_MM_USER_START} AND user_id < $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT))) OR (user_id >= ${STRESS_TAKER_USER_START} AND user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT))))"
+}
+
+fund_stress_accounts_for_line() {
+  local product_line="$1"
+  local type
+  type="$(account_type "${product_line}")"
+  if [[ "${product_line}" == "LINEAR_PERPETUAL" ]]; then
+    psql_exec <<SQL >/dev/null
+WITH requested AS (
+    SELECT (${STRESS_MM_USER_START} + gs)::bigint AS user_id,
+           'USDT'::text AS asset,
+           200000000000000::bigint AS amount_units,
+           ('stress-${RUN_ID}-${product_line}-mm-' || gs || '-USDT')::text AS reference_id
+      FROM generate_series(0, ${STRESS_SYMBOL_COUNT} - 1) AS gs
+    UNION ALL
+    SELECT (${STRESS_TAKER_USER_START} + gs)::bigint AS user_id,
+           'USDT'::text AS asset,
+           200000000000000::bigint AS amount_units,
+           ('stress-${RUN_ID}-${product_line}-user-' || gs || '-USDT')::text AS reference_id
+      FROM generate_series(0, ${STRESS_USER_COUNT} - 1) AS gs
+),
+counted AS (
+    SELECT count(*)::bigint AS row_count FROM requested
+),
+seq AS (
+    INSERT INTO account_sequences (sequence_name, sequence_value, updated_at)
+    SELECT 'ledger-entry', row_count, now() FROM counted
+    ON CONFLICT (sequence_name) DO UPDATE SET
+        sequence_value = account_sequences.sequence_value + EXCLUDED.sequence_value,
+        updated_at = now()
+    RETURNING sequence_value
+),
+numbered AS (
+    SELECT r.*, row_number() OVER (ORDER BY r.user_id, r.asset) AS rn
+      FROM requested r
+),
+ledger_rows AS (
+    INSERT INTO account_ledger_entries (
+        entry_id, user_id, asset, amount_units, balance_after_units,
+        reference_type, reference_id, reason, created_at
+    )
+    SELECT (seq.sequence_value - counted.row_count + numbered.rn)::bigint,
+           numbered.user_id,
+           numbered.asset,
+           numbered.amount_units,
+           numbered.amount_units,
+           'BALANCE_ADJUSTMENT',
+           numbered.reference_id,
+           'PRODUCT_LINE_MULTI_SYMBOL_STRESS',
+           now()
+      FROM numbered
+      CROSS JOIN seq
+      CROSS JOIN counted
+    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
+    RETURNING user_id, asset, amount_units, reference_id
+),
+balance_rows AS (
+    INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
+    SELECT user_id, asset, amount_units, 0, now()
+      FROM ledger_rows
+    ON CONFLICT (user_id, asset) DO UPDATE SET
+        available_units = account_balances.available_units + EXCLUDED.available_units,
+        updated_at = EXCLUDED.updated_at
+    RETURNING user_id, asset
+)
+INSERT INTO account_admin_balance_adjustments (
+    reference_key, adjustment_kind, admin_user_id, admin_username, user_id, account_type,
+    asset, amount_units, balance_after_units, reference_id, reason, created_at
+)
+SELECT 'BASIC|' || user_id || '||' || asset || '|' || reference_id,
+       'BASIC',
+       1,
+       'product-line-stress',
+       user_id,
+       NULL,
+       asset,
+       amount_units,
+       amount_units,
+       reference_id,
+       'PRODUCT_LINE_MULTI_SYMBOL_STRESS',
+       now()
+  FROM ledger_rows
+ON CONFLICT (reference_key) DO NOTHING;
+SQL
+    return
+  fi
+
+  python3 - "${product_line}" "${type}" "${STRESS_SYMBOL_COUNT}" "${STRESS_USER_COUNT}" \
+    "${STRESS_MM_USER_START}" "${STRESS_TAKER_USER_START}" "${RUN_ID}" <<'PY' | psql_exec >/dev/null
+import sys
+
+product_line, account_type = sys.argv[1], sys.argv[2]
+symbol_count, user_count = int(sys.argv[3]), int(sys.argv[4])
+mm_start, taker_start = int(sys.argv[5]), int(sys.argv[6])
+run_id = sys.argv[7]
+bases = [
+    "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "TRX", "TON", "AVAX",
+    "LINK", "BCH", "DOT", "LTC", "NEAR", "UNI", "AAVE", "ETC", "FIL", "OP",
+]
+
+rows = []
+for i in range(symbol_count):
+    user_id = mm_start + i
+    rows.append((user_id, "USDT", 200000000000000, f"stress-{run_id}-{product_line}-mm-{i}-USDT"))
+    if product_line == "SPOT":
+        base = bases[i % len(bases)]
+        rows.append((user_id, base, 100000000000, f"stress-{run_id}-{product_line}-mm-{i}-{base}"))
+for i in range(user_count):
+    rows.append((taker_start + i, "USDT", 200000000000000, f"stress-{run_id}-{product_line}-user-{i}-USDT"))
+
+def quote(value):
+    return "'" + str(value).replace("'", "''") + "'"
+
+values = ",\n".join(
+    f"({user_id}, {quote(asset)}, {amount}, {quote(reference_id)})"
+    for user_id, asset, amount, reference_id in rows
+)
+print(f"""
+WITH requested(user_id, asset, amount_units, reference_id) AS (
+    VALUES
+{values}
+),
+counted AS (
+    SELECT count(*)::bigint AS row_count FROM requested
+),
+seq AS (
+    INSERT INTO account_sequences (sequence_name, sequence_value, updated_at)
+    SELECT 'product-ledger-entry', row_count, now() FROM counted
+    ON CONFLICT (sequence_name) DO UPDATE SET
+        sequence_value = account_sequences.sequence_value + EXCLUDED.sequence_value,
+        updated_at = now()
+    RETURNING sequence_value
+),
+numbered AS (
+    SELECT r.*, row_number() OVER (ORDER BY r.user_id, r.asset) AS rn
+      FROM requested r
+),
+ledger_rows AS (
+    INSERT INTO account_product_ledger_entries (
+        entry_id, user_id, account_type, asset, amount_units, balance_after_units,
+        reference_type, reference_id, reason, created_at
+    )
+    SELECT (seq.sequence_value - counted.row_count + numbered.rn)::bigint,
+           numbered.user_id,
+           {quote(account_type)},
+           numbered.asset,
+           numbered.amount_units,
+           numbered.amount_units,
+           'PRODUCT_BALANCE_ADJUSTMENT',
+           numbered.reference_id,
+           'PRODUCT_LINE_MULTI_SYMBOL_STRESS',
+           now()
+      FROM numbered
+      CROSS JOIN seq
+      CROSS JOIN counted
+    ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
+    RETURNING user_id, account_type, asset, amount_units, reference_id
+),
+balance_rows AS (
+    INSERT INTO account_product_balances (account_type, user_id, asset, available_units, locked_units, updated_at)
+    SELECT account_type, user_id, asset, amount_units, 0, now()
+      FROM ledger_rows
+    ON CONFLICT (account_type, user_id, asset) DO UPDATE SET
+        available_units = account_product_balances.available_units + EXCLUDED.available_units,
+        updated_at = EXCLUDED.updated_at
+    RETURNING account_type, user_id, asset
+)
+INSERT INTO account_admin_balance_adjustments (
+    reference_key, adjustment_kind, admin_user_id, admin_username, user_id, account_type,
+    asset, amount_units, balance_after_units, reference_id, reason, created_at
+)
+SELECT 'PRODUCT|' || user_id || '|' || account_type || '|' || asset || '|' || reference_id,
+       'PRODUCT',
+       1,
+       'product-line-stress',
+       user_id,
+       account_type,
+       asset,
+       amount_units,
+       amount_units,
+       reference_id,
+       'PRODUCT_LINE_MULTI_SYMBOL_STRESS',
+       now()
+  FROM ledger_rows
+ON CONFLICT (reference_key) DO NOTHING;
+""")
+PY
+}
+
+stress_order_payload() {
+  local user_id="$1"
+  local client_order_id="$2"
+  local symbol="$3"
+  local side="$4"
+  local tif="$5"
+  local price_ticks="$6"
+  local quantity_steps="$7"
+  local reduce_only="$8"
+  printf '{"userId":%s,"clientOrderId":"%s","symbol":"%s","side":"%s","orderType":"LIMIT","timeInForce":"%s","priceTicks":%s,"quantitySteps":%s,"marginMode":"CROSS","positionSide":"NET","reduceOnly":%s,"postOnly":false}' \
+    "${user_id}" "${client_order_id}" "${symbol}" "${side}" "${tif}" "${price_ticks}" "${quantity_steps}" "${reduce_only}"
+}
+
+stress_order_command() {
+  local product_line="$1"
+  local user_id="$2"
+  local client_order_id="$3"
+  local symbol="$4"
+  local side="$5"
+  local tif="$6"
+  local price_ticks="$7"
+  local quantity_steps="$8"
+  local reduce_only="$9"
+  local trace="${10}"
+  local payload
+  payload="$(stress_order_payload "${user_id}" "${client_order_id}" "${symbol}" "${side}" "${tif}" "${price_ticks}" "${quantity_steps}" "${reduce_only}")"
+  printf "curl --retry 3 --retry-delay 1 --retry-max-time 45 --retry-all-errors -fsS -X POST 'http://localhost:9094/api/v1/gateway/trading' -H 'Content-Type: application/json' -H 'X-User-Id: %s' -H 'X-Product-Line: %s' -H 'X-Trace-Id: %s' -d '%s' >/dev/null\n" \
+    "${user_id}" "${product_line}" "${trace}" "${payload}"
+}
+
+stress_batch_command() {
+  local product_line="$1"
+  local user_id="$2"
+  local trace="$3"
+  local items="$4"
+  printf "curl --retry 3 --retry-delay 1 --retry-max-time 45 --retry-all-errors -fsS -X POST 'http://localhost:9094/api/v1/gateway/trading/batch' -H 'Content-Type: application/json' -H 'X-User-Id: %s' -H 'X-Product-Line: %s' -H 'X-Trace-Id: %s' -d '{\"orders\":[%s]}' >/dev/null\n" \
+    "${user_id}" "${product_line}" "${trace}" "${items}"
+}
+
+emit_stress_maker_commands() {
+  local product_line="$1"
+  local phase="$2"
+  local outer_offset="$3"
+  local level_count="$4"
+  local quantity_steps="$5"
+  local rules_json
+  rules_json="$(stress_rules_json "${product_line}")"
+  python3 - "${product_line}" "${phase}" "${outer_offset}" "${level_count}" "${quantity_steps}" \
+    "${RUN_ID}" "${STRESS_SYMBOL_COUNT}" "${STRESS_MM_USER_START}" "${STRESS_MAKER_BATCH_SIZE}" \
+    "${rules_json}" <<'PY'
+import json
+import sys
+
+product_line = sys.argv[1]
+phase = sys.argv[2]
+outer_offset = int(sys.argv[3])
+level_count = int(sys.argv[4])
+quantity_steps = int(sys.argv[5])
+run_id = sys.argv[6]
+symbol_count = int(sys.argv[7])
+mm_user_start = int(sys.argv[8])
+batch_size = int(sys.argv[9])
+rules = json.loads(sys.argv[10])
+bases = [
+    "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "TRX", "TON", "AVAX",
+    "LINK", "BCH", "DOT", "LTC", "NEAR", "UNI", "AAVE", "ETC", "FIL", "OP",
+]
+underlying_prices = [
+    600000, 30000, 1500, 1000, 6000, 1000, 1200, 1000, 3000, 3000,
+    1500, 4500, 1000, 8500, 1000, 1000, 9000, 2000, 1000, 1000,
+]
+slug_map = {
+    "SPOT": "spot",
+    "LINEAR_PERPETUAL": "linear-perp",
+    "LINEAR_DELIVERY": "linear-delivery",
+    "OPTION": "option",
+}
+
+def symbol_and_price(i):
+    base = bases[i % len(bases)]
+    underlying_ticks = underlying_prices[i % len(underlying_prices)]
+    if product_line == "SPOT":
+        return f"{base}-USDT-SPOT", underlying_ticks
+    if product_line == "LINEAR_PERPETUAL":
+        return f"{base}-USDT", underlying_ticks
+    if product_line == "LINEAR_DELIVERY":
+        return f"{base}-USDT-260925", underlying_ticks
+    if product_line == "OPTION":
+        strike = 59000 + i * 500
+        option_type = "C" if i % 2 == 0 else "P"
+        return f"{base}-USDT-260925-{strike}-{option_type}", 1000 + i * 25
+    raise SystemExit(f"unsupported product line {product_line}")
+
+def quantity_for(symbol, price_ticks):
+    rule = rules.get(symbol, {})
+    min_quantity = int(rule.get("minQuantitySteps", 1))
+    max_quantity = int(rule.get("maxQuantitySteps", 9223372036854775807))
+    min_notional = int(rule.get("minNotionalUnits", 1))
+    notional_multiplier = int(rule.get("notionalMultiplierUnits", 10000))
+    denominator = max(1, price_ticks * notional_multiplier)
+    required_by_notional = (min_notional + denominator - 1) // denominator
+    required = max(quantity_steps, min_quantity, required_by_notional)
+    if required > max_quantity:
+        raise SystemExit(
+            f"{symbol} required quantity {required} exceeds max_quantity_steps {max_quantity}"
+        )
+    return required
+
+slug = slug_map[product_line]
+for i in range(symbol_count):
+    symbol, base_price = symbol_and_price(i)
+    maker_user = mm_user_start + i
+    for side, side_label, direction in (("BUY", "bid", -1), ("SELL", "ask", 1)):
+        batch = []
+        batch_index = 1
+        for level in range(1, level_count + 1):
+            price = max(1, base_price + direction * (outer_offset + level))
+            order_quantity_steps = quantity_for(symbol, price)
+            payload = {
+                "userId": maker_user,
+                "clientOrderId": f"stress-mm-{run_id}-{slug}-{phase}-{i}-{side_label}-{level}",
+                "symbol": symbol,
+                "side": side,
+                "orderType": "LIMIT",
+                "timeInForce": "GTC",
+                "priceTicks": price,
+                "quantitySteps": order_quantity_steps,
+                "marginMode": "CROSS",
+                "positionSide": "NET",
+                "reduceOnly": False,
+                "postOnly": False,
+            }
+            batch.append(json.dumps(payload, separators=(",", ":")))
+            if len(batch) >= batch_size:
+                items = ",".join(batch)
+                trace = f"stress-{run_id}-{slug}-{phase}-{i}-{side_label}-batch-{batch_index}"
+                print(
+                    "curl --retry 3 --retry-delay 1 --retry-max-time 45 --retry-all-errors -fsS "
+                    "-X POST 'http://localhost:9094/api/v1/gateway/trading/batch' "
+                    f"-H 'Content-Type: application/json' -H 'X-User-Id: {maker_user}' "
+                    f"-H 'X-Product-Line: {product_line}' -H 'X-Trace-Id: {trace}' "
+                    f"-d '{{\"orders\":[{items}]}}' >/dev/null"
+                )
+                batch = []
+                batch_index += 1
+        if batch:
+            items = ",".join(batch)
+            trace = f"stress-{run_id}-{slug}-{phase}-{i}-{side_label}-batch-{batch_index}"
+            print(
+                "curl --retry 3 --retry-delay 1 --retry-max-time 45 --retry-all-errors -fsS "
+                "-X POST 'http://localhost:9094/api/v1/gateway/trading/batch' "
+                f"-H 'Content-Type: application/json' -H 'X-User-Id: {maker_user}' "
+                f"-H 'X-Product-Line: {product_line}' -H 'X-Trace-Id: {trace}' "
+                f"-d '{{\"orders\":[{items}]}}' >/dev/null"
+            )
+PY
+}
+
+emit_stress_taker_commands() {
+  local product_line="$1"
+  local phase="$2"
+  local rules_json
+  rules_json="$(stress_rules_json "${product_line}")"
+  python3 - "${product_line}" "${phase}" "${RUN_ID}" "${STRESS_SYMBOL_COUNT}" "${STRESS_USER_COUNT}" \
+    "${STRESS_TAKER_USER_START}" "${STRESS_TAKER_QUANTITY_STEPS}" \
+    "$((STRESS_MAKER_DEPTH_LEVELS + STRESS_MAKER_REFRESH_CYCLES * STRESS_MAKER_REFRESH_LEVELS + 20))" \
+    "${rules_json}" <<'PY'
+import json
+import sys
+
+product_line = sys.argv[1]
+phase = sys.argv[2]
+run_id = sys.argv[3]
+symbol_count = int(sys.argv[4])
+user_count = int(sys.argv[5])
+taker_user_start = int(sys.argv[6])
+quantity_steps = int(sys.argv[7])
+offset = int(sys.argv[8])
+rules = json.loads(sys.argv[9])
+bases = [
+    "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "TRX", "TON", "AVAX",
+    "LINK", "BCH", "DOT", "LTC", "NEAR", "UNI", "AAVE", "ETC", "FIL", "OP",
+]
+underlying_prices = [
+    600000, 30000, 1500, 1000, 6000, 1000, 1200, 1000, 3000, 3000,
+    1500, 4500, 1000, 8500, 1000, 1000, 9000, 2000, 1000, 1000,
+]
+slug_map = {
+    "SPOT": "spot",
+    "LINEAR_PERPETUAL": "linear-perp",
+    "LINEAR_DELIVERY": "linear-delivery",
+    "OPTION": "option",
+}
+
+def symbol_and_price(i):
+    base = bases[i % len(bases)]
+    underlying_ticks = underlying_prices[i % len(underlying_prices)]
+    if product_line == "SPOT":
+        return f"{base}-USDT-SPOT", underlying_ticks
+    if product_line == "LINEAR_PERPETUAL":
+        return f"{base}-USDT", underlying_ticks
+    if product_line == "LINEAR_DELIVERY":
+        return f"{base}-USDT-260925", underlying_ticks
+    if product_line == "OPTION":
+        strike = 59000 + i * 500
+        option_type = "C" if i % 2 == 0 else "P"
+        return f"{base}-USDT-260925-{strike}-{option_type}", 1000 + i * 25
+    raise SystemExit(f"unsupported product line {product_line}")
+
+def quantity_for(symbol, price_ticks):
+    rule = rules.get(symbol, {})
+    min_quantity = int(rule.get("minQuantitySteps", 1))
+    max_quantity = int(rule.get("maxQuantitySteps", 9223372036854775807))
+    min_notional = int(rule.get("minNotionalUnits", 1))
+    notional_multiplier = int(rule.get("notionalMultiplierUnits", 10000))
+    denominator = max(1, price_ticks * notional_multiplier)
+    required_by_notional = (min_notional + denominator - 1) // denominator
+    required = max(quantity_steps, min_quantity, required_by_notional)
+    if required > max_quantity:
+        raise SystemExit(
+            f"{symbol} required quantity {required} exceeds max_quantity_steps {max_quantity}"
+        )
+    return required
+
+slug = slug_map[product_line]
+for i in range(user_count):
+    symbol_index = i % symbol_count
+    symbol, base_price = symbol_and_price(symbol_index)
+    user_id = taker_user_start + i
+    close_price = max(1, base_price - offset)
+    order_quantity_steps = quantity_for(symbol, close_price)
+    if phase == "open":
+        side = "BUY"
+        price = base_price + offset
+        reduce_only = False
+    else:
+        side = "SELL"
+        price = close_price
+        reduce_only = product_line != "SPOT"
+    payload = {
+        "userId": user_id,
+        "clientOrderId": f"stress-user-{run_id}-{slug}-{phase}-{i}",
+        "symbol": symbol,
+        "side": side,
+        "orderType": "LIMIT",
+        "timeInForce": "IOC",
+        "priceTicks": price,
+        "quantitySteps": order_quantity_steps,
+        "marginMode": "CROSS",
+        "positionSide": "NET",
+        "reduceOnly": reduce_only,
+        "postOnly": False,
+    }
+    body = json.dumps(payload, separators=(",", ":"))
+    trace = f"stress-{run_id}-{slug}-{phase}-{i}"
+    print(
+        "curl --retry 3 --retry-delay 1 --retry-max-time 45 --retry-all-errors -fsS "
+        "-X POST 'http://localhost:9094/api/v1/gateway/trading' "
+        f"-H 'Content-Type: application/json' -H 'X-User-Id: {user_id}' "
+        f"-H 'X-Product-Line: {product_line}' -H 'X-Trace-Id: {trace}' "
+        f"-d '{body}' >/dev/null"
+    )
+PY
+}
+
+run_with_concurrency() {
+  local max_jobs="$1"
+  shift
+  local active_pids=()
+  local failures=0
+  local command pid
+  for command in "$@"; do
+    bash -c "${command}" &
+    active_pids+=("$!")
+    if ((${#active_pids[@]} >= max_jobs)); then
+      if ! wait "${active_pids[0]}"; then
+        failures=$((failures + 1))
+      fi
+      active_pids=("${active_pids[@]:1}")
+    fi
+  done
+  for pid in "${active_pids[@]}"; do
+    if ! wait "${pid}"; then
+      failures=$((failures + 1))
+    fi
+  done
+  RUN_FAILURES="${failures}"
+}
+
+run_stress_maker_refresh_loop() {
+  local product_line="$1"
+  local phase="$2"
+  local cycle offset commands=()
+  for ((cycle = 1; cycle <= STRESS_MAKER_REFRESH_CYCLES; cycle++)); do
+    commands=()
+    offset=$((STRESS_MAKER_DEPTH_LEVELS + (cycle - 1) * STRESS_MAKER_REFRESH_LEVELS))
+    while IFS= read -r command; do
+      commands+=("${command}")
+    done < <(emit_stress_maker_commands "${product_line}" "${phase}-refresh-${cycle}" "${offset}" \
+      "${STRESS_MAKER_REFRESH_LEVELS}" "${STRESS_MAKER_LEVEL_QUANTITY_STEPS}")
+    run_with_concurrency "${STRESS_MAKER_LOAD_CONCURRENCY}" "${commands[@]}"
+    if ((RUN_FAILURES > 0)); then
+      return "${RUN_FAILURES}"
+    fi
+  done
+}
+
+wait_stress_maker_phase_processed() {
+  local product_line="$1"
+  local phase="$2"
+  local level_count="$3"
+  local slug expected
+  slug="$(stress_product_slug "${product_line}")"
+  expected=$((STRESS_SYMBOL_COUNT * 2 * level_count))
+  wait_sql_equals "${product_line} ${phase} maker orders processed by matching" \
+    "SELECT count(*)
+       FROM trading_match_results r
+       JOIN trading_orders o ON o.product_line = r.product_line AND o.order_id = r.order_id
+      WHERE r.product_line = '${product_line}'
+        AND r.command_type = 'PLACE'
+        AND r.result_code = 'SUCCESS'
+        AND o.client_order_id LIKE 'stress-mm-${RUN_ID}-${slug}-${phase}-%'" \
+    "${expected}" "${STRESS_WAIT_SECONDS}"
+}
+
+wait_stress_phase_settled() {
+  local product_line="$1"
+  local phase="$2"
+  local slug
+  slug="$(stress_product_slug "${product_line}")"
+  wait_sql_equals "${product_line} ${phase} orders filled" \
+    "SELECT count(*) FROM trading_orders WHERE product_line = '${product_line}' AND client_order_id LIKE 'stress-user-${RUN_ID}-${slug}-${phase}-%' AND status = 'FILLED'" \
+    "${STRESS_USER_COUNT}" "${STRESS_WAIT_SECONDS}"
+  wait_sql_equals "${product_line} ${phase} taker orders matched" \
+    "SELECT count(DISTINCT taker_order_id) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'" \
+    "${STRESS_USER_COUNT}" "${STRESS_WAIT_SECONDS}"
+  wait_sql_equals "${product_line} ${phase} account settled taker orders" \
+    "SELECT count(DISTINCT t.taker_order_id) FROM account_processed_trades p JOIN trading_match_trades t ON t.product_line = p.product_line AND t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.product_line = '${product_line}' AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'" \
+    "${STRESS_USER_COUNT}" "${STRESS_WAIT_SECONDS}"
+  wait_sql_equals "${product_line} ${phase} active symbols" \
+    "SELECT count(DISTINCT symbol) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'" \
+    "${STRESS_SYMBOL_COUNT}" "${STRESS_WAIT_SECONDS}"
+}
+
+stress_latency_summary() {
+  local product_line="$1"
+  local phase="$2"
+  local slug
+  slug="$(stress_product_slug "${product_line}")"
+  query_value "
+WITH lat AS (
+  SELECT EXTRACT(EPOCH FROM (p.processed_at - e.event_time)) * 1000 AS ms
+    FROM trading_orders o
+    JOIN trading_order_events e ON e.order_id = o.order_id AND e.event_type = 'ACCEPTED'
+    JOIN trading_match_trades t ON t.taker_order_id = o.order_id
+    JOIN account_processed_trades p ON p.product_line = t.product_line AND p.symbol = t.symbol AND p.trade_id = t.trade_id
+   WHERE o.product_line = '${product_line}'
+     AND o.client_order_id LIKE 'stress-user-${RUN_ID}-${slug}-${phase}-%'
+)
+SELECT count(*) || ' ' || round(min(ms)::numeric, 3) || ' ' ||
+       round(percentile_disc(0.50) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' ' ||
+       round(percentile_disc(0.95) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' ' ||
+       round(percentile_disc(0.99) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' ' ||
+       round(max(ms)::numeric, 3)
+  FROM lat"
+}
+
+collect_stress_funds_rows() {
+  local product_line="$1"
+  local type scope
+  type="$(account_type "${product_line}")"
+  scope="$(stress_user_scope_predicate)"
+  if [[ "${product_line}" == "LINEAR_PERPETUAL" ]]; then
+    psql_exec -At <<SQL
+WITH ledger AS (
+    SELECT asset, amount_units, reference_type, reason
+      FROM account_ledger_entries
+     WHERE ${scope}
+),
+balances AS (
+    SELECT asset, SUM(available_units + locked_units)::bigint AS final_units
+      FROM account_balances
+     WHERE ${scope}
+     GROUP BY asset
+),
+assets AS (
+    SELECT asset FROM ledger
+    UNION
+    SELECT asset FROM balances
+),
+summary AS (
+    SELECT a.asset,
+           COALESCE(SUM(l.amount_units) FILTER (WHERE l.reference_type = 'BALANCE_ADJUSTMENT'), 0)::bigint AS adjustment_units,
+           COALESCE(SUM(l.amount_units) FILTER (
+               WHERE l.reference_type IN ('TRADE_PNL', 'OPTION_PREMIUM')
+                  OR (l.reference_type = 'SPOT_TRADE' AND COALESCE(l.reason, '') NOT LIKE '%FEE%')
+           ), 0)::bigint AS trade_net_units,
+           COALESCE(SUM(abs(l.amount_units)) FILTER (
+               WHERE l.reference_type IN ('TRADE_PNL', 'OPTION_PREMIUM')
+                  OR (l.reference_type = 'SPOT_TRADE' AND COALESCE(l.reason, '') NOT LIKE '%FEE%')
+           ), 0)::bigint AS trade_gross_units,
+           COALESCE(SUM(l.amount_units) FILTER (
+               WHERE l.reference_type = 'TRADE_FEE'
+                  OR (l.reference_type = 'SPOT_TRADE' AND COALESCE(l.reason, '') LIKE '%FEE%')
+           ), 0)::bigint AS fee_units,
+           COALESCE(SUM(l.amount_units) FILTER (WHERE l.reference_type IN ('FUNDING', 'FUNDING_FEE')), 0)::bigint AS funding_units,
+           COALESCE(SUM(abs(l.amount_units)) FILTER (WHERE l.reference_type IN ('FUNDING', 'FUNDING_FEE')), 0)::bigint AS funding_gross_units,
+           COALESCE(SUM(l.amount_units) FILTER (WHERE l.reference_type = 'LIQUIDATION_FEE'), 0)::bigint AS liquidation_fee_units,
+           COALESCE(SUM(l.amount_units) FILTER (WHERE l.reference_type IN ('DELIVERY_SETTLEMENT', 'OPTION_EXERCISE')), 0)::bigint AS delivery_exercise_units,
+           COALESCE(SUM(abs(l.amount_units)) FILTER (WHERE l.reference_type IN ('DELIVERY_SETTLEMENT', 'OPTION_EXERCISE')), 0)::bigint AS delivery_exercise_gross_units,
+           COALESCE(SUM(l.amount_units), 0)::bigint AS expected_final_units
+      FROM assets a
+      LEFT JOIN ledger l ON l.asset = a.asset
+     GROUP BY a.asset
+)
+SELECT '| ${product_line} | ' || s.asset || ' | 0 | ' || s.adjustment_units || ' | ' ||
+       s.trade_net_units || ' | ' || s.trade_gross_units || ' | ' || s.fee_units || ' | ' ||
+       s.funding_units || ' / ' || s.funding_gross_units || ' | ' || s.liquidation_fee_units || ' | ' ||
+       s.delivery_exercise_units || ' / ' || s.delivery_exercise_gross_units || ' | ' ||
+       s.expected_final_units || ' | ' || COALESCE(b.final_units, 0) || ' | ' ||
+       CASE WHEN s.expected_final_units = COALESCE(b.final_units, 0) THEN 'OK' ELSE 'FAIL' END || ' |'
+  FROM summary s
+  LEFT JOIN balances b ON b.asset = s.asset
+ ORDER BY s.asset;
+SQL
+    return
+  fi
+  psql_exec -At <<SQL
+WITH ledger AS (
+    SELECT asset, amount_units, reference_type, reason
+      FROM account_product_ledger_entries
+     WHERE account_type = '${type}'
+       AND ${scope}
+),
+balances AS (
+    SELECT asset, SUM(available_units + locked_units)::bigint AS final_units
+      FROM account_product_balances
+     WHERE account_type = '${type}'
+       AND ${scope}
+     GROUP BY asset
+),
+assets AS (
+    SELECT asset FROM ledger
+    UNION
+    SELECT asset FROM balances
+),
+summary AS (
+    SELECT a.asset,
+           COALESCE(SUM(l.amount_units) FILTER (WHERE l.reference_type = 'PRODUCT_BALANCE_ADJUSTMENT'), 0)::bigint AS adjustment_units,
+           COALESCE(SUM(l.amount_units) FILTER (
+               WHERE l.reference_type IN ('TRADE_PNL', 'OPTION_PREMIUM')
+                  OR (l.reference_type = 'SPOT_TRADE' AND COALESCE(l.reason, '') NOT LIKE '%FEE%')
+           ), 0)::bigint AS trade_net_units,
+           COALESCE(SUM(abs(l.amount_units)) FILTER (
+               WHERE l.reference_type IN ('TRADE_PNL', 'OPTION_PREMIUM')
+                  OR (l.reference_type = 'SPOT_TRADE' AND COALESCE(l.reason, '') NOT LIKE '%FEE%')
+           ), 0)::bigint AS trade_gross_units,
+           COALESCE(SUM(l.amount_units) FILTER (
+               WHERE l.reference_type = 'TRADE_FEE'
+                  OR (l.reference_type = 'SPOT_TRADE' AND COALESCE(l.reason, '') LIKE '%FEE%')
+           ), 0)::bigint AS fee_units,
+           COALESCE(SUM(l.amount_units) FILTER (WHERE l.reference_type IN ('FUNDING', 'FUNDING_FEE')), 0)::bigint AS funding_units,
+           COALESCE(SUM(abs(l.amount_units)) FILTER (WHERE l.reference_type IN ('FUNDING', 'FUNDING_FEE')), 0)::bigint AS funding_gross_units,
+           COALESCE(SUM(l.amount_units) FILTER (WHERE l.reference_type = 'LIQUIDATION_FEE'), 0)::bigint AS liquidation_fee_units,
+           COALESCE(SUM(l.amount_units) FILTER (WHERE l.reference_type IN ('DELIVERY_SETTLEMENT', 'OPTION_EXERCISE')), 0)::bigint AS delivery_exercise_units,
+           COALESCE(SUM(abs(l.amount_units)) FILTER (WHERE l.reference_type IN ('DELIVERY_SETTLEMENT', 'OPTION_EXERCISE')), 0)::bigint AS delivery_exercise_gross_units,
+           COALESCE(SUM(l.amount_units), 0)::bigint AS expected_final_units
+      FROM assets a
+      LEFT JOIN ledger l ON l.asset = a.asset
+     GROUP BY a.asset
+)
+SELECT '| ${product_line} | ' || s.asset || ' | 0 | ' || s.adjustment_units || ' | ' ||
+       s.trade_net_units || ' | ' || s.trade_gross_units || ' | ' || s.fee_units || ' | ' ||
+       s.funding_units || ' / ' || s.funding_gross_units || ' | ' || s.liquidation_fee_units || ' | ' ||
+       s.delivery_exercise_units || ' / ' || s.delivery_exercise_gross_units || ' | ' ||
+       s.expected_final_units || ' | ' || COALESCE(b.final_units, 0) || ' | ' ||
+       CASE WHEN s.expected_final_units = COALESCE(b.final_units, 0) THEN 'OK' ELSE 'FAIL' END || ' |'
+  FROM summary s
+  LEFT JOIN balances b ON b.asset = s.asset
+ ORDER BY s.asset;
+SQL
+}
+
+assert_stress_state() {
+  local product_line="$1"
+  local type scope
+  type="$(account_type "${product_line}")"
+  scope="$(stress_user_scope_predicate)"
+  wait_sql_equals "stress maker accounts cover symbols ${product_line}" \
+    "SELECT count(DISTINCT user_id) FROM trading_orders WHERE product_line = '${product_line}' AND client_order_id LIKE 'stress-mm-${RUN_ID}-%' AND user_id >= ${STRESS_MM_USER_START} AND user_id < $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT))" \
+    "${STRESS_SYMBOL_COUNT}" 60
+  if is_margin_product "${product_line}"; then
+    wait_sql_equals "stress taker positions closed ${product_line}" \
+      "SELECT count(*) FROM account_positions WHERE product_line = '${product_line}' AND user_id >= ${STRESS_TAKER_USER_START} AND user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT)) AND signed_quantity_steps <> 0" \
+      "0" 60
+  fi
+  if [[ "${product_line}" == "LINEAR_PERPETUAL" ]]; then
+    wait_sql_equals "stress no negative basic balances ${product_line}" \
+      "SELECT count(*) FROM account_balances WHERE ${scope} AND (available_units < 0 OR locked_units < 0)" \
+      "0" 60
+  else
+    wait_sql_equals "stress no negative product balances ${product_line}" \
+      "SELECT count(*) FROM account_product_balances WHERE account_type = '${type}' AND ${scope} AND (available_units < 0 OR locked_units < 0)" \
+      "0" 60
+  fi
+  wait_sql_equals "stress no negative position margins ${product_line}" \
+    "SELECT count(*) FROM account_position_margins WHERE product_line = '${product_line}' AND margin_units < 0" \
+    "0" 60
+  wait_sql_equals "stress no over-released margin reservations ${product_line}" \
+    "SELECT count(*) FROM account_margin_reservations WHERE account_type = '${type}' AND ${scope} AND released_units + position_margin_units > reserved_units" \
+    "0" 60
+  wait_sql_equals "stress no over-released spot reservations ${product_line}" \
+    "SELECT count(*) FROM account_spot_order_reservations WHERE ${scope} AND settled_units + released_units > reserved_units" \
+    "0" 60
+  wait_sql_equals "stress no product deficits ${product_line}" \
+    "SELECT count(*) FROM account_product_deficits WHERE account_type = '${type}' AND ${scope} AND deficit_units <> 0" \
+    "0" 60
+}
+
+run_multi_symbol_stress_flow() {
+  local product_line="$1"
+  local slug commands=() maker_pid open_start open_end close_start close_end open_ms close_ms open_latency close_latency open_trades close_trades settled_open settled_close active_symbols maker_users
+  slug="$(stress_product_slug "${product_line}")"
+  echo "Scenario ${product_line}: multi-symbol high-frequency stress symbols=${STRESS_SYMBOL_COUNT} users=${STRESS_USER_COUNT}"
+  seed_stress_prices "${product_line}"
+  fund_stress_accounts_for_line "${product_line}"
+  wait_sql_nonzero "market-maker cycle success ${product_line}" \
+    "SELECT count(*) FROM market_maker_strategy_run_events WHERE product_line = '${product_line}' AND strategy_id LIKE 'stress-mm-%' AND event_type = 'CYCLE_SUCCESS'" \
+    180
+
+  echo "Placing ${product_line} initial maker book"
+  commands=()
+  while IFS= read -r command; do
+    commands+=("${command}")
+  done < <(emit_stress_maker_commands "${product_line}" "initial" 0 "${STRESS_MAKER_DEPTH_LEVELS}" "${STRESS_MAKER_LEVEL_QUANTITY_STEPS}")
+  run_with_concurrency "${STRESS_MAKER_LOAD_CONCURRENCY}" "${commands[@]}"
+  if ((RUN_FAILURES > 0)); then
+    echo "Initial maker placement failed: ${RUN_FAILURES}" >&2
+    exit 1
+  fi
+  wait_stress_maker_phase_processed "${product_line}" "initial" "${STRESS_MAKER_DEPTH_LEVELS}"
+
+  echo "Running ${product_line} concurrent open phase"
+  commands=()
+  while IFS= read -r command; do
+    commands+=("${command}")
+  done < <(emit_stress_taker_commands "${product_line}" "open")
+  open_start="$(date +%s%N)"
+  run_stress_maker_refresh_loop "${product_line}" "open" &
+  maker_pid="$!"
+  run_with_concurrency "${STRESS_LOAD_CONCURRENCY}" "${commands[@]}"
+  if ((RUN_FAILURES > 0)); then
+    echo "Open taker placement failed: ${RUN_FAILURES}" >&2
+    exit 1
+  fi
+  wait "${maker_pid}"
+  open_end="$(date +%s%N)"
+  wait_stress_phase_settled "${product_line}" "open"
+
+  echo "Running ${product_line} concurrent close/sell phase"
+  commands=()
+  while IFS= read -r command; do
+    commands+=("${command}")
+  done < <(emit_stress_taker_commands "${product_line}" "close")
+  close_start="$(date +%s%N)"
+  run_stress_maker_refresh_loop "${product_line}" "close" &
+  maker_pid="$!"
+  run_with_concurrency "${STRESS_LOAD_CONCURRENCY}" "${commands[@]}"
+  if ((RUN_FAILURES > 0)); then
+    echo "Close taker placement failed: ${RUN_FAILURES}" >&2
+    exit 1
+  fi
+  wait "${maker_pid}"
+  close_end="$(date +%s%N)"
+  wait_stress_phase_settled "${product_line}" "close"
+
+  open_ms="$(python3 - "${open_start}" "${open_end}" <<'PY'
+import sys
+print(round((int(sys.argv[2]) - int(sys.argv[1])) / 1_000_000, 3))
+PY
+)"
+  close_ms="$(python3 - "${close_start}" "${close_end}" <<'PY'
+import sys
+print(round((int(sys.argv[2]) - int(sys.argv[1])) / 1_000_000, 3))
+PY
+)"
+  open_latency="$(stress_latency_summary "${product_line}" "open")"
+  close_latency="$(stress_latency_summary "${product_line}" "close")"
+  open_trades="$(query_value "SELECT count(*) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-open-%'")"
+  close_trades="$(query_value "SELECT count(*) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-close-%'")"
+  settled_open="$(query_value "SELECT count(DISTINCT t.taker_order_id) FROM account_processed_trades p JOIN trading_match_trades t ON t.product_line = p.product_line AND t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.product_line = '${product_line}' AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-open-%'")"
+  settled_close="$(query_value "SELECT count(DISTINCT t.taker_order_id) FROM account_processed_trades p JOIN trading_match_trades t ON t.product_line = p.product_line AND t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.product_line = '${product_line}' AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-close-%'")"
+  active_symbols="$(query_value "SELECT count(DISTINCT symbol) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-%'")"
+  maker_users="$(query_value "SELECT count(DISTINCT user_id) FROM trading_orders WHERE product_line = '${product_line}' AND client_order_id LIKE 'stress-mm-${RUN_ID}-${slug}-%'")"
+
+  assert_stress_state "${product_line}"
+  assert_no_negative_balances "${product_line}"
+  assert_outbox_drained "${product_line}"
+
+  STRESS_LAST_SUMMARY_FILE="${TMP_DIR}/${product_line}-stress-summary.md"
+  {
+    echo "## ${product_line}"
+    echo
+    echo "- Symbols active：${active_symbols}/${STRESS_SYMBOL_COUNT}"
+    echo "- Maker accounts：${maker_users}/${STRESS_SYMBOL_COUNT}"
+    echo "- Users：${STRESS_USER_COUNT}"
+    echo "- Open phase：orders=${STRESS_USER_COUNT}, trades=${open_trades}, settledOrders=${settled_open}, submitMs=${open_ms}, concurrency=${STRESS_LOAD_CONCURRENCY}"
+    echo "- Close/sell phase：orders=${STRESS_USER_COUNT}, trades=${close_trades}, settledOrders=${settled_close}, submitMs=${close_ms}, concurrency=${STRESS_LOAD_CONCURRENCY}"
+    echo "- Account settlement latency ms \`count min p50 p95 p99 max\`：open=${open_latency}; close=${close_latency}"
+    echo
+    echo "| 产品线 | 资产 | 期初 | 充值/调整 | 成交/权利金净额 | 成交/权利金发生额 | 手续费 | 资金费净额/发生额 | 强平费 | 交割/行权净额/发生额 | 期末应有 | 期末实际 | 结果 |"
+    echo "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"
+    collect_stress_funds_rows "${product_line}"
+    echo
+  } >"${STRESS_LAST_SUMMARY_FILE}"
 }
 
 wait_market_maker_running() {
@@ -1541,13 +2840,49 @@ run_spot_asset_flow() {
 run_line() {
   local product_line="$1"
   echo "========== Product line ${product_line} =========="
-  reset_database
+  reset_database "${product_line}"
   reset_kafka_topics "${product_line}"
   rm -rf "${ROOT_DIR}/data/kafka-streams/$(product_slug "${product_line}")"
-  seed_prices_for_line "${product_line}"
+  if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+    seed_stress_prices "${product_line}"
+  else
+    seed_prices_for_line "${product_line}"
+  fi
   start_providers_for_line "${product_line}"
-  seed_prices_for_line "${product_line}"
+  if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+    seed_stress_prices "${product_line}"
+  else
+    seed_prices_for_line "${product_line}"
+  fi
   start_price_refresher "${product_line}"
+  if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+    run_multi_symbol_stress_flow "${product_line}"
+    stop_provider_by_name market-maker
+    stop_all_providers
+    local reconcile_file="${TMP_DIR}/${product_line}-funds-reconcile.txt"
+    if [[ "${RECONCILE_FUNDS}" == "true" ]]; then
+      PRODUCT_LINES="${product_line}" \
+        DB_HOST=localhost \
+        DB_USER="${DB_USER}" \
+        DB_PASSWORD="${DB_PASSWORD}" \
+        DB_NAME="${DB_NAME}" \
+        POSTGRES_PORT="${POSTGRES_PORT}" \
+        "${ROOT_DIR}/scripts/product-line-funds-reconcile.sh" | tee "${reconcile_file}"
+    fi
+    cat "${STRESS_LAST_SUMMARY_FILE}" >>"${STRESS_REPORT_FILE}"
+    {
+      echo "<details><summary>${product_line} funds-reconcile raw output</summary>"
+      echo
+      echo '```'
+      cat "${reconcile_file}" 2>/dev/null || true
+      echo '```'
+      echo
+      echo "</details>"
+      echo
+    } >>"${STRESS_REPORT_FILE}"
+    echo "Product line ${product_line} multi-symbol stress passed"
+    return
+  fi
   fund_user_for_line "${product_line}" "${MM_USER_A}"
   fund_user_for_line "${product_line}" "${MM_USER_B}"
   fund_user_for_line "${product_line}" "${TAKER_USER}"
@@ -1574,13 +2909,44 @@ main() {
   require_command "$(kafka_topics_cmd)"
   require_command "$(kafka_producer_cmd)"
   wait_until "PostgreSQL" 120 pg_isready -h localhost -p "${POSTGRES_PORT}" -U "${DB_USER}"
-  wait_until "Kafka" 120 "$(kafka_topics_cmd)" --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" --list
+  wait_until "Kafka" 120 kafka_ready
   ensure_database
   package_services
+  if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+    if ((STRESS_SYMBOL_COUNT < 20)); then
+      echo "STRESS_SYMBOL_COUNT must be at least 20 for multi-symbol stress" >&2
+      exit 1
+    fi
+    mkdir -p "$(dirname "${STRESS_REPORT_FILE}")"
+    {
+      echo "# 四产品线 20 Symbol / 2000 用户真实链路压测报告"
+      echo
+      echo "时间：$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+      echo
+      echo "## 压测口径"
+      echo
+      echo "- 每次只启动一个产品线，wallet 服务未启动。"
+      echo "- 每个产品线 active symbols：${STRESS_SYMBOL_COUNT}。"
+      echo "- Maker accounts：${STRESS_SYMBOL_COUNT}，每个 symbol 一个 maker account；market-maker provider 同时配置 ${STRESS_SYMBOL_COUNT} 个 strategy。"
+      echo "- Maker 高频：初始 ${STRESS_MAKER_DEPTH_LEVELS} 档，压测阶段每个 phase 刷新 ${STRESS_MAKER_REFRESH_CYCLES} 轮，每轮 ${STRESS_MAKER_REFRESH_LEVELS} 档。"
+      echo "- 用户：每个产品线 ${STRESS_USER_COUNT} 个 taker 用户，经 gateway 单笔真实下单；open 与 close/sell 两阶段均按并发 ${STRESS_LOAD_CONCURRENCY} 提交。"
+      echo "- 资金准备：批量 fixture 写入 balance、ledger 和 admin adjustment；下单、撮合、Kafka、account 结算全部走真实 provider 链路。"
+      echo "- 临时日志目录：\`${TMP_DIR}\`"
+      echo
+    } >"${STRESS_REPORT_FILE}"
+  fi
   local product_line
   for product_line in ${PRODUCT_LINES}; do
     run_line "${product_line}"
   done
+  if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+    {
+      echo "## 总结"
+      echo
+      echo "所有已执行产品线均完成 active symbol、maker account、用户订单、撮合成交、account 结算、余额/仓位/预占/outbox 和资金守恒核对。"
+    } >>"${STRESS_REPORT_FILE}"
+    echo "multi_symbol_stress_report=${STRESS_REPORT_FILE}"
+  fi
 }
 
 main "$@"
