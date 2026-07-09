@@ -5,6 +5,7 @@ import com.surprising.trading.api.model.MatchTradeEvent;
 import java.util.Arrays;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -12,6 +13,7 @@ public class AccountSettlementConcurrencyGuard {
 
     private final ReentrantLock[] userLocks;
 
+    @Autowired
     public AccountSettlementConcurrencyGuard(AccountProperties properties) {
         this(properties.getSettlement().getMatchTradeUserLockStripes());
     }

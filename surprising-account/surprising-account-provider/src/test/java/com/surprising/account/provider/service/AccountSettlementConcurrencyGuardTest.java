@@ -3,6 +3,7 @@ package com.surprising.account.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.OrderSide;
 import java.time.Instant;
@@ -14,8 +15,13 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 class AccountSettlementConcurrencyGuardTest {
+
+    private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+            .withBean(AccountProperties.class)
+            .withBean(AccountSettlementConcurrencyGuard.class);
 
     @Test
     void serializesTradesThatShareAUserAcrossSymbols() throws Exception {
@@ -93,6 +99,12 @@ class AccountSettlementConcurrencyGuardTest {
         assertThatThrownBy(() -> new AccountSettlementConcurrencyGuard(0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("userLockStripes must be positive");
+    }
+
+    @Test
+    void createsGuardBeanThroughSpringConstructorInjection() {
+        contextRunner.run(context -> assertThat(context)
+                .hasSingleBean(AccountSettlementConcurrencyGuard.class));
     }
 
     private static void recordActive(AtomicInteger active, AtomicInteger maxActive) {
