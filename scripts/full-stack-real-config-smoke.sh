@@ -697,8 +697,7 @@ shared_build_input_newer_than() {
   local shared_pom
   for shared_pom in \
     "${ROOT_DIR}/pom.xml" \
-    "${ROOT_DIR}/surprising-parent/pom.xml" \
-    "${ROOT_DIR}/surprising-dependencies/pom.xml"; do
+    "${ROOT_DIR}/surprising-parent/pom.xml"; do
     if [[ "${shared_pom}" -nt "${jar}" ]]; then
       echo "${shared_pom}"
       return 0

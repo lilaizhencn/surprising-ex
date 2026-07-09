@@ -13,7 +13,6 @@
     <description>Exchange backend services for Surprising</description>
 
     <modules>
-        <module>surprising-dependencies</module>
         <module>surprising-parent</module>
         <module>surprising-product-api</module>
         <module>surprising-instrument</module>

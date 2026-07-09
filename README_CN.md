@@ -16,8 +16,7 @@ Surprising 多产品线交易所后端服务。
 
 ## 模块
 
-- `surprising-dependencies`：从 `surprising-wallet` 复制过来的统一依赖版本管理模块。
-- `surprising-parent`：从 `surprising-wallet` 复制过来的公共父 POM。
+- `surprising-parent`：公共父 POM，统一管理依赖版本和插件版本。
 - `surprising-product-api`：公共产品线枚举、账户类型映射和产品线 topic 命名。
 - `surprising-instrument`：现货、永续、交割和期权的基础配置和产品规则中心。
 - `surprising-candlestick`：按产品线隔离的 K 线服务。

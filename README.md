@@ -16,8 +16,7 @@ To understand the project architecture and implementation details, read the Surp
 
 ## Modules
 
-- `surprising-dependencies`: centralized dependency versions copied from `surprising-wallet`.
-- `surprising-parent`: shared parent POM copied from `surprising-wallet`.
+- `surprising-parent`: shared parent POM with centralized dependency and plugin version management.
 - `surprising-product-api`: shared product-line enum, account-type mapping, and product-topic naming.
 - `surprising-instrument`: instrument configuration and product-rule center for spot, perpetual, delivery, and option instruments.
 - `surprising-candlestick`: product-line-aware candlestick service.
