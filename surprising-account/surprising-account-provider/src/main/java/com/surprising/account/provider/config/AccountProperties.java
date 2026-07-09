@@ -286,7 +286,6 @@ public class AccountProperties {
         private int contractSpecMaxEntries = 4096;
         private int instrumentTypeMaxEntries = 4096;
         private int spotInstrumentSpecMaxEntries = 4096;
-        private int orderFeeSnapshotMaxEntries = 200_000;
         private int liquidationFeeContextMaxEntries = 200_000;
 
         public int getContractSpecMaxEntries() {
@@ -311,14 +310,6 @@ public class AccountProperties {
 
         public void setSpotInstrumentSpecMaxEntries(int spotInstrumentSpecMaxEntries) {
             this.spotInstrumentSpecMaxEntries = spotInstrumentSpecMaxEntries;
-        }
-
-        public int getOrderFeeSnapshotMaxEntries() {
-            return orderFeeSnapshotMaxEntries;
-        }
-
-        public void setOrderFeeSnapshotMaxEntries(int orderFeeSnapshotMaxEntries) {
-            this.orderFeeSnapshotMaxEntries = orderFeeSnapshotMaxEntries;
         }
 
         public int getLiquidationFeeContextMaxEntries() {

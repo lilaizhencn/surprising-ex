@@ -16,6 +16,7 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.InstrumentSymbol;
+import com.surprising.trading.matching.model.MatchedOrderSnapshot;
 import com.surprising.trading.matching.model.MatchingSymbol;
 import com.surprising.trading.matching.model.RecoveredOrderBookOrder;
 import com.surprising.trading.matching.repository.MatchingOrderBookRecoveryRepository;
@@ -60,10 +61,12 @@ class MatchingServiceTest {
 
             OrderCommandEvent maker = new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 1001L,
                     "maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
-                    100L, 10L, false, false, Instant.parse("2026-07-01T00:00:00Z"), "trace-maker-501");
+                    100L, 10L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z"),
+                    "trace-maker-501");
             OrderCommandEvent taker = new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 2002L,
                     "taker-202", "BTC-USDT", 7L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
-                    100L, 3L, false, false, Instant.parse("2026-07-01T00:00:01Z"), "trace-taker-502");
+                    100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z"),
+                    "trace-taker-502");
 
             service.process(maker);
             service.process(taker);
@@ -90,6 +93,8 @@ class MatchingServiceTest {
             assertThat(trade.makerUserId()).isEqualTo(1001L);
             assertThat(trade.makerMarginMode()).isEqualTo(MarginMode.CROSS);
             assertThat(trade.makerPositionSide()).isEqualTo(PositionSide.NET);
+            assertThat(trade.takerFeeRatePpm()).isEqualTo(5L);
+            assertThat(trade.makerFeeRatePpm()).isEqualTo(2L);
             assertThat(trade.priceTicks()).isEqualTo(100L);
             assertThat(trade.quantitySteps()).isEqualTo(3L);
             assertThat(trade.traceId()).isEqualTo("trace-taker-502");
@@ -143,7 +148,8 @@ class MatchingServiceTest {
 
         service.process(new OrderCommandEvent(OrderCommandType.PLACE, 901L, 404L, 1001L,
                 "missing-404", "BTC-USDT", 5L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
-                100L, 1L, false, false, Instant.parse("2026-07-01T00:00:00Z"), "trace-missing-901"));
+                100L, 1L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z"),
+                "trace-missing-901"));
 
         assertThat(resultRepository.results).isEmpty();
         assertThat(resultRepository.trades).isEmpty();
@@ -171,11 +177,11 @@ class MatchingServiceTest {
 
             OrderCommandEvent maker = new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 1001L,
                     "maker-short-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
-                    100L, 10L, MarginMode.CROSS, PositionSide.SHORT, false, false,
+                    100L, 10L, MarginMode.CROSS, PositionSide.SHORT, 2L, 5L, false, false,
                     Instant.parse("2026-07-01T00:00:00Z"), "trace-maker-short");
             OrderCommandEvent taker = new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 2002L,
                     "taker-long-202", "BTC-USDT", 7L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
-                    100L, 3L, MarginMode.CROSS, PositionSide.LONG, false, false,
+                    100L, 3L, MarginMode.CROSS, PositionSide.LONG, 2L, 5L, false, false,
                     Instant.parse("2026-07-01T00:00:01Z"), "trace-taker-long");
 
             service.process(maker);
@@ -213,7 +219,7 @@ class MatchingServiceTest {
 
             service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 1001L,
                     "market-101", "BTC-USDT", 5L, OrderSide.BUY, OrderType.MARKET, TimeInForce.IOC,
-                    0L, 1L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
+                    0L, 1L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
 
             assertThat(resultRepository.results).singleElement().satisfies(result -> {
                 assertThat(result.orderStatus()).isEqualTo(OrderStatus.REJECTED);
@@ -248,7 +254,7 @@ class MatchingServiceTest {
 
             service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 1001L,
                     "maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
-                    100L, 10L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
+                    100L, 10L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
 
             assertThat(resultRepository.results).isEmpty();
             assertThat(resultRepository.activeStatusUpdates).isZero();
@@ -280,11 +286,11 @@ class MatchingServiceTest {
 
             service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 1001L,
                     "maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
-                    100L, 10L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
+                    100L, 10L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
             resultRepository.rejectNextSaveTrade = true;
             service.process(new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 2002L,
                     "taker-202", "BTC-USDT", 7L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
-                    100L, 3L, false, false, Instant.parse("2026-07-01T00:00:01Z")));
+                    100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z")));
 
             assertThat(resultRepository.results).hasSize(2);
             assertThat(resultRepository.trades).isEmpty();
@@ -319,10 +325,10 @@ class MatchingServiceTest {
 
             service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 1001L,
                     "ask-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
-                    90L, 1L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
+                    90L, 1L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
             service.process(new OrderCommandEvent(OrderCommandType.CANCEL, 502L, 202L, 2002L,
                     "post-only-cancel-202", "BTC-USDT", 5L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
-                    100L, 1L, false, true, Instant.parse("2026-07-01T00:00:01Z")));
+                    100L, 1L, 2L, 5L, false, true, Instant.parse("2026-07-01T00:00:01Z")));
 
             MatchResultEvent cancelResult = resultRepository.results.get(1);
             assertThat(cancelResult.commandType()).isEqualTo(OrderCommandType.CANCEL);
@@ -356,7 +362,7 @@ class MatchingServiceTest {
 
             service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 900001L,
                     "mm-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
-                    100L, 10L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
+                    100L, 10L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
 
             assertThat(resultRepository.results).singleElement()
                     .satisfies(result -> assertThat(result.orderStatus()).isEqualTo(OrderStatus.ACCEPTED));
@@ -507,6 +513,12 @@ class MatchingServiceTest {
         @Override
         public PositionSide orderPositionSide(long orderId) {
             return orderPositionSides.getOrDefault(orderId, PositionSide.NET);
+        }
+
+        @Override
+        public MatchedOrderSnapshot orderSnapshot(long orderId) {
+            return new MatchedOrderSnapshot(orderInstrumentVersion(orderId), orderMarginMode(orderId),
+                    orderPositionSide(orderId), 2L, 5L);
         }
 
         @Override

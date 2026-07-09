@@ -18,7 +18,6 @@ import com.surprising.account.provider.model.BalanceSettlementState;
 import com.surprising.account.provider.model.ContractSpec;
 import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.account.provider.model.LiquidationFeeSettlement;
-import com.surprising.account.provider.model.OrderFeeSnapshot;
 import com.surprising.account.provider.model.PositionSettlementState;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
@@ -2051,20 +2050,6 @@ public class AccountRepository {
                 rs.getLong("notional_multiplier_units")), symbol, instrumentVersion).stream().findFirst()
                 .orElseThrow(() -> new IllegalStateException("spot instrument spec not found for "
                         + symbol + " version " + instrumentVersion));
-    }
-
-    public OrderFeeSnapshot orderFeeSnapshot(long orderId, long userId, String symbol) {
-        return jdbcTemplate.query("""
-                SELECT maker_fee_rate_ppm,
-                       taker_fee_rate_ppm
-                  FROM trading_orders
-                 WHERE order_id = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                """, (rs, rowNum) -> new OrderFeeSnapshot(
-                rs.getLong("maker_fee_rate_ppm"),
-                rs.getLong("taker_fee_rate_ppm")), orderId, userId, symbol).stream().findFirst()
-                .orElseThrow(() -> new IllegalStateException("order fee snapshot not found for order " + orderId));
     }
 
     public Optional<LiquidationFeeContext> liquidationFeeContext(long orderId, long userId, String symbol) {

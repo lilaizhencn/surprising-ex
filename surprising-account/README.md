@@ -22,7 +22,9 @@ Surprising Exchange account and product settlement module. The current implement
 - Entry price uses `entryPriceTicks`.
 - Position collateral is stored in `account_position_margins.margin_units`.
 - Realized PnL is accumulated as `realizedPnlUnits` in the instrument settlement asset. Linear contracts use tick-step notional; inverse contracts use the contract face value and reciprocal entry/exit price formula.
-- Trading fees use `maker_fee_rate_ppm` / `taker_fee_rate_ppm` snapshotted on each side's order. Positive rates debit the user; negative rates credit rebates. The instrument version only provides the default rate.
+- Trading fees use the required `takerFeeRatePpm` / `makerFeeRatePpm` fields carried by
+  `MatchTradeEvent`. Positive rates debit the user; negative rates credit rebates. Account settlement
+  does not query `trading_orders` for fee rates on the hot path.
 - Liquidation fees use the frozen `liquidation_orders.liquidation_fee_rate_ppm`. Account settlement charges only the actually collectible amount from user collateral and publishes the collected amount to the insurance-fund topic.
 - Losses beyond `availableUnits + lockedUnits` are recorded in `account_deficits` instead of making balance columns negative.
 
@@ -175,7 +177,6 @@ surprising:
       send-timeout: 3s
     cache:
       contract-spec-max-entries: 4096
-      order-fee-snapshot-max-entries: 200000
 ```
 
 Set `product-line` to `SPOT`, `LINEAR_PERPETUAL`, `LINEAR_DELIVERY`, or `OPTION` when running isolated product-line instances. Legacy topics remain available when `product-topics-enabled=false`.
@@ -183,7 +184,6 @@ Set `product-line` to `SPOT`, `LINEAR_PERPETUAL`, `LINEAR_DELIVERY`, or `OPTION`
 The local cache is intentionally limited to immutable read snapshots:
 
 - `contract-spec-max-entries` caches contract math by `(symbol, instrumentVersion)`.
-- `order-fee-snapshot-max-entries` caches maker/taker fee rates snapshotted on accepted orders.
 
 Balances, positions, margin reservations, processed-trade idempotency, ledgers, and outbox state are never cached and remain PostgreSQL-authoritative.
 

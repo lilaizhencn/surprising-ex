@@ -25,7 +25,7 @@ class MatchingCommandConsumerTest {
         MatchingCommandConsumer consumer = new MatchingCommandConsumer(objectMapper, matchingService, guard);
         OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, 7001L, 8001L, 9001L,
                 "cli-9001", "BTC-USDT", 3L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
-                100L, 2L, false, false, Instant.parse("2026-07-01T00:00:00Z"));
+                100L, 2L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z"));
 
         assertThatThrownBy(() -> consumer.onCommand(new ConsumerRecord<>("surprising.perp.order.commands.v1",
                 5, 42L, "BTC-USDT", objectMapper.writeValueAsString(command))))
@@ -63,7 +63,7 @@ class MatchingCommandConsumerTest {
         MatchingCommandConsumer consumer = new MatchingCommandConsumer(objectMapper, matchingService, guard);
         OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, 7001L, 8001L, 9001L,
                 "cli-9001", "BTC-USDT", 3L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
-                100L, 2L, false, false, Instant.parse("2026-07-01T00:00:00Z"));
+                100L, 2L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z"));
 
         assertThatThrownBy(() -> consumer.onCommand(new ConsumerRecord<>("surprising.perp.order.commands.v1",
                 5, 42L, "ETH-USDT", objectMapper.writeValueAsString(command))))
@@ -89,7 +89,7 @@ class MatchingCommandConsumerTest {
                 properties);
         OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, 7001L, 8001L, 9001L,
                 "cli-9001", "BTC-USDT-260925", 3L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
-                100L, 2L, false, false, Instant.parse("2026-07-01T00:00:00Z"));
+                100L, 2L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z"));
 
         assertThatThrownBy(() -> consumer.onCommand(new ConsumerRecord<>("surprising.inverse-delivery.order.commands.v1",
                 5, 42L, "BTC-USDT-260925", objectMapper.writeValueAsString(command))))

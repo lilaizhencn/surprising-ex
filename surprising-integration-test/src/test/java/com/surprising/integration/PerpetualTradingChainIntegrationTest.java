@@ -15,7 +15,7 @@ import com.surprising.account.provider.model.BalanceSettlementState;
 import com.surprising.account.provider.model.ContractSpec;
 import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.account.provider.model.LiquidationFeeSettlement;
-import com.surprising.account.provider.model.OrderFeeSnapshot;
+import com.surprising.account.provider.model.PositionSettlementState;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
@@ -83,6 +83,7 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.InstrumentSymbol;
+import com.surprising.trading.matching.model.MatchedOrderSnapshot;
 import com.surprising.trading.matching.model.MatchingSymbol;
 import com.surprising.trading.matching.model.RecoveredOrderBookOrder;
 import com.surprising.trading.matching.repository.MatchingOrderBookRecoveryRepository;
@@ -1616,6 +1617,14 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
+        public MatchedOrderSnapshot orderSnapshot(long orderId) {
+            OrderRecord order = Optional.ofNullable(state.orders.get(orderId))
+                    .orElseThrow(() -> new IllegalStateException("missing order " + orderId));
+            return new MatchedOrderSnapshot(order.instrumentVersion(), order.marginMode(), order.positionSide(),
+                    order.makerFeeRatePpm(), order.takerFeeRatePpm());
+        }
+
+        @Override
         public boolean saveResult(MatchResultEvent event) {
             results.add(event);
             return true;
@@ -1724,15 +1733,6 @@ class PerpetualTradingChainIntegrationTest {
         }
 
         @Override
-        public OrderFeeSnapshot orderFeeSnapshot(long orderId, long userId, String symbol) {
-            OrderRecord order = state.orders.get(orderId);
-            if (order == null || order.userId() != userId || !symbol.equals(order.symbol())) {
-                throw new IllegalStateException("missing order fee snapshot " + orderId);
-            }
-            return new OrderFeeSnapshot(order.makerFeeRatePpm(), order.takerFeeRatePpm());
-        }
-
-        @Override
         public Optional<LiquidationFeeContext> liquidationFeeContext(long orderId, long userId, String symbol) {
             LiquidationOrderResponse order = state.liquidationOrders.get(orderId);
             if (order == null || order.userId() != userId || !symbol.equals(order.symbol())) {
@@ -1802,6 +1802,20 @@ class PerpetualTradingChainIntegrationTest {
                             entry.getKey().positionSide(), entry.getValue().signedQuantitySteps(),
                             entry.getValue().entryPriceTicks(), entry.getValue().realizedPnlUnits(), Instant.now()))
                     .sorted(Comparator.comparingLong(PositionResponse::userId))
+                    .toList();
+        }
+
+        @Override
+        public List<PositionSettlementState> openPositionStatesForSettlement(ProductLine productLine, String symbol) {
+            assertThat(productLine).isEqualTo(state.productLine());
+            assertThat(symbol).isEqualTo(SYMBOL);
+            return state.positions.entrySet().stream()
+                    .filter(entry -> entry.getKey().symbol().equals(symbol))
+                    .filter(entry -> entry.getValue().signedQuantitySteps() != 0L)
+                    .map(entry -> new PositionSettlementState(entry.getKey().userId(), symbol,
+                            entry.getKey().marginMode(), entry.getKey().positionSide(), entry.getValue(),
+                            Instant.now()))
+                    .sorted(Comparator.comparingLong(PositionSettlementState::userId))
                     .toList();
         }
 
@@ -3060,7 +3074,8 @@ class PerpetualTradingChainIntegrationTest {
                         order.orderId(), order.userId(), order.clientOrderId(), order.symbol(),
                         order.instrumentVersion(), order.side(), order.orderType(), order.timeInForce(),
                         order.priceTicks(), order.quantitySteps(), order.marginMode(), order.positionSide(),
-                        order.reduceOnly(), order.postOnly(), now, null));
+                        order.makerFeeRatePpm(), order.takerFeeRatePpm(), order.reduceOnly(), order.postOnly(),
+                        now, null));
             }
             return openReduceOnlyOrders.size();
         }
@@ -3114,7 +3129,8 @@ class PerpetualTradingChainIntegrationTest {
             state.orders.put(orderId, order);
             OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, commandId, orderId, userId,
                     order.clientOrderId(), symbol, instrumentVersion, side, OrderType.MARKET, TimeInForce.IOC,
-                    0L, quantitySteps, order.marginMode(), order.positionSide(), true, false, now, null);
+                    0L, quantitySteps, order.marginMode(), order.positionSide(), order.makerFeeRatePpm(),
+                    order.takerFeeRatePpm(), true, false, now, null);
             commands.add(command);
             return command;
         }

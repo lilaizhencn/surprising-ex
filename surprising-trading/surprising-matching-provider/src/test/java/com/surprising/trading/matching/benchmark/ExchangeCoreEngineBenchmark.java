@@ -110,7 +110,7 @@ public final class ExchangeCoreEngineBenchmark {
                                            long quantitySteps) {
         return new OrderCommandEvent(OrderCommandType.PLACE, commandId, orderId, userId,
                 "benchmark-" + orderId, SYMBOL, 1L, side, OrderType.LIMIT, timeInForce,
-                priceTicks, quantitySteps, false, false, Instant.now(), "benchmark-" + commandId);
+                priceTicks, quantitySteps, 2L, 5L, false, false, Instant.now(), "benchmark-" + commandId);
     }
 
     private static int intArg(String[] args, int index, String envName, int defaultValue) {

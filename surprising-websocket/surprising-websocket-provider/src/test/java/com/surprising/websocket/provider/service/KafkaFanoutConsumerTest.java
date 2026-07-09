@@ -166,7 +166,7 @@ class KafkaFanoutConsumerTest {
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
         MatchTradeEvent event = new MatchTradeEvent(91L, 11L, "BTC-USDT", 202L, 7L,
                 2002L, OrderSide.BUY, MarginMode.CROSS, 101L, 5L, 1001L, MarginMode.CROSS,
-                600_000L, 3L, true, false, eventTime, "trace-trade-1");
+                5L, 2L, 600_000L, 3L, true, false, eventTime, "trace-trade-1");
 
         consumer.onMatchTrade(new ConsumerRecord<>("surprising.perp.match.trades.v1", 0, 0L,
                 "BTC-USDT", objectMapper.writeValueAsString(event)));

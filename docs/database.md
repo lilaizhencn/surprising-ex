@@ -394,8 +394,9 @@ CREATE INDEX adl_events_asset_symbol_time_idx
 - `price_ticks`: exchange-core price ticks.
 - `quantity_steps`, `executed_quantity_steps`, `remaining_quantity_steps`: exchange-core size steps.
 - `maker_fee_rate_ppm` and `taker_fee_rate_ppm`: the order-admission fee snapshot. Account settlement
-  uses these order fields instead of the current instrument or user tier so old resting orders are not
-  reinterpreted after a VIP, rebate, or promotion change.
+  receives the executed-side rates through `MatchTradeEvent` instead of querying the current instrument,
+  user tier, or order rows on the hot path, so old resting orders are not reinterpreted after a VIP,
+  rebate, or promotion change.
 - `reduce_only` and `post_only`: execution flags.
 - `(user_id, client_order_id)` is unique when `client_order_id` is present.
 - `trading_orders_stp_open_idx` supports self-trade prevention checks by user, symbol, side, and price.
@@ -595,10 +596,10 @@ external order book snapshot is available:
 - `trace_id` is copied from the order command and links the result to the originating REST request.
 - `trading_match_results_success_place_idx` lets the recovery query confirm that an open order had a successful `PLACE` result before restoring it into exchange-core.
 
-`trading_match_trades` stores `taker_instrument_version` and `maker_instrument_version`. Account
-settlement uses those side-specific versions because maker orders can be older than the taker command.
-`trace_id` is copied from the taker command that produced the trade and is forwarded to account position
-events.
+`trading_match_trades` stores `taker_instrument_version`, `maker_instrument_version`,
+`taker_fee_rate_ppm`, and `maker_fee_rate_ppm`. Account settlement uses those side-specific versions
+and required fee rates because maker orders can be older than the taker command. `trace_id` is copied
+from the taker command that produced the trade and is forwarded to account position events.
 
 `trading_order_events` stores `trace_id` from the HTTP order or cancel request. Use it with
 `trading_match_results.trace_id`, `trading_match_trades.trace_id`, Kafka topic/partition/offset, and
@@ -612,8 +613,8 @@ The `trading_trigger_orders_trace_idx`, `trading_order_events_trace_idx`,
 TraceId lookup endpoint `/api/v1/admin/traces/{traceId}`.
 `gateway_admin_operation_logs.duration_ms` stores admin gateway proxy request duration for audit exports
 and p50/p95/p99 system latency metrics.
-The same side-specific versions are used for contract math, while maker/taker fee ppm comes from each
-side's `trading_orders` fee snapshot.
+The same side-specific versions are used for contract math, while maker/taker fee ppm comes from the
+required fee fields stored on `trading_match_trades`.
 
 `account_margin_reservations` tracks initial margin reserved by order entry:
 

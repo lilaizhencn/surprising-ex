@@ -908,6 +908,8 @@ public class OrderService {
                 order.quantitySteps(),
                 order.marginMode(),
                 order.positionSide(),
+                order.makerFeeRatePpm(),
+                order.takerFeeRatePpm(),
                 order.reduceOnly(),
                 order.postOnly(),
                 now,

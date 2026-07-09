@@ -73,7 +73,8 @@ public class ReduceOnlyOrderPruner {
         StringBuilder sql = new StringBuilder("""
                 SELECT o.order_id, o.user_id, o.client_order_id, o.symbol, o.instrument_version, o.side,
                        o.order_type, o.time_in_force, o.price_ticks, o.quantity_steps,
-                       o.remaining_quantity_steps, o.status, o.post_only, o.created_at
+                       o.remaining_quantity_steps, o.status, o.maker_fee_rate_ppm, o.taker_fee_rate_ppm,
+                       o.post_only, o.created_at
                   FROM trading_orders o
                 """);
         List<Object> args = new ArrayList<>();
@@ -109,6 +110,8 @@ public class ReduceOnlyOrderPruner {
                 rs.getLong("quantity_steps"),
                 rs.getLong("remaining_quantity_steps"),
                 OrderStatus.valueOf(rs.getString("status")),
+                rs.getLong("maker_fee_rate_ppm"),
+                rs.getLong("taker_fee_rate_ppm"),
                 rs.getBoolean("post_only"),
                 rs.getTimestamp("created_at").toInstant()), args.toArray());
     }
@@ -136,7 +139,7 @@ public class ReduceOnlyOrderPruner {
         OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.CANCEL, nextTradingSequence("command"),
                 order.orderId(), order.userId(), order.clientOrderId(), order.symbol(), order.instrumentVersion(),
                 order.side(), order.orderType(), order.timeInForce(), order.priceTicks(), order.quantitySteps(),
-                true, order.postOnly(), now, traceId);
+                order.makerFeeRatePpm(), order.takerFeeRatePpm(), true, order.postOnly(), now, traceId);
         enqueue("ORDER", order.orderId(), properties.getKafka().getOrderCommandsTopic(), order.symbol(),
                 OrderCommandType.CANCEL.name(), payload(command), now);
     }
@@ -211,6 +214,8 @@ public class ReduceOnlyOrderPruner {
             long quantitySteps,
             long remainingQuantitySteps,
             OrderStatus status,
+            long makerFeeRatePpm,
+            long takerFeeRatePpm,
             boolean postOnly,
             Instant createdAt) {
     }

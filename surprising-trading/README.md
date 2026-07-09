@@ -247,7 +247,10 @@ Instrument already stores exchange-core-aligned long rule boundaries:
 - `LINEAR_PERPETUAL` order notional = `priceTicks * quantitySteps * notional_multiplier_units`.
 - `INVERSE_PERPETUAL` order face value = `quantitySteps * notional_multiplier_units`.
 - `max_leverage_ppm` and `instrument_risk_brackets` participate in order margin reservation; higher risk brackets lower max leverage and raise the minimum initial-margin rate.
-- `maker_fee_rate_ppm` and `taker_fee_rate_ppm` are not passed into exchange-core. Instrument provides the default, `trading_fee_schedules` can override by user globally or by symbol, and order admission freezes the final rates on `trading_orders`.
+- `maker_fee_rate_ppm` and `taker_fee_rate_ppm` are not passed into exchange-core. Instrument provides
+  the default, `trading_fee_schedules` can override by user globally or by symbol, order admission
+  freezes the final rates on `trading_orders`, and matching copies the taker/maker rates into
+  `OrderCommandEvent` / `MatchTradeEvent` so account settlement does not re-read fee schedules or orders.
 
 The trading Java module remains long-only.
 
@@ -311,7 +314,7 @@ For each `OrderCommandEvent`:
 - `trading_match_results` and `trading_match_trades` are idempotent replay gates. If a result or trade row already exists, the service skips the downstream side effects for that row instead of reapplying order fills, margin release, or outbox writes.
 - Guarded order fill/status updates, margin release, and matching outbox writes must still affect exactly one row. If an overfill guard, inconsistent quantity invariant, missing target row, or outbox write skips a row, the matcher fails and restarts instead of continuing with a mutated in-memory exchange-core book.
 
-The provider uses the real exchange-core order book and matcher event chain, but exchange-core risk processing and built-in fees are disabled. Order entry reserves initial margin before command publication; account-provider migrates filled opening margin into position margin and writes maker/taker `TRADE_FEE` ledger entries from the order fee snapshot. Funding, insurance, and ADL are handled by separate settlement modules.
+The provider uses the real exchange-core order book and matcher event chain, but exchange-core risk processing and built-in fees are disabled. Order entry reserves initial margin before command publication; account-provider migrates filled opening margin into position margin and writes maker/taker `TRADE_FEE` ledger entries from the required fee rates on `MatchTradeEvent`. Funding, insurance, and ADL are handled by separate settlement modules.
 
 ### Order Book Depth
 

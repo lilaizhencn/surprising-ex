@@ -2,7 +2,6 @@ package com.surprising.trading.matching.service;
 
 import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MatchTradeEvent;
-import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.MarketPriceProtection;
 import com.surprising.trading.api.model.OrderBookDepthEvent;
 import com.surprising.trading.api.model.OrderBookDepthUpdateType;
@@ -14,9 +13,9 @@ import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
-import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.matching.config.MatchingProperties;
+import com.surprising.trading.matching.model.MatchedOrderSnapshot;
 import com.surprising.trading.matching.model.MatchingSymbol;
 import com.surprising.trading.matching.repository.MatchingOutboxRepository;
 import com.surprising.trading.matching.repository.MatchingProtectionRepository;
@@ -171,14 +170,12 @@ public class MatchingService {
 
     private List<MatchTradeEvent> trades(OrderCommandEvent command, OrderCommand response, Instant now) {
         List<MatchTradeEvent> trades = new ArrayList<>();
-        Map<Long, Long> makerVersions = new HashMap<>();
-        Map<Long, MarginMode> makerMarginModes = new HashMap<>();
-        Map<Long, PositionSide> makerPositionSides = new HashMap<>();
+        Map<Long, MatchedOrderSnapshot> makerSnapshots = new HashMap<>();
         response.processMatcherEvents(event -> {
             if (event.eventType != MatcherEventType.TRADE) {
                 return;
             }
-            trades.add(toTrade(command, event, now, makerVersions, makerMarginModes, makerPositionSides));
+            trades.add(toTrade(command, event, now, makerSnapshots));
         });
         return trades;
     }
@@ -186,15 +183,9 @@ public class MatchingService {
     private MatchTradeEvent toTrade(OrderCommandEvent command,
                                     MatcherTradeEvent event,
                                     Instant now,
-                                    Map<Long, Long> makerVersions,
-                                    Map<Long, MarginMode> makerMarginModes,
-                                    Map<Long, PositionSide> makerPositionSides) {
-        long makerInstrumentVersion = makerVersions.computeIfAbsent(event.matchedOrderId,
-                resultRepository::orderInstrumentVersion);
-        MarginMode makerMarginMode = makerMarginModes.computeIfAbsent(event.matchedOrderId,
-                resultRepository::orderMarginMode);
-        PositionSide makerPositionSide = makerPositionSides.computeIfAbsent(event.matchedOrderId,
-                resultRepository::orderPositionSide);
+                                    Map<Long, MatchedOrderSnapshot> makerSnapshots) {
+        MatchedOrderSnapshot makerSnapshot = makerSnapshots.computeIfAbsent(event.matchedOrderId,
+                resultRepository::orderSnapshot);
         return new MatchTradeEvent(
                 sequenceRepository.nextSequence("match-trade"),
                 command.commandId(),
@@ -206,10 +197,12 @@ public class MatchingService {
                 command.marginMode(),
                 command.positionSide(),
                 event.matchedOrderId,
-                makerInstrumentVersion,
+                makerSnapshot.instrumentVersion(),
                 event.matchedOrderUid,
-                makerMarginMode,
-                makerPositionSide,
+                makerSnapshot.marginMode(),
+                makerSnapshot.positionSide(),
+                command.takerFeeRatePpm(),
+                makerSnapshot.makerFeeRatePpm(),
                 event.price,
                 event.size,
                 event.activeOrderCompleted,

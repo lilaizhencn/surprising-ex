@@ -384,7 +384,10 @@ Do not point this script at a shared development database. Matching restores ope
 - Account opening fills require an existing non-reduce-only `account_margin_reservations` row. Missing reservations or skipped account margin updates must fail the trade transaction rather than creating uncollateralized positions.
 - Account closing fills may skip order-reservation release only for `reduce_only = TRUE` orders. Non-reduce-only close or flip fills must find the original reservation row; otherwise the account transaction fails.
 - Account `TRADE_PNL` ledger insert/backfill writes are fail-fast. Duplicate trade delivery is handled before settlement by `account_processed_trades(symbol, trade_id)`; ledger conflicts during a new trade transaction indicate inconsistent state.
-- Account maker/taker fees are settled from the side-specific `trading_orders` fee snapshot and written as `TRADE_FEE` with `trade_id`, `order_id`, `symbol`, and `fee_rate_ppm`. Positive ppm rates debit the user; negative ppm rates rebate. Fee ledger insert/backfill writes are fail-fast for the same reason as `TRADE_PNL`.
+- Account maker/taker fees are settled from the required `taker_fee_rate_ppm` / `maker_fee_rate_ppm`
+  values on `trading_match_trades` and written as `TRADE_FEE` with `trade_id`, `order_id`, `symbol`,
+  and `fee_rate_ppm`. Positive ppm rates debit the user; negative ppm rates rebate. Fee ledger
+  insert/backfill writes are fail-fast for the same reason as `TRADE_PNL`.
 - PnL and funding losses may reduce `locked_units` only through locked collateral backed by `account_position_margins`; open-order reservation locks must remain intact. If `account_position_margins` exceeds the releasable locked collateral, treat it as an accounting invariant issue.
 - Account position event outbox rows are written after `account_positions` is updated. Kafka publishing is at-least-once, so clients and downstream consumers should tolerate duplicate position events by `eventId` or `tradeId`.
 - Risk consumes account position events only as scan triggers. It does not trust the event as accounting state; it re-reads positions, balances, deficits, instruments, and mark prices inside the risk transaction before writing snapshots or candidates.

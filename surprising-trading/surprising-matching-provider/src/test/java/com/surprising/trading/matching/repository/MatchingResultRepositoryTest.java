@@ -107,7 +107,7 @@ class MatchingResultRepositoryTest {
                 .thenReturn(1);
 
         assertThat(repository.saveTrade(new MatchTradeEvent(91L, 11L, "BTC-USDT",
-                101L, 1L, 1001L, OrderSide.BUY, 202L, 1L, 2002L, 65_000L, 3L,
+                101L, 1L, 1001L, OrderSide.BUY, 202L, 1L, 2002L, 5L, 2L, 65_000L, 3L,
                 false, false, EVENT_TIME))).isTrue();
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
@@ -127,7 +127,7 @@ class MatchingResultRepositoryTest {
                 .thenReturn(1);
 
         assertThat(repository.saveTrade(new MatchTradeEvent(91L, 11L, "BTC-USDT-260626-C-65000",
-                101L, 1L, 1001L, OrderSide.BUY, 202L, 1L, 2002L, 65_000L, 3L,
+                101L, 1L, 1001L, OrderSide.BUY, 202L, 1L, 2002L, 5L, 2L, 65_000L, 3L,
                 false, false, EVENT_TIME))).isTrue();
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
@@ -145,7 +145,7 @@ class MatchingResultRepositoryTest {
                 .thenReturn(0);
 
         assertThat(repository.saveTrade(new MatchTradeEvent(91L, 11L, "BTC-USDT",
-                101L, 1L, 1001L, OrderSide.BUY, 202L, 1L, 2002L, 65_000L, 3L,
+                101L, 1L, 1001L, OrderSide.BUY, 202L, 1L, 2002L, 5L, 2L, 65_000L, 3L,
                 false, false, EVENT_TIME))).isFalse();
     }
 
@@ -157,7 +157,7 @@ class MatchingResultRepositoryTest {
         when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
 
         repository.applyMakerFill(new MatchTradeEvent(91L, 11L, "BTC-USDT",
-                101L, 1L, 1001L, OrderSide.BUY, 202L, 1L, 2002L, 65_000L, 3L,
+                101L, 1L, 1001L, OrderSide.BUY, 202L, 1L, 2002L, 5L, 2L, 65_000L, 3L,
                 false, false, EVENT_TIME));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
@@ -180,7 +180,7 @@ class MatchingResultRepositoryTest {
                 .thenReturn(0);
 
         assertThatThrownBy(() -> repository.applyMakerFill(new MatchTradeEvent(91L, 11L, "BTC-USDT",
-                101L, 1L, 1001L, OrderSide.BUY, 202L, 1L, 2002L, 65_000L, 3L,
+                101L, 1L, 1001L, OrderSide.BUY, 202L, 1L, 2002L, 5L, 2L, 65_000L, 3L,
                 false, false, EVENT_TIME)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("order fill update");

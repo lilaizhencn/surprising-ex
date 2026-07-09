@@ -744,7 +744,7 @@ class LiquidationServiceTest {
             assertThat(positionSide).isNotNull();
             OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, 8001L, 7001L, userId,
                     "LIQ-" + candidateId, symbol, instrumentVersion, side, OrderType.MARKET,
-                    TimeInForce.IOC, 0L, quantitySteps, marginMode, positionSide, true, false, now, null);
+                    TimeInForce.IOC, 0L, quantitySteps, marginMode, positionSide, 0L, 0L, true, false, now, null);
             commands.add(command);
             return command;
         }

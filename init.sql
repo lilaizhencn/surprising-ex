@@ -1729,6 +1729,8 @@ CREATE TABLE IF NOT EXISTS trading_match_trades (
     maker_user_id           BIGINT NOT NULL,
     maker_margin_mode       TEXT NOT NULL DEFAULT 'CROSS',
     maker_position_side     TEXT NOT NULL DEFAULT 'NET',
+    taker_fee_rate_ppm      BIGINT NOT NULL DEFAULT 0,
+    maker_fee_rate_ppm      BIGINT NOT NULL DEFAULT 0,
     price_ticks             BIGINT NOT NULL,
     quantity_steps          BIGINT NOT NULL,
     taker_order_completed   BOOLEAN NOT NULL,
@@ -1754,11 +1756,30 @@ CREATE TABLE IF NOT EXISTS trading_match_trades (
     CONSTRAINT trading_match_trades_position_side_check CHECK (
         taker_position_side IN ('NET', 'LONG', 'SHORT') AND maker_position_side IN ('NET', 'LONG', 'SHORT')
     ),
+    CONSTRAINT trading_match_trades_fee_rate_check CHECK (
+        taker_fee_rate_ppm BETWEEN -1000000 AND 1000000
+        AND maker_fee_rate_ppm BETWEEN -1000000 AND 1000000
+    ),
     CONSTRAINT trading_match_trades_positive_values CHECK (price_ticks > 0 AND quantity_steps > 0)
 );
 
 ALTER TABLE trading_match_trades
     ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+
+ALTER TABLE trading_match_trades
+    ADD COLUMN IF NOT EXISTS taker_fee_rate_ppm BIGINT NOT NULL DEFAULT 0;
+
+ALTER TABLE trading_match_trades
+    ADD COLUMN IF NOT EXISTS maker_fee_rate_ppm BIGINT NOT NULL DEFAULT 0;
+
+ALTER TABLE trading_match_trades
+    DROP CONSTRAINT IF EXISTS trading_match_trades_fee_rate_check;
+
+ALTER TABLE trading_match_trades
+    ADD CONSTRAINT trading_match_trades_fee_rate_check CHECK (
+        taker_fee_rate_ppm BETWEEN -1000000 AND 1000000
+        AND maker_fee_rate_ppm BETWEEN -1000000 AND 1000000
+    );
 
 UPDATE trading_match_trades t
    SET product_line = r.product_line

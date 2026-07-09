@@ -244,7 +244,10 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `LINEAR_PERPETUAL` 订单 notional = `priceTicks * quantitySteps * notional_multiplier_units`。
 - `INVERSE_PERPETUAL` 订单面值 = `quantitySteps * notional_multiplier_units`。
 - `max_leverage_ppm` 和 `instrument_risk_brackets` 会参与下单保证金冻结；风险档位越高，允许杠杆越低，最低初始保证金率越高。
-- `maker_fee_rate_ppm` 和 `taker_fee_rate_ppm` 不传给 exchange-core。instrument 提供默认费率，`trading_fee_schedules` 可提供用户全局或单 symbol 覆盖，订单接受时会把最终费率固化到 `trading_orders`。
+- `maker_fee_rate_ppm` 和 `taker_fee_rate_ppm` 不传给 exchange-core。instrument 提供默认费率，
+  `trading_fee_schedules` 可提供用户全局或单 symbol 覆盖，订单接受时会把最终费率固化到
+  `trading_orders`，matching 再把 taker/maker 实际费率带入 `OrderCommandEvent` / `MatchTradeEvent`，
+  账户结算不再回查 fee schedule 或订单费率。
 
 所以交易模块 Java 代码仍然保持 long-only。
 
@@ -308,7 +311,7 @@ symbol 在 exchange-core 内注册为 `CURRENCY_EXCHANGE_PAIR`。这是有意设
 - `trading_match_results` 和 `trading_match_trades` 是撮合结果重放幂等门。结果或成交行已存在时，服务会跳过该行后续副作用，不能重复更新订单成交、释放保证金或写 outbox。
 - guarded 订单成交/状态更新、保证金释放和 matching outbox 写入仍然必须影响 1 行。若 overfill guard、数量不变量不一致、目标订单缺失或 outbox 写入导致行数异常，matcher 会失败并走重启恢复，不能在已变更的 exchange-core 内存簿上继续处理。
 
-当前 matching-provider 使用 exchange-core 的真实订单簿和成交事件链，但关闭 exchange-core 内置风险处理和内置手续费。订单入口已接入下单前初始保证金冻结；账户 provider 已接入成交后的开仓保证金迁移，并按订单费率快照写入 maker/taker `TRADE_FEE` ledger。资金费率、保险基金和 ADL 由独立结算模块处理。
+当前 matching-provider 使用 exchange-core 的真实订单簿和成交事件链，但关闭 exchange-core 内置风险处理和内置手续费。订单入口已接入下单前初始保证金冻结；账户 provider 已接入成交后的开仓保证金迁移，并按 `MatchTradeEvent` 必须携带的费率写入 maker/taker `TRADE_FEE` ledger。资金费率、保险基金和 ADL 由独立结算模块处理。
 
 ### 盘口深度
 

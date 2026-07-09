@@ -681,24 +681,6 @@ class AccountRepositoryTest {
     }
 
     @Test
-    void orderFeeSnapshotIsReadFromAcceptedOrder() throws Exception {
-        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
-        when(jdbcTemplate.query(contains("FROM trading_orders"), anyRowMapper(),
-                eq(5001L), eq(1001L), eq("BTC-USDT"))).thenAnswer(invocation -> {
-                    RowMapper<?> mapper = invocation.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.getLong("maker_fee_rate_ppm")).thenReturn(-100L);
-                    when(rs.getLong("taker_fee_rate_ppm")).thenReturn(400L);
-                    return List.of(mapper.mapRow(rs, 0));
-                });
-
-        var snapshot = repository.orderFeeSnapshot(5001L, 1001L, "BTC-USDT");
-
-        assertThat(snapshot.makerFeeRatePpm()).isEqualTo(-100L);
-        assertThat(snapshot.takerFeeRatePpm()).isEqualTo(400L);
-    }
-
-    @Test
     void liquidationFeeContextReadsFrozenAuditRate() throws Exception {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         when(jdbcTemplate.query(contains("FROM liquidation_orders"), anyRowMapper(),

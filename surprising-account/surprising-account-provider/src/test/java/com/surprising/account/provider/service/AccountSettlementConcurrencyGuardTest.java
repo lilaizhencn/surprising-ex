@@ -144,6 +144,8 @@ class AccountSettlementConcurrencyGuardTest {
                 9001L,
                 1L,
                 makerUserId,
+                5L,
+                2L,
                 600_000L,
                 3L,
                 true,

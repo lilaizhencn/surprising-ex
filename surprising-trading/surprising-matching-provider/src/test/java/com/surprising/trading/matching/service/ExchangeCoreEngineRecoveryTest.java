@@ -35,7 +35,7 @@ class ExchangeCoreEngineRecoveryTest {
 
             OrderCommandEvent taker = new OrderCommandEvent(OrderCommandType.PLACE, 2L, 2L, 2002L,
                     null, "BTC-USDT", 1L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
-                    100L, 3L, false, false, Instant.now());
+                    100L, 3L, 2L, 5L, false, false, Instant.now());
             var response = engine.submit(taker, symbol, 100L);
 
             AtomicInteger trades = new AtomicInteger();

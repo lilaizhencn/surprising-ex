@@ -15,7 +15,6 @@ import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.ContractSpec;
 import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.account.provider.model.LiquidationFeeSettlement;
-import com.surprising.account.provider.model.OrderFeeSnapshot;
 import com.surprising.account.provider.model.PositionSettlementState;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
@@ -68,6 +67,8 @@ class AccountServiceTest {
                 9001L,
                 1L,
                 1001L,
+                5L,
+                2L,
                 600_000L,
                 3L,
                 true,
@@ -109,6 +110,8 @@ class AccountServiceTest {
                 9001L,
                 1L,
                 1001L,
+                5L,
+                2L,
                 600_000L,
                 3L,
                 true,
@@ -138,6 +141,8 @@ class AccountServiceTest {
                 9001L,
                 1L,
                 1001L,
+                1_000L,
+                -100L,
                 600_000L,
                 3L,
                 true,
@@ -172,6 +177,8 @@ class AccountServiceTest {
                 9001L,
                 4L,
                 1001L,
+                5L,
+                2L,
                 600_000L,
                 2L,
                 true,
@@ -208,6 +215,8 @@ class AccountServiceTest {
                 9001L,
                 6L,
                 1001L,
+                5L,
+                2L,
                 120L,
                 2L,
                 true,
@@ -513,6 +522,8 @@ class AccountServiceTest {
                 9101L,
                 3L,
                 1001L,
+                800L,
+                -200L,
                 650_000L,
                 4L,
                 true,
@@ -546,7 +557,7 @@ class AccountServiceTest {
     }
 
     @Test
-    void cachesImmutableInstrumentMetadataContractSpecsAndOrderFeeSnapshotsAcrossTrades() {
+    void cachesImmutableInstrumentMetadataAcrossTradesAndUsesEventFeeRates() {
         FakeAccountRepository repository = new FakeAccountRepository();
         repository.feeSnapshots.put(9001L, new OrderFeeSnapshot(2L, 5L));
         repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 5L));
@@ -564,6 +575,8 @@ class AccountServiceTest {
                 9001L,
                 1L,
                 1001L,
+                5L,
+                2L,
                 600_000L,
                 2L,
                 true,
@@ -580,6 +593,8 @@ class AccountServiceTest {
                 9001L,
                 1L,
                 1001L,
+                5L,
+                2L,
                 600_000L,
                 2L,
                 true,
@@ -591,10 +606,6 @@ class AccountServiceTest {
 
         assertThat(repository.instrumentTypeLoads).containsEntry("BTC-USDT:1", 1);
         assertThat(repository.contractSpecLoads).containsEntry("BTC-USDT:1", 1);
-        assertThat(repository.feeSnapshotLoads)
-                .containsEntry(9001L, 1)
-                .containsEntry(9002L, 1)
-                .containsEntry(9003L, 1);
     }
 
     @Test
@@ -675,6 +686,8 @@ class AccountServiceTest {
                 9001L,
                 1L,
                 1001L,
+                5L,
+                2L,
                 600_000L,
                 3L,
                 true,
@@ -691,6 +704,8 @@ class AccountServiceTest {
                 9004L,
                 1L,
                 1001L,
+                5L,
+                2L,
                 30_000L,
                 5L,
                 true,
@@ -786,6 +801,8 @@ class AccountServiceTest {
                 9008L,
                 1L,
                 1001L,
+                5L,
+                2L,
                 600_000L,
                 3L,
                 true,
@@ -833,6 +850,8 @@ class AccountServiceTest {
                 9004L,
                 1L,
                 1001L,
+                5L,
+                2L,
                 610_000L,
                 2L,
                 true,
@@ -878,6 +897,8 @@ class AccountServiceTest {
                 9013L,
                 1L,
                 1001L,
+                5L,
+                2L,
                 610_000L,
                 2L,
                 true,
@@ -920,6 +941,8 @@ class AccountServiceTest {
                 9015L,
                 1L,
                 1001L,
+                5L,
+                2L,
                 610_000L,
                 2L,
                 false,
@@ -936,6 +959,8 @@ class AccountServiceTest {
                 9016L,
                 1L,
                 1003L,
+                5L,
+                2L,
                 611_000L,
                 1L,
                 true,
@@ -975,6 +1000,8 @@ class AccountServiceTest {
                 9011L,
                 1L,
                 1001L,
+                0L,
+                0L,
                 600_000L,
                 2L,
                 true,
@@ -1018,6 +1045,8 @@ class AccountServiceTest {
                 9006L,
                 2L,
                 1001L,
+                5L,
+                2L,
                 90L,
                 8L,
                 true,
@@ -1065,7 +1094,6 @@ class AccountServiceTest {
         private final Map<String, Integer> contractSpecLoads = new HashMap<>();
         private final Map<String, Integer> instrumentTypeLoads = new HashMap<>();
         private final Map<String, Integer> spotSpecLoads = new HashMap<>();
-        private final Map<Long, Integer> feeSnapshotLoads = new HashMap<>();
         private final Map<String, InstrumentType> instrumentTypes = new HashMap<>();
         private final Map<String, SpotInstrumentSpec> spotSpecs = new HashMap<>();
         private final List<AccountType> pnlAccountTypes = new ArrayList<>();
@@ -1142,13 +1170,6 @@ class AccountServiceTest {
             lastSettlementMarkPriceTime = settlementTime;
             lastSettlementPriceWindow = priceWindow;
             return latestMarkPriceUnits(symbol);
-        }
-
-        @Override
-        public OrderFeeSnapshot orderFeeSnapshot(long orderId, long userId, String symbol) {
-            feeSnapshotLoads.merge(orderId, 1, Integer::sum);
-            return Optional.ofNullable(feeSnapshots.get(orderId))
-                    .orElseThrow(() -> new IllegalStateException("missing fee snapshot " + orderId));
         }
 
         @Override
@@ -1873,6 +1894,9 @@ class AccountServiceTest {
         private PositionKey(long userId, String symbol, MarginMode marginMode) {
             this(userId, symbol, marginMode, PositionSide.NET);
         }
+    }
+
+    private record OrderFeeSnapshot(long makerFeeRatePpm, long takerFeeRatePpm) {
     }
 
     private record ProcessedTradeKey(ProductLine productLine, String symbol, long tradeId) {

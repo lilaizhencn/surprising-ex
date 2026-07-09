@@ -82,7 +82,8 @@ public class LiquidationOrderRepository {
         }
         OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, commandId, orderId, userId,
                 clientOrderId, symbol, instrumentVersion, side, OrderType.MARKET, TimeInForce.IOC, 0L, quantitySteps,
-                MarginMode.defaultIfNull(marginMode), PositionSide.defaultIfNull(positionSide), true, false, now, null);
+                MarginMode.defaultIfNull(marginMode), PositionSide.defaultIfNull(positionSide), 0L, 0L, true, false,
+                now, null);
         enqueue("LIQUIDATION_ORDER", event.orderId(), properties.getKafka().getOrderEventsTopic(), symbol,
                 OrderEventType.ACCEPTED.name(), serializer.apply(event), now);
         enqueue("LIQUIDATION_ORDER", orderId, properties.getKafka().getOrderCommandsTopic(), symbol,
@@ -211,7 +212,8 @@ public class LiquidationOrderRepository {
                                                                     OrderSide closeSide) {
         return jdbcTemplate.query("""
                 SELECT order_id, user_id, client_order_id, symbol, instrument_version, side, order_type,
-                       time_in_force, price_ticks, quantity_steps, remaining_quantity_steps, margin_mode, position_side, status, post_only
+                       time_in_force, price_ticks, quantity_steps, remaining_quantity_steps, margin_mode,
+                       position_side, status, maker_fee_rate_ppm, taker_fee_rate_ppm, post_only
                   FROM trading_orders
                  WHERE user_id = ?
                    AND product_line = ?
@@ -239,6 +241,8 @@ public class LiquidationOrderRepository {
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 PositionSide.fromNullableDbValue(rs.getString("position_side")),
                 OrderStatus.valueOf(rs.getString("status")),
+                rs.getLong("maker_fee_rate_ppm"),
+                rs.getLong("taker_fee_rate_ppm"),
                 rs.getBoolean("post_only")), userId, currentProductLine().name(), symbol,
                 MarginMode.defaultIfNull(marginMode).name(),
                 PositionSide.defaultIfNull(positionSide).name(), instrumentVersion, closeSide.name());
@@ -279,7 +283,7 @@ public class LiquidationOrderRepository {
                 sequenceRepository.nextTradingSequence("command"), order.orderId(), order.userId(),
                 order.clientOrderId(), order.symbol(), order.instrumentVersion(), order.side(), order.orderType(),
                 order.timeInForce(), order.priceTicks(), order.quantitySteps(), order.marginMode(),
-                order.positionSide(), true,
+                order.positionSide(), order.makerFeeRatePpm(), order.takerFeeRatePpm(), true,
                 order.postOnly(), now, null);
         enqueue("ORDER", order.orderId(), properties.getKafka().getOrderCommandsTopic(), order.symbol(),
                 OrderCommandType.CANCEL.name(), serializer.apply(command), now);
@@ -374,6 +378,8 @@ public class LiquidationOrderRepository {
             MarginMode marginMode,
             PositionSide positionSide,
             OrderStatus status,
+            long makerFeeRatePpm,
+            long takerFeeRatePpm,
             boolean postOnly) {
         private OpenReduceOnlyOrder {
             marginMode = MarginMode.defaultIfNull(marginMode);

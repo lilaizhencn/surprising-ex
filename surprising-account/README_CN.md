@@ -20,7 +20,7 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - 开仓均价使用 `entryPriceTicks`。
 - 持仓保证金记录在 `account_position_margins.margin_units`。
 - 已实现盈亏按 `realizedPnlUnits` 累计，单位是 instrument 的结算资产最小单位。U 本位线性合约使用 tick-step notional；币本位反向合约使用合约面值和入场/出场价格倒数公式。
-- 交易手续费使用成交双方各自订单上的 `maker_fee_rate_ppm` / `taker_fee_rate_ppm` 快照。正费率扣用户余额，负费率给用户返佣；instrument version 只提供默认费率。
+- 交易手续费使用 `MatchTradeEvent` 必须携带的 `takerFeeRatePpm` / `makerFeeRatePpm`。正费率扣用户余额，负费率给用户返佣；账户结算热路径不再回查 `trading_orders` 费率。
 - 强平费使用 `liquidation_orders.liquidation_fee_rate_ppm` 冻结费率。账户结算只扣实际可从用户保证金中收上的金额，并把已收金额发布给保险基金。
 - 当亏损超过 `availableUnits + lockedUnits` 时，超额亏损写入 `account_deficits`，不让余额列变成负数。
 
@@ -168,7 +168,6 @@ surprising:
       send-timeout: 3s
     cache:
       contract-spec-max-entries: 4096
-      order-fee-snapshot-max-entries: 200000
 ```
 
 启动独立产品线实例时，把 `product-line` 设置为 `SPOT`、`LINEAR_PERPETUAL`、`LINEAR_DELIVERY` 或 `OPTION`。`product-topics-enabled=false` 时仍可使用 legacy topic。
@@ -176,7 +175,6 @@ surprising:
 本地缓存只用于不可变读快照：
 
 - `contract-spec-max-entries` 按 `(symbol, instrumentVersion)` 缓存合约数学配置。
-- `order-fee-snapshot-max-entries` 缓存订单接受时已经快照下来的 maker/taker 费率。
 
 余额、持仓、保证金冻结、成交幂等、ledger 和 outbox 状态不会缓存，仍然以 PostgreSQL 为准。
 

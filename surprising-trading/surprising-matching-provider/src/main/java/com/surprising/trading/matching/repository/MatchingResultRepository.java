@@ -8,6 +8,7 @@ import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.matching.config.MatchingProperties;
+import com.surprising.trading.matching.model.MatchedOrderSnapshot;
 import java.sql.Timestamp;
 import java.time.Instant;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -84,6 +85,24 @@ public class MatchingResultRepository {
         return PositionSide.fromNullableDbValue(positionSide);
     }
 
+    public MatchedOrderSnapshot orderSnapshot(long orderId) {
+        return jdbcTemplate.query("""
+                SELECT instrument_version,
+                       margin_mode,
+                       position_side,
+                       maker_fee_rate_ppm,
+                       taker_fee_rate_ppm
+                  FROM trading_orders
+                 WHERE order_id = ?
+                """, (rs, rowNum) -> new MatchedOrderSnapshot(
+                rs.getLong("instrument_version"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                PositionSide.fromNullableDbValue(rs.getString("position_side")),
+                rs.getLong("maker_fee_rate_ppm"),
+                rs.getLong("taker_fee_rate_ppm")), orderId).stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("order snapshot not found for order " + orderId));
+    }
+
     public boolean saveResult(MatchResultEvent event) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO trading_match_results (
@@ -103,15 +122,16 @@ public class MatchingResultRepository {
                     trade_id, command_id, product_line, symbol, taker_order_id, taker_instrument_version,
                     taker_user_id, taker_side, taker_margin_mode, taker_position_side,
                     maker_order_id, maker_instrument_version,
-                    maker_user_id, maker_margin_mode, maker_position_side, price_ticks, quantity_steps,
+                    maker_user_id, maker_margin_mode, maker_position_side,
+                    taker_fee_rate_ppm, maker_fee_rate_ppm, price_ticks, quantity_steps,
                     taker_order_completed, maker_order_completed, trace_id, event_time, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
                 ON CONFLICT (product_line, symbol, trade_id) DO NOTHING
                 """, trade.tradeId(), trade.commandId(), productLine(), trade.symbol(), trade.takerOrderId(),
                 trade.takerInstrumentVersion(), trade.takerUserId(), trade.takerSide().name(),
                 trade.takerMarginMode().name(), trade.takerPositionSide().name(), trade.makerOrderId(),
                 trade.makerInstrumentVersion(), trade.makerUserId(), trade.makerMarginMode().name(),
-                trade.makerPositionSide().name(), trade.priceTicks(),
+                trade.makerPositionSide().name(), trade.takerFeeRatePpm(), trade.makerFeeRatePpm(), trade.priceTicks(),
                 trade.quantitySteps(), trade.takerOrderCompleted(), trade.makerOrderCompleted(),
                 trade.traceId(), Timestamp.from(trade.eventTime()));
         return rows == 1;

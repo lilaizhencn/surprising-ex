@@ -24,7 +24,6 @@ import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.ContractSpec;
 import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.account.provider.model.LiquidationFeeSettlement;
-import com.surprising.account.provider.model.OrderFeeSnapshot;
 import com.surprising.account.provider.model.PositionChange;
 import com.surprising.account.provider.model.PositionSettlementState;
 import com.surprising.account.provider.model.PositionState;
@@ -67,8 +66,8 @@ public class AccountService {
     private final BoundedLocalCache<ContractSpecKey, ContractSpec> contractSpecCache;
     private final BoundedLocalCache<ContractSpecKey, InstrumentType> instrumentTypeCache;
     private final BoundedLocalCache<ContractSpecKey, SpotInstrumentSpec> spotInstrumentSpecCache;
-    private final BoundedLocalCache<OrderFeeSnapshotKey, OrderFeeSnapshot> orderFeeSnapshotCache;
-    private final BoundedLocalCache<OrderFeeSnapshotKey, Optional<LiquidationFeeContext>> liquidationFeeContextCache;
+    private final BoundedLocalCache<LiquidationFeeContextKey, Optional<LiquidationFeeContext>>
+            liquidationFeeContextCache;
 
     public AccountService(AccountRepository accountRepository, PositionCalculator positionCalculator) {
         this(accountRepository, positionCalculator, null, new AccountProperties(), null);
@@ -91,7 +90,6 @@ public class AccountService {
         this.contractSpecCache = new BoundedLocalCache<>(cacheProperties.getContractSpecMaxEntries());
         this.instrumentTypeCache = new BoundedLocalCache<>(cacheProperties.getInstrumentTypeMaxEntries());
         this.spotInstrumentSpecCache = new BoundedLocalCache<>(cacheProperties.getSpotInstrumentSpecMaxEntries());
-        this.orderFeeSnapshotCache = new BoundedLocalCache<>(cacheProperties.getOrderFeeSnapshotMaxEntries());
         this.liquidationFeeContextCache = new BoundedLocalCache<>(
                 cacheProperties.getLiquidationFeeContextMaxEntries());
     }
@@ -504,20 +502,21 @@ public class AccountService {
         if (takerInstrumentType == InstrumentType.SPOT) {
             applySpotTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
                     trade.takerInstrumentVersion(), trade.takerSide(), trade.priceTicks(), trade.quantitySteps(),
-                    trade.takerOrderCompleted(), true, trade.eventTime());
+                    trade.takerOrderCompleted(), trade.takerFeeRatePpm(), "TAKER_FEE", trade.eventTime());
             applySpotTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
                     trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.priceTicks(),
-                    trade.quantitySteps(), trade.makerOrderCompleted(), false, trade.eventTime());
+                    trade.quantitySteps(), trade.makerOrderCompleted(), trade.makerFeeRatePpm(), "MAKER_FEE",
+                    trade.eventTime());
             return true;
         }
         applyTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
                 trade.takerInstrumentVersion(), trade.takerSide(), trade.takerMarginMode(), trade.takerPositionSide(),
                 trade.priceTicks(), trade.quantitySteps(),
-                trade.takerOrderCompleted(), true, trade.eventTime(), traceId);
+                trade.takerOrderCompleted(), trade.takerFeeRatePpm(), "TAKER_FEE", trade.eventTime(), traceId);
         applyTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
                 trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.makerMarginMode(),
                 trade.makerPositionSide(), trade.priceTicks(), trade.quantitySteps(),
-                trade.makerOrderCompleted(), false, trade.eventTime(), traceId);
+                trade.makerOrderCompleted(), trade.makerFeeRatePpm(), "MAKER_FEE", trade.eventTime(), traceId);
         return true;
     }
 
@@ -727,13 +726,12 @@ public class AccountService {
                                     long priceTicks,
                                     long quantitySteps,
                                     boolean orderCompleted,
-                                    boolean taker,
+                                    long feeRatePpm,
+                                    String feeReason,
                                     Instant eventTime) {
         SpotInstrumentSpec spec = spotInstrumentSpec(symbol, instrumentVersion);
-        OrderFeeSnapshot feeSnapshot = orderFeeSnapshot(orderId, userId, symbol);
-        long feeRatePpm = taker ? feeSnapshot.takerFeeRatePpm() : feeSnapshot.makerFeeRatePpm();
         accountRepository.settleSpotTradeSide(userId, orderId, tradeId, symbol, side, priceTicks,
-                quantitySteps, spec, feeRatePpm, taker ? "TAKER_FEE" : "MAKER_FEE", orderCompleted, eventTime);
+                quantitySteps, spec, feeRatePpm, feeReason, orderCompleted, eventTime);
     }
 
     private PositionResponse applyTradeSide(long tradeId,
@@ -747,7 +745,8 @@ public class AccountService {
                                             long priceTicks,
                                             long quantitySteps,
                                             boolean orderCompleted,
-                                            boolean taker,
+                                            long feeRatePpm,
+                                            String feeReason,
                                             Instant eventTime,
                                             String traceId) {
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
@@ -781,11 +780,9 @@ public class AccountService {
                         actualMarginUnits, orderCompleted, eventTime);
             }
         }
-        OrderFeeSnapshot feeSnapshot = orderFeeSnapshot(orderId, userId, symbol);
-        long feeRatePpm = taker ? feeSnapshot.takerFeeRatePpm() : feeSnapshot.makerFeeRatePpm();
         long feeDeltaUnits = TradeFeeMath.feeDeltaUnits(fillSpec, priceTicks, quantitySteps, feeRatePpm);
         accountRepository.settleTradeFee(derivativeAccountType(fillSpec), userId, fillSpec.settleAsset(),
-                orderId, tradeId, feeDeltaUnits, taker ? "TAKER_FEE" : "MAKER_FEE", feeRatePpm, symbol,
+                orderId, tradeId, feeDeltaUnits, feeReason, feeRatePpm, symbol,
                 normalizedMarginMode, eventTime);
         if (closeSteps > 0) {
             settleLiquidationFeeIfNeeded(tradeId, orderId, userId, symbol, normalizedMarginMode, fillSpec,
@@ -875,13 +872,8 @@ public class AccountService {
                 key -> accountRepository.spotInstrumentSpec(key.symbol(), key.instrumentVersion()));
     }
 
-    private OrderFeeSnapshot orderFeeSnapshot(long orderId, long userId, String symbol) {
-        return orderFeeSnapshotCache.get(new OrderFeeSnapshotKey(orderId, userId, symbol),
-                key -> accountRepository.orderFeeSnapshot(key.orderId(), key.userId(), key.symbol()));
-    }
-
     private Optional<LiquidationFeeContext> liquidationFeeContext(long orderId, long userId, String symbol) {
-        return liquidationFeeContextCache.get(new OrderFeeSnapshotKey(orderId, userId, symbol),
+        return liquidationFeeContextCache.get(new LiquidationFeeContextKey(orderId, userId, symbol),
                 key -> accountRepository.liquidationFeeContext(key.orderId(), key.userId(), key.symbol()));
     }
 
@@ -1047,7 +1039,7 @@ public class AccountService {
     private record ContractSpecKey(String symbol, long instrumentVersion) {
     }
 
-    private record OrderFeeSnapshotKey(long orderId, long userId, String symbol) {
+    private record LiquidationFeeContextKey(long orderId, long userId, String symbol) {
     }
 
     private static final class BoundedLocalCache<K, V> {
