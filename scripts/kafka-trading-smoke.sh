@@ -93,7 +93,6 @@ start_infra() {
     if command -v brew >/dev/null 2>&1; then
       brew services start postgresql@18 >/dev/null 2>&1 || true
       brew services start kafka >/dev/null 2>&1 || true
-      brew services start redis >/dev/null 2>&1 || true
     fi
     return
   fi

@@ -83,14 +83,13 @@ psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f in
 ```
 
 本仓库是新项目，数据库 schema 统一放在根目录 [init.sql](init.sql)，不使用 Flyway。
-本地集成测试统一使用 Homebrew PostgreSQL/Kafka/Redis，标准端口是 `localhost:5432`、`localhost:9092`、`localhost:6379`；详细配置见 [docs/local-homebrew-infra.md](docs/local-homebrew-infra.md)。
+本地集成测试统一使用 Homebrew PostgreSQL/Kafka，标准端口是 `localhost:5432`、`localhost:9092`；详细配置见 [docs/local-homebrew-infra.md](docs/local-homebrew-infra.md)。
 
 ## 本地启动顺序
 
 ```bash
 brew services start postgresql@18
 brew services start kafka
-brew services start redis
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
 mvn -pl :surprising-instrument-provider -am spring-boot:run

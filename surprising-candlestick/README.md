@@ -197,7 +197,7 @@ Consumer group caution:
 
 - If every WebSocket node must push to its own connected clients, do not put all WebSocket nodes in one shared consumer group unless you have a shared subscription/fanout layer.
 - A shared consumer group delivers each Kafka record to only one WebSocket node.
-- Common choices are either one unique consumer group per WebSocket node, or one market-data fanout service that consumes Kafka once and redistributes through Redis/NATS/internal pub-sub.
+- Common choices are either one unique consumer group per WebSocket node, or one market-data fanout service that consumes Kafka once and forwards updates through NATS/internal pub-sub.
 
 Hot-symbol push control:
 
@@ -240,7 +240,6 @@ Run from repository root:
 ```bash
 brew services start postgresql@18
 brew services start kafka
-brew services start redis
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
 mvn -pl :surprising-candlestick-provider -am spring-boot:run

@@ -83,14 +83,13 @@ psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f in
 ```
 
 This is a new project, so all initial schema is kept in root [init.sql](init.sql). Flyway is not used.
-Local integration tests use Homebrew PostgreSQL/Kafka/Redis on `localhost:5432`, `localhost:9092`, and `localhost:6379`; see [docs/local-homebrew-infra.md](docs/local-homebrew-infra.md).
+Local integration tests use Homebrew PostgreSQL/Kafka on `localhost:5432` and `localhost:9092`; see [docs/local-homebrew-infra.md](docs/local-homebrew-infra.md).
 
 ## Local Startup Order
 
 ```bash
 brew services start postgresql@18
 brew services start kafka
-brew services start redis
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
 mvn -pl :surprising-instrument-provider -am spring-boot:run

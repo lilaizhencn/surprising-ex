@@ -328,7 +328,7 @@
 
       <rect x="30" y="35" width="2940" height="1815" rx="18" class="lane"></rect>
       <text x="60" y="80" class="lane-title">全链路交易主路径</text>
-      <text x="60" y="112" class="lane-note">关键原则：用户请求只在 order/account/risk 等服务落库；跨服务通信走 Outbox + Kafka；资金/持仓以 PostgreSQL 事务为准，Redis/缓存不得作为资金真相。</text>
+      <text x="60" y="112" class="lane-note">关键原则：用户请求只在 order/account/risk 等服务落库；跨服务通信走 Outbox + Kafka；资金/持仓以 PostgreSQL 事务为准，缓存不得作为资金真相。</text>
 
       <rect x="55" y="135" width="2920" height="560" rx="14" class="lane"></rect>
       <text x="75" y="170" class="lane-title">1. 用户下单到 orderCommand 进入撮合</text>

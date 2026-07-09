@@ -195,7 +195,7 @@ Consumer group 注意事项：
 
 - 如果每个 WebSocket 节点都需要给自己连接的客户端推送数据，不要让所有 WebSocket 节点共用同一个 consumer group，除非你另有共享订阅/转发层。
 - 同一个 consumer group 下，一条 Kafka 消息只会被其中一个 WebSocket 节点消费。
-- 常见做法是每个 WebSocket 节点使用独立 consumer group，或者由一个行情 fanout 服务消费 Kafka 后，再通过 Redis/NATS/内部 pub-sub 分发给各 WebSocket 节点。
+- 常见做法是每个 WebSocket 节点使用独立 consumer group，或者由一个行情 fanout 服务消费 Kafka 后，再通过 NATS/内部 pub-sub 分发给各 WebSocket 节点。
 
 热门合约推送控制：
 
@@ -238,7 +238,6 @@ Kafka 消息示例：
 ```bash
 brew services start postgresql@18
 brew services start kafka
-brew services start redis
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
 mvn -pl :surprising-candlestick-provider -am spring-boot:run

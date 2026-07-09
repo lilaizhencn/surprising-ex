@@ -328,7 +328,7 @@ surprising.perp.liquidation.candidates.v1
 更常见的做法：
 
 - Kafka 按 `symbol` 分区。
-- 聚合状态放在内存、RocksDB、Redis、Kafka Streams/Flink state store。
+- 聚合状态放在内存、RocksDB 或 Kafka Streams/Flink state store。
 - DB/ClickHouse/Timescale 主要做最终或准实时落盘。
 - 每笔成交带 `tradeId/sequence/offset`，支持幂等和重放。
 - K 线计算和 WebSocket 推送分层。

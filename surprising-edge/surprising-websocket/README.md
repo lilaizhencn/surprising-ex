@@ -173,7 +173,7 @@ surprising:
 
 The default `allowed-origins: ["*"]` is convenient for local development. Production should use exact HTTPS origins.
 
-For very large public fanout, add an internal pub/sub layer such as Redis, NATS, or a dedicated market-data fanout tier later. The current design is intentionally simple and correct for horizontal WebSocket pods because Kafka already carries the authoritative event stream.
+For very large public fanout, add an internal pub/sub layer such as NATS or a dedicated market-data fanout tier later. The current design is intentionally simple and correct for horizontal WebSocket pods because Kafka already carries the authoritative event stream.
 
 ## Operations
 

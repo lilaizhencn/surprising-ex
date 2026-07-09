@@ -173,7 +173,7 @@ surprising:
 
 默认 `allowed-origins: ["*"]` 方便本地开发。生产环境应配置精确 HTTPS Origin。
 
-如果未来公共行情推送规模非常大，可以再加 Redis、NATS 或独立 market-data fanout 层。当前设计先保持简单和正确：Kafka 保存权威事件流，每个 WebSocket 节点做本地 fanout。
+如果未来公共行情推送规模非常大，可以再加 NATS 或独立 market-data fanout 层。当前设计先保持简单和正确：Kafka 保存权威事件流，每个 WebSocket 节点做本地 fanout。
 
 ## 运维注意事项
 

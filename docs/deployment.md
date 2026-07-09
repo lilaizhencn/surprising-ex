@@ -314,12 +314,11 @@ Set `RUN_MAVEN=true` to run `mvn -q test` after the database checks. Set `PG_BIN
 
 ## Kafka Trading Smoke
 
-Run the real process-level order -> matching -> account smoke against the local Homebrew PostgreSQL/Kafka/Redis instances:
+Run the real process-level order -> matching -> account smoke against the local Homebrew PostgreSQL/Kafka instances:
 
 ```bash
 brew services start postgresql@18
 brew services start kafka
-brew services start redis
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 PRODUCT_LINES=LINEAR_PERPETUAL INCLUDE_LEGACY_PERP_TOPICS=false ./scripts/create-topics.sh
 ```

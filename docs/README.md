@@ -13,7 +13,7 @@ stay under `/tmp` unless they are promoted into the current consolidated report.
 - [Four Product-Line Funds and Performance Report](full-chain-funds-performance-report.md): consolidated latest high-concurrency report.
 - [Matching Symbol Sharding and Capacity Notes](matching-symbol-sharding-and-capacity_CN.md): exchange-core Disruptor and symbol shard behavior.
 - [Perpetual Contract Tutorial and Implementation Notes](perpetual-contract-tutorial_CN.md): user-facing perpetual concepts mapped to this codebase.
-- [Local Homebrew Middleware](local-homebrew-infra.md): local PostgreSQL/Kafka/Redis setup.
+- [Local Homebrew Middleware](local-homebrew-infra.md): local PostgreSQL/Kafka setup.
 - [Trading System Architecture Diagram](trading-system-architecture-fullscreen_CN.html): fullscreen architecture walkthrough.
 
 ## Current Runtime Shape
