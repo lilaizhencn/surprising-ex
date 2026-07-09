@@ -2792,6 +2792,12 @@ public class AccountRepository {
                                             MarginMode marginMode,
                                             long amountUnits,
                                             Instant now) {
+        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        Optional<Long> availableDebitFastPath = tryApplyLegacyAvailableDebitFastPath(
+                userId, asset, normalizedMarginMode, amountUnits, now);
+        if (availableDebitFastPath.isPresent()) {
+            return availableDebitFastPath.get();
+        }
         jdbcTemplate.update("""
                 INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
                 VALUES (?, ?, 0, 0, ?)
@@ -2802,8 +2808,7 @@ public class AccountRepository {
                 VALUES (?, ?, 0, ?)
                 ON CONFLICT (user_id, asset) DO NOTHING
                 """, userId, asset, Timestamp.from(now));
-        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
-        Optional<Long> availableDebitFastPath = tryApplyLegacyAvailableDebitFastPath(
+        availableDebitFastPath = tryApplyLegacyAvailableDebitFastPath(
                 userId, asset, normalizedMarginMode, amountUnits, now);
         if (availableDebitFastPath.isPresent()) {
             return availableDebitFastPath.get();
@@ -2854,6 +2859,12 @@ public class AccountRepository {
                                              MarginMode marginMode,
                                              long amountUnits,
                                              Instant now) {
+        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        Optional<Long> availableDebitFastPath = tryApplyProductAvailableDebitFastPath(
+                accountType, userId, asset, normalizedMarginMode, amountUnits, now);
+        if (availableDebitFastPath.isPresent()) {
+            return availableDebitFastPath.get();
+        }
         jdbcTemplate.update("""
                 INSERT INTO account_product_balances (
                     account_type, user_id, asset, available_units, locked_units, updated_at
@@ -2865,8 +2876,7 @@ public class AccountRepository {
                 VALUES (?, ?, ?, 0, ?)
                 ON CONFLICT (account_type, user_id, asset) DO NOTHING
                 """, accountType.name(), userId, asset, Timestamp.from(now));
-        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
-        Optional<Long> availableDebitFastPath = tryApplyProductAvailableDebitFastPath(
+        availableDebitFastPath = tryApplyProductAvailableDebitFastPath(
                 accountType, userId, asset, normalizedMarginMode, amountUnits, now);
         if (availableDebitFastPath.isPresent()) {
             return availableDebitFastPath.get();
