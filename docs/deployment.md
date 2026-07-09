@@ -2,30 +2,26 @@
 
 ## Kafka Topics
 
-Create the perpetual trade input topic with enough partitions for your active symbols and expected throughput.
+Use the repository script for topic creation. It is product-line aware and creates only the requested
+product-line topics when `PRODUCT_LINES` is provided:
 
 ```bash
-kafka-topics.sh --bootstrap-server localhost:9092 \
-  --create --if-not-exists \
-  --topic surprising.instrument.events.v1 \
-  --partitions 24 \
-  --replication-factor 3
-
-kafka-topics.sh --bootstrap-server localhost:9092 \
-  --create --if-not-exists \
-  --topic surprising.perp.trade.events.v1 \
-  --partitions 24 \
-  --replication-factor 3
-
-kafka-topics.sh --bootstrap-server localhost:9092 \
-  --create --if-not-exists \
-  --topic surprising.perp.candle.events.v1 \
-  --partitions 24 \
-  --replication-factor 3
+PRODUCT_LINES=LINEAR_PERPETUAL \
+INCLUDE_SHARED_TOPICS=true \
+INCLUDE_LEGACY_PERP_TOPICS=false \
+./scripts/create-topics.sh
 ```
 
-For local Docker Compose, use replication factor `1`.
-The repository script `scripts/create-topics.sh` creates the full topic set, including `surprising.account.position.events.v1` for private position pushes and risk scan triggers, `surprising.risk.account.events.v1` / `surprising.risk.position.events.v1` for backend-calculated private risk/PnL pushes, and `surprising.account.liquidation-fee.events.v1` for actual liquidation-fee credits to the insurance fund.
+Without `PRODUCT_LINES`, `scripts/create-topics.sh` creates the full product-topic set. Shared topics
+include `surprising.instrument.events.v1`, `surprising.account.position.events.v1`,
+`surprising.risk.account.events.v1`, `surprising.risk.position.events.v1`, and
+`surprising.account.liquidation-fee.events.v1`.
+
+Topic creation is idempotent; it does not require deleting and recreating topics on every run. Local
+test scripts may use `RESET_KAFKA=true` to remove stale local topics/offsets, but do not use topic
+delete/recreate as a shared-environment or production data-clearing strategy. For clean tests on a
+shared Kafka cluster, use isolated topic names or consumer groups and short retention on dedicated
+test topics.
 
 ## Java Runtime
 
@@ -78,9 +74,9 @@ PRODUCT_LINE=OPTION PORT_OFFSET=200 ./scripts/start-product-line-providers.sh
 PRODUCT_LINE=OPTION PORT_OFFSET=200 ACTION=stop ./scripts/start-product-line-providers.sh
 ```
 
-`PORT_OFFSET` is added to each provider's default port. For example, trading-entry/matching/account/margin-ops use `9084/9085/9086/9088` for `LINEAR_PERPETUAL`, `9184/9185/9186/9188` for `LINEAR_DELIVERY`, and `9284/9285/9286/9288` for `OPTION`. Standalone split-mode risk still uses base port `9087`.
+`PORT_OFFSET` is added to each provider's default port. For example, price/trading-entry/matching/account/margin-ops/edge use `9082/9084/9085/9086/9088/9094` for `LINEAR_PERPETUAL`, `9182/9184/9185/9186/9188/9194` for `LINEAR_DELIVERY`, and `9282/9284/9285/9286/9288/9294` for `OPTION`. Standalone split-mode mark price, risk, funding, insurance, ADL, WebSocket, gateway, and trigger providers keep their own base ports.
 
-The startup script sets product-line Kafka topic routing, product-specific consumer groups, unique client ids, and unique coordination node ids where a provider needs them. Index price, mark price, risk, liquidation, and funding are skipped automatically for `SPOT`; funding is also skipped for delivery and option product lines. Use `BUILD_SERVICES=true` when jars are not already built, `SERVICES="order matching account"` for a subset, and `WAIT_HEALTH=false` for CI environments where Actuator health is not exposed.
+The startup script sets product-line Kafka topic routing, product-specific consumer groups, unique client ids, and unique coordination node ids where a provider needs them. Price, margin-ops, and funding-only work are skipped automatically when the product line does not need them. Use `BUILD_SERVICES=true` when jars are not already built, `SERVICES="trading-entry matching account"` for a subset, and `WAIT_HEALTH=false` for CI environments where Actuator health is not exposed.
 
 For Kubernetes, systemd, or another process manager, use the same environment pattern instead of the script:
 
@@ -249,18 +245,15 @@ Recommended production settings:
 
 1. Start PostgreSQL and Kafka.
 2. Apply `init.sql`.
-3. Create Kafka topics with `scripts/create-topics.sh`.
+3. Create Kafka topics with `scripts/create-topics.sh`; pass `PRODUCT_LINES=<line>` when starting only one product line.
 4. Start instrument providers.
 5. Start candlestick providers.
-6. Start index price providers.
-7. Start mark price providers after index, book ticker, trade, and funding-rate topics are available.
-8. Start funding providers after mark price tables have fresh data.
-9. Start order, matching, account, risk, and liquidation providers.
-10. Start insurance providers after account tables are initialized and the fund is seeded.
-11. Start ADL providers after account, liquidation, and insurance providers.
-12. Start `surprising-edge-provider`, or start WebSocket/fanout and gateway providers separately when WebSocket needs independent scaling.
-13. If split, start gateway providers after the internal REST services they expose are reachable.
-14. Start market-maker providers last. They should see healthy order, matching, account, mark, and gateway services before `surprising.market-maker.engine.enabled=true` is rolled out.
+6. Start `surprising-price-provider`, or start index and mark price providers separately.
+7. Start `surprising-trading-entry-provider`, matching, account, and `surprising-margin-ops-provider`.
+8. If split, start funding after mark price tables have fresh data, insurance after account tables are initialized and the fund is seeded, and ADL after account/liquidation/insurance are healthy.
+9. Start `surprising-edge-provider`, or start WebSocket/fanout and gateway providers separately when WebSocket needs independent scaling.
+10. If split, start gateway providers after the internal REST services they expose are reachable.
+11. Start market-maker providers last. They should see healthy order, matching, account, mark, and gateway services before `surprising.market-maker.engine.enabled=true` is rolled out.
 
 ## Operational Kill Switches
 
@@ -328,7 +321,7 @@ brew services start postgresql@18
 brew services start kafka
 brew services start redis
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
-./scripts/create-topics.sh
+PRODUCT_LINES=LINEAR_PERPETUAL INCLUDE_LEGACY_PERP_TOPICS=false ./scripts/create-topics.sh
 ```
 
 ```bash
@@ -347,8 +340,8 @@ The basic script:
 
 - uses local middleware by default and does not start Docker middleware;
 - creates an isolated database named `surprising_smoke_<run>` by default, then applies root `init.sql`;
-- creates all topics through `scripts/create-topics.sh`;
-- packages and starts order, matching, and account providers;
+- creates required topics through `scripts/create-topics.sh`;
+- packages and starts the required trading, matching, account, edge, and supporting providers for the selected flow;
 - funds a maker and taker through the account admin REST API;
 - submits crossing REST orders, waits for exchange-core matching, and waits for account Kafka settlement;
 - republishes the same match-trade payload to verify `(symbol, trade_id)` account idempotency.

@@ -42,15 +42,15 @@ To understand the project architecture and implementation details, read the Surp
 
 ## Module Documentation
 
+- [Docs index](docs/README.md)
+- [Deployment guide](docs/deployment.md)
+- [Database design](docs/database.md)
 - [Product-line split and delivery/options plan](docs/product-line-split-plan.md)
 - [Product-line funds conservation and account reconciliation](docs/product-line-testing-and-funds-reconciliation.md)
-- [Order API completion and full-chain stress report](docs/order-api-production-test-report.md)
-- [Market-maker provider continuous full-stack smoke](docs/market-maker-provider-continuous-report.md)
-- [Market-maker provider scheduled engine smoke](docs/market-maker-provider-engine-report.md)
-- [Market-maker scheduled engine account-restart fault smoke](docs/market-maker-provider-engine-fault-report.md)
-- [Market-maker reference-market WebSocket smoke](docs/market-maker-reference-market-report.md)
-- [Market-maker reference-market account-restart fault smoke](docs/market-maker-reference-market-fault-report.md)
-- [Market-maker reference-market 180s sustained smoke](docs/market-maker-reference-market-sustained-report.md)
+- [Full-chain test checklist](docs/full-chain-test-plan_CN.md)
+- [Four product-line funds and performance report](docs/full-chain-funds-performance-report.md)
+- [Matching symbol sharding and capacity notes](docs/matching-symbol-sharding-and-capacity_CN.md)
+- [Perpetual contract tutorial and implementation notes](docs/perpetual-contract-tutorial_CN.md)
 - [surprising-candlestick](surprising-candlestick/README.md)
 - [surprising-instrument](surprising-instrument/README.md)
 - [surprising-price](surprising-price/README.md)
@@ -97,8 +97,7 @@ psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f in
 ./scripts/create-topics.sh
 mvn -pl :surprising-instrument-provider -am spring-boot:run
 mvn -pl :surprising-candlestick-provider -am spring-boot:run
-mvn -pl :surprising-index-price-provider -am spring-boot:run
-mvn -pl :surprising-mark-price-provider -am spring-boot:run
+mvn -pl :surprising-price-provider -am spring-boot:run
 mvn -pl :surprising-trading-entry-provider -am spring-boot:run
 JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED" \
 mvn -pl :surprising-matching-provider -am spring-boot:run
@@ -112,8 +111,8 @@ Ports:
 
 - `9080`: instrument configuration service.
 - `9081`: candlestick service.
-- `9082`: index price and FX service.
-- `9083`: mark price service.
+- `9082`: combined price service for index price, mark price, and FX; in split mode this is the index price service.
+- `9083`: mark price service in split mode.
 - `9084`: trading-entry combined service for order entry and trigger orders.
 - `9085`: exchange-core matching service.
 - `9086`: account and position service.
@@ -155,12 +154,12 @@ curl 'http://localhost:9080/api/v1/instruments/latest?symbol=BTC-USDT'
 curl 'http://localhost:9081/api/v1/candlestick/candles/latest?symbol=BTC-USDT&period=1m'
 curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
 curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
-curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
+curl 'http://localhost:9082/api/v1/price/mark/latest?symbol=BTC-USDT'
 curl -X POST 'http://localhost:9084/api/v1/trading/orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientOrderId":"cli-1001-1","symbol":"BTC-USDT","side":"BUY","orderType":"LIMIT","timeInForce":"GTC","priceTicks":650000,"quantitySteps":10,"reduceOnly":false,"postOnly":false}'
 curl -X POST 'http://localhost:9084/api/v1/trading/trigger-orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientTriggerOrderId":"tp-1001-1","ocoGroupId":"bracket-1001-1","symbol":"BTC-USDT","side":"SELL","triggerType":"TAKE_PROFIT","triggerPriceType":"MARK_PRICE","triggerPriceTicks":700000,"orderType":"MARKET","timeInForce":"IOC","priceTicks":0,"quantitySteps":10,"marginMode":"CROSS"}'
-curl 'http://localhost:9089/api/v1/funding/rates/latest?symbol=BTC-USDT'
-curl 'http://localhost:9090/api/v1/insurance/balances?asset=USDT'
-curl 'http://localhost:9091/api/v1/adl/queue?asset=USDT&limit=100'
+curl 'http://localhost:9088/api/v1/funding/rates/latest?symbol=BTC-USDT'
+curl 'http://localhost:9088/api/v1/insurance/balances?asset=USDT'
+curl 'http://localhost:9088/api/v1/adl/queue?asset=USDT&limit=100'
 curl 'http://localhost:9094/api/v1/gateway/candlestick/candles/latest?symbol=BTC-USDT&period=1m'
 curl 'http://localhost:9094/api/v1/gateway/account/1001/positions' -H 'X-User-Id: 1001'
 ```
@@ -183,15 +182,15 @@ The integration-test module runs real exchange-core with in-memory Kafka/DB adap
 Run one process-level product-line API flow at a time:
 
 ```bash
-PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=LINEAR_DELIVERY BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=OPTION BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=SPOT BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=LINEAR_DELIVERY BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=OPTION BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=SPOT BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
 ```
 
 The product-line smoke starts only the current line's required providers, keeps the market maker running, simulates API order flow from ordinary users, covers position creation, user close, liquidation, risk, matching, funding where applicable, delivery/exercise where applicable, and then runs `scripts/product-line-funds-reconcile.sh`. The reconciliation compares opening balance, adjustments, trades, fees, funding, liquidation fees, delivery/exercise ledgers, and final balance exactly in integer units.
 
-When Docker is available, run the real Kafka/PostgreSQL process-level trading smoke:
+Run the real Kafka/PostgreSQL process-level trading smoke:
 
 ```bash
 ./scripts/kafka-trading-smoke.sh
@@ -257,7 +256,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Order entry reserves initial margin; account processing moves filled opening margin into position margin and releases old position margin on closing trades.
 - User-initiated close orders are protected by reduce-only validation before entering the matching command path.
 - Risk detects liquidation candidates; liquidation converts candidates into staged reduce-only close orders and is not blocked by existing user reduce-only orders.
-- Insurance absorbs `account_deficits`; ADL handles residual deficits when insurance is depleted. The latest local evidence includes an L4 single-node real-chain stress that filled and account-settled 10000 gateway taker orders with 4 maker accounts, 5 refresh cycles, and private fanout checks for 5 users, a 180-second reference-market scheduled-engine smoke with 1333 submitted quotes, 30/30 taker trades settled, strict runtime outbox drainage, and monotonic WebSocket depth, a reference-market WebSocket account-restart smoke with Binance/OKX/Bybit streaming samples and 10/10 outage-window taker trades account-settled, a 60-second market-maker-provider scheduled-engine smoke with 400 submitted quotes and 20/20 taker trades settled, a scheduled-engine account-provider restart smoke with 5/5 outage-window taker trades settled after restart and no bad funds, and a run-once continuous smoke with 160 submitted quotes. Production rollout still needs longer multi-node/multi-broker stress testing, monitoring thresholds, real-cluster kill-switch drills, and multi-process Kafka evidence.
+- Insurance absorbs `account_deficits`; ADL handles residual deficits when insurance is depleted. The current consolidated evidence is the four product-line report: each line ran with 20 active symbols, 20 maker accounts, 2000 taker users, continuous market making, and `funds-reconcile` finished with `Violations=0`. Production rollout still needs longer multi-node/multi-broker stress testing, monitoring thresholds, real-cluster kill-switch drills, and multi-process Kafka evidence.
 - WebSocket fanout should be a separate service consuming Kafka output topics, not part of the calculators.
 - Every WebSocket node uses a unique Kafka consumer group so public market data reaches all nodes for local client fanout; do not share one WebSocket group across pods.
 - Account position pushes are emitted from the account transactional outbox after settlement, then consumed by WebSocket and filtered by authenticated user subscription.
@@ -269,4 +268,5 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 
 - [Deployment](docs/deployment.md)
 - [Database design](docs/database.md)
-- [Integration verification report](docs/integration-report.md)
+- [Docs index](docs/README.md)
+- [Four product-line funds and performance report](docs/full-chain-funds-performance-report.md)

@@ -303,15 +303,17 @@ brew services start kafka
 brew services start redis
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
+mvn -pl :surprising-price-provider -am spring-boot:run
+```
+
+Split processes remain available when index and mark price need independent scaling:
+
+```bash
 mvn -pl :surprising-index-price-provider -am spring-boot:run
 mvn -pl :surprising-mark-price-provider -am spring-boot:run
 ```
 
-For a single combined price process:
-
-```bash
-mvn -pl :surprising-price-provider -am spring-boot:run
-```
+With the combined provider, both index and mark APIs are served on `9082`.
 
 Query latest prices:
 

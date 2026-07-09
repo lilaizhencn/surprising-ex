@@ -28,21 +28,21 @@
 
 ```text
 SPOT:
-  order-provider -> matching-provider -> account spot settlement
+  trading-entry/order-provider -> matching-provider -> account spot settlement
 
 LINEAR_PERPETUAL:
-  order-provider -> matching-provider -> account derivative settlement
-  -> risk -> liquidation -> insurance -> adl
+  trading-entry/order-provider -> matching-provider -> account derivative settlement
+  -> margin-ops/risk -> liquidation -> insurance -> adl
   -> funding
 
 LINEAR_DELIVERY:
-  order-provider -> matching-provider -> account derivative settlement
-  -> risk -> liquidation -> insurance -> adl
+  trading-entry/order-provider -> matching-provider -> account derivative settlement
+  -> margin-ops/risk -> liquidation -> insurance -> adl
   -> delivery settlement event
 
 OPTION:
-  order-provider -> matching-provider -> account derivative settlement
-  -> risk -> liquidation -> insurance -> adl
+  trading-entry/order-provider -> matching-provider -> account derivative settlement
+  -> margin-ops/risk -> liquidation -> insurance -> adl
   -> option exercise event
 ```
 
@@ -55,7 +55,7 @@ OPTION:
 - `surprising-trading`：订单入口、条件单、算法单、exchange-core 撮合封装和产品线 topic 路由。
 - `surprising-account`：基础账户、产品账户、余额流水、产品流水、持仓、保证金、资金费、交割/行权账务。
 - `surprising-margin-ops`：保证金产品共用的风控、强平、资金费、保险基金和 ADL 链路，按产品线和账户类型隔离。
-- `surprising-gateway` / `surprising-websocket`：客户端使用 `productLine` 路由 REST 和订阅实时推送。
+- `surprising-edge`：客户端使用 `productLine` 路由 REST 和订阅实时推送；`surprising-gateway` 和 `surprising-websocket` 仍保留在 edge 模块下，可按生产容量独立部署。
 
 ## 交割合约执行模型
 
@@ -111,10 +111,10 @@ PRODUCT_TOPIC_LINES="spot linear-perp linear-delivery option" ./scripts/create-t
 每次只跑一条业务线，不需要同时启动四条撮合链路：
 
 ```bash
-PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=LINEAR_DELIVERY BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=OPTION BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=SPOT BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=LINEAR_DELIVERY BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=OPTION BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=SPOT BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
 ```
 
 脚本覆盖：

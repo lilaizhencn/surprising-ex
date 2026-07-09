@@ -16,10 +16,10 @@
 每次只启动当前产品线所需 provider，不需要把四条撮合业务全部启动：
 
 ```bash
-PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=LINEAR_DELIVERY BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=OPTION BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=SPOT BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=LINEAR_DELIVERY BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=OPTION BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=SPOT BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
 ```
 
 钱包服务不参与本地 smoke。测试资金通过 account/admin 产品账户调整接口或脚本 fixture 注入，核对脚本会把这些调整作为期初之后的 `adjustment_units` 单独列出。
@@ -125,4 +125,5 @@ DB_NAME=surprising_product_line_smoke \
 - `OPTION`：API 下单、撮合、持仓、主动平仓、强平、行权事件、持仓归零、资金核对通过。
 - `SPOT`：API 下单、撮合、资产互换、冻结释放、无衍生品持仓、资金核对通过。
 
-所有已跑场景的资金核对 violations 为 0。
+所有已跑场景的资金核对 violations 为 0。当前高并发基线已合并到
+[四产品线资金与性能压测报告](full-chain-funds-performance-report.md)。

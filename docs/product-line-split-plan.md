@@ -28,21 +28,21 @@ The currently validated product lines are:
 
 ```text
 SPOT:
-  order-provider -> matching-provider -> account spot settlement
+  trading-entry/order-provider -> matching-provider -> account spot settlement
 
 LINEAR_PERPETUAL:
-  order-provider -> matching-provider -> account derivative settlement
-  -> risk -> liquidation -> insurance -> adl
+  trading-entry/order-provider -> matching-provider -> account derivative settlement
+  -> margin-ops/risk -> liquidation -> insurance -> adl
   -> funding
 
 LINEAR_DELIVERY:
-  order-provider -> matching-provider -> account derivative settlement
-  -> risk -> liquidation -> insurance -> adl
+  trading-entry/order-provider -> matching-provider -> account derivative settlement
+  -> margin-ops/risk -> liquidation -> insurance -> adl
   -> delivery settlement event
 
 OPTION:
-  order-provider -> matching-provider -> account derivative settlement
-  -> risk -> liquidation -> insurance -> adl
+  trading-entry/order-provider -> matching-provider -> account derivative settlement
+  -> margin-ops/risk -> liquidation -> insurance -> adl
   -> option exercise event
 ```
 
@@ -55,7 +55,7 @@ The matching provider still uses the same `exchange-core` wrapper, but a product
 - `surprising-trading`: order entry, trigger orders, algo orders, exchange-core wrapper, and product-line topic routing.
 - `surprising-account`: basic balances, product balances, ledgers, product ledgers, positions, margin, funding, delivery, and exercise accounting.
 - `surprising-margin-ops`: shared margin-product risk, liquidation, funding, insurance, and ADL handling, isolated by product line and account type.
-- `surprising-gateway` / `surprising-websocket`: client-facing REST routing and realtime subscriptions by `productLine`.
+- `surprising-edge`: client-facing REST routing and realtime subscriptions by `productLine`; `surprising-gateway` and `surprising-websocket` remain independently deployable under the edge module.
 
 ## Delivery Futures Model
 
@@ -111,10 +111,10 @@ PRODUCT_TOPIC_LINES="spot linear-perp linear-delivery option" ./scripts/create-t
 Run one product line at a time. The four matching businesses do not need to run together:
 
 ```bash
-PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=LINEAR_DELIVERY BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=OPTION BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=SPOT BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=LINEAR_DELIVERY BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=OPTION BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=SPOT BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
 ```
 
 The smoke suite covers:

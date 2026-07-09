@@ -338,17 +338,20 @@ surprising.perp.liquidation.candidates.v1
 
 ## 12. WebSocket 和 API 网关
 
-前端 REST 请求走 `surprising-gateway`：
+前端 REST 请求默认走 `surprising-edge-provider` 中的 gateway 路由：
 
 ```text
-frontend -> gateway -> instrument/order/account/risk/market APIs
+frontend -> edge/gateway -> instrument/trading/account/margin-ops/market APIs
 ```
 
-实时推送走 `surprising-websocket`：
+实时推送默认走同一个 `surprising-edge-provider` 中的 WebSocket fanout：
 
 ```text
-Kafka domain events -> websocket provider local fanout -> frontend
+Kafka domain events -> edge/websocket local fanout -> frontend
 ```
+
+生产环境如果 WebSocket 长连接很多，可以继续把 `surprising-gateway-provider` 和
+`surprising-websocket-provider` 拆开部署，它们现在都在 `surprising-edge` 模块下。
 
 公共频道：
 
@@ -427,14 +430,23 @@ RocksDB 适合做本地状态存储，不适合代替账户权威账本。
 instrument-provider
   合约配置、交易规则、风险档位、指数源配置
 
-index-price-provider
+price-provider
+  合并部署指数价格和标记价格；两块业务仍按包隔离
+
+index-price package
   外部现货价格采集、USD/USDT 换算、指数价
 
-mark-price-provider
+mark-price package
   指数价 + 合约盘口 + 资金费率 -> 标记价
 
-order-provider
+trading-entry-provider
+  合并部署普通订单入口、条件单和算法单
+
+order package
   下单校验、余额和保证金预占、订单事件、撮合命令 outbox
+
+trigger package
+  止盈止损、追踪止损和条件单触发
 
 matching-provider
   exchange-core 撮合、成交、盘口深度、撮合结果 outbox
@@ -442,26 +454,32 @@ matching-provider
 account-provider
   成交结算、余额、持仓、手续费、保证金迁移、持仓推送
 
-risk-provider
+margin-ops-provider
+  合并部署风控、强平、资金费、保险基金和 ADL
+
+risk package
   定时扫描持仓风险、写风险快照、生成强平候选
 
-liquidation-provider
+liquidation package
   消费强平候选、复核风险、生成 reduce-only 强平单
 
-funding-provider
+funding package
   资金费率发布和资金费结算
 
-insurance-provider
+insurance package
   保险基金、穿仓亏损覆盖
 
-adl-provider
+adl package
   保险基金不足时的自动减仓
 
-websocket-provider
-  行情、订单、成交、持仓实时推送
+edge-provider
+  合并部署 REST gateway 和 WebSocket fanout
 
-gateway-provider
+gateway package
   前端统一 REST API 入口
+
+websocket package
+  行情、订单、成交、持仓实时推送
 ```
 
 ## 17. 新手最容易误解的点

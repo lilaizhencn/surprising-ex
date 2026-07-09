@@ -281,15 +281,17 @@ brew services start kafka
 brew services start redis
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
+mvn -pl :surprising-price-provider -am spring-boot:run
+```
+
+需要独立扩容指数价格和标记价格时，仍可拆分进程启动：
+
+```bash
 mvn -pl :surprising-index-price-provider -am spring-boot:run
 mvn -pl :surprising-mark-price-provider -am spring-boot:run
 ```
 
-单进程合并启动：
-
-```bash
-mvn -pl :surprising-price-provider -am spring-boot:run
-```
+使用合并 provider 时，指数和标记价格 API 都在 `9082`。
 
 查询最新价格：
 

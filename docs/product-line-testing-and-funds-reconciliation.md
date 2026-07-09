@@ -16,10 +16,10 @@ Current scripts:
 Only the providers required for the current product line are started. The four matching businesses do not need to run together:
 
 ```bash
-PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=LINEAR_DELIVERY BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=OPTION BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=SPOT BUILD_SERVICES=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=LINEAR_DELIVERY BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=OPTION BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=SPOT BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
 ```
 
 Wallet services are not part of this local smoke. Test funds are injected through account/admin product balance adjustments or script fixtures, and the reconciliation script reports those as `adjustment_units`.
@@ -125,4 +125,5 @@ The latest per-line run passed:
 - `OPTION`: API order flow, matching, position creation, self-close, liquidation, exercise event, position closeout, and reconciliation.
 - `SPOT`: API order flow, matching, asset exchange, reservation release, no derivative positions, and reconciliation.
 
-All covered scenarios ended with 0 reconciliation violations.
+All covered scenarios ended with 0 reconciliation violations. The current high-concurrency baseline
+is consolidated in [full-chain-funds-performance-report.md](full-chain-funds-performance-report.md).
