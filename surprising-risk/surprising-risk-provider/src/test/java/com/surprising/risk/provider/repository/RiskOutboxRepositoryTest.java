@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.risk.provider.config.RiskProperties;
+import java.sql.Statement;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
@@ -127,6 +129,69 @@ class RiskOutboxRepositoryTest {
         assertThat(sql.getValue())
                 .contains("topic IN (?, ?, ?)")
                 .contains("next_attempt_at <= now()");
+    }
+
+    @Test
+    void claimPendingLeasesEarliestDueRowsPerTopicKey() {
+        RiskOutboxRepository repository = new RiskOutboxRepository(jdbcTemplate, sequenceRepository);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        Instant leaseUntil = Instant.parse("2026-07-01T00:00:30Z");
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Object[].class))).thenReturn(List.of());
+
+        repository.claimPending(100, leaseUntil, now);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), any(Object[].class));
+        assertThat(sql.getValue())
+                .contains("SELECT DISTINCT ON (topic, event_key)")
+                .contains("pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))")
+                .contains("FOR UPDATE OF e SKIP LOCKED")
+                .contains("SET next_attempt_at = ?")
+                .contains("RETURNING e.id, e.topic, e.event_key");
+    }
+
+    @Test
+    void claimPendingFiltersByProductTopicsWhenProductTopicsAreEnabled() {
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        RiskOutboxRepository repository = new RiskOutboxRepository(jdbcTemplate, sequenceRepository, properties);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Object[].class))).thenReturn(List.of());
+
+        repository.claimPending(100, Instant.parse("2026-07-01T00:00:30Z"),
+                Instant.parse("2026-07-01T00:00:00Z"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), any(Object[].class));
+        assertThat(sql.getValue())
+                .contains("e.topic IN (?, ?, ?)")
+                .contains("next_attempt_at <= ?");
+    }
+
+    @Test
+    void markPublishedBatchAcceptsSuccessfulRows() {
+        RiskOutboxRepository repository = new RiskOutboxRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.batchUpdate(any(String.class), any(BatchPreparedStatementSetter.class)))
+                .thenReturn(new int[] {1, Statement.SUCCESS_NO_INFO});
+
+        repository.markPublished(List.of(901L, 902L), Instant.parse("2026-07-01T00:00:00Z"));
+
+        ArgumentCaptor<BatchPreparedStatementSetter> setter =
+                ArgumentCaptor.forClass(BatchPreparedStatementSetter.class);
+        verify(jdbcTemplate).batchUpdate(contains("SET published_at"), setter.capture());
+        assertThat(setter.getValue().getBatchSize()).isEqualTo(2);
+    }
+
+    @Test
+    void markPublishedBatchFailsWhenAnyRowIsSkipped() {
+        RiskOutboxRepository repository = new RiskOutboxRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.batchUpdate(any(String.class), any(BatchPreparedStatementSetter.class)))
+                .thenReturn(new int[] {1, 0});
+
+        assertThatThrownBy(() -> repository.markPublished(List.of(901L, 902L),
+                Instant.parse("2026-07-01T00:00:00Z")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("risk outbox event published 902");
     }
 
     @Test

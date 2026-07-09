@@ -42,6 +42,8 @@ surprising:
       node-id:
       lease-duration: 15s
     outbox:
-      batch-size: 200
-      publish-delay-ms: 200
+      batch-size: 1000
+      publish-delay-ms: 20
+      async-enabled: true
+      max-in-flight: 32
       send-timeout: 3s

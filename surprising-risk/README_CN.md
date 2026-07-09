@@ -166,6 +166,11 @@ provider 支持 active-active 多节点部署，使用 PostgreSQL 按 `userId + 
 | `surprising.risk.coordination.node-id` | `${HOSTNAME:}` | 稳定 owner id。为空时进程会生成本地随机 id。 |
 | `surprising.risk.coordination.lease-duration` | `15s` | 停止扫描节点的故障转移等待时间，应长于扫描间隔。 |
 | `surprising.risk.calculation.scan-batch-size` | `500` | 每次 keyset 分页读取的 `userId + settleAsset` 组数。调大可减少 DB 往返，调小可降低大账户场景的扫描尖峰延迟。 |
+| `surprising.risk.outbox.batch-size` | `1000` | 每轮最多 claim 的到期 risk outbox 行数。 |
+| `surprising.risk.outbox.publish-delay-ms` | `20` | risk outbox 排空调度间隔。 |
+| `surprising.risk.outbox.async-enabled` | `true` | claim 短租约后开启有界并发发布。 |
+| `surprising.risk.outbox.max-in-flight` | `32` | 单节点同时发布的 `topic + event_key` 分组上限，应低于 Kafka 和 DB 可承受容量。 |
+| `surprising.risk.outbox.send-timeout` | `3s` | 单条 Kafka send 等待超时；超时后标记失败并按 backoff 重试。 |
 
 ## 本地运行
 
@@ -186,6 +191,8 @@ mvn -pl :surprising-risk-provider -am spring-boot:run
 
 - risk-provider 依赖最新 mark price；mark price 超过 `max-mark-age` 时不会参与风险扫描。
 - 风险扫描按 `userId + settleAsset` 独立事务隔离。某个异常账户组不能回滚整批扫描，也不能阻塞其他账户。
+- risk outbox 发布按 `topic + event_key` claim 短租约，不同 key 有界并发发布。同一个账户风险 key、持仓 symbol key
+  或强平 symbol key 内保持顺序；但 Kafka send 成功后、`published_at` 落库前如果进程崩溃，仍可能重复发送，消费者必须幂等。
 - 账户组级 PnL 或维持保证金聚合溢出会被当成状态异常处理。provider 会在写入快照、候选或 outbox 前回滚该账户组事务。
 - 爆仓候选是强平输入，不是强平执行结果。
 - 强平执行必须再次校验最新 mark/equity，避免候选生成后行情恢复仍继续强平。

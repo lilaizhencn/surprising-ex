@@ -183,6 +183,11 @@ Configuration:
 | `surprising.risk.coordination.node-id` | `${HOSTNAME:}` | Stable owner id. If empty, the process generates a local random id. |
 | `surprising.risk.coordination.lease-duration` | `15s` | Failover delay for a stopped scanner. Keep it longer than the scan interval. |
 | `surprising.risk.calculation.scan-batch-size` | `500` | Number of `userId + settleAsset` groups fetched per keyset page. Raise it for fewer DB round trips; lower it to reduce scan latency spikes on large accounts. |
+| `surprising.risk.outbox.batch-size` | `1000` | Maximum number of due risk outbox rows claimed per scheduler run. |
+| `surprising.risk.outbox.publish-delay-ms` | `20` | Delay between risk outbox drain attempts. |
+| `surprising.risk.outbox.async-enabled` | `true` | Enables bounded parallel publishing after rows are claimed with a short DB lease. |
+| `surprising.risk.outbox.max-in-flight` | `32` | Maximum concurrent topic/key publish groups per node. Keep this below Kafka and DB capacity. |
+| `surprising.risk.outbox.send-timeout` | `3s` | Per Kafka send wait timeout before the outbox row is marked failed and retried with backoff. |
 
 ## Local Run
 
@@ -204,6 +209,9 @@ Port:
 - risk-provider depends on fresh mark prices; stale marks older than `max-mark-age` are excluded from scans.
 - Risk scans are isolated per `userId + settleAsset` transaction. A bad account group must not roll back the whole scan
   batch or block other accounts.
+- Risk outbox publishing claims rows by `topic + event_key` lease and publishes different keys concurrently. It preserves
+  order for the same account risk key, position symbol key, or liquidation symbol key, but consumers must still be
+  idempotent because a crash after Kafka send and before `published_at` can produce duplicate sends.
 - Overflow in group-level PnL or maintenance-margin aggregation is treated as inconsistent state. The provider rolls back that group before writing snapshots, candidates, or outbox rows.
 - A liquidation candidate is liquidation input, not execution proof.
 - The liquidation executor must re-check latest mark/equity before submitting liquidation orders.

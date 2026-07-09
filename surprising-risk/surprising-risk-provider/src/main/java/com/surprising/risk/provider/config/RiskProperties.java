@@ -200,9 +200,11 @@ public class RiskProperties {
     }
 
     public static class Outbox {
-        private int batchSize = 200;
-        private long publishDelayMs = 200L;
+        private int batchSize = 1000;
+        private long publishDelayMs = 20L;
         private Duration sendTimeout = Duration.ofSeconds(3);
+        private boolean asyncEnabled = true;
+        private int maxInFlight = 32;
 
         public int getBatchSize() {
             return batchSize;
@@ -226,6 +228,22 @@ public class RiskProperties {
 
         public void setSendTimeout(Duration sendTimeout) {
             this.sendTimeout = sendTimeout;
+        }
+
+        public boolean isAsyncEnabled() {
+            return asyncEnabled;
+        }
+
+        public void setAsyncEnabled(boolean asyncEnabled) {
+            this.asyncEnabled = asyncEnabled;
+        }
+
+        public int getMaxInFlight() {
+            return maxInFlight;
+        }
+
+        public void setMaxInFlight(int maxInFlight) {
+            this.maxInFlight = maxInFlight;
         }
     }
 

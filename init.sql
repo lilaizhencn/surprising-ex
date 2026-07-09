@@ -2721,6 +2721,10 @@ CREATE INDEX IF NOT EXISTS risk_outbox_pending_idx
     ON risk_outbox_events (next_attempt_at, id)
     WHERE published_at IS NULL;
 
+CREATE INDEX IF NOT EXISTS risk_outbox_pending_key_idx
+    ON risk_outbox_events (topic, event_key, id)
+    WHERE published_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS risk_outbox_events_trace_idx
     ON risk_outbox_events ((payload ->> 'traceId'))
     WHERE payload ? 'traceId';

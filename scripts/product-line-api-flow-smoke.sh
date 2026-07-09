@@ -3009,7 +3009,7 @@ main() {
     fi
     mkdir -p "$(dirname "${STRESS_REPORT_FILE}")"
     {
-      echo "# 四产品线 20 Symbol / 2000 用户真实链路压测报告"
+      echo "# 四产品线 ${STRESS_SYMBOL_COUNT} Symbol / ${STRESS_USER_COUNT} 用户真实链路压测报告"
       echo
       echo "时间：$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
       echo
