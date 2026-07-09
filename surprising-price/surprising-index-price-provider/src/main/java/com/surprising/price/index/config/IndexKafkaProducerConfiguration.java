@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.Map;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
@@ -29,7 +30,8 @@ public class IndexKafkaProducerConfiguration {
     }
 
     @Bean
-    public KafkaTemplate<String, Object> indexKafkaTemplate(ProducerFactory<String, Object> indexProducerFactory) {
+    public KafkaTemplate<String, Object> indexKafkaTemplate(
+            @Qualifier("indexProducerFactory") ProducerFactory<String, Object> indexProducerFactory) {
         return new KafkaTemplate<>(indexProducerFactory);
     }
 }

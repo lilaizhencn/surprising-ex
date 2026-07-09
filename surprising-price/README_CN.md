@@ -9,6 +9,7 @@ Surprising Exchange 合约指数价格和标记价格模块。
 - `surprising-price-api`：RPC 合约和 Kafka 事件模型。
 - `surprising-index-price-provider`：外部现货源采集和指数价格计算。
 - `surprising-mark-price-provider`：用于风控、强平、账户权益和 WebSocket 展示的标记价格计算。
+- `surprising-price-provider`：指数价格和标记价格合并部署 jar。
 
 ## 架构
 
@@ -33,6 +34,17 @@ Surprising Exchange 合约指数价格和标记价格模块。
 `instrument.price_tick_units` 把这个 long 值转换成版本对应的 ticks。
 
 合约清单和交易规则来自 `surprising-instrument`。指数价格 provider 默认从 `instruments + instrument_index_sources` 当前版本动态读取 symbol 和外部指数源；`application.yml` 中的静态 BTC/ETH 源仅作为数据库未初始化时的兜底。
+
+## 合并 Provider 部署
+
+`surprising-price-provider` 会在一个 JVM 里启动现有指数价格和标记价格组件，适合开发环境、单节点或低成本部署。这个改动只合并部署包：
+
+- 指数价格业务逻辑仍在 `com.surprising.price.index`。
+- 标记价格业务逻辑仍在 `com.surprising.price.mark`。
+- 标记价格仍然消费配置里的指数价格 Kafka topic，不直接读取 index provider 的内存变量。
+- 持久边界仍然是 PostgreSQL 和 Kafka topic，所以以后拆回独立部署不需要改计算逻辑。
+
+合并 jar 默认端口是 `9082`，同时提供 `/api/v1/price/index` 和 `/api/v1/price/mark`。使用合并部署时，mark-price 客户端和 gateway 的 mark 路由要指向同一个 base URL，例如 `GATEWAY_ROUTE_PRICE_MARK_BASE_URL=http://localhost:9082`。
 
 ## 指数价格
 
@@ -273,12 +285,24 @@ mvn -pl :surprising-index-price-provider -am spring-boot:run
 mvn -pl :surprising-mark-price-provider -am spring-boot:run
 ```
 
+单进程合并启动：
+
+```bash
+mvn -pl :surprising-price-provider -am spring-boot:run
+```
+
 查询最新价格：
 
 ```bash
 curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
 curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
 curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
+```
+
+使用 `surprising-price-provider` 时，标记价格也从 `9082` 查询：
+
+```bash
+curl 'http://localhost:9082/api/v1/price/mark/latest?symbol=BTC-USDT'
 ```
 
 ## 参考

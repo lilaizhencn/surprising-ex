@@ -1,0 +1,231 @@
+server:
+  port: 9082
+
+spring:
+  application:
+    name: surprising-price-provider
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  price:
+    index:
+      kafka:
+        bootstrap-servers: localhost:9092
+        product-line: LINEAR_PERPETUAL
+        product-topics-enabled: false
+        index-price-topic: surprising.perp.index.price.v1
+        index-components-topic: surprising.perp.index.components.v1
+      calculation:
+        poll-delay-ms: 1000
+        max-source-age: 5s
+        outlier-threshold: 0.01
+        min-valid-sources: 3
+        scale: 18
+        conversion-cache-ttl: 30s
+      http:
+        connect-timeout: 2s
+        request-timeout: 3s
+        max-concurrent-requests: 32
+        user-agent: surprising-index-price/1.0
+      web-socket:
+        enabled: true
+        idle-timeout: 20s
+        reconnect-initial-delay: 1s
+        reconnect-max-delay: 30s
+        health-check-interval: 5s
+      coordination:
+        enabled: true
+        node-id:
+        lease-duration: 15s
+      instrument:
+        enabled: true
+        refresh-delay-ms: 30000
+        fallback-to-static-symbols: true
+      fiat:
+        enabled: true
+        refresh-delay-ms: 3600000
+        stale-after: 30h
+        provider: OPEN_ER_API
+        base-url: https://open.er-api.com
+        path: /v6/latest/{base}
+        base-currency: USD
+        quote-currencies:
+          - CNY
+          - EUR
+          - JPY
+          - KRW
+          - GBP
+          - AUD
+          - CAD
+          - HKD
+          - TWD
+          - SGD
+          - INR
+          - BRL
+          - TRY
+          - VND
+          - THB
+          - PHP
+          - IDR
+          - MYR
+        stable-coin:
+          enabled: true
+          refresh-delay-ms: 10000
+          stale-after: 5m
+          currency: USDT
+          fiat-currency: USD
+          base-url: https://api.exchange.coinbase.com
+          path: /products/USDT-USD/ticker
+          parser: COINBASE_TICKER
+          fallback-rate: 1
+      symbols:
+        - symbol: BTC-USDT
+          min-valid-sources: 3
+          sources:
+            - name: BINANCE
+              base-url: https://api.binance.com
+              path: /api/v3/ticker/bookTicker?symbol=BTCUSDT
+              source-symbol: BTCUSDT
+              parser: BINANCE_BOOK_TICKER
+              websocket-url: wss://stream.binance.com:9443/ws
+              websocket-subscribe-message: '{"method":"SUBSCRIBE","params":["btcusdt@bookTicker"],"id":1}'
+              websocket-parser: BINANCE_BOOK_TICKER
+              weight: 1
+            - name: OKX
+              base-url: https://www.okx.com
+              path: /api/v5/market/ticker?instId=BTC-USDT
+              source-symbol: BTC-USDT
+              parser: OKX_TICKER
+              websocket-url: wss://ws.okx.com:8443/ws/v5/public
+              websocket-subscribe-message: '{"op":"subscribe","args":[{"channel":"tickers","instId":"BTC-USDT"}]}'
+              websocket-parser: OKX_TICKER
+              weight: 1
+            - name: BYBIT
+              base-url: https://api.bybit.com
+              path: /v5/market/tickers?category=spot&symbol=BTCUSDT
+              source-symbol: BTCUSDT
+              parser: BYBIT_TICKER
+              websocket-url: wss://stream.bybit.com/v5/public/spot
+              websocket-subscribe-message: '{"op":"subscribe","args":["tickers.BTCUSDT"]}'
+              websocket-parser: BYBIT_TICKER
+              weight: 1
+            - name: COINBASE
+              base-url: https://api.exchange.coinbase.com
+              path: /products/BTC-USD/ticker
+              source-symbol: BTC-USD
+              parser: COINBASE_TICKER
+              quote-currency: USD
+              target-quote-currency: USDT
+              conversion-base-url: https://api.exchange.coinbase.com
+              conversion-path: /products/USDT-USD/ticker
+              conversion-parser: COINBASE_TICKER
+              conversion-operation: DIVIDE
+              conversion-mode: DISCOUNT
+              fallback-weight-multiplier: 0.50
+              websocket-url: wss://ws-feed.exchange.coinbase.com
+              websocket-subscribe-message: '{"type":"subscribe","product_ids":["BTC-USD"],"channels":["ticker"]}'
+              websocket-parser: COINBASE_TICKER
+              weight: 1
+            - name: KRAKEN
+              base-url: https://api.kraken.com
+              path: /0/public/Ticker?pair=XBTUSDT
+              source-symbol: XBTUSDT
+              parser: KRAKEN_TICKER
+              websocket-url: wss://ws.kraken.com/v2
+              websocket-subscribe-message: '{"method":"subscribe","params":{"channel":"ticker","symbol":["BTC/USDT"]}}'
+              websocket-parser: KRAKEN_TICKER
+              weight: 1
+        - symbol: ETH-USDT
+          min-valid-sources: 3
+          sources:
+            - name: BINANCE
+              base-url: https://api.binance.com
+              path: /api/v3/ticker/bookTicker?symbol=ETHUSDT
+              source-symbol: ETHUSDT
+              parser: BINANCE_BOOK_TICKER
+              websocket-url: wss://stream.binance.com:9443/ws
+              websocket-subscribe-message: '{"method":"SUBSCRIBE","params":["ethusdt@bookTicker"],"id":2}'
+              websocket-parser: BINANCE_BOOK_TICKER
+              weight: 1
+            - name: OKX
+              base-url: https://www.okx.com
+              path: /api/v5/market/ticker?instId=ETH-USDT
+              source-symbol: ETH-USDT
+              parser: OKX_TICKER
+              websocket-url: wss://ws.okx.com:8443/ws/v5/public
+              websocket-subscribe-message: '{"op":"subscribe","args":[{"channel":"tickers","instId":"ETH-USDT"}]}'
+              websocket-parser: OKX_TICKER
+              weight: 1
+            - name: BYBIT
+              base-url: https://api.bybit.com
+              path: /v5/market/tickers?category=spot&symbol=ETHUSDT
+              source-symbol: ETHUSDT
+              parser: BYBIT_TICKER
+              websocket-url: wss://stream.bybit.com/v5/public/spot
+              websocket-subscribe-message: '{"op":"subscribe","args":["tickers.ETHUSDT"]}'
+              websocket-parser: BYBIT_TICKER
+              weight: 1
+            - name: COINBASE
+              base-url: https://api.exchange.coinbase.com
+              path: /products/ETH-USD/ticker
+              source-symbol: ETH-USD
+              parser: COINBASE_TICKER
+              quote-currency: USD
+              target-quote-currency: USDT
+              conversion-base-url: https://api.exchange.coinbase.com
+              conversion-path: /products/USDT-USD/ticker
+              conversion-parser: COINBASE_TICKER
+              conversion-operation: DIVIDE
+              conversion-mode: DISCOUNT
+              fallback-weight-multiplier: 0.50
+              websocket-url: wss://ws-feed.exchange.coinbase.com
+              websocket-subscribe-message: '{"type":"subscribe","product_ids":["ETH-USD"],"channels":["ticker"]}'
+              websocket-parser: COINBASE_TICKER
+              weight: 1
+            - name: KRAKEN
+              base-url: https://api.kraken.com
+              path: /0/public/Ticker?pair=ETHUSDT
+              source-symbol: ETHUSDT
+              parser: KRAKEN_TICKER
+              websocket-url: wss://ws.kraken.com/v2
+              websocket-subscribe-message: '{"method":"subscribe","params":{"channel":"ticker","symbol":["ETH/USDT"]}}'
+              websocket-parser: KRAKEN_TICKER
+              weight: 1
+    mark:
+      kafka:
+        bootstrap-servers: localhost:9092
+        product-line: LINEAR_PERPETUAL
+        product-topics-enabled: false
+        group-id: surprising-mark-price-v1
+        concurrency: 2
+        max-poll-records: 500
+      topics:
+        index-price-topic: surprising.perp.index.price.v1
+        book-ticker-topic: surprising.perp.book.ticker.v1
+        trade-topic: surprising.perp.trade.events.v1
+        funding-rate-topic: surprising.perp.funding.rate.v1
+        mark-price-topic: surprising.perp.mark.price.v1
+        mark-price-audit-topic: surprising.perp.mark.price.audit.v1
+      calculation:
+        publish-delay-ms: 1000
+        basis-window: 60s
+        max-input-age: 15s
+        clamp-ratio: 0.03
+        default-funding-interval-hours: 8
+        scale: 18
+      coordination:
+        enabled: true
+        node-id:
+        lease-duration: 15s

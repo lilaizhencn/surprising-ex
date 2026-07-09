@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -49,7 +50,7 @@ public class MarkPriceService {
                             MarkPriceProperties properties,
                             MarkPriceCalculator markPriceCalculator,
                             MarkPriceRepository markPriceRepository,
-                            KafkaTemplate<String, Object> kafkaTemplate) {
+                            @Qualifier("markKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.markPriceCalculator = markPriceCalculator;

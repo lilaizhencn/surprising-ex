@@ -9,6 +9,7 @@ Perpetual index price and mark price module for Surprising Exchange.
 - `surprising-price-api`: shared RPC contracts and Kafka event models.
 - `surprising-index-price-provider`: external spot-source collector and index price calculator.
 - `surprising-mark-price-provider`: mark price calculator for risk, liquidation, account equity, and WebSocket display.
+- `surprising-price-provider`: combined deployable jar for index and mark providers.
 
 ## Architecture
 
@@ -38,6 +39,22 @@ version-specific ticks with their pinned `instrument.price_tick_units`.
 The symbol universe and trading rules come from `surprising-instrument`. The index provider reads
 current symbols and external index sources dynamically from `instruments + instrument_index_sources`;
 static BTC/ETH YAML sources are only a fallback before database initialization.
+
+## Combined Provider Deployment
+
+`surprising-price-provider` starts the existing index and mark provider components in one JVM for
+small development, single-node, or low-cost deployments. This is only a packaging merge:
+
+- Index business logic remains under `com.surprising.price.index`.
+- Mark business logic remains under `com.surprising.price.mark`.
+- Mark price still consumes the configured index-price Kafka topic and does not read index-provider
+  in-memory variables directly.
+- The durable boundary remains PostgreSQL plus Kafka topics, so split deployment can be restored
+  without changing the calculation code.
+
+The combined jar defaults to port `9082`, serving both `/api/v1/price/index` and
+`/api/v1/price/mark`. When using it, point mark-price clients and gateway mark routes to the same
+base URL, for example `GATEWAY_ROUTE_PRICE_MARK_BASE_URL=http://localhost:9082`.
 
 ## Index Price
 
@@ -290,12 +307,24 @@ mvn -pl :surprising-index-price-provider -am spring-boot:run
 mvn -pl :surprising-mark-price-provider -am spring-boot:run
 ```
 
+For a single combined price process:
+
+```bash
+mvn -pl :surprising-price-provider -am spring-boot:run
+```
+
 Query latest prices:
 
 ```bash
 curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
 curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
 curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
+```
+
+With `surprising-price-provider`, query mark price on `9082`:
+
+```bash
+curl 'http://localhost:9082/api/v1/price/mark/latest?symbol=BTC-USDT'
 ```
 
 ## References

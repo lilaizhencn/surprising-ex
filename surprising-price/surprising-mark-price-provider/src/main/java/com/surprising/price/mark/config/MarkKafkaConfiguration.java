@@ -7,6 +7,7 @@ import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -36,7 +37,8 @@ public class MarkKafkaConfiguration {
     }
 
     @Bean
-    public KafkaTemplate<String, Object> markKafkaTemplate(ProducerFactory<String, Object> markProducerFactory) {
+    public KafkaTemplate<String, Object> markKafkaTemplate(
+            @Qualifier("markProducerFactory") ProducerFactory<String, Object> markProducerFactory) {
         return new KafkaTemplate<>(markProducerFactory);
     }
 
@@ -56,7 +58,7 @@ public class MarkKafkaConfiguration {
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory(
-            ConsumerFactory<String, String> markConsumerFactory,
+            @Qualifier("markConsumerFactory") ConsumerFactory<String, String> markConsumerFactory,
             MarkPriceProperties properties) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(markConsumerFactory);

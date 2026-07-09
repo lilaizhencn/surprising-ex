@@ -15,6 +15,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -40,7 +41,7 @@ public class IndexPriceService {
                              LatestSourceQuoteStore latestSourceQuoteStore,
                              IndexPriceCalculator indexPriceCalculator,
                              IndexPriceRepository indexPriceRepository,
-                             KafkaTemplate<String, Object> kafkaTemplate) {
+                             @Qualifier("indexKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate) {
         this.properties = properties;
         this.indexInstrumentConfigService = indexInstrumentConfigService;
         this.externalSpotPriceClient = externalSpotPriceClient;

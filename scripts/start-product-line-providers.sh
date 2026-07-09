@@ -44,6 +44,7 @@ validate_port_offset() {
 module_for() {
   case "$1" in
     candlestick) echo "surprising-candlestick/surprising-candlestick-provider" ;;
+    price) echo "surprising-price/surprising-price-provider" ;;
     index-price) echo "surprising-price/surprising-index-price-provider" ;;
     mark-price) echo "surprising-price/surprising-mark-price-provider" ;;
     order) echo "surprising-trading/surprising-order-provider" ;;
@@ -69,6 +70,7 @@ artifact_for() {
 base_port_for() {
   case "$1" in
     candlestick) echo 9081 ;;
+    price) echo 9082 ;;
     index-price) echo 9082 ;;
     mark-price) echo 9083 ;;
     order) echo 9084 ;;
@@ -93,6 +95,17 @@ supports_funding() {
 
 supports_margin_services() {
   [[ "${PRODUCT_LINE}" != "SPOT" ]]
+}
+
+service_requested() {
+  local needle="$1"
+  local service
+  for service in ${SERVICES}; do
+    if [[ "${service}" == "${needle}" ]]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 find_jar() {
@@ -151,6 +164,18 @@ service_env() {
         "SURPRISING_PRICE_INDEX_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
         "SURPRISING_PRICE_INDEX_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
         "SURPRISING_PRICE_INDEX_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-index"
+      ;;
+    price)
+      printf '%s\n' \
+        "SURPRISING_PRICE_INDEX_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
+        "SURPRISING_PRICE_INDEX_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
+        "SURPRISING_PRICE_INDEX_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
+        "SURPRISING_PRICE_INDEX_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-index" \
+        "SURPRISING_PRICE_MARK_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
+        "SURPRISING_PRICE_MARK_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
+        "SURPRISING_PRICE_MARK_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
+        "SURPRISING_PRICE_MARK_KAFKA_GROUP_ID=surprising-mark-price-${slug}-v1" \
+        "SURPRISING_PRICE_MARK_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-mark"
       ;;
     mark-price)
       printf '%s\n' \
@@ -220,8 +245,14 @@ service_env() {
         "SURPRISING_WEBSOCKET_KAFKA_GROUP_ID=surprising-websocket-${slug}-${HOSTNAME:-local}-$$"
       ;;
     market-maker)
+      local mark_price_port=9083
+      if service_requested price && ! service_requested mark-price; then
+        mark_price_port=9082
+      fi
+      mark_price_port=$((mark_price_port + PORT_OFFSET))
       printf '%s\n' \
-        "SURPRISING_MARKET_MAKER_ENGINE_NODE_ID=${HOSTNAME:-local}-${slug}-market-maker"
+        "SURPRISING_MARKET_MAKER_ENGINE_NODE_ID=${HOSTNAME:-local}-${slug}-market-maker" \
+        "SURPRISING_CLIENTS_MARK_PRICE_BASE_URL=http://localhost:${mark_price_port}"
       ;;
   esac
 }
@@ -263,7 +294,7 @@ wait_health() {
 
 start_service() {
   local service="$1"
-  if [[ "${service}" =~ ^(index-price|mark-price|risk|liquidation)$ ]] && ! supports_margin_services; then
+  if [[ "${service}" =~ ^(price|index-price|mark-price|risk|liquidation)$ ]] && ! supports_margin_services; then
     echo "${service}: skipped for ${PRODUCT_LINE}"
     return
   fi
