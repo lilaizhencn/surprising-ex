@@ -53,12 +53,10 @@ kafka-topics --bootstrap-server localhost:9092 --list | rg '^surprising'
 
 ```bash
 ./scripts/kafka-trading-smoke.sh
-PAIR_COUNT=50 LOAD_CONCURRENCY=16 ./scripts/kafka-trading-load-smoke.sh
-./scripts/full-stack-real-config-smoke.sh
-./scripts/market-maker-stress.sh
+PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
 ```
 
-本地模式下 `RESET_KAFKA_MODE=recreate` 不会删除 Docker Kafka 容器或 volume，只会删除并重建项目 topic。历史 Docker 模式只保留给显式调试：`INFRA_MODE=docker START_INFRA=true`。
+本地模式下 `RESET_KAFKA=true` 只删除并重建项目 topic，不会删除本机 Kafka 数据目录。历史 Docker Compose 模式已经移除；需要临时容器调试时只保留脚本内的直接 Docker 模式。
 
 ## Tuned Local Settings
 

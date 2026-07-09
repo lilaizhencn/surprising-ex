@@ -194,13 +194,7 @@ PRODUCT_LINES=SPOT BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LE
 ```
 
 它会创建隔离的 smoke 数据库，启动 order/matching/account providers，通过 REST 提交可成交的对手单，等待 exchange-core 撮合和 account Kafka 结算，再重放同一条 match-trade payload 验证账户幂等。
-更重的进程级测试会同时启动 WebSocket，并验证全部成交、部分成交后撤单、只撤单、全部撤单、并发用户、持仓正确性、盘口深度推送和私有推送接收：
-
-```bash
-PAIR_COUNT=50 LOAD_CONCURRENCY=16 ./scripts/kafka-trading-load-smoke.sh
-```
-
-这些 smoke/load 脚本默认使用本机 Homebrew 中间件，不会启动 Docker PostgreSQL/Kafka/Redis。`PAIR_COUNT` 控制并发撮合场景里的 maker/taker 用户组数量。
+完整产品线用户流程、做市、强平/生命周期和资金核对覆盖使用 `scripts/product-line-api-flow-smoke.sh`。
 
 盘口深度客户端应先拉公共 REST 快照，再套 WebSocket 增量：
 

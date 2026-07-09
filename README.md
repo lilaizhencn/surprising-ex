@@ -193,13 +193,7 @@ Run the real Kafka/PostgreSQL process-level trading smoke:
 ```
 
 It creates an isolated smoke database, starts order/matching/account providers, places crossing REST orders, waits for exchange-core matching and account Kafka settlement, then replays the same match-trade payload to verify account idempotency.
-For a heavier process-level run that also starts WebSocket and checks full fill, partial fill plus cancel, cancel-only, cancel-all, concurrent users, position correctness, and depth/private push reception:
-
-```bash
-PAIR_COUNT=50 LOAD_CONCURRENCY=16 ./scripts/kafka-trading-load-smoke.sh
-```
-
-The smoke/load scripts default to the local Homebrew middleware and do not start Docker middleware. `PAIR_COUNT` controls how many concurrent maker/taker user pairs are submitted in the load section.
+For full product-line user-flow, market-maker, liquidation/lifecycle, and funds reconciliation coverage, use `scripts/product-line-api-flow-smoke.sh`.
 
 Market-depth clients should initialize from the public REST snapshot, then apply WebSocket deltas:
 

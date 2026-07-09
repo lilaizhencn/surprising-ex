@@ -328,20 +328,12 @@ PRODUCT_LINES=LINEAR_PERPETUAL INCLUDE_LEGACY_PERP_TOPICS=false ./scripts/create
 ./scripts/kafka-trading-smoke.sh
 ```
 
-For the heavier process-level trading/WebSocket smoke:
-
-```bash
-PAIR_COUNT=50 LOAD_CONCURRENCY=16 ./scripts/kafka-trading-load-smoke.sh
-```
-
-This starts order, matching, account, and WebSocket providers, then verifies full fills, partial-fill cancellation, cancel-only, cancel-all, concurrent maker/taker users, account positions, REST order-book snapshots, depth deltas, and private order/match/position pushes.
-
 The basic script:
 
 - uses local middleware by default and does not start Docker middleware;
 - creates an isolated database named `surprising_smoke_<run>` by default, then applies root `init.sql`;
 - creates required topics through `scripts/create-topics.sh`;
-- packages and starts the required trading, matching, account, edge, and supporting providers for the selected flow;
+- packages and starts order, matching, and account providers for the split smoke;
 - funds a maker and taker through the account admin REST API;
 - submits crossing REST orders, waits for exchange-core matching, and waits for account Kafka settlement;
 - republishes the same match-trade payload to verify `(symbol, trade_id)` account idempotency.

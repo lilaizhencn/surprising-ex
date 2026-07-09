@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMPOSE_FILE="${COMPOSE_FILE:-${ROOT_DIR}/docker-compose.yml}"
 BOOTSTRAP_SERVERS="${BOOTSTRAP_SERVERS:-localhost:9092}"
 DB_USER="${DB_USER:-surprising}"
 DB_PASSWORD="${DB_PASSWORD:-surprising}"
@@ -21,8 +20,6 @@ STOP_INFRA="${STOP_INFRA:-false}"
 BUILD_SERVICES="${BUILD_SERVICES:-true}"
 KEEP_TMP="${KEEP_TMP:-false}"
 TMP_DIR="$(mktemp -d /tmp/surprising-kafka-smoke.XXXXXX)"
-COMPOSE_BIN=""
-COMPOSE_SUBCOMMAND=""
 INFRA_MODE="${INFRA_MODE:-local}"
 DOCKER_NETWORK="${DOCKER_NETWORK:-surprising-ex-net}"
 KAFKA_IMAGE="${KAFKA_IMAGE:-apache/kafka:3.7.0}"
@@ -58,40 +55,16 @@ require_command() {
   fi
 }
 
-detect_compose() {
-  if docker compose version >/dev/null 2>&1; then
-    COMPOSE_BIN="docker"
-    COMPOSE_SUBCOMMAND="compose"
-    INFRA_MODE="compose"
-    return
-  fi
-  if command -v docker-compose >/dev/null 2>&1; then
-    COMPOSE_BIN="docker-compose"
-    COMPOSE_SUBCOMMAND=""
-    INFRA_MODE="compose"
-    return
-  fi
+detect_docker() {
   if command -v docker >/dev/null 2>&1 && docker version >/dev/null 2>&1; then
     INFRA_MODE="docker"
     return
   fi
-  echo "Missing running Docker environment: need docker compose, docker-compose, or a working docker daemon" >&2
+  echo "Missing running Docker environment: need a working docker daemon" >&2
   exit 1
 }
 
-compose() {
-  if [[ "${INFRA_MODE}" == "docker" ]]; then
-    echo "compose command is unavailable in direct docker mode" >&2
-    exit 1
-  fi
-  if [[ -n "${COMPOSE_SUBCOMMAND}" ]]; then
-    "${COMPOSE_BIN}" "${COMPOSE_SUBCOMMAND}" -f "${COMPOSE_FILE}" "$@"
-  else
-    "${COMPOSE_BIN}" -f "${COMPOSE_FILE}" "$@"
-  fi
-}
-
-compose_exec() {
+infra_exec() {
   local service="$1"
   shift
   if [[ "${INFRA_MODE}" == "local" ]]; then
@@ -111,7 +84,8 @@ compose_exec() {
     docker exec -i "surprising-ex-${service}" "$@"
     return
   fi
-  compose exec -T "$@"
+  echo "Unsupported INFRA_MODE=${INFRA_MODE}; use local or docker" >&2
+  exit 1
 }
 
 start_infra() {
@@ -121,10 +95,6 @@ start_infra() {
       brew services start kafka >/dev/null 2>&1 || true
       brew services start redis >/dev/null 2>&1 || true
     fi
-    return
-  fi
-  if [[ "${INFRA_MODE}" == "compose" ]]; then
-    compose up -d postgres kafka >/dev/null
     return
   fi
   docker network inspect "${DOCKER_NETWORK}" >/dev/null 2>&1 || docker network create "${DOCKER_NETWORK}" >/dev/null
@@ -170,10 +140,6 @@ stop_infra() {
   if [[ "${INFRA_MODE}" == "local" ]]; then
     return
   fi
-  if [[ "${INFRA_MODE}" == "compose" ]]; then
-    compose down
-    return
-  fi
   if [[ "${INFRA_MODE}" == "docker" ]]; then
     docker rm -f surprising-ex-kafka surprising-ex-postgres >/dev/null 2>&1 || true
   fi
@@ -200,12 +166,12 @@ wait_http() {
 }
 
 psql_exec() {
-  compose_exec postgres env PGPASSWORD="${DB_PASSWORD}" \
+  infra_exec postgres env PGPASSWORD="${DB_PASSWORD}" \
     psql -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 "$@"
 }
 
 postgres_exec() {
-  compose_exec postgres env PGPASSWORD="${DB_PASSWORD}" "$@"
+  infra_exec postgres env PGPASSWORD="${DB_PASSWORD}" "$@"
 }
 
 ensure_smoke_database() {
@@ -306,10 +272,8 @@ fi
 if [[ "${INFRA_MODE:-}" == "local" ]]; then
   exec kafka-topics "$@"
 fi
-if [[ -n "${COMPOSE_SUBCOMMAND:-}" ]]; then
-  exec "${COMPOSE_BIN}" "${COMPOSE_SUBCOMMAND}" -f "${COMPOSE_FILE}" exec -T kafka kafka-topics.sh "$@"
-fi
-exec "${COMPOSE_BIN}" -f "${COMPOSE_FILE}" exec -T kafka kafka-topics.sh "$@"
+echo "Unsupported INFRA_MODE=${INFRA_MODE:-}; use local or docker" >&2
+exit 1
 EOF
   chmod +x "${TMP_DIR}/bin/kafka-topics.sh"
 }
@@ -418,7 +382,7 @@ wait_consumer_group_lag_zero() {
   local output
   local deadline=$((SECONDS + 120))
   while true; do
-    output="$(compose_exec kafka kafka-consumer-groups.sh \
+    output="$(infra_exec kafka kafka-consumer-groups.sh \
       --bootstrap-server localhost:9092 \
       --group "${group}" \
       --describe 2>/dev/null || true)"
@@ -441,7 +405,7 @@ publish_duplicate_match_trade() {
     echo "Could not find MATCH_TRADE outbox payload for duplicate replay" >&2
     exit 1
   fi
-  printf '%s\n' "${payload}" | compose_exec kafka kafka-console-producer.sh \
+  printf '%s\n' "${payload}" | infra_exec kafka kafka-console-producer.sh \
     --bootstrap-server localhost:9092 \
     --topic surprising.perp.match.trades.v1 >/dev/null
 }
@@ -455,7 +419,7 @@ require_command kafka-console-producer
 require_command kafka-consumer-groups
 if [[ "${INFRA_MODE}" != "local" ]]; then
   require_command docker
-  detect_compose
+  detect_docker
 fi
 
 if [[ "${START_INFRA}" == "true" ]]; then
@@ -463,8 +427,8 @@ if [[ "${START_INFRA}" == "true" ]]; then
   start_infra
 fi
 
-wait_until "PostgreSQL" 120 compose_exec postgres pg_isready -U "${DB_USER}"
-wait_until "Kafka" 120 compose_exec kafka kafka-topics.sh --bootstrap-server localhost:9092 --list
+wait_until "PostgreSQL" 120 infra_exec postgres pg_isready -U "${DB_USER}"
+wait_until "Kafka" 120 infra_exec kafka kafka-topics.sh --bootstrap-server localhost:9092 --list
 
 echo "Ensuring smoke database ${DB_NAME}"
 ensure_smoke_database
@@ -474,7 +438,7 @@ psql_exec -f - < "${ROOT_DIR}/init.sql" >/dev/null
 seed_mark_price
 
 echo "Creating Kafka topics"
-export COMPOSE_FILE COMPOSE_BIN COMPOSE_SUBCOMMAND INFRA_MODE
+export INFRA_MODE
 create_topic_wrapper
 PATH="${TMP_DIR}/bin:${PATH}" "${ROOT_DIR}/scripts/create-topics.sh" >/dev/null
 
