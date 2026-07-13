@@ -254,6 +254,36 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - 外部交易所行情采集以 WebSocket 为主，REST 只做冷启动和兜底。
 - 法币汇率只用于展示和估值提示，不参与合约风控核心价格替代。
 
+## 下一阶段计划：生产级多节点撮合
+
+当前 matching 已具备第一阶段多节点基础：订单命令以 `symbol` 为 Kafka key，同一 consumer group 内每个 partition 同时只分配给一个存活节点，节点重启后从 PostgreSQL 恢复开放订单簿。下一阶段将在此基础上建设显式管理的撮合集群，并继续坚持单 symbol 单写者原则：不同节点可以持有不同 symbol shard，但绝不能同时修改同一个订单簿。
+
+### 第一阶段：现有分区模型生产化
+
+- 四条产品线继续隔离，各自使用独立的订单命令 topic、consumer group、client identity、instrument、账户、风险模型和下游 topic。
+- 根据预期撮合并行度提前规划足够的 Kafka partition。已经承载流量的 keyed topic 不得直接在线增加 partition；这会改变 `symbol -> partition` 映射，必须按产品线安排维护、迁移和重放方案。
+- 同一产品线部署多个 matching provider，使用相同 `group-id`，每个节点使用稳定且唯一的 `client-id`。生产保持 `restart-on-partition-reassignment=true`，采用受控滚动发布和 PodDisruptionBudget，避免高频自动扩缩容。
+- 节点只恢复自己已分配 partition 所属的 symbol，不再让每个进程加载全部开放订单簿。完成 partition 分配、订单簿恢复和一致性校验前，readiness 必须保持失败。
+- 增加 `symbol -> partition -> client-id` 归属、consumer lag、命令 P99 延迟、恢复耗时、开放订单数、outbox backlog、结算延迟、重启原因和资金核对失败监控。
+- 增加多 broker、多 matching 节点故障演练，覆盖优雅 drain、节点硬故障、Kafka rebalance、数据库中断、command replay 和 outbox replay。
+
+### 第二阶段：显式分片和快速故障切换
+
+- 引入带版本的 `symbol -> matching shard` 元数据，不再只依赖 Kafka 默认 key hash。热点 symbol 可以独占 shard，冷门 symbol 可以共享 shard。
+- 为 shard ownership 增加单调递增的 epoch/fencing token。所有撮合状态变更、checkpoint 和 shard lease 都必须拒绝过期 owner 的写入，防止延迟恢复的旧节点形成第二写者。
+- 持久化有序撮合 command journal、周期性订单簿 snapshot，以及 Kafka offset/checkpoint 元数据。恢复时加载最新的已校验 snapshot，只重放 checkpoint 之后的命令。
+- 支持 shard 级 drain、handoff、recovery 和健康状态，partition 移动时不再要求恢复全部订单簿或重启整个 JVM。
+- 如果恢复时间目标需要，为 shard 增加 leader/follower 复制；只有持有有效 fencing token 的 leader 可以发布权威 match result、trade、depth sequence 和结算事件。
+- 单个 symbol 仍必须在一个 shard 内串行处理。增加节点提升的是多 symbol 聚合吞吐，不能让多个节点同时撮合一个 BTC-USDT 订单簿。
+
+### 验收门槛
+
+- 每次只运行一条产品线，做市进程保持在线，通过模拟用户 API 覆盖下单、撤单、撮合、开平仓、强平、风控事件以及 WebSocket 公共/私有推送。
+- 证明恢复结果确定：每次故障切换前后逐项比较开放订单、价格时间优先级、持仓、余额、深度 sequence 连续性、持久化 checkpoint 和 Kafka offset。
+- 用户账号和做市账号逐项资金对账：期初、调整、成交、手续费、资金费、强平费、适用时的交割/行权流水和期末余额必须精确对平。
+- 验证产品线特有边界：永续的资金费/标记价/强平/ADL/保险基金，交割的到期结算，期权的权利金/行权/到期失效，以及现货资产冻结/扣减/释放。
+- 生产发布前必须通过持续热点 symbol 压测和重复节点 kill/rebalance 测试，且不能出现重复成交、命令丢失、重复结算、恢复后订单簿交叉、过期 owner 写入或资金核对异常。
+
 ## 文档
 
 - [部署说明](docs/deployment.md)

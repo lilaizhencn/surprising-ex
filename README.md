@@ -253,6 +253,36 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - External venue market data should use WebSocket as the primary path and REST only for cold start and fallback.
 - Fiat FX is for display and valuation hints; it must not replace contract index or mark price risk logic.
 
+## Next-Phase Plan: Production-Grade Multi-Node Matching
+
+The matching service already has the first-stage multi-node foundation: order commands are keyed by `symbol`, Kafka assigns each partition to one live consumer in a shared matching group, and a restarted node rebuilds open order books from PostgreSQL. The next phase will harden this model into an explicitly managed matching cluster. It will preserve the single-writer rule for each symbol; multiple nodes may own different symbol shards, but must never concurrently mutate the same order book.
+
+### Phase 1: Productionize the Existing Partition Model
+
+- Keep each product line isolated with its own order-command topic, consumer group, client identities, instruments, accounts, risk model, and downstream topics.
+- Pre-allocate enough Kafka partitions for the expected matching parallelism. Do not increase a live keyed topic's partition count without a product-line maintenance, migration, and replay plan, because it can change `symbol -> partition` placement.
+- Deploy multiple matching providers with the same product-line `group-id` and a stable unique `client-id` per node. Keep `restart-on-partition-reassignment=true`, use controlled rolling updates and a PodDisruptionBudget, and avoid high-frequency autoscaling.
+- Restore only the symbols owned by the node's assigned partitions instead of loading every open order book into every process. Readiness must remain false until assignment, recovery, and consistency checks finish.
+- Add operational visibility for `symbol -> partition -> client-id`, consumer lag, command P99 latency, recovery duration, open-order count, outbox backlog, settlement latency, restart causes, and reconciliation failures.
+- Add multi-broker and multi-node failure drills covering graceful drain, hard node loss, Kafka rebalance, database interruption, command replay, and outbox replay.
+
+### Phase 2: Explicit Shards and Fast Failover
+
+- Introduce versioned `symbol -> matching shard` metadata rather than relying only on Kafka's default key hash. Hot symbols may receive dedicated shards while cold symbols share shards.
+- Add a monotonically increasing shard ownership epoch/fencing token. Every matching state transition, checkpoint, and shard lease must reject writes from an expired owner so a delayed old node cannot become a second writer.
+- Persist an ordered matching command journal, periodic order-book snapshots, and Kafka offset/checkpoint metadata. Recovery should load the latest verified snapshot and replay only commands after its checkpoint.
+- Support shard-level drain, handoff, recovery, and health state so partition movement does not require rebuilding every book or restarting the whole JVM.
+- If recovery-time objectives require it, add leader/follower replication per shard; only the fenced leader may emit authoritative match results, trades, depth sequences, or settlement events.
+- Keep a single symbol serial within one shard. Adding nodes improves aggregate throughput across symbols; it does not make multiple nodes concurrently match one BTC-USDT book.
+
+### Acceptance Gates
+
+- Run one product line at a time with market making kept online, using simulated user APIs for place, cancel, match, position open/close, liquidation, risk events, and public/private WebSocket flows.
+- Prove deterministic recovery: before and after each failover, compare open orders, price-time priority, positions, balances, depth sequence continuity, persisted checkpoints, and Kafka offsets.
+- Reconcile user and market-maker funds item by item: opening balance, adjustments, trades, fees, funding, liquidation fees, delivery/exercise ledgers where applicable, and closing balance must balance exactly.
+- Validate product-specific boundaries: perpetual funding/mark price/liquidation/ADL/insurance, delivery expiry settlement, option premium/exercise/expiry, and spot asset freeze/debit/release.
+- Require sustained hotspot-symbol stress tests and repeated node-kill/rebalance tests with no double match, lost command, duplicate settlement, crossed recovered book, stale-owner write, or reconciliation violation before production rollout.
+
 ## Documentation
 
 - [Deployment](docs/deployment.md)
