@@ -171,8 +171,8 @@ The root `init.sql` creates:
 - `instrument_index_sources`: index component source config keyed by `(symbol, version, source)`.
 - `candlestick_symbols`: optional symbol registry.
 - `candlestick_candles`: OHLCV storage keyed by `(symbol, period, open_time)`.
-- `price_index_ticks`: index price ticks keyed by `(symbol, sequence)`.
-- `price_index_components`: index component audit rows keyed by `(symbol, sequence, source)`.
+- `price_index_ticks`: three-day asynchronous index-price audit ticks keyed by `(symbol, sequence)`.
+- `price_index_components`: three-day asynchronous index component audit rows keyed by `(symbol, sequence, source)`.
 - `price_symbol_leases`: active publisher ownership keyed by `(module, symbol)`.
 - `price_symbol_sequences`: database-allocated price sequence keyed by `(module, symbol)`.
 - `price_exchange_rates`: fiat and stable-coin bridge rates keyed by `(base_currency, quote_currency)`.
@@ -432,7 +432,8 @@ Do not point this script at a shared development database. Matching restores ope
 - ADL can be paused with `surprising.adl.scanner.enabled=false`; the scanner returns before claiming deficit rows.
 - ADL providers re-lock target `account_positions` rows before reducing a position; concurrent nodes skip locked positions.
 - ADL position-margin release is guarded by `account_position_margins.margin_units >= releaseUnits`; skipped updates fail the ADL transaction.
-- External-source failures are stored in component/audit records; unusable index prices are not published.
+- External-source failures are stored in component/audit records; unavailable index snapshots are published so
+  real-time consumers invalidate earlier usable values.
 - Instrument changes are immutable versions; downstream services replace local cache after reading current snapshots or consuming `surprising.instrument.events.v1`.
 - Gateway route names are allowlisted. Unknown services return 404 before any backend call.
 - WebSocket private subscriptions are matched against the authenticated user id; a client cannot subscribe to another user's private stream by sending a different `userId`.
@@ -442,7 +443,8 @@ Do not point this script at a shared development database. Matching restores ope
 - `price_symbol_leases` owner does not move after a node dies: wait until `lease_until`; if it is far in the future, verify node clock synchronization.
 - `risk_scan_leases` owner does not move after a risk node dies: wait until `lease_until`, confirm all nodes have synchronized clocks, and verify `surprising.risk.coordination.node-id` is unique per live instance.
 - Price sequence has gaps: expected after failed attempts. Investigate only if a sequence moves backwards, which should not happen.
-- Index price missing: inspect `price_index_components` for `STALE`, `OUTLIER`, `ERROR`, or conversion failure reasons.
+- Index price unavailable: inspect the latest index-topic snapshot status, then `price_index_components` for
+  `STALE`, `OUTLIER`, `ERROR`, or conversion failure reasons.
 - Binance returns `451` or Bybit returns `403`: collector egress region/IP is blocked by the venue.
 - WebSocket reconnect loop: check venue connectivity, ping/pong behavior, idle timeout, and egress firewall.
 - Kafka consumer lag: increase topic partitions, provider instances, or stream threads. Do not create one topic per symbol.

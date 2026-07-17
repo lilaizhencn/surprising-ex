@@ -9,11 +9,12 @@ import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 public class IndexPriceRepository {
@@ -75,31 +76,31 @@ public class IndexPriceRepository {
         return sequence;
     }
 
-    public void save(IndexPriceEvent event) {
-        jdbcTemplate.update(INSERT_TICK_SQL, event.symbol(), event.sequence(), event.indexPrice(), event.status().name(),
-                event.componentCount(), event.validComponentCount(), event.totalConfiguredWeight(),
-                Timestamp.from(event.eventTime()));
-        saveComponents(event);
-    }
+    @Transactional
+    public void saveBatch(List<IndexPriceEvent> events) {
+        if (events == null || events.isEmpty()) {
+            return;
+        }
+        jdbcTemplate.batchUpdate(INSERT_TICK_SQL, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(PreparedStatement statement, int index) throws java.sql.SQLException {
+                IndexPriceEvent event = events.get(index);
+                statement.setString(1, event.symbol());
+                statement.setLong(2, event.sequence());
+                statement.setBigDecimal(3, event.indexPrice());
+                statement.setString(4, event.status().name());
+                statement.setInt(5, event.componentCount());
+                statement.setInt(6, event.validComponentCount());
+                statement.setBigDecimal(7, event.totalConfiguredWeight());
+                statement.setTimestamp(8, Timestamp.from(event.eventTime()));
+            }
 
-    public Optional<IndexPriceResponse> latest(String symbol) {
-        String sql = """
-                SELECT symbol, sequence, index_price, status, component_count, valid_component_count, event_time
-                  FROM price_index_ticks
-                 WHERE symbol = ?
-                   AND index_price IS NOT NULL
-                 ORDER BY event_time DESC
-                 LIMIT 1
-                """;
-        List<IndexPriceResponse> rows = jdbcTemplate.query(sql, (rs, rowNum) -> toResponse(
-                rs.getString("symbol"),
-                rs.getLong("sequence"),
-                rs.getBigDecimal("index_price"),
-                PriceStatus.valueOf(rs.getString("status")),
-                rs.getInt("component_count"),
-                rs.getInt("valid_component_count"),
-                rs.getTimestamp("event_time").toInstant()), symbol);
-        return rows.stream().findFirst();
+            @Override
+            public int getBatchSize() {
+                return events.size();
+            }
+        });
+        saveComponents(events);
     }
 
     public List<IndexPriceResponse> history(String symbol, Instant startTime, Instant endTime, int limit) {
@@ -124,17 +125,47 @@ public class IndexPriceRepository {
                 symbol, Timestamp.from(startTime), Timestamp.from(endTime), limit);
     }
 
-    private void saveComponents(IndexPriceEvent event) {
-        List<IndexComponentSnapshot> components = event.components();
-        if (components == null || components.isEmpty()) {
+    public int deleteAuditBefore(Instant cutoff, int limit) {
+        return jdbcTemplate.update("""
+                WITH expired AS MATERIALIZED (
+                    SELECT symbol, sequence
+                      FROM price_index_ticks
+                     WHERE event_time < ?
+                     ORDER BY event_time ASC
+                     LIMIT ?
+                ), deleted_components AS (
+                    DELETE FROM price_index_components c
+                    USING expired e
+                    WHERE c.symbol = e.symbol
+                      AND c.sequence = e.sequence
+                )
+                DELETE FROM price_index_ticks t
+                USING expired e
+                WHERE t.symbol = e.symbol
+                  AND t.sequence = e.sequence
+                """, Timestamp.from(cutoff), limit);
+    }
+
+    private void saveComponents(List<IndexPriceEvent> events) {
+        List<IndexComponentRow> rows = new ArrayList<>();
+        for (IndexPriceEvent event : events) {
+            if (event.components() == null) {
+                continue;
+            }
+            for (IndexComponentSnapshot component : event.components()) {
+                rows.add(new IndexComponentRow(event, component));
+            }
+        }
+        if (rows.isEmpty()) {
             return;
         }
         jdbcTemplate.batchUpdate(INSERT_COMPONENT_SQL, new BatchPreparedStatementSetter() {
             @Override
             public void setValues(PreparedStatement ps, int i) throws java.sql.SQLException {
-                IndexComponentSnapshot component = components.get(i);
-                ps.setString(1, event.symbol());
-                ps.setLong(2, event.sequence());
+                IndexComponentRow row = rows.get(i);
+                IndexComponentSnapshot component = row.component();
+                ps.setString(1, row.event().symbol());
+                ps.setLong(2, row.event().sequence());
                 ps.setString(3, component.source());
                 ps.setString(4, component.sourceSymbol());
                 ps.setBigDecimal(5, component.price());
@@ -155,7 +186,7 @@ public class IndexPriceRepository {
 
             @Override
             public int getBatchSize() {
-                return components.size();
+                return rows.size();
             }
         });
     }
@@ -206,5 +237,8 @@ public class IndexPriceRepository {
     private Long nullableLong(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
         long value = rs.getLong(column);
         return rs.wasNull() ? null : value;
+    }
+
+    private record IndexComponentRow(IndexPriceEvent event, IndexComponentSnapshot component) {
     }
 }

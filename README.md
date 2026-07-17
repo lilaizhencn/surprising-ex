@@ -137,7 +137,6 @@ Ports:
 - `surprising.account.position.events.v1`: account position update events for private WebSocket fanout.
 - `surprising.perp.liquidation.candidates.v1`: liquidation candidate events.
 - `surprising.perp.index.price.v1`: index price output.
-- `surprising.perp.index.components.v1`: index component audit output.
 - `surprising.perp.book.ticker.v1`: perpetual best bid/ask input.
 - `surprising.perp.funding.rate.v1`: funding rate output consumed by mark price.
 - `surprising.perp.mark.price.v1`: single mark-price output containing the business result and complete audit inputs.

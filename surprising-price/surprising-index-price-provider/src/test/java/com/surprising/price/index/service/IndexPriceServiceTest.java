@@ -3,11 +3,9 @@ package com.surprising.price.index.service;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.surprising.price.api.model.IndexComponentEvent;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.SourceStatus;
 import com.surprising.price.index.client.ExternalSpotPriceClient;
@@ -26,7 +24,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 class IndexPriceServiceTest {
 
     @Test
-    void publishesIndexPriceAndComponentsToProductSpecificTopics() {
+    void publishesCompleteIndexSnapshotToTheProductSpecificTopicWithoutSynchronouslyWritingAuditTables() {
         IndexPriceProperties properties = properties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
         properties.getKafka().setProductTopicsEnabled(true);
@@ -52,11 +50,8 @@ class IndexPriceServiceTest {
 
         service.pollAndPublish();
 
-        verify(repository).save(any(IndexPriceEvent.class));
         verify(kafkaTemplate).send(eq("surprising.option.index.price.v1"),
                 eq("BTC-USDT-260925-70000-C"), any(IndexPriceEvent.class));
-        verify(kafkaTemplate, times(3)).send(eq("surprising.option.index.components.v1"),
-                eq("BTC-USDT-260925-70000-C"), any(IndexComponentEvent.class));
     }
 
     private IndexPriceProperties properties() {

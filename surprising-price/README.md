@@ -85,14 +85,11 @@ Outlier handling:
 - Default `outlier-threshold` is `0.01`, or 1%.
 - Default minimum valid sources is `3`.
 
-Index topics:
-
-```text
-surprising.perp.index.price.v1
-surprising.perp.index.components.v1
-```
-
-The components topic carries source snapshots and reject reasons for audit.
+The single `surprising.perp.index.price.v1` event carries the calculated result and every source
+component snapshot. It is the real-time input for mark price and the only audit stream: an independent
+consumer group batches the same events into `price_index_ticks` and `price_index_components`. The producer
+never synchronously writes those audit tables. Unusable snapshots are also published, so local consumers
+immediately invalidate an earlier usable index price rather than silently retaining it.
 
 ## WebSocket And REST
 
@@ -270,7 +267,9 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
   BRIN time index retain only three days.
 - Index and mark price producers use `acks=all`, idempotence, `zstd`, and `max.in.flight.requests.per.connection=5`.
 - Mark-price input consumers intentionally use `auto.offset.reset=latest` because stale input snapshots should not be replayed into a live mark calculator after a fresh start. They still use disabled auto-commit, record acknowledgements, and cooperative-sticky rebalance.
-- If external sources are insufficient, index provider records the failed snapshot but does not publish a usable index price.
+- If external sources are insufficient, index provider publishes an unavailable snapshot; consumers must reject it.
+- `price_index_ticks` and `price_index_components` are asynchronous three-day audit tables. They are never
+  a real-time business input; `/latest` reads the local Kafka cache and `/history` reads audit storage.
 - USD sources must declare `quote-currency`, `target-quote-currency`, stable conversion source, and conversion direction.
 - App fiat display must use the local `price_exchange_rates` cache, not third-party FX API calls per user request.
 - Mark input topics must use the same `symbol` key. Keep related topics at the same partition count when possible to reduce cross-node input skew.
@@ -279,7 +278,8 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
 
 - Binance REST returns `451`: the current host is in a restricted region. Deploy collectors in an allowed region, or disable/lower this source.
 - Bybit returns `403`: CloudFront region or WAF restriction. Validate collector egress IPs before production.
-- Index price is not published: check whether valid sources are below `min-valid-sources`, and inspect `price_index_components.reason`.
+- Index price is unavailable: check the latest index topic snapshot status and inspect
+  `price_index_components.reason` in the audit table.
 - WebSocket reconnects frequently: check venue ping/pong behavior, egress network, `idle-timeout`, and `reconnect-max-delay`.
 - USD source weight is reduced: USDT/USD conversion is likely unavailable; inspect component reason for `conversion failed`.
 - Fiat conversion returns 404: check whether `price_exchange_rates` has refreshed or whether the rate is older than `stale-after`.

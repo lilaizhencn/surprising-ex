@@ -73,14 +73,10 @@ indexPrice = Σ(sourceMid_i * normalizedWeight_i)
 - 默认 `outlier-threshold` 是 `0.01`，也就是 1%。
 - 默认至少需要 `3` 个有效源。
 
-指数价格 topic：
-
-```text
-surprising.perp.index.price.v1
-surprising.perp.index.components.v1
-```
-
-components topic 会记录每个外部源的价格、权重、状态和剔除原因，用于审计。
+唯一的 `surprising.perp.index.price.v1` 消息同时携带计算结果和全部外部源 component 快照。它既是
+标记价格的实时输入，也是唯一审计流：独立 consumer group 批量把同一条消息写入
+`price_index_ticks` 和 `price_index_components`。生产端不会同步写这些审计表。不可用快照也会发布，
+这样本地消费者会立即让旧的可用指数价格失效，而不会静默继续使用旧价。
 
 ## WebSocket 和 REST
 
@@ -246,7 +242,9 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
 - `price_mark_ticks` 使用普通非分区表和紧凑的时间 BRIN 索引，每分钟分批删除，只保留 3 天。
 - 指数价格和标记价格 producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.connection=5`。
 - 标记价格输入 consumer 有意使用 `auto.offset.reset=latest`，因为新启动的 live mark calculator 不应该把旧输入快照重新计算成当前标记价格；但它仍然关闭 auto commit，使用 record ack 和 cooperative-sticky rebalance。
-- 外部源不足时，指数服务会记录失败快照，但不会发布可用指数价格。
+- 外部源不足时，指数服务会发布不可用快照；消费者必须拒绝该价格。
+- `price_index_ticks` 和 `price_index_components` 是异步写入、保留三天的审计表，不能作为实时业务输入；
+  `/latest` 读取本地 Kafka 缓存，`/history` 才读取审计库。
 - USD 源必须声明 `quote-currency`、`target-quote-currency`、稳定币换算源和换算方向。
 - App 法币展示必须走本地 `price_exchange_rates` 缓存，不能每个用户请求实时打第三方 FX API。
 - 标记价格输入 topic 必须使用相同的 `symbol` key；建议相关 topic 使用相同 partition 数，降低跨节点输入错位概率。
@@ -255,7 +253,7 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
 
 - Binance REST 返回 `451`：当前机器所在地区被 Binance 限制。生产要部署在允许访问的区域，或禁用该源/降低权重。
 - Bybit 返回 `403`：CloudFront 地区限制或风控拦截。生产要验证采集机房 IP 和 WAF 策略。
-- 指数价格不发布：检查有效外部源是否少于 `min-valid-sources`，以及 `price_index_components.reason`。
+- 指数价格不可用：查看最新指数 topic 快照的状态，以及审计表中的 `price_index_components.reason`。
 - WS 频繁重连：检查外部交易所 ping/pong、网络出口、`idle-timeout` 和 `reconnect-max-delay`。
 - USD 源权重变低：通常是 USDT/USD 换算源不可用，查看成分 reason 是否包含 `conversion failed`。
 - 法币换算 404：检查 `price_exchange_rates` 是否已刷新，或 FX rate 是否超过 `stale-after`。

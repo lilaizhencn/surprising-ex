@@ -17,8 +17,6 @@ class IndexKafkaProducerConfigurationTest {
         IndexPriceProperties properties = new IndexPriceProperties();
 
         assertThat(properties.getKafka().getIndexPriceTopic()).isEqualTo("surprising.perp.index.price.v1");
-        assertThat(properties.getKafka().getIndexComponentsTopic())
-                .isEqualTo("surprising.perp.index.components.v1");
     }
 
     @Test
@@ -29,8 +27,6 @@ class IndexKafkaProducerConfigurationTest {
 
         assertThat(properties.getKafka().getIndexPriceTopic())
                 .isEqualTo("surprising.linear-delivery.index.price.v1");
-        assertThat(properties.getKafka().getIndexComponentsTopic())
-                .isEqualTo("surprising.linear-delivery.index.components.v1");
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.surprising.price.api.PriceApiPaths;
 import com.surprising.price.api.model.IndexPriceQueryResponse;
 import com.surprising.price.api.model.IndexPriceResponse;
 import com.surprising.price.index.repository.IndexPriceRepository;
+import com.surprising.price.index.service.LatestIndexPriceCache;
 import java.time.Instant;
 import org.springframework.http.HttpStatus;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -16,15 +17,20 @@ import org.springframework.web.server.ResponseStatusException;
 public class IndexPriceController {
 
     private final IndexPriceRepository indexPriceRepository;
+    private final LatestIndexPriceCache latestIndexPriceCache;
 
-    public IndexPriceController(IndexPriceRepository indexPriceRepository) {
+    public IndexPriceController(IndexPriceRepository indexPriceRepository, LatestIndexPriceCache latestIndexPriceCache) {
         this.indexPriceRepository = indexPriceRepository;
+        this.latestIndexPriceCache = latestIndexPriceCache;
     }
 
     @GetMapping(PriceApiPaths.INDEX_BASE_PATH + "/latest")
     public IndexPriceResponse latestIndexPrice(@RequestParam("symbol") String symbol) {
-        return indexPriceRepository.latest(normalizeSymbol(symbol))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "index price not found"));
+        try {
+            return latestIndexPriceCache.requireFresh(normalizeSymbol(symbol));
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
+        }
     }
 
     @GetMapping(PriceApiPaths.INDEX_BASE_PATH + "/history")

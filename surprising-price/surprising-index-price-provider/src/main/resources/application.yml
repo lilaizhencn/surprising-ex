@@ -34,7 +34,10 @@ surprising:
         product-line: LINEAR_PERPETUAL
         product-topics-enabled: false
         index-price-topic: surprising.perp.index.price.v1
-        index-components-topic: surprising.perp.index.components.v1
+        group-id: surprising-index-price-v1
+        cache-group-id: surprising-index-price-cache-${HOSTNAME:${random.uuid}}
+        concurrency: 2
+        max-poll-records: 500
       calculation:
         poll-delay-ms: 1000
         max-source-age: 5s
@@ -57,6 +60,11 @@ surprising:
         enabled: true
         node-id:
         lease-duration: 15s
+      audit:
+        retention: 3d
+        cleanup-delay-ms: 60000
+        cleanup-batch-size: 10000
+        max-batches-per-run: 10
       instrument:
         enabled: true
         refresh-delay-ms: 30000

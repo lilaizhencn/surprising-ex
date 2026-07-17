@@ -127,7 +127,6 @@ create_product_topics() {
   case "${product_line}" in
     linear-perp|inverse-perp|linear-delivery|inverse-delivery|option)
       create_topic "${prefix}.index.price.v1"
-      create_topic "${prefix}.index.components.v1"
       create_topic "${prefix}.book.ticker.v1"
       create_topic "${prefix}.account.position.events.v1"
       create_topic "${prefix}.risk.account.events.v1"
@@ -169,7 +168,6 @@ if [[ "${INCLUDE_LEGACY_PERP_TOPICS}" == "true" ]]; then
   create_topic surprising.perp.orderbook.depth.v1
   create_topic surprising.perp.liquidation.candidates.v1
   create_topic surprising.perp.index.price.v1
-  create_topic surprising.perp.index.components.v1
   create_topic surprising.perp.book.ticker.v1
   create_topic surprising.perp.funding.rate.v1
   create_topic surprising.perp.mark.price.v1

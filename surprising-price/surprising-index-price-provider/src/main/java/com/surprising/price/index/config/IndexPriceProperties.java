@@ -17,6 +17,7 @@ public class IndexPriceProperties {
     private WebSocket webSocket = new WebSocket();
     private Fiat fiat = new Fiat();
     private Coordination coordination = new Coordination();
+    private Audit audit = new Audit();
     private Instrument instrument = new Instrument();
     private List<SymbolConfig> symbols = new ArrayList<>();
 
@@ -68,6 +69,14 @@ public class IndexPriceProperties {
         this.coordination = coordination;
     }
 
+    public Audit getAudit() {
+        return audit;
+    }
+
+    public void setAudit(Audit audit) {
+        this.audit = audit;
+    }
+
     public Instrument getInstrument() {
         return instrument;
     }
@@ -89,7 +98,10 @@ public class IndexPriceProperties {
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
         private boolean productTopicsEnabled;
         private String indexPriceTopic = "surprising.perp.index.price.v1";
-        private String indexComponentsTopic = "surprising.perp.index.components.v1";
+        private String groupId = "surprising-index-price-v1";
+        private String cacheGroupId = "surprising-index-price-cache-local";
+        private int concurrency = 2;
+        private int maxPollRecords = 500;
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -123,12 +135,36 @@ public class IndexPriceProperties {
             this.indexPriceTopic = indexPriceTopic;
         }
 
-        public String getIndexComponentsTopic() {
-            return productTopicsEnabled ? productTopics().indexComponentsTopic() : indexComponentsTopic;
+        public String getGroupId() {
+            return groupId;
         }
 
-        public void setIndexComponentsTopic(String indexComponentsTopic) {
-            this.indexComponentsTopic = indexComponentsTopic;
+        public void setGroupId(String groupId) {
+            this.groupId = groupId;
+        }
+
+        public String getCacheGroupId() {
+            return cacheGroupId;
+        }
+
+        public void setCacheGroupId(String cacheGroupId) {
+            this.cacheGroupId = cacheGroupId;
+        }
+
+        public int getConcurrency() {
+            return concurrency;
+        }
+
+        public void setConcurrency(int concurrency) {
+            this.concurrency = concurrency;
+        }
+
+        public int getMaxPollRecords() {
+            return maxPollRecords;
+        }
+
+        public void setMaxPollRecords(int maxPollRecords) {
+            this.maxPollRecords = maxPollRecords;
         }
 
         private ProductTopicNames productTopics() {
@@ -486,6 +522,45 @@ public class IndexPriceProperties {
 
         public void setLeaseDuration(Duration leaseDuration) {
             this.leaseDuration = leaseDuration;
+        }
+    }
+
+    public static class Audit {
+        private Duration retention = Duration.ofDays(3);
+        private long cleanupDelayMs = Duration.ofMinutes(1).toMillis();
+        private int cleanupBatchSize = 10_000;
+        private int maxBatchesPerRun = 10;
+
+        public Duration getRetention() {
+            return retention;
+        }
+
+        public void setRetention(Duration retention) {
+            this.retention = retention;
+        }
+
+        public long getCleanupDelayMs() {
+            return cleanupDelayMs;
+        }
+
+        public void setCleanupDelayMs(long cleanupDelayMs) {
+            this.cleanupDelayMs = cleanupDelayMs;
+        }
+
+        public int getCleanupBatchSize() {
+            return cleanupBatchSize;
+        }
+
+        public void setCleanupBatchSize(int cleanupBatchSize) {
+            this.cleanupBatchSize = cleanupBatchSize;
+        }
+
+        public int getMaxBatchesPerRun() {
+            return maxBatchesPerRun;
+        }
+
+        public void setMaxBatchesPerRun(int maxBatchesPerRun) {
+            this.maxBatchesPerRun = maxBatchesPerRun;
         }
     }
 

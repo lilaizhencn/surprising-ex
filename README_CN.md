@@ -138,7 +138,6 @@ Legacy 永续 topic 仍保留用于兼容单线启动。产品线实例使用 `s
 - `surprising.account.position.events.v1`：账户持仓变化事件，供私有 WebSocket 推送消费。
 - `surprising.perp.liquidation.candidates.v1`：爆仓候选事件。
 - `surprising.perp.index.price.v1`：指数价格输出。
-- `surprising.perp.index.components.v1`：指数成分审计输出。
 - `surprising.perp.book.ticker.v1`：合约盘口最优价输入。
 - `surprising.perp.funding.rate.v1`：资金费率输出，供 mark price 服务消费。
 - `surprising.perp.mark.price.v1`：唯一标记价格输出，同时携带业务结果和完整审计输入。

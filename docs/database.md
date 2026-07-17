@@ -144,7 +144,12 @@ Query index:
 
 ```sql
 CREATE INDEX price_index_ticks_query_idx ON price_index_ticks (symbol, event_time DESC);
+CREATE INDEX price_index_ticks_event_time_brin ON price_index_ticks USING BRIN (event_time);
 ```
+
+The index provider publishes one complete Kafka event first. A separate audit consumer batches that same
+event into this table and `price_index_components`; both tables are retained for three days and are not
+real-time price inputs.
 
 ## `price_index_components`
 

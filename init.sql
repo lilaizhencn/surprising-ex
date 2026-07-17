@@ -502,6 +502,9 @@ CREATE TABLE IF NOT EXISTS price_index_ticks (
 CREATE INDEX IF NOT EXISTS price_index_ticks_query_idx
     ON price_index_ticks (symbol, event_time DESC);
 
+CREATE INDEX IF NOT EXISTS price_index_ticks_event_time_brin
+    ON price_index_ticks USING BRIN (event_time);
+
 CREATE TABLE IF NOT EXISTS price_index_components (
     symbol              TEXT NOT NULL,
     sequence            BIGINT NOT NULL,

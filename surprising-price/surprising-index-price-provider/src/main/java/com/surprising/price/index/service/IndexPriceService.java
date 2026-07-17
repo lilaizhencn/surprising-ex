@@ -1,9 +1,6 @@
 package com.surprising.price.index.service;
 
-import com.surprising.price.api.model.IndexComponentSnapshot;
-import com.surprising.price.api.model.IndexComponentEvent;
 import com.surprising.price.api.model.IndexPriceEvent;
-import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.index.client.ExternalSpotPriceClient;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.model.SourceQuote;
@@ -80,15 +77,9 @@ public class IndexPriceService {
         long sequence = indexPriceRepository.nextSequence(SEQUENCE_MODULE, symbol);
         IndexPriceEvent event = indexPriceCalculator.calculate(symbol, sequence, symbolConfig.getMinValidSources(),
                 quotes, Instant.now());
-        indexPriceRepository.save(event);
-
-        if (event.status() != PriceStatus.INSUFFICIENT_SOURCES && event.indexPrice() != null) {
-            kafkaTemplate.send(properties.getKafka().getIndexPriceTopic(), symbol, event);
-        }
-        for (IndexComponentSnapshot component : event.components()) {
-            kafkaTemplate.send(properties.getKafka().getIndexComponentsTopic(), symbol,
-                    new IndexComponentEvent(symbol, event.sequence(), event.eventTime(), component));
-        }
+        // The index-price topic is the single real-time and audit stream.  In particular, publish
+        // unavailable snapshots as well so consumers cannot continue using a prior healthy price.
+        kafkaTemplate.send(properties.getKafka().getIndexPriceTopic(), symbol, event);
     }
 
     private boolean ownsSymbol(String symbol) {

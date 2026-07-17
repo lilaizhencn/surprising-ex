@@ -43,10 +43,6 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("index.price");
     }
 
-    public String indexComponentsTopic() {
-        return topic("index.components");
-    }
-
     public String bookTickerTopic() {
         return topic("book.ticker");
     }
