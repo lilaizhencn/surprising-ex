@@ -690,25 +690,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS funding_payments_settlement_user_uidx
 CREATE INDEX IF NOT EXISTS funding_payments_user_time_idx
     ON funding_payments (user_id, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS funding_outbox_events (
-    id                  BIGINT PRIMARY KEY,
-    topic               TEXT NOT NULL,
-    event_key           TEXT NOT NULL,
-    event_type          TEXT NOT NULL,
-    payload             JSONB NOT NULL,
-    published_at        TIMESTAMPTZ,
-    next_attempt_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    attempts            INTEGER NOT NULL DEFAULT 0,
-    last_error          TEXT,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT funding_outbox_attempts_non_negative CHECK (attempts >= 0)
-);
-
-CREATE INDEX IF NOT EXISTS funding_outbox_pending_idx
-    ON funding_outbox_events (next_attempt_at, id)
-    WHERE published_at IS NULL;
-
 CREATE TABLE IF NOT EXISTS trading_sequences (
     sequence_name       TEXT PRIMARY KEY,
     sequence_value      BIGINT NOT NULL,

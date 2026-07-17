@@ -140,7 +140,7 @@ Legacy 永续 topic 仍保留用于兼容单线启动。产品线实例使用 `s
 - `surprising.perp.liquidation.candidates.v1`：爆仓候选事件。
 - `surprising.perp.index.price.v1`：指数价格输出。
 - `surprising.perp.book.ticker.v1`：合约盘口最优价输入。
-- `surprising.perp.funding.rate.v1`：资金费率输出，供 mark price 服务消费。
+- `surprising.perp.funding.rate.v1`：实时预测资金费率输出，供 mark price 服务消费；funding provider 和其他消费者按 symbol 缓存最新事件。
 - `surprising.perp.mark.price.v1`：唯一标记价格输出，同时携带业务结果和完整审计输入。
 
 所有市场数据 topic 都使用 `symbol` 作为 Kafka key。
@@ -232,7 +232,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Liquidation 会把过期或缺失的风险快照视为非强平状态；`surprising.liquidation.risk.max-snapshot-age` 默认 `5s`。
 - Liquidation 创建强平订单时走 fail-fast：交易订单、订单事件或审计行被冲突跳过都会回滚候选事务。
 - 风控扫描、强平执行、资金费率发布、资金费结算、保险基金覆盖、ADL 扫描都有显式 `*.enabled` 运营开关，用于事故暂停。
-- Funding 基于 mark/index premium 和 instrument 利率/上限/下限计算 long ppm 资金费率，并把到期资金费结算到账户余额。
+- Funding 基于 mark/index premium 和 instrument 利率/上限/下限计算 long ppm 预测资金费率，直接发布到 Kafka；每个结算时点才把缓存中的最新预测冻结为 `FINAL` 数据库行并结算到账户余额。
 - Insurance 使用 long 资产单位覆盖显式账户亏损，并同时写保险基金流水和账户流水。
 - ADL 在保险基金耗尽后处理剩余亏损，削减盈利高优先级仓位，并把实现盈利转去覆盖 deficit。
 - K 线服务用 Kafka Streams + RocksDB 分区状态，按 Kafka partition 水平扩展。

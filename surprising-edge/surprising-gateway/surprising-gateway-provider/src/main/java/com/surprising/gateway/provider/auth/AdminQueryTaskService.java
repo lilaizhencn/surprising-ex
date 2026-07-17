@@ -174,15 +174,6 @@ public class AdminQueryTaskService {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
                 SELECT *
                   FROM (
-                        SELECT 'funding' AS module, 'funding_outbox_events' AS table_name,
-                               COUNT(*) AS total,
-                               COUNT(*) FILTER (WHERE published_at IS NULL) AS pending,
-                               COUNT(*) FILTER (WHERE published_at IS NULL AND last_error IS NOT NULL) AS failed,
-                               COALESCE(MAX(attempts) FILTER (WHERE published_at IS NULL), 0) AS max_attempts,
-                               MIN(next_attempt_at) FILTER (WHERE published_at IS NULL) AS oldest_pending_at,
-                               MAX(last_error) FILTER (WHERE published_at IS NULL AND last_error IS NOT NULL) AS last_error
-                          FROM funding_outbox_events
-                        UNION ALL
                         SELECT 'trading', 'trading_outbox_events',
                                COUNT(*),
                                COUNT(*) FILTER (WHERE published_at IS NULL),

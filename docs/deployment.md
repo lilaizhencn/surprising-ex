@@ -211,7 +211,7 @@ The root `init.sql` creates:
 - `price_exchange_rates`: fiat and stable-coin bridge rates keyed by `(base_currency, quote_currency)`.
 - `price_mark_ticks`: three-day mark-price audit snapshots keyed by `(symbol, sequence)`, including the
   complete calculation-input JSON and fixed-point output; real-time consumers use Kafka, not this table.
-- `funding_rate_ticks`: predicted funding rates keyed by `(symbol, sequence)`.
+- `funding_rate_ticks`: `FINAL` funding rates frozen at a settlement boundary and keyed by `(symbol, sequence)`; per-second predictions remain on Kafka/cache.
 - `funding_settlements`: idempotent funding settlement batches keyed by `(symbol, funding_time)`.
 - `funding_payments`: per-user funding payments keyed by `(settlement_id, user_id)`.
 - `trading_orders`: accepted/rejected order state using long ticks and steps.
@@ -422,9 +422,9 @@ Do not point this script at a shared development database. Matching restores ope
 - Funding providers also use `price_symbol_leases` and `price_symbol_sequences`; settlement is additionally guarded by `funding_settlements(symbol, funding_time)`.
 - Risk providers use `risk_scan_leases` so only one live node writes snapshots and candidates for a given `userId + settleAsset`; lease expiry allows another node to take over after the owner dies.
 - Market-maker providers use `market_maker_strategy_leases` so only one live node quotes a given `strategyId + symbol`. If the owner dies, lease expiry allows another node to continue. The module places normal `LIMIT + GTX + postOnly` orders through order-provider and never writes matching state directly.
-- Funding-rate publication is a rate-row plus outbox transaction. If the funding rate insert or outbox enqueue/mark update is skipped, the provider fails instead of committing a one-sided state change.
+- Funding-rate prediction is published directly to `surprising.perp.funding.rate.v1` and cached by symbol; it performs no rate-table or outbox write. At the funding boundary, the owner freezes the cached prediction into one idempotent `FINAL` rate row before settlement. If no current prediction is available, settlement fails closed for that symbol.
 - Funding-rate publication and settlement can be paused independently with `surprising.funding.calculation.enabled=false` and `surprising.funding.settlement.enabled=false`.
-- Trading, matching, risk, and funding outbox publishers are at-least-once. A Kafka send failure increments `attempts`, records `last_error`, and moves `next_attempt_at` forward with capped exponential backoff; the row remains unpublished and is retried by later scans.
+- Trading, matching, and risk outbox publishers are at-least-once. A Kafka send failure increments `attempts`, records `last_error`, and moves `next_attempt_at` forward with capped exponential backoff; the row remains unpublished and is retried by later scans.
 - Mark-price publication requires a fresh index-price event with non-null `indexPrice` and usable status (`HEALTHY` or `DEGRADED`). `INSUFFICIENT_SOURCES`, stale, or missing index events stop fresh mark publication; ordinary order entry then fails closed through the mark-price freshness checks.
 - Order entry rejects market orders when mark price is stale or missing, and enforces min/max notional using the configured mark-derived execution band. Linear market-order max-notional and initial-margin checks use the upper bound for both BUY and SELL; matching still applies the side-specific protected price before exchange-core submission and rejects taker orders that would self-trade.
 - Matching startup rebuilds exchange-core order books from DB open `LIMIT` + `GTC/GTX` orders that already have successful `PLACE` results.

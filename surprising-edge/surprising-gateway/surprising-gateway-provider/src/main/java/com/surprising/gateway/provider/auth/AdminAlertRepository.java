@@ -699,12 +699,11 @@ public class AdminAlertRepository {
         String sql = """
                 SELECT 'all' AS target, SUM(value)::numeric AS value
                   FROM (
-                        SELECT COUNT(*) AS value FROM funding_outbox_events WHERE %s
-                        UNION ALL SELECT COUNT(*) AS value FROM trading_outbox_events WHERE %s
+                        SELECT COUNT(*) AS value FROM trading_outbox_events WHERE %s
                         UNION ALL SELECT COUNT(*) AS value FROM account_outbox_events WHERE %s
                         UNION ALL SELECT COUNT(*) AS value FROM risk_outbox_events WHERE %s
                   ) rows
-                """.formatted(predicate, predicate, predicate, predicate);
+                """.formatted(predicate, predicate, predicate);
         return scalar("all", label, sql);
     }
 

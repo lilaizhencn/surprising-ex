@@ -11,7 +11,6 @@ public class FundingProperties {
     private Kafka kafka = new Kafka();
     private Calculation calculation = new Calculation();
     private Settlement settlement = new Settlement();
-    private Outbox outbox = new Outbox();
     private Coordination coordination = new Coordination();
 
     public Kafka getKafka() {
@@ -38,14 +37,6 @@ public class FundingProperties {
         this.settlement = settlement;
     }
 
-    public Outbox getOutbox() {
-        return outbox;
-    }
-
-    public void setOutbox(Outbox outbox) {
-        this.outbox = outbox;
-    }
-
     public Coordination getCoordination() {
         return coordination;
     }
@@ -59,6 +50,9 @@ public class FundingProperties {
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
         private boolean productTopicsEnabled;
         private String fundingRateTopic = "surprising.perp.funding.rate.v1";
+        private String cacheGroupId = "surprising-funding-rate-cache-local";
+        private int concurrency = 1;
+        private int maxPollRecords = 500;
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -97,12 +91,37 @@ public class FundingProperties {
         public void setFundingRateTopic(String fundingRateTopic) {
             this.fundingRateTopic = fundingRateTopic;
         }
+
+        public String getCacheGroupId() {
+            return cacheGroupId;
+        }
+
+        public void setCacheGroupId(String cacheGroupId) {
+            this.cacheGroupId = cacheGroupId;
+        }
+
+        public int getConcurrency() {
+            return concurrency;
+        }
+
+        public void setConcurrency(int concurrency) {
+            this.concurrency = concurrency;
+        }
+
+        public int getMaxPollRecords() {
+            return maxPollRecords;
+        }
+
+        public void setMaxPollRecords(int maxPollRecords) {
+            this.maxPollRecords = maxPollRecords;
+        }
     }
 
     public static class Calculation {
         private boolean enabled = true;
         private long publishDelayMs = 1000L;
         private Duration maxMarkAge = Duration.ofSeconds(10);
+        private Duration maxRateAge = Duration.ofSeconds(5);
 
         public boolean isEnabled() {
             return enabled;
@@ -126,6 +145,14 @@ public class FundingProperties {
 
         public void setMaxMarkAge(Duration maxMarkAge) {
             this.maxMarkAge = maxMarkAge;
+        }
+
+        public Duration getMaxRateAge() {
+            return maxRateAge;
+        }
+
+        public void setMaxRateAge(Duration maxRateAge) {
+            this.maxRateAge = maxRateAge;
         }
     }
 
@@ -156,36 +183,6 @@ public class FundingProperties {
 
         public void setBatchSize(int batchSize) {
             this.batchSize = batchSize;
-        }
-    }
-
-    public static class Outbox {
-        private int batchSize = 200;
-        private long publishDelayMs = 200L;
-        private Duration sendTimeout = Duration.ofSeconds(3);
-
-        public int getBatchSize() {
-            return batchSize;
-        }
-
-        public void setBatchSize(int batchSize) {
-            this.batchSize = batchSize;
-        }
-
-        public long getPublishDelayMs() {
-            return publishDelayMs;
-        }
-
-        public void setPublishDelayMs(long publishDelayMs) {
-            this.publishDelayMs = publishDelayMs;
-        }
-
-        public Duration getSendTimeout() {
-            return sendTimeout;
-        }
-
-        public void setSendTimeout(Duration sendTimeout) {
-            this.sendTimeout = sendTimeout;
         }
     }
 

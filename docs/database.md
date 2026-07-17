@@ -250,7 +250,7 @@ PRIMARY KEY (symbol, sequence)
 
 ## Funding Tables
 
-`funding_rate_ticks` stores predicted funding rates using long ppm values:
+`funding_rate_ticks` stores only `FINAL` funding rates frozen at a settlement boundary, using long ppm values. Per-second `PREDICTED` rates are Kafka events held in each consumer's latest-by-symbol cache and are not inserted here:
 
 - `funding_rate_ppm`: final clamped funding rate in parts per million.
 - `premium_rate_ppm`: `(markPrice - indexPrice) / indexPrice * 1_000_000`.

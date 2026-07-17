@@ -137,23 +137,17 @@ public class FundingRepository {
                 rs.getTimestamp("event_time").toInstant()), args.toArray());
     }
 
-    public FundingRateResponse saveRate(FundingRateInput input,
-                                        long sequence,
-                                        long fundingRatePpm,
-                                        Instant fundingTime,
-                                        Instant now) {
+    public boolean saveFinalRate(FundingRateResponse rate) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO funding_rate_ticks (
                     symbol, sequence, funding_time, funding_interval_hours,
                     premium_rate_ppm, interest_rate_ppm, funding_rate_ppm,
                     status, event_time, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'PREDICTED', ?, now())
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'FINAL', ?, now())
                 ON CONFLICT (symbol, sequence) DO NOTHING
-                """, input.symbol(), sequence, Timestamp.from(fundingTime), input.fundingIntervalHours(),
-                input.premiumRatePpm(), input.interestRatePpm(), fundingRatePpm, Timestamp.from(now));
-        requireSingleRow(rows, "funding rate insert");
-        return new FundingRateResponse(input.symbol(), sequence, fundingRatePpm, input.premiumRatePpm(),
-                input.interestRatePpm(), fundingTime, input.fundingIntervalHours(), "PREDICTED", now);
+                """, rate.symbol(), rate.sequence(), Timestamp.from(rate.fundingTime()), rate.fundingIntervalHours(),
+                rate.premiumRatePpm(), rate.interestRatePpm(), rate.fundingRatePpm(), Timestamp.from(rate.eventTime()));
+        return rows == 1;
     }
 
     public Optional<FundingRateResponse> latestRate(String symbol) {
@@ -208,6 +202,7 @@ public class FundingRepository {
                   JOIN instruments i
                     ON i.symbol = c.symbol AND i.version = c.version
                  WHERE r.funding_time <= ?
+                   AND r.status = 'FINAL'
                    AND %s
                    AND NOT EXISTS (
                        SELECT 1

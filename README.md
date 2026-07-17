@@ -138,7 +138,7 @@ Ports:
 - `surprising.perp.liquidation.candidates.v1`: liquidation candidate events.
 - `surprising.perp.index.price.v1`: index price output.
 - `surprising.perp.book.ticker.v1`: perpetual best bid/ask input.
-- `surprising.perp.funding.rate.v1`: funding rate output consumed by mark price.
+- `surprising.perp.funding.rate.v1`: real-time predicted funding-rate output consumed by mark price; the funding provider and other consumers cache the latest event by symbol.
 - `surprising.perp.mark.price.v1`: single mark-price output containing the business result and complete audit inputs.
 
 All market-data topics use `symbol` as the Kafka key.
@@ -230,7 +230,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Liquidation treats stale or missing risk snapshots as non-liquidatable; `surprising.liquidation.risk.max-snapshot-age` defaults to `5s`.
 - Liquidation order creation is fail-fast: skipped trading order, order event, or audit inserts roll back the candidate transaction.
 - Risk scans, liquidation execution, funding-rate publication, funding settlement, insurance coverage, and ADL scanners all have explicit `*.enabled` operational switches for incident pauses.
-- Funding calculates long ppm funding rates from mark/index premium plus instrument interest/cap/floor, then settles due funding payments into account balances.
+- Funding calculates long ppm predicted funding rates from mark/index premium plus instrument interest/cap/floor and publishes them directly to Kafka. At each funding boundary, the latest cached prediction is frozen as a `FINAL` database row and then settled into account balances.
 - Insurance covers explicit account deficits with long asset units and writes both fund ledger and account ledger records.
 - ADL handles residual deficits after insurance depletion by reducing profitable high-priority positions and transferring realized profit to deficit coverage.
 - Candlestick state scales with Kafka Streams partitions and local RocksDB state stores.

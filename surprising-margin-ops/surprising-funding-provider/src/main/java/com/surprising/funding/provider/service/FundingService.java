@@ -6,17 +6,19 @@ import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.api.model.FundingSettlementResponse;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.model.FundingPaymentCandidate;
-import com.surprising.funding.provider.repository.FundingOutboxRepository;
 import com.surprising.funding.provider.repository.FundingRepository;
+import com.surprising.price.api.model.PerpFundingRateEvent;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
@@ -26,22 +28,24 @@ public class FundingService {
 
     private final FundingProperties properties;
     private final FundingRepository fundingRepository;
-    private final FundingOutboxRepository outboxRepository;
+    private final LatestFundingRateCache latestFundingRateCache;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
     private final TransactionTemplate transactionTemplate;
     private final String nodeId;
 
     public FundingService(FundingProperties properties,
                           FundingRepository fundingRepository,
-                          FundingOutboxRepository outboxRepository,
+                          LatestFundingRateCache latestFundingRateCache,
+                          @Qualifier("fundingKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
                           PlatformTransactionManager transactionManager) {
         this.properties = properties;
         this.fundingRepository = fundingRepository;
-        this.outboxRepository = outboxRepository;
+        this.latestFundingRateCache = latestFundingRateCache;
+        this.kafkaTemplate = kafkaTemplate;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
     }
 
-    @Transactional
     @Scheduled(fixedDelayString = "${surprising.funding.calculation.publish-delay-ms:1000}")
     public void publishRates() {
         if (!properties.getCalculation().isEnabled()) {
@@ -56,9 +60,11 @@ public class FundingService {
             long rawRate = Math.addExact(input.interestRatePpm(), input.premiumRatePpm());
             long fundingRate = FundingMath.clampRate(rawRate, input.fundingRateFloorPpm(), input.fundingRateCapPpm());
             Instant fundingTime = FundingTime.nextFundingTime(now, input.fundingIntervalHours());
-            FundingRateResponse rate = fundingRepository.saveRate(input, sequence, fundingRate, fundingTime, now);
-            outboxRepository.enqueue(properties.getKafka().getFundingRateTopic(), rate.symbol(), "FUNDING_RATE",
-                    fundingRatePayload(rate), now);
+            FundingRateResponse rate = new FundingRateResponse(input.symbol(), sequence, fundingRate,
+                    input.premiumRatePpm(), input.interestRatePpm(), fundingTime, input.fundingIntervalHours(),
+                    "PREDICTED", now);
+            latestFundingRateCache.update(rate);
+            kafkaTemplate.send(properties.getKafka().getFundingRateTopic(), rate.symbol(), fundingRateEvent(rate));
         }
     }
 
@@ -68,6 +74,7 @@ public class FundingService {
             return;
         }
         Instant now = Instant.now();
+        freezeDuePredictions(now);
         for (FundingRateResponse rate : fundingRepository.dueRates(now, properties.getSettlement().getBatchSize())) {
             if (!ownsSymbol(rate.symbol())) {
                 continue;
@@ -82,8 +89,7 @@ public class FundingService {
     }
 
     public FundingRateResponse latestRate(String symbol) {
-        return fundingRepository.latestRate(normalizeSymbol(symbol))
-                .orElseThrow(() -> new IllegalStateException("funding rate not found for symbol: " + symbol));
+        return latestFundingRateCache.requireFresh(normalizeSymbol(symbol));
     }
 
     public FundingRateQueryResponse rateHistory(String symbol, int limit) {
@@ -150,15 +156,24 @@ public class FundingService {
         return fundingRepository.acquireLease(symbol, nodeId, properties.getCoordination().getLeaseDuration());
     }
 
-    private String fundingRatePayload(FundingRateResponse rate) {
-        return "{"
-                + "\"symbol\":\"" + rate.symbol() + "\","
-                + "\"fundingRate\":" + FundingTime.rateDecimalString(rate.fundingRatePpm()) + ","
-                + "\"nextFundingTime\":\"" + rate.fundingTime() + "\","
-                + "\"fundingIntervalHours\":" + rate.fundingIntervalHours() + ","
-                + "\"sequence\":" + rate.sequence() + ","
-                + "\"eventTime\":\"" + rate.eventTime() + "\""
-                + "}";
+    private void freezeDuePredictions(Instant now) {
+        for (FundingRateResponse rate : latestFundingRateCache.duePredictions(now)) {
+            if (!ownsSymbol(rate.symbol())) {
+                continue;
+            }
+            try {
+                fundingRepository.saveFinalRate(rate);
+                latestFundingRateCache.removeIfCurrent(rate);
+            } catch (Exception ex) {
+                log.error("Failed to freeze funding rate symbol={} fundingTime={}: {}",
+                        rate.symbol(), rate.fundingTime(), ex.getMessage(), ex);
+            }
+        }
+    }
+
+    private PerpFundingRateEvent fundingRateEvent(FundingRateResponse rate) {
+        return new PerpFundingRateEvent(rate.symbol(), new BigDecimal(FundingTime.rateDecimalString(rate.fundingRatePpm())),
+                rate.fundingTime(), rate.fundingIntervalHours(), rate.sequence(), rate.eventTime());
     }
 
     private String normalizeSymbol(String symbol) {

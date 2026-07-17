@@ -29,10 +29,10 @@ class AdminSystemMetricsControllerTest {
         var response = controller.metrics("Bearer admin", 60);
 
         assertThat(response.windowMinutes()).isEqualTo(60);
-        assertThat(response.outbox().totalPending()).isEqualTo(6);
+        assertThat(response.outbox().totalPending()).isEqualTo(5);
         assertThat(response.outbox().totalFailed()).isEqualTo(2);
         assertThat(response.outbox().maxAttempts()).isEqualTo(4);
-        assertThat(response.outbox().modules()).hasSize(4);
+        assertThat(response.outbox().modules()).hasSize(3);
         assertThat(response.adminOperations().total()).isEqualTo(10);
         assertThat(response.adminOperations().failed()).isEqualTo(2);
         assertThat(response.adminOperations().failureRatePpm()).isEqualTo(200_000);
@@ -62,9 +62,6 @@ class AdminSystemMetricsControllerTest {
 
         @Override
         public Map<String, Object> queryForMap(String sql, Object... args) {
-            if (sql.contains("funding_outbox_events")) {
-                return outbox(10, 1, 0, 2);
-            }
             if (sql.contains("trading_outbox_events")) {
                 return outbox(20, 2, 1, 4);
             }

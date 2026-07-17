@@ -43,18 +43,15 @@ class FundingRepositoryTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    void saveRateFailsWhenInsertIsSkipped() {
+    void saveFinalRateTreatsExistingFrozenRateAsIdempotent() {
         FundingRepository repository = new FundingRepository(jdbcTemplate);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
-        FundingRateInput input = new FundingRateInput("BTC-USDT", 0L, 100L, 10L,
-                -3_750L, 3_750L, 8, now);
+        FundingRateResponse rate = new FundingRateResponse("BTC-USDT", 11L, 110L, 100L, 10L,
+                Instant.parse("2026-07-01T08:00:00Z"), 8, "PREDICTED", now);
         when(jdbcTemplate.update(contains("INSERT INTO funding_rate_ticks"), any(Object[].class)))
                 .thenReturn(0);
 
-        assertThatThrownBy(() -> repository.saveRate(input, 11L, 110L,
-                Instant.parse("2026-07-01T08:00:00Z"), now))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("funding rate insert");
+        assertThat(repository.saveFinalRate(rate)).isFalse();
     }
 
     @Test

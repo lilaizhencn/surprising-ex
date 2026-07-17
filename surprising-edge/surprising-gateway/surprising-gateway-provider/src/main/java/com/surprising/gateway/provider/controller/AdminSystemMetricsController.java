@@ -22,7 +22,6 @@ import org.springframework.web.server.ResponseStatusException;
 public class AdminSystemMetricsController {
 
     private static final List<OutboxTable> OUTBOX_TABLES = List.of(
-            new OutboxTable("funding", "funding_outbox_events"),
             new OutboxTable("trading", "trading_outbox_events"),
             new OutboxTable("account", "account_outbox_events"),
             new OutboxTable("risk", "risk_outbox_events"));
