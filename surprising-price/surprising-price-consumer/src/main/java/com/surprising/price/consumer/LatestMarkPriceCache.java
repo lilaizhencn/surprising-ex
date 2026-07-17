@@ -11,6 +11,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -20,6 +21,7 @@ public class LatestMarkPriceCache {
     private final Clock clock;
     private final ConcurrentMap<String, MarkPriceEvent> latestBySymbol = new ConcurrentHashMap<>();
 
+    @Autowired
     public LatestMarkPriceCache(MarkPriceConsumerProperties properties) {
         this(properties, Clock.systemUTC());
     }

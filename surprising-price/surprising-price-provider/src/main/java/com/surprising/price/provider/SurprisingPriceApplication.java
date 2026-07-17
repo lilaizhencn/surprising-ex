@@ -20,7 +20,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @ComponentScan(
         basePackages = {
                 "com.surprising.price.index",
-                "com.surprising.price.mark"
+                "com.surprising.price.mark",
+                "com.surprising.price.consumer"
         },
         excludeFilters = @ComponentScan.Filter(
                 type = FilterType.ASSIGNABLE_TYPE,
