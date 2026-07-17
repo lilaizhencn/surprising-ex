@@ -15,11 +15,11 @@ import tools.jackson.databind.ObjectMapper;
 public class OpenOrderViewConsumer {
     private final ObjectMapper mapper; private final OrderRepository repository; private final RedisOpenOrderView view; private final TradingOrderProperties properties;
     public OpenOrderViewConsumer(ObjectMapper mapper, OrderRepository repository, RedisOpenOrderView view, TradingOrderProperties properties){this.mapper=mapper;this.repository=repository;this.view=view;this.properties=properties;}
-    @KafkaListener(topics="#{__listener.orderEventsTopic()}",groupId="#{__listener.groupId()}")
+    @KafkaListener(topics="#{__listener.orderEventsTopic()}",groupId="#{__listener.groupId()}", containerFactory="orderOpenViewKafkaListenerContainerFactory")
     public void onOrder(ConsumerRecord<String,String> record)throws Exception{project(mapper.readValue(record.value(),OrderEvent.class).orderId());}
-    @KafkaListener(topics="#{__listener.matchResultsTopic()}",groupId="#{__listener.groupId()}")
+    @KafkaListener(topics="#{__listener.matchResultsTopic()}",groupId="#{__listener.groupId()}", containerFactory="orderOpenViewKafkaListenerContainerFactory")
     public void onMatch(ConsumerRecord<String,String> record)throws Exception{project(mapper.readValue(record.value(),MatchResultEvent.class).orderId());}
-    @KafkaListener(topics="#{__listener.matchTradesTopic()}",groupId="#{__listener.groupId()}")
+    @KafkaListener(topics="#{__listener.matchTradesTopic()}",groupId="#{__listener.groupId()}", containerFactory="orderOpenViewKafkaListenerContainerFactory")
     public void onTrade(ConsumerRecord<String,String> record)throws Exception{
         MatchTradeEvent trade=mapper.readValue(record.value(),MatchTradeEvent.class);
         project(trade.takerOrderId()); project(trade.makerOrderId());
