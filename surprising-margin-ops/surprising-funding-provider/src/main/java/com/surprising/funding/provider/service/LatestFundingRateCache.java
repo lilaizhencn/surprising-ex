@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** Kafka-backed latest predicted funding rates. Database rows are reserved for frozen settlement rates. */
@@ -20,6 +21,7 @@ public class LatestFundingRateCache {
     private final Clock clock;
     private final ConcurrentMap<FundingRateKey, FundingRateResponse> ratesByFundingTime = new ConcurrentHashMap<>();
 
+    @Autowired
     public LatestFundingRateCache(FundingProperties properties) {
         this(properties, Clock.systemUTC());
     }
