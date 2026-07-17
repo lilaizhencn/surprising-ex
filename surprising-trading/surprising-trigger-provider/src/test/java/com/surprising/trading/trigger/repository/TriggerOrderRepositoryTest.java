@@ -225,6 +225,32 @@ class TriggerOrderRepositoryTest {
 
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
+    void claimTriggeredCandidatesRechecksIdsPriceAndProductLineUnderRowLock() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(List.of());
+
+        var rows = repository.claimTriggeredCandidates(ProductLine.OPTION, "BTC-USDT",
+                TriggerPriceType.LAST_PRICE, 70_000L, 10L,
+                Instant.parse("2026-07-01T00:00:00Z"), 100,
+                Instant.parse("2026-07-01T00:00:01Z"), List.of(501L, 502L));
+
+        assertThat(rows).isEmpty();
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("trigger_order_id IN (?,?)")
+                .contains("trigger_price_ticks <= ?")
+                .contains("trigger_price_ticks >= ?")
+                .contains("FOR UPDATE SKIP LOCKED")
+                .contains("sibling.product_line = c.product_line");
+        assertThat(args.getValue()).startsWith("BTC-USDT", "LAST_PRICE", "OPTION", 501L, 502L);
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
     void claimTrailingTriggeredTracksExtremaAndUsesRowLocks() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);

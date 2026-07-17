@@ -36,13 +36,18 @@ import com.surprising.trading.trigger.model.TriggerPosition;
 import com.surprising.trading.trigger.repository.TriggerOrderRepository;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.OptionalLong;
+import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Owns the TP/SL trigger-order state machine.
@@ -62,13 +67,23 @@ public class TriggerOrderService {
     private final TriggerOrderRepository triggerOrderRepository;
     private final OrderRpcApi orderRpcApi;
     private final TriggerProperties properties;
+    private final TriggerOrderIndex triggerOrderIndex;
 
     public TriggerOrderService(TriggerOrderRepository triggerOrderRepository,
                                OrderRpcApi orderRpcApi,
                                TriggerProperties properties) {
+        this(triggerOrderRepository, orderRpcApi, properties, TriggerOrderIndex.disabled());
+    }
+
+    @Autowired
+    public TriggerOrderService(TriggerOrderRepository triggerOrderRepository,
+                               OrderRpcApi orderRpcApi,
+                               TriggerProperties properties,
+                               TriggerOrderIndex triggerOrderIndex) {
         this.triggerOrderRepository = triggerOrderRepository;
         this.orderRpcApi = orderRpcApi;
         this.properties = properties;
+        this.triggerOrderIndex = triggerOrderIndex;
     }
 
     @Transactional
@@ -132,8 +147,13 @@ public class TriggerOrderService {
                 null,
                 now,
                 now);
+        // Index before insertion: when Redis indexing is enabled, a committed static TP/SL can never exist
+        // without its candidate member. A later database rollback only leaves a harmless stale candidate.
+        triggerOrderIndex.indexPlaced(order);
+        removeIndexOnRollback(order);
         boolean inserted = triggerOrderRepository.insert(order);
         if (!inserted && hasClientTriggerOrderId(normalized)) {
+            triggerOrderIndex.remove(order);
             return triggerOrderRepository.findByClientTriggerOrderId(productLine, normalized.userId(),
                             normalized.clientTriggerOrderId())
                     .map(existing -> {
@@ -143,6 +163,7 @@ public class TriggerOrderService {
                     .orElseThrow(() -> new IllegalStateException("duplicate trigger id but order not found"));
         }
         if (!inserted) {
+            triggerOrderIndex.remove(order);
             throw new IllegalStateException("failed to insert trigger order " + triggerOrderId);
         }
         return toResponse(order);
@@ -215,9 +236,13 @@ public class TriggerOrderService {
         if (current.status() != TriggerOrderStatus.PENDING) {
             return toResponse(current);
         }
-        return triggerOrderRepository.cancel(request.userId(), request.triggerOrderId(), Instant.now())
-                .map(this::toResponse)
+        TriggerOrderRecord updated = triggerOrderRepository.cancel(
+                        request.userId(), request.triggerOrderId(), Instant.now())
                 .orElseThrow(() -> new IllegalStateException("trigger order disappeared after cancel"));
+        if (updated.status() == TriggerOrderStatus.CANCELED) {
+            afterCommit(() -> triggerOrderIndex.remove(updated));
+        }
+        return toResponse(updated);
     }
 
     @Transactional
@@ -427,6 +452,26 @@ public class TriggerOrderService {
                                                     Instant triggeredAt,
                                                     int limit,
                                                     Instant now) {
+        int candidateLimit = Math.max(limit, properties.getRedisIndex().getCandidateBatchSize());
+        var candidateIds = triggerOrderIndex.dueCandidates(
+                currentProductLine(), symbol, triggerPriceType, triggerPriceTicks, candidateLimit);
+        if (candidateIds.isPresent()) {
+            if (candidateIds.get().isEmpty()) {
+                return List.of();
+            }
+            List<TriggerOrderRecord> claimed = triggerOrderRepository.claimTriggeredCandidates(
+                    currentProductLine(), symbol, triggerPriceType, triggerPriceTicks, triggerSequence,
+                    triggeredAt, limit, now, candidateIds.get());
+            try {
+                cleanupCandidateIndex(symbol, triggerPriceType, candidateIds.get());
+                cleanupOcoIndex(claimed);
+            } catch (RuntimeException ex) {
+                // Index cleanup cannot invalidate the DB claim. Stale members are rejected on the next exact claim.
+                log.warn("Trigger candidate cleanup failed line={} symbol={} type={}: {}",
+                        currentProductLine(), symbol, triggerPriceType, ex.getMessage());
+            }
+            return claimed;
+        }
         String contractType = currentProductContractType();
         if (contractType == null) {
             return triggerOrderRepository.claimTriggered(symbol, triggerPriceType, triggerPriceTicks, triggerSequence,
@@ -444,15 +489,31 @@ public class TriggerOrderService {
                                                             int limit,
                                                             Instant now) {
         String contractType = currentProductContractType();
+        List<TriggerOrderRecord> claimed;
         if (contractType == null) {
-            return triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceType, triggerPriceTicks,
+            claimed = triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceType, triggerPriceTicks,
                     triggerSequence, triggeredAt, limit, now);
+        } else {
+            claimed = triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceType, triggerPriceTicks,
+                    triggerSequence, triggeredAt, limit, now, contractType);
         }
-        return triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceType, triggerPriceTicks,
-                triggerSequence, triggeredAt, limit, now, contractType);
+        if (triggerOrderIndex.enabled()) {
+            try {
+                cleanupOcoIndex(claimed);
+            } catch (RuntimeException ex) {
+                log.warn("Trailing trigger OCO index cleanup failed line={} symbol={}: {}",
+                        currentProductLine(), symbol, ex.getMessage());
+            }
+        }
+        return claimed;
     }
 
     private void expirePending(Instant now, int limit) {
+        if (triggerOrderIndex.enabled()) {
+            triggerOrderRepository.expirePendingOrders(now, limit, currentProductLine())
+                    .forEach(triggerOrderIndex::remove);
+            return;
+        }
         String contractType = currentProductContractType();
         if (contractType == null) {
             triggerOrderRepository.expirePending(now, limit);
@@ -494,6 +555,7 @@ public class TriggerOrderService {
             } else {
                 triggerOrderRepository.markTriggered(order.triggerOrderId(), placed.orderId(), now);
             }
+            triggerOrderIndex.remove(order);
         } catch (Exception ex) {
             // Leave the row in TRIGGERING; maintenance will reset stale rows for a later mark event.
             log.error("Failed to execute trigger order id={}: {}", order.triggerOrderId(), ex.getMessage(), ex);
@@ -822,5 +884,69 @@ public class TriggerOrderService {
 
     private ProductLine currentProductLine() {
         return properties.getKafka().getProductLine();
+    }
+
+    private void cleanupCandidateIndex(String symbol,
+                                       TriggerPriceType triggerPriceType,
+                                       List<Long> candidateIds) {
+        List<TriggerOrderRecord> persisted = triggerOrderRepository.findByIds(candidateIds);
+        Set<Long> foundIds = new HashSet<>();
+        for (TriggerOrderRecord order : persisted) {
+            foundIds.add(order.triggerOrderId());
+            if (order.status() != TriggerOrderStatus.PENDING
+                    && order.status() != TriggerOrderStatus.TRIGGERING) {
+                triggerOrderIndex.remove(order);
+            }
+        }
+        for (Long candidateId : candidateIds) {
+            if (!foundIds.contains(candidateId)) {
+                triggerOrderIndex.remove(currentProductLine(), symbol, triggerPriceType, candidateId);
+            }
+        }
+    }
+
+    private void cleanupOcoIndex(List<TriggerOrderRecord> claimed) {
+        Set<String> handledGroups = new HashSet<>();
+        for (TriggerOrderRecord order : claimed) {
+            if (order.ocoGroupId() == null || order.ocoGroupId().isBlank()) {
+                continue;
+            }
+            String groupKey = order.productLine() + ":" + order.userId() + ":" + order.symbol() + ":"
+                    + order.marginMode() + ":" + order.ocoGroupId();
+            if (!handledGroups.add(groupKey)) {
+                continue;
+            }
+            triggerOrderRepository.ocoGroupOrders(order).stream()
+                    .filter(sibling -> sibling.status() != TriggerOrderStatus.PENDING
+                            && sibling.status() != TriggerOrderStatus.TRIGGERING)
+                    .forEach(triggerOrderIndex::remove);
+        }
+    }
+
+    private void afterCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            action.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                action.run();
+            }
+        });
+    }
+
+    private void removeIndexOnRollback(TriggerOrderRecord order) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                    triggerOrderIndex.remove(order);
+                }
+            }
+        });
     }
 }

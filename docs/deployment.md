@@ -58,6 +58,36 @@ Keep the matching provider on JDK 21 unless exchange-core and Chronicle are reva
 - Gateway providers are stateless. Scale them behind a load balancer and point route `base-url` values at Kubernetes Services or your service-discovery layer.
 - Market-maker providers coordinate by `market_maker_strategy_leases(strategy_id, symbol)`. Multiple nodes may run the same config, but only the lease owner quotes a strategy-symbol pair. Keep the provider on an internal network and keep `surprising.market-maker.engine.enabled=false` unless liquidity accounts are funded and risk caps are reviewed.
 
+## Trigger Redis Index
+
+Static TP/SL price-range indexing uses Spring Data Redis with Lettuce. It is disabled by default for a controlled
+rollout. Configure every trigger-provider or combined trading-entry node for one product line with the same Redis
+deployment and key prefix:
+
+```bash
+export TRIGGER_REDIS_INDEX_ENABLED=true
+export REDIS_HOST=redis.internal
+export REDIS_PORT=6379
+export REDIS_PASSWORD='replace-with-secret-manager-value'
+export REDIS_DATABASE=0
+export TRIGGER_REDIS_KEY_PREFIX=surprising:trigger:v1
+```
+
+- Use product-topic routing and one configured product line per provider. ZSET keys include product line, symbol,
+  price source, and a Redis Cluster hash tag; TP/SL state never crosses product lines.
+- Use `maxmemory-policy noeviction` (preferred) or a volatile-only eviction policy, and deploy Redis with durable
+  failover. An all-keys eviction policy can remove a range ZSET while leaving the readiness marker and is therefore
+  not allowed for this index. A Redis restart that loses both data and marker is safe because providers fall back
+  to PostgreSQL and rebuild before marking the index ready again.
+- Do not enable Spring Data Redis global transaction support. Candidate reads and two-direction removal use Lua;
+  PostgreSQL and Redis are deliberately not treated as an XA transaction.
+- New static TP/SL placement is fail-closed if its Redis member cannot be written while the feature is enabled.
+  Existing committed orders fall back to PostgreSQL claims when the readiness marker or Redis lookup is unavailable.
+- The rebuild lease uses `SET NX` with a TTL and token-checked Lua release. Do not use that lease as the trigger
+  execution lock; PostgreSQL conditional state transitions and `FOR UPDATE SKIP LOCKED` remain the final guard.
+- Keep Redis command timeout short relative to the price-event cadence. Monitor Redis latency/errors together with
+  trigger DB fallback rate, stale candidate cleanup, `TRIGGERING` age, and Kafka consumer lag before widening rollout.
+
 ## Product-Line Provider Instances
 
 The backend keeps one shared codebase and runs product-line instances by configuration. Use product topic routing for separated order, match, account, risk, liquidation, mark price, candlestick, WebSocket, and funding traffic.

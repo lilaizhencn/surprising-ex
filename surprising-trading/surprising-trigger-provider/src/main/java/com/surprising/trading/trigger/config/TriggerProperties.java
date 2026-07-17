@@ -10,6 +10,7 @@ public class TriggerProperties {
 
     private Kafka kafka = new Kafka();
     private Execution execution = new Execution();
+    private RedisIndex redisIndex = new RedisIndex();
 
     public Kafka getKafka() {
         return kafka;
@@ -25,6 +26,14 @@ public class TriggerProperties {
 
     public void setExecution(Execution execution) {
         this.execution = execution;
+    }
+
+    public RedisIndex getRedisIndex() {
+        return redisIndex;
+    }
+
+    public void setRedisIndex(RedisIndex redisIndex) {
+        this.redisIndex = redisIndex;
     }
 
     public static class Kafka {
@@ -142,6 +151,72 @@ public class TriggerProperties {
 
         public void setMaintenanceDelayMs(long maintenanceDelayMs) {
             this.maintenanceDelayMs = maintenanceDelayMs;
+        }
+    }
+
+    public static class RedisIndex {
+        private boolean enabled;
+        private String keyPrefix = "surprising:trigger:v1";
+        private int candidateBatchSize = 400;
+        private int rebuildBatchSize = 1_000;
+        private long reconcileDelayMs = 10_000L;
+        private Duration readyTtl = Duration.ofSeconds(30);
+        private Duration lockTtl = Duration.ofSeconds(30);
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getKeyPrefix() {
+            return keyPrefix;
+        }
+
+        public void setKeyPrefix(String keyPrefix) {
+            this.keyPrefix = keyPrefix;
+        }
+
+        public int getCandidateBatchSize() {
+            return candidateBatchSize;
+        }
+
+        public void setCandidateBatchSize(int candidateBatchSize) {
+            this.candidateBatchSize = candidateBatchSize;
+        }
+
+        public int getRebuildBatchSize() {
+            return rebuildBatchSize;
+        }
+
+        public void setRebuildBatchSize(int rebuildBatchSize) {
+            this.rebuildBatchSize = rebuildBatchSize;
+        }
+
+        public long getReconcileDelayMs() {
+            return reconcileDelayMs;
+        }
+
+        public void setReconcileDelayMs(long reconcileDelayMs) {
+            this.reconcileDelayMs = reconcileDelayMs;
+        }
+
+        public Duration getReadyTtl() {
+            return readyTtl;
+        }
+
+        public void setReadyTtl(Duration readyTtl) {
+            this.readyTtl = readyTtl;
+        }
+
+        public Duration getLockTtl() {
+            return lockTtl;
+        }
+
+        public void setLockTtl(Duration lockTtl) {
+            this.lockTtl = lockTtl;
         }
     }
 }

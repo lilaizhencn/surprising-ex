@@ -304,6 +304,52 @@ public class TriggerOrderRepository {
                 """, (rs, rowNum) -> toRecord(rs), triggerOrderId).stream().findFirst();
     }
 
+    public List<TriggerOrderRecord> findByIds(List<Long> triggerOrderIds) {
+        if (triggerOrderIds == null || triggerOrderIds.isEmpty()) {
+            return List.of();
+        }
+        List<Long> normalizedIds = triggerOrderIds.stream().distinct().limit(2_000).toList();
+        String placeholders = String.join(",", java.util.Collections.nCopies(normalizedIds.size(), "?"));
+        return jdbcTemplate.query("""
+                SELECT *
+                  FROM trading_trigger_orders
+                 WHERE trigger_order_id IN (%s)
+                """.formatted(placeholders), (rs, rowNum) -> toRecord(rs), normalizedIds.toArray());
+    }
+
+    public List<TriggerOrderRecord> staticOrdersForIndex(ProductLine productLine,
+                                                         long afterTriggerOrderId,
+                                                         int limit) {
+        int normalizedLimit = Math.max(1, Math.min(limit, 5_000));
+        return jdbcTemplate.query("""
+                SELECT *
+                  FROM trading_trigger_orders
+                 WHERE product_line = ?
+                   AND trigger_order_id > ?
+                   AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
+                   AND status IN ('PENDING', 'TRIGGERING')
+                 ORDER BY trigger_order_id ASC
+                 LIMIT ?
+                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), afterTriggerOrderId,
+                normalizedLimit);
+    }
+
+    public List<TriggerOrderRecord> ocoGroupOrders(TriggerOrderRecord order) {
+        if (order == null || order.ocoGroupId() == null || order.ocoGroupId().isBlank()) {
+            return List.of();
+        }
+        return jdbcTemplate.query("""
+                SELECT *
+                  FROM trading_trigger_orders
+                 WHERE product_line = ?
+                   AND user_id = ?
+                   AND symbol = ?
+                   AND margin_mode = ?
+                   AND oco_group_id = ?
+                """, (rs, rowNum) -> toRecord(rs), order.productLine().name(), order.userId(), order.symbol(),
+                order.marginMode().name(), order.ocoGroupId());
+    }
+
     public boolean triggerOrderMatchesContractType(long triggerOrderId, String contractType) {
         ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
         if (normalizedProductLine == null) {
@@ -614,7 +660,8 @@ public class TriggerOrderRepository {
                     SELECT trigger_order_id,
                            CASE
                                WHEN oco_group_id IS NULL THEN 'order:' || trigger_order_id::text
-                               ELSE 'oco:' || user_id::text || ':' || symbol || ':' || margin_mode || ':' || oco_group_id
+                               ELSE 'oco:' || product_line || ':' || user_id::text || ':' || symbol || ':'
+                                    || margin_mode || ':' || oco_group_id
                            END AS claim_group_key
                       FROM trading_trigger_orders
                      WHERE symbol = ?
@@ -661,6 +708,7 @@ public class TriggerOrderRepository {
                            updated_at = ?
                       FROM claimed c
                      WHERE c.oco_group_id IS NOT NULL
+                       AND sibling.product_line = c.product_line
                        AND sibling.user_id = c.user_id
                        AND sibling.symbol = c.symbol
                        AND sibling.margin_mode = c.margin_mode
@@ -671,6 +719,104 @@ public class TriggerOrderRepository {
                 )
                 SELECT * FROM claimed
                 """.formatted(productFilter), (rs, rowNum) -> toRecord(rs), args.toArray());
+    }
+
+    public List<TriggerOrderRecord> claimTriggeredCandidates(ProductLine productLine,
+                                                             String symbol,
+                                                             TriggerPriceType triggerPriceType,
+                                                             long triggerPriceTicks,
+                                                             long triggerSequence,
+                                                             Instant triggeredAt,
+                                                             int limit,
+                                                             Instant now,
+                                                             List<Long> candidateIds) {
+        if (candidateIds == null || candidateIds.isEmpty()) {
+            return List.of();
+        }
+        List<Long> normalizedIds = candidateIds.stream().distinct().limit(2_000).toList();
+        String placeholders = String.join(",", java.util.Collections.nCopies(normalizedIds.size(), "?"));
+        int normalizedLimit = Math.max(1, Math.min(limit, 1000));
+        Instant eventVisibleAt = triggeredAt.plusSeconds(1);
+        List<Object> args = new ArrayList<>();
+        args.add(symbol);
+        args.add(triggerPriceType.name());
+        args.add(productLine(productLine).name());
+        args.addAll(normalizedIds);
+        args.add(Timestamp.from(eventVisibleAt));
+        args.add(Timestamp.from(now));
+        args.add(triggerPriceTicks);
+        args.add(triggerPriceTicks);
+        args.add(normalizedLimit);
+        args.add(triggerSequence);
+        args.add(triggerPriceTicks);
+        args.add(Timestamp.from(triggeredAt));
+        args.add(Timestamp.from(now));
+        args.add(Timestamp.from(now));
+        return jdbcTemplate.query("""
+                WITH due AS (
+                    SELECT trigger_order_id,
+                           CASE
+                               WHEN oco_group_id IS NULL THEN 'order:' || trigger_order_id::text
+                               ELSE 'oco:' || product_line || ':' || user_id::text || ':' || symbol || ':'
+                                    || margin_mode || ':' || oco_group_id
+                           END AS claim_group_key
+                      FROM trading_trigger_orders
+                     WHERE symbol = ?
+                       AND status = 'PENDING'
+                       AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
+                       AND trigger_price_type = ?
+                       AND product_line = ?
+                       AND trigger_order_id IN (%s)
+                       AND created_at <= ?
+                       AND (expires_at IS NULL OR expires_at > ?)
+                       AND (
+                           (trigger_condition = 'GREATER_OR_EQUAL' AND trigger_price_ticks <= ?)
+                        OR (trigger_condition = 'LESS_OR_EQUAL' AND trigger_price_ticks >= ?)
+                       )
+                     ORDER BY trigger_order_id ASC
+                     LIMIT ?
+                     FOR UPDATE SKIP LOCKED
+                ),
+                candidates AS (
+                    SELECT trigger_order_id
+                      FROM (
+                          SELECT trigger_order_id,
+                                 row_number() OVER (
+                                     PARTITION BY claim_group_key
+                                     ORDER BY trigger_order_id ASC
+                                 ) AS group_rank
+                            FROM due
+                      ) ranked
+                     WHERE group_rank = 1
+                ),
+                claimed AS (
+                    UPDATE trading_trigger_orders o
+                       SET status = 'TRIGGERING',
+                           trigger_sequence = ?,
+                           triggered_price_ticks = ?,
+                           triggered_at = ?,
+                           updated_at = ?
+                      FROM candidates c
+                     WHERE o.trigger_order_id = c.trigger_order_id
+                 RETURNING o.*
+                ),
+                canceled_oco AS (
+                    UPDATE trading_trigger_orders sibling
+                       SET status = 'CANCELED',
+                           updated_at = ?
+                      FROM claimed c
+                     WHERE c.oco_group_id IS NOT NULL
+                       AND sibling.product_line = c.product_line
+                       AND sibling.user_id = c.user_id
+                       AND sibling.symbol = c.symbol
+                       AND sibling.margin_mode = c.margin_mode
+                       AND sibling.oco_group_id = c.oco_group_id
+                       AND sibling.trigger_order_id <> c.trigger_order_id
+                       AND sibling.status = 'PENDING'
+                 RETURNING sibling.trigger_order_id
+                )
+                SELECT * FROM claimed
+                """.formatted(placeholders), (rs, rowNum) -> toRecord(rs), args.toArray());
     }
 
     public List<TriggerOrderRecord> claimTrailingTriggered(String symbol,
@@ -775,8 +921,8 @@ public class TriggerOrderRepository {
                            END AS should_trigger,
                            CASE
                                WHEN oco_group_id IS NULL THEN 'order:' || trigger_order_id::text
-                               ELSE 'oco:' || user_id::text || ':' || symbol || ':' || margin_mode || ':'
-                                   || oco_group_id
+                               ELSE 'oco:' || product_line || ':' || user_id::text || ':' || symbol || ':'
+                                    || margin_mode || ':' || oco_group_id
                            END AS claim_group_key
                       FROM tracked
                 ),
@@ -843,8 +989,9 @@ public class TriggerOrderRepository {
                     UPDATE trading_trigger_orders sibling
                        SET status = 'CANCELED',
                            updated_at = ?
-                      FROM claimed c
+                     FROM claimed c
                      WHERE c.oco_group_id IS NOT NULL
+                       AND sibling.product_line = c.product_line
                        AND sibling.user_id = c.user_id
                        AND sibling.symbol = c.symbol
                        AND sibling.margin_mode = c.margin_mode
@@ -928,6 +1075,30 @@ public class TriggerOrderRepository {
                  FROM expired e
                  WHERE o.trigger_order_id = e.trigger_order_id
                 """, Timestamp.from(now), normalizedProductLine.name(), normalizedLimit, Timestamp.from(now));
+    }
+
+    public List<TriggerOrderRecord> expirePendingOrders(Instant now, int limit, ProductLine productLine) {
+        int normalizedLimit = Math.max(1, Math.min(limit, 1000));
+        return jdbcTemplate.query("""
+                WITH expired AS (
+                    SELECT trigger_order_id
+                      FROM trading_trigger_orders
+                     WHERE product_line = ?
+                       AND status = 'PENDING'
+                       AND expires_at IS NOT NULL
+                       AND expires_at <= ?
+                     ORDER BY expires_at ASC, trigger_order_id ASC
+                     LIMIT ?
+                     FOR UPDATE SKIP LOCKED
+                )
+                UPDATE trading_trigger_orders o
+                   SET status = 'EXPIRED',
+                       updated_at = ?
+                  FROM expired e
+                 WHERE o.trigger_order_id = e.trigger_order_id
+                RETURNING o.*
+                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), Timestamp.from(now),
+                normalizedLimit, Timestamp.from(now));
     }
 
     public int resetStaleTriggering(Instant staleBefore, Instant now, int limit) {

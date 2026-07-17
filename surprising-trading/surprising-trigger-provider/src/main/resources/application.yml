@@ -20,7 +20,18 @@ spring:
       maximum-pool-size: 20
       minimum-idle: 3
       connection-timeout: 3000
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:2s}
+      timeout: ${REDIS_COMMAND_TIMEOUT:1s}
 management:
+  health:
+    redis:
+      enabled: ${TRIGGER_REDIS_INDEX_ENABLED:false}
   endpoints:
     web:
       exposure:
@@ -46,3 +57,11 @@ surprising:
         trigger-batch-size: 200
         stale-triggering-after: 30s
         maintenance-delay-ms: 1000
+      redis-index:
+        enabled: ${TRIGGER_REDIS_INDEX_ENABLED:false}
+        key-prefix: ${TRIGGER_REDIS_KEY_PREFIX:surprising:trigger:v1}
+        candidate-batch-size: 400
+        rebuild-batch-size: 1000
+        reconcile-delay-ms: 10000
+        ready-ttl: 30s
+        lock-ttl: 30s

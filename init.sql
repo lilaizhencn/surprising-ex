@@ -1447,21 +1447,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS trading_trigger_orders_user_client_uidx
     WHERE client_trigger_order_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_user_status_idx
-    ON trading_trigger_orders (product_line, user_id, status, updated_at DESC);
+    ON trading_trigger_orders (product_line, user_id, status, created_at DESC, trigger_order_id DESC);
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_user_oco_idx
     ON trading_trigger_orders (product_line, user_id, symbol, margin_mode, oco_group_id, status, updated_at DESC)
     WHERE oco_group_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_symbol_gte_idx
-    ON trading_trigger_orders (product_line, symbol, trigger_price_ticks, trigger_order_id)
+    ON trading_trigger_orders (product_line, symbol, trigger_price_type, trigger_price_ticks, trigger_order_id)
     WHERE status = 'PENDING'
       AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
       AND trigger_price_type IN ('MARK_PRICE', 'INDEX_PRICE', 'LAST_PRICE')
       AND trigger_condition = 'GREATER_OR_EQUAL';
 
 CREATE INDEX IF NOT EXISTS trading_trigger_orders_symbol_lte_idx
-    ON trading_trigger_orders (product_line, symbol, trigger_price_ticks DESC, trigger_order_id)
+    ON trading_trigger_orders (product_line, symbol, trigger_price_type, trigger_price_ticks DESC, trigger_order_id)
     WHERE status = 'PENDING'
       AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
       AND trigger_price_type IN ('MARK_PRICE', 'INDEX_PRICE', 'LAST_PRICE')

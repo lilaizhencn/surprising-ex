@@ -84,6 +84,27 @@ class TriggerOrderServiceTest {
     }
 
     @Test
+    void placeIndexesCommittedStaticTriggerCandidate() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderIndex index = mock(TriggerOrderIndex.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties(), index);
+        PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-redis", null, "BTC-USDT",
+                OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, TriggerPriceType.MARK_PRICE, 70_000L,
+                OrderType.MARKET, TimeInForce.IOC, 0L, 2L, MarginMode.CROSS, null);
+        when(repository.nextSequence("trigger-order")).thenReturn(599L);
+        stubCloseCapacity(repository, 10L, 0L, 0L, 0L);
+        when(repository.insert(any())).thenReturn(true);
+        ArgumentCaptor<TriggerOrderRecord> orderCaptor = ArgumentCaptor.forClass(TriggerOrderRecord.class);
+
+        service.place(request);
+
+        verify(index).indexPlaced(orderCaptor.capture());
+        assertThat(orderCaptor.getValue().triggerOrderId()).isEqualTo(599L);
+        assertThat(orderCaptor.getValue().status()).isEqualTo(TriggerOrderStatus.PENDING);
+    }
+
+    @Test
     void placeAcceptsIndexPriceTriggerSource() {
         TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
@@ -475,6 +496,40 @@ class TriggerOrderServiceTest {
     }
 
     @Test
+    void cancelRemovesRedisCandidateAfterAuthoritativeStateChange() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderIndex index = mock(TriggerOrderIndex.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties(), index);
+        TriggerOrderRecord pending = record(502L, TriggerOrderStatus.PENDING);
+        TriggerOrderRecord canceled = record(502L, TriggerOrderStatus.CANCELED);
+        when(repository.findById(502L)).thenReturn(Optional.of(pending));
+        when(repository.cancel(eq(1001L), eq(502L), any())).thenReturn(Optional.of(canceled));
+
+        TriggerOrderResponse response = service.cancel(new CancelTriggerOrderRequest(1001L, 502L));
+
+        assertThat(response.status()).isEqualTo(TriggerOrderStatus.CANCELED);
+        verify(index).remove(canceled);
+    }
+
+    @Test
+    void cancelLosingRaceToTriggerKeepsCandidateForStaleRetry() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderIndex index = mock(TriggerOrderIndex.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties(), index);
+        TriggerOrderRecord pending = record(503L, TriggerOrderStatus.PENDING);
+        TriggerOrderRecord triggering = record(503L, TriggerOrderStatus.TRIGGERING);
+        when(repository.findById(503L)).thenReturn(Optional.of(pending));
+        when(repository.cancel(eq(1001L), eq(503L), any())).thenReturn(Optional.of(triggering));
+
+        TriggerOrderResponse response = service.cancel(new CancelTriggerOrderRequest(1001L, 503L));
+
+        assertThat(response.status()).isEqualTo(TriggerOrderStatus.TRIGGERING);
+        verify(index, never()).remove(any(TriggerOrderRecord.class));
+    }
+
+    @Test
     void onMarkPricePlacesReduceOnlyOrderAndMarksTriggered() {
         TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
@@ -595,6 +650,36 @@ class TriggerOrderServiceTest {
         verify(repository).markTriggered(eq(521L), eq(9021L), any());
         verify(repository, never()).markPriceTicks(anyString(), anyLong());
         verify(repository, never()).indexPriceTicks(anyString(), anyLong());
+    }
+
+    @Test
+    void onLastPriceUsesRedisCandidatesThenDatabaseExactClaim() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
+        TriggerOrderIndex index = mock(TriggerOrderIndex.class);
+        TriggerProperties properties = new TriggerProperties();
+        properties.getRedisIndex().setCandidateBatchSize(400);
+        TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, properties, index);
+        TriggerOrderRecord claimed = record(522L, TriggerPriceType.LAST_PRICE, TriggerOrderStatus.TRIGGERING);
+        when(index.dueCandidates(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", TriggerPriceType.LAST_PRICE,
+                70_003L, 400)).thenReturn(Optional.of(List.of(522L)));
+        when(repository.claimTriggeredCandidates(eq(ProductLine.LINEAR_PERPETUAL), eq("BTC-USDT"),
+                eq(TriggerPriceType.LAST_PRICE), eq(70_003L), eq(92L), any(), anyInt(), any(),
+                eq(List.of(522L)))).thenReturn(List.of(claimed));
+        when(repository.findByIds(List.of(522L))).thenReturn(List.of(claimed));
+        when(repository.ocoGroupOrders(claimed)).thenReturn(List.of(claimed));
+        stubNoTrailingClaim(repository);
+        when(orderRpcApi.place(any())).thenReturn(orderResponse(9022L, OrderStatus.ACCEPTED, null));
+
+        service.onLastPrice(new LastPriceTrigger("BTC-USDT", 92L, 70_003L,
+                Instant.parse("2026-07-01T00:00:00Z")));
+
+        verify(repository).claimTriggeredCandidates(eq(ProductLine.LINEAR_PERPETUAL), eq("BTC-USDT"),
+                eq(TriggerPriceType.LAST_PRICE), eq(70_003L), eq(92L), any(), anyInt(), any(),
+                eq(List.of(522L)));
+        verify(repository, never()).claimTriggered(anyString(), any(), anyLong(), anyLong(), any(), anyInt(), any());
+        verify(repository).markTriggered(eq(522L), eq(9022L), any());
+        verify(index).remove(claimed);
     }
 
     @Test

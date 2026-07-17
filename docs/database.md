@@ -477,29 +477,29 @@ Core trigger indexes:
 
 ```sql
 CREATE UNIQUE INDEX trading_trigger_orders_user_client_uidx
-    ON trading_trigger_orders (user_id, client_trigger_order_id)
+    ON trading_trigger_orders (product_line, user_id, client_trigger_order_id)
     WHERE client_trigger_order_id IS NOT NULL;
 
 CREATE INDEX trading_trigger_orders_user_oco_idx
-    ON trading_trigger_orders (user_id, symbol, margin_mode, oco_group_id, status, updated_at DESC)
+    ON trading_trigger_orders (product_line, user_id, symbol, margin_mode, oco_group_id, status, updated_at DESC)
     WHERE oco_group_id IS NOT NULL;
 
 CREATE INDEX trading_trigger_orders_symbol_gte_idx
-    ON trading_trigger_orders (symbol, trigger_price_ticks, trigger_order_id)
+    ON trading_trigger_orders (product_line, symbol, trigger_price_type, trigger_price_ticks, trigger_order_id)
     WHERE status = 'PENDING'
       AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
       AND trigger_price_type IN ('MARK_PRICE', 'INDEX_PRICE', 'LAST_PRICE')
       AND trigger_condition = 'GREATER_OR_EQUAL';
 
 CREATE INDEX trading_trigger_orders_symbol_lte_idx
-    ON trading_trigger_orders (symbol, trigger_price_ticks DESC, trigger_order_id)
+    ON trading_trigger_orders (product_line, symbol, trigger_price_type, trigger_price_ticks DESC, trigger_order_id)
     WHERE status = 'PENDING'
       AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
       AND trigger_price_type IN ('MARK_PRICE', 'INDEX_PRICE', 'LAST_PRICE')
       AND trigger_condition = 'LESS_OR_EQUAL';
 
 CREATE INDEX trading_trigger_orders_trailing_pending_idx
-    ON trading_trigger_orders (symbol, trigger_price_type, trigger_order_id)
+    ON trading_trigger_orders (product_line, symbol, trigger_price_type, trigger_order_id)
     WHERE status = 'PENDING'
       AND trigger_type = 'TRAILING_STOP';
 ```
@@ -509,6 +509,14 @@ same configured price-source stream without executing the same trigger twice. Th
 `trigger_price_type`, partitions candidates by OCO group, selects one pending row per group, sets that row to
 `TRIGGERING`, and cancels pending siblings in the same statement. The expiry and `TRIGGERING` indexes support
 scheduled expiry and stale execution retry.
+
+When `surprising.trading.trigger.redis-index.enabled=true`, Spring Data Redis with Lettuce keeps static TP/SL ids
+in product-line/symbol/price-source sorted sets. Redis performs one atomic Lua range lookup, but the returned ids
+still pass through the same PostgreSQL exact predicate and row claim. The database remains authoritative for user
+queries and all state transitions. Placement writes the candidate before DB insert and cleans it on rollback;
+terminal DB changes remove the member afterward, so a process crash can only leave a harmless stale candidate.
+The rebuild coordinator uses a token-owned Redis lease with compare-and-delete Lua release. It is an efficiency
+lock only; trigger uniqueness depends on the PostgreSQL conditional update and `SKIP LOCKED`.
 
 `trading_fee_schedules` stores user-level fee overrides:
 
