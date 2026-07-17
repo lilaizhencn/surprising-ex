@@ -7,6 +7,7 @@ import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.api.model.PerpTradeEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.mark.config.MarkPriceProperties;
+import com.surprising.price.mark.model.MarkPriceEncoding;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
@@ -30,6 +31,7 @@ public class MarkPriceCalculator {
                                     PerpTradeEvent trade,
                                     PerpFundingRateEvent funding,
                                     BigDecimal basisAverage,
+                                    MarkPriceEncoding encoding,
                                     Instant now) {
         int scale = properties.getCalculation().getScale();
         BigDecimal indexPrice = index.indexPrice();
@@ -60,10 +62,16 @@ public class MarkPriceCalculator {
             status = PriceStatus.DEGRADED;
         }
 
-        return new MarkPriceEvent(symbol, markPrice, indexPrice, price1, price2, lastTradePrice,
+        long markPriceUnits = markPrice.multiply(BigDecimal.valueOf(encoding.quoteScaleUnits()))
+                .setScale(0, RoundingMode.HALF_UP)
+                .longValueExact();
+        long markPriceTicks = Math.floorDiv(
+                Math.addExact(markPriceUnits, encoding.priceTickUnits() / 2), encoding.priceTickUnits());
+        return new MarkPriceEvent(properties.getKafka().getProductLine(), symbol, encoding.instrumentVersion(),
+                markPriceUnits, markPriceTicks, markPrice, indexPrice, price1, price2, lastTradePrice,
                 book.bestBidPrice(), book.bestAskPrice(), fundingRate, nextFundingTime, timeUntilFundingSeconds,
                 basisAverage, properties.getCalculation().getBasisWindow().toSeconds(), clampLow, clampHigh,
-                sequence, status, now);
+                sequence, status, now, now);
     }
 
     public BigDecimal basis(IndexPriceEvent index, PerpBookTickerEvent book) {

@@ -13,6 +13,7 @@ public class MarkPriceProperties {
     private Topics topics = new Topics();
     private Calculation calculation = new Calculation();
     private Coordination coordination = new Coordination();
+    private Audit audit = new Audit();
 
     public Kafka getKafka() {
         return kafka;
@@ -44,6 +45,14 @@ public class MarkPriceProperties {
 
     public void setCoordination(Coordination coordination) {
         this.coordination = coordination;
+    }
+
+    public Audit getAudit() {
+        return audit;
+    }
+
+    public void setAudit(Audit audit) {
+        this.audit = audit;
     }
 
     public String indexPriceTopic() {
@@ -278,6 +287,45 @@ public class MarkPriceProperties {
 
         public void setLeaseDuration(Duration leaseDuration) {
             this.leaseDuration = leaseDuration;
+        }
+    }
+
+    public static class Audit {
+        private Duration retention = Duration.ofDays(3);
+        private long cleanupDelayMs = Duration.ofHours(1).toMillis();
+        private int cleanupBatchSize = 10_000;
+        private int maxBatchesPerRun = 10;
+
+        public Duration getRetention() {
+            return retention;
+        }
+
+        public void setRetention(Duration retention) {
+            this.retention = retention;
+        }
+
+        public long getCleanupDelayMs() {
+            return cleanupDelayMs;
+        }
+
+        public void setCleanupDelayMs(long cleanupDelayMs) {
+            this.cleanupDelayMs = cleanupDelayMs;
+        }
+
+        public int getCleanupBatchSize() {
+            return cleanupBatchSize;
+        }
+
+        public void setCleanupBatchSize(int cleanupBatchSize) {
+            this.cleanupBatchSize = cleanupBatchSize;
+        }
+
+        public int getMaxBatchesPerRun() {
+            return maxBatchesPerRun;
+        }
+
+        public void setMaxBatchesPerRun(int maxBatchesPerRun) {
+            this.maxBatchesPerRun = maxBatchesPerRun;
         }
     }
 }

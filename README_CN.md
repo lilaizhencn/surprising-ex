@@ -216,7 +216,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - 市价单在订单入口使用新鲜 mark price 的可成交区间校验 notional，matching 再按买卖方向保护价提交 exchange-core；线性合约市价单无论 BUY/SELL 都按上边界冻结初始保证金，保证 SELL 市价单吃到高买价时不会抵押不足。matching 会拒绝会自成交的 taker 订单。
 - 普通订单改单由 order-provider 对开放 LIMIT 订单执行 cancel-replace；替换单使用新的 `newClientOrderId`，重新走普通订单校验和资金预占，原单释放仍由撤单撮合结果和 account 结算完成。
 - TWAP 和 Iceberg 算法单是 order-provider 里的父单，不进入实时订单簿。调度出的子单仍是普通 order-provider 订单，所以成交继续经过 exchange-core 撮合、账户结算、风控、强平检查和 WebSocket fanout。活动算法单会阻断保证金模式和持仓模式切换，直到取消或完成。
-- 止盈、止损和追踪止损都由标记价格触发。trigger-provider 按 symbol 只保留最新标记价格并固定每秒扫描一次。满足规则后通过 order-provider 提交幂等的 `reduceOnly=true` 平仓单，`clientOrderId=trigger-<triggerOrderId>`。追踪止损使用整数 `callbackRatePpm`（`1000` = `0.1%`，`100000` = `10%`）和可选 `activationPriceTicks`，最高/最低水位同样只按每秒采样的最新标记价格更新。
+- 止盈、止损和追踪止损只由 Kafka 标记价格事件触发。公共消费者会校验产品线、定点数 ticks、事件/发布时间和 3 秒时效；trigger-provider 每秒只处理各 symbol 最新且新鲜的一笔，不再按 sequence 回查审计表。满足规则后通过 order-provider 提交幂等的 `reduceOnly=true` 平仓单，`clientOrderId=trigger-<triggerOrderId>`。追踪止损使用整数 `callbackRatePpm`（`1000` = `0.1%`，`100000` = `10%`）和可选 `activationPriceTicks`，最高/最低水位同样只按每秒采样的最新标记价格更新。
 - 静态止盈止损默认且始终使用 Spring Data Redis + Lettuce ZSET 候选索引，无需功能开关。Redis 只做价格范围候选过滤；PostgreSQL 仍负责精确价格、状态、过期、OCO 条件校验和最终抢占，也是唯一权威状态。用户开放条件单查询继续读取数据库。用户撤单、过期、OCO 互撤、触发成功/拒绝以及事务回滚都会移除或校准索引；Redis 不可用或索引未 ready 时，已提交条件单退回原数据库 claim 链路。
 - 成对 TP/SL 可以使用同一个 `ocoGroupId`；同一用户、symbol、保证金模式组里任意一条 pending 触发单被抢占后，其它 pending sibling 会在同一条数据库语句里先置为 `CANCELED`，然后再提交生成的平仓单。
 - 普通平仓、强平成交、交割结算或期权行权把持仓降为零时，account 会在同一个 PostgreSQL 事务里取消该持仓剩余的 `PENDING` 条件单，并把 `CANCELED` 状态快照写入 trading outbox。提交后的持仓事件驱动 trigger-provider 删除对应静态止盈止损 Redis member，`trigger-order.events` 驱动认证用户 WebSocket 主动刷新；`GET /open` 始终以数据库已取消状态为准。
@@ -237,6 +237,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - ADL 在保险基金耗尽后处理剩余亏损，削减盈利高优先级仓位，并把实现盈利转去覆盖 deficit。
 - K 线服务用 Kafka Streams + RocksDB 分区状态，按 Kafka partition 水平扩展。
 - 指数价格和标记价格服务用 PostgreSQL 的 symbol 租约和数据库 sequence 避免多节点重复发布和 sequence 回退。
+- 每条标记价格 Kafka 事件都携带产品线、instrument 版本、定点数 units/ticks、计算时间和发布时间。审计 topic 还包含指数成分、盘口、最新成交、资金费、基差中间值和最终结果等完整输入，异步批量写入 PostgreSQL 并只保留 3 天；任何实时业务都不等待这次入库。
 - 订单入口用 PostgreSQL 幂等键、原子 sequence 和 outbox `FOR UPDATE SKIP LOCKED` 支持多节点部署。
 - Trigger provider 可先用 Redis Lua 范围查询过滤候选，再由 PostgreSQL `FOR UPDATE SKIP LOCKED` 完成多节点最终抢占，并通过 Kafka 行情重放和 stale `TRIGGERING` 重置处理故障重试。带 token 的 Redis lease 只防止多个节点重复重建索引，不承担业务正确性。Trigger provider 不直接修改余额或持仓。
 - 当前 matching 已接入真实 exchange-core 订单簿，交易链路端到端使用 long ticks/steps。

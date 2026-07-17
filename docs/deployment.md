@@ -176,8 +176,8 @@ The root `init.sql` creates:
 - `price_symbol_leases`: active publisher ownership keyed by `(module, symbol)`.
 - `price_symbol_sequences`: database-allocated price sequence keyed by `(module, symbol)`.
 - `price_exchange_rates`: fiat and stable-coin bridge rates keyed by `(base_currency, quote_currency)`.
-- `price_mark_ticks`: mark price snapshots keyed by `(symbol, sequence)`, including `mark_price_units` for
-  long-unit consumers.
+- `price_mark_ticks`: three-day mark-price audit snapshots keyed by `(symbol, sequence)`, including the
+  complete calculation-input JSON and fixed-point output; real-time consumers use Kafka, not this table.
 - `funding_rate_ticks`: predicted funding rates keyed by `(symbol, sequence)`.
 - `funding_settlements`: idempotent funding settlement batches keyed by `(symbol, funding_time)`.
 - `funding_payments`: per-user funding payments keyed by `(settlement_id, user_id)`.

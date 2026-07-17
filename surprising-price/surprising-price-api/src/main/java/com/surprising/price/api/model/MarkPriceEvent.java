@@ -1,5 +1,6 @@
 package com.surprising.price.api.model;
 
+import com.surprising.product.api.ProductLine;
 import java.math.BigDecimal;
 import java.time.Instant;
 
@@ -11,7 +12,11 @@ import java.time.Instant;
  * clamp around the index price.</p>
  */
 public record MarkPriceEvent(
+        ProductLine productLine,
         String symbol,
+        long instrumentVersion,
+        long markPriceUnits,
+        long markPriceTicks,
         BigDecimal markPrice,
         BigDecimal indexPrice,
         BigDecimal price1,
@@ -28,5 +33,6 @@ public record MarkPriceEvent(
         BigDecimal clampHigh,
         long sequence,
         PriceStatus status,
-        Instant eventTime) {
+        Instant eventTime,
+        Instant publishedAt) {
 }

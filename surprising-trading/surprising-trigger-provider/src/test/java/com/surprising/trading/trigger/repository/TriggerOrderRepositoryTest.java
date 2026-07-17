@@ -16,7 +16,6 @@ import com.surprising.trading.api.model.TriggerOrderStatus;
 import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.List;
-import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.ResultSetExtractor;
@@ -24,54 +23,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 class TriggerOrderRepositoryTest {
-
-    @Test
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    void markPriceTicksUsesPersistedMarkUnitsAndCurrentTickSize() throws Exception {
-        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
-        when(jdbcTemplate.query(contains("price_mark_ticks"), any(RowMapper.class), any(Object[].class)))
-                .thenAnswer(invocation -> {
-                    RowMapper mapper = invocation.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.getLong("mark_ticks")).thenReturn(65_001L);
-                    return List.of(mapper.mapRow(rs, 0));
-                });
-
-        OptionalLong markTicks = repository.markPriceTicks("BTC-USDT", 42L);
-
-        assertThat(markTicks).hasValue(65_001L);
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
-        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
-        assertThat(sql.getValue())
-                .contains("i.price_tick_units")
-                .doesNotContain("i.contract_type = ?");
-        assertThat(args.getValue()).containsExactly("BTC-USDT", 42L);
-    }
-
-    @Test
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    void markPriceTicksFiltersByContractTypeWhenProvided() throws Exception {
-        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
-        when(jdbcTemplate.query(contains("price_mark_ticks"), any(RowMapper.class), any(Object[].class)))
-                .thenAnswer(invocation -> {
-                    RowMapper mapper = invocation.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.getLong("mark_ticks")).thenReturn(65_001L);
-                    return List.of(mapper.mapRow(rs, 0));
-                });
-
-        OptionalLong markTicks = repository.markPriceTicks("BTC-USDT", 42L, "INVERSE_DELIVERY");
-
-        assertThat(markTicks).hasValue(65_001L);
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
-        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
-        assertThat(sql.getValue()).contains("i.contract_type = ?");
-        assertThat(args.getValue()).containsExactly("BTC-USDT", 42L, "INVERSE_DELIVERY");
-    }
 
     @Test
     void hasPendingOrdersChecksSymbolAndStatus() {

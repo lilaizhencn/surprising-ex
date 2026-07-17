@@ -20,7 +20,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalLong;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -530,38 +529,6 @@ public class TriggerOrderRepository {
                    AND status = 'PENDING'
                 """, Timestamp.from(now), userId, triggerOrderId);
         return findById(triggerOrderId);
-    }
-
-    public OptionalLong markPriceTicks(String symbol, long sequence) {
-        return markPriceTicks(symbol, sequence, null);
-    }
-
-    public OptionalLong markPriceTicks(String symbol, long sequence, String contractType) {
-        ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
-        String productFilter = normalizedProductLine == null ? "" : """
-                   AND i.contract_type = ?
-                """;
-        List<Object> args = new ArrayList<>();
-        args.add(symbol);
-        args.add(sequence);
-        if (normalizedProductLine != null) {
-            args.add(normalizedProductLine.contractTypeCode());
-        }
-        return jdbcTemplate.query("""
-                SELECT ((m.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_ticks
-                  FROM price_mark_ticks m
-                  JOIN instrument_current_versions c
-                    ON c.symbol = m.symbol
-                  JOIN instruments i
-                    ON i.symbol = c.symbol AND i.version = c.version
-                 WHERE m.symbol = ?
-                   AND m.sequence = ?
-                %s
-                """.formatted(productFilter), (rs, rowNum) -> rs.getLong("mark_ticks"), args.toArray())
-                .stream()
-                .mapToLong(Long::longValue)
-                .filter(value -> value > 0)
-                .findFirst();
     }
 
     public boolean hasPendingOrders(String symbol) {

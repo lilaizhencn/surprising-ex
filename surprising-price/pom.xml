@@ -18,6 +18,7 @@
 
     <modules>
         <module>surprising-price-api</module>
+        <module>surprising-price-consumer</module>
         <module>surprising-index-price-provider</module>
         <module>surprising-mark-price-provider</module>
         <module>surprising-price-provider</module>
@@ -28,6 +29,11 @@
             <dependency>
                 <groupId>com.surprising</groupId>
                 <artifactId>surprising-price-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.surprising</groupId>
+                <artifactId>surprising-price-consumer</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

@@ -1,6 +1,7 @@
 package com.surprising.price.mark.service;
 
 import com.surprising.price.api.model.IndexPriceEvent;
+import com.surprising.price.api.model.MarkPriceAuditEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PerpBookTickerEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
@@ -8,6 +9,7 @@ import com.surprising.price.api.model.PerpTradeEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.model.BasisWindow;
+import com.surprising.price.mark.model.MarkPriceEncoding;
 import com.surprising.price.mark.repository.MarkPriceRepository;
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -45,6 +47,7 @@ public class MarkPriceService {
     private final ConcurrentHashMap<String, BasisWindow> basisWindows = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Object> symbolLocks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Instant> lastPublishedAt = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, MarkPriceEncoding> encodings = new ConcurrentHashMap<>();
 
     public MarkPriceService(ObjectMapper objectMapper,
                             MarkPriceProperties properties,
@@ -163,11 +166,14 @@ public class MarkPriceService {
                 properties.getCalculation().getScale());
 
         long sequence = markPriceRepository.nextSequence(SEQUENCE_MODULE, symbol);
+        MarkPriceEncoding encoding = encodings.computeIfAbsent(symbol, markPriceRepository::encoding);
         MarkPriceEvent event = markPriceCalculator.calculate(symbol, sequence, index, book, trade,
-                fundingRates.get(symbol), basisAverage, now);
-        markPriceRepository.save(event);
+                fundingRates.get(symbol), basisAverage, encoding, now);
         kafkaTemplate.send(properties.markPriceTopic(), symbol, event);
-        kafkaTemplate.send(properties.markPriceAuditTopic(), symbol, event);
+        MarkPriceAuditEvent auditEvent = new MarkPriceAuditEvent(event, index, book, trade,
+                fundingRates.get(symbol), basisAverage,
+                properties.getCalculation().getBasisWindow().toSeconds(), now);
+        kafkaTemplate.send(properties.markPriceAuditTopic(), symbol, auditEvent);
         return true;
     }
 

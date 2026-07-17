@@ -213,12 +213,14 @@ as `USDT -> USD -> CNY` without calling third-party FX APIs per user request.
 
 ## `price_mark_ticks`
 
-One row represents one calculated mark price snapshot:
+One row represents one asynchronous mark-price audit snapshot. Real-time order, trigger, risk,
+liquidation, funding, ADL, and settlement decisions must consume the Kafka mark-price event and must
+not wait for or query this table.
 
 - `sequence`: database-allocated monotonic sequence per symbol.
 - `mark_price`: final mark price after median and clamp.
-- `mark_price_units`: final mark price converted once into quote-asset smallest units. Core modules convert this long
-  value to version-specific ticks with `instrument.price_tick_units`.
+- `product_line` / `instrument_version`: the exact product and instrument encoding used.
+- `mark_price_units` / `mark_price_ticks`: final fixed-point values published to real-time consumers.
 - `index_price`: latest index input.
 - `price1`: funding convergence price.
 - `price2`: index plus moving-average basis.
@@ -226,6 +228,12 @@ One row represents one calculated mark price snapshot:
 - `best_bid_price` / `best_ask_price`: latest perpetual book top.
 - `basis_average`: moving average of `(bid1 + ask1) / 2 - indexPrice`.
 - `clamp_low` / `clamp_high`: final protection band around index price.
+- `event_time` / `published_at`: calculation time and Kafka publication time used for freshness checks.
+- `calculation_inputs`: the complete audit-topic JSON envelope, including the exact index component
+  snapshots, book ticker, last trade, funding input, basis intermediate, and final result.
+
+The audit topic is consumed in JDBC batches. Rows older than three days are deleted hourly in bounded
+batches; no database write or cleanup operation is on the real-time price-consumer path.
 
 Primary key:
 

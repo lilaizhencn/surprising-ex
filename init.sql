@@ -568,10 +568,13 @@ CREATE INDEX IF NOT EXISTS price_exchange_rates_updated_idx
     ON price_exchange_rates (updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS price_mark_ticks (
+    product_line                TEXT NOT NULL,
     symbol                      TEXT NOT NULL,
+    instrument_version          BIGINT NOT NULL,
     sequence                    BIGINT NOT NULL,
     mark_price                  NUMERIC(38, 18) NOT NULL,
     mark_price_units            BIGINT NOT NULL,
+    mark_price_ticks            BIGINT NOT NULL,
     index_price                 NUMERIC(38, 18) NOT NULL,
     price1                      NUMERIC(38, 18) NOT NULL,
     price2                      NUMERIC(38, 18) NOT NULL,
@@ -587,17 +590,23 @@ CREATE TABLE IF NOT EXISTS price_mark_ticks (
     clamp_high                  NUMERIC(38, 18) NOT NULL,
     status                      TEXT NOT NULL,
     event_time                  TIMESTAMPTZ NOT NULL,
+    published_at                TIMESTAMPTZ NOT NULL,
+    calculation_inputs          JSONB NOT NULL,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (symbol, sequence),
     CONSTRAINT price_mark_ticks_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT price_mark_ticks_status CHECK (status IN ('HEALTHY', 'DEGRADED', 'STALE', 'INSUFFICIENT_SOURCES', 'CLAMPED')),
     CONSTRAINT price_mark_ticks_positive_units CHECK (mark_price_units > 0),
+    CONSTRAINT price_mark_ticks_positive_ticks CHECK (mark_price_ticks > 0),
     CONSTRAINT price_mark_ticks_valid_book CHECK (best_bid_price <= best_ask_price),
     CONSTRAINT price_mark_ticks_valid_clamp CHECK (clamp_low <= mark_price AND mark_price <= clamp_high)
 );
 
 CREATE INDEX IF NOT EXISTS price_mark_ticks_query_idx
     ON price_mark_ticks (symbol, event_time DESC);
+
+CREATE INDEX IF NOT EXISTS price_mark_ticks_retention_idx
+    ON price_mark_ticks (event_time);
 
 CREATE TABLE IF NOT EXISTS funding_sequences (
     sequence_name       TEXT PRIMARY KEY,

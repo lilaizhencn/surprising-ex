@@ -1,10 +1,9 @@
 package com.surprising.trading.trigger.service;
 
-import com.surprising.trading.trigger.model.MarkTrigger;
-import java.util.Comparator;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,21 +21,13 @@ public class MarkPriceTriggerScheduler {
     private static final Logger log = LoggerFactory.getLogger(MarkPriceTriggerScheduler.class);
 
     private final TriggerOrderService triggerOrderService;
-    private final ConcurrentMap<String, MarkTrigger> latestBySymbol = new ConcurrentHashMap<>();
+    private final LatestMarkPriceCache markPriceCache;
     private final ConcurrentMap<String, Long> processedSequences = new ConcurrentHashMap<>();
     private final AtomicBoolean scanning = new AtomicBoolean(false);
 
-    public MarkPriceTriggerScheduler(TriggerOrderService triggerOrderService) {
+    public MarkPriceTriggerScheduler(TriggerOrderService triggerOrderService, LatestMarkPriceCache markPriceCache) {
         this.triggerOrderService = triggerOrderService;
-    }
-
-    public void updateLatest(MarkTrigger trigger) {
-        if (trigger == null || trigger.symbol() == null || trigger.symbol().isBlank()
-                || trigger.sequence() <= 0 || trigger.eventTime() == null) {
-            throw new IllegalArgumentException("valid mark price trigger is required");
-        }
-        latestBySymbol.compute(trigger.symbol(), (symbol, current) -> current == null
-                || trigger.sequence() > current.sequence() ? trigger : current);
+        this.markPriceCache = markPriceCache;
     }
 
     @Scheduled(fixedRate = SCAN_INTERVAL_MS, initialDelay = SCAN_INTERVAL_MS)
@@ -45,27 +36,24 @@ public class MarkPriceTriggerScheduler {
             return;
         }
         try {
-            latestBySymbol.entrySet().stream()
-                    .sorted(Map.Entry.comparingByKey(Comparator.naturalOrder()))
-                    .map(Map.Entry::getValue)
-                    .forEach(this::scan);
+            markPriceCache.freshSnapshots().forEach(this::scan);
         } finally {
             scanning.set(false);
         }
     }
 
-    private void scan(MarkTrigger trigger) {
-        long processedSequence = processedSequences.getOrDefault(trigger.symbol(), 0L);
-        if (trigger.sequence() <= processedSequence) {
+    private void scan(MarkPriceEvent event) {
+        long processedSequence = processedSequences.getOrDefault(event.symbol(), 0L);
+        if (event.sequence() <= processedSequence) {
             return;
         }
         try {
-            triggerOrderService.onMarkPrice(trigger);
-            processedSequences.merge(trigger.symbol(), trigger.sequence(), Math::max);
+            triggerOrderService.onMarkPrice(event);
+            processedSequences.merge(event.symbol(), event.sequence(), Math::max);
         } catch (RuntimeException ex) {
             // Keep the latest sample pending so a transient database/order-provider failure is retried next second.
             log.error("Failed to scan latest mark price symbol={} sequence={}: {}",
-                    trigger.symbol(), trigger.sequence(), ex.getMessage(), ex);
+                    event.symbol(), event.sequence(), ex.getMessage(), ex);
         }
     }
 }

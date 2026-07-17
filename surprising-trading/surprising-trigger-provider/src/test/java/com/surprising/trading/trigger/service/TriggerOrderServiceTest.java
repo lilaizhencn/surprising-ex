@@ -13,6 +13,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.api.model.PriceStatus;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.client.OrderRpcApi;
@@ -37,15 +39,14 @@ import com.surprising.trading.api.model.TriggerOrderResponse;
 import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
 import com.surprising.trading.trigger.config.TriggerProperties;
-import com.surprising.trading.trigger.model.MarkTrigger;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import com.surprising.trading.trigger.model.TriggerPosition;
 import com.surprising.trading.trigger.repository.TriggerOrderRepository;
 import com.surprising.trading.trigger.repository.TriggerOrderOutboxRepository;
 import java.time.Instant;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalLong;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -558,7 +559,6 @@ class TriggerOrderServiceTest {
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
         TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, new TriggerProperties());
         TriggerOrderRecord claimed = record(501L, TriggerOrderStatus.TRIGGERING);
-        when(repository.markPriceTicks("BTC-USDT", 42L)).thenReturn(OptionalLong.of(70_001L));
         when(repository.claimTriggered(eq("BTC-USDT"),
                 eq(70_001L), eq(42L), any(), anyInt(), any()))
                 .thenReturn(List.of(claimed));
@@ -566,7 +566,7 @@ class TriggerOrderServiceTest {
         when(orderRpcApi.place(any())).thenReturn(orderResponse(9001L, OrderStatus.ACCEPTED, null));
         ArgumentCaptor<PlaceOrderRequest> orderCaptor = ArgumentCaptor.forClass(PlaceOrderRequest.class);
 
-        service.onMarkPrice(new MarkTrigger("BTC-USDT", 42L, Instant.parse("2026-07-01T00:00:00Z")));
+        service.onMarkPrice(mark(42L, 70_001L));
 
         verify(orderRpcApi).place(orderCaptor.capture());
         assertThat(orderCaptor.getValue().clientOrderId()).isEqualTo("trigger-501");
@@ -584,7 +584,6 @@ class TriggerOrderServiceTest {
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, properties);
         TriggerOrderRecord claimed = record(501L, TriggerOrderStatus.TRIGGERING);
-        when(repository.markPriceTicks("BTC-USDT", 42L, "LINEAR_DELIVERY")).thenReturn(OptionalLong.of(70_001L));
         when(repository.claimTriggered(eq("BTC-USDT"),
                 eq(70_001L), eq(42L), any(), anyInt(), any(), eq("LINEAR_DELIVERY")))
                 .thenReturn(List.of(claimed));
@@ -593,9 +592,8 @@ class TriggerOrderServiceTest {
                 .thenReturn(List.of());
         when(orderRpcApi.place(any())).thenReturn(orderResponse(9001L, OrderStatus.ACCEPTED, null));
 
-        service.onMarkPrice(new MarkTrigger("BTC-USDT", 42L, Instant.parse("2026-07-01T00:00:00Z")));
+        service.onMarkPrice(mark(ProductLine.LINEAR_DELIVERY, 42L, 70_001L));
 
-        verify(repository).markPriceTicks("BTC-USDT", 42L, "LINEAR_DELIVERY");
         verify(repository).claimTriggered(eq("BTC-USDT"),
                 eq(70_001L), eq(42L), any(), anyInt(), any(), eq("LINEAR_DELIVERY"));
         verify(repository).claimTrailingTriggered(eq("BTC-USDT"),
@@ -610,7 +608,6 @@ class TriggerOrderServiceTest {
         TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, new TriggerProperties());
         TriggerOrderRecord trailing = record(531L, OrderSide.SELL, TriggerOrderType.TRAILING_STOP,
                 TriggerCondition.LESS_OR_EQUAL, 0L, 4L, PositionSide.NET, TriggerOrderStatus.TRIGGERING);
-        when(repository.markPriceTicks("BTC-USDT", 52L)).thenReturn(OptionalLong.of(60_100L));
         when(repository.claimTriggered(eq("BTC-USDT"),
                 eq(60_100L), eq(52L), any(), anyInt(), any()))
                 .thenReturn(List.of());
@@ -620,7 +617,7 @@ class TriggerOrderServiceTest {
         when(orderRpcApi.place(any())).thenReturn(orderResponse(9031L, OrderStatus.ACCEPTED, null));
         ArgumentCaptor<PlaceOrderRequest> orderCaptor = ArgumentCaptor.forClass(PlaceOrderRequest.class);
 
-        service.onMarkPrice(new MarkTrigger("BTC-USDT", 52L, Instant.parse("2026-07-01T00:00:00Z")));
+        service.onMarkPrice(mark(52L, 60_100L));
 
         verify(orderRpcApi).place(orderCaptor.capture());
         assertThat(orderCaptor.getValue().clientOrderId()).isEqualTo("trigger-531");
@@ -631,17 +628,13 @@ class TriggerOrderServiceTest {
     }
 
     @Test
-    void onMarkPriceWithoutPersistedMarkPriceDoesNotClaimOrPlaceOrder() {
+    void onMarkPriceRejectsInvalidFixedPointTicksWithoutClaiming() {
         TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
         TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, new TriggerProperties());
-        when(repository.markPriceTicks("BTC-USDT", 98L)).thenReturn(OptionalLong.empty());
-        when(repository.hasPendingOrders("BTC-USDT")).thenReturn(true);
-
-        assertThatThrownBy(() -> service.onMarkPrice(new MarkTrigger("BTC-USDT", 98L,
-                Instant.parse("2026-07-01T00:00:00Z"))))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("mark price ticks unavailable: BTC-USDT sequence=98");
+        assertThatThrownBy(() -> service.onMarkPrice(mark(98L, 0L)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("valid fixed-point mark price");
 
         verify(repository, never()).claimTriggered(anyString(), anyLong(), anyLong(), any(), anyInt(), any());
         verify(orderRpcApi, never()).place(any());
@@ -655,7 +648,6 @@ class TriggerOrderServiceTest {
         TriggerOrderRecord claimed = record(601L, OrderSide.SELL, TriggerOrderType.TAKE_PROFIT,
                 TriggerCondition.GREATER_OR_EQUAL, 71_000L, 3L, PositionSide.LONG,
                 TriggerOrderStatus.TRIGGERING);
-        when(repository.markPriceTicks("BTC-USDT", 43L)).thenReturn(OptionalLong.of(71_001L));
         when(repository.claimTriggered(eq("BTC-USDT"),
                 eq(71_001L), eq(43L), any(), anyInt(), any()))
                 .thenReturn(List.of(claimed));
@@ -663,7 +655,7 @@ class TriggerOrderServiceTest {
         when(orderRpcApi.place(any())).thenReturn(orderResponse(9101L, OrderStatus.ACCEPTED, null));
         ArgumentCaptor<PlaceOrderRequest> orderCaptor = ArgumentCaptor.forClass(PlaceOrderRequest.class);
 
-        service.onMarkPrice(new MarkTrigger("BTC-USDT", 43L, Instant.parse("2026-07-01T00:00:00Z")));
+        service.onMarkPrice(mark(43L, 71_001L));
 
         verify(orderRpcApi).place(orderCaptor.capture());
         assertThat(orderCaptor.getValue().positionSide()).isEqualTo(PositionSide.LONG);
@@ -683,7 +675,6 @@ class TriggerOrderServiceTest {
         TriggerOrderRecord secondLevel = record(702L, OrderSide.SELL, TriggerOrderType.TAKE_PROFIT,
                 TriggerCondition.GREATER_OR_EQUAL, 72_000L, 5L, PositionSide.NET,
                 TriggerOrderStatus.TRIGGERING);
-        when(repository.markPriceTicks("BTC-USDT", 44L)).thenReturn(OptionalLong.of(72_001L));
         when(repository.claimTriggered(eq("BTC-USDT"),
                 eq(72_001L), eq(44L), any(), anyInt(), any()))
                 .thenReturn(List.of(firstLevel, secondLevel));
@@ -693,7 +684,7 @@ class TriggerOrderServiceTest {
                 .thenReturn(orderResponse(9202L, OrderStatus.ACCEPTED, null));
         ArgumentCaptor<PlaceOrderRequest> orderCaptor = ArgumentCaptor.forClass(PlaceOrderRequest.class);
 
-        service.onMarkPrice(new MarkTrigger("BTC-USDT", 44L, Instant.parse("2026-07-01T00:00:00Z")));
+        service.onMarkPrice(mark(44L, 72_001L));
 
         verify(orderRpcApi, org.mockito.Mockito.times(2)).place(orderCaptor.capture());
         assertThat(orderCaptor.getAllValues())
@@ -713,7 +704,6 @@ class TriggerOrderServiceTest {
         TriggerOrderRecord claimed = record(801L, OrderSide.SELL, TriggerOrderType.STOP_LOSS,
                 TriggerCondition.LESS_OR_EQUAL, 60_000L, 4L, PositionSide.LONG,
                 TriggerOrderStatus.TRIGGERING);
-        when(repository.markPriceTicks("BTC-USDT", 45L)).thenReturn(OptionalLong.of(59_999L));
         when(repository.claimTriggered(eq("BTC-USDT"),
                 eq(59_999L), eq(45L), any(), anyInt(), any()))
                 .thenReturn(List.of(claimed));
@@ -722,7 +712,7 @@ class TriggerOrderServiceTest {
                 "reduce-only requires an open position"));
         ArgumentCaptor<PlaceOrderRequest> orderCaptor = ArgumentCaptor.forClass(PlaceOrderRequest.class);
 
-        service.onMarkPrice(new MarkTrigger("BTC-USDT", 45L, Instant.parse("2026-07-01T00:00:00Z")));
+        service.onMarkPrice(mark(45L, 59_999L));
 
         verify(orderRpcApi).place(orderCaptor.capture());
         assertThat(orderCaptor.getValue().clientOrderId()).isEqualTo("trigger-801");
@@ -740,7 +730,6 @@ class TriggerOrderServiceTest {
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
         TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, new TriggerProperties());
         TriggerOrderRecord claimed = record(501L, TriggerOrderStatus.TRIGGERING);
-        when(repository.markPriceTicks("BTC-USDT", 42L)).thenReturn(OptionalLong.of(50_000L));
         when(repository.claimTriggered(eq("BTC-USDT"),
                 eq(50_000L), eq(42L), any(), anyInt(), any()))
                 .thenReturn(List.of(claimed));
@@ -748,7 +737,7 @@ class TriggerOrderServiceTest {
         when(orderRpcApi.place(any())).thenReturn(orderResponse(9002L, OrderStatus.REJECTED,
                 "reduce-only requires an open position"));
 
-        service.onMarkPrice(new MarkTrigger("BTC-USDT", 42L, Instant.parse("2026-07-01T00:00:00Z")));
+        service.onMarkPrice(mark(42L, 50_000L));
 
         verify(repository).markTriggerFailed(eq(501L), eq(9002L),
                 eq("reduce-only requires an open position"), any());
@@ -858,6 +847,19 @@ class TriggerOrderServiceTest {
         return new OrderResponse(orderId, 1001L, "trigger-501", "BTC-USDT", 1L, OrderSide.SELL,
                 OrderType.MARKET, TimeInForce.IOC, 0L, 10L, 0L, 10L, MarginMode.CROSS, 0L, 0L,
                 true, false, status, rejectReason, now, now);
+    }
+
+    private MarkPriceEvent mark(long sequence, long ticks) {
+        return mark(ProductLine.LINEAR_PERPETUAL, sequence, ticks);
+    }
+
+    private MarkPriceEvent mark(ProductLine productLine, long sequence, long ticks) {
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        BigDecimal price = BigDecimal.valueOf(Math.max(1L, ticks));
+        return new MarkPriceEvent(productLine, "BTC-USDT", 1L, Math.max(1L, ticks), ticks,
+                price, price, price, price, price, price, price, BigDecimal.ZERO,
+                now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L, price, price,
+                sequence, PriceStatus.HEALTHY, now, now);
     }
 
     private void stubCloseCapacity(TriggerOrderRepository repository,

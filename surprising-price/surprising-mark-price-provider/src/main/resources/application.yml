@@ -54,3 +54,8 @@ surprising:
         enabled: true
         node-id:
         lease-duration: 15s
+      audit:
+        retention: 3d
+        cleanup-delay-ms: 3600000
+        cleanup-batch-size: 10000
+        max-batches-per-run: 10

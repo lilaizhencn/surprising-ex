@@ -2,6 +2,7 @@ package com.surprising.trading.trigger.service;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.product.api.ProductLine;
+import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.client.OrderRpcApi;
 import com.surprising.trading.api.model.AdminTriggerOrderTimelineEvent;
@@ -29,7 +30,6 @@ import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import com.surprising.trading.trigger.config.TriggerTraceContext;
-import com.surprising.trading.trigger.model.MarkTrigger;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import com.surprising.trading.trigger.model.TriggerPosition;
 import com.surprising.trading.trigger.repository.TriggerOrderOutboxRepository;
@@ -38,7 +38,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -401,26 +400,14 @@ public class TriggerOrderService {
         return new AdminTriggerOrderTimelineResponse(toResponse(order), timelineEvents(order));
     }
 
-    public void onMarkPrice(MarkTrigger markTrigger) {
-        OptionalLong markPriceTicks = markPriceTicks(markTrigger);
-        if (markPriceTicks.isEmpty()) {
-            if (!hasPendingOrders(markTrigger.symbol())) {
-                return;
-            }
-            throw new IllegalStateException("mark price ticks unavailable: " + markTrigger.symbol()
-                    + " sequence=" + markTrigger.sequence());
+    public void onMarkPrice(MarkPriceEvent markPrice) {
+        if (markPrice == null || markPrice.markPriceTicks() <= 0 || markPrice.eventTime() == null) {
+            throw new IllegalArgumentException("valid fixed-point mark price is required");
         }
-        onTriggerPrice(markTrigger, markPriceTicks.getAsLong());
+        onTriggerPrice(markPrice, markPrice.markPriceTicks());
     }
 
-    private OptionalLong markPriceTicks(MarkTrigger markTrigger) {
-        String contractType = currentProductContractType();
-        return contractType == null
-                ? triggerOrderRepository.markPriceTicks(markTrigger.symbol(), markTrigger.sequence())
-                : triggerOrderRepository.markPriceTicks(markTrigger.symbol(), markTrigger.sequence(), contractType);
-    }
-
-    private void onTriggerPrice(MarkTrigger priceTrigger, long triggerPriceTicks) {
+    private void onTriggerPrice(MarkPriceEvent priceTrigger, long triggerPriceTicks) {
         Instant now = Instant.now();
         List<TriggerOrderRecord> orders = new ArrayList<>(claimTriggered(priceTrigger.symbol(),
                 triggerPriceTicks, priceTrigger.sequence(), priceTrigger.eventTime(),
@@ -439,13 +426,6 @@ public class TriggerOrderService {
         expirePending(now, properties.getExecution().getTriggerBatchSize());
         Instant staleBefore = now.minus(properties.getExecution().getStaleTriggeringAfter());
         resetStaleTriggering(staleBefore, now, properties.getExecution().getTriggerBatchSize());
-    }
-
-    private boolean hasPendingOrders(String symbol) {
-        String contractType = currentProductContractType();
-        return contractType == null
-                ? triggerOrderRepository.hasPendingOrders(symbol)
-                : triggerOrderRepository.hasPendingOrders(symbol, contractType);
     }
 
     private List<TriggerOrderRecord> claimTriggered(String symbol,
