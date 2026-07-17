@@ -8,6 +8,7 @@ public class AdlProperties {
 
     private Kafka kafka = new Kafka();
     private Scanner scanner = new Scanner();
+    private RedisIndex redisIndex = new RedisIndex();
 
     public Kafka getKafka() {
         return kafka;
@@ -24,10 +25,15 @@ public class AdlProperties {
     public void setScanner(Scanner scanner) {
         this.scanner = scanner;
     }
+    public RedisIndex getRedisIndex() { return redisIndex; }
+    public void setRedisIndex(RedisIndex redisIndex) { this.redisIndex = redisIndex; }
 
     public static class Kafka {
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
         private boolean productTopicsEnabled;
+        private String bootstrapServers = "localhost:9092";
+        private String positionRiskEventsTopic = "surprising.risk.position.events.v1";
+        private String groupId = "surprising-adl-risk-index-v1";
 
         public ProductLine getProductLine() {
             return productLine;
@@ -48,6 +54,21 @@ public class AdlProperties {
         public String getAccountType() {
             return productLine.accountTypeCode();
         }
+        public String getBootstrapServers() { return bootstrapServers; }
+        public void setBootstrapServers(String bootstrapServers) { this.bootstrapServers = bootstrapServers; }
+        public String getPositionRiskEventsTopic() { return positionRiskEventsTopic; }
+        public void setPositionRiskEventsTopic(String positionRiskEventsTopic) { this.positionRiskEventsTopic = positionRiskEventsTopic; }
+        public String getGroupId() { return groupId; }
+        public void setGroupId(String groupId) { this.groupId = groupId; }
+    }
+
+    public static class RedisIndex {
+        private String keyPrefix = "surprising:adl:v1";
+        private long readyTtlMs = 30_000L;
+        public String getKeyPrefix() { return keyPrefix; }
+        public void setKeyPrefix(String keyPrefix) { this.keyPrefix = keyPrefix; }
+        public long getReadyTtlMs() { return readyTtlMs; }
+        public void setReadyTtlMs(long readyTtlMs) { this.readyTtlMs = readyTtlMs; }
     }
 
     public static class Scanner {

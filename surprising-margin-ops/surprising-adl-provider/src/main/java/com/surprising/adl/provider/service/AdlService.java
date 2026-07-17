@@ -14,6 +14,10 @@ import java.time.Duration;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
+import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.PositionSide;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,10 +27,18 @@ public class AdlService {
 
     private final AdlProperties properties;
     private final AdlRepository adlRepository;
+    private final RedisAdlCandidateIndex redisCandidateIndex;
 
     public AdlService(AdlProperties properties, AdlRepository adlRepository) {
+        this(properties, adlRepository, null);
+    }
+
+    @Autowired
+    public AdlService(AdlProperties properties, AdlRepository adlRepository,
+                      RedisAdlCandidateIndex redisCandidateIndex) {
         this.properties = properties;
         this.adlRepository = adlRepository;
+        this.redisCandidateIndex = redisCandidateIndex;
     }
 
     /**
@@ -113,7 +125,7 @@ public class AdlService {
                 maxDeleverages * Math.max(1, scanner.getCandidateMultiplier()));
         long remaining = deficit.deficitUnits();
         int executions = 0;
-        var candidates = adlRepository.queue(deficit.asset(), deficit.userId(), candidateLimit, maxMarkAge()).stream()
+        var candidates = redisCandidates(deficit, candidateLimit).stream()
                 .sorted(Comparator.comparingLong((com.surprising.adl.provider.model.AdlCandidate c) ->
                                 c.priorityScorePpm()).reversed()
                         .thenComparing(Comparator.comparingLong(
@@ -131,6 +143,22 @@ public class AdlService {
             remaining = adlRepository.executeAdl(deficit, locked.get(), remaining);
             executions++;
         }
+    }
+
+    private List<com.surprising.adl.provider.model.AdlCandidate> redisCandidates(DeficitRow deficit, int limit) {
+        if (redisCandidateIndex != null) {
+            Optional<List<RedisAdlCandidateIndex.Member>> members = redisCandidateIndex.candidates(deficit.asset(), limit);
+            if (members.isPresent()) {
+                return members.get().stream()
+                        .filter(member -> member.userId() != deficit.userId())
+                        .map(member -> adlRepository.lockCandidate(member.userId(), member.symbol(),
+                                MarginMode.valueOf(member.marginMode()), PositionSide.valueOf(member.positionSide()),
+                                deficit.asset(), maxMarkAge()))
+                        .flatMap(Optional::stream)
+                        .toList();
+            }
+        }
+        return adlRepository.queue(deficit.asset(), deficit.userId(), limit, maxMarkAge());
     }
 
     private String normalizeAsset(String asset) {

@@ -126,6 +126,14 @@ public class AdlRepository {
         return queue(asset, 0L, limit, maxMarkAge);
     }
 
+    public List<String> candidateAssets() {
+        return jdbcTemplate.query("""
+                SELECT DISTINCT settle_asset FROM account_positions
+                 WHERE account_type = ? AND signed_quantity_steps <> 0
+                 ORDER BY settle_asset ASC
+                """, (rs, rowNum) -> rs.getString(1), accountType());
+    }
+
     public List<AdlCandidate> queue(String asset, long excludedUserId, int limit, Duration maxMarkAge) {
         MarkPriceValues markPrices = freshMarkPrices(maxMarkAge, null);
         if (markPrices.isEmpty()) {

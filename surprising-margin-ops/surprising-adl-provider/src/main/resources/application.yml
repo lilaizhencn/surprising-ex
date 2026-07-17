@@ -27,6 +27,21 @@ management:
         include: health,info,metrics,prometheus
 
 surprising:
+  adl:
+    kafka:
+      bootstrap-servers: localhost:9092
+      position-risk-events-topic: surprising.risk.position.events.v1
+      group-id: surprising-adl-risk-index-${HOSTNAME:${random.uuid}}
+    redis-index:
+      key-prefix: surprising:adl:v1
+      ready-ttl-ms: 30000
+    scanner:
+      scan-delay-ms: 1000
+      min-deficit-age-ms: 10000
+      max-mark-age-ms: 5000
+      batch-size: 50
+      max-deleverages-per-deficit: 20
+      candidate-multiplier: 5
   price:
     consumer:
       bootstrap-servers: localhost:9092
@@ -38,11 +53,3 @@ surprising:
       allowed-future-skew: 1s
       concurrency: 1
       max-poll-records: 500
-  adl:
-    scanner:
-      scan-delay-ms: 1000
-      min-deficit-age-ms: 10000
-      max-mark-age-ms: 5000
-      batch-size: 50
-      max-deleverages-per-deficit: 20
-      candidate-multiplier: 5
