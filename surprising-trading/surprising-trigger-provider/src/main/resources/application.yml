@@ -48,6 +48,7 @@ surprising:
         mark-price-topic: surprising.perp.mark.price.v1
         index-price-topic: surprising.perp.index.price.v1
         last-price-topic: surprising.perp.match.trades.v1
+        position-events-topic: surprising.account.position.events.v1
         concurrency: 2
         max-poll-records: 500
       execution:

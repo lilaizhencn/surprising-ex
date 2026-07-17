@@ -304,6 +304,29 @@ public class TriggerOrderRepository {
                 """, (rs, rowNum) -> toRecord(rs), triggerOrderId).stream().findFirst();
     }
 
+    public List<TriggerOrderRecord> positionClosedCancellations(ProductLine productLine,
+                                                                 long userId,
+                                                                 String symbol,
+                                                                 MarginMode marginMode,
+                                                                 PositionSide positionSide,
+                                                                 Instant closedAt) {
+        return jdbcTemplate.query("""
+                SELECT *
+                  FROM trading_trigger_orders
+                 WHERE product_line = ?
+                   AND user_id = ?
+                   AND symbol = ?
+                   AND margin_mode = ?
+                   AND position_side = ?
+                   AND status = 'CANCELED'
+                   AND reject_reason = 'POSITION_CLOSED'
+                   AND updated_at = ?
+                 ORDER BY trigger_order_id ASC
+                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), userId, symbol,
+                MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name(),
+                Timestamp.from(closedAt));
+    }
+
     public List<TriggerOrderRecord> findByIds(List<Long> triggerOrderIds) {
         if (triggerOrderIds == null || triggerOrderIds.isEmpty()) {
             return List.of();

@@ -12,6 +12,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.client.OrderRpcApi;
@@ -527,6 +528,26 @@ class TriggerOrderServiceTest {
 
         assertThat(response.status()).isEqualTo(TriggerOrderStatus.TRIGGERING);
         verify(index, never()).remove(any(TriggerOrderRecord.class));
+    }
+
+    @Test
+    void closedPositionReconcilesAuthoritativelyCanceledTriggersOutOfRedis() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderIndex index = mock(TriggerOrderIndex.class);
+        TriggerProperties properties = new TriggerProperties();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+        TriggerOrderService service = new TriggerOrderService(
+                repository, mock(OrderRpcApi.class), properties, index);
+        Instant closedAt = Instant.parse("2026-07-01T00:00:00Z");
+        TriggerOrderRecord canceled = record(504L, TriggerOrderStatus.CANCELED);
+        when(repository.positionClosedCancellations(ProductLine.INVERSE_PERPETUAL, 1001L, "BTC-USDT",
+                MarginMode.CROSS, PositionSide.NET, closedAt)).thenReturn(List.of(canceled));
+
+        service.onPositionClosed(new PositionUpdatedEvent(701L, 801L, 1001L, "btc-usdt", 1L,
+                MarginMode.CROSS, PositionSide.NET, 0L, 0L, 0L, closedAt, "trace-close"));
+
+        verify(index).synchronize(canceled);
     }
 
     @Test

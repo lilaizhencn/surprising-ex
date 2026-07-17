@@ -21,6 +21,8 @@ class TriggerKafkaConfigurationTest {
         assertThat(properties.getKafka().getMarkPriceTopic()).isEqualTo("surprising.perp.mark.price.v1");
         assertThat(properties.getKafka().getIndexPriceTopic()).isEqualTo("surprising.perp.index.price.v1");
         assertThat(properties.getKafka().getLastPriceTopic()).isEqualTo("surprising.perp.match.trades.v1");
+        assertThat(properties.getKafka().getPositionEventsTopic())
+                .isEqualTo("surprising.account.position.events.v1");
     }
 
     @Test
@@ -33,6 +35,8 @@ class TriggerKafkaConfigurationTest {
         assertThat(properties.getKafka().getMarkPriceTopic()).isEqualTo("surprising.inverse-perp.mark.price.v1");
         assertThat(properties.getKafka().getIndexPriceTopic()).isEqualTo("surprising.inverse-perp.index.price.v1");
         assertThat(properties.getKafka().getLastPriceTopic()).isEqualTo("surprising.inverse-perp.match.trades.v1");
+        assertThat(properties.getKafka().getPositionEventsTopic())
+                .isEqualTo("surprising.inverse-perp.account.position.events.v1");
     }
 
     @Test

@@ -317,6 +317,31 @@ class TriggerOrderRepositoryTest {
     }
 
     @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void positionClosedCancellationsUseExactProductAndPositionScope() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        Instant closedAt = Instant.parse("2026-07-01T00:00:00Z");
+        when(jdbcTemplate.query(contains("POSITION_CLOSED"), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(List.of());
+
+        repository.positionClosedCancellations(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT-260925",
+                MarginMode.ISOLATED, PositionSide.LONG, closedAt);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("product_line = ?")
+                .contains("position_side = ?")
+                .contains("status = 'CANCELED'")
+                .contains("reject_reason = 'POSITION_CLOSED'")
+                .contains("updated_at = ?");
+        assertThat(args.getValue()).containsExactly("LINEAR_DELIVERY", 1001L, "BTC-USDT-260925",
+                "ISOLATED", "LONG", java.sql.Timestamp.from(closedAt));
+    }
+
+    @Test
     void resetStaleTriggeringFiltersByContractTypeWhenProvided() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);

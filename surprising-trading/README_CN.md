@@ -157,6 +157,7 @@ REST 接口：
 - 触发后的真实订单继续走普通订单、撮合、账户、手续费、PnL、风控、强平和 WebSocket 链路。trigger 服务不直接修改余额或持仓。
 - `MARKET` 触发执行要求 `priceTicks=0` 且 `timeInForce` 为 `IOC` 或 `FOK`。静态 TP/SL 也可用 `LIMIT` 执行且要求 `priceTicks > 0`；触发执行不支持 `GTX`。
 - 可选 `ocoGroupId` 支持成对 TP/SL 互撤。同一个 `userId + symbol + marginMode + ocoGroupId` 组里任意一条 pending 条件单被配置的触发价源事件抢占触发时，同一条数据库 claim 语句会先把其它 pending sibling 置为 `CANCELED`，再提交生成的 reduce-only 平仓单。
+- 持仓完全归零时，account 会在结算事务内按精确的 `productLine + userId + symbol + marginMode + positionSide` 范围取消剩余全部 `PENDING` 条件单，并写入 `rejectReason=POSITION_CLOSED`。普通平仓、强平成交、交割结算和期权行权都走这条链路；事务提交后再由 account 持仓 outbox 事件驱动 Redis ZSET 幂等清理。已经处于 `TRIGGERING` 的行不会被抢撤，继续走现有 reduce-only 状态机收敛。
 - 批量条件单放置支持 `atomic=true`，用于组合 TP/SL 的全成全撤语义。原子模式下任一条校验失败会拒绝整组、回滚已插入条件单，并返回逐项失败结果；默认批量模式仍保持逐条隔离成功/失败。
 - OCO sibling 在 claim 阶段就会取消；如果后续 order-provider 执行失败，该 OCO 组也已经被消费。这个取舍可以避免多节点 trigger-provider 并发下重复平仓，执行失败后客户端可以重新挂一组 TP/SL。
 - 当前条件单 API 不做原地改单。用户更新触发价或数量时应先撤旧单，再使用新的 `clientTriggerOrderId` 下单，确保重新执行完整校验并避免跨存储 move 竞争。`GET /open` 始终查询 PostgreSQL 的权威 `PENDING`/`TRIGGERING` 状态；触发生成的真实平仓单和成交继续走现有私有 WebSocket 频道。

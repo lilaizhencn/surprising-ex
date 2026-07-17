@@ -48,6 +48,7 @@ surprising.<product-segment>.match.trades.v1
 - 平仓成交只有 `reduceOnly=true` 订单可以跳过订单保证金释放。非 reduce-only 订单只要平掉了仓位，就仍必须存在原始 reservation 行。
 - 持仓更新、余额更新、发生数值变化的 deficit 更新、PnL/fee ledger 插入/回填、订单保证金释放、持仓保证金增减都要求写入 1 行。任何异常都不应静默跳过。
 - 持仓数量或版本变化后会触发 reduce-only 挂单剪枝：反向、版本不一致或超过新持仓容量的未完成 reduce-only 订单会被写为 `CANCEL_REQUESTED` 并通过 order command outbox 发送撤单。容量检查使用 checked absolute value 和 checked 待平数量累加，异常持仓数量会在发出撤单命令前失败。
+- 结算把持仓降为零时，account-provider 还会在同一个事务里把精确持仓范围内全部 `PENDING` 止盈、止损和追踪止损置为 `CANCELED`，原因为 `POSITION_CLOSED`。持仓 outbox 事件在该更新进入事务后才写出，trigger-provider 因而只会在数据库提交后清理 Redis 二级索引。
 
 `account_processed_trades(symbol, trade_id)` 是成交幂等键，重复投递不会重复更新持仓，也不会把不同 symbol 的同号 tradeId 误判为重复。
 

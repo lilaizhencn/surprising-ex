@@ -418,7 +418,11 @@ public class GatewayProperties {
                     new KafkaConsumerGroup("surprising-liquidation-v1", List.of(
                             "surprising.perp.liquidation.candidates.v1",
                             "surprising.perp.match.results.v1")),
-                    new KafkaConsumerGroup("surprising-trigger-v1", List.of("surprising.perp.mark.price.v1")),
+                    new KafkaConsumerGroup("surprising-trigger-v1", List.of(
+                            "surprising.perp.mark.price.v1",
+                            "surprising.perp.index.price.v1",
+                            "surprising.perp.match.trades.v1",
+                            "surprising.account.position.events.v1")),
                     new KafkaConsumerGroup("surprising-mark-price-v1", List.of(
                             "surprising.perp.index.price.v1",
                             "surprising.perp.book.ticker.v1",
@@ -440,7 +444,8 @@ public class GatewayProperties {
                     new KafkaConsumerGroup(topics.consumerGroup("liquidation"),
                             List.of(topics.liquidationCandidatesTopic(), topics.matchResultsTopic())),
                     new KafkaConsumerGroup(topics.consumerGroup("trigger"),
-                            List.of(topics.markPriceTopic(), topics.indexPriceTopic(), topics.matchTradesTopic())),
+                            List.of(topics.markPriceTopic(), topics.indexPriceTopic(), topics.matchTradesTopic(),
+                                    topics.accountPositionEventsTopic())),
                     new KafkaConsumerGroup(topics.consumerGroup("mark-price"),
                             markPriceConsumerTopics(productLine, topics)),
                     new KafkaConsumerGroup(topics.consumerGroup("candlestick"),

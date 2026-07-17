@@ -25,6 +25,11 @@
             <artifactId>surprising-trading-api</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-account-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>

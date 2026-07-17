@@ -116,10 +116,13 @@ INSERT INTO trading_match_trades (
     taker_order_completed, maker_order_completed, event_time
 ) VALUES (9201, 9101, 'LINEAR_PERPETUAL', 'BTC-USDT', 9002, 1, 2002, 'BUY', 9001, 1, 1001, 600000, 3, TRUE, FALSE, now());
 
-INSERT INTO account_positions (product_line, user_id, symbol, instrument_version, signed_quantity_steps, entry_price_ticks, realized_pnl_units, updated_at)
+INSERT INTO account_positions (
+    product_line, user_id, symbol, instrument_version, signed_quantity_steps,
+    entry_price_ticks, entry_value_ticks, realized_pnl_units, updated_at
+)
 VALUES
-    ('LINEAR_PERPETUAL', 1001, 'BTC-USDT', 1, -3, 600000, 0, now()),
-    ('LINEAR_PERPETUAL', 2002, 'BTC-USDT', 1, 3, 600000, 0, now());
+    ('LINEAR_PERPETUAL', 1001, 'BTC-USDT', 1, -3, 600000, 1800000, 0, now()),
+    ('LINEAR_PERPETUAL', 2002, 'BTC-USDT', 1, 3, 600000, 1800000, 0, now());
 
 INSERT INTO price_mark_ticks (
     symbol, sequence, mark_price, mark_price_units, index_price, price1, price2, last_trade_price,
@@ -318,8 +321,8 @@ END $$;
 
 INSERT INTO account_positions (
     product_line, user_id, symbol, instrument_version, signed_quantity_steps,
-    entry_price_ticks, realized_pnl_units, updated_at
-) VALUES ('LINEAR_PERPETUAL', 5005, 'BTC-USDT', 1, 10, 580000, 0, now());
+    entry_price_ticks, entry_value_ticks, realized_pnl_units, updated_at
+) VALUES ('LINEAR_PERPETUAL', 5005, 'BTC-USDT', 1, 10, 580000, 5800000, 0, now());
 
 INSERT INTO account_position_margins (product_line, user_id, symbol, asset, margin_units, updated_at)
 VALUES ('LINEAR_PERPETUAL', 5005, 'BTC-USDT', 'USDT', 1000, now());
@@ -445,8 +448,11 @@ INSERT INTO instruments (
 INSERT INTO instrument_current_versions (symbol, version, updated_at)
 VALUES ('BTC-USD', 1, now());
 
-INSERT INTO account_positions (product_line, user_id, symbol, instrument_version, signed_quantity_steps, entry_price_ticks, realized_pnl_units, updated_at)
-VALUES ('INVERSE_PERPETUAL', 3003, 'BTC-USD', 1, 1, 50000, 0, now());
+INSERT INTO account_positions (
+    product_line, user_id, symbol, instrument_version, signed_quantity_steps,
+    entry_price_ticks, entry_value_ticks, realized_pnl_units, updated_at
+)
+VALUES ('INVERSE_PERPETUAL', 3003, 'BTC-USD', 1, 1, 50000, 50000, 0, now());
 
 INSERT INTO price_mark_ticks (
     symbol, sequence, mark_price, mark_price_units, index_price, price1, price2, last_trade_price,

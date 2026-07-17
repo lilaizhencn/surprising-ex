@@ -61,6 +61,7 @@ public class AccountService {
     private final AccountRepository accountRepository;
     private final PositionCalculator positionCalculator;
     private final ReduceOnlyOrderPruner reduceOnlyOrderPruner;
+    private final ClosedPositionTriggerOrderPruner closedPositionTriggerOrderPruner;
     private final AccountProperties properties;
     private final AccountOutboxRepository outboxRepository;
     private final BoundedLocalCache<ContractSpecKey, ContractSpec> contractSpecCache;
@@ -73,15 +74,25 @@ public class AccountService {
         this(accountRepository, positionCalculator, null, new AccountProperties(), null);
     }
 
-    @Autowired
     public AccountService(AccountRepository accountRepository,
                           PositionCalculator positionCalculator,
                           ReduceOnlyOrderPruner reduceOnlyOrderPruner,
                           AccountProperties properties,
                           AccountOutboxRepository outboxRepository) {
+        this(accountRepository, positionCalculator, reduceOnlyOrderPruner, null, properties, outboxRepository);
+    }
+
+    @Autowired
+    public AccountService(AccountRepository accountRepository,
+                          PositionCalculator positionCalculator,
+                          ReduceOnlyOrderPruner reduceOnlyOrderPruner,
+                          ClosedPositionTriggerOrderPruner closedPositionTriggerOrderPruner,
+                          AccountProperties properties,
+                          AccountOutboxRepository outboxRepository) {
         this.accountRepository = accountRepository;
         this.positionCalculator = positionCalculator;
         this.reduceOnlyOrderPruner = reduceOnlyOrderPruner;
+        this.closedPositionTriggerOrderPruner = closedPositionTriggerOrderPruner;
         this.properties = properties;
         this.outboxRepository = outboxRepository;
         AccountProperties.Cache cacheProperties = properties.getCache() == null
@@ -556,6 +567,8 @@ public class AccountService {
             PositionResponse updated = accountRepository.updatePosition(productLine, position.userId(), symbol,
                     position.marginMode(), position.positionSide(), change.next(), position.signedQuantitySteps(),
                     eventTime);
+            pruneClosedPositionTriggers(productLine, position.userId(), symbol, position.marginMode(),
+                    position.positionSide(), change.next(), eventTime);
             if (outboxRepository != null) {
                 outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
                         0L, updated, eventTime, TraceContext.currentOrCreate());
@@ -800,11 +813,28 @@ public class AccountService {
         if (closeSteps > 0 && reduceOnlyOrderPruner != null) {
             reduceOnlyOrderPruner.prune(userId, symbol, normalizedPositionSide, change.next(), eventTime, traceId);
         }
+        if (closeSteps > 0) {
+            pruneClosedPositionTriggers(productLine, userId, symbol, normalizedMarginMode, normalizedPositionSide,
+                    change.next(), eventTime);
+        }
         if (outboxRepository != null) {
             outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
                     tradeId, updated, eventTime, traceId);
         }
         return updated;
+    }
+
+    private void pruneClosedPositionTriggers(ProductLine productLine,
+                                             long userId,
+                                             String symbol,
+                                             MarginMode marginMode,
+                                             PositionSide positionSide,
+                                             PositionState position,
+                                             Instant closedAt) {
+        if (closedPositionTriggerOrderPruner == null || position.signedQuantitySteps() != 0L) {
+            return;
+        }
+        closedPositionTriggerOrderPruner.prune(productLine, userId, symbol, marginMode, positionSide, closedAt);
     }
 
     private void settleLiquidationFeeIfNeeded(long tradeId,

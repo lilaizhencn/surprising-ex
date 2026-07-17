@@ -52,6 +52,7 @@ Each `MatchTradeEvent` updates:
 - Closing fills may skip order-margin release only for `reduceOnly=true` orders. A non-reduce-only order that closes exposure must still have its original reservation row.
 - Position updates, balance updates, changed deficit updates, PnL/fee ledger inserts/backfills, order-margin release, and position-margin changes must each affect one row. Unexpected skipped writes are not ignored.
 - After position quantity or version changes, reduce-only pruning runs: wrong-side, stale-version, or excess open reduce-only orders are marked `CANCEL_REQUESTED` and cancel commands are emitted through the order-command outbox. Capacity checks use checked absolute value and checked pending-quantity accumulation, so impossible position quantities fail before cancel commands are emitted.
+- If settlement reduces the position to zero, account-provider also moves every exact-scope `PENDING` TP/SL/trailing trigger to `CANCELED` with `POSITION_CLOSED` in the same transaction. The position outbox event is emitted only after that update is part of the transaction, allowing trigger-provider to clean its Redis secondary index after commit.
 
 `account_processed_trades(symbol, trade_id)` is the trade idempotency key, so repeated delivery does not update positions twice and same-number trade ids from different symbols are not treated as duplicates.
 

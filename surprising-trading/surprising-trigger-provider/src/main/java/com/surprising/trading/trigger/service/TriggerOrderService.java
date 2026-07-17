@@ -1,5 +1,6 @@
 package com.surprising.trading.trigger.service;
 
+import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.client.OrderRpcApi;
@@ -167,6 +168,16 @@ public class TriggerOrderService {
             throw new IllegalStateException("failed to insert trigger order " + triggerOrderId);
         }
         return toResponse(order);
+    }
+
+    public void onPositionClosed(PositionUpdatedEvent event) {
+        if (event == null || event.signedQuantitySteps() != 0L || event.eventTime() == null) {
+            return;
+        }
+        triggerOrderRepository.positionClosedCancellations(
+                        currentProductLine(), event.userId(), normalizeSymbol(event.symbol()), event.marginMode(),
+                        event.positionSide(), event.eventTime())
+                .forEach(triggerOrderIndex::synchronize);
     }
 
     @Transactional

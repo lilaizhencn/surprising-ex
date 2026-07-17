@@ -44,6 +44,7 @@ public class TriggerProperties {
         private String markPriceTopic = "surprising.perp.mark.price.v1";
         private String indexPriceTopic = "surprising.perp.index.price.v1";
         private String lastPriceTopic = "surprising.perp.match.trades.v1";
+        private String positionEventsTopic = "surprising.account.position.events.v1";
         private int concurrency = 2;
         private int maxPollRecords = 500;
 
@@ -101,6 +102,14 @@ public class TriggerProperties {
 
         public void setLastPriceTopic(String lastPriceTopic) {
             this.lastPriceTopic = lastPriceTopic;
+        }
+
+        public String getPositionEventsTopic() {
+            return productTopicsEnabled ? productTopics().accountPositionEventsTopic() : positionEventsTopic;
+        }
+
+        public void setPositionEventsTopic(String positionEventsTopic) {
+            this.positionEventsTopic = positionEventsTopic;
         }
 
         public int getConcurrency() {

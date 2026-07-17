@@ -668,6 +668,9 @@ surprising:
           - group-id: surprising-trigger-v1
             topics:
               - surprising.perp.mark.price.v1
+              - surprising.perp.index.price.v1
+              - surprising.perp.match.trades.v1
+              - surprising.account.position.events.v1
           - group-id: surprising-mark-price-v1
             topics:
               - surprising.perp.index.price.v1

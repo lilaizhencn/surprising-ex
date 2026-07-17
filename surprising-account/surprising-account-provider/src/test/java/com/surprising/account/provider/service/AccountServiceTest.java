@@ -243,7 +243,9 @@ class AccountServiceTest {
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
                 new PositionState(3L, 4L, 500_000L, 0L));
         repository.latestMarkPriceTicks.put(symbol + ":4", 600_000L);
-        AccountService service = new AccountService(repository, new PositionCalculator());
+        RecordingClosedPositionTriggerOrderPruner triggerPruner = new RecordingClosedPositionTriggerOrderPruner();
+        AccountService service = new AccountService(repository, new PositionCalculator(), null, triggerPruner,
+                new AccountProperties(), null);
 
         int settled = service.processDeliverySettlement(new DeliverySettlementEvent(
                 symbol, 4L, ContractType.LINEAR_DELIVERY, EVENT_TIME, EVENT_TIME,
@@ -263,6 +265,8 @@ class AccountServiceTest {
         assertThat(repository.scopedPositionUpdateLines).containsExactly(ProductLine.LINEAR_DELIVERY);
         assertThat(repository.lastSettlementMarkPriceTime).isEqualTo(EVENT_TIME);
         assertThat(repository.lastSettlementPriceWindow).isEqualTo(Duration.ofMinutes(30));
+        assertThat(triggerPruner.calls).containsExactly(new ClosedTriggerPruneCall(
+                ProductLine.LINEAR_DELIVERY, 2002L, symbol, MarginMode.CROSS, PositionSide.NET, EVENT_TIME));
     }
 
     @Test
@@ -980,13 +984,14 @@ class AccountServiceTest {
         repository.feeSnapshots.put(9010L, new OrderFeeSnapshot(0L, 0L));
         repository.feeSnapshots.put(9011L, new OrderFeeSnapshot(0L, 0L));
         repository.positions.put(new PositionKey(2002L, "BTC-USDT", MarginMode.CROSS),
-                new PositionState(3L, 1L, 600_000L, 0L));
+                new PositionState(2L, 1L, 600_000L, 0L));
         repository.liquidationFeeContexts.put(9010L, new LiquidationFeeContext(6001L, 9401L, 3_000L));
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setPositionEventsTopic("surprising.account.position.events.v1");
         properties.getKafka().setLiquidationFeeEventsTopic("surprising.account.liquidation-fee.events.v1");
-        AccountService service = new AccountService(repository, new PositionCalculator(), null,
+        RecordingClosedPositionTriggerOrderPruner triggerPruner = new RecordingClosedPositionTriggerOrderPruner();
+        AccountService service = new AccountService(repository, new PositionCalculator(), null, triggerPruner,
                 properties, outboxRepository);
 
         MatchTradeEvent close = new MatchTradeEvent(
@@ -1012,6 +1017,9 @@ class AccountServiceTest {
         service.processTrade(close);
 
         assertThat(repository.liquidationFeeByUser).containsEntry(2002L, 3_600L);
+        assertThat(triggerPruner.calls).containsExactly(new ClosedTriggerPruneCall(
+                ProductLine.LINEAR_PERPETUAL, 2002L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET,
+                EVENT_TIME.plusSeconds(4)));
         assertThat(outboxRepository.liquidationFeeCalls).singleElement().satisfies(call -> {
             assertThat(call.topic()).isEqualTo("surprising.account.liquidation-fee.events.v1");
             assertThat(call.tradeId()).isEqualTo(9205L);
@@ -1689,6 +1697,27 @@ class AccountServiceTest {
         }
     }
 
+    private static final class RecordingClosedPositionTriggerOrderPruner
+            extends ClosedPositionTriggerOrderPruner {
+
+        private final List<ClosedTriggerPruneCall> calls = new ArrayList<>();
+
+        private RecordingClosedPositionTriggerOrderPruner() {
+            super(null);
+        }
+
+        @Override
+        public int prune(ProductLine productLine,
+                         long userId,
+                         String symbol,
+                         MarginMode marginMode,
+                         PositionSide positionSide,
+                         Instant closedAt) {
+            calls.add(new ClosedTriggerPruneCall(productLine, userId, symbol, marginMode, positionSide, closedAt));
+            return 1;
+        }
+    }
+
     private static final class FakeOutboxRepository extends AccountOutboxRepository {
 
         private final List<PositionUpdatedCall> calls = new ArrayList<>();
@@ -1888,6 +1917,14 @@ class AccountServiceTest {
                              PositionState position,
                              Instant eventTime,
                              String traceId) {
+    }
+
+    private record ClosedTriggerPruneCall(ProductLine productLine,
+                                          long userId,
+                                          String symbol,
+                                          MarginMode marginMode,
+                                          PositionSide positionSide,
+                                          Instant closedAt) {
     }
 
     private record PositionKey(long userId, String symbol, MarginMode marginMode, PositionSide positionSide) {
