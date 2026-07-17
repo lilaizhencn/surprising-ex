@@ -15,6 +15,8 @@ import com.surprising.liquidation.provider.model.LiquidationSizingInput;
 import com.surprising.liquidation.api.model.LiquidationOrderStatus;
 import com.surprising.liquidation.provider.model.LiquidationPricingDecision;
 import com.surprising.liquidation.provider.model.LiquidationPricingInput;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.trading.api.model.MarginMode;
@@ -24,6 +26,7 @@ import java.sql.ResultSet;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -245,9 +248,15 @@ class LiquidationRepositoryTest {
 
     @Test
     void sizingInputCalculatesNotionalWithSharedLongMathAndLongBracketLookup() throws Exception {
-        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
+        LatestMarkPriceCache markPriceCache = mock(LatestMarkPriceCache.class);
+        MarkPriceEvent markPrice = mock(MarkPriceEvent.class);
+        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate,
+                new LiquidationProperties(), markPriceCache);
+        when(markPriceCache.fresh("BTC-USDT", Duration.ofSeconds(5))).thenReturn(Optional.of(markPrice));
+        when(markPrice.instrumentVersion()).thenReturn(7L);
+        when(markPrice.markPriceTicks()).thenReturn(5L);
         when(jdbcTemplate.query(contains("FROM account_positions p"), anyRowMapper(),
-                eq(2002L), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(7L),
+                eq(5L), eq(2002L), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(7L),
                 eq("LINEAR_PERPETUAL"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
@@ -269,19 +278,26 @@ class LiquidationRepositoryTest {
 
         assertThat(input).isEqualTo(new LiquidationSizingInput(10L, 6L, 20_000L, 2_000L, 10_000L));
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(2002L), eq("BTC-USDT"), eq("CROSS"),
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(5L), eq(2002L), eq("BTC-USDT"), eq("CROSS"),
                 eq("NET"), eq(7L), eq("LINEAR_PERPETUAL"));
         assertThat(sql.getValue())
                 .contains("p.product_line = ?")
+                .doesNotContain("price_mark_ticks")
                 .doesNotContain("::NUMERIC")
                 .doesNotContain("abs(");
     }
 
     @Test
     void latestPricingInputUsesFreshRiskPositionAndAccountSnapshot() throws Exception {
-        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
+        LatestMarkPriceCache markPriceCache = mock(LatestMarkPriceCache.class);
+        MarkPriceEvent markPrice = mock(MarkPriceEvent.class);
+        LiquidationRepository repository = new LiquidationRepository(jdbcTemplate,
+                new LiquidationProperties(), markPriceCache);
+        when(markPriceCache.fresh("BTC-USDT", Duration.ofSeconds(5))).thenReturn(Optional.of(markPrice));
+        when(markPrice.instrumentVersion()).thenReturn(8L);
+        when(markPrice.markPriceTicks()).thenReturn(100L);
         when(jdbcTemplate.query(contains("FROM risk_position_snapshots ps"), anyRowMapper(),
-                eq(2002L), eq("LINEAR_PERPETUAL"), eq("BTC-USDT"), eq("ISOLATED"), eq("NET"), eq(8L),
+                eq(100L), eq(2002L), eq("LINEAR_PERPETUAL"), eq("BTC-USDT"), eq("ISOLATED"), eq("NET"), eq(8L),
                 eq(5000L))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
@@ -302,7 +318,7 @@ class LiquidationRepositoryTest {
         assertThat(input).isEqualTo(new LiquidationPricingInput(ContractType.LINEAR_PERPETUAL,
                 10L, 100L, 200L, 50L, 1L, 1L, 100_000_000L));
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(2002L), eq("LINEAR_PERPETUAL"), eq("BTC-USDT"),
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(100L), eq(2002L), eq("LINEAR_PERPETUAL"), eq("BTC-USDT"),
                 eq("ISOLATED"), eq("NET"), eq(8L), eq(5000L));
         assertThat(sql.getValue())
                 .contains("ps.product_line = ?")

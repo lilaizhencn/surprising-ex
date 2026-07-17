@@ -11,6 +11,8 @@ import com.surprising.liquidation.provider.model.LiquidationCloseState;
 import com.surprising.liquidation.provider.model.LiquidationPricingDecision;
 import com.surprising.liquidation.provider.model.LiquidationPricingInput;
 import com.surprising.liquidation.provider.model.LiquidationSizingInput;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.trading.api.model.MarginMode;
@@ -36,15 +38,23 @@ public class LiquidationRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final LiquidationProperties properties;
+    private final LatestMarkPriceCache markPriceCache;
 
     public LiquidationRepository(JdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, new LiquidationProperties());
+        this(jdbcTemplate, new LiquidationProperties(), null);
+    }
+
+    public LiquidationRepository(JdbcTemplate jdbcTemplate, LiquidationProperties properties) {
+        this(jdbcTemplate, properties, null);
     }
 
     @Autowired
-    public LiquidationRepository(JdbcTemplate jdbcTemplate, LiquidationProperties properties) {
+    public LiquidationRepository(JdbcTemplate jdbcTemplate,
+                                 LiquidationProperties properties,
+                                 LatestMarkPriceCache markPriceCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties == null ? new LiquidationProperties() : properties;
+        this.markPriceCache = markPriceCache;
     }
 
     public Optional<ClaimedCandidate> claimCandidate(long candidateId) {
@@ -223,6 +233,7 @@ public class LiquidationRepository {
                                                         PositionSide positionSide,
                                                         long instrumentVersion,
                                                         long availableCloseSteps) {
+        long markPriceTicks = requireMarkPrice(symbol, instrumentVersion).markPriceTicks();
         String sql = """
                 SELECT p.symbol,
                        p.instrument_version AS version,
@@ -231,42 +242,33 @@ public class LiquidationRepository {
                        i.notional_multiplier_units,
                        i.price_tick_units,
                        ss.scale_units AS settle_scale_units,
-                       pm.mark_price_ticks
+                       ?::BIGINT AS mark_price_ticks
                   FROM account_positions p
                   JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
                   JOIN account_asset_scales ss ON ss.asset = i.settle_asset
-                  JOIN LATERAL (
-                      SELECT ((m.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_price_ticks,
-                             event_time
-                        FROM price_mark_ticks m
-                       WHERE m.symbol = p.symbol
-                       ORDER BY event_time DESC
-                       LIMIT 1
-                  ) pm ON TRUE
                  WHERE p.user_id = ? AND p.symbol = ? AND p.margin_mode = ? AND p.position_side = ?
                    AND p.instrument_version = ?
                    AND p.product_line = ?
                    AND p.signed_quantity_steps <> 0
-                   AND pm.mark_price_ticks > 0
                 """;
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
                     ContractType contractType = ContractType.valueOf(rs.getString("contract_type"));
                     long signedQuantitySteps = rs.getLong("signed_quantity_steps");
-                    long markPriceTicks = rs.getLong("mark_price_ticks");
+                    long rowMarkPriceTicks = rs.getLong("mark_price_ticks");
                     long notionalMultiplierUnits = rs.getLong("notional_multiplier_units");
                     long priceTickUnits = rs.getLong("price_tick_units");
                     long settleScaleUnits = rs.getLong("settle_scale_units");
                     long notionalUnits = PerpetualContractMath.notionalUnits(contractType, signedQuantitySteps,
-                            markPriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
+                            rowMarkPriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
                     long notionalPerStepUnits = Math.max(1L, PerpetualContractMath.notionalPerStepUnits(contractType,
-                            markPriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits));
+                            rowMarkPriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits));
                     return new SizingRow(
                             rs.getString("symbol"),
                             rs.getLong("version"),
                             Math.absExact(signedQuantitySteps),
                             notionalUnits,
                             notionalPerStepUnits);
-                }, userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                }, markPriceTicks, userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
                 PositionSide.defaultIfNull(positionSide).name(), instrumentVersion, currentProductLine().name())
                 .stream()
                 .findFirst()
@@ -292,9 +294,10 @@ public class LiquidationRepository {
                                                                 PositionSide positionSide,
                                                                 long instrumentVersion,
                                                                 Duration maxSnapshotAge) {
+        long markPriceTicks = requireMarkPrice(symbol, instrumentVersion).markPriceTicks();
         return jdbcTemplate.query("""
                 SELECT ps.signed_quantity_steps,
-                       ps.mark_price_ticks,
+                       ?::BIGINT AS mark_price_ticks,
                        CASE
                            WHEN ps.margin_mode = 'ISOLATED'
                                THEN ps.position_margin_units + ps.unrealized_pnl_units
@@ -334,7 +337,7 @@ public class LiquidationRepository {
                 rs.getLong("maintenance_margin_units"),
                 rs.getLong("notional_multiplier_units"),
                 rs.getLong("price_tick_units"),
-                rs.getLong("settle_scale_units")), userId, currentProductLine().name(), symbol,
+                rs.getLong("settle_scale_units")), markPriceTicks, userId, currentProductLine().name(), symbol,
                 MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name(),
                 instrumentVersion,
                 Math.max(1L, maxSnapshotAge.toMillis())).stream().findFirst();
@@ -364,6 +367,19 @@ public class LiquidationRepository {
                    AND notional_floor_units <= ?
                 """, Long.class, symbol, instrumentVersion, notionalUnits);
         return value == null ? 0L : value;
+    }
+
+    private MarkPriceEvent requireMarkPrice(String symbol, long instrumentVersion) {
+        if (markPriceCache == null) {
+            throw new IllegalStateException("mark price cache is not configured");
+        }
+        MarkPriceEvent markPrice = markPriceCache.fresh(symbol, properties.getRisk().getMaxSnapshotAge())
+                .orElseThrow(() -> new IllegalStateException("fresh mark price not found for " + symbol));
+        if (markPrice.instrumentVersion() != instrumentVersion) {
+            throw new IllegalStateException("mark price instrument version mismatch for " + symbol
+                    + ": expected=" + instrumentVersion + ", actual=" + markPrice.instrumentVersion());
+        }
+        return markPrice;
     }
 
     public void markCandidate(long candidateId, String status) {
