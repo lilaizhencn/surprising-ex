@@ -56,6 +56,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
@@ -78,6 +79,7 @@ public class OrderService {
     private final OrderMarginRepository orderMarginRepository;
     private final SpotOrderReservationRepository spotOrderReservationRepository;
     private final OutboxRepository outboxRepository;
+    private final RedisOpenOrderView openOrderView;
 
     public OrderService(ObjectMapper objectMapper,
                         TradingOrderProperties properties,
@@ -88,6 +90,21 @@ public class OrderService {
                         OrderMarginRepository orderMarginRepository,
                         SpotOrderReservationRepository spotOrderReservationRepository,
                         OutboxRepository outboxRepository) {
+        this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderFeeRepository,
+                orderMarginRepository, spotOrderReservationRepository, outboxRepository, null);
+    }
+
+    @Autowired
+    public OrderService(ObjectMapper objectMapper,
+                        TradingOrderProperties properties,
+                        OrderValidator orderValidator,
+                        ReduceOnlyValidator reduceOnlyValidator,
+                        OrderRepository orderRepository,
+                        OrderFeeRepository orderFeeRepository,
+                        OrderMarginRepository orderMarginRepository,
+                        SpotOrderReservationRepository spotOrderReservationRepository,
+                        OutboxRepository outboxRepository,
+                        RedisOpenOrderView openOrderView) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.orderValidator = orderValidator;
@@ -97,6 +114,7 @@ public class OrderService {
         this.orderMarginRepository = orderMarginRepository;
         this.spotOrderReservationRepository = spotOrderReservationRepository;
         this.outboxRepository = outboxRepository;
+        this.openOrderView = openOrderView;
     }
 
     @Transactional
@@ -585,8 +603,13 @@ public class OrderService {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
-        String contractType = currentProductContractType();
-        List<OrderResponse> rows = orderRepository.openOrders(userId, normalizedSymbol, limit, contractType)
+        ProductLine productLine = currentProductLine();
+        List<OrderRecord> orders = openOrderView == null
+                ? orderRepository.openOrders(userId, normalizedSymbol, limit, currentProductContractType())
+                : openOrderView.orders(productLine, userId, normalizedSymbol, limit)
+                        .orElseGet(() -> orderRepository.openOrders(userId, normalizedSymbol, limit,
+                                currentProductContractType()));
+        List<OrderResponse> rows = orders
                 .stream()
                 .map(this::toResponse)
                 .toList();

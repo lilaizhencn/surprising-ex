@@ -65,6 +65,9 @@ public class TradingOrderProperties {
         private boolean productTopicsEnabled;
         private String orderCommandsTopic = "surprising.perp.order.commands.v1";
         private String orderEventsTopic = "surprising.perp.order.events.v1";
+        private String matchResultsTopic = "surprising.perp.match.results.v1";
+        private String matchTradesTopic = "surprising.perp.match.trades.v1";
+        private String openOrderViewGroupId = "surprising-order-open-view-v1";
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -105,6 +108,12 @@ public class TradingOrderProperties {
         public void setOrderEventsTopic(String orderEventsTopic) {
             this.orderEventsTopic = orderEventsTopic;
         }
+        public String getMatchResultsTopic() { return productTopicsEnabled ? productTopics().matchResultsTopic() : matchResultsTopic; }
+        public void setMatchResultsTopic(String matchResultsTopic) { this.matchResultsTopic = matchResultsTopic; }
+        public String getMatchTradesTopic() { return productTopicsEnabled ? productTopics().matchTradesTopic() : matchTradesTopic; }
+        public void setMatchTradesTopic(String matchTradesTopic) { this.matchTradesTopic = matchTradesTopic; }
+        public String getOpenOrderViewGroupId() { return openOrderViewGroupId; }
+        public void setOpenOrderViewGroupId(String openOrderViewGroupId) { this.openOrderViewGroupId = openOrderViewGroupId; }
 
         private ProductTopicNames productTopics() {
             return ProductTopicNames.of(productLine);

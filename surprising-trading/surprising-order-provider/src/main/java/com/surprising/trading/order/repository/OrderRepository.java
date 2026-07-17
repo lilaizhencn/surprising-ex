@@ -253,6 +253,19 @@ public class OrderRepository {
                 userId, normalizedSymbol, normalizedSymbol, productLine, productLine, limit);
     }
 
+    /** Stable keyset scan used only to rebuild the optional Redis open-order read model. */
+    public List<OrderRecord> activeOrdersForOpenOrderView(ProductLine productLine, long afterOrderId, int limit) {
+        return jdbcTemplate.query("""
+                SELECT *
+                  FROM trading_orders
+                 WHERE product_line = ?
+                   AND order_id > ?
+                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                 ORDER BY order_id ASC
+                 LIMIT ?
+                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), afterOrderId, limit);
+    }
+
     public List<OrderRecord> adminOrders(Long userId,
                                          String symbol,
                                          OrderStatus status,
