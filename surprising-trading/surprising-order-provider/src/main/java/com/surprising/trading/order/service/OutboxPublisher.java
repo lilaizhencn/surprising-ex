@@ -30,7 +30,8 @@ import org.springframework.stereotype.Service;
 public class OutboxPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxPublisher.class);
-    private static final Duration CLAIM_LEASE = Duration.ofSeconds(30);
+    private static final Duration MINIMUM_CLAIM_LEASE = Duration.ofSeconds(30);
+    private static final Duration CLAIM_LEASE_BUFFER = Duration.ofSeconds(5);
 
     private final TradingOrderProperties properties;
     private final OutboxRepository outboxRepository;
@@ -58,7 +59,7 @@ public class OutboxPublisher {
             int remaining = properties.getOutbox().getBatchSize();
             while (remaining > 0) {
                 Instant now = Instant.now();
-                var rows = outboxRepository.claimPending(remaining, now.plus(CLAIM_LEASE), now)
+                var rows = outboxRepository.claimPending(remaining, now.plus(claimLease(remaining)), now)
                         .stream()
                         .sorted(Comparator.comparing(OutboxRecord::topic)
                                 .thenComparing(OutboxRecord::eventKey)
@@ -102,6 +103,16 @@ public class OutboxPublisher {
                 markFailed(row, failure);
             }
         }
+    }
+
+    private Duration claimLease(int claimedLimit) {
+        int batchSize = Math.max(1, claimedLimit);
+        int sendRounds = properties.getOutbox().isAsyncEnabled()
+                ? (batchSize + maxInFlight - 1) / maxInFlight
+                : batchSize;
+        Duration budget = properties.getOutbox().getSendTimeout().multipliedBy(sendRounds)
+                .plus(CLAIM_LEASE_BUFFER);
+        return budget.compareTo(MINIMUM_CLAIM_LEASE) < 0 ? MINIMUM_CLAIM_LEASE : budget;
     }
 
     private void publishConcurrent(List<OutboxRecord> rows) {

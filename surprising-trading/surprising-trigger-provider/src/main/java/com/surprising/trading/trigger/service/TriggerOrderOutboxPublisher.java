@@ -19,7 +19,8 @@ import org.springframework.stereotype.Service;
 public class TriggerOrderOutboxPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(TriggerOrderOutboxPublisher.class);
-    private static final Duration CLAIM_LEASE = Duration.ofSeconds(30);
+    private static final Duration MINIMUM_CLAIM_LEASE = Duration.ofSeconds(30);
+    private static final Duration CLAIM_LEASE_BUFFER = Duration.ofSeconds(5);
 
     private final TriggerProperties properties;
     private final TriggerOrderOutboxRepository outboxRepository;
@@ -43,7 +44,7 @@ public class TriggerOrderOutboxPublisher {
             int remaining = Math.max(1, properties.getOutbox().getBatchSize());
             while (remaining > 0) {
                 Instant now = Instant.now();
-                var rows = outboxRepository.claimPending(remaining, now.plus(CLAIM_LEASE), now);
+                var rows = outboxRepository.claimPending(remaining, now.plus(claimLease(remaining)), now);
                 if (rows.isEmpty()) {
                     return;
                 }
@@ -72,5 +73,11 @@ public class TriggerOrderOutboxPublisher {
                         row.id(), markEx.getMessage(), markEx);
             }
         }
+    }
+
+    private Duration claimLease(int claimedLimit) {
+        Duration budget = properties.getOutbox().getSendTimeout().multipliedBy(Math.max(1, claimedLimit))
+                .plus(CLAIM_LEASE_BUFFER);
+        return budget.compareTo(MINIMUM_CLAIM_LEASE) < 0 ? MINIMUM_CLAIM_LEASE : budget;
     }
 }

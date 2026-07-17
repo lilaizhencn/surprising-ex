@@ -17,7 +17,8 @@ import org.springframework.stereotype.Service;
 public class TradingOutboxPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(TradingOutboxPublisher.class);
-    private static final Duration CLAIM_LEASE = Duration.ofSeconds(30);
+    private static final Duration MINIMUM_CLAIM_LEASE = Duration.ofSeconds(30);
+    private static final Duration CLAIM_LEASE_BUFFER = Duration.ofSeconds(5);
 
     private final LiquidationProperties properties;
     private final LiquidationOrderRepository orderRepository;
@@ -39,7 +40,8 @@ public class TradingOutboxPublisher {
         }
         try {
             Instant now = Instant.now();
-            var rows = orderRepository.claimPending(properties.getOutbox().getBatchSize(), now.plus(CLAIM_LEASE), now);
+            int batchSize = Math.max(1, properties.getOutbox().getBatchSize());
+            var rows = orderRepository.claimPending(batchSize, now.plus(claimLease(batchSize)), now);
             for (var row : rows) {
                 try {
                     kafkaTemplate.send(row.topic(), row.eventKey(), row.payload())
@@ -54,5 +56,11 @@ public class TradingOutboxPublisher {
         } finally {
             publishing.set(false);
         }
+    }
+
+    private Duration claimLease(int claimedLimit) {
+        Duration budget = properties.getOutbox().getSendTimeout().multipliedBy(Math.max(1, claimedLimit))
+                .plus(CLAIM_LEASE_BUFFER);
+        return budget.compareTo(MINIMUM_CLAIM_LEASE) < 0 ? MINIMUM_CLAIM_LEASE : budget;
     }
 }
