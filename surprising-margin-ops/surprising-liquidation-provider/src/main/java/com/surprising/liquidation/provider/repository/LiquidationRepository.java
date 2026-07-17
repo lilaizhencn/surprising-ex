@@ -15,6 +15,7 @@ import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.RiskStatus;
+import com.surprising.risk.api.model.LiquidationCandidateEvent;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
@@ -97,6 +98,27 @@ public class LiquidationRepository {
                 rs.getLong("equity_units"),
                 rs.getLong("maintenance_margin_units"),
                 rs.getLong("margin_ratio_ppm")), args.toArray()).stream().findFirst();
+    }
+
+    public List<LiquidationCandidateEvent> newCandidateEvents(int limit) {
+        List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("""
+                SELECT candidate_id, snapshot_id, user_id, symbol, margin_mode, position_side, instrument_version,
+                       settle_asset, signed_quantity_steps, mark_price_ticks, equity_units,
+                       maintenance_margin_units, margin_ratio_ppm, event_time
+                  FROM risk_liquidation_candidates c
+                 WHERE status = 'NEW'
+                """);
+        appendCandidateProductLineFilter(sql, "c", args);
+        sql.append(" ORDER BY margin_ratio_ppm ASC, event_time ASC, candidate_id ASC LIMIT ?");
+        args.add(Math.max(1, limit));
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new LiquidationCandidateEvent(
+                rs.getLong("candidate_id"), rs.getLong("snapshot_id"), rs.getLong("user_id"), rs.getString("symbol"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                PositionSide.fromNullableDbValue(rs.getString("position_side")), rs.getLong("instrument_version"),
+                rs.getString("settle_asset"), rs.getLong("signed_quantity_steps"), rs.getLong("mark_price_ticks"),
+                rs.getLong("equity_units"), rs.getLong("maintenance_margin_units"), rs.getLong("margin_ratio_ppm"),
+                rs.getTimestamp("event_time").toInstant()), args.toArray());
     }
 
     public RiskStatus latestRiskStatus(long userId,

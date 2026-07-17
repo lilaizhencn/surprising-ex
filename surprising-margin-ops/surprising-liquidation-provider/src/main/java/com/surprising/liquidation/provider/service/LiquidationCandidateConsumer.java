@@ -18,18 +18,27 @@ public class LiquidationCandidateConsumer {
 
     private final ObjectMapper objectMapper;
     private final LiquidationService liquidationService;
+    private final LiquidationCandidateQueueProcessor queueProcessor;
     private final LiquidationProperties properties;
 
     public LiquidationCandidateConsumer(ObjectMapper objectMapper, LiquidationService liquidationService) {
-        this(objectMapper, liquidationService, new LiquidationProperties());
+        this(objectMapper, liquidationService, null, new LiquidationProperties());
+    }
+
+    public LiquidationCandidateConsumer(ObjectMapper objectMapper,
+                                        LiquidationService liquidationService,
+                                        LiquidationProperties properties) {
+        this(objectMapper, liquidationService, null, properties);
     }
 
     @Autowired
     public LiquidationCandidateConsumer(ObjectMapper objectMapper,
                                         LiquidationService liquidationService,
+                                        LiquidationCandidateQueueProcessor queueProcessor,
                                         LiquidationProperties properties) {
         this.objectMapper = objectMapper;
         this.liquidationService = liquidationService;
+        this.queueProcessor = queueProcessor;
         this.properties = properties;
     }
 
@@ -42,7 +51,7 @@ public class LiquidationCandidateConsumer {
             LiquidationCandidateEvent event = objectMapper.readValue(record.value(), LiquidationCandidateEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "liquidation candidate");
             requireCurrentProductTopic(record.topic());
-            liquidationService.processCandidate(event);
+            if (queueProcessor == null) liquidationService.processCandidate(event); else queueProcessor.enqueueAndDrain(event);
         } catch (Exception ex) {
             log.error("Failed to process liquidation candidate: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to process liquidation candidate", ex);

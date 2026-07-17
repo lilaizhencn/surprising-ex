@@ -13,6 +13,7 @@ public class LiquidationProperties {
     private Sizing sizing = new Sizing();
     private Risk risk = new Risk();
     private Execution execution = new Execution();
+    private RedisIndex redisIndex = new RedisIndex();
 
     public Kafka getKafka() {
         return kafka;
@@ -53,6 +54,8 @@ public class LiquidationProperties {
     public void setExecution(Execution execution) {
         this.execution = execution;
     }
+    public RedisIndex getRedisIndex() { return redisIndex; }
+    public void setRedisIndex(RedisIndex redisIndex) { this.redisIndex = redisIndex; }
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
@@ -260,5 +263,14 @@ public class LiquidationProperties {
         public void setLiquidationFeeRatePpm(long liquidationFeeRatePpm) {
             this.liquidationFeeRatePpm = liquidationFeeRatePpm;
         }
+    }
+
+    public static class RedisIndex {
+        private String keyPrefix = "surprising:liquidation:v1";
+        private int candidateBatchSize = 100;
+        public String getKeyPrefix() { return keyPrefix; }
+        public void setKeyPrefix(String keyPrefix) { this.keyPrefix = keyPrefix; }
+        public int getCandidateBatchSize() { return candidateBatchSize; }
+        public void setCandidateBatchSize(int candidateBatchSize) { this.candidateBatchSize = candidateBatchSize; }
     }
 }
