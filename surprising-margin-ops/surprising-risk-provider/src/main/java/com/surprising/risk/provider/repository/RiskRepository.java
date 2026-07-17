@@ -1,6 +1,8 @@
 package com.surprising.risk.provider.repository;
 
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineSql;
 import com.surprising.risk.api.model.AdminCursorPage;
@@ -34,39 +36,48 @@ public class RiskRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final RiskProperties properties;
+    private final LatestMarkPriceCache markPriceCache;
 
     public RiskRepository(JdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, new RiskProperties());
+        this(jdbcTemplate, new RiskProperties(), null);
+    }
+
+    public RiskRepository(JdbcTemplate jdbcTemplate, RiskProperties properties) {
+        this(jdbcTemplate, properties, null);
     }
 
     @Autowired
-    public RiskRepository(JdbcTemplate jdbcTemplate, RiskProperties properties) {
+    public RiskRepository(JdbcTemplate jdbcTemplate,
+                          RiskProperties properties,
+                          LatestMarkPriceCache markPriceCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties == null ? new RiskProperties() : properties;
+        this.markPriceCache = markPriceCache;
     }
 
     public List<RiskGroupKey> riskGroups(Duration maxMarkAge, RiskGroupKey after, int limit) {
+        MarkPriceValues markPrices = freshMarkPrices(maxMarkAge);
+        if (markPrices.isEmpty()) {
+            return List.of();
+        }
         long afterUserId = after == null ? 0L : after.userId();
         String afterAccountType = after == null ? "" : after.accountType();
         String afterSettleAsset = after == null ? "" : after.settleAsset();
         int cappedLimit = Math.max(1, limit);
-        List<Object> args = new ArrayList<>();
+        List<Object> args = new ArrayList<>(markPrices.args());
         String productLineFilter = positionProductLineFilter("p", args);
         String sql = """
-                WITH group_inputs AS (
+                WITH %s,
+                group_inputs AS (
                     SELECT p.user_id,
                            %s AS account_type,
                            i.settle_asset,
-                           pm.event_time
+                           pm.symbol IS NOT NULL AS mark_available
                       FROM account_positions p
                       JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
-                      LEFT JOIN LATERAL (
-                          SELECT event_time
-                            FROM price_mark_ticks m
-                           WHERE m.symbol = p.symbol
-                           ORDER BY event_time DESC
-                           LIMIT 1
-                      ) pm ON TRUE
+                      LEFT JOIN mark_prices pm
+                        ON pm.symbol = p.symbol
+                       AND pm.instrument_version = p.instrument_version
                      WHERE p.signed_quantity_steps <> 0
                        %s
                 ),
@@ -74,8 +85,7 @@ public class RiskRepository {
                     SELECT user_id,
                            account_type,
                            settle_asset,
-                           bool_and(event_time IS NOT NULL
-                               AND event_time >= now() - (? * INTERVAL '1 millisecond')) AS all_marks_fresh
+                           bool_and(mark_available) AS all_marks_fresh
                       FROM group_inputs
                      WHERE (? = 0
                          OR user_id > ?
@@ -88,8 +98,7 @@ public class RiskRepository {
                  WHERE all_marks_fresh
                  ORDER BY user_id ASC, account_type ASC, settle_asset ASC
                  LIMIT ?
-                """.formatted(accountTypeExpression("i"), productLineFilter);
-        args.add(maxMarkAge.toMillis());
+                """.formatted(markPrices.cte(), accountTypeExpression("i"), productLineFilter);
         args.add(afterUserId);
         args.add(afterUserId);
         args.add(afterUserId);
@@ -173,9 +182,14 @@ public class RiskRepository {
     }
 
     public List<CalculatedPositionRisk> calculatePositions(Duration maxMarkAge) {
-        List<Object> args = new ArrayList<>();
+        MarkPriceValues markPrices = freshMarkPrices(maxMarkAge);
+        if (markPrices.isEmpty()) {
+            return List.of();
+        }
+        List<Object> args = new ArrayList<>(markPrices.args());
         String sql = """
-                WITH position_inputs AS (
+                WITH %s,
+                position_inputs AS (
                     SELECT p.user_id,
                            p.symbol,
                            p.margin_mode,
@@ -204,14 +218,9 @@ public class RiskRepository {
                       FROM account_positions p
                       JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
                       JOIN account_asset_scales ss ON ss.asset = i.settle_asset
-                      JOIN LATERAL (
-                          SELECT ((m.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_price_ticks,
-                                 event_time
-                            FROM price_mark_ticks m
-                           WHERE m.symbol = p.symbol
-                           ORDER BY event_time DESC
-                           LIMIT 1
-                      ) pm ON TRUE
+                      JOIN mark_prices pm
+                        ON pm.symbol = p.symbol
+                       AND pm.instrument_version = p.instrument_version
                       LEFT JOIN LATERAL (
                           SELECT COALESCE(SUM(m.margin_units), 0) AS margin_units
                             FROM account_position_margins m
@@ -223,7 +232,6 @@ public class RiskRepository {
                              AND m.product_line = p.product_line
                       ) position_margin ON TRUE
                      WHERE p.signed_quantity_steps <> 0
-                       AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
                        %s
                 )
                 SELECT pi.user_id,
@@ -252,27 +260,26 @@ public class RiskRepository {
                        ORDER BY b.notional_floor_units DESC
                        LIMIT 1
                   ) br ON TRUE
-                """.formatted(positionProductLineFilter("p", args));
-        args.add(0, maxMarkAge.toMillis());
+                """.formatted(markPrices.cte(), positionProductLineFilter("p", args));
         return queryCalculatedPositions(sql, args.toArray());
     }
 
     public List<CalculatedPositionRisk> calculatePositions(RiskGroupKey key, Duration maxMarkAge) {
+        MarkPriceValues markPrices = freshMarkPrices(maxMarkAge);
+        if (markPrices.isEmpty()) {
+            return List.of();
+        }
         List<Object> groupArgs = new ArrayList<>();
         List<Object> positionArgs = new ArrayList<>();
         String sql = """
-                WITH group_freshness AS (
-                    SELECT COALESCE(bool_and(pm.event_time IS NOT NULL
-                               AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')), false) AS all_marks_fresh
+                WITH %s,
+                group_freshness AS (
+                    SELECT COALESCE(bool_and(pm.symbol IS NOT NULL), false) AS all_marks_fresh
                       FROM account_positions p
                       JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
-                      LEFT JOIN LATERAL (
-                          SELECT event_time
-                            FROM price_mark_ticks m
-                           WHERE m.symbol = p.symbol
-                           ORDER BY event_time DESC
-                           LIMIT 1
-                      ) pm ON TRUE
+                      LEFT JOIN mark_prices pm
+                        ON pm.symbol = p.symbol
+                       AND pm.instrument_version = p.instrument_version
                      WHERE p.signed_quantity_steps <> 0
                        AND p.user_id = ?
                        AND %s = ?
@@ -308,14 +315,9 @@ public class RiskRepository {
                       FROM account_positions p
                       JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
                       JOIN account_asset_scales ss ON ss.asset = i.settle_asset
-                      JOIN LATERAL (
-                          SELECT ((m.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_price_ticks,
-                                 event_time
-                            FROM price_mark_ticks m
-                           WHERE m.symbol = p.symbol
-                           ORDER BY event_time DESC
-                           LIMIT 1
-                      ) pm ON TRUE
+                      JOIN mark_prices pm
+                        ON pm.symbol = p.symbol
+                       AND pm.instrument_version = p.instrument_version
                       LEFT JOIN LATERAL (
                           SELECT COALESCE(SUM(m.margin_units), 0) AS margin_units
                             FROM account_position_margins m
@@ -332,7 +334,6 @@ public class RiskRepository {
                        AND %s = ?
                        AND i.settle_asset = ?
                        AND gf.all_marks_fresh
-                       AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
                        %s
                 )
                 SELECT pi.user_id,
@@ -361,10 +362,9 @@ public class RiskRepository {
                        ORDER BY b.notional_floor_units DESC
                        LIMIT 1
                   ) br ON TRUE
-                """.formatted(accountTypeExpression("i"), positionProductLineFilter("p", groupArgs),
+                """.formatted(markPrices.cte(), accountTypeExpression("i"), positionProductLineFilter("p", groupArgs),
                 accountTypeExpression("i"), positionProductLineFilter("p", positionArgs));
-        List<Object> args = new ArrayList<>();
-        args.add(maxMarkAge.toMillis());
+        List<Object> args = new ArrayList<>(markPrices.args());
         args.add(key.userId());
         args.add(key.accountType());
         args.add(key.settleAsset());
@@ -372,7 +372,6 @@ public class RiskRepository {
         args.add(key.userId());
         args.add(key.accountType());
         args.add(key.settleAsset());
-        args.add(maxMarkAge.toMillis());
         args.addAll(positionArgs);
         return queryCalculatedPositions(sql, args.toArray());
     }
@@ -1079,6 +1078,29 @@ public class RiskRepository {
         return jdbcTemplate.query(sql, calculatedPositionMapper(), args);
     }
 
+    private MarkPriceValues freshMarkPrices(Duration maxAge) {
+        if (markPriceCache == null) {
+            throw new IllegalStateException("mark price cache is not configured");
+        }
+        List<MarkPriceEvent> snapshots = markPriceCache.freshSnapshots(maxAge);
+        if (snapshots.isEmpty()) {
+            return MarkPriceValues.empty();
+        }
+        StringBuilder values = new StringBuilder();
+        List<Object> args = new ArrayList<>(snapshots.size() * 3);
+        for (MarkPriceEvent snapshot : snapshots) {
+            if (!values.isEmpty()) {
+                values.append(", ");
+            }
+            values.append("(?::TEXT, ?::BIGINT, ?::BIGINT)");
+            args.add(snapshot.symbol());
+            args.add(snapshot.instrumentVersion());
+            args.add(snapshot.markPriceTicks());
+        }
+        return new MarkPriceValues("mark_prices(symbol, instrument_version, mark_price_ticks) AS (VALUES "
+                + values + ")", List.copyOf(args));
+    }
+
     private RowMapper<CalculatedPositionRisk> calculatedPositionMapper() {
         return (rs, rowNum) -> {
             ContractType contractType = ContractType.valueOf(rs.getString("contract_type"));
@@ -1119,6 +1141,17 @@ public class RiskRepository {
     private void requireSingleRow(int rows, String operation) {
         if (rows != 1) {
             throw new IllegalStateException("failed to write " + operation);
+        }
+    }
+
+    private record MarkPriceValues(String cte, List<Object> args) {
+
+        private static MarkPriceValues empty() {
+            return new MarkPriceValues("", List.of());
+        }
+
+        private boolean isEmpty() {
+            return args.isEmpty();
         }
     }
 

@@ -73,8 +73,15 @@ public class LatestMarkPriceCache {
     }
 
     public List<MarkPriceEvent> freshSnapshots() {
+        return freshSnapshots(properties.getMaxAge());
+    }
+
+    public List<MarkPriceEvent> freshSnapshots(Duration maxAge) {
+        if (maxAge == null || maxAge.isZero() || maxAge.isNegative()) {
+            throw new IllegalArgumentException("maxAge must be positive");
+        }
         return latestBySymbol.values().stream()
-                .filter(this::isFresh)
+                .filter(event -> isFresh(event, maxAge))
                 .sorted(Comparator.comparing(MarkPriceEvent::symbol))
                 .toList();
     }

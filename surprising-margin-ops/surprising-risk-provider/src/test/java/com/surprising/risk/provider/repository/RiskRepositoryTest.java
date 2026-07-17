@@ -10,6 +10,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.risk.api.model.LiquidationCandidateStatus;
 import com.surprising.risk.api.model.RiskAccountSnapshotResponse;
 import com.surprising.risk.api.model.RiskStatus;
@@ -127,20 +129,21 @@ class RiskRepositoryTest {
 
     @Test
     void riskGroupsUsesFreshMarkKeysetPagination() {
-        RiskRepository repository = new RiskRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(10_000L),
+        RiskRepository repository = repositoryWithMarkPrice(new RiskProperties());
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq("BTC-USDT"), eq(7L), eq(90L),
                 eq(1001L), eq(1001L), eq(1001L), eq("USDT_PERPETUAL"), eq(1001L),
                 eq("USDT_PERPETUAL"), eq("USDT"), eq(200))).thenReturn(List.of());
 
         repository.riskGroups(Duration.ofSeconds(10), new RiskGroupKey(1001L, "USDT"), 200);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(10_000L),
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq("BTC-USDT"), eq(7L), eq(90L),
                 eq(1001L), eq(1001L), eq(1001L), eq("USDT_PERPETUAL"), eq(1001L),
                 eq("USDT_PERPETUAL"), eq("USDT"), eq(200));
         assertThat(sql.getValue())
                 .contains("END AS account_type")
-                .contains("bool_and(event_time IS NOT NULL")
+                .contains("bool_and(mark_available)")
+                .contains("mark_prices(symbol, instrument_version, mark_price_ticks)")
                 .contains("GROUP BY user_id, account_type, settle_asset")
                 .contains("WHERE all_marks_fresh")
                 .contains("user_id > ?")
@@ -154,7 +157,7 @@ class RiskRepositoryTest {
         RiskProperties properties = new RiskProperties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
         properties.getKafka().setProductTopicsEnabled(true);
-        RiskRepository repository = new RiskRepository(jdbcTemplate, properties);
+        RiskRepository repository = repositoryWithMarkPrice(properties);
 
         repository.riskGroups(Duration.ofSeconds(10), null, 50);
 
@@ -163,7 +166,7 @@ class RiskRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
         assertThat(sql.getValue()).contains("p.product_line = ?");
         assertThat(args.getValue()).containsExactly(
-                "OPTION", 10_000L, 0L, 0L, 0L, "", 0L, "", "", 50);
+                "BTC-USDT", 7L, 90L, "OPTION", 0L, 0L, 0L, "", 0L, "", "", 50);
     }
 
     @Test
@@ -332,13 +335,14 @@ class RiskRepositoryTest {
 
     @Test
     void calculatePositionsUsesRiskBracketMaintenanceMarginRate() {
-        RiskRepository repository = new RiskRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(10_000L))).thenReturn(List.of());
+        RiskRepository repository = repositoryWithMarkPrice(new RiskProperties());
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq("BTC-USDT"), eq(7L), eq(90L)))
+                .thenReturn(List.of());
 
         repository.calculatePositions(Duration.ofSeconds(10));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(10_000L));
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq("BTC-USDT"), eq(7L), eq(90L));
         assertThat(sql.getValue())
                 .contains("instrument_risk_brackets")
                 .contains("b.notional_floor_units <= pi.bracket_notional_units")
@@ -353,7 +357,7 @@ class RiskRepositoryTest {
         RiskProperties properties = new RiskProperties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
         properties.getKafka().setProductTopicsEnabled(true);
-        RiskRepository repository = new RiskRepository(jdbcTemplate, properties);
+        RiskRepository repository = repositoryWithMarkPrice(properties);
 
         repository.calculatePositions(new RiskGroupKey(1001L, "OPTION", "USDT"), Duration.ofSeconds(10));
 
@@ -362,14 +366,15 @@ class RiskRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
         assertThat(sql.getValue()).contains("p.product_line = ?");
         assertThat(args.getValue()).containsExactly(
-                10_000L, 1001L, "OPTION", "USDT", "OPTION",
-                1001L, "OPTION", "USDT", 10_000L, "OPTION");
+                "BTC-USDT", 7L, 90L, 1001L, "OPTION", "USDT", "OPTION",
+                1001L, "OPTION", "USDT", "OPTION");
     }
 
     @Test
     void calculatePositionsKeepsOptionLongMaintenanceMarginZero() throws Exception {
-        RiskRepository repository = new RiskRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(10_000L))).thenAnswer(invocation -> {
+        RiskRepository repository = repositoryWithMarkPrice(new RiskProperties());
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq("BTC-USDT"), eq(7L), eq(90L)))
+                .thenAnswer(invocation -> {
             @SuppressWarnings("unchecked")
             RowMapper<CalculatedPositionRisk> mapper = invocation.getArgument(1);
             return List.of(
@@ -388,20 +393,19 @@ class RiskRepositoryTest {
 
     @Test
     void calculatePositionsForGroupRequiresWholeGroupFreshness() {
-        RiskRepository repository = new RiskRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(10_000L),
-                eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"),
-                eq(10_000L))).thenReturn(List.of());
+        RiskRepository repository = repositoryWithMarkPrice(new RiskProperties());
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq("BTC-USDT"), eq(7L), eq(90L),
+                eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq(1001L), eq("USDT_PERPETUAL"), eq("USDT")))
+                .thenReturn(List.of());
 
         repository.calculatePositions(new RiskGroupKey(1001L, "USDT"), Duration.ofSeconds(10));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(10_000L),
-                eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"),
-                eq(10_000L));
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq("BTC-USDT"), eq(7L), eq(90L),
+                eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"), eq(1001L), eq("USDT_PERPETUAL"), eq("USDT"));
         assertThat(sql.getValue())
-                .contains("WITH group_freshness AS")
-                .contains("COALESCE(bool_and(pm.event_time IS NOT NULL")
+                .contains("group_freshness AS")
+                .contains("COALESCE(bool_and(pm.symbol IS NOT NULL)")
                 .contains("AND p.user_id = ?")
                 .contains("END = ?")
                 .contains("AND i.settle_asset = ?")
@@ -409,6 +413,16 @@ class RiskRepositoryTest {
                 .contains("AND gf.all_marks_fresh")
                 .contains("instrument_risk_brackets")
                 .contains("i.contract_type IN ('INVERSE_PERPETUAL', 'INVERSE_DELIVERY')");
+    }
+
+    private RiskRepository repositoryWithMarkPrice(RiskProperties properties) {
+        LatestMarkPriceCache markPriceCache = mock(LatestMarkPriceCache.class);
+        MarkPriceEvent markPrice = mock(MarkPriceEvent.class);
+        when(markPrice.symbol()).thenReturn("BTC-USDT");
+        when(markPrice.instrumentVersion()).thenReturn(7L);
+        when(markPrice.markPriceTicks()).thenReturn(90L);
+        when(markPriceCache.freshSnapshots(any(Duration.class))).thenReturn(List.of(markPrice));
+        return new RiskRepository(jdbcTemplate, properties, markPriceCache);
     }
 
     @SuppressWarnings("unchecked")

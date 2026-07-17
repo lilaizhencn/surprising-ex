@@ -44,6 +44,16 @@ class LatestMarkPriceCacheTest {
     }
 
     @Test
+    void supportsConsumerSpecificFreshnessForBatchSnapshots() {
+        LatestMarkPriceCache cache = cache(Duration.ofSeconds(10));
+        MarkPriceEvent event = event(12L, NOW.minusSeconds(4), PriceStatus.HEALTHY);
+        cache.update(event);
+
+        assertThat(cache.freshSnapshots(Duration.ofSeconds(3))).isEmpty();
+        assertThat(cache.freshSnapshots(Duration.ofSeconds(5))).containsExactly(event);
+    }
+
+    @Test
     void rejectsWrongProductFutureTimestampAndUnusableStatus() {
         LatestMarkPriceCache cache = cache(Duration.ofSeconds(3));
 
