@@ -289,7 +289,7 @@ public class LiquidationOrderRepository {
                 OrderCommandType.CANCEL.name(), serializer.apply(command), now);
     }
 
-    public List<TradingOutboxRecord> lockPending(int limit) {
+    public List<TradingOutboxRecord> claimPending(int limit, Instant leaseUntil, Instant now) {
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
                 WITH earliest AS (
@@ -297,24 +297,35 @@ public class LiquidationOrderRepository {
                            id
                       FROM trading_outbox_events
                      WHERE published_at IS NULL
-                       AND aggregate_type IN ('ORDER', 'LIQUIDATION_ORDER')
+                       AND aggregate_type = 'LIQUIDATION_ORDER'
                      ORDER BY topic, event_key, id
-                )
-                SELECT e.id, e.topic, e.event_key, e.payload::text AS payload
-                  FROM trading_outbox_events e
-                  JOIN earliest c ON c.id = e.id
-                 WHERE e.published_at IS NULL
-                   AND e.aggregate_type IN ('ORDER', 'LIQUIDATION_ORDER')
+                ),
+                candidates AS (
+                    SELECT e.id
+                      FROM trading_outbox_events e
+                      JOIN earliest c ON c.id = e.id
+                     WHERE e.published_at IS NULL
+                       AND e.aggregate_type = 'LIQUIDATION_ORDER'
                 """);
         appendTopicScope(sql, args);
         sql.append("""
-                   AND e.next_attempt_at <= now()
-                   AND pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))
-                 ORDER BY e.topic, e.event_key, e.id
-                 LIMIT ?
-                 FOR UPDATE OF e SKIP LOCKED
+                       AND e.next_attempt_at <= ?
+                       AND pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))
+                     ORDER BY e.topic, e.event_key, e.id
+                     LIMIT ?
+                     FOR UPDATE OF e SKIP LOCKED
+                )
+                UPDATE trading_outbox_events e
+                   SET next_attempt_at = ?,
+                       updated_at = ?
+                  FROM candidates c
+                 WHERE e.id = c.id
+             RETURNING e.id, e.topic, e.event_key, e.payload::text AS payload
                 """);
-        args.add(limit);
+        args.add(Timestamp.from(now));
+        args.add(Math.max(1, limit));
+        args.add(Timestamp.from(leaseUntil));
+        args.add(Timestamp.from(now));
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new TradingOutboxRecord(
                 rs.getLong("id"),
                 rs.getString("topic"),

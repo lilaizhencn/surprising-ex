@@ -219,46 +219,45 @@ class LiquidationOrderRepositoryTest {
     }
 
     @Test
-    void lockPendingOnlyClaimsEarliestLiquidationOwnedOutboxRowsByTopicAndKey() {
+    void claimPendingOnlyClaimsEarliestLiquidationOrderOutboxRowsByTopicAndKey() {
         LiquidationOrderRepository repository = repository();
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(100))).thenReturn(java.util.List.of());
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Object[].class)))
+                .thenReturn(java.util.List.of());
 
-        repository.lockPending(100);
+        repository.claimPending(100, Instant.parse("2026-07-01T00:00:30Z"),
+                Instant.parse("2026-07-01T00:00:00Z"));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(100));
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), any(Object[].class));
         assertThat(sql.getValue())
                 .contains("DISTINCT ON (topic, event_key)")
-                .contains("aggregate_type IN ('ORDER', 'LIQUIDATION_ORDER')")
+                .contains("aggregate_type = 'LIQUIDATION_ORDER'")
                 .contains("pg_try_advisory_xact_lock")
                 .contains("FOR UPDATE OF e SKIP LOCKED")
+                .contains("SET next_attempt_at = ?")
                 .doesNotContain("ORDER_BOOK_DEPTH")
                 .doesNotContain("MATCH_RESULT")
                 .doesNotContain("MATCH_TRADE");
     }
 
     @Test
-    void lockPendingFiltersByProductTopicsWhenProductTopicsAreEnabled() {
+    void claimPendingFiltersByProductTopicsWhenProductTopicsAreEnabled() {
         LiquidationProperties properties = new LiquidationProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
         LiquidationOrderRepository repository = new LiquidationOrderRepository(jdbcTemplate, sequenceRepository,
                 properties);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(),
-                eq("surprising.linear-delivery.order.events.v1"),
-                eq("surprising.linear-delivery.order.commands.v1"),
-                eq(100))).thenReturn(java.util.List.of());
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Object[].class)))
+                .thenReturn(java.util.List.of());
 
-        repository.lockPending(100);
+        repository.claimPending(100, Instant.parse("2026-07-01T00:00:30Z"),
+                Instant.parse("2026-07-01T00:00:00Z"));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
-                eq("surprising.linear-delivery.order.events.v1"),
-                eq("surprising.linear-delivery.order.commands.v1"),
-                eq(100));
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), any(Object[].class));
         assertThat(sql.getValue())
                 .contains("e.topic IN (?, ?)")
-                .contains("aggregate_type IN ('ORDER', 'LIQUIDATION_ORDER')")
+                .contains("aggregate_type = 'LIQUIDATION_ORDER'")
                 .doesNotContain("ORDER_BOOK_DEPTH")
                 .doesNotContain("MATCH_RESULT")
                 .doesNotContain("MATCH_TRADE");
