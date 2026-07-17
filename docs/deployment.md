@@ -144,6 +144,7 @@ Client deployment must point every client to the gateway and WebSocket edge, not
 - `surprising-client`: build with `--dart-define=SURPRISING_GATEWAY_URL=...` and `--dart-define=SURPRISING_WEBSOCKET_URL=...`.
 
 All three clients send `productLine` on REST requests and WebSocket subscription payloads. When a client switches from perpetual to delivery, option, or spot, use a full REST refresh and WebSocket resubscribe so stale product-line market data cannot be reused.
+Web and mobile derivative clients also subscribe to the authenticated `triggerOrders` channel, apply full trigger-order snapshots by monotonically increasing `eventId`, remove terminal rows immediately, and reload the REST open-trigger snapshot after every private WebSocket reconnect.
 
 ## Observability
 

@@ -43,6 +43,8 @@ class TriggerConsumerTopicTest {
         assertThat(lastConsumer.lastPriceTopic()).isEqualTo("surprising.linear-delivery.match.trades.v1");
         assertThat(positionConsumer.positionEventsTopic())
                 .isEqualTo("surprising.linear-delivery.account.position.events.v1");
+        assertThat(properties.getKafka().getTriggerOrderEventsTopic())
+                .isEqualTo("surprising.linear-delivery.trigger-order.events.v1");
         assertThat(markConsumer.groupId()).isEqualTo("surprising-linear-delivery-trigger-v1");
         assertThat(indexConsumer.groupId()).isEqualTo("surprising-linear-delivery-trigger-v1");
         assertThat(lastConsumer.groupId()).isEqualTo("surprising-linear-delivery-trigger-v1");

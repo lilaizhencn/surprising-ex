@@ -62,6 +62,7 @@ public class WebSocketProperties {
         private String markPriceTopic = "surprising.perp.mark.price.v1";
         private String fundingRateTopic = "surprising.perp.funding.rate.v1";
         private String orderEventsTopic = "surprising.perp.order.events.v1";
+        private String triggerOrderEventsTopic = "surprising.perp.trigger-order.events.v1";
         private String matchResultsTopic = "surprising.perp.match.results.v1";
         private String matchTradesTopic = "surprising.perp.match.trades.v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
@@ -176,6 +177,14 @@ public class WebSocketProperties {
 
         public void setOrderEventsTopic(String orderEventsTopic) {
             this.orderEventsTopic = orderEventsTopic;
+        }
+
+        public String getTriggerOrderEventsTopic() {
+            return productTopicsEnabled ? productTopics().triggerOrderEventsTopic() : triggerOrderEventsTopic;
+        }
+
+        public void setTriggerOrderEventsTopic(String triggerOrderEventsTopic) {
+            this.triggerOrderEventsTopic = triggerOrderEventsTopic;
         }
 
         public String getMatchResultsTopic() {

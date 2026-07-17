@@ -39,6 +39,7 @@ surprising:
       order-events-topic: surprising.perp.order.events.v1
       position-events-topic: surprising.account.position.events.v1
       liquidation-fee-events-topic: surprising.account.liquidation-fee.events.v1
+      trigger-order-events-topic: surprising.perp.trigger-order.events.v1
       delivery-settlements-topic: surprising.linear-delivery.delivery.settlements.v1
       option-exercises-topic: surprising.option.option.exercises.v1
       concurrency: 2

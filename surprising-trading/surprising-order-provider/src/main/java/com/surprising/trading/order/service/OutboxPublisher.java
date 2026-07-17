@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -40,7 +41,7 @@ public class OutboxPublisher {
 
     public OutboxPublisher(TradingOrderProperties properties,
                            OutboxRepository outboxRepository,
-                           KafkaTemplate<String, String> kafkaTemplate) {
+                           @Qualifier("orderKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate) {
         this.properties = properties;
         this.outboxRepository = outboxRepository;
         this.kafkaTemplate = kafkaTemplate;

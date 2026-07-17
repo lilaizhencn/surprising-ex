@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.Map;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
@@ -28,7 +29,8 @@ public class TradingOrderKafkaConfiguration {
     }
 
     @Bean
-    public KafkaTemplate<String, String> orderKafkaTemplate(ProducerFactory<String, String> orderProducerFactory) {
+    public KafkaTemplate<String, String> orderKafkaTemplate(
+            @Qualifier("orderProducerFactory") ProducerFactory<String, String> orderProducerFactory) {
         return new KafkaTemplate<>(orderProducerFactory);
     }
 }

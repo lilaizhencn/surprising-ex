@@ -11,6 +11,7 @@ public class TriggerProperties {
     private Kafka kafka = new Kafka();
     private Execution execution = new Execution();
     private RedisIndex redisIndex = new RedisIndex();
+    private Outbox outbox = new Outbox();
 
     public Kafka getKafka() {
         return kafka;
@@ -36,6 +37,14 @@ public class TriggerProperties {
         this.redisIndex = redisIndex;
     }
 
+    public Outbox getOutbox() {
+        return outbox;
+    }
+
+    public void setOutbox(Outbox outbox) {
+        this.outbox = outbox;
+    }
+
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
@@ -45,6 +54,7 @@ public class TriggerProperties {
         private String indexPriceTopic = "surprising.perp.index.price.v1";
         private String lastPriceTopic = "surprising.perp.match.trades.v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
+        private String triggerOrderEventsTopic = "surprising.perp.trigger-order.events.v1";
         private int concurrency = 2;
         private int maxPollRecords = 500;
 
@@ -110,6 +120,14 @@ public class TriggerProperties {
 
         public void setPositionEventsTopic(String positionEventsTopic) {
             this.positionEventsTopic = positionEventsTopic;
+        }
+
+        public String getTriggerOrderEventsTopic() {
+            return productTopicsEnabled ? productTopics().triggerOrderEventsTopic() : triggerOrderEventsTopic;
+        }
+
+        public void setTriggerOrderEventsTopic(String triggerOrderEventsTopic) {
+            this.triggerOrderEventsTopic = triggerOrderEventsTopic;
         }
 
         public int getConcurrency() {
@@ -217,6 +235,36 @@ public class TriggerProperties {
 
         public void setLockTtl(Duration lockTtl) {
             this.lockTtl = lockTtl;
+        }
+    }
+
+    public static class Outbox {
+        private int batchSize = 200;
+        private long publishDelayMs = 200L;
+        private Duration sendTimeout = Duration.ofSeconds(3);
+
+        public int getBatchSize() {
+            return batchSize;
+        }
+
+        public void setBatchSize(int batchSize) {
+            this.batchSize = batchSize;
+        }
+
+        public long getPublishDelayMs() {
+            return publishDelayMs;
+        }
+
+        public void setPublishDelayMs(long publishDelayMs) {
+            this.publishDelayMs = publishDelayMs;
+        }
+
+        public Duration getSendTimeout() {
+            return sendTimeout;
+        }
+
+        public void setSendTimeout(Duration sendTimeout) {
+            this.sendTimeout = sendTimeout;
         }
     }
 }

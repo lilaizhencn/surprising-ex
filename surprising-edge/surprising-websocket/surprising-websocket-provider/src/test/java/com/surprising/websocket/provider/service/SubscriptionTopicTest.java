@@ -97,6 +97,17 @@ class SubscriptionTopicTest {
     }
 
     @Test
+    void privateTriggerOrdersChannelUsesAuthenticatedUser() {
+        SubscriptionTopic topic = SubscriptionTopic.fromCommand(
+                new WsClientCommand("subscribe", "req-trigger", "triggerOrders", "btc-usdt", null, null),
+                42L);
+
+        assertThat(topic.channel()).isEqualTo(WsChannel.TRIGGER_ORDERS);
+        assertThat(topic.symbol()).isEqualTo("BTC-USDT");
+        assertThat(topic.userId()).isEqualTo(42L);
+    }
+
+    @Test
     void privateChannelRejectsMissingAuthentication() {
         WsClientCommand command = new WsClientCommand("subscribe", "req-3", "orders", "BTC-USDT", null, null);
 

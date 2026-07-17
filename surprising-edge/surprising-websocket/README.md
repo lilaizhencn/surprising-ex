@@ -34,6 +34,12 @@ Example private position subscription:
 {"op":"subscribe","id":"p1","channel":"positions","symbol":"BTC-USDT"}
 ```
 
+Example private trigger-order subscription:
+
+```json
+{"op":"subscribe","id":"t1","channel":"triggerOrders","symbol":"BTC-USDT","productLine":"LINEAR_PERPETUAL"}
+```
+
 Example private risk subscriptions:
 
 ```json
@@ -54,12 +60,15 @@ Private channels require an authenticated user id. In production the ingress/aut
 | `mark` | yes | `symbol` | `surprising.perp.mark.price.v1` |
 | `funding` | yes | `symbol` | `surprising.perp.funding.rate.v1` |
 | `orders` | no | optional `symbol` | `surprising.perp.order.events.v1` |
+| `triggerOrders` | no | optional `symbol` | `surprising.perp.trigger-order.events.v1` |
 | `matches` | no | optional `symbol` | `surprising.perp.match.results.v1`, `surprising.perp.match.trades.v1` |
 | `positions` | no | optional `symbol` | `surprising.account.position.events.v1` |
 | `positionRisk` | no | optional `symbol` | `surprising.risk.position.events.v1` |
 | `accountRisk` | no | optional `symbol` ignored as wildcard | `surprising.risk.account.events.v1` |
 
 Private subscriptions without `symbol` use wildcard symbol `*` and receive all events for the authenticated user.
+
+`triggerOrders` carries a full `TriggerOrderUpdatedEvent` wrapper with `eventId`, `productLine`, `order`, `eventTime`, and `traceId`. Clients keep `PENDING`/`TRIGGERING` snapshots in the open list, remove terminal snapshots immediately, ignore replayed or out-of-order `eventId` values, and reload the REST open-trigger snapshot after reconnect.
 
 ## Depth Push Flow
 

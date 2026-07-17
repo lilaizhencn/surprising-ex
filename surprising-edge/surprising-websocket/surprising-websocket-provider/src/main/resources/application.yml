@@ -30,6 +30,7 @@ surprising:
       mark-price-topic: surprising.perp.mark.price.v1
       funding-rate-topic: surprising.perp.funding.rate.v1
       order-events-topic: surprising.perp.order.events.v1
+      trigger-order-events-topic: surprising.perp.trigger-order.events.v1
       match-results-topic: surprising.perp.match.results.v1
       match-trades-topic: surprising.perp.match.trades.v1
       position-events-topic: surprising.account.position.events.v1

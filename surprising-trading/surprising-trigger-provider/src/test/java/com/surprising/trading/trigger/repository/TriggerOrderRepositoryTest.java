@@ -263,7 +263,7 @@ class TriggerOrderRepositoryTest {
                 Instant.parse("2026-07-01T00:00:00Z"), 100, Instant.parse("2026-07-01T00:00:01Z"));
 
         assertThat(rows).isEmpty();
-        verify(jdbcTemplate).query(contains("highest_price_ticks"), any(RowMapper.class),
+        verify(jdbcTemplate).query(contains("highest_price_ticks IS DISTINCT FROM"), any(RowMapper.class),
                 eq(60_100L), eq(60_100L), eq("BTC-USDT"), eq("MARK_PRICE"), any(), any(), eq(100),
                 eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L),
                 any(), any(), eq(52L), eq(60_100L), any(), any(), any(), any());
@@ -356,6 +356,28 @@ class TriggerOrderRepositoryTest {
                 .contains("o.status = 'TRIGGERING'")
                 .contains("o.product_line = ?");
         assertThat(args.getValue()).contains("LINEAR_DELIVERY");
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void resetStaleTriggeringOrdersReturnsRowsForStatusPush() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(List.of());
+
+        repository.resetStaleTriggeringOrders(now.minusSeconds(30), now, 100, ProductLine.OPTION);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("status = 'PENDING'")
+                .contains("FOR UPDATE SKIP LOCKED")
+                .contains("RETURNING o.*");
+        assertThat(args.getValue()).containsExactly(
+                "OPTION", java.sql.Timestamp.from(now.minusSeconds(30)), 100, java.sql.Timestamp.from(now));
     }
 
     @Test

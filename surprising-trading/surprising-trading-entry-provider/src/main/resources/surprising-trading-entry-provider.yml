@@ -84,12 +84,17 @@ surprising:
         index-price-topic: surprising.perp.index.price.v1
         last-price-topic: surprising.perp.match.trades.v1
         position-events-topic: surprising.account.position.events.v1
+        trigger-order-events-topic: surprising.perp.trigger-order.events.v1
         concurrency: 2
         max-poll-records: 500
       execution:
         trigger-batch-size: 200
         stale-triggering-after: 30s
         maintenance-delay-ms: 1000
+      outbox:
+        batch-size: 200
+        publish-delay-ms: 200
+        send-timeout: 3s
       redis-index:
         key-prefix: ${TRIGGER_REDIS_KEY_PREFIX:surprising:trigger:v1}
         candidate-batch-size: 400

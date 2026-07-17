@@ -10,6 +10,7 @@ public enum WsChannel {
     MARK_PRICE("mark", true),
     FUNDING_RATE("funding", true),
     ORDERS("orders", false),
+    TRIGGER_ORDERS("triggerOrders", false),
     MATCHES("matches", false),
     EXECUTION_REPORTS("executionReports", false),
     POSITIONS("positions", false),

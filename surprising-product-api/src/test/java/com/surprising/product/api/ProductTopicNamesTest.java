@@ -14,6 +14,8 @@ class ProductTopicNamesTest {
 
         assertThat(spot.orderCommandsTopic()).isEqualTo("surprising.spot.order.commands.v1");
         assertThat(linear.orderCommandsTopic()).isEqualTo("surprising.linear-perp.order.commands.v1");
+        assertThat(linear.triggerOrderEventsTopic())
+                .isEqualTo("surprising.linear-perp.trigger-order.events.v1");
         assertThat(inverse.matchTradesTopic()).isEqualTo("surprising.inverse-perp.match.trades.v1");
         assertThat(linear.indexPriceTopic()).isEqualTo("surprising.linear-perp.index.price.v1");
         assertThat(linear.indexComponentsTopic()).isEqualTo("surprising.linear-perp.index.components.v1");

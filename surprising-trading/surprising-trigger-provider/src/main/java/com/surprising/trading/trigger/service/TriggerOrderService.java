@@ -34,6 +34,7 @@ import com.surprising.trading.trigger.model.MarkTrigger;
 import com.surprising.trading.trigger.model.LastPriceTrigger;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import com.surprising.trading.trigger.model.TriggerPosition;
+import com.surprising.trading.trigger.repository.TriggerOrderOutboxRepository;
 import com.surprising.trading.trigger.repository.TriggerOrderRepository;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -41,14 +42,17 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Owns the TP/SL trigger-order state machine.
@@ -69,6 +73,8 @@ public class TriggerOrderService {
     private final OrderRpcApi orderRpcApi;
     private final TriggerProperties properties;
     private final TriggerOrderIndex triggerOrderIndex;
+    private final TriggerOrderOutboxRepository outboxRepository;
+    private final TransactionTemplate transactionTemplate;
 
     public TriggerOrderService(TriggerOrderRepository triggerOrderRepository,
                                OrderRpcApi orderRpcApi,
@@ -76,15 +82,26 @@ public class TriggerOrderService {
         this(triggerOrderRepository, orderRpcApi, properties, TriggerOrderIndex.disabled());
     }
 
-    @Autowired
     public TriggerOrderService(TriggerOrderRepository triggerOrderRepository,
                                OrderRpcApi orderRpcApi,
                                TriggerProperties properties,
                                TriggerOrderIndex triggerOrderIndex) {
+        this(triggerOrderRepository, orderRpcApi, properties, triggerOrderIndex, null, null);
+    }
+
+    @Autowired
+    public TriggerOrderService(TriggerOrderRepository triggerOrderRepository,
+                               OrderRpcApi orderRpcApi,
+                               TriggerProperties properties,
+                               TriggerOrderIndex triggerOrderIndex,
+                               TriggerOrderOutboxRepository outboxRepository,
+                               PlatformTransactionManager transactionManager) {
         this.triggerOrderRepository = triggerOrderRepository;
         this.orderRpcApi = orderRpcApi;
         this.properties = properties;
         this.triggerOrderIndex = triggerOrderIndex;
+        this.outboxRepository = outboxRepository;
+        this.transactionTemplate = transactionManager == null ? null : new TransactionTemplate(transactionManager);
     }
 
     @Transactional
@@ -167,6 +184,7 @@ public class TriggerOrderService {
             triggerOrderIndex.remove(order);
             throw new IllegalStateException("failed to insert trigger order " + triggerOrderId);
         }
+        enqueueStatusChange(order);
         return toResponse(order);
     }
 
@@ -251,6 +269,7 @@ public class TriggerOrderService {
                         request.userId(), request.triggerOrderId(), Instant.now())
                 .orElseThrow(() -> new IllegalStateException("trigger order disappeared after cancel"));
         if (updated.status() == TriggerOrderStatus.CANCELED) {
+            enqueueStatusChange(updated);
             afterCommit(() -> triggerOrderIndex.remove(updated));
         }
         return toResponse(updated);
@@ -470,9 +489,13 @@ public class TriggerOrderService {
             if (candidateIds.get().isEmpty()) {
                 return List.of();
             }
-            List<TriggerOrderRecord> claimed = triggerOrderRepository.claimTriggeredCandidates(
-                    currentProductLine(), symbol, triggerPriceType, triggerPriceTicks, triggerSequence,
-                    triggeredAt, limit, now, candidateIds.get());
+            List<TriggerOrderRecord> claimed = inTransaction(() -> {
+                List<TriggerOrderRecord> rows = triggerOrderRepository.claimTriggeredCandidates(
+                        currentProductLine(), symbol, triggerPriceType, triggerPriceTicks, triggerSequence,
+                        triggeredAt, limit, now, candidateIds.get());
+                enqueueClaimChanges(rows);
+                return rows;
+            });
             try {
                 cleanupCandidateIndex(symbol, triggerPriceType, candidateIds.get());
                 cleanupOcoIndex(claimed);
@@ -484,12 +507,22 @@ public class TriggerOrderService {
             return claimed;
         }
         String contractType = currentProductContractType();
-        if (contractType == null) {
-            return triggerOrderRepository.claimTriggered(symbol, triggerPriceType, triggerPriceTicks, triggerSequence,
-                    triggeredAt, limit, now);
+        List<TriggerOrderRecord> claimed = inTransaction(() -> {
+            List<TriggerOrderRecord> rows = contractType == null
+                    ? triggerOrderRepository.claimTriggered(symbol, triggerPriceType, triggerPriceTicks,
+                            triggerSequence, triggeredAt, limit, now)
+                    : triggerOrderRepository.claimTriggered(symbol, triggerPriceType, triggerPriceTicks,
+                            triggerSequence, triggeredAt, limit, now, contractType);
+            enqueueClaimChanges(rows);
+            return rows;
+        });
+        try {
+            cleanupOcoIndex(claimed);
+        } catch (RuntimeException ex) {
+            log.warn("Trigger OCO index cleanup failed line={} symbol={}: {}",
+                    currentProductLine(), symbol, ex.getMessage());
         }
-        return triggerOrderRepository.claimTriggered(symbol, triggerPriceType, triggerPriceTicks, triggerSequence,
-                triggeredAt, limit, now, contractType);
+        return claimed;
     }
 
     private List<TriggerOrderRecord> claimTrailingTriggered(String symbol,
@@ -500,14 +533,15 @@ public class TriggerOrderService {
                                                             int limit,
                                                             Instant now) {
         String contractType = currentProductContractType();
-        List<TriggerOrderRecord> claimed;
-        if (contractType == null) {
-            claimed = triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceType, triggerPriceTicks,
-                    triggerSequence, triggeredAt, limit, now);
-        } else {
-            claimed = triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceType, triggerPriceTicks,
-                    triggerSequence, triggeredAt, limit, now, contractType);
-        }
+        List<TriggerOrderRecord> claimed = inTransaction(() -> {
+            List<TriggerOrderRecord> rows = contractType == null
+                    ? triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceType, triggerPriceTicks,
+                            triggerSequence, triggeredAt, limit, now)
+                    : triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceType, triggerPriceTicks,
+                            triggerSequence, triggeredAt, limit, now, contractType);
+            enqueueClaimChanges(rows);
+            return rows;
+        });
         try {
             cleanupOcoIndex(claimed);
         } catch (RuntimeException ex) {
@@ -518,17 +552,23 @@ public class TriggerOrderService {
     }
 
     private void expirePending(Instant now, int limit) {
-        triggerOrderRepository.expirePendingOrders(now, limit, currentProductLine())
-                .forEach(triggerOrderIndex::remove);
+        List<TriggerOrderRecord> expired = inTransaction(() -> {
+            List<TriggerOrderRecord> rows = triggerOrderRepository.expirePendingOrders(
+                    now, limit, currentProductLine());
+            rows.forEach(this::enqueueStatusChange);
+            return rows;
+        });
+        expired.forEach(triggerOrderIndex::remove);
     }
 
     private void resetStaleTriggering(Instant staleBefore, Instant now, int limit) {
-        String contractType = currentProductContractType();
-        if (contractType == null) {
-            triggerOrderRepository.resetStaleTriggering(staleBefore, now, limit);
-        } else {
-            triggerOrderRepository.resetStaleTriggering(staleBefore, now, limit, contractType);
-        }
+        List<TriggerOrderRecord> reset = inTransaction(() -> {
+            List<TriggerOrderRecord> rows = triggerOrderRepository.resetStaleTriggeringOrders(
+                    staleBefore, now, limit, currentProductLine());
+            rows.forEach(this::enqueueStatusChange);
+            return rows;
+        });
+        reset.forEach(triggerOrderIndex::synchronize);
     }
 
     private void executeTriggeredOrder(TriggerOrderRecord order) {
@@ -549,12 +589,21 @@ public class TriggerOrderService {
                     true,
                     false));
             Instant now = Instant.now();
-            if (placed.status() == OrderStatus.REJECTED) {
-                triggerOrderRepository.markTriggerFailed(order.triggerOrderId(), placed.orderId(),
-                        placed.rejectReason(), now);
-            } else {
-                triggerOrderRepository.markTriggered(order.triggerOrderId(), placed.orderId(), now);
-            }
+            inTransaction(() -> {
+                if (placed.status() == OrderStatus.REJECTED) {
+                    triggerOrderRepository.markTriggerFailed(order.triggerOrderId(), placed.orderId(),
+                            placed.rejectReason(), now);
+                } else {
+                    triggerOrderRepository.markTriggered(order.triggerOrderId(), placed.orderId(), now);
+                }
+                if (outboxRepository != null) {
+                    TriggerOrderRecord updated = triggerOrderRepository.findById(order.triggerOrderId())
+                            .orElseThrow(() -> new IllegalStateException(
+                                    "trigger order disappeared after execution: " + order.triggerOrderId()));
+                    enqueueStatusChange(updated);
+                }
+                return null;
+            });
             triggerOrderIndex.remove(order);
         } catch (Exception ex) {
             // Leave the row in TRIGGERING; maintenance will reset stale rows for a later mark event.
@@ -921,6 +970,37 @@ public class TriggerOrderService {
                             && sibling.status() != TriggerOrderStatus.TRIGGERING)
                     .forEach(triggerOrderIndex::remove);
         }
+    }
+
+    private void enqueueClaimChanges(List<TriggerOrderRecord> claimed) {
+        if (outboxRepository == null || claimed.isEmpty()) {
+            return;
+        }
+        claimed.forEach(this::enqueueStatusChange);
+        Set<Long> published = new HashSet<>();
+        claimed.forEach(order -> published.add(order.triggerOrderId()));
+        for (TriggerOrderRecord order : claimed) {
+            if (order.ocoGroupId() == null || order.ocoGroupId().isBlank()) {
+                continue;
+            }
+            triggerOrderRepository.ocoGroupOrders(order).stream()
+                    .filter(sibling -> sibling.status() == TriggerOrderStatus.CANCELED)
+                    .filter(sibling -> published.add(sibling.triggerOrderId()))
+                    .forEach(this::enqueueStatusChange);
+        }
+    }
+
+    private void enqueueStatusChange(TriggerOrderRecord order) {
+        if (outboxRepository != null) {
+            outboxRepository.enqueue(order, toResponse(order));
+        }
+    }
+
+    private <T> T inTransaction(Supplier<T> action) {
+        if (transactionTemplate == null) {
+            return action.get();
+        }
+        return transactionTemplate.execute(status -> action.get());
     }
 
     private void afterCommit(Runnable action) {

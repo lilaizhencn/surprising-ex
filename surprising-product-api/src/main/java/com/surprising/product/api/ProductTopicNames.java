@@ -23,6 +23,10 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("order.events");
     }
 
+    public String triggerOrderEventsTopic() {
+        return topic("trigger-order.events");
+    }
+
     public String matchResultsTopic() {
         return topic("match.results");
     }

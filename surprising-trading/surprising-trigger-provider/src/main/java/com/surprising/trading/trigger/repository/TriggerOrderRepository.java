@@ -962,6 +962,11 @@ public class TriggerOrderRepository {
                      WHERE o.trigger_order_id = c.trigger_order_id
                        AND c.next_activated
                        AND NOT c.should_trigger
+                       AND (
+                           o.activated_at IS NULL
+                           OR o.highest_price_ticks IS DISTINCT FROM c.next_highest_price_ticks
+                           OR o.lowest_price_ticks IS DISTINCT FROM c.next_lowest_price_ticks
+                       )
                  RETURNING o.trigger_order_id
                 ),
                 due AS (
@@ -1169,6 +1174,33 @@ public class TriggerOrderRepository {
                  WHERE o.trigger_order_id = s.trigger_order_id
                    AND o.placed_order_id IS NULL
                 """, Timestamp.from(staleBefore), normalizedProductLine.name(), normalizedLimit, Timestamp.from(now));
+    }
+
+    public List<TriggerOrderRecord> resetStaleTriggeringOrders(Instant staleBefore,
+                                                               Instant now,
+                                                               int limit,
+                                                               ProductLine productLine) {
+        int normalizedLimit = Math.max(1, Math.min(limit, 1000));
+        return jdbcTemplate.query("""
+                WITH stale AS (
+                    SELECT trigger_order_id
+                      FROM trading_trigger_orders
+                     WHERE product_line = ?
+                       AND status = 'TRIGGERING'
+                       AND updated_at < ?
+                     ORDER BY updated_at ASC, trigger_order_id ASC
+                     LIMIT ?
+                     FOR UPDATE SKIP LOCKED
+                )
+                UPDATE trading_trigger_orders o
+                   SET status = 'PENDING',
+                       updated_at = ?
+                  FROM stale s
+                 WHERE o.trigger_order_id = s.trigger_order_id
+                   AND o.placed_order_id IS NULL
+             RETURNING o.*
+                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), Timestamp.from(staleBefore),
+                normalizedLimit, Timestamp.from(now));
     }
 
     private TriggerOrderRecord toRecord(ResultSet rs) throws SQLException {

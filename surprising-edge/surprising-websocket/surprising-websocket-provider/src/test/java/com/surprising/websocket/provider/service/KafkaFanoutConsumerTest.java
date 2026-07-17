@@ -23,7 +23,15 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderSide;
+import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PositionSide;
+import com.surprising.trading.api.model.TimeInForce;
+import com.surprising.trading.api.model.TriggerCondition;
+import com.surprising.trading.api.model.TriggerOrderResponse;
+import com.surprising.trading.api.model.TriggerOrderStatus;
+import com.surprising.trading.api.model.TriggerOrderType;
+import com.surprising.trading.api.model.TriggerOrderUpdatedEvent;
+import com.surprising.trading.api.model.TriggerPriceType;
 import com.surprising.websocket.api.model.ExecutionReportEvent;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
@@ -232,6 +240,32 @@ class KafkaFanoutConsumerTest {
         assertThat(report.orderStatus()).isEqualTo("CANCEL_REQUESTED");
         assertThat(report.reason()).isEqualTo("reduce-only-pruned");
         assertThat(report.traceId()).isEqualTo("trace-1");
+    }
+
+    @Test
+    void fansOutTriggerOrderStatusSnapshotToTheOwningUser() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        TriggerOrderResponse order = new TriggerOrderResponse(
+                501L, 1001L, "sl-1", null, "BTC-USDT", OrderSide.SELL,
+                TriggerOrderType.STOP_LOSS, TriggerPriceType.MARK_PRICE, TriggerCondition.LESS_OR_EQUAL,
+                60_000L, OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS,
+                PositionSide.NET, TriggerOrderStatus.CANCELED, null, null, null,
+                "POSITION_CLOSED", "trace-trigger", null, null, eventTime.minusSeconds(60), eventTime);
+        TriggerOrderUpdatedEvent event = new TriggerOrderUpdatedEvent(
+                701L, ProductLine.LINEAR_PERPETUAL, order, eventTime, "trace-trigger");
+
+        consumer.onTriggerOrderEvent(new ConsumerRecord<>("surprising.perp.trigger-order.events.v1", 0, 0L,
+                "BTC-USDT", objectMapper.writeValueAsString(event)));
+
+        ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
+        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+        verify(registry).publish(topic.capture(), payload.capture(), eq(eventTime));
+        assertThat(topic.getValue().channel()).isEqualTo(WsChannel.TRIGGER_ORDERS);
+        assertThat(topic.getValue().symbol()).isEqualTo("BTC-USDT");
+        assertThat(topic.getValue().userId()).isEqualTo(1001L);
+        assertThat(payload.getValue()).isEqualTo(event);
     }
 
     @Test

@@ -6,9 +6,12 @@ import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
 
 class TriggerKafkaConfigurationTest {
@@ -65,5 +68,24 @@ class TriggerKafkaConfigurationTest {
                 CooperativeStickyAssignor.class.getName());
         assertThat(listenerFactory.getContainerProperties().getAckMode())
                 .isEqualTo(ContainerProperties.AckMode.RECORD);
+    }
+
+    @Test
+    void producerUsesConfiguredBrokerAndIdempotentOutboxSettings() {
+        TriggerProperties properties = new TriggerProperties();
+        properties.getKafka().setBootstrapServers("kafka-t:9092");
+        TriggerKafkaConfiguration configuration = new TriggerKafkaConfiguration();
+
+        var producerFactory = (DefaultKafkaProducerFactory<String, String>)
+                configuration.triggerProducerFactory(properties);
+
+        Map<String, Object> config = producerFactory.getConfigurationProperties();
+        assertThat(config).containsEntry(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka-t:9092");
+        assertThat(config).containsEntry(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        assertThat(config).containsEntry(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        assertThat(config).containsEntry(ProducerConfig.ACKS_CONFIG, "all");
+        assertThat(config).containsEntry(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+        assertThat(config).containsEntry(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
+        assertThat(config).containsEntry(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);
     }
 }

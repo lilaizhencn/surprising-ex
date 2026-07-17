@@ -119,6 +119,7 @@ create_product_topics() {
   create_topic "${prefix}.candle.events.v1"
   create_topic "${prefix}.order.commands.v1"
   create_topic "${prefix}.order.events.v1"
+  create_topic "${prefix}.trigger-order.events.v1"
   create_topic "${prefix}.match.results.v1"
   create_topic "${prefix}.match.trades.v1"
   create_topic "${prefix}.orderbook.depth.v1"
@@ -163,6 +164,7 @@ if [[ "${INCLUDE_LEGACY_PERP_TOPICS}" == "true" ]]; then
   create_topic surprising.perp.candle.events.v1
   create_topic surprising.perp.order.commands.v1
   create_topic surprising.perp.order.events.v1
+  create_topic surprising.perp.trigger-order.events.v1
   create_topic surprising.perp.match.results.v1
   create_topic surprising.perp.match.trades.v1
   create_topic surprising.perp.orderbook.depth.v1

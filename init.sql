@@ -1535,6 +1535,10 @@ CREATE INDEX IF NOT EXISTS trading_outbox_pending_idx
     ON trading_outbox_events (next_attempt_at, id)
     WHERE published_at IS NULL;
 
+CREATE INDEX IF NOT EXISTS trading_outbox_pending_stream_idx
+    ON trading_outbox_events (aggregate_type, topic, event_key, id)
+    WHERE published_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS trading_outbox_aggregate_idx
     ON trading_outbox_events (aggregate_type, aggregate_id);
 

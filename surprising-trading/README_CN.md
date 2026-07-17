@@ -147,7 +147,7 @@ REST 接口：
 - 条件单先以 `PENDING` 状态保存在 `trading_trigger_orders`，触发前不进入 exchange-core，也不冻结新增保证金。
 - 当前支持 `MARK_PRICE`、`INDEX_PRICE` 和 `LAST_PRICE` 触发源。`LAST_PRICE` 消费真实撮合成交流，可用于用户 TP/SL/追踪止损条件单；但薄盘口下按最新成交价触发更容易被短时冲击操纵，强平仍只依赖 mark price。
 - 触发方向由平仓方向和条件单类型自动推导：多仓止盈是 `SELL + TAKE_PROFIT`，所选触发价源大于等于触发价时触发；多仓止损是 `SELL + STOP_LOSS`，所选触发价源小于等于触发价时触发。空仓平仓用 `BUY`，方向相反。
-- `TRAILING_STOP` 要求执行单为 `MARKET`，`callbackRatePpm` 在 `[1000, 100000]`（`0.1%` 到 `10%`），`activationPriceTicks` 可选。SELL 追踪止损激活后维护最高价，价格从最高价回撤达到回调比例时触发；BUY 追踪止损维护最低价，反弹达到回调比例时触发。
+- `TRAILING_STOP` 要求执行单为 `MARKET`，`callbackRatePpm` 在 `[1000, 100000]`（`0.1%` 到 `10%`），`activationPriceTicks` 可选。SELL 追踪止损激活后维护最高价，价格从最高价回撤达到回调比例时触发；BUY 追踪止损维护最低价，反弹达到回调比例时触发。只有追踪止损有这些水位字段；固定 TP/SL 不会更新它们，PostgreSQL 也只在首次激活或出现新高/新低时写追踪水位，不会每个价格事件都重写。
 - trigger provider 对 `MARK_PRICE` 消费当前产品线的 mark-price topic，对 `INDEX_PRICE` 消费 index-price topic，对 `LAST_PRICE` 消费 match-trades topic；校验 Kafka key 等于 payload `symbol`，再把 mark/index 已落库价格行按当前 instrument tick size 转为 ticks，用 PostgreSQL `FOR UPDATE SKIP LOCKED` 抢占到期条件单。关闭产品线 topic 路由时才使用 legacy `surprising.perp.*` topic。
 - 多个 trigger-provider 节点可以同时运行。每条到期条件单只能被一个节点抢到；如果下游 order-provider 故障，`TRIGGERING` 状态超过 `surprising.trading.trigger.execution.stale-triggering-after` 后会重置，等待后续 mark 事件重试。
 - 静态 `TAKE_PROFIT`/`STOP_LOSS` 默认且始终通过 Spring Data Redis + Lettuce 写入按产品线、symbol、价格源隔离的 Redis ZSET，无需功能开关。一次 Lua 调用同时读取大于等于和小于等于两个范围，PostgreSQL 再对候选 id 复核并执行原有 `FOR UPDATE SKIP LOCKED` 状态迁移；追踪止损的高低水位更新仍保留在 PostgreSQL。
@@ -160,7 +160,8 @@ REST 接口：
 - 持仓完全归零时，account 会在结算事务内按精确的 `productLine + userId + symbol + marginMode + positionSide` 范围取消剩余全部 `PENDING` 条件单，并写入 `rejectReason=POSITION_CLOSED`。普通平仓、强平成交、交割结算和期权行权都走这条链路；事务提交后再由 account 持仓 outbox 事件驱动 Redis ZSET 幂等清理。已经处于 `TRIGGERING` 的行不会被抢撤，继续走现有 reduce-only 状态机收敛。
 - 批量条件单放置支持 `atomic=true`，用于组合 TP/SL 的全成全撤语义。原子模式下任一条校验失败会拒绝整组、回滚已插入条件单，并返回逐项失败结果；默认批量模式仍保持逐条隔离成功/失败。
 - OCO sibling 在 claim 阶段就会取消；如果后续 order-provider 执行失败，该 OCO 组也已经被消费。这个取舍可以避免多节点 trigger-provider 并发下重复平仓，执行失败后客户端可以重新挂一组 TP/SL。
-- 当前条件单 API 不做原地改单。用户更新触发价或数量时应先撤旧单，再使用新的 `clientTriggerOrderId` 下单，确保重新执行完整校验并避免跨存储 move 竞争。`GET /open` 始终查询 PostgreSQL 的权威 `PENDING`/`TRIGGERING` 状态；触发生成的真实平仓单和成交继续走现有私有 WebSocket 频道。
+- 每次已提交的条件单状态变化（`PENDING`、`TRIGGERING`、`TRIGGERED`、`TRIGGER_FAILED`、`CANCELED`、`EXPIRED`）都会在同一数据库事务内向 `trading_outbox_events` 写入完整 `TriggerOrderUpdatedEvent` 快照。trigger outbox publisher 把它发送到当前产品线的 `trigger-order.events` topic，WebSocket 再通过认证私有频道 `triggerOrders` 推送。该链路是至少一次投递，客户端需按 `eventId` 去重，并在重连后重新拉取 `GET /open`。
+- 当前条件单 API 不做原地改单。用户更新触发价或数量时应先撤旧单，再使用新的 `clientTriggerOrderId` 下单，确保重新执行完整校验并避免跨存储 move 竞争。`GET /open` 始终查询 PostgreSQL 的权威 `PENDING`/`TRIGGERING` 状态；私有 `triggerOrders` 频道会立即更新或移除列表行，触发生成的真实平仓单和成交继续走现有私有 WebSocket 频道。
 
 REST 接口：
 

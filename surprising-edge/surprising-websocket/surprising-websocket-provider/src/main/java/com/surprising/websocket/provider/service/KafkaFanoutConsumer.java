@@ -15,6 +15,7 @@ import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.OrderBookDepthEvent;
 import com.surprising.trading.api.model.OrderEvent;
 import com.surprising.trading.api.model.OrderSide;
+import com.surprising.trading.api.model.TriggerOrderUpdatedEvent;
 import com.surprising.websocket.api.model.ExecutionReportEvent;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
@@ -176,6 +177,29 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
+            topics = "#{__listener.triggerOrderEventsTopic()}",
+            groupId = "#{__listener.groupId()}",
+            containerFactory = "webSocketKafkaListenerContainerFactory")
+    public void onTriggerOrderEvent(ConsumerRecord<String, String> record) {
+        try {
+            requireCurrentProductTopic(record.topic(), triggerOrderEventsTopic(), "trigger order event");
+            TriggerOrderUpdatedEvent event = objectMapper.readValue(record.value(), TriggerOrderUpdatedEvent.class);
+            KafkaSymbolKeyValidator.requireMatchingSymbol(
+                    record.key(), event.order().symbol(), "trigger order event");
+            if (properties.getKafka().isProductTopicsEnabled()
+                    && event.productLine() != properties.getKafka().getProductLine()) {
+                throw new ProductTopicMismatchException("trigger order event product line must match websocket node: "
+                        + "expected=" + properties.getKafka().getProductLine() + " actual=" + event.productLine());
+            }
+            registry.publish(topic(WsChannel.TRIGGER_ORDERS, event.order().symbol(), event.order().userId()),
+                    event, event.eventTime());
+        } catch (Exception ex) {
+            log.error("Failed to fanout trigger order event: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to fanout trigger order event", ex);
+        }
+    }
+
+    @KafkaListener(
             topics = "#{__listener.matchResultsTopic()}",
             groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
@@ -295,6 +319,10 @@ public class KafkaFanoutConsumer {
 
     public String orderEventsTopic() {
         return properties.getKafka().getOrderEventsTopic();
+    }
+
+    public String triggerOrderEventsTopic() {
+        return properties.getKafka().getTriggerOrderEventsTopic();
     }
 
     public String matchResultsTopic() {

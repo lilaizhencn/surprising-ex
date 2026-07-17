@@ -131,6 +131,7 @@ Legacy 永续 topic 仍保留用于兼容单线启动。产品线实例使用 `s
 
 - `surprising.perp.order.commands.v1`：legacy 永续订单撮合命令。
 - `surprising.perp.order.events.v1`：订单入口事件。
+- `surprising.perp.trigger-order.events.v1`：事务型止盈止损状态快照，供认证用户的私有 WebSocket 推送消费。
 - `surprising.perp.match.results.v1`：撮合结果事件。
 - `surprising.perp.match.trades.v1`：撮合成交事件，long 定点数，供 K 线和公开成交推送消费。
 - `surprising.perp.orderbook.depth.v1`：exchange-core L2 盘口 `SNAPSHOT`/`DELTA` 事件，供前端深度推送消费。
@@ -218,7 +219,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - 止盈、止损和追踪止损都是条件单，触发前只保存在 `trading_trigger_orders`，不进入 exchange-core 订单簿；配置的 `MARK_PRICE`、`INDEX_PRICE` 或 `LAST_PRICE` 触发源满足触发规则后，`surprising-trigger-provider` 通过 order-provider 提交幂等的 `reduceOnly=true` 平仓单，`clientOrderId=trigger-<triggerOrderId>`。追踪止损使用整数 `callbackRatePpm`（`1000` = `0.1%`，`100000` = `10%`）和可选 `activationPriceTicks`，激活后维护最高/最低水位，达到回调幅度才触发。`LAST_PRICE` 来自真实撮合成交，薄盘口下比 mark/index 更容易受短时冲击影响。
 - 静态止盈止损默认且始终使用 Spring Data Redis + Lettuce ZSET 候选索引，无需功能开关。Redis 只做价格范围候选过滤；PostgreSQL 仍负责精确价格、状态、过期、OCO 条件校验和最终抢占，也是唯一权威状态。用户开放条件单查询继续读取数据库。用户撤单、过期、OCO 互撤、触发成功/拒绝以及事务回滚都会移除或校准索引；Redis 不可用或索引未 ready 时，已提交条件单退回原数据库 claim 链路。
 - 成对 TP/SL 可以使用同一个 `ocoGroupId`；同一用户、symbol、保证金模式组里任意一条 pending 触发单被抢占后，其它 pending sibling 会在同一条数据库语句里先置为 `CANCELED`，然后再提交生成的平仓单。
-- 普通平仓、强平成交、交割结算或期权行权把持仓降为零时，account 会在同一个 PostgreSQL 事务里取消该持仓剩余的 `PENDING` 条件单；事务提交后的持仓 outbox 事件再驱动 trigger-provider 删除对应静态止盈止损 Redis member，`GET /open` 始终以数据库已取消状态为准。
+- 普通平仓、强平成交、交割结算或期权行权把持仓降为零时，account 会在同一个 PostgreSQL 事务里取消该持仓剩余的 `PENDING` 条件单，并把 `CANCELED` 状态快照写入 trading outbox。提交后的持仓事件驱动 trigger-provider 删除对应静态止盈止损 Redis member，`trigger-order.events` 驱动认证用户 WebSocket 主动刷新；`GET /open` 始终以数据库已取消状态为准。
 - Account 消费撮合成交，按 `tradeId` 幂等更新 long-based 净持仓，把开仓成交保证金迁移到持仓保证金，并把已实现盈亏结算进余额。
 - `CROSS` 和 `ISOLATED` 保证金模式会从下单一路传到撮合、账户、风控、资金费和强平。全仓亏损可以使用全仓可用余额和全仓持仓保证金；逐仓亏损只使用该 symbol 的逐仓持仓保证金，亏穿后记录 deficit。
 - 逐仓持仓保证金可以通过 account-provider 手动追加或减少。追加会把可用余额转入持仓保证金；减少必须依赖最新风险快照，并保证减少后权益仍高于维持保证金加配置缓冲。

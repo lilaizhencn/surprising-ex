@@ -43,6 +43,7 @@ import com.surprising.trading.trigger.model.MarkTrigger;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import com.surprising.trading.trigger.model.TriggerPosition;
 import com.surprising.trading.trigger.repository.TriggerOrderRepository;
+import com.surprising.trading.trigger.repository.TriggerOrderOutboxRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -82,6 +83,30 @@ class TriggerOrderServiceTest {
         assertThat(saved.triggerCondition()).isEqualTo(TriggerCondition.GREATER_OR_EQUAL);
         assertThat(saved.status()).isEqualTo(TriggerOrderStatus.PENDING);
         assertThat(saved.traceId()).isNotBlank();
+    }
+
+    @Test
+    void placeEnqueuesPendingSnapshotWithTheTriggerRow() {
+        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderOutboxRepository outboxRepository = mock(TriggerOrderOutboxRepository.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties(), TriggerOrderIndex.disabled(), outboxRepository, null);
+        PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-push", null, "btc-usdt",
+                OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, TriggerPriceType.MARK_PRICE, 70_000L,
+                OrderType.MARKET, TimeInForce.IOC, 0L, 2L, MarginMode.CROSS, null);
+        when(repository.nextSequence("trigger-order")).thenReturn(598L);
+        stubCloseCapacity(repository, 10L, 0L, 0L, 0L);
+        when(repository.insert(any())).thenReturn(true);
+        ArgumentCaptor<TriggerOrderRecord> row = ArgumentCaptor.forClass(TriggerOrderRecord.class);
+        ArgumentCaptor<TriggerOrderResponse> snapshot = ArgumentCaptor.forClass(TriggerOrderResponse.class);
+
+        service.place(request);
+
+        verify(outboxRepository).enqueue(row.capture(), snapshot.capture());
+        assertThat(row.getValue().triggerOrderId()).isEqualTo(598L);
+        assertThat(row.getValue().status()).isEqualTo(TriggerOrderStatus.PENDING);
+        assertThat(snapshot.getValue().triggerOrderId()).isEqualTo(598L);
+        assertThat(snapshot.getValue().status()).isEqualTo(TriggerOrderStatus.PENDING);
     }
 
     @Test
