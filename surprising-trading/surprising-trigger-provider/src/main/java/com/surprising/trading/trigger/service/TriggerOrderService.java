@@ -27,11 +27,9 @@ import com.surprising.trading.api.model.TriggerOrderQueryResponse;
 import com.surprising.trading.api.model.TriggerOrderResponse;
 import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
-import com.surprising.trading.api.model.TriggerPriceType;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import com.surprising.trading.trigger.config.TriggerTraceContext;
 import com.surprising.trading.trigger.model.MarkTrigger;
-import com.surprising.trading.trigger.model.LastPriceTrigger;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import com.surprising.trading.trigger.model.TriggerPosition;
 import com.surprising.trading.trigger.repository.TriggerOrderOutboxRepository;
@@ -57,7 +55,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * Owns the TP/SL trigger-order state machine.
  *
- * <p>Trigger rows are passive until a configured price stream crosses the configured level. Execution is
+ * <p>Trigger rows are passive until the sampled mark price crosses the configured level. Execution is
  * delegated back to order-provider as a reduce-only close order, so account and position state still
  * changes only through the normal order, matching, and settlement pipeline.</p>
  */
@@ -141,7 +139,6 @@ public class TriggerOrderService {
                 normalized.symbol(),
                 normalized.side(),
                 normalized.triggerType(),
-                normalized.triggerPriceType(),
                 triggerCondition(normalized.side(), normalized.triggerType()),
                 normalized.triggerPriceTicks(),
                 normalized.activationPriceTicks(),
@@ -407,30 +404,13 @@ public class TriggerOrderService {
     public void onMarkPrice(MarkTrigger markTrigger) {
         OptionalLong markPriceTicks = markPriceTicks(markTrigger);
         if (markPriceTicks.isEmpty()) {
-            if (!hasPendingOrdersForPriceType(markTrigger.symbol(), TriggerPriceType.MARK_PRICE)) {
+            if (!hasPendingOrders(markTrigger.symbol())) {
                 return;
             }
             throw new IllegalStateException("mark price ticks unavailable: " + markTrigger.symbol()
                     + " sequence=" + markTrigger.sequence());
         }
-        onTriggerPrice(TriggerPriceType.MARK_PRICE, markTrigger, markPriceTicks.getAsLong());
-    }
-
-    public void onIndexPrice(MarkTrigger indexTrigger) {
-        OptionalLong indexPriceTicks = indexPriceTicks(indexTrigger);
-        if (indexPriceTicks.isEmpty()) {
-            if (!hasPendingOrdersForPriceType(indexTrigger.symbol(), TriggerPriceType.INDEX_PRICE)) {
-                return;
-            }
-            throw new IllegalStateException("index price ticks unavailable: " + indexTrigger.symbol()
-                    + " sequence=" + indexTrigger.sequence());
-        }
-        onTriggerPrice(TriggerPriceType.INDEX_PRICE, indexTrigger, indexPriceTicks.getAsLong());
-    }
-
-    public void onLastPrice(LastPriceTrigger lastTrigger) {
-        onTriggerPrice(TriggerPriceType.LAST_PRICE, new MarkTrigger(lastTrigger.symbol(), lastTrigger.sequence(),
-                lastTrigger.eventTime()), lastTrigger.priceTicks());
+        onTriggerPrice(markTrigger, markPriceTicks.getAsLong());
     }
 
     private OptionalLong markPriceTicks(MarkTrigger markTrigger) {
@@ -440,20 +420,13 @@ public class TriggerOrderService {
                 : triggerOrderRepository.markPriceTicks(markTrigger.symbol(), markTrigger.sequence(), contractType);
     }
 
-    private OptionalLong indexPriceTicks(MarkTrigger indexTrigger) {
-        String contractType = currentProductContractType();
-        return contractType == null
-                ? triggerOrderRepository.indexPriceTicks(indexTrigger.symbol(), indexTrigger.sequence())
-                : triggerOrderRepository.indexPriceTicks(indexTrigger.symbol(), indexTrigger.sequence(), contractType);
-    }
-
-    private void onTriggerPrice(TriggerPriceType triggerPriceType, MarkTrigger priceTrigger, long triggerPriceTicks) {
+    private void onTriggerPrice(MarkTrigger priceTrigger, long triggerPriceTicks) {
         Instant now = Instant.now();
         List<TriggerOrderRecord> orders = new ArrayList<>(claimTriggered(priceTrigger.symbol(),
-                triggerPriceType, triggerPriceTicks, priceTrigger.sequence(), priceTrigger.eventTime(),
-                properties.getExecution().getTriggerBatchSize(), now));
-        orders.addAll(claimTrailingTriggered(priceTrigger.symbol(), triggerPriceType,
                 triggerPriceTicks, priceTrigger.sequence(), priceTrigger.eventTime(),
+                properties.getExecution().getTriggerBatchSize(), now));
+        orders.addAll(claimTrailingTriggered(priceTrigger.symbol(), triggerPriceTicks,
+                priceTrigger.sequence(), priceTrigger.eventTime(),
                 properties.getExecution().getTriggerBatchSize(), now));
         for (TriggerOrderRecord order : orders) {
             executeTriggeredOrder(order);
@@ -468,15 +441,14 @@ public class TriggerOrderService {
         resetStaleTriggering(staleBefore, now, properties.getExecution().getTriggerBatchSize());
     }
 
-    private boolean hasPendingOrdersForPriceType(String symbol, TriggerPriceType triggerPriceType) {
+    private boolean hasPendingOrders(String symbol) {
         String contractType = currentProductContractType();
         return contractType == null
-                ? triggerOrderRepository.hasPendingOrdersForPriceType(symbol, triggerPriceType)
-                : triggerOrderRepository.hasPendingOrdersForPriceType(symbol, triggerPriceType, contractType);
+                ? triggerOrderRepository.hasPendingOrders(symbol)
+                : triggerOrderRepository.hasPendingOrders(symbol, contractType);
     }
 
     private List<TriggerOrderRecord> claimTriggered(String symbol,
-                                                    TriggerPriceType triggerPriceType,
                                                     long triggerPriceTicks,
                                                     long triggerSequence,
                                                     Instant triggeredAt,
@@ -484,34 +456,34 @@ public class TriggerOrderService {
                                                     Instant now) {
         int candidateLimit = Math.max(limit, properties.getRedisIndex().getCandidateBatchSize());
         var candidateIds = triggerOrderIndex.dueCandidates(
-                currentProductLine(), symbol, triggerPriceType, triggerPriceTicks, candidateLimit);
+                currentProductLine(), symbol, triggerPriceTicks, candidateLimit);
         if (candidateIds.isPresent()) {
             if (candidateIds.get().isEmpty()) {
                 return List.of();
             }
             List<TriggerOrderRecord> claimed = inTransaction(() -> {
                 List<TriggerOrderRecord> rows = triggerOrderRepository.claimTriggeredCandidates(
-                        currentProductLine(), symbol, triggerPriceType, triggerPriceTicks, triggerSequence,
+                        currentProductLine(), symbol, triggerPriceTicks, triggerSequence,
                         triggeredAt, limit, now, candidateIds.get());
                 enqueueClaimChanges(rows);
                 return rows;
             });
             try {
-                cleanupCandidateIndex(symbol, triggerPriceType, candidateIds.get());
+                cleanupCandidateIndex(symbol, candidateIds.get());
                 cleanupOcoIndex(claimed);
             } catch (RuntimeException ex) {
                 // Index cleanup cannot invalidate the DB claim. Stale members are rejected on the next exact claim.
-                log.warn("Trigger candidate cleanup failed line={} symbol={} type={}: {}",
-                        currentProductLine(), symbol, triggerPriceType, ex.getMessage());
+                log.warn("Trigger candidate cleanup failed line={} symbol={}: {}",
+                        currentProductLine(), symbol, ex.getMessage());
             }
             return claimed;
         }
         String contractType = currentProductContractType();
         List<TriggerOrderRecord> claimed = inTransaction(() -> {
             List<TriggerOrderRecord> rows = contractType == null
-                    ? triggerOrderRepository.claimTriggered(symbol, triggerPriceType, triggerPriceTicks,
+                    ? triggerOrderRepository.claimTriggered(symbol, triggerPriceTicks,
                             triggerSequence, triggeredAt, limit, now)
-                    : triggerOrderRepository.claimTriggered(symbol, triggerPriceType, triggerPriceTicks,
+                    : triggerOrderRepository.claimTriggered(symbol, triggerPriceTicks,
                             triggerSequence, triggeredAt, limit, now, contractType);
             enqueueClaimChanges(rows);
             return rows;
@@ -526,7 +498,6 @@ public class TriggerOrderService {
     }
 
     private List<TriggerOrderRecord> claimTrailingTriggered(String symbol,
-                                                            TriggerPriceType triggerPriceType,
                                                             long triggerPriceTicks,
                                                             long triggerSequence,
                                                             Instant triggeredAt,
@@ -535,9 +506,9 @@ public class TriggerOrderService {
         String contractType = currentProductContractType();
         List<TriggerOrderRecord> claimed = inTransaction(() -> {
             List<TriggerOrderRecord> rows = contractType == null
-                    ? triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceType, triggerPriceTicks,
+                    ? triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceTicks,
                             triggerSequence, triggeredAt, limit, now)
-                    : triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceType, triggerPriceTicks,
+                    : triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceTicks,
                             triggerSequence, triggeredAt, limit, now, contractType);
             enqueueClaimChanges(rows);
             return rows;
@@ -625,11 +596,6 @@ public class TriggerOrderService {
                 || request.timeInForce() == null) {
             throw new IllegalArgumentException("side, triggerType, orderType and timeInForce are required");
         }
-        if (request.triggerPriceType() != TriggerPriceType.MARK_PRICE
-                && request.triggerPriceType() != TriggerPriceType.INDEX_PRICE
-                && request.triggerPriceType() != TriggerPriceType.LAST_PRICE) {
-            throw new IllegalArgumentException("only MARK_PRICE, INDEX_PRICE and LAST_PRICE triggers are supported");
-        }
         if (request.quantitySteps() <= 0) {
             throw new IllegalArgumentException("quantitySteps must be positive");
         }
@@ -650,7 +616,6 @@ public class TriggerOrderService {
                 normalizeSymbol(request.symbol()),
                 request.side(),
                 request.triggerType(),
-                request.triggerPriceType(),
                 request.triggerPriceTicks(),
                 request.activationPriceTicks(),
                 request.callbackRatePpm(),
@@ -818,7 +783,6 @@ public class TriggerOrderService {
                 order.symbol(),
                 order.side(),
                 order.triggerType(),
-                order.triggerPriceType(),
                 order.triggerCondition(),
                 order.triggerPriceTicks(),
                 order.activationPriceTicks(),
@@ -879,7 +843,7 @@ public class TriggerOrderService {
         }
         if (order.triggeredAt() != null) {
             events.add(new AdminTriggerOrderTimelineEvent(
-                    triggeredTimelineEvent(order),
+                    "TRIGGERED_MARK",
                     order.status(),
                     order.triggerSequence(),
                     order.triggeredPriceTicks(),
@@ -902,14 +866,6 @@ public class TriggerOrderService {
         return events.stream()
                 .sorted(java.util.Comparator.comparing(AdminTriggerOrderTimelineEvent::eventTime))
                 .toList();
-    }
-
-    private String triggeredTimelineEvent(TriggerOrderRecord order) {
-        return switch (order.triggerPriceType()) {
-            case INDEX_PRICE -> "TRIGGERED_INDEX";
-            case LAST_PRICE -> "TRIGGERED_LAST";
-            case MARK_PRICE -> "TRIGGERED_MARK";
-        };
     }
 
     private String normalizeSymbol(String symbol) {
@@ -935,9 +891,7 @@ public class TriggerOrderService {
         return properties.getKafka().getProductLine();
     }
 
-    private void cleanupCandidateIndex(String symbol,
-                                       TriggerPriceType triggerPriceType,
-                                       List<Long> candidateIds) {
+    private void cleanupCandidateIndex(String symbol, List<Long> candidateIds) {
         List<TriggerOrderRecord> persisted = triggerOrderRepository.findByIds(candidateIds);
         Set<Long> foundIds = new HashSet<>();
         for (TriggerOrderRecord order : persisted) {
@@ -949,7 +903,7 @@ public class TriggerOrderService {
         }
         for (Long candidateId : candidateIds) {
             if (!foundIds.contains(candidateId)) {
-                triggerOrderIndex.remove(currentProductLine(), symbol, triggerPriceType, candidateId);
+                triggerOrderIndex.remove(currentProductLine(), symbol, candidateId);
             }
         }
     }

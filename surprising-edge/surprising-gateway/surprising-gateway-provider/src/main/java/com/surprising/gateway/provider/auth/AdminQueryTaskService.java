@@ -287,7 +287,7 @@ public class AdminQueryTaskService {
         int limit = intParam(params.get("limit"), 1000, 1, 10_000);
         List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
                 SELECT trigger_order_id, user_id, client_trigger_order_id, oco_group_id, symbol,
-                       side, trigger_type, trigger_price_type, trigger_condition, trigger_price_ticks,
+                       side, trigger_type, trigger_condition, trigger_price_ticks,
                        order_type, time_in_force, price_ticks, quantity_steps, margin_mode,
                        status, placed_order_id, trigger_sequence, triggered_price_ticks, reject_reason,
                        trace_id, expires_at, triggered_at, created_at, updated_at

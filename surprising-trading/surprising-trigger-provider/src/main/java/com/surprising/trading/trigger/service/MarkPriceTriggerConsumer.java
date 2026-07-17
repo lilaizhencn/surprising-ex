@@ -11,7 +11,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
 /**
- * Consumes mark-price ticks for trigger orders using MARK_PRICE as their trigger source.
+ * Keeps the newest mark-price event per symbol for the fixed-rate trigger scheduler.
  *
  * <p>The Kafka key must match the payload symbol; otherwise one symbol's trigger stream could lose
  * ordering guarantees by landing on the wrong partition.</p>
@@ -22,19 +22,19 @@ public class MarkPriceTriggerConsumer {
     private static final Logger log = LoggerFactory.getLogger(MarkPriceTriggerConsumer.class);
 
     private final MarkPriceTriggerParser parser;
-    private final TriggerOrderService triggerOrderService;
+    private final MarkPriceTriggerScheduler triggerScheduler;
     private final TriggerProperties properties;
 
-    public MarkPriceTriggerConsumer(MarkPriceTriggerParser parser, TriggerOrderService triggerOrderService) {
-        this(parser, triggerOrderService, new TriggerProperties());
+    public MarkPriceTriggerConsumer(MarkPriceTriggerParser parser, MarkPriceTriggerScheduler triggerScheduler) {
+        this(parser, triggerScheduler, new TriggerProperties());
     }
 
     @Autowired
     public MarkPriceTriggerConsumer(MarkPriceTriggerParser parser,
-                                    TriggerOrderService triggerOrderService,
+                                    MarkPriceTriggerScheduler triggerScheduler,
                                     TriggerProperties properties) {
         this.parser = parser;
-        this.triggerOrderService = triggerOrderService;
+        this.triggerScheduler = triggerScheduler;
         this.properties = properties;
     }
 
@@ -47,7 +47,7 @@ public class MarkPriceTriggerConsumer {
             TriggerTopicGuard.requireCurrentProductTopic(properties, record.topic(), markPriceTopic(), "mark price");
             MarkTrigger trigger = parser.parse(record.value());
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), trigger.symbol(), "mark price");
-            triggerOrderService.onMarkPrice(trigger);
+            triggerScheduler.updateLatest(trigger);
         } catch (Exception ex) {
             log.error("Failed to process mark price trigger: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to process mark price trigger", ex);

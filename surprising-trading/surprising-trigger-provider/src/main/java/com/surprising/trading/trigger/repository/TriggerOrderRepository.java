@@ -11,7 +11,6 @@ import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.TriggerCondition;
 import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
-import com.surprising.trading.api.model.TriggerPriceType;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import com.surprising.trading.trigger.model.TriggerPosition;
 import java.sql.ResultSet;
@@ -53,21 +52,20 @@ public class TriggerOrderRepository {
         return jdbcTemplate.update("""
                 INSERT INTO trading_trigger_orders (
                     trigger_order_id, product_line, user_id, client_trigger_order_id, oco_group_id, symbol, side,
-                    trigger_type,
-                    trigger_price_type, trigger_condition, trigger_price_ticks, activation_price_ticks,
+                    trigger_type, trigger_condition, trigger_price_ticks, activation_price_ticks,
                     callback_rate_ppm, highest_price_ticks, lowest_price_ticks, activated_at, order_type,
                     time_in_force, price_ticks, quantity_steps, margin_mode, position_side, status, placed_order_id,
                     trigger_sequence, triggered_price_ticks, reject_reason, trace_id, expires_at, triggered_at,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (product_line, user_id, client_trigger_order_id)
                 WHERE client_trigger_order_id IS NOT NULL
                 DO NOTHING
                 """, order.triggerOrderId(), order.productLine().name(), order.userId(), order.clientTriggerOrderId(),
                 order.ocoGroupId(),
                 order.symbol(),
-                order.side().name(), order.triggerType().name(), order.triggerPriceType().name(),
-                order.triggerCondition().name(), order.triggerPriceTicks(), order.activationPriceTicks(),
+                order.side().name(), order.triggerType().name(), order.triggerCondition().name(),
+                order.triggerPriceTicks(), order.activationPriceTicks(),
                 order.callbackRatePpm(), order.highestPriceTicks(), order.lowestPriceTicks(),
                 timestampOrNull(order.activatedAt()), order.orderType().name(), order.timeInForce().name(),
                 order.priceTicks(), order.quantitySteps(), order.marginMode().name(),
@@ -566,62 +564,22 @@ public class TriggerOrderRepository {
                 .findFirst();
     }
 
-    public OptionalLong indexPriceTicks(String symbol, long sequence) {
-        return indexPriceTicks(symbol, sequence, null);
-    }
-
-    public OptionalLong indexPriceTicks(String symbol, long sequence, String contractType) {
-        ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
-        String productFilter = normalizedProductLine == null ? "" : """
-                   AND i.contract_type = ?
-                """;
-        List<Object> args = new ArrayList<>();
-        args.add(symbol);
-        args.add(sequence);
-        if (normalizedProductLine != null) {
-            args.add(normalizedProductLine.contractTypeCode());
-        }
-        return jdbcTemplate.query("""
-                SELECT ((CAST(round(p.index_price * qs.scale_units) AS BIGINT) + i.price_tick_units / 2)
-                        / i.price_tick_units) AS index_ticks
-                  FROM price_index_ticks p
-                  JOIN instrument_current_versions c
-                    ON c.symbol = p.symbol
-                  JOIN instruments i
-                    ON i.symbol = c.symbol AND i.version = c.version
-                  JOIN account_asset_scales qs
-                    ON qs.asset = i.quote_asset
-                 WHERE p.symbol = ?
-                   AND p.sequence = ?
-                   AND p.index_price IS NOT NULL
-                   AND p.status IN ('HEALTHY', 'DEGRADED', 'CLAMPED')
-                %s
-                """.formatted(productFilter), (rs, rowNum) -> rs.getLong("index_ticks"), args.toArray())
-                .stream()
-                .mapToLong(Long::longValue)
-                .filter(value -> value > 0)
-                .findFirst();
-    }
-
-    public boolean hasPendingOrdersForPriceType(String symbol, TriggerPriceType triggerPriceType) {
+    public boolean hasPendingOrders(String symbol) {
         Boolean result = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
-                      FROM trading_trigger_orders
+                     FROM trading_trigger_orders
                      WHERE symbol = ?
                        AND status = 'PENDING'
-                       AND trigger_price_type = ?
                 )
-                """, Boolean.class, symbol, triggerPriceType.name());
+                """, Boolean.class, symbol);
         return Boolean.TRUE.equals(result);
     }
 
-    public boolean hasPendingOrdersForPriceType(String symbol,
-                                                TriggerPriceType triggerPriceType,
-                                                String contractType) {
+    public boolean hasPendingOrders(String symbol, String contractType) {
         ProductLine normalizedProductLine = productLineFromExternalFilter(contractType);
         if (normalizedProductLine == null) {
-            return hasPendingOrdersForPriceType(symbol, triggerPriceType);
+            return hasPendingOrders(symbol);
         }
         Boolean result = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
@@ -629,26 +587,22 @@ public class TriggerOrderRepository {
                       FROM trading_trigger_orders o
                      WHERE o.symbol = ?
                        AND o.status = 'PENDING'
-                       AND o.trigger_price_type = ?
                        AND o.product_line = ?
                 )
-                """, Boolean.class, symbol, triggerPriceType.name(), normalizedProductLine.name());
+                """, Boolean.class, symbol, normalizedProductLine.name());
         return Boolean.TRUE.equals(result);
     }
 
     public List<TriggerOrderRecord> claimTriggered(String symbol,
-                                                   TriggerPriceType triggerPriceType,
                                                    long triggerPriceTicks,
                                                    long triggerSequence,
                                                    Instant triggeredAt,
                                                    int limit,
                                                    Instant now) {
-        return claimTriggered(symbol, triggerPriceType, triggerPriceTicks, triggerSequence, triggeredAt, limit, now,
-                null);
+        return claimTriggered(symbol, triggerPriceTicks, triggerSequence, triggeredAt, limit, now, null);
     }
 
     public List<TriggerOrderRecord> claimTriggered(String symbol,
-                                                   TriggerPriceType triggerPriceType,
                                                    long triggerPriceTicks,
                                                    long triggerSequence,
                                                    Instant triggeredAt,
@@ -663,7 +617,6 @@ public class TriggerOrderRepository {
                 """;
         List<Object> args = new ArrayList<>();
         args.add(symbol);
-        args.add(triggerPriceType.name());
         if (normalizedProductLine != null) {
             args.add(normalizedProductLine.name());
         }
@@ -690,7 +643,6 @@ public class TriggerOrderRepository {
                      WHERE symbol = ?
                        AND status = 'PENDING'
                        AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
-                       AND trigger_price_type = ?
                 %s
                        AND created_at <= ?
                        AND (expires_at IS NULL OR expires_at > ?)
@@ -746,7 +698,6 @@ public class TriggerOrderRepository {
 
     public List<TriggerOrderRecord> claimTriggeredCandidates(ProductLine productLine,
                                                              String symbol,
-                                                             TriggerPriceType triggerPriceType,
                                                              long triggerPriceTicks,
                                                              long triggerSequence,
                                                              Instant triggeredAt,
@@ -762,7 +713,6 @@ public class TriggerOrderRepository {
         Instant eventVisibleAt = triggeredAt.plusSeconds(1);
         List<Object> args = new ArrayList<>();
         args.add(symbol);
-        args.add(triggerPriceType.name());
         args.add(productLine(productLine).name());
         args.addAll(normalizedIds);
         args.add(Timestamp.from(eventVisibleAt));
@@ -787,7 +737,6 @@ public class TriggerOrderRepository {
                      WHERE symbol = ?
                        AND status = 'PENDING'
                        AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
-                       AND trigger_price_type = ?
                        AND product_line = ?
                        AND trigger_order_id IN (%s)
                        AND created_at <= ?
@@ -843,18 +792,15 @@ public class TriggerOrderRepository {
     }
 
     public List<TriggerOrderRecord> claimTrailingTriggered(String symbol,
-                                                           TriggerPriceType triggerPriceType,
                                                            long priceTicks,
                                                            long triggerSequence,
                                                            Instant triggeredAt,
                                                            int limit,
                                                            Instant now) {
-        return claimTrailingTriggered(symbol, triggerPriceType, priceTicks, triggerSequence, triggeredAt, limit, now,
-                null);
+        return claimTrailingTriggered(symbol, priceTicks, triggerSequence, triggeredAt, limit, now, null);
     }
 
     public List<TriggerOrderRecord> claimTrailingTriggered(String symbol,
-                                                           TriggerPriceType triggerPriceType,
                                                            long priceTicks,
                                                            long triggerSequence,
                                                            Instant triggeredAt,
@@ -871,7 +817,6 @@ public class TriggerOrderRepository {
         args.add(priceTicks);
         args.add(priceTicks);
         args.add(symbol);
-        args.add(triggerPriceType.name());
         if (normalizedProductLine != null) {
             args.add(normalizedProductLine.name());
         }
@@ -905,7 +850,6 @@ public class TriggerOrderRepository {
                      WHERE symbol = ?
                        AND status = 'PENDING'
                        AND trigger_type = 'TRAILING_STOP'
-                       AND trigger_price_type = ?
                 %s
                        AND created_at <= ?
                        AND (expires_at IS NULL OR expires_at > ?)
@@ -1213,7 +1157,6 @@ public class TriggerOrderRepository {
                 rs.getString("symbol"),
                 OrderSide.valueOf(rs.getString("side")),
                 TriggerOrderType.valueOf(rs.getString("trigger_type")),
-                TriggerPriceType.valueOf(rs.getString("trigger_price_type")),
                 TriggerCondition.valueOf(rs.getString("trigger_condition")),
                 rs.getLong("trigger_price_ticks"),
                 longOrNull(rs, "activation_price_ticks"),

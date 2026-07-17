@@ -12,7 +12,6 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
-import com.surprising.trading.api.model.TriggerPriceType;
 import com.surprising.trading.api.model.TriggerOrderStatus;
 import java.sql.ResultSet;
 import java.time.Instant;
@@ -75,81 +74,32 @@ class TriggerOrderRepositoryTest {
     }
 
     @Test
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    void indexPriceTicksUsesDecimalPriceAndCurrentTickSize() throws Exception {
-        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
-        when(jdbcTemplate.query(contains("price_index_ticks"), any(RowMapper.class), any(Object[].class)))
-                .thenAnswer(invocation -> {
-                    RowMapper mapper = invocation.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.getLong("index_ticks")).thenReturn(650_001L);
-                    return List.of(mapper.mapRow(rs, 0));
-                });
-
-        OptionalLong indexTicks = repository.indexPriceTicks("BTC-USDT", 77L);
-
-        assertThat(indexTicks).hasValue(650_001L);
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
-        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
-        assertThat(sql.getValue())
-                .contains("p.index_price * qs.scale_units")
-                .doesNotContain("i.contract_type = ?");
-        assertThat(args.getValue()).containsExactly("BTC-USDT", 77L);
-    }
-
-    @Test
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    void indexPriceTicksFiltersByContractTypeWhenProvided() throws Exception {
-        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
-        when(jdbcTemplate.query(contains("price_index_ticks"), any(RowMapper.class), any(Object[].class)))
-                .thenAnswer(invocation -> {
-                    RowMapper mapper = invocation.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.getLong("index_ticks")).thenReturn(650_001L);
-                    return List.of(mapper.mapRow(rs, 0));
-                });
-
-        OptionalLong indexTicks = repository.indexPriceTicks("BTC-USDT", 77L, "VANILLA_OPTION");
-
-        assertThat(indexTicks).hasValue(650_001L);
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
-        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
-        assertThat(sql.getValue()).contains("i.contract_type = ?");
-        assertThat(args.getValue()).containsExactly("BTC-USDT", 77L, "VANILLA_OPTION");
-    }
-
-    @Test
-    void hasPendingOrdersForPriceTypeChecksSymbolStatusAndTriggerSource() {
+    void hasPendingOrdersChecksSymbolAndStatus() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
         when(jdbcTemplate.queryForObject(contains("trading_trigger_orders"), eq(Boolean.class),
-                eq("ETH-USDT"), eq("INDEX_PRICE"))).thenReturn(true);
+                eq("ETH-USDT"))).thenReturn(true);
 
-        boolean result = repository.hasPendingOrdersForPriceType("ETH-USDT", TriggerPriceType.INDEX_PRICE);
+        boolean result = repository.hasPendingOrders("ETH-USDT");
 
         assertThat(result).isTrue();
         verify(jdbcTemplate).queryForObject(contains("status = 'PENDING'"), eq(Boolean.class),
-                eq("ETH-USDT"), eq("INDEX_PRICE"));
+                eq("ETH-USDT"));
     }
 
     @Test
-    void hasPendingOrdersForPriceTypeFiltersByContractTypeWhenProvided() {
+    void hasPendingOrdersFiltersByContractTypeWhenProvided() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
         when(jdbcTemplate.queryForObject(any(String.class), eq(Boolean.class),
-                eq("ETH-USDT"), eq("INDEX_PRICE"), eq("LINEAR_DELIVERY"))).thenReturn(true);
+                eq("ETH-USDT"), eq("LINEAR_DELIVERY"))).thenReturn(true);
 
-        boolean result = repository.hasPendingOrdersForPriceType("ETH-USDT", TriggerPriceType.INDEX_PRICE,
-                "LINEAR_DELIVERY");
+        boolean result = repository.hasPendingOrders("ETH-USDT", "LINEAR_DELIVERY");
 
         assertThat(result).isTrue();
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).queryForObject(sql.capture(), eq(Boolean.class),
-                eq("ETH-USDT"), eq("INDEX_PRICE"), eq("LINEAR_DELIVERY"));
+                eq("ETH-USDT"), eq("LINEAR_DELIVERY"));
         assertThat(sql.getValue())
                 .contains("o.product_line = ?");
     }
@@ -180,24 +130,24 @@ class TriggerOrderRepositoryTest {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("FOR UPDATE SKIP LOCKED"), any(RowMapper.class),
-                eq("BTC-USDT"), eq("MARK_PRICE"), any(), any(), eq(70_000L), eq(70_000L), eq(100),
+                eq("BTC-USDT"), any(), any(), eq(70_000L), eq(70_000L), eq(100),
                 eq(9L), eq(70_000L), any(), any(), any())).thenReturn(List.of());
 
-        var rows = repository.claimTriggered("BTC-USDT", TriggerPriceType.MARK_PRICE, 70_000L, 9L,
+        var rows = repository.claimTriggered("BTC-USDT", 70_000L, 9L,
                 Instant.parse("2026-07-01T00:00:00Z"), 100, Instant.parse("2026-07-01T00:00:01Z"));
 
         assertThat(rows).isEmpty();
         verify(jdbcTemplate).query(contains("trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')"), any(RowMapper.class),
-                eq("BTC-USDT"), eq("MARK_PRICE"), any(), any(), eq(70_000L), eq(70_000L), eq(100),
+                eq("BTC-USDT"), any(), any(), eq(70_000L), eq(70_000L), eq(100),
                 eq(9L), eq(70_000L), any(), any(), any());
         verify(jdbcTemplate).query(contains("trigger_condition = 'GREATER_OR_EQUAL'"), any(RowMapper.class),
-                eq("BTC-USDT"), eq("MARK_PRICE"), any(), any(), eq(70_000L), eq(70_000L), eq(100),
+                eq("BTC-USDT"), any(), any(), eq(70_000L), eq(70_000L), eq(100),
                 eq(9L), eq(70_000L), any(), any(), any());
         verify(jdbcTemplate).query(contains("canceled_oco"), any(RowMapper.class),
-                eq("BTC-USDT"), eq("MARK_PRICE"), any(), any(), eq(70_000L), eq(70_000L), eq(100),
+                eq("BTC-USDT"), any(), any(), eq(70_000L), eq(70_000L), eq(100),
                 eq(9L), eq(70_000L), any(), any(), any());
         verify(jdbcTemplate).query(contains("PARTITION BY claim_group_key"), any(RowMapper.class),
-                eq("BTC-USDT"), eq("MARK_PRICE"), any(), any(), eq(70_000L), eq(70_000L), eq(100),
+                eq("BTC-USDT"), any(), any(), eq(70_000L), eq(70_000L), eq(100),
                 eq(9L), eq(70_000L), any(), any(), any());
     }
 
@@ -209,7 +159,7 @@ class TriggerOrderRepositoryTest {
         when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
                 .thenReturn(List.of());
 
-        var rows = repository.claimTriggered("BTC-USDT", TriggerPriceType.MARK_PRICE, 70_000L, 9L,
+        var rows = repository.claimTriggered("BTC-USDT", 70_000L, 9L,
                 Instant.parse("2026-07-01T00:00:00Z"), 100,
                 Instant.parse("2026-07-01T00:00:01Z"), "LINEAR_DELIVERY");
 
@@ -231,8 +181,7 @@ class TriggerOrderRepositoryTest {
         when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
                 .thenReturn(List.of());
 
-        var rows = repository.claimTriggeredCandidates(ProductLine.OPTION, "BTC-USDT",
-                TriggerPriceType.LAST_PRICE, 70_000L, 10L,
+        var rows = repository.claimTriggeredCandidates(ProductLine.OPTION, "BTC-USDT", 70_000L, 10L,
                 Instant.parse("2026-07-01T00:00:00Z"), 100,
                 Instant.parse("2026-07-01T00:00:01Z"), List.of(501L, 502L));
 
@@ -246,7 +195,7 @@ class TriggerOrderRepositoryTest {
                 .contains("trigger_price_ticks >= ?")
                 .contains("FOR UPDATE SKIP LOCKED")
                 .contains("sibling.product_line = c.product_line");
-        assertThat(args.getValue()).startsWith("BTC-USDT", "LAST_PRICE", "OPTION", 501L, 502L);
+        assertThat(args.getValue()).startsWith("BTC-USDT", "OPTION", 501L, 502L);
     }
 
     @Test
@@ -255,24 +204,24 @@ class TriggerOrderRepositoryTest {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("trigger_type = 'TRAILING_STOP'"), any(RowMapper.class),
-                eq(60_100L), eq(60_100L), eq("BTC-USDT"), eq("MARK_PRICE"), any(), any(), eq(100),
+                eq(60_100L), eq(60_100L), eq("BTC-USDT"), any(), any(), eq(100),
                 eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L),
                 any(), any(), eq(52L), eq(60_100L), any(), any(), any(), any())).thenReturn(List.of());
 
-        var rows = repository.claimTrailingTriggered("BTC-USDT", TriggerPriceType.MARK_PRICE, 60_100L, 52L,
+        var rows = repository.claimTrailingTriggered("BTC-USDT", 60_100L, 52L,
                 Instant.parse("2026-07-01T00:00:00Z"), 100, Instant.parse("2026-07-01T00:00:01Z"));
 
         assertThat(rows).isEmpty();
         verify(jdbcTemplate).query(contains("highest_price_ticks IS DISTINCT FROM"), any(RowMapper.class),
-                eq(60_100L), eq(60_100L), eq("BTC-USDT"), eq("MARK_PRICE"), any(), any(), eq(100),
+                eq(60_100L), eq(60_100L), eq("BTC-USDT"), any(), any(), eq(100),
                 eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L),
                 any(), any(), eq(52L), eq(60_100L), any(), any(), any(), any());
         verify(jdbcTemplate).query(contains("FOR UPDATE SKIP LOCKED"), any(RowMapper.class),
-                eq(60_100L), eq(60_100L), eq("BTC-USDT"), eq("MARK_PRICE"), any(), any(), eq(100),
+                eq(60_100L), eq(60_100L), eq("BTC-USDT"), any(), any(), eq(100),
                 eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L),
                 any(), any(), eq(52L), eq(60_100L), any(), any(), any(), any());
         verify(jdbcTemplate).query(contains("PARTITION BY claim_group_key"), any(RowMapper.class),
-                eq(60_100L), eq(60_100L), eq("BTC-USDT"), eq("MARK_PRICE"), any(), any(), eq(100),
+                eq(60_100L), eq(60_100L), eq("BTC-USDT"), any(), any(), eq(100),
                 eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L), eq(60_100L),
                 any(), any(), eq(52L), eq(60_100L), any(), any(), any(), any());
     }
@@ -285,7 +234,7 @@ class TriggerOrderRepositoryTest {
         when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
                 .thenReturn(List.of());
 
-        var rows = repository.claimTrailingTriggered("BTC-USDT", TriggerPriceType.MARK_PRICE, 60_100L, 52L,
+        var rows = repository.claimTrailingTriggered("BTC-USDT", 60_100L, 52L,
                 Instant.parse("2026-07-01T00:00:00Z"), 100,
                 Instant.parse("2026-07-01T00:00:01Z"), "LINEAR_DELIVERY");
 

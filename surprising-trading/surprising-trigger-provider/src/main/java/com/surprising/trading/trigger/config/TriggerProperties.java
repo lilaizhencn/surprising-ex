@@ -51,8 +51,6 @@ public class TriggerProperties {
         private boolean productTopicsEnabled;
         private String groupId = "surprising-trigger-v1";
         private String markPriceTopic = "surprising.perp.mark.price.v1";
-        private String indexPriceTopic = "surprising.perp.index.price.v1";
-        private String lastPriceTopic = "surprising.perp.match.trades.v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
         private String triggerOrderEventsTopic = "surprising.perp.trigger-order.events.v1";
         private int concurrency = 2;
@@ -96,22 +94,6 @@ public class TriggerProperties {
 
         public void setMarkPriceTopic(String markPriceTopic) {
             this.markPriceTopic = markPriceTopic;
-        }
-
-        public String getIndexPriceTopic() {
-            return productTopicsEnabled ? productTopics().indexPriceTopic() : indexPriceTopic;
-        }
-
-        public void setIndexPriceTopic(String indexPriceTopic) {
-            this.indexPriceTopic = indexPriceTopic;
-        }
-
-        public String getLastPriceTopic() {
-            return productTopicsEnabled ? productTopics().matchTradesTopic() : lastPriceTopic;
-        }
-
-        public void setLastPriceTopic(String lastPriceTopic) {
-            this.lastPriceTopic = lastPriceTopic;
         }
 
         public String getPositionEventsTopic() {

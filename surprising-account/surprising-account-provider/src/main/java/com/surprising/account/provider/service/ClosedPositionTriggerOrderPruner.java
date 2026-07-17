@@ -12,7 +12,6 @@ import com.surprising.trading.api.model.TriggerOrderResponse;
 import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
 import com.surprising.trading.api.model.TriggerOrderUpdatedEvent;
-import com.surprising.trading.api.model.TriggerPriceType;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -121,7 +120,6 @@ public class ClosedPositionTriggerOrderPruner {
                 rs.getString("symbol"),
                 OrderSide.valueOf(rs.getString("side")),
                 TriggerOrderType.valueOf(rs.getString("trigger_type")),
-                TriggerPriceType.valueOf(rs.getString("trigger_price_type")),
                 TriggerCondition.valueOf(rs.getString("trigger_condition")),
                 rs.getLong("trigger_price_ticks"),
                 longOrNull(rs, "activation_price_ticks"),

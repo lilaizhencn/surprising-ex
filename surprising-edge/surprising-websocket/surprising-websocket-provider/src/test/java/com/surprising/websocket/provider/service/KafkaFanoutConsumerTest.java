@@ -31,7 +31,6 @@ import com.surprising.trading.api.model.TriggerOrderResponse;
 import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
 import com.surprising.trading.api.model.TriggerOrderUpdatedEvent;
-import com.surprising.trading.api.model.TriggerPriceType;
 import com.surprising.websocket.api.model.ExecutionReportEvent;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
@@ -249,7 +248,7 @@ class KafkaFanoutConsumerTest {
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
         TriggerOrderResponse order = new TriggerOrderResponse(
                 501L, 1001L, "sl-1", null, "BTC-USDT", OrderSide.SELL,
-                TriggerOrderType.STOP_LOSS, TriggerPriceType.MARK_PRICE, TriggerCondition.LESS_OR_EQUAL,
+                TriggerOrderType.STOP_LOSS, TriggerCondition.LESS_OR_EQUAL,
                 60_000L, OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS,
                 PositionSide.NET, TriggerOrderStatus.CANCELED, null, null, null,
                 "POSITION_CLOSED", "trace-trigger", null, null, eventTime.minusSeconds(60), eventTime);

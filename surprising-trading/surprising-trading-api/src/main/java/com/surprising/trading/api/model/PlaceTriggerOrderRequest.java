@@ -15,7 +15,6 @@ public record PlaceTriggerOrderRequest(
         @NotBlank @Size(max = 64) String symbol,
         @NotNull OrderSide side,
         @NotNull TriggerOrderType triggerType,
-        TriggerPriceType triggerPriceType,
         @Min(0) long triggerPriceTicks,
         @Min(0) Long activationPriceTicks,
         @Min(1000) @Max(100000) Long callbackRatePpm,
@@ -28,7 +27,6 @@ public record PlaceTriggerOrderRequest(
         Instant expiresAt) {
 
     public PlaceTriggerOrderRequest {
-        triggerPriceType = triggerPriceType == null ? TriggerPriceType.MARK_PRICE : triggerPriceType;
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
     }
@@ -39,7 +37,6 @@ public record PlaceTriggerOrderRequest(
                                     String symbol,
                                     OrderSide side,
                                     TriggerOrderType triggerType,
-                                    TriggerPriceType triggerPriceType,
                                     long triggerPriceTicks,
                                     OrderType orderType,
                                     TimeInForce timeInForce,
@@ -47,7 +44,7 @@ public record PlaceTriggerOrderRequest(
                                     long quantitySteps,
                                     MarginMode marginMode,
                                     Instant expiresAt) {
-        this(userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType, triggerPriceType,
+        this(userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType,
                 triggerPriceTicks, null, null, orderType, timeInForce, priceTicks, quantitySteps, marginMode,
                 PositionSide.NET, expiresAt);
     }
@@ -58,7 +55,6 @@ public record PlaceTriggerOrderRequest(
                                     String symbol,
                                     OrderSide side,
                                     TriggerOrderType triggerType,
-                                    TriggerPriceType triggerPriceType,
                                     long triggerPriceTicks,
                                     OrderType orderType,
                                     TimeInForce timeInForce,
@@ -67,7 +63,7 @@ public record PlaceTriggerOrderRequest(
                                     MarginMode marginMode,
                                     PositionSide positionSide,
                                     Instant expiresAt) {
-        this(userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType, triggerPriceType,
+        this(userId, clientTriggerOrderId, ocoGroupId, symbol, side, triggerType,
                 triggerPriceTicks, null, null, orderType, timeInForce, priceTicks, quantitySteps, marginMode,
                 positionSide, expiresAt);
     }

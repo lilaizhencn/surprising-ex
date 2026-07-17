@@ -18,7 +18,6 @@ import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.TriggerCondition;
 import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
-import com.surprising.trading.api.model.TriggerPriceType;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import java.time.Instant;
@@ -42,7 +41,7 @@ class RedisTriggerOrderIndexTest {
         index.indexPlaced(order(501L, TriggerCondition.GREATER_OR_EQUAL, TriggerOrderStatus.PENDING));
 
         verify(zSetOperations).add(
-                "surprising:trigger:v1:range:{LINEAR_PERPETUAL:BTC-USDT:MARK_PRICE}:ge",
+                "surprising:trigger:v1:range:{LINEAR_PERPETUAL:BTC-USDT}:ge",
                 "501", 70_000D);
         assertThat((double) index.exactScore(RedisTriggerOrderIndex.MAX_EXACT_REDIS_SCORE))
                 .isEqualTo(RedisTriggerOrderIndex.MAX_EXACT_REDIS_SCORE);
@@ -60,13 +59,12 @@ class RedisTriggerOrderIndexTest {
                 .thenReturn(List.of("501", "502"));
         RedisTriggerOrderIndex index = new RedisTriggerOrderIndex(redisTemplate, properties());
 
-        var candidates = index.dueCandidates(ProductLine.LINEAR_PERPETUAL, "BTC-USDT",
-                TriggerPriceType.MARK_PRICE, 70_000L, 400);
+        var candidates = index.dueCandidates(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 70_000L, 400);
 
         assertThat(candidates).contains(List.of(501L, 502L));
         verify(redisTemplate).execute(any(RedisScript.class), eq(List.of(
-                        "surprising:trigger:v1:range:{LINEAR_PERPETUAL:BTC-USDT:MARK_PRICE}:ge",
-                        "surprising:trigger:v1:range:{LINEAR_PERPETUAL:BTC-USDT:MARK_PRICE}:le")),
+                        "surprising:trigger:v1:range:{LINEAR_PERPETUAL:BTC-USDT}:ge",
+                        "surprising:trigger:v1:range:{LINEAR_PERPETUAL:BTC-USDT}:le")),
                 eq("70000"), eq("400"));
     }
 
@@ -79,7 +77,7 @@ class RedisTriggerOrderIndexTest {
                                      TriggerOrderStatus status) {
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         return new TriggerOrderRecord(triggerOrderId, 1001L, "tp-" + triggerOrderId, null, "BTC-USDT",
-                OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, TriggerPriceType.MARK_PRICE, condition, 70_000L,
+                OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, condition, 70_000L,
                 OrderType.MARKET, TimeInForce.IOC, 0L, 2L, MarginMode.CROSS, PositionSide.NET, status,
                 null, null, null, null, "trace-" + triggerOrderId, null, null, now, now);
     }

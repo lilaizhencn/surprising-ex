@@ -11,8 +11,9 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * Parses only the mark-price fields needed for trigger detection.
  *
- * <p>The price module's display DTO can evolve independently; trigger execution reads the canonical
- * persisted mark units from PostgreSQL by symbol and sequence before comparing ticks.</p>
+ * <p>The price module's display DTO can evolve independently. The listener keeps only the newest
+ * symbol sequence, and the one-second trigger scan reads its canonical persisted mark units before
+ * comparing ticks.</p>
  */
 @Component
 public class MarkPriceTriggerParser {

@@ -19,7 +19,6 @@ import com.surprising.trading.api.model.TriggerOrderResponse;
 import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
 import com.surprising.trading.api.model.TriggerOrderUpdatedEvent;
-import com.surprising.trading.api.model.TriggerPriceType;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -93,7 +92,7 @@ class ClosedPositionTriggerOrderPrunerTest {
     private TriggerOrderResponse canceledOrder(Instant now) {
         return new TriggerOrderResponse(
                 501L, 1001L, "client-trigger-1", null, "BTC-USD", OrderSide.BUY,
-                TriggerOrderType.STOP_LOSS, TriggerPriceType.MARK_PRICE, TriggerCondition.LESS_OR_EQUAL,
+                TriggerOrderType.STOP_LOSS, TriggerCondition.LESS_OR_EQUAL,
                 60_000L, OrderType.MARKET, TimeInForce.GTC, 0L, 10L, MarginMode.ISOLATED,
                 PositionSide.SHORT, TriggerOrderStatus.CANCELED, null, null, null,
                 ClosedPositionTriggerOrderPruner.REASON, "trace-close", null, null, now.minusSeconds(60), now);

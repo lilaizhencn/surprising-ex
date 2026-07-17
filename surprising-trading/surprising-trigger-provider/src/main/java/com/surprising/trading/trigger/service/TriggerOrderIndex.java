@@ -1,7 +1,6 @@
 package com.surprising.trading.trigger.service;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.model.TriggerPriceType;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import java.util.List;
 import java.util.Optional;
@@ -19,12 +18,10 @@ public interface TriggerOrderIndex {
 
     void remove(ProductLine productLine,
                 String symbol,
-                TriggerPriceType triggerPriceType,
                 long triggerOrderId);
 
     Optional<List<Long>> dueCandidates(ProductLine productLine,
                                        String symbol,
-                                       TriggerPriceType triggerPriceType,
                                        long priceTicks,
                                        int limit);
 
@@ -59,14 +56,12 @@ public interface TriggerOrderIndex {
         @Override
         public void remove(ProductLine productLine,
                            String symbol,
-                           TriggerPriceType triggerPriceType,
                            long triggerOrderId) {
         }
 
         @Override
         public Optional<List<Long>> dueCandidates(ProductLine productLine,
                                                   String symbol,
-                                                  TriggerPriceType triggerPriceType,
                                                   long priceTicks,
                                                   int limit) {
             return Optional.empty();

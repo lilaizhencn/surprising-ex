@@ -9,7 +9,6 @@ import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.TriggerCondition;
 import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
-import com.surprising.trading.api.model.TriggerPriceType;
 import java.time.Instant;
 
 public record TriggerOrderRecord(
@@ -21,7 +20,6 @@ public record TriggerOrderRecord(
         String symbol,
         OrderSide side,
         TriggerOrderType triggerType,
-        TriggerPriceType triggerPriceType,
         TriggerCondition triggerCondition,
         long triggerPriceTicks,
         Long activationPriceTicks,
@@ -59,7 +57,6 @@ public record TriggerOrderRecord(
                               String symbol,
                               OrderSide side,
                               TriggerOrderType triggerType,
-                              TriggerPriceType triggerPriceType,
                               TriggerCondition triggerCondition,
                               long triggerPriceTicks,
                               OrderType orderType,
@@ -78,8 +75,7 @@ public record TriggerOrderRecord(
                               Instant createdAt,
                               Instant updatedAt) {
         this(triggerOrderId, ProductLine.LINEAR_PERPETUAL, userId, clientTriggerOrderId, ocoGroupId, symbol, side,
-                triggerType, triggerPriceType,
-                triggerCondition, triggerPriceTicks, null, null, null, null, null, orderType, timeInForce,
+                triggerType, triggerCondition, triggerPriceTicks, null, null, null, null, null, orderType, timeInForce,
                 priceTicks, quantitySteps, marginMode, PositionSide.NET, status, placedOrderId, triggerSequence,
                 triggeredPriceTicks, rejectReason, traceId, expiresAt, triggeredAt, createdAt, updatedAt);
     }
@@ -91,7 +87,6 @@ public record TriggerOrderRecord(
                               String symbol,
                               OrderSide side,
                               TriggerOrderType triggerType,
-                              TriggerPriceType triggerPriceType,
                               TriggerCondition triggerCondition,
                               long triggerPriceTicks,
                               OrderType orderType,
@@ -111,8 +106,7 @@ public record TriggerOrderRecord(
                               Instant createdAt,
                               Instant updatedAt) {
         this(triggerOrderId, ProductLine.LINEAR_PERPETUAL, userId, clientTriggerOrderId, ocoGroupId, symbol, side,
-                triggerType, triggerPriceType,
-                triggerCondition, triggerPriceTicks, null, null, null, null, null, orderType, timeInForce,
+                triggerType, triggerCondition, triggerPriceTicks, null, null, null, null, null, orderType, timeInForce,
                 priceTicks, quantitySteps, marginMode, positionSide, status, placedOrderId, triggerSequence,
                 triggeredPriceTicks, rejectReason, traceId, expiresAt, triggeredAt, createdAt, updatedAt);
     }

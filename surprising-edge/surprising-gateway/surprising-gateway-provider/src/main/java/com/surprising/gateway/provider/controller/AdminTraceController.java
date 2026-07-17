@@ -72,7 +72,7 @@ public class AdminTraceController {
     private TraceSection tradingTriggerOrders(String traceId, int limit, List<TraceWarning> warnings) {
         return querySection("TRADING_TRIGGER_ORDER", "trading_trigger_orders", warnings, """
                 SELECT trigger_order_id, user_id, client_trigger_order_id, oco_group_id, symbol, side,
-                       trigger_type, trigger_price_type, trigger_condition, order_type, time_in_force,
+                       trigger_type, trigger_condition, order_type, time_in_force,
                        quantity_steps, margin_mode, status, placed_order_id, reject_reason,
                        trace_id, expires_at, triggered_at, created_at, updated_at
                   FROM trading_trigger_orders

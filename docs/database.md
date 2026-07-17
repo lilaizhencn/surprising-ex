@@ -460,8 +460,8 @@ order path:
 - `client_trigger_order_id` is scoped by `user_id` for idempotent placement.
 - `oco_group_id` is optional and scoped by `user_id + symbol + margin_mode`. Pending siblings in the same
   OCO group are canceled when one row is claimed for execution.
-- `trigger_price_type` is `MARK_PRICE`, `INDEX_PRICE`, or `LAST_PRICE`, and `trigger_condition` is derived from close side
-  and trigger type.
+- `trigger_condition` is derived from close side and trigger type. Every trigger is evaluated from the latest
+  mark price sampled once per second, so there is no configurable price-source field.
 - `trigger_price_ticks`, `price_ticks`, and `quantity_steps` stay in the same long tick/step model as
   regular orders. Static TP/SL requires a positive `trigger_price_ticks`; trailing stop allows `0` and uses
   `activation_price_ticks`, `callback_rate_ppm`, `highest_price_ticks`, `lowest_price_ticks`, and `activated_at`
@@ -469,7 +469,7 @@ order path:
 - `status` moves through `PENDING -> TRIGGERING -> TRIGGERED` or `TRIGGER_FAILED`; user cancellation moves
   only `PENDING` rows to `CANCELED`, and expiry moves due rows to `EXPIRED`.
 - `placed_order_id` links the generated reduce-only close order in `trading_orders`.
-- `trigger_sequence` and `triggered_price_ticks` record which configured price-source event triggered the row.
+- `trigger_sequence` and `triggered_price_ticks` record which sampled mark-price event triggered the row.
 - `trace_id` is forwarded to the generated order request so private WebSocket order/match/position pushes can
   be traced back to the original TP/SL placement.
 
@@ -485,33 +485,31 @@ CREATE INDEX trading_trigger_orders_user_oco_idx
     WHERE oco_group_id IS NOT NULL;
 
 CREATE INDEX trading_trigger_orders_symbol_gte_idx
-    ON trading_trigger_orders (product_line, symbol, trigger_price_type, trigger_price_ticks, trigger_order_id)
+    ON trading_trigger_orders (product_line, symbol, trigger_price_ticks, trigger_order_id)
     WHERE status = 'PENDING'
       AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
-      AND trigger_price_type IN ('MARK_PRICE', 'INDEX_PRICE', 'LAST_PRICE')
       AND trigger_condition = 'GREATER_OR_EQUAL';
 
 CREATE INDEX trading_trigger_orders_symbol_lte_idx
-    ON trading_trigger_orders (product_line, symbol, trigger_price_type, trigger_price_ticks DESC, trigger_order_id)
+    ON trading_trigger_orders (product_line, symbol, trigger_price_ticks DESC, trigger_order_id)
     WHERE status = 'PENDING'
       AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
-      AND trigger_price_type IN ('MARK_PRICE', 'INDEX_PRICE', 'LAST_PRICE')
       AND trigger_condition = 'LESS_OR_EQUAL';
 
 CREATE INDEX trading_trigger_orders_trailing_pending_idx
-    ON trading_trigger_orders (product_line, symbol, trigger_price_type, trigger_order_id)
+    ON trading_trigger_orders (product_line, symbol, trigger_order_id)
     WHERE status = 'PENDING'
       AND trigger_type = 'TRAILING_STOP';
 ```
 
 The trigger provider claims due rows with `FOR UPDATE SKIP LOCKED`, so active-active nodes can consume the
-same configured price-source stream without executing the same trigger twice. The claim statement filters by
-`trigger_price_type`, partitions candidates by OCO group, selects one pending row per group, sets that row to
+same mark-price stream without executing the same trigger twice. The claim statement partitions candidates by
+OCO group, selects one pending row per group, sets that row to
 `TRIGGERING`, and cancels pending siblings in the same statement. The expiry and `TRIGGERING` indexes support
 scheduled expiry and stale execution retry.
 
 Spring Data Redis with Lettuce always keeps static TP/SL ids
-in product-line/symbol/price-source sorted sets. Redis performs one atomic Lua range lookup, but the returned ids
+in product-line/symbol sorted sets. Redis performs one atomic Lua range lookup, but the returned ids
 still pass through the same PostgreSQL exact predicate and row claim. The database remains authoritative for user
 queries and all state transitions. Placement writes the candidate before DB insert and cleans it on rollback;
 terminal DB changes remove the member afterward, so a process crash can only leave a harmless stale candidate.

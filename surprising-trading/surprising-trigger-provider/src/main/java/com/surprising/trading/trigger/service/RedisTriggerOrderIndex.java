@@ -4,7 +4,6 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.TriggerCondition;
 import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
-import com.surprising.trading.api.model.TriggerPriceType;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import java.util.ArrayList;
@@ -89,7 +88,7 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
         if (isOpen(order.status())) {
             put(order);
         } else {
-            removeStrict(order.productLine(), order.symbol(), order.triggerPriceType(), order.triggerOrderId());
+            removeStrict(order.productLine(), order.symbol(), order.triggerOrderId());
         }
     }
 
@@ -98,16 +97,15 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
         if (order == null || !isStaticTrigger(order)) {
             return;
         }
-        remove(order.productLine(), order.symbol(), order.triggerPriceType(), order.triggerOrderId());
+        remove(order.productLine(), order.symbol(), order.triggerOrderId());
     }
 
     @Override
     public void remove(ProductLine productLine,
                        String symbol,
-                       TriggerPriceType triggerPriceType,
                        long triggerOrderId) {
         try {
-            removeStrict(productLine, symbol, triggerPriceType, triggerOrderId);
+            removeStrict(productLine, symbol, triggerOrderId);
         } catch (RuntimeException ex) {
             // A stale member is safe: PostgreSQL will reject it during the exact conditional claim.
             log.warn("Failed to remove stale Redis trigger member id={}: {}", triggerOrderId, ex.getMessage());
@@ -117,7 +115,6 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
     @Override
     public Optional<List<Long>> dueCandidates(ProductLine productLine,
                                               String symbol,
-                                              TriggerPriceType triggerPriceType,
                                               long priceTicks,
                                               int limit) {
         try {
@@ -129,8 +126,8 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
             @SuppressWarnings("unchecked")
             List<Object> values = redisTemplate.execute(
                     DUE_CANDIDATES,
-                    List.of(rangeKey(productLine, symbol, triggerPriceType, "ge"),
-                            rangeKey(productLine, symbol, triggerPriceType, "le")),
+                    List.of(rangeKey(productLine, symbol, "ge"),
+                            rangeKey(productLine, symbol, "le")),
                     Long.toString(score), Integer.toString(normalizedLimit));
             if (values == null || values.isEmpty()) {
                 return Optional.of(List.of());
@@ -142,8 +139,8 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
             return Optional.of(List.copyOf(ids));
         } catch (RuntimeException ex) {
             markNotReady(productLine);
-            log.warn("Redis trigger candidate lookup failed; using PostgreSQL fallback line={} symbol={} type={}: {}",
-                    productLine, symbol, triggerPriceType, ex.getMessage());
+            log.warn("Redis trigger candidate lookup failed; using PostgreSQL fallback line={} symbol={}: {}",
+                    productLine, symbol, ex.getMessage());
             return Optional.empty();
         }
     }
@@ -173,9 +170,8 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
 
     String rangeKey(ProductLine productLine,
                     String symbol,
-                    TriggerPriceType triggerPriceType,
                     String condition) {
-        String scope = productLine.name() + ":" + symbol + ":" + triggerPriceType.name();
+        String scope = productLine.name() + ":" + symbol;
         return keyPrefix() + ":range:{" + scope + "}:" + condition;
     }
 
@@ -194,7 +190,7 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
     private void put(TriggerOrderRecord order) {
         String condition = order.triggerCondition() == TriggerCondition.GREATER_OR_EQUAL ? "ge" : "le";
         Boolean indexed = redisTemplate.opsForZSet().add(
-                rangeKey(order.productLine(), order.symbol(), order.triggerPriceType(), condition),
+                rangeKey(order.productLine(), order.symbol(), condition),
                 Long.toString(order.triggerOrderId()),
                 exactScore(order.triggerPriceTicks()));
         if (indexed == null) {
@@ -204,12 +200,11 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
 
     private void removeStrict(ProductLine productLine,
                               String symbol,
-                              TriggerPriceType triggerPriceType,
                               long triggerOrderId) {
         redisTemplate.execute(
                 REMOVE_FROM_RANGE,
-                List.of(rangeKey(productLine, symbol, triggerPriceType, "ge"),
-                        rangeKey(productLine, symbol, triggerPriceType, "le")),
+                List.of(rangeKey(productLine, symbol, "ge"),
+                        rangeKey(productLine, symbol, "le")),
                 Long.toString(triggerOrderId));
     }
 

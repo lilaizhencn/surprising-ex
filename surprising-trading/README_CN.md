@@ -145,18 +145,18 @@ REST 接口：
 大型交易所的 TP/SL 通常是活跃订单簿外的条件单。本模块按这个模型实现：
 
 - 条件单先以 `PENDING` 状态保存在 `trading_trigger_orders`，触发前不进入 exchange-core，也不冻结新增保证金。
-- 当前支持 `MARK_PRICE`、`INDEX_PRICE` 和 `LAST_PRICE` 触发源。`LAST_PRICE` 消费真实撮合成交流，可用于用户 TP/SL/追踪止损条件单；但薄盘口下按最新成交价触发更容易被短时冲击操纵，强平仍只依赖 mark price。
-- 触发方向由平仓方向和条件单类型自动推导：多仓止盈是 `SELL + TAKE_PROFIT`，所选触发价源大于等于触发价时触发；多仓止损是 `SELL + STOP_LOSS`，所选触发价源小于等于触发价时触发。空仓平仓用 `BUY`，方向相反。
-- `TRAILING_STOP` 要求执行单为 `MARKET`，`callbackRatePpm` 在 `[1000, 100000]`（`0.1%` 到 `10%`），`activationPriceTicks` 可选。SELL 追踪止损激活后维护最高价，价格从最高价回撤达到回调比例时触发；BUY 追踪止损维护最低价，反弹达到回调比例时触发。只有追踪止损有这些水位字段；固定 TP/SL 不会更新它们，PostgreSQL 也只在首次激活或出现新高/新低时写追踪水位，不会每个价格事件都重写。
-- trigger provider 对 `MARK_PRICE` 消费当前产品线的 mark-price topic，对 `INDEX_PRICE` 消费 index-price topic，对 `LAST_PRICE` 消费 match-trades topic；校验 Kafka key 等于 payload `symbol`，再把 mark/index 已落库价格行按当前 instrument tick size 转为 ticks，用 PostgreSQL `FOR UPDATE SKIP LOCKED` 抢占到期条件单。关闭产品线 topic 路由时才使用 legacy `surprising.perp.*` topic。
+- 标记价格是止盈止损触发源。每个 symbol 的更高 sequence 会覆盖尚未扫描的旧标记价格，固定每秒只处理最新样本。
+- 触发方向由平仓方向和条件单类型自动推导：多仓止盈是 `SELL + TAKE_PROFIT`，采样标记价大于等于触发价时触发；多仓止损是 `SELL + STOP_LOSS`，采样标记价小于等于触发价时触发。空仓平仓用 `BUY`，方向相反。
+- `TRAILING_STOP` 要求执行单为 `MARKET`，`callbackRatePpm` 在 `[1000, 100000]`（`0.1%` 到 `10%`），`activationPriceTicks` 可选。SELL 追踪止损激活后维护每秒采样标记价的最高价，从最高价回撤达到回调比例时触发；BUY 追踪止损维护每秒采样标记价的最低价，反弹达到回调比例时触发。只有追踪止损有这些水位字段；固定 TP/SL 不会更新它们，PostgreSQL 也只在首次激活或采样标记价出现新高/新低时写追踪水位。
+- trigger provider 只消费当前产品线的 mark-price topic 并校验 Kafka key 等于 payload `symbol`。Kafka listener 只更新内存中的 symbol 最新样本；每秒调度器再把已落库标记价格按当前 instrument tick size 转为 ticks，并用 PostgreSQL `FOR UPDATE SKIP LOCKED` 抢占到期条件单。一秒内被更高 sequence 覆盖的标记价格不会参与触发判断。
 - 多个 trigger-provider 节点可以同时运行。每条到期条件单只能被一个节点抢到；如果下游 order-provider 故障，`TRIGGERING` 状态超过 `surprising.trading.trigger.execution.stale-triggering-after` 后会重置，等待后续 mark 事件重试。
-- 静态 `TAKE_PROFIT`/`STOP_LOSS` 默认且始终通过 Spring Data Redis + Lettuce 写入按产品线、symbol、价格源隔离的 Redis ZSET，无需功能开关。一次 Lua 调用同时读取大于等于和小于等于两个范围，PostgreSQL 再对候选 id 复核并执行原有 `FOR UPDATE SKIP LOCKED` 状态迁移；追踪止损的高低水位更新仍保留在 PostgreSQL。
+- 静态 `TAKE_PROFIT`/`STOP_LOSS` 默认且始终通过 Spring Data Redis + Lettuce 写入按产品线、symbol 隔离的 Redis ZSET，无需功能开关。一次 Lua 调用同时读取大于等于和小于等于两个范围，PostgreSQL 再对候选 id 复核并执行原有 `FOR UPDATE SKIP LOCKED` 状态迁移；追踪止损的高低水位保留在 PostgreSQL，并使用相同的每秒标记价格样本。
 - Redis score 只使用 `2^53-1` 以内可精确表示的整数 ticks；已有数据超过范围时索引保持 not-ready 并退回数据库扫描，不能用浮点近似冒漏触发风险。新静态 TP/SL 在 Redis 索引写失败时 fail-closed；Redis 查询不可用时，已经提交的条件单仍走数据库 fallback 触发。
 - readiness marker 使用短 TTL 并在校准后刷新。带 token 的 `SET NX` lease 和 compare-and-delete Lua 解锁只用于防止多节点重复重建，不串行业务触发。终态 DB 更新成功后再幂等删除 Redis member，因此故障最多留下会被 DB 拒绝的陈旧候选，不会制造错误数据库终态。
 - 触发后通过 order-provider 提交 `reduceOnly=true`、`postOnly=false` 的平仓单，`clientOrderId=trigger-<triggerOrderId>`。order-provider 的幂等键会保护重试不会创建重复平仓单。
 - 触发后的真实订单继续走普通订单、撮合、账户、手续费、PnL、风控、强平和 WebSocket 链路。trigger 服务不直接修改余额或持仓。
 - `MARKET` 触发执行要求 `priceTicks=0` 且 `timeInForce` 为 `IOC` 或 `FOK`。静态 TP/SL 也可用 `LIMIT` 执行且要求 `priceTicks > 0`；触发执行不支持 `GTX`。
-- 可选 `ocoGroupId` 支持成对 TP/SL 互撤。同一个 `userId + symbol + marginMode + ocoGroupId` 组里任意一条 pending 条件单被配置的触发价源事件抢占触发时，同一条数据库 claim 语句会先把其它 pending sibling 置为 `CANCELED`，再提交生成的 reduce-only 平仓单。
+- 可选 `ocoGroupId` 支持成对 TP/SL 互撤。每秒采样的最新标记价抢占同一个 `userId + symbol + marginMode + ocoGroupId` 组里任意一条 pending 条件单时，同一条数据库 claim 语句会先把其它 pending sibling 置为 `CANCELED`，再提交生成的 reduce-only 平仓单。
 - 持仓完全归零时，account 会在结算事务内按精确的 `productLine + userId + symbol + marginMode + positionSide` 范围取消剩余全部 `PENDING` 条件单，并写入 `rejectReason=POSITION_CLOSED`。普通平仓、强平成交、交割结算和期权行权都走这条链路；事务提交后再由 account 持仓 outbox 事件驱动 Redis ZSET 幂等清理。已经处于 `TRIGGERING` 的行不会被抢撤，继续走现有 reduce-only 状态机收敛。
 - 批量条件单放置支持 `atomic=true`，用于组合 TP/SL 的全成全撤语义。原子模式下任一条校验失败会拒绝整组、回滚已插入条件单，并返回逐项失败结果；默认批量模式仍保持逐条隔离成功/失败。
 - OCO sibling 在 claim 阶段就会取消；如果后续 order-provider 执行失败，该 OCO 组也已经被消费。这个取舍可以避免多节点 trigger-provider 并发下重复平仓，执行失败后客户端可以重新挂一组 TP/SL。
@@ -176,7 +176,6 @@ curl -X POST 'http://localhost:9084/api/v1/trading/trigger-orders' \
     "symbol": "BTC-USDT",
     "side": "SELL",
     "triggerType": "TAKE_PROFIT",
-    "triggerPriceType": "MARK_PRICE",
     "triggerPriceTicks": 700000,
     "orderType": "MARKET",
     "timeInForce": "IOC",

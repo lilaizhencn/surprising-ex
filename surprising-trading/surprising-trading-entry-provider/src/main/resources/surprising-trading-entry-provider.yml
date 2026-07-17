@@ -81,8 +81,6 @@ surprising:
         product-topics-enabled: false
         group-id: surprising-trigger-v1
         mark-price-topic: surprising.perp.mark.price.v1
-        index-price-topic: surprising.perp.index.price.v1
-        last-price-topic: surprising.perp.match.trades.v1
         position-events-topic: surprising.account.position.events.v1
         trigger-order-events-topic: surprising.perp.trigger-order.events.v1
         concurrency: 2

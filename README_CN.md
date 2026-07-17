@@ -155,7 +155,7 @@ curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
 curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
 curl 'http://localhost:9082/api/v1/price/mark/latest?symbol=BTC-USDT'
 curl -X POST 'http://localhost:9084/api/v1/trading/orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientOrderId":"cli-1001-1","symbol":"BTC-USDT","side":"BUY","orderType":"LIMIT","timeInForce":"GTC","priceTicks":650000,"quantitySteps":10,"reduceOnly":false,"postOnly":false}'
-curl -X POST 'http://localhost:9084/api/v1/trading/trigger-orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientTriggerOrderId":"tp-1001-1","ocoGroupId":"bracket-1001-1","symbol":"BTC-USDT","side":"SELL","triggerType":"TAKE_PROFIT","triggerPriceType":"MARK_PRICE","triggerPriceTicks":700000,"orderType":"MARKET","timeInForce":"IOC","priceTicks":0,"quantitySteps":10,"marginMode":"CROSS"}'
+curl -X POST 'http://localhost:9084/api/v1/trading/trigger-orders' -H 'Content-Type: application/json' -d '{"userId":1001,"clientTriggerOrderId":"tp-1001-1","ocoGroupId":"bracket-1001-1","symbol":"BTC-USDT","side":"SELL","triggerType":"TAKE_PROFIT","triggerPriceTicks":700000,"orderType":"MARKET","timeInForce":"IOC","priceTicks":0,"quantitySteps":10,"marginMode":"CROSS"}'
 curl 'http://localhost:9088/api/v1/funding/rates/latest?symbol=BTC-USDT'
 curl 'http://localhost:9088/api/v1/insurance/balances?asset=USDT'
 curl 'http://localhost:9088/api/v1/adl/queue?asset=USDT&limit=100'
@@ -216,7 +216,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - 市价单在订单入口使用新鲜 mark price 的可成交区间校验 notional，matching 再按买卖方向保护价提交 exchange-core；线性合约市价单无论 BUY/SELL 都按上边界冻结初始保证金，保证 SELL 市价单吃到高买价时不会抵押不足。matching 会拒绝会自成交的 taker 订单。
 - 普通订单改单由 order-provider 对开放 LIMIT 订单执行 cancel-replace；替换单使用新的 `newClientOrderId`，重新走普通订单校验和资金预占，原单释放仍由撤单撮合结果和 account 结算完成。
 - TWAP 和 Iceberg 算法单是 order-provider 里的父单，不进入实时订单簿。调度出的子单仍是普通 order-provider 订单，所以成交继续经过 exchange-core 撮合、账户结算、风控、强平检查和 WebSocket fanout。活动算法单会阻断保证金模式和持仓模式切换，直到取消或完成。
-- 止盈、止损和追踪止损都是条件单，触发前只保存在 `trading_trigger_orders`，不进入 exchange-core 订单簿；配置的 `MARK_PRICE`、`INDEX_PRICE` 或 `LAST_PRICE` 触发源满足触发规则后，`surprising-trigger-provider` 通过 order-provider 提交幂等的 `reduceOnly=true` 平仓单，`clientOrderId=trigger-<triggerOrderId>`。追踪止损使用整数 `callbackRatePpm`（`1000` = `0.1%`，`100000` = `10%`）和可选 `activationPriceTicks`，激活后维护最高/最低水位，达到回调幅度才触发。`LAST_PRICE` 来自真实撮合成交，薄盘口下比 mark/index 更容易受短时冲击影响。
+- 止盈、止损和追踪止损都由标记价格触发。trigger-provider 按 symbol 只保留最新标记价格并固定每秒扫描一次。满足规则后通过 order-provider 提交幂等的 `reduceOnly=true` 平仓单，`clientOrderId=trigger-<triggerOrderId>`。追踪止损使用整数 `callbackRatePpm`（`1000` = `0.1%`，`100000` = `10%`）和可选 `activationPriceTicks`，最高/最低水位同样只按每秒采样的最新标记价格更新。
 - 静态止盈止损默认且始终使用 Spring Data Redis + Lettuce ZSET 候选索引，无需功能开关。Redis 只做价格范围候选过滤；PostgreSQL 仍负责精确价格、状态、过期、OCO 条件校验和最终抢占，也是唯一权威状态。用户开放条件单查询继续读取数据库。用户撤单、过期、OCO 互撤、触发成功/拒绝以及事务回滚都会移除或校准索引；Redis 不可用或索引未 ready 时，已提交条件单退回原数据库 claim 链路。
 - 成对 TP/SL 可以使用同一个 `ocoGroupId`；同一用户、symbol、保证金模式组里任意一条 pending 触发单被抢占后，其它 pending sibling 会在同一条数据库语句里先置为 `CANCELED`，然后再提交生成的平仓单。
 - 普通平仓、强平成交、交割结算或期权行权把持仓降为零时，account 会在同一个 PostgreSQL 事务里取消该持仓剩余的 `PENDING` 条件单，并把 `CANCELED` 状态快照写入 trading outbox。提交后的持仓事件驱动 trigger-provider 删除对应静态止盈止损 Redis member，`trigger-order.events` 驱动认证用户 WebSocket 主动刷新；`GET /open` 始终以数据库已取消状态为准。
