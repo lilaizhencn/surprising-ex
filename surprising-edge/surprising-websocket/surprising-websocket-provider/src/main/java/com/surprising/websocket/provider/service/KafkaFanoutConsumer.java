@@ -7,6 +7,7 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
+import com.surprising.price.api.model.PriceStatus;
 import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
 import com.surprising.risk.api.model.RiskPositionUpdatedEvent;
 import com.surprising.trading.api.KafkaSymbolKeyValidator;
@@ -20,6 +21,8 @@ import com.surprising.websocket.api.model.ExecutionReportEvent;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import com.surprising.websocket.provider.config.WebSocketProperties;
+import java.time.Duration;
+import java.time.Instant;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -135,11 +138,35 @@ public class KafkaFanoutConsumer {
             requireCurrentProductTopic(record.topic(), markPriceTopic(), "mark price");
             MarkPriceEvent event = objectMapper.readValue(record.value(), MarkPriceEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "mark price");
+            if (!isFreshMarkPrice(event)) {
+                log.warn("Dropped unusable mark price symbol={} status={} eventTime={} publishedAt={}",
+                        event.symbol(), event.status(), event.eventTime(), event.publishedAt());
+                return;
+            }
             registry.publish(topic(WsChannel.MARK_PRICE, event.symbol(), null), event, event.eventTime());
         } catch (Exception ex) {
             log.error("Failed to fanout mark price: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout mark price", ex);
         }
+    }
+
+    private boolean isFreshMarkPrice(MarkPriceEvent event) {
+        if (event == null || event.productLine() != properties.getKafka().getProductLine()
+                || event.instrumentVersion() <= 0 || event.markPriceUnits() <= 0 || event.markPriceTicks() <= 0
+                || event.sequence() <= 0 || event.eventTime() == null || event.publishedAt() == null
+                || event.status() == null || event.status() == PriceStatus.STALE
+                || event.status() == PriceStatus.INSUFFICIENT_SOURCES
+                || event.publishedAt().isBefore(event.eventTime())) {
+            return false;
+        }
+        Instant now = Instant.now();
+        Duration maxAge = properties.getFanout().getMarkPriceMaxAge();
+        Duration futureSkew = properties.getFanout().getMarkPriceAllowedFutureSkew();
+        return maxAge != null && !maxAge.isNegative() && !maxAge.isZero()
+                && futureSkew != null && !futureSkew.isNegative()
+                && !event.eventTime().isBefore(now.minus(maxAge))
+                && !event.eventTime().isAfter(now.plus(futureSkew))
+                && !event.publishedAt().isAfter(now.plus(futureSkew));
     }
 
     @KafkaListener(

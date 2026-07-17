@@ -29,7 +29,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
                 "com.surprising.liquidation.provider",
                 "com.surprising.funding.provider",
                 "com.surprising.insurance.provider",
-                "com.surprising.adl.provider"
+                "com.surprising.adl.provider",
+                "com.surprising.price.consumer"
         },
         excludeFilters = @ComponentScan.Filter(
                 type = FilterType.ASSIGNABLE_TYPE,

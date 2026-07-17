@@ -13,7 +13,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -153,37 +152,6 @@ public class MarkPriceRepository {
                      LIMIT ?
                  )
                 """, Timestamp.from(cutoff), batchSize);
-    }
-
-    public Optional<MarkPriceResponse> latest(String symbol) {
-        String sql = """
-                SELECT *
-                  FROM price_mark_ticks
-                 WHERE symbol = ?
-                 ORDER BY event_time DESC
-                 LIMIT 1
-                """;
-        List<MarkPriceResponse> rows = jdbcTemplate.query(sql, (rs, rowNum) -> new MarkPriceResponse(
-                rs.getString("symbol"),
-                rs.getBigDecimal("mark_price"),
-                rs.getLong("mark_price_units"),
-                rs.getBigDecimal("index_price"),
-                rs.getBigDecimal("price1"),
-                rs.getBigDecimal("price2"),
-                rs.getBigDecimal("last_trade_price"),
-                rs.getBigDecimal("best_bid_price"),
-                rs.getBigDecimal("best_ask_price"),
-                rs.getBigDecimal("funding_rate"),
-                rs.getTimestamp("next_funding_time").toInstant(),
-                rs.getLong("time_until_funding_seconds"),
-                rs.getBigDecimal("basis_average"),
-                rs.getLong("basis_window_seconds"),
-                rs.getBigDecimal("clamp_low"),
-                rs.getBigDecimal("clamp_high"),
-                rs.getLong("sequence"),
-                PriceStatus.valueOf(rs.getString("status")),
-                rs.getTimestamp("event_time").toInstant()), symbol);
-        return rows.stream().findFirst();
     }
 
     public List<MarkPriceResponse> history(String symbol, Instant startTime, Instant endTime, int limit) {

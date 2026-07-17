@@ -38,10 +38,10 @@ import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventRecord;
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventWrite;
 import com.surprising.marketmaker.provider.repository.MarketMakerStrategyOverrideStore;
-import com.surprising.price.api.client.MarkPriceRpcApi;
-import com.surprising.price.api.model.MarkPriceQueryResponse;
-import com.surprising.price.api.model.MarkPriceResponse;
+import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PriceStatus;
+import com.surprising.price.consumer.LatestMarkPriceCache;
+import com.surprising.price.consumer.MarkPriceConsumerProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AmendOrderBatchResponse;
 import com.surprising.trading.api.model.AmendOrderRequest;
@@ -78,6 +78,7 @@ import com.surprising.trading.api.client.MarketDataRpcApi;
 import com.surprising.trading.api.client.OrderRpcApi;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -351,10 +352,26 @@ class MarketMakerServiceTest {
         private MarketMakerService service(MarketMakerAdminRepository adminRepository,
                                            ReferenceMarketProvider referenceMarketProvider) {
             MarketMakerProperties properties = properties();
-            return new MarketMakerService(properties, new FakeInstrumentRpc(), new FakeMarkPriceRpc(),
+            return new MarketMakerService(properties, new FakeInstrumentRpc(), markPriceCache(),
                     new FakeMarketDataRpc(), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
                     referenceMarketProvider, (productLine, strategyId, symbol, ownerId, leaseDuration) -> true,
                     new FakeOverrideStore(), adminRepository);
+        }
+
+        private LatestMarkPriceCache markPriceCache() {
+            MarkPriceConsumerProperties consumerProperties = new MarkPriceConsumerProperties();
+            consumerProperties.setProductLine(ProductLine.LINEAR_PERPETUAL);
+            consumerProperties.setMaxAge(Duration.ofSeconds(3));
+            LatestMarkPriceCache cache = new LatestMarkPriceCache(consumerProperties);
+            Instant now = Instant.now();
+            BigDecimal price = BigDecimal.valueOf(50_000L);
+            cache.update(new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 1L,
+                    5_000_000L, 50_000L, price, price, price, price, price,
+                    BigDecimal.valueOf(49_990L), BigDecimal.valueOf(50_010L), BigDecimal.ZERO,
+                    now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
+                    BigDecimal.valueOf(49_000L), BigDecimal.valueOf(51_000L), 1L,
+                    PriceStatus.HEALTHY, now, now));
+            return cache;
         }
 
         private MarketMakerProperties properties() {
@@ -606,23 +623,6 @@ class MarketMakerServiceTest {
             return new OrderBookSnapshotResponse(symbol, 1L, depth,
                     List.of(new OrderBookLevel(49_990L, 100L, 1L)),
                     List.of(new OrderBookLevel(50_010L, 100L, 1L)), now);
-        }
-    }
-
-    private static final class FakeMarkPriceRpc implements MarkPriceRpcApi {
-        @Override
-        public MarkPriceResponse latestMarkPrice(String symbol) {
-            Instant now = Instant.parse("2026-01-01T00:00:00Z");
-            return new MarkPriceResponse(symbol, BigDecimal.valueOf(50_000L), 5_000_000L,
-                    BigDecimal.valueOf(50_000L), BigDecimal.valueOf(50_000L), BigDecimal.valueOf(50_000L),
-                    BigDecimal.valueOf(50_000L), BigDecimal.valueOf(49_990L), BigDecimal.valueOf(50_010L),
-                    BigDecimal.ZERO, now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
-                    BigDecimal.valueOf(49_000L), BigDecimal.valueOf(51_000L), 1L, PriceStatus.HEALTHY, now);
-        }
-
-        @Override
-        public MarkPriceQueryResponse history(String symbol, Instant startTime, Instant endTime, int limit) {
-            throw new UnsupportedOperationException();
         }
     }
 

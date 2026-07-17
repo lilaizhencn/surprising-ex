@@ -14,7 +14,9 @@ import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderBookDepthEvent;
 import com.surprising.trading.api.model.OrderBookDepthUpdateType;
 import com.surprising.trading.api.model.OrderBookLevel;
+import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
+import com.surprising.price.api.model.PriceStatus;
 import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
 import com.surprising.risk.api.model.RiskPositionUpdatedEvent;
 import com.surprising.risk.api.model.RiskStatus;
@@ -167,6 +169,31 @@ class KafkaFanoutConsumerTest {
     }
 
     @Test
+    void fansOutFreshMarkPriceBySymbol() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        MarkPriceEvent event = markPriceEvent(Instant.now());
+
+        consumer.onMarkPrice(new ConsumerRecord<>("surprising.perp.mark.price.v1", 0, 0L,
+                "BTC-USDT", objectMapper.writeValueAsString(event)));
+
+        verify(registry).publish(eq(new SubscriptionTopic(WsChannel.MARK_PRICE, "BTC-USDT", null, null)),
+                eq(event), eq(event.eventTime()));
+    }
+
+    @Test
+    void dropsStaleMarkPriceWithoutFanoutOrRetryFailure() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        MarkPriceEvent event = markPriceEvent(Instant.now().minusSeconds(4));
+
+        consumer.onMarkPrice(new ConsumerRecord<>("surprising.perp.mark.price.v1", 0, 0L,
+                "BTC-USDT", objectMapper.writeValueAsString(event)));
+
+        verifyNoInteractions(registry);
+    }
+
+    @Test
     void fansOutMatchTradeToPublicTradesAndPrivateMatches() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
@@ -208,6 +235,15 @@ class KafkaFanoutConsumerTest {
         assertThat(makerReport.orderCompleted()).isFalse();
         assertThat(makerReport.priceTicks()).isEqualTo(600_000L);
         assertThat(makerReport.quantitySteps()).isEqualTo(3L);
+    }
+
+    private MarkPriceEvent markPriceEvent(Instant eventTime) {
+        BigDecimal price = new BigDecimal("50000");
+        return new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 1L, 5_000_000L, 50_000L,
+                price, price, price, price, price, new BigDecimal("49990"), new BigDecimal("50010"),
+                BigDecimal.ZERO, eventTime.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
+                new BigDecimal("49000"), new BigDecimal("51000"), 1L, PriceStatus.HEALTHY,
+                eventTime, eventTime);
     }
 
     @Test

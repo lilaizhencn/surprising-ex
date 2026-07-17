@@ -24,8 +24,9 @@ import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventRecord;
 import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventWrite;
 import com.surprising.marketmaker.provider.repository.MarketMakerStrategyOverrideStore;
-import com.surprising.price.api.client.MarkPriceRpcApi;
+import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPriceResponse;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.CancelOrderRequest;
@@ -72,7 +73,7 @@ public class MarketMakerService {
 
     private final MarketMakerProperties properties;
     private final InstrumentRpcApi instrumentRpcApi;
-    private final MarkPriceRpcApi markPriceRpcApi;
+    private final LatestMarkPriceCache markPriceCache;
     private final MarketDataRpcApi marketDataRpcApi;
     private final OrderRpcApi orderRpcApi;
     private final AccountRpcApi accountRpcApi;
@@ -91,21 +92,21 @@ public class MarketMakerService {
 
     MarketMakerService(MarketMakerProperties properties,
                        InstrumentRpcApi instrumentRpcApi,
-                       MarkPriceRpcApi markPriceRpcApi,
+                       LatestMarkPriceCache markPriceCache,
                        MarketDataRpcApi marketDataRpcApi,
                        OrderRpcApi orderRpcApi,
                        AccountRpcApi accountRpcApi,
                        QuotePlanner quotePlanner,
                        MarketMakerLeaseCoordinator leaseCoordinator,
                        MarketMakerStrategyOverrideStore overrideStore) {
-        this(properties, instrumentRpcApi, markPriceRpcApi, marketDataRpcApi, orderRpcApi, accountRpcApi,
+        this(properties, instrumentRpcApi, markPriceCache, marketDataRpcApi, orderRpcApi, accountRpcApi,
                 quotePlanner, ReferenceMarketProvider.disabled(), leaseCoordinator, overrideStore,
                 new NoopMarketMakerAdminRepository());
     }
 
     MarketMakerService(MarketMakerProperties properties,
                        InstrumentRpcApi instrumentRpcApi,
-                       MarkPriceRpcApi markPriceRpcApi,
+                       LatestMarkPriceCache markPriceCache,
                        MarketDataRpcApi marketDataRpcApi,
                        OrderRpcApi orderRpcApi,
                        AccountRpcApi accountRpcApi,
@@ -113,14 +114,14 @@ public class MarketMakerService {
                        MarketMakerLeaseCoordinator leaseCoordinator,
                        MarketMakerStrategyOverrideStore overrideStore,
                        MarketMakerAdminRepository adminRepository) {
-        this(properties, instrumentRpcApi, markPriceRpcApi, marketDataRpcApi, orderRpcApi, accountRpcApi,
+        this(properties, instrumentRpcApi, markPriceCache, marketDataRpcApi, orderRpcApi, accountRpcApi,
                 quotePlanner, ReferenceMarketProvider.disabled(), leaseCoordinator, overrideStore, adminRepository);
     }
 
     @Autowired
     public MarketMakerService(MarketMakerProperties properties,
                               InstrumentRpcApi instrumentRpcApi,
-                              MarkPriceRpcApi markPriceRpcApi,
+                              LatestMarkPriceCache markPriceCache,
                               MarketDataRpcApi marketDataRpcApi,
                               OrderRpcApi orderRpcApi,
                               AccountRpcApi accountRpcApi,
@@ -131,7 +132,7 @@ public class MarketMakerService {
                               MarketMakerAdminRepository adminRepository) {
         this.properties = properties;
         this.instrumentRpcApi = instrumentRpcApi;
-        this.markPriceRpcApi = markPriceRpcApi;
+        this.markPriceCache = markPriceCache;
         this.marketDataRpcApi = marketDataRpcApi;
         this.orderRpcApi = orderRpcApi;
         this.accountRpcApi = accountRpcApi;
@@ -423,7 +424,7 @@ public class MarketMakerService {
             InstrumentResponse instrument = instrumentRpcApi.latest(symbol);
             OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
                     properties.getQuoting().getOrderBookDepth());
-            MarkPriceResponse markPrice = latestMarkPrice(symbol);
+            MarkPriceResponse markPrice = latestMarkPrice(symbol, instrument.version());
             ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol, productLine, instrument);
             QuotePlan plan = !isTradableForProduct(instrument, productLine)
                     ? new QuotePlan(0L, position.signedQuantitySteps(), List.of())
@@ -713,7 +714,7 @@ public class MarketMakerService {
                 requireTradable(instrument, strategy.getProductLine());
                 OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
                         properties.getQuoting().getOrderBookDepth());
-                MarkPriceResponse markPrice = latestMarkPrice(symbol);
+                MarkPriceResponse markPrice = latestMarkPrice(symbol, instrument.version());
                 ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol,
                         strategy.getProductLine(), instrument);
                 recordReferenceSample(strategy, symbol, cycleSequence, referenceOrderBook, traceId, now);
@@ -1076,13 +1077,17 @@ public class MarketMakerService {
         return response == null || response.orders() == null ? List.of() : response.orders();
     }
 
-    private MarkPriceResponse latestMarkPrice(String symbol) {
-        try {
-            return markPriceRpcApi.latestMarkPrice(symbol);
-        } catch (RuntimeException ex) {
-            log.debug("Mark price unavailable for market-maker symbol={}: {}", symbol, ex.getMessage());
-            return null;
+    private MarkPriceResponse latestMarkPrice(String symbol, long instrumentVersion) {
+        MarkPriceEvent event = markPriceCache.requireFresh(symbol);
+        if (event.instrumentVersion() != instrumentVersion) {
+            throw new IllegalStateException("mark price instrument version mismatch for " + symbol
+                    + ": expected=" + instrumentVersion + ", actual=" + event.instrumentVersion());
         }
+        return new MarkPriceResponse(event.symbol(), event.markPrice(), event.markPriceUnits(), event.indexPrice(),
+                event.price1(), event.price2(), event.lastTradePrice(), event.bestBidPrice(), event.bestAskPrice(),
+                event.fundingRate(), event.nextFundingTime(), event.timeUntilFundingSeconds(), event.basisAverage(),
+                event.basisWindowSeconds(), event.clampLow(), event.clampHigh(), event.sequence(), event.status(),
+                event.eventTime());
     }
 
     private void requireTradable(InstrumentResponse instrument, ProductLine productLine) {

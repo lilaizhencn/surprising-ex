@@ -49,3 +49,5 @@ surprising:
         - "*"
     fanout:
       candle-partial-coalesce-window: 250ms
+      mark-price-max-age: 3s
+      mark-price-allowed-future-skew: 1s

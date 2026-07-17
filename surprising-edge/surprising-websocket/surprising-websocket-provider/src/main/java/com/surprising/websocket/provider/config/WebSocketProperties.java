@@ -312,6 +312,8 @@ public class WebSocketProperties {
 
     public static class Fanout {
         private Duration candlePartialCoalesceWindow = Duration.ofMillis(250);
+        private Duration markPriceMaxAge = Duration.ofSeconds(3);
+        private Duration markPriceAllowedFutureSkew = Duration.ofSeconds(1);
 
         public Duration getCandlePartialCoalesceWindow() {
             return candlePartialCoalesceWindow;
@@ -319,6 +321,22 @@ public class WebSocketProperties {
 
         public void setCandlePartialCoalesceWindow(Duration candlePartialCoalesceWindow) {
             this.candlePartialCoalesceWindow = candlePartialCoalesceWindow;
+        }
+
+        public Duration getMarkPriceMaxAge() {
+            return markPriceMaxAge;
+        }
+
+        public void setMarkPriceMaxAge(Duration markPriceMaxAge) {
+            this.markPriceMaxAge = markPriceMaxAge;
+        }
+
+        public Duration getMarkPriceAllowedFutureSkew() {
+            return markPriceAllowedFutureSkew;
+        }
+
+        public void setMarkPriceAllowedFutureSkew(Duration markPriceAllowedFutureSkew) {
+            this.markPriceAllowedFutureSkew = markPriceAllowedFutureSkew;
         }
     }
 }

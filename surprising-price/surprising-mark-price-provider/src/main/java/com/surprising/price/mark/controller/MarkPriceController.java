@@ -3,6 +3,8 @@ package com.surprising.price.mark.controller;
 import com.surprising.price.api.PriceApiPaths;
 import com.surprising.price.api.model.MarkPriceQueryResponse;
 import com.surprising.price.api.model.MarkPriceResponse;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.price.mark.repository.MarkPriceRepository;
 import java.time.Instant;
 import org.springframework.http.HttpStatus;
@@ -16,15 +18,20 @@ import org.springframework.web.server.ResponseStatusException;
 public class MarkPriceController {
 
     private final MarkPriceRepository markPriceRepository;
+    private final LatestMarkPriceCache markPriceCache;
 
-    public MarkPriceController(MarkPriceRepository markPriceRepository) {
+    public MarkPriceController(MarkPriceRepository markPriceRepository, LatestMarkPriceCache markPriceCache) {
         this.markPriceRepository = markPriceRepository;
+        this.markPriceCache = markPriceCache;
     }
 
     @GetMapping(PriceApiPaths.MARK_BASE_PATH + "/latest")
     public MarkPriceResponse latestMarkPrice(@RequestParam("symbol") String symbol) {
-        return markPriceRepository.latest(normalizeSymbol(symbol))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "mark price not found"));
+        try {
+            return toResponse(markPriceCache.requireFresh(normalizeSymbol(symbol)));
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
+        }
     }
 
     @GetMapping(PriceApiPaths.MARK_BASE_PATH + "/history")
@@ -46,6 +53,14 @@ public class MarkPriceController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid symbol");
         }
         return symbol;
+    }
+
+    private MarkPriceResponse toResponse(MarkPriceEvent event) {
+        return new MarkPriceResponse(event.symbol(), event.markPrice(), event.markPriceUnits(), event.indexPrice(),
+                event.price1(), event.price2(), event.lastTradePrice(), event.bestBidPrice(), event.bestAskPrice(),
+                event.fundingRate(), event.nextFundingTime(), event.timeUntilFundingSeconds(), event.basisAverage(),
+                event.basisWindowSeconds(), event.clampLow(), event.clampHigh(), event.sequence(), event.status(),
+                event.eventTime());
     }
 
     private void validateRange(Instant startTime, Instant endTime) {
