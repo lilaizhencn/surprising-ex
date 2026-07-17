@@ -112,7 +112,9 @@ public class CancelAllAfterService {
         } catch (RuntimeException ex) {
             repository.releaseForRetry(currentProductLine(), timer.userId(), timer.symbolScope(),
                     ex.getMessage(), Instant.now());
-            scheduleIndex.synchronizeTimer(currentProductLine(), timer);
+            scheduleIndex.synchronizeTimer(currentProductLine(), new CancelAllAfterTimer(
+                    timer.userId(), timer.symbolScope(), timer.countdownMs(), "ACTIVE", timer.triggerAt(),
+                    Instant.now(), timer.canceledOrders(), timer.canceledTriggerOrders()));
             log.warn("cancel-all-after execution failed for userId={} symbolScope={}",
                     timer.userId(), timer.symbolScope(), ex);
         }
