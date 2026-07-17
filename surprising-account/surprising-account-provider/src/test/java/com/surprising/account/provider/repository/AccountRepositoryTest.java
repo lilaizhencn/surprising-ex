@@ -14,6 +14,8 @@ import static org.mockito.Mockito.when;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.account.provider.model.PositionState;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionMode;
@@ -77,54 +79,36 @@ class AccountRepositoryTest {
     }
 
     @Test
-    void settlementMarkPriceTicksUsesWindowAverageBeforeFallingBackToLatestMark() {
-        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+    void settlementMarkPriceTicksUsesFreshKafkaCacheValue() {
+        LatestMarkPriceCache markPriceCache = mock(LatestMarkPriceCache.class);
+        MarkPriceEvent markPrice = mock(MarkPriceEvent.class);
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository, markPriceCache);
         Instant settlementTime = Instant.parse("2026-07-01T08:00:00Z");
         Duration window = Duration.ofMinutes(30);
-        when(jdbcTemplate.query(contains("ROUND(AVG(mark_price_units))::BIGINT"), anyRowMapper(),
-                eq(Timestamp.from(settlementTime.minus(window))), eq(Timestamp.from(settlementTime)),
-                eq(Timestamp.from(settlementTime)), eq("BTC-USDT-260626"), eq(4L)))
-                .thenReturn(List.of(600_000L));
+        when(markPriceCache.requireFresh("BTC-USDT-260626")).thenReturn(markPrice);
+        when(markPrice.instrumentVersion()).thenReturn(4L);
+        when(markPrice.markPriceTicks()).thenReturn(600_000L);
 
         long priceTicks = repository.settlementMarkPriceTicks("BTC-USDT-260626", 4L, settlementTime, window);
 
         assertThat(priceTicks).isEqualTo(600_000L);
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
-                eq(Timestamp.from(settlementTime.minus(window))), eq(Timestamp.from(settlementTime)),
-                eq(Timestamp.from(settlementTime)), eq("BTC-USDT-260626"), eq(4L));
-        assertThat(sql.getValue())
-                .contains("FROM price_mark_ticks")
-                .contains("AVG(mark_price_units)")
-                .contains("event_time >= ?")
-                .contains("event_time <= ?")
-                .contains("ORDER BY event_time DESC");
+        verify(markPriceCache).requireFresh("BTC-USDT-260626");
     }
 
     @Test
-    void settlementMarkPriceUnitsUsesUnderlyingWindowAverageForOptionExercise() {
-        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+    void settlementMarkPriceUnitsUsesFreshKafkaCacheValue() {
+        LatestMarkPriceCache markPriceCache = mock(LatestMarkPriceCache.class);
+        MarkPriceEvent markPrice = mock(MarkPriceEvent.class);
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository, markPriceCache);
         Instant settlementTime = Instant.parse("2026-07-01T08:00:00Z");
         Duration window = Duration.ofMinutes(15);
-        when(jdbcTemplate.query(contains("SELECT m.mark_price_units"), anyRowMapper(),
-                eq("BTC-USDT"), eq(Timestamp.from(settlementTime.minus(window))),
-                eq(Timestamp.from(settlementTime)), eq("BTC-USDT"), eq(Timestamp.from(settlementTime)),
-                eq("BTC-USDT")))
-                .thenReturn(List.of(150L));
+        when(markPriceCache.requireFresh("BTC-USDT")).thenReturn(markPrice);
+        when(markPrice.markPriceUnits()).thenReturn(150L);
 
         long priceUnits = repository.settlementMarkPriceUnits("BTC-USDT", settlementTime, window);
 
         assertThat(priceUnits).isEqualTo(150L);
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
-                eq("BTC-USDT"), eq(Timestamp.from(settlementTime.minus(window))),
-                eq(Timestamp.from(settlementTime)), eq("BTC-USDT"), eq(Timestamp.from(settlementTime)),
-                eq("BTC-USDT"));
-        assertThat(sql.getValue())
-                .contains("AVG(mark_price_units)")
-                .contains("event_time >= ?")
-                .contains("event_time <= ?")
-                .contains("ORDER BY event_time DESC");
+        verify(markPriceCache).requireFresh("BTC-USDT");
     }
 
     @Test
