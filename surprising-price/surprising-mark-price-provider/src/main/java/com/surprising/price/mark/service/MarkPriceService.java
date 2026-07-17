@@ -1,8 +1,8 @@
 package com.surprising.price.mark.service;
 
 import com.surprising.price.api.model.IndexPriceEvent;
-import com.surprising.price.api.model.MarkPriceAuditEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.api.model.MarkPricePublishedEvent;
 import com.surprising.price.api.model.PerpBookTickerEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.api.model.PerpTradeEvent;
@@ -45,8 +45,6 @@ public class MarkPriceService {
     private final ConcurrentHashMap<String, PerpTradeEvent> trades = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, PerpFundingRateEvent> fundingRates = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, BasisWindow> basisWindows = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Object> symbolLocks = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Instant> lastPublishedAt = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, MarkPriceEncoding> encodings = new ConcurrentHashMap<>();
 
     public MarkPriceService(ObjectMapper objectMapper,
@@ -69,10 +67,7 @@ public class MarkPriceService {
     }
 
     void onIndexPrice(String payload) {
-        parse(payload, IndexPriceEvent.class, "index price", event -> {
-            indexPrices.put(event.symbol(), event);
-            publishIfReady(event.symbol());
-        });
+        parse(payload, IndexPriceEvent.class, "index price", event -> indexPrices.put(event.symbol(), event));
     }
 
     @KafkaListener(topics = "#{__listener.bookTickerTopic()}", groupId = "#{__listener.groupId()}")
@@ -82,10 +77,7 @@ public class MarkPriceService {
     }
 
     void onBookTicker(String payload) {
-        parse(payload, PerpBookTickerEvent.class, "book ticker", event -> {
-            bookTickers.put(event.symbol(), event);
-            publishIfReady(event.symbol());
-        });
+        parse(payload, PerpBookTickerEvent.class, "book ticker", event -> bookTickers.put(event.symbol(), event));
     }
 
     @KafkaListener(topics = "#{__listener.tradeTopic()}", groupId = "#{__listener.groupId()}")
@@ -95,10 +87,7 @@ public class MarkPriceService {
     }
 
     void onTrade(String payload) {
-        parse(payload, PerpTradeEvent.class, "trade", event -> {
-            trades.put(event.symbol(), event);
-            publishIfReady(event.symbol());
-        });
+        parse(payload, PerpTradeEvent.class, "trade", event -> trades.put(event.symbol(), event));
     }
 
     @KafkaListener(topics = "#{__listener.fundingRateTopic()}",
@@ -113,30 +102,12 @@ public class MarkPriceService {
         parse(payload, PerpFundingRateEvent.class, "funding rate", event -> fundingRates.put(event.symbol(), event));
     }
 
-    @Scheduled(fixedDelayString = "${surprising.price.mark.calculation.publish-delay-ms:1000}")
+    @Scheduled(fixedRateString = "${surprising.price.mark.calculation.publish-interval-ms:1000}")
     public void publishMarkPrices() {
         Instant now = Instant.now();
         for (String symbol : symbols()) {
-            publishIfReady(symbol, now);
-        }
-    }
-
-    private void publishIfReady(String symbol) {
-        publishIfReady(symbol, Instant.now());
-    }
-
-    private void publishIfReady(String symbol, Instant now) {
-        Object lock = symbolLocks.computeIfAbsent(symbol, ignored -> new Object());
-        synchronized (lock) {
             try {
-                Instant last = lastPublishedAt.get(symbol);
-                Duration publishDelay = Duration.ofMillis(properties.getCalculation().getPublishDelayMs());
-                if (last != null && Duration.between(last, now).compareTo(publishDelay) < 0) {
-                    return;
-                }
-                if (publishSymbol(symbol, now)) {
-                    lastPublishedAt.put(symbol, now);
-                }
+                publishSymbol(symbol, now);
             } catch (Exception ex) {
                 log.error("Failed to publish mark price for symbol={}", symbol, ex);
             }
@@ -169,11 +140,10 @@ public class MarkPriceService {
         MarkPriceEncoding encoding = encodings.computeIfAbsent(symbol, markPriceRepository::encoding);
         MarkPriceEvent event = markPriceCalculator.calculate(symbol, sequence, index, book, trade,
                 fundingRates.get(symbol), basisAverage, encoding, now);
-        kafkaTemplate.send(properties.markPriceTopic(), symbol, event);
-        MarkPriceAuditEvent auditEvent = new MarkPriceAuditEvent(event, index, book, trade,
+        MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, index, book, trade,
                 fundingRates.get(symbol), basisAverage,
                 properties.getCalculation().getBasisWindow().toSeconds(), now);
-        kafkaTemplate.send(properties.markPriceAuditTopic(), symbol, auditEvent);
+        kafkaTemplate.send(properties.markPriceTopic(), symbol, publication);
         return true;
     }
 

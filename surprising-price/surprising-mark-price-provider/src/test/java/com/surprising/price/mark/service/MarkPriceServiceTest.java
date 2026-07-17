@@ -12,8 +12,8 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.price.api.model.IndexPriceEvent;
-import com.surprising.price.api.model.MarkPriceAuditEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.api.model.MarkPricePublishedEvent;
 import com.surprising.price.api.model.PerpBookTickerEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.api.model.PerpTradeEvent;
@@ -89,7 +89,10 @@ class MarkPriceServiceTest {
         service.onIndexPrice(objectMapper.writeValueAsString(
                 new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 1, PriceStatus.HEALTHY, 3, 3,
                         BigDecimal.valueOf(3), now, List.of())));
-        verify(kafkaTemplate).send(eq(properties().markPriceTopic()), eq("BTC-USDT"), any(MarkPriceEvent.class));
+        verify(kafkaTemplate, never()).send(any(), any(), any());
+        service.publishMarkPrices();
+        verify(kafkaTemplate).send(eq(properties().markPriceTopic()), eq("BTC-USDT"),
+                any(MarkPricePublishedEvent.class));
 
         reset(repository, kafkaTemplate);
         service.onIndexPrice(objectMapper.writeValueAsString(
@@ -115,18 +118,16 @@ class MarkPriceServiceTest {
         service.onIndexPrice(objectMapper.writeValueAsString(
                 new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 2, PriceStatus.HEALTHY, 3, 3,
                         BigDecimal.valueOf(3), now, List.of())));
+        verify(kafkaTemplate, never()).send(any(), any(), any());
+        service.publishMarkPrices();
 
         ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
         verify(kafkaTemplate).send(eq(properties.markPriceTopic()), eq("BTC-USDT"), eventCaptor.capture());
-        assertThat(eventCaptor.getValue()).isInstanceOf(MarkPriceEvent.class);
-        MarkPriceEvent event = (MarkPriceEvent) eventCaptor.getValue();
+        assertThat(eventCaptor.getValue()).isInstanceOf(MarkPricePublishedEvent.class);
+        MarkPriceEvent event = ((MarkPricePublishedEvent) eventCaptor.getValue()).result();
         assertThat(event.symbol()).isEqualTo("BTC-USDT");
         assertThat(event.sequence()).isEqualTo(11L);
         assertThat(event.markPrice()).isEqualByComparingTo("100.000000000000000000");
-        ArgumentCaptor<Object> auditCaptor = ArgumentCaptor.forClass(Object.class);
-        verify(kafkaTemplate).send(eq(properties.markPriceAuditTopic()), eq("BTC-USDT"), auditCaptor.capture());
-        assertThat(auditCaptor.getValue()).isInstanceOf(MarkPriceAuditEvent.class);
-        assertThat(((MarkPriceAuditEvent) auditCaptor.getValue()).result()).isEqualTo(event);
     }
 
     @Test
@@ -145,16 +146,14 @@ class MarkPriceServiceTest {
         service.onIndexPrice(new ObjectMapper().writeValueAsString(
                 new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 2, PriceStatus.HEALTHY, 3, 3,
                         BigDecimal.valueOf(3), now, List.of())));
+        verify(kafkaTemplate, never()).send(any(), any(), any());
+        service.publishMarkPrices();
 
         ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
         verify(kafkaTemplate).send(eq("surprising.linear-delivery.mark.price.v1"), eq("BTC-USDT"),
                 eventCaptor.capture());
-        MarkPriceEvent event = (MarkPriceEvent) eventCaptor.getValue();
+        MarkPriceEvent event = ((MarkPricePublishedEvent) eventCaptor.getValue()).result();
         assertThat(event.status()).isEqualTo(PriceStatus.HEALTHY);
-        ArgumentCaptor<Object> auditCaptor = ArgumentCaptor.forClass(Object.class);
-        verify(kafkaTemplate).send(eq("surprising.linear-delivery.mark.price.audit.v1"), eq("BTC-USDT"),
-                auditCaptor.capture());
-        assertThat(((MarkPriceAuditEvent) auditCaptor.getValue()).result()).isEqualTo(event);
     }
 
     @Test
@@ -231,7 +230,6 @@ class MarkPriceServiceTest {
     private MarkPriceProperties properties() {
         MarkPriceProperties properties = new MarkPriceProperties();
         properties.getCoordination().setEnabled(false);
-        properties.getCalculation().setPublishDelayMs(0);
         properties.getCalculation().setMaxInputAge(Duration.ofSeconds(5));
         return properties;
     }

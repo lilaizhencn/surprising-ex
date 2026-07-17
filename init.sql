@@ -606,7 +606,7 @@ CREATE INDEX IF NOT EXISTS price_mark_ticks_query_idx
     ON price_mark_ticks (symbol, event_time DESC);
 
 CREATE INDEX IF NOT EXISTS price_mark_ticks_retention_idx
-    ON price_mark_ticks (event_time);
+    ON price_mark_ticks USING BRIN (event_time) WITH (pages_per_range = 64);
 
 CREATE TABLE IF NOT EXISTS funding_sequences (
     sequence_name       TEXT PRIMARY KEY,

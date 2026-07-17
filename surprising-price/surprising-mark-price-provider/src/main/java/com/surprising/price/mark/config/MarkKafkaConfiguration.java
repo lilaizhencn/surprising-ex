@@ -17,7 +17,9 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.JsonSerializer;
+import org.springframework.util.backoff.FixedBackOff;
 
 @Configuration
 public class MarkKafkaConfiguration {
@@ -90,6 +92,8 @@ public class MarkKafkaConfiguration {
         factory.setConcurrency(Math.max(1, properties.getKafka().getConcurrency()));
         factory.setBatchListener(true);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
+        factory.setCommonErrorHandler(new DefaultErrorHandler(
+                new FixedBackOff(1_000L, FixedBackOff.UNLIMITED_ATTEMPTS)));
         return factory;
     }
 }

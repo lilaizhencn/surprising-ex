@@ -55,10 +55,6 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("mark.price");
     }
 
-    public String markPriceAuditTopic() {
-        return topic("mark.price.audit");
-    }
-
     public String fundingRateTopic() {
         return topic("funding.rate");
     }

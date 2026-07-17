@@ -31,10 +31,10 @@ The module is intentionally separate from candlestick aggregation. Index and mar
 inputs, while candlesticks are market-data history. Keeping them separate avoids coupling risk
 calculation to K-line query or WebSocket fanout load.
 
-External price collection and display APIs keep decimal prices. The durable boundary for trading,
-risk, liquidation, funding settlement, and ADL is `price_mark_ticks.mark_price_units`: the mark price
-converted once into quote-asset smallest units. Those consumers convert that long value into
-version-specific ticks with their pinned `instrument.price_tick_units`.
+External price collection and display APIs keep decimal prices. The real-time boundary for trading,
+risk, liquidation, funding settlement, and ADL is the committed Kafka `MarkPriceEvent`, which carries
+the product line, instrument version, quote-asset units, comparable ticks, sequence, and timestamps.
+`price_mark_ticks` is only the asynchronous three-day audit store and is never a business input.
 
 The symbol universe and trading rules come from `surprising-instrument`. The index provider reads
 current symbols and external index sources dynamically from `instruments + instrument_index_sources`;
@@ -164,12 +164,17 @@ surprising.perp.trade.events.v1
 surprising.perp.funding.rate.v1
 ```
 
-It publishes:
+It publishes one complete event:
 
 ```text
 surprising.perp.mark.price.v1
-surprising.perp.mark.price.audit.v1
 ```
+
+The event contains a compact `result` used by real-time consumers plus the exact index, book,
+trade, funding, and basis inputs used by the calculation. A separate consumer group persists the
+same record asynchronously for audit; there is no second audit topic to synchronize.
+Input listeners only replace their latest in-memory sample. The fixed one-second scheduler is the
+only path that calculates and publishes a mark price; input-event arrival never triggers publication.
 
 The calculation follows the common OKX/Binance/Bybit pattern:
 
@@ -202,7 +207,7 @@ Production recommendations:
 - Run at least two instances of each provider.
 - All nodes must share the same PostgreSQL database.
 - Set `coordination.node-id` explicitly to pod name, hostname, or instance id in containers.
-- Keep `lease-duration` greater than the normal publish period, typically 5-20x `poll-delay-ms` or `publish-delay-ms`.
+- Keep `lease-duration` greater than the normal publish period, typically 5-20x `poll-delay-ms` or `publish-interval-ms`.
 - If PostgreSQL is unavailable, price providers should not continue publishing because sequence and symbol ownership cannot be guaranteed.
 
 ## Key Configuration
@@ -223,7 +228,7 @@ Production recommendations:
 | `surprising.price.index.fiat.stable-coin.refresh-delay-ms` | `10000` | USDT/USD stable bridge refresh interval. |
 | `surprising.price.mark.kafka.concurrency` | `2` | Mark input Kafka listener concurrency per node. |
 | `surprising.price.mark.kafka.max-poll-records` | `500` | Kafka records fetched per poll for mark-price inputs. |
-| `surprising.price.mark.calculation.publish-delay-ms` | `1000` | Mark price publish interval. |
+| `surprising.price.mark.calculation.publish-interval-ms` | `1000` | Fixed-rate mark price publish interval. |
 | `surprising.price.mark.calculation.basis-window` | `60s` | Moving-average basis window. |
 | `surprising.price.mark.calculation.max-input-age` | `5s` | Maximum acceptable mark input age. |
 | `surprising.price.mark.calculation.clamp-ratio` | `0.03` | Mark protection band around index price. |
@@ -259,7 +264,10 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
 - Use Kafka key `symbol` for all price input and output topics.
 - Strongly prefer one shared topic with enough partitions over one topic per symbol.
 - Risk and liquidation services must consume `surprising.perp.mark.price.v1`; they should not calculate mark price independently.
-- Keep `surprising.perp.mark.price.audit.v1` for incident review and liquidation dispute resolution.
+- The one `surprising.perp.mark.price.v1` record includes the complete audit envelope. The idempotent
+  audit consumer retries database failures by `symbol + sequence` without affecting other consumer groups.
+- `price_mark_ticks` is an ordinary, non-partitioned table. Bounded minute-level deletes and a compact
+  BRIN time index retain only three days.
 - Index and mark price producers use `acks=all`, idempotence, `zstd`, and `max.in.flight.requests.per.connection=5`.
 - Mark-price input consumers intentionally use `auto.offset.reset=latest` because stale input snapshots should not be replayed into a live mark calculator after a fresh start. They still use disabled auto-commit, record acknowledgements, and cooperative-sticky rebalance.
 - If external sources are insufficient, index provider records the failed snapshot but does not publish a usable index price.

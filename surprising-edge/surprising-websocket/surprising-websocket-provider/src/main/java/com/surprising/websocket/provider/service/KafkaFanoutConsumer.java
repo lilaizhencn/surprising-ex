@@ -6,6 +6,7 @@ import com.surprising.candlestick.api.model.TradeEvent;
 import com.surprising.product.api.ProductLine;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.api.model.MarkPricePublishedEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
@@ -136,7 +137,12 @@ public class KafkaFanoutConsumer {
     public void onMarkPrice(ConsumerRecord<String, String> record) {
         try {
             requireCurrentProductTopic(record.topic(), markPriceTopic(), "mark price");
-            MarkPriceEvent event = objectMapper.readValue(record.value(), MarkPriceEvent.class);
+            MarkPricePublishedEvent publication = objectMapper.readValue(
+                    record.value(), MarkPricePublishedEvent.class);
+            MarkPriceEvent event = publication.result();
+            if (event == null) {
+                throw new IllegalArgumentException("mark price publication result is required");
+            }
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "mark price");
             if (!isFreshMarkPrice(event)) {
                 log.warn("Dropped unusable mark price symbol={} status={} eventTime={} publishedAt={}",

@@ -229,11 +229,13 @@ not wait for or query this table.
 - `basis_average`: moving average of `(bid1 + ask1) / 2 - indexPrice`.
 - `clamp_low` / `clamp_high`: final protection band around index price.
 - `event_time` / `published_at`: calculation time and Kafka publication time used for freshness checks.
-- `calculation_inputs`: the complete audit-topic JSON envelope, including the exact index component
+- `calculation_inputs`: the complete mark-price Kafka JSON envelope, including the exact index component
   snapshots, book ticker, last trade, funding input, basis intermediate, and final result.
 
-The audit topic is consumed in JDBC batches. Rows older than three days are deleted hourly in bounded
-batches; no database write or cleanup operation is on the real-time price-consumer path.
+An independent consumer group reads the same mark-price topic in JDBC batches. Rows older than three
+days are deleted every minute in bounded batches (up to 100,000 rows per default run). The retention
+index is BRIN because inserts are time-ordered. No database write or cleanup operation is on the
+real-time price-consumer path.
 
 Primary key:
 
@@ -270,8 +272,8 @@ unrealized PnL, equity, maintenance margin, margin ratio, and status.
 `risk_position_snapshots` stores the position-level inputs used for each account snapshot:
 
 - `signed_quantity_steps`: long exposure from `account_positions`.
-- `mark_price_ticks`: latest usable mark price converted from `price_mark_ticks.mark_price_units` to
-  exchange-core ticks with the position's pinned `instrument_version`.
+- `mark_price_ticks`: latest usable Kafka mark-price event ticks for the position's pinned
+  `instrument_version`.
 - `notional_units`, `unrealized_pnl_units`, and `maintenance_margin_units`: long settlement-asset units.
 
 When an account position event closes a symbol completely, risk-provider writes a zero-quantity position snapshot for
@@ -279,10 +281,10 @@ that symbol. In that flat snapshot, `entry_price_ticks` and `mark_price_ticks` a
 zero unrealized PnL and zero maintenance margin. This prevents `latestPositions` from showing stale nonzero exposure
 after a full close.
 
-Risk, funding, liquidation, and ADL read instrument parameters and mark quote units from PostgreSQL, convert them to
-version-specific mark ticks, then
-calculate contract notional/PnL/margin amounts through shared Java `PerpetualContractMath` long
-formulas with exact integer intermediates.
+Risk, funding, liquidation, and ADL take one fresh immutable snapshot from their local Kafka mark-price
+cache, require the event's exact instrument version, and combine it with PostgreSQL account/instrument
+state. They calculate contract notional/PnL/margin amounts through shared Java `PerpetualContractMath`
+long formulas with exact integer intermediates; none reads the mark-price audit table.
 
 `risk_scan_leases` coordinates active-active risk providers by `user_id + settle_asset`:
 

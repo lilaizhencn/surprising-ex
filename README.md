@@ -140,8 +140,7 @@ Ports:
 - `surprising.perp.index.components.v1`: index component audit output.
 - `surprising.perp.book.ticker.v1`: perpetual best bid/ask input.
 - `surprising.perp.funding.rate.v1`: funding rate output consumed by mark price.
-- `surprising.perp.mark.price.v1`: mark price output.
-- `surprising.perp.mark.price.audit.v1`: mark price audit output.
+- `surprising.perp.mark.price.v1`: single mark-price output containing the business result and complete audit inputs.
 
 All market-data topics use `symbol` as the Kafka key.
 

@@ -29,9 +29,9 @@ Surprising Exchange 合约指数价格和标记价格模块。
 
 这个模块刻意和 K 线服务分开。指数价格和标记价格是风控输入，K 线是行情历史聚合。分开部署可以避免风控价格被 K 线查询或 WebSocket 推送压力影响。
 
-外部行情采集和展示 API 保留 decimal 价格。交易、风控、强平、资金费结算和 ADL 的持久边界是
-`price_mark_ticks.mark_price_units`：标记价格先转换成 quote asset 最小单位。消费方再用自己锁定的
-`instrument.price_tick_units` 把这个 long 值转换成版本对应的 ticks。
+外部行情采集和展示 API 保留 decimal 价格。交易、风控、强平、资金费结算和 ADL 的实时边界是已提交的
+Kafka `MarkPriceEvent`；事件直接携带产品线、instrument 版本、quote asset units、可比较 ticks、sequence
+和时间戳。`price_mark_ticks` 只是异步写入、保留 3 天的审计表，不能作为实时业务输入。
 
 合约清单和交易规则来自 `surprising-instrument`。指数价格 provider 默认从 `instruments + instrument_index_sources` 当前版本动态读取 symbol 和外部指数源；`application.yml` 中的静态 BTC/ETH 源仅作为数据库未初始化时的兜底。
 
@@ -143,12 +143,16 @@ surprising.perp.trade.events.v1
 surprising.perp.funding.rate.v1
 ```
 
-发布：
+只发布一个完整事件：
 
 ```text
 surprising.perp.mark.price.v1
-surprising.perp.mark.price.audit.v1
 ```
+
+消息中的 `result` 供实时消费者使用，同时携带本次计算实际使用的指数、盘口、成交、资金费和 basis
+输入。独立审计 consumer group 异步持久化同一条消息，不再维护第二个审计 topic。
+各输入 listener 只替换内存中的最新样本；只有固定的一秒调度器能够计算和发布标记价格，输入事件
+到达本身不会触发发布。
 
 计算方式综合了 OKX/Binance/Bybit 的常见做法：
 
@@ -180,7 +184,7 @@ markPrice = clamp(rawMark, indexPrice * (1 - clampRatio), indexPrice * (1 + clam
 - 每个 provider 至少 2 个实例。
 - 多节点共享同一个 PostgreSQL，不要每个节点使用独立数据库。
 - `coordination.node-id` 在容器环境建议显式设置为 pod name、hostname 或 instance id。
-- `lease-duration` 要大于正常发布周期，通常为 `poll-delay-ms` 或 `publish-delay-ms` 的 5-20 倍。
+- `lease-duration` 要大于正常发布周期，通常为 `poll-delay-ms` 或 `publish-interval-ms` 的 5-20 倍。
 - 如果 PostgreSQL 不可用，价格服务不应继续发布，因为无法保证 sequence 和 symbol 所有权。
 
 ## 关键配置
@@ -201,7 +205,7 @@ markPrice = clamp(rawMark, indexPrice * (1 - clampRatio), indexPrice * (1 + clam
 | `surprising.price.index.fiat.stable-coin.refresh-delay-ms` | `10000` | USDT/USD 稳定币桥接刷新周期。 |
 | `surprising.price.mark.kafka.concurrency` | `2` | 每个节点的标记价格输入 Kafka listener 并发数。 |
 | `surprising.price.mark.kafka.max-poll-records` | `500` | 标记价格输入 consumer 每次 poll 拉取的 Kafka 记录数。 |
-| `surprising.price.mark.calculation.publish-delay-ms` | `1000` | 标记价格发布周期。 |
+| `surprising.price.mark.calculation.publish-interval-ms` | `1000` | 标记价格固定频率发布周期。 |
 | `surprising.price.mark.calculation.basis-window` | `60s` | basis 移动平均窗口。 |
 | `surprising.price.mark.calculation.max-input-age` | `5s` | 标记价格输入最大可接受年龄。 |
 | `surprising.price.mark.calculation.clamp-ratio` | `0.03` | 标记价格相对指数价格的保护带。 |
@@ -237,7 +241,9 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
 - 所有价格输入和输出 topic 都用 `symbol` 作为 Kafka key。
 - 优先使用一个共享 topic + 足够多 partition，不要按每个 symbol 建 topic。
 - 风控和强平服务必须消费 `surprising.perp.mark.price.v1`，不要各节点自己计算标记价格。
-- 保留 `surprising.perp.mark.price.audit.v1`，用于事故复盘和强平争议审计。
+- 唯一的 `surprising.perp.mark.price.v1` 消息已经包含完整审计信封；审计 consumer 按
+  `symbol + sequence` 幂等重试数据库失败，不影响其它 consumer group。
+- `price_mark_ticks` 使用普通非分区表和紧凑的时间 BRIN 索引，每分钟分批删除，只保留 3 天。
 - 指数价格和标记价格 producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.connection=5`。
 - 标记价格输入 consumer 有意使用 `auto.offset.reset=latest`，因为新启动的 live mark calculator 不应该把旧输入快照重新计算成当前标记价格；但它仍然关闭 auto commit，使用 record ack 和 cooperative-sticky rebalance。
 - 外部源不足时，指数服务会记录失败快照，但不会发布可用指数价格。

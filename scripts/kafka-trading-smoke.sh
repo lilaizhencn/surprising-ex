@@ -210,35 +210,26 @@ seed_mark_price() {
   local bid
   local ask
   local units
+  local event_time
+  local next_funding_time
+  local payload
   sequence=$((($(date +%s%N) / 1000000) % 2000000000))
   price="$(decimal_price "${PRICE_TICKS}" "${TICK_UNITS}")"
   bid="$(decimal_price "$((PRICE_TICKS - 1))" "${TICK_UNITS}")"
   ask="$(decimal_price "$((PRICE_TICKS + 1))" "${TICK_UNITS}")"
   units=$((PRICE_TICKS * TICK_UNITS))
-  psql_exec <<SQL >/dev/null
-INSERT INTO price_index_ticks (
-    symbol, sequence, index_price, status, component_count, valid_component_count,
-    total_configured_weight, event_time
-) VALUES
-    ('${SYMBOL}', ${sequence}, ${price}, 'HEALTHY', 5, 5, 5.000000000000000000, now())
-ON CONFLICT (symbol, sequence) DO NOTHING;
-
-INSERT INTO price_mark_ticks (
-    symbol, sequence, mark_price, mark_price_units, index_price, price1, price2,
-    last_trade_price, best_bid_price, best_ask_price, funding_rate, next_funding_time,
-    time_until_funding_seconds, basis_average, basis_window_seconds, clamp_low, clamp_high,
-    status, event_time
-) VALUES
-    (
-        '${SYMBOL}', ${sequence}, ${price}, ${units}, ${price}, ${price}, ${price},
-        ${price}, ${bid}, ${ask}, 0.000000000000000000, now() + interval '8 hours',
-        28800, 0.000000000000000000, 60,
-        (${price} * 0.970000000000000000),
-        (${price} * 1.030000000000000000),
-        'HEALTHY', now()
-    )
-ON CONFLICT (symbol, sequence) DO NOTHING;
-SQL
+  read -r event_time next_funding_time < <(python3 - <<'PY'
+from datetime import datetime, timedelta, timezone
+now = datetime.now(timezone.utc)
+print(now.isoformat().replace("+00:00", "Z"), (now + timedelta(hours=8)).isoformat().replace("+00:00", "Z"))
+PY
+)
+  payload="{\"result\":{\"productLine\":\"LINEAR_PERPETUAL\",\"symbol\":\"${SYMBOL}\",\"instrumentVersion\":1,\"markPriceUnits\":${units},\"markPriceTicks\":${PRICE_TICKS},\"markPrice\":${price},\"indexPrice\":${price},\"price1\":${price},\"price2\":${price},\"lastTradePrice\":${price},\"bestBidPrice\":${bid},\"bestAskPrice\":${ask},\"fundingRate\":0,\"nextFundingTime\":\"${next_funding_time}\",\"timeUntilFundingSeconds\":28800,\"basisAverage\":0,\"basisWindowSeconds\":60,\"clampLow\":${price},\"clampHigh\":${price},\"sequence\":${sequence},\"status\":\"HEALTHY\",\"eventTime\":\"${event_time}\",\"publishedAt\":\"${event_time}\"},\"indexInput\":null,\"bookInput\":null,\"tradeInput\":null,\"fundingInput\":null,\"basisAverage\":0,\"basisWindowSeconds\":60,\"calculatedAt\":\"${event_time}\"}"
+  printf '%s:%s\n' "${SYMBOL}" "${payload}" | infra_exec kafka kafka-console-producer.sh \
+    --bootstrap-server localhost:9092 \
+    --topic surprising.perp.mark.price.v1 \
+    --property parse.key=true \
+    --property key.separator=: >/dev/null
 }
 
 wait_sql_equals() {
@@ -434,12 +425,12 @@ ensure_smoke_database
 
 echo "Applying init.sql"
 psql_exec -f - < "${ROOT_DIR}/init.sql" >/dev/null
-seed_mark_price
 
 echo "Creating Kafka topics"
 export INFRA_MODE
 create_topic_wrapper
 PATH="${TMP_DIR}/bin:${PATH}" "${ROOT_DIR}/scripts/create-topics.sh" >/dev/null
+seed_mark_price
 
 package_services
 

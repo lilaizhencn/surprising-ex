@@ -141,8 +141,7 @@ Legacy 永续 topic 仍保留用于兼容单线启动。产品线实例使用 `s
 - `surprising.perp.index.components.v1`：指数成分审计输出。
 - `surprising.perp.book.ticker.v1`：合约盘口最优价输入。
 - `surprising.perp.funding.rate.v1`：资金费率输出，供 mark price 服务消费。
-- `surprising.perp.mark.price.v1`：标记价格输出。
-- `surprising.perp.mark.price.audit.v1`：标记价格审计输出。
+- `surprising.perp.mark.price.v1`：唯一标记价格输出，同时携带业务结果和完整审计输入。
 
 所有市场数据 topic 都使用 `symbol` 作为 Kafka key。
 
@@ -237,7 +236,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - ADL 在保险基金耗尽后处理剩余亏损，削减盈利高优先级仓位，并把实现盈利转去覆盖 deficit。
 - K 线服务用 Kafka Streams + RocksDB 分区状态，按 Kafka partition 水平扩展。
 - 指数价格和标记价格服务用 PostgreSQL 的 symbol 租约和数据库 sequence 避免多节点重复发布和 sequence 回退。
-- 每条标记价格 Kafka 事件都携带产品线、instrument 版本、定点数 units/ticks、计算时间和发布时间。审计 topic 还包含指数成分、盘口、最新成交、资金费、基差中间值和最终结果等完整输入，异步批量写入 PostgreSQL 并只保留 3 天；任何实时业务都不等待这次入库。
+- 每条标记价格 Kafka 事件都携带产品线、instrument 版本、定点数 units/ticks、计算时间和发布时间，并在同一消息中包含指数成分、盘口、最新成交、资金费、基差中间值和最终结果等完整审计输入。独立 consumer group 异步批量写入 PostgreSQL 并只保留 3 天；任何实时业务都不等待这次入库。
 - 订单入口用 PostgreSQL 幂等键、原子 sequence 和 outbox `FOR UPDATE SKIP LOCKED` 支持多节点部署。
 - Trigger provider 可先用 Redis Lua 范围查询过滤候选，再由 PostgreSQL `FOR UPDATE SKIP LOCKED` 完成多节点最终抢占，并通过 Kafka 行情重放和 stale `TRIGGERING` 重置处理故障重试。带 token 的 Redis lease 只防止多个节点重复重建索引，不承担业务正确性。Trigger provider 不直接修改余额或持仓。
 - 当前 matching 已接入真实 exchange-core 订单簿，交易链路端到端使用 long ticks/steps。

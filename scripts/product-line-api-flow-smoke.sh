@@ -811,8 +811,9 @@ SELECT GREATEST(
 
 seed_stress_prices() {
   local product_line="$1"
-  python3 - "${product_line}" "${STRESS_SYMBOL_COUNT}" "${RUN_SEQ}" <<'PY' | psql_exec >/dev/null
-import decimal
+  while IFS=$'\t' read -r symbol price_ticks sequence; do
+    publish_mark_price "${product_line}" "${symbol}" 10000000 "${sequence}" "${price_ticks}"
+  done < <(python3 - "${product_line}" "${STRESS_SYMBOL_COUNT}" "${RUN_SEQ}" <<'PY'
 import sys
 
 product_line = sys.argv[1]
@@ -826,13 +827,6 @@ underlying_prices = [
     600000, 30000, 1500, 1000, 6000, 1000, 1200, 1000, 3000, 3000,
     1500, 4500, 1000, 8500, 1000, 1000, 9000, 2000, 1000, 1000,
 ]
-
-def quote(value):
-    return "'" + str(value).replace("'", "''") + "'"
-
-def decimal_price(ticks, tick_units=10000000):
-    price = decimal.Decimal(ticks) * decimal.Decimal(tick_units) / decimal.Decimal(100000000)
-    return str(price.quantize(decimal.Decimal("0.00000001")))
 
 def symbol_and_price(i):
     base = bases[i % len(bases)]
@@ -860,50 +854,10 @@ deduped = {}
 for symbol, ticks, sequence in price_rows:
     deduped[symbol] = (ticks, sequence)
 
-print("INSERT INTO price_index_ticks (symbol, sequence, index_price, status, component_count, valid_component_count, total_configured_weight, event_time) VALUES")
-index_values = []
-mark_values = []
 for symbol, (ticks, sequence) in deduped.items():
-    price = decimal_price(ticks)
-    bid = decimal_price(max(1, ticks - 1))
-    ask = decimal_price(ticks + 1)
-    units = ticks * 10000000
-    index_values.append(f"({quote(symbol)}, {sequence}, {price}, 'HEALTHY', 5, 5, 5.000000000000000000, now())")
-    mark_values.append(
-        f"({quote(symbol)}, {sequence}, {price}, {units}, {price}, {price}, {price}, "
-        f"{price}, {bid}, {ask}, 0.000000000000000000, now() + interval '8 hours', "
-        "28800, 0.000000000000000000, 60, "
-        f"({price} * 0.970000000000000000), ({price} * 1.030000000000000000), 'HEALTHY', now())"
-    )
-print(",\n".join(index_values))
-print("""ON CONFLICT (symbol, sequence) DO UPDATE SET
-    index_price = EXCLUDED.index_price,
-    status = EXCLUDED.status,
-    component_count = EXCLUDED.component_count,
-    valid_component_count = EXCLUDED.valid_component_count,
-    total_configured_weight = EXCLUDED.total_configured_weight,
-    event_time = EXCLUDED.event_time;""")
-print("INSERT INTO price_mark_ticks (symbol, sequence, mark_price, mark_price_units, index_price, price1, price2, last_trade_price, best_bid_price, best_ask_price, funding_rate, next_funding_time, time_until_funding_seconds, basis_average, basis_window_seconds, clamp_low, clamp_high, status, event_time) VALUES")
-print(",\n".join(mark_values))
-print("""ON CONFLICT (symbol, sequence) DO UPDATE SET
-    mark_price = EXCLUDED.mark_price,
-    mark_price_units = EXCLUDED.mark_price_units,
-    index_price = EXCLUDED.index_price,
-    price1 = EXCLUDED.price1,
-    price2 = EXCLUDED.price2,
-    last_trade_price = EXCLUDED.last_trade_price,
-    best_bid_price = EXCLUDED.best_bid_price,
-    best_ask_price = EXCLUDED.best_ask_price,
-    funding_rate = EXCLUDED.funding_rate,
-    next_funding_time = EXCLUDED.next_funding_time,
-    time_until_funding_seconds = EXCLUDED.time_until_funding_seconds,
-    basis_average = EXCLUDED.basis_average,
-    basis_window_seconds = EXCLUDED.basis_window_seconds,
-    clamp_low = EXCLUDED.clamp_low,
-    clamp_high = EXCLUDED.clamp_high,
-    status = EXCLUDED.status,
-    event_time = EXCLUDED.event_time;""")
+    print(f"{symbol}\t{ticks}\t{sequence}")
 PY
+)
 }
 
 delete_surprising_topics() {
@@ -1351,7 +1305,14 @@ start_provider() {
   jar="$(boot_jar "${module}" "${artifact}")"
   log_file="${TMP_DIR}/${product_line}-${name}.log"
   local java_args=()
-  local app_args=("--server.port=${port}")
+  local app_args=(
+    "--server.port=${port}"
+    "--surprising.price.consumer.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}"
+    "--surprising.price.consumer.product-line=${product_line}"
+    "--surprising.price.consumer.product-topics-enabled=true"
+    "--surprising.price.consumer.group-id=product-smoke-${RUN_ID}-$(product_slug "${product_line}")-${name}-mark-price"
+    "--surprising.price.consumer.max-age=30s"
+  )
   local arg
   if [[ "${name}" == "matching" ]]; then
     while IFS= read -r arg; do
@@ -1418,61 +1379,20 @@ print(price.quantize(decimal.Decimal("0.00000001")))
 PY
 }
 
-insert_mark_price() {
-  local symbol="$1"
-  local tick_units="$2"
-  local sequence="$3"
-  local price_ticks="$4"
-  local price bid ask units
+publish_mark_price() {
+  local product_line="$1"
+  local symbol="$2"
+  local tick_units="$3"
+  local sequence="$4"
+  local price_ticks="$5"
+  local price bid ask units event_time payload
   price="$(decimal_price "${price_ticks}" "${tick_units}")"
   bid="$(decimal_price "$((price_ticks - 1))" "${tick_units}")"
   ask="$(decimal_price "$((price_ticks + 1))" "${tick_units}")"
   units=$((price_ticks * tick_units))
-  psql_exec <<SQL >/dev/null
-INSERT INTO price_index_ticks (
-    symbol, sequence, index_price, status, component_count, valid_component_count,
-    total_configured_weight, event_time
-) VALUES (
-    '${symbol}', ${sequence}, ${price}, 'HEALTHY', 5, 5, 5.000000000000000000, now()
-) ON CONFLICT (symbol, sequence) DO UPDATE SET
-    index_price = EXCLUDED.index_price,
-    status = EXCLUDED.status,
-    component_count = EXCLUDED.component_count,
-    valid_component_count = EXCLUDED.valid_component_count,
-    total_configured_weight = EXCLUDED.total_configured_weight,
-    event_time = EXCLUDED.event_time;
-
-INSERT INTO price_mark_ticks (
-    symbol, sequence, mark_price, mark_price_units, index_price, price1, price2,
-    last_trade_price, best_bid_price, best_ask_price, funding_rate, next_funding_time,
-    time_until_funding_seconds, basis_average, basis_window_seconds, clamp_low, clamp_high,
-    status, event_time
-) VALUES (
-    '${symbol}', ${sequence}, ${price}, ${units}, ${price}, ${price}, ${price},
-    ${price}, ${bid}, ${ask}, 0.000000000000000000, now() + interval '8 hours',
-    28800, 0.000000000000000000, 60,
-    (${price} * 0.970000000000000000),
-    (${price} * 1.030000000000000000),
-    'HEALTHY', now()
-) ON CONFLICT (symbol, sequence) DO UPDATE SET
-    mark_price = EXCLUDED.mark_price,
-    mark_price_units = EXCLUDED.mark_price_units,
-    index_price = EXCLUDED.index_price,
-    price1 = EXCLUDED.price1,
-    price2 = EXCLUDED.price2,
-    last_trade_price = EXCLUDED.last_trade_price,
-    best_bid_price = EXCLUDED.best_bid_price,
-    best_ask_price = EXCLUDED.best_ask_price,
-    funding_rate = EXCLUDED.funding_rate,
-    next_funding_time = EXCLUDED.next_funding_time,
-    time_until_funding_seconds = EXCLUDED.time_until_funding_seconds,
-    basis_average = EXCLUDED.basis_average,
-    basis_window_seconds = EXCLUDED.basis_window_seconds,
-    clamp_low = EXCLUDED.clamp_low,
-    clamp_high = EXCLUDED.clamp_high,
-    status = EXCLUDED.status,
-    event_time = EXCLUDED.event_time;
-SQL
+  event_time="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  payload="{\"result\":{\"productLine\":\"${product_line}\",\"symbol\":\"${symbol}\",\"instrumentVersion\":1,\"markPriceUnits\":${units},\"markPriceTicks\":${price_ticks},\"markPrice\":${price},\"indexPrice\":${price},\"price1\":${price},\"price2\":${price},\"lastTradePrice\":${price},\"bestBidPrice\":${bid},\"bestAskPrice\":${ask},\"fundingRate\":0,\"nextFundingTime\":\"${event_time}\",\"timeUntilFundingSeconds\":0,\"basisAverage\":0,\"basisWindowSeconds\":60,\"clampLow\":${price},\"clampHigh\":${price},\"sequence\":${sequence},\"status\":\"HEALTHY\",\"eventTime\":\"${event_time}\",\"publishedAt\":\"${event_time}\"},\"indexInput\":null,\"bookInput\":null,\"tradeInput\":null,\"fundingInput\":null,\"basisAverage\":0,\"basisWindowSeconds\":60,\"calculatedAt\":\"${event_time}\"}"
+  produce_json "$(topic_name "${product_line}" "mark.price")" "${symbol}" "${payload}"
 }
 
 seed_prices_for_line() {
@@ -1481,8 +1401,8 @@ seed_prices_for_line() {
   symbol="$(symbol_for "${product_line}")"
   price_ticks="$(price_ticks_for "${product_line}")"
   tick_units="$(price_tick_units_for "${product_line}")"
-  insert_mark_price "${symbol}" "${tick_units}" "$((1000 + RUN_SEQ % 100000))" "${price_ticks}"
-  insert_mark_price "BTC-USDT" 10000000 "$((2000 + RUN_SEQ % 100000))" 600000
+  publish_mark_price "${product_line}" "${symbol}" "${tick_units}" "$((1000 + RUN_SEQ % 100000))" "${price_ticks}"
+  publish_mark_price "${product_line}" "BTC-USDT" 10000000 "$((2000 + RUN_SEQ % 100000))" 600000
 }
 
 seed_lifecycle_settlement_price() {
@@ -1493,9 +1413,9 @@ seed_lifecycle_settlement_price() {
   tick_units="$(price_tick_units_for "${product_line}")"
   sequence="$((3000 + RUN_SEQ % 100000))"
   if is_delivery_product "${product_line}"; then
-    insert_mark_price "${symbol}" "${tick_units}" "${sequence}" "$((price_ticks + 100))"
+    publish_mark_price "${product_line}" "${symbol}" "${tick_units}" "${sequence}" "$((price_ticks + 100))"
   elif is_option_product "${product_line}"; then
-    insert_mark_price "BTC-USDT" 10000000 "${sequence}" 600100
+    publish_mark_price "${product_line}" "BTC-USDT" 10000000 "${sequence}" 600100
   fi
 }
 

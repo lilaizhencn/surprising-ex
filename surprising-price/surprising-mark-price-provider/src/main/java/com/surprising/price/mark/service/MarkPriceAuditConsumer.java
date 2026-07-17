@@ -1,6 +1,6 @@
 package com.surprising.price.mark.service;
 
-import com.surprising.price.api.model.MarkPriceAuditEvent;
+import com.surprising.price.api.model.MarkPricePublishedEvent;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.model.MarkPriceAuditRecord;
 import com.surprising.price.mark.repository.MarkPriceRepository;
@@ -32,14 +32,14 @@ public class MarkPriceAuditConsumer {
     }
 
     @KafkaListener(
-            topics = "#{__listener.auditTopic()}",
+            topics = "#{__listener.markPriceTopic()}",
             groupId = "#{__listener.groupId()}",
             containerFactory = "markAuditKafkaListenerContainerFactory")
     public void onAudit(List<ConsumerRecord<String, String>> records) {
         try {
             List<MarkPriceAuditRecord> auditRecords = new ArrayList<>(records.size());
             for (ConsumerRecord<String, String> record : records) {
-                MarkPriceAuditEvent event = objectMapper.readValue(record.value(), MarkPriceAuditEvent.class);
+                MarkPricePublishedEvent event = objectMapper.readValue(record.value(), MarkPricePublishedEvent.class);
                 if (event.result() == null || record.key() == null
                         || !record.key().equals(event.result().symbol())) {
                     throw new IllegalArgumentException("mark price audit Kafka key must match payload symbol");
@@ -53,8 +53,8 @@ public class MarkPriceAuditConsumer {
         }
     }
 
-    public String auditTopic() {
-        return properties.markPriceAuditTopic();
+    public String markPriceTopic() {
+        return properties.markPriceTopic();
     }
 
     public String groupId() {

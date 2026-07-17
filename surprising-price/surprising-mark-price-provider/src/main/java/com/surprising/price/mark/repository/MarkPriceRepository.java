@@ -1,6 +1,5 @@
 package com.surprising.price.mark.repository;
 
-import com.surprising.price.api.model.MarkPriceAuditEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPriceResponse;
 import com.surprising.price.api.model.PriceStatus;
@@ -146,9 +145,8 @@ public class MarkPriceRepository {
                 DELETE FROM price_mark_ticks
                  WHERE ctid IN (
                     SELECT ctid
-                      FROM price_mark_ticks
+                     FROM price_mark_ticks
                      WHERE event_time < ?
-                     ORDER BY event_time
                      LIMIT ?
                  )
                 """, Timestamp.from(cutoff), batchSize);

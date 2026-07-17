@@ -3,6 +3,7 @@ package com.surprising.price.mark.config;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.product.api.ProductLine;
+import java.time.Duration;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.JsonSerializer;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -29,7 +31,9 @@ class MarkKafkaConfigurationTest {
         assertThat(properties.isFundingRateExpected()).isTrue();
         assertThat(properties.fundingRateTopic()).isEqualTo("surprising.perp.funding.rate.v1");
         assertThat(properties.markPriceTopic()).isEqualTo("surprising.perp.mark.price.v1");
-        assertThat(properties.markPriceAuditTopic()).isEqualTo("surprising.perp.mark.price.audit.v1");
+        assertThat(properties.getCalculation().getPublishIntervalMs()).isEqualTo(1_000L);
+        assertThat(properties.getAudit().getRetention()).isEqualTo(Duration.ofDays(3));
+        assertThat(properties.getAudit().getCleanupDelayMs()).isEqualTo(60_000L);
     }
 
     @Test
@@ -45,7 +49,6 @@ class MarkKafkaConfigurationTest {
         assertThat(properties.isFundingRateExpected()).isFalse();
         assertThat(properties.fundingRateTopic()).isEqualTo("surprising.perp.funding.rate.v1");
         assertThat(properties.markPriceTopic()).isEqualTo("surprising.inverse-delivery.mark.price.v1");
-        assertThat(properties.markPriceAuditTopic()).isEqualTo("surprising.inverse-delivery.mark.price.audit.v1");
     }
 
     @Test
@@ -104,5 +107,26 @@ class MarkKafkaConfigurationTest {
         assertThat(ReflectionTestUtils.getField(listenerFactory, "concurrency")).isEqualTo(3);
         assertThat(listenerFactory.getContainerProperties().getAckMode())
                 .isEqualTo(ContainerProperties.AckMode.RECORD);
+    }
+
+    @Test
+    void auditConsumerReadsTheSameTopicFromTheBeginningAndRetriesUntilPersisted() {
+        MarkPriceProperties properties = new MarkPriceProperties();
+        properties.getKafka().setBootstrapServers("kafka-price:9092");
+        properties.getKafka().setGroupId("mark-test-group");
+
+        MarkKafkaConfiguration configuration = new MarkKafkaConfiguration();
+        var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
+                configuration.markAuditConsumerFactory(properties);
+        var listenerFactory = configuration.markAuditKafkaListenerContainerFactory(consumerFactory, properties);
+
+        assertThat(consumerFactory.getConfigurationProperties())
+                .containsEntry(ConsumerConfig.GROUP_ID_CONFIG, "mark-test-group-audit-writer")
+                .containsEntry(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
+                .containsEntry(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        assertThat(listenerFactory.getContainerProperties().getAckMode())
+                .isEqualTo(ContainerProperties.AckMode.BATCH);
+        assertThat(ReflectionTestUtils.getField(listenerFactory, "commonErrorHandler"))
+                .isInstanceOf(DefaultErrorHandler.class);
     }
 }

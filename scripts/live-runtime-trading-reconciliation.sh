@@ -6,6 +6,8 @@ DB_USER="${DB_USER:-surprising}"
 DB_PASSWORD="${DB_PASSWORD:-surprising}"
 DB_NAME="${DB_NAME:-surprising_exchange}"
 GATEWAY_BASE="${GATEWAY_BASE:-http://localhost:9094/api/v1/gateway}"
+KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
+PRODUCT_LINE="${PRODUCT_LINE:-LINEAR_PERPETUAL}"
 RUN_ID="${RUN_ID:-$(date +%s%N)}"
 RUN_SEQ=$((RUN_ID % 100000000))
 
@@ -44,6 +46,23 @@ psql_exec() {
 query_value() {
   local sql="$1"
   psql_exec -At -c "${sql}"
+}
+
+kafka_producer_cmd() {
+  if command -v kafka-console-producer >/dev/null 2>&1; then
+    echo kafka-console-producer
+  else
+    echo kafka-console-producer.sh
+  fi
+}
+
+mark_price_topic() {
+  case "${PRODUCT_LINE}" in
+    LINEAR_PERPETUAL) echo "${MARK_PRICE_TOPIC:-surprising.perp.mark.price.v1}" ;;
+    INVERSE_PERPETUAL) echo "${MARK_PRICE_TOPIC:-surprising.inverse-perp.mark.price.v1}" ;;
+    SPOT) echo "${MARK_PRICE_TOPIC:-surprising.spot.mark.price.v1}" ;;
+    *) echo "Unsupported PRODUCT_LINE=${PRODUCT_LINE}" >&2; exit 1 ;;
+  esac
 }
 
 wait_sql_equals() {
@@ -145,7 +164,7 @@ require_health() {
   echo "health ${name}=UP"
 }
 
-insert_mark_price() {
+publish_mark_price() {
   local symbol="$1"
   local tick_units="$2"
   local sequence="$3"
@@ -154,32 +173,21 @@ insert_mark_price() {
   local bid
   local ask
   local units
+  local instrument_version
+  local event_time
+  local payload
   price="$(decimal_price "${price_ticks}" "${tick_units}")"
   bid="$(decimal_price "$((price_ticks - 1))" "${tick_units}")"
   ask="$(decimal_price "$((price_ticks + 1))" "${tick_units}")"
   units=$((price_ticks * tick_units))
-  psql_exec <<SQL >/dev/null
-INSERT INTO price_index_ticks (
-    symbol, sequence, index_price, status, component_count, valid_component_count,
-    total_configured_weight, event_time
-) VALUES (
-    '${symbol}', ${sequence}, ${price}, 'HEALTHY', 5, 5, 5.000000000000000000, now()
-) ON CONFLICT (symbol, sequence) DO NOTHING;
-
-INSERT INTO price_mark_ticks (
-    symbol, sequence, mark_price, mark_price_units, index_price, price1, price2,
-    last_trade_price, best_bid_price, best_ask_price, funding_rate, next_funding_time,
-    time_until_funding_seconds, basis_average, basis_window_seconds, clamp_low, clamp_high,
-    status, event_time
-) VALUES (
-    '${symbol}', ${sequence}, ${price}, ${units}, ${price}, ${price}, ${price},
-    ${price}, ${bid}, ${ask}, 0.000000000000000000, now() + interval '8 hours',
-    28800, 0.000000000000000000, 60,
-    (${price} * 0.970000000000000000),
-    (${price} * 1.030000000000000000),
-    'HEALTHY', now()
-) ON CONFLICT (symbol, sequence) DO NOTHING;
-SQL
+  instrument_version="$(instrument_field "${symbol}" "version")"
+  event_time="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  payload="{\"result\":{\"productLine\":\"${PRODUCT_LINE}\",\"symbol\":\"${symbol}\",\"instrumentVersion\":${instrument_version},\"markPriceUnits\":${units},\"markPriceTicks\":${price_ticks},\"markPrice\":${price},\"indexPrice\":${price},\"price1\":${price},\"price2\":${price},\"lastTradePrice\":${price},\"bestBidPrice\":${bid},\"bestAskPrice\":${ask},\"fundingRate\":0,\"nextFundingTime\":\"${event_time}\",\"timeUntilFundingSeconds\":0,\"basisAverage\":0,\"basisWindowSeconds\":60,\"clampLow\":${price},\"clampHigh\":${price},\"sequence\":${sequence},\"status\":\"HEALTHY\",\"eventTime\":\"${event_time}\",\"publishedAt\":\"${event_time}\"},\"indexInput\":null,\"bookInput\":null,\"tradeInput\":null,\"fundingInput\":null,\"basisAverage\":0,\"basisWindowSeconds\":60,\"calculatedAt\":\"${event_time}\"}"
+  printf '%s:%s\n' "${symbol}" "${payload}" | "$(kafka_producer_cmd)" \
+    --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
+    --topic "$(mark_price_topic)" \
+    --property parse.key=true \
+    --property key.separator=: >/dev/null
 }
 
 refresh_mark_price() {
@@ -187,16 +195,24 @@ refresh_mark_price() {
   local price_ticks="$2"
   local tick_units
   tick_units="$(instrument_field "${symbol}" "price_tick_units")"
-  insert_mark_price "${symbol}" "${tick_units}" "$((RUN_SEQ + SECONDS + price_ticks))" "${price_ticks}"
-  wait_sql_nonzero "fresh mark price ${symbol}" \
-    "SELECT count(*) FROM price_mark_ticks WHERE symbol = '${symbol}' AND event_time >= now() - interval '10 seconds'"
+  publish_mark_price "${symbol}" "${tick_units}" "$((RUN_SEQ + SECONDS + price_ticks))" "${price_ticks}"
+  local deadline=$((SECONDS + 30))
+  until [[ "$(latest_mark_ticks "${symbol}" 2>/dev/null || true)" == "${price_ticks}" ]]; do
+    if ((SECONDS >= deadline)); then
+      echo "Timed out waiting for Kafka mark price ${symbol}=${price_ticks}" >&2
+      exit 1
+    fi
+    sleep 1
+  done
 }
 
 latest_mark_ticks() {
   local symbol="$1"
   local tick_units
   tick_units="$(instrument_field "${symbol}" "price_tick_units")"
-  query_value "SELECT COALESCE((SELECT ((mark_price_units + ${tick_units} / 2) / ${tick_units}) FROM price_mark_ticks WHERE symbol = '${symbol}' ORDER BY event_time DESC, sequence DESC LIMIT 1), 0)"
+  local units
+  units="$(curl -fsS "${GATEWAY_BASE}/price-mark/mark/latest?symbol=${symbol}" | json_field markPriceUnits)"
+  echo $(((units + tick_units / 2) / tick_units))
 }
 
 gateway_post() {
@@ -540,6 +556,10 @@ run_market_maker_flow() {
 }
 
 main() {
+  if ! command -v "$(kafka_producer_cmd)" >/dev/null 2>&1; then
+    echo "Missing Kafka console producer" >&2
+    exit 1
+  fi
   require_health instrument 9080
   require_health trading-entry 9084
   require_health matching 9085
@@ -548,11 +568,23 @@ main() {
   require_health gateway 9094
   require_health market-maker 9096
 
-  echo "runId=${RUN_ID}"
-  run_linear_flow
-  run_coin_flow
-  run_spot_flow
-  run_market_maker_flow
+  echo "runId=${RUN_ID} productLine=${PRODUCT_LINE}"
+  case "${PRODUCT_LINE}" in
+    LINEAR_PERPETUAL)
+      run_linear_flow
+      run_market_maker_flow
+      ;;
+    INVERSE_PERPETUAL)
+      run_coin_flow
+      ;;
+    SPOT)
+      run_spot_flow
+      ;;
+    *)
+      echo "Unsupported PRODUCT_LINE=${PRODUCT_LINE}" >&2
+      exit 1
+      ;;
+  esac
   assert_global_accounting_invariants
   echo "Live runtime trading reconciliation passed"
 }

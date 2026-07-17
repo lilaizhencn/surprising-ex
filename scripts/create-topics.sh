@@ -123,13 +123,12 @@ create_product_topics() {
   create_topic "${prefix}.match.results.v1"
   create_topic "${prefix}.match.trades.v1"
   create_topic "${prefix}.orderbook.depth.v1"
+  create_topic "${prefix}.mark.price.v1"
   case "${product_line}" in
     linear-perp|inverse-perp|linear-delivery|inverse-delivery|option)
       create_topic "${prefix}.index.price.v1"
       create_topic "${prefix}.index.components.v1"
       create_topic "${prefix}.book.ticker.v1"
-      create_topic "${prefix}.mark.price.v1"
-      create_topic "${prefix}.mark.price.audit.v1"
       create_topic "${prefix}.account.position.events.v1"
       create_topic "${prefix}.risk.account.events.v1"
       create_topic "${prefix}.risk.position.events.v1"
@@ -174,7 +173,6 @@ if [[ "${INCLUDE_LEGACY_PERP_TOPICS}" == "true" ]]; then
   create_topic surprising.perp.book.ticker.v1
   create_topic surprising.perp.funding.rate.v1
   create_topic surprising.perp.mark.price.v1
-  create_topic surprising.perp.mark.price.audit.v1
 fi
 
 if [[ "${INCLUDE_PRODUCT_TOPICS}" == "true" ]]; then

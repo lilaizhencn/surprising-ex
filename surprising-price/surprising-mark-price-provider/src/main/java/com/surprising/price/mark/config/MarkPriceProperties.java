@@ -81,10 +81,6 @@ public class MarkPriceProperties {
         return kafka.productTopicsEnabled ? productTopics().markPriceTopic() : topics.getMarkPriceTopic();
     }
 
-    public String markPriceAuditTopic() {
-        return kafka.productTopicsEnabled ? productTopics().markPriceAuditTopic() : topics.getMarkPriceAuditTopic();
-    }
-
     private ProductTopicNames productTopics() {
         return ProductTopicNames.of(kafka.productLine);
     }
@@ -152,7 +148,6 @@ public class MarkPriceProperties {
         private String tradeTopic = "surprising.perp.trade.events.v1";
         private String fundingRateTopic = "surprising.perp.funding.rate.v1";
         private String markPriceTopic = "surprising.perp.mark.price.v1";
-        private String markPriceAuditTopic = "surprising.perp.mark.price.audit.v1";
 
         public String getIndexPriceTopic() {
             return indexPriceTopic;
@@ -194,29 +189,22 @@ public class MarkPriceProperties {
             this.markPriceTopic = markPriceTopic;
         }
 
-        public String getMarkPriceAuditTopic() {
-            return markPriceAuditTopic;
-        }
-
-        public void setMarkPriceAuditTopic(String markPriceAuditTopic) {
-            this.markPriceAuditTopic = markPriceAuditTopic;
-        }
     }
 
     public static class Calculation {
-        private long publishDelayMs = 1000L;
+        private long publishIntervalMs = 1000L;
         private Duration basisWindow = Duration.ofSeconds(60);
         private Duration maxInputAge = Duration.ofSeconds(5);
         private BigDecimal clampRatio = new BigDecimal("0.03");
         private int defaultFundingIntervalHours = 8;
         private int scale = 18;
 
-        public long getPublishDelayMs() {
-            return publishDelayMs;
+        public long getPublishIntervalMs() {
+            return publishIntervalMs;
         }
 
-        public void setPublishDelayMs(long publishDelayMs) {
-            this.publishDelayMs = publishDelayMs;
+        public void setPublishIntervalMs(long publishIntervalMs) {
+            this.publishIntervalMs = publishIntervalMs;
         }
 
         public Duration getBasisWindow() {
@@ -292,7 +280,7 @@ public class MarkPriceProperties {
 
     public static class Audit {
         private Duration retention = Duration.ofDays(3);
-        private long cleanupDelayMs = Duration.ofHours(1).toMillis();
+        private long cleanupDelayMs = Duration.ofMinutes(1).toMillis();
         private int cleanupBatchSize = 10_000;
         private int maxBatchesPerRun = 10;
 

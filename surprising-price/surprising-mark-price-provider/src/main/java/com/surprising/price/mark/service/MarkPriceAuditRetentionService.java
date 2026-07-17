@@ -22,7 +22,7 @@ public class MarkPriceAuditRetentionService {
         this.properties = properties;
     }
 
-    @Scheduled(fixedDelayString = "${surprising.price.mark.audit.cleanup-delay-ms:3600000}")
+    @Scheduled(fixedDelayString = "${surprising.price.mark.audit.cleanup-delay-ms:60000}")
     public void deleteExpiredAuditRows() {
         MarkPriceProperties.Audit audit = properties.getAudit();
         Instant cutoff = Instant.now().minus(audit.getRetention());

@@ -6,8 +6,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.surprising.price.api.model.MarkPriceAuditEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.api.model.MarkPricePublishedEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.mark.model.MarkPriceAuditRecord;
 import com.surprising.product.api.ProductLine;
@@ -76,9 +76,9 @@ class MarkPriceRepositoryTest {
         assertThat(args.getValue()).containsExactly(Timestamp.from(cutoff), 10_000);
     }
 
-    private static MarkPriceAuditEvent auditEvent() {
+    private static MarkPricePublishedEvent auditEvent() {
         MarkPriceEvent event = event();
-        return new MarkPriceAuditEvent(event, null, null, null, null,
+        return new MarkPricePublishedEvent(event, null, null, null, null,
                 event.basisAverage(), event.basisWindowSeconds(), event.eventTime());
     }
 

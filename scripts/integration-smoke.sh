@@ -125,14 +125,16 @@ VALUES
     ('LINEAR_PERPETUAL', 2002, 'BTC-USDT', 1, 3, 600000, 1800000, 0, now());
 
 INSERT INTO price_mark_ticks (
-    symbol, sequence, mark_price, mark_price_units, index_price, price1, price2, last_trade_price,
+    product_line, symbol, instrument_version, sequence, mark_price, mark_price_units, mark_price_ticks,
+    index_price, price1, price2, last_trade_price,
     best_bid_price, best_ask_price, funding_rate, next_funding_time,
     time_until_funding_seconds, basis_average, basis_window_seconds, clamp_low,
-    clamp_high, status, event_time
+    clamp_high, status, event_time, published_at, calculation_inputs
 ) VALUES (
-    'BTC-USDT', 9901, 59000, 5900000000000, 59000, 59000, 59000, 59000,
+    'LINEAR_PERPETUAL', 'BTC-USDT', 1, 9901, 59000, 5900000000000, 590000,
+    59000, 59000, 59000, 59000,
     58999, 59001, 0, now() + interval '1 hour',
-    3600, 0, 300, 1, 100000, 'HEALTHY', now()
+    3600, 0, 300, 1, 100000, 'HEALTHY', now(), now(), '{}'::jsonb
 );
 
 DO $$
@@ -455,14 +457,16 @@ INSERT INTO account_positions (
 VALUES ('INVERSE_PERPETUAL', 3003, 'BTC-USD', 1, 1, 50000, 50000, 0, now());
 
 INSERT INTO price_mark_ticks (
-    symbol, sequence, mark_price, mark_price_units, index_price, price1, price2, last_trade_price,
+    product_line, symbol, instrument_version, sequence, mark_price, mark_price_units, mark_price_ticks,
+    index_price, price1, price2, last_trade_price,
     best_bid_price, best_ask_price, funding_rate, next_funding_time,
     time_until_funding_seconds, basis_average, basis_window_seconds, clamp_low,
-    clamp_high, status, event_time
+    clamp_high, status, event_time, published_at, calculation_inputs
 ) VALUES (
-    'BTC-USD', 9902, 60000, 6000000000000, 60000, 60000, 60000, 60000,
+    'INVERSE_PERPETUAL', 'BTC-USD', 1, 9902, 60000, 6000000000000, 600000,
+    60000, 60000, 60000, 60000,
     59999, 60001, 0, now() + interval '1 hour',
-    3600, 0, 300, 1, 100000, 'HEALTHY', now()
+    3600, 0, 300, 1, 100000, 'HEALTHY', now(), now(), '{}'::jsonb
 );
 
 DO $$

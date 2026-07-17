@@ -245,7 +245,7 @@ surprising:
 account_positions
   + account_balances
   + account_deficits
-  + price_mark_ticks
+  + 本机 Kafka 最新标记价快照
   + instruments
   + account_asset_scales
   -> risk_account_snapshots
@@ -253,6 +253,9 @@ account_positions
   -> risk_liquidation_candidates
   -> surprising.perp.liquidation.candidates.v1
 ```
+
+标记价不从审计表读取。每轮风险扫描先截取一份不可变的本机 Kafka 缓存快照；任一持仓缺少新鲜、同
+instrument 版本的标记价时，整个账户风险组本轮不落快照、不生成强平候选，等待下一次有效价格。
 
 多节点部署时，risk-provider 通过 `risk_scan_leases` 按 `userId + settleAsset` 抢扫描租约。默认租约 `15s`。同一个账户资产组同一时间只允许一个节点写风险快照和强平候选，节点挂掉后其他节点等租约过期接管。
 

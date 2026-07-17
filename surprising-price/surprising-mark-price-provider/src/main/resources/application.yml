@@ -52,9 +52,8 @@ surprising:
         trade-topic: surprising.perp.trade.events.v1
         funding-rate-topic: surprising.perp.funding.rate.v1
         mark-price-topic: surprising.perp.mark.price.v1
-        mark-price-audit-topic: surprising.perp.mark.price.audit.v1
       calculation:
-        publish-delay-ms: 1000
+        publish-interval-ms: 1000
         basis-window: 60s
         max-input-age: 15s
         clamp-ratio: 0.03
@@ -66,6 +65,6 @@ surprising:
         lease-duration: 15s
       audit:
         retention: 3d
-        cleanup-delay-ms: 3600000
+        cleanup-delay-ms: 60000
         cleanup-batch-size: 10000
         max-batches-per-run: 10

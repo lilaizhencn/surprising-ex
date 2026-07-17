@@ -15,6 +15,7 @@ import com.surprising.trading.api.model.OrderBookDepthEvent;
 import com.surprising.trading.api.model.OrderBookDepthUpdateType;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.api.model.MarkPricePublishedEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
@@ -175,7 +176,7 @@ class KafkaFanoutConsumerTest {
         MarkPriceEvent event = markPriceEvent(Instant.now());
 
         consumer.onMarkPrice(new ConsumerRecord<>("surprising.perp.mark.price.v1", 0, 0L,
-                "BTC-USDT", objectMapper.writeValueAsString(event)));
+                "BTC-USDT", objectMapper.writeValueAsString(markPricePublication(event))));
 
         verify(registry).publish(eq(new SubscriptionTopic(WsChannel.MARK_PRICE, "BTC-USDT", null, null)),
                 eq(event), eq(event.eventTime()));
@@ -188,7 +189,7 @@ class KafkaFanoutConsumerTest {
         MarkPriceEvent event = markPriceEvent(Instant.now().minusSeconds(4));
 
         consumer.onMarkPrice(new ConsumerRecord<>("surprising.perp.mark.price.v1", 0, 0L,
-                "BTC-USDT", objectMapper.writeValueAsString(event)));
+                "BTC-USDT", objectMapper.writeValueAsString(markPricePublication(event))));
 
         verifyNoInteractions(registry);
     }
@@ -244,6 +245,11 @@ class KafkaFanoutConsumerTest {
                 BigDecimal.ZERO, eventTime.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
                 new BigDecimal("49000"), new BigDecimal("51000"), 1L, PriceStatus.HEALTHY,
                 eventTime, eventTime);
+    }
+
+    private MarkPricePublishedEvent markPricePublication(MarkPriceEvent event) {
+        return new MarkPricePublishedEvent(event, null, null, null, null,
+                event.basisAverage(), event.basisWindowSeconds(), event.eventTime());
     }
 
     @Test
