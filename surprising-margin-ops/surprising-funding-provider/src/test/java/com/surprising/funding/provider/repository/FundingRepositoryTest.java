@@ -14,11 +14,15 @@ import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.model.FundingPaymentCandidate;
 import com.surprising.funding.provider.model.FundingRateInput;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
+import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -55,7 +59,7 @@ class FundingRepositoryTest {
 
     @Test
     void rateInputsDefaultToPerpetualInstruments() {
-        FundingRepository repository = new FundingRepository(jdbcTemplate);
+        FundingRepository repository = repositoryWithMarkPrice(new FundingProperties(), "BTC-USDT", 7L, 90L);
 
         repository.rateInputs(java.time.Duration.ofSeconds(10));
 
@@ -65,8 +69,11 @@ class FundingRepositoryTest {
         assertThat(sql.getValue())
                 .contains("i.instrument_type = 'PERPETUAL'")
                 .contains("i.funding_interval_hours > 0")
+                .contains("JOIN mark_prices pm")
+                .doesNotContain("price_mark_ticks")
                 .doesNotContain("i.contract_type = ?");
-        assertThat(args.getValue()).containsExactly(10_000L);
+        assertThat(args.getValue()).containsExactly("BTC-USDT", 7L, new BigDecimal("90"),
+                new BigDecimal("89"), Timestamp.from(Instant.parse("2026-07-01T00:00:00Z")));
     }
 
     @Test
@@ -74,7 +81,7 @@ class FundingRepositoryTest {
         FundingProperties properties = new FundingProperties();
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
-        FundingRepository repository = new FundingRepository(jdbcTemplate, properties);
+        FundingRepository repository = repositoryWithMarkPrice(properties, "BTC-USD", 8L, 90L);
 
         repository.rateInputs(java.time.Duration.ofSeconds(10));
 
@@ -82,7 +89,9 @@ class FundingRepositoryTest {
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
         assertThat(sql.getValue()).contains("i.contract_type = ?");
-        assertThat(args.getValue()).containsExactly("INVERSE_PERPETUAL", 10_000L);
+        assertThat(args.getValue()).containsExactly("BTC-USD", 8L, new BigDecimal("90"),
+                new BigDecimal("89"), Timestamp.from(Instant.parse("2026-07-01T00:00:00Z")),
+                "INVERSE_PERPETUAL");
     }
 
     @Test
@@ -90,7 +99,7 @@ class FundingRepositoryTest {
         FundingProperties properties = new FundingProperties();
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        FundingRepository repository = new FundingRepository(jdbcTemplate, properties);
+        FundingRepository repository = repositoryWithMarkPrice(properties, "BTC-USDT-260626", 4L, 90L);
 
         repository.rateInputs(java.time.Duration.ofSeconds(10));
 
@@ -98,7 +107,8 @@ class FundingRepositoryTest {
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
         assertThat(sql.getValue()).contains("1 = 0").doesNotContain("i.contract_type = ?");
-        assertThat(args.getValue()).containsExactly(10_000L);
+        assertThat(args.getValue()).containsExactly("BTC-USDT-260626", 4L, new BigDecimal("90"),
+                new BigDecimal("89"), Timestamp.from(Instant.parse("2026-07-01T00:00:00Z")));
     }
 
     @Test
@@ -122,8 +132,8 @@ class FundingRepositoryTest {
     }
 
     @Test
-    void paymentCandidatesConvertMarkTicksWithPositionInstrumentVersion() {
-        FundingRepository repository = new FundingRepository(jdbcTemplate);
+    void paymentCandidatesUseFreshKafkaMarkWithPositionInstrumentVersion() {
+        FundingRepository repository = repositoryWithMarkPrice(new FundingProperties(), "BTC-USDT", 7L, 65_000L);
         Instant fundingTime = Instant.parse("2026-07-01T08:00:00Z");
 
         repository.paymentCandidates(new FundingRateResponse("BTC-USDT", 11L, 100L,
@@ -131,16 +141,16 @@ class FundingRepositoryTest {
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq("BTC-USDT"),
-                any(Timestamp.class), eq("LINEAR_PERPETUAL"), eq("BTC-USDT"), eq("LINEAR_PERPETUAL"));
+                any(Timestamp.class), eq(65_000L), eq("LINEAR_PERPETUAL"), eq("BTC-USDT"),
+                eq("LINEAR_PERPETUAL"), eq(7L));
 
         assertThat(sql.getValue())
                 .contains("JOIN instruments i")
                 .contains("i.version = p.instrument_version")
                 .contains("i.contract_type = ?")
                 .contains("p.product_line = ?")
-                .contains("m.mark_price_units")
-                .contains("FROM price_mark_ticks m")
-                .contains("WHERE m.symbol = p.symbol")
+                .contains("p.instrument_version = ?")
+                .doesNotContain("price_mark_ticks")
                 .doesNotContain("::NUMERIC")
                 .doesNotContain("instrument_current_versions");
     }
@@ -150,7 +160,7 @@ class FundingRepositoryTest {
         FundingProperties properties = new FundingProperties();
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
-        FundingRepository repository = new FundingRepository(jdbcTemplate, properties);
+        FundingRepository repository = repositoryWithMarkPrice(properties, "BTC-USD", 9L, 65_000L);
         Instant fundingTime = Instant.parse("2026-07-01T08:00:00Z");
 
         repository.paymentCandidates(new FundingRateResponse("BTC-USD", 11L, 100L,
@@ -158,7 +168,8 @@ class FundingRepositoryTest {
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq("BTC-USD"),
-                any(Timestamp.class), eq("INVERSE_PERPETUAL"), eq("BTC-USD"), eq("INVERSE_PERPETUAL"));
+                any(Timestamp.class), eq(65_000L), eq("INVERSE_PERPETUAL"), eq("BTC-USD"),
+                eq("INVERSE_PERPETUAL"), eq(9L));
         assertThat(sql.getValue())
                 .contains("i.contract_type = ?")
                 .contains("p.product_line = ?");
@@ -182,10 +193,11 @@ class FundingRepositoryTest {
 
     @Test
     void paymentCandidatesCalculateNotionalWithSharedLongMath() throws Exception {
-        FundingRepository repository = new FundingRepository(jdbcTemplate);
+        FundingRepository repository = repositoryWithMarkPrice(new FundingProperties(), "BTC-USDT", 7L, 5L);
         Instant fundingTime = Instant.parse("2026-07-01T08:00:00Z");
         when(jdbcTemplate.query(contains("WITH rate_row"), anyRowMapper(), eq("BTC-USDT"),
-                any(Timestamp.class), eq("LINEAR_PERPETUAL"), eq("BTC-USDT"), eq("LINEAR_PERPETUAL")))
+                any(Timestamp.class), eq(5L), eq("LINEAR_PERPETUAL"), eq("BTC-USDT"),
+                eq("LINEAR_PERPETUAL"), eq(7L)))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
@@ -214,6 +226,24 @@ class FundingRepositoryTest {
             assertThat(candidate.notionalUnits()).isEqualTo(20_000L);
             assertThat(candidate.amountUnits()).isEqualTo(2_000L);
         });
+    }
+
+    private FundingRepository repositoryWithMarkPrice(FundingProperties properties,
+                                                       String symbol,
+                                                       long instrumentVersion,
+                                                       long markPriceTicks) {
+        LatestMarkPriceCache markPriceCache = mock(LatestMarkPriceCache.class);
+        MarkPriceEvent markPrice = mock(MarkPriceEvent.class);
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        when(markPrice.symbol()).thenReturn(symbol);
+        when(markPrice.instrumentVersion()).thenReturn(instrumentVersion);
+        when(markPrice.markPriceTicks()).thenReturn(markPriceTicks);
+        when(markPrice.markPrice()).thenReturn(new BigDecimal("90"));
+        when(markPrice.indexPrice()).thenReturn(new BigDecimal("89"));
+        when(markPrice.eventTime()).thenReturn(eventTime);
+        when(markPriceCache.freshSnapshots(any(Duration.class))).thenReturn(List.of(markPrice));
+        when(markPriceCache.fresh(eq(symbol), any(Duration.class))).thenReturn(java.util.Optional.of(markPrice));
+        return new FundingRepository(jdbcTemplate, properties, markPriceCache);
     }
 
     @Test

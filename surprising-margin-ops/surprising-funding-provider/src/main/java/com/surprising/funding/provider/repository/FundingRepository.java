@@ -11,6 +11,8 @@ import com.surprising.funding.provider.model.FundingBalanceState;
 import com.surprising.funding.provider.model.FundingPaymentCandidate;
 import com.surprising.funding.provider.model.FundingRateInput;
 import com.surprising.funding.provider.service.FundingMath;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
@@ -31,15 +33,23 @@ public class FundingRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final FundingProperties properties;
+    private final LatestMarkPriceCache markPriceCache;
+
+    public FundingRepository(JdbcTemplate jdbcTemplate, FundingProperties properties) {
+        this(jdbcTemplate, properties, null);
+    }
 
     @Autowired
-    public FundingRepository(JdbcTemplate jdbcTemplate, FundingProperties properties) {
+    public FundingRepository(JdbcTemplate jdbcTemplate,
+                             FundingProperties properties,
+                             LatestMarkPriceCache markPriceCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties == null ? new FundingProperties() : properties;
+        this.markPriceCache = markPriceCache;
     }
 
     protected FundingRepository(JdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, new FundingProperties());
+        this(jdbcTemplate, new FundingProperties(), null);
     }
 
     public boolean acquireLease(String symbol, String ownerId, Duration leaseDuration) {
@@ -90,10 +100,14 @@ public class FundingRepository {
     }
 
     public List<FundingRateInput> rateInputs(Duration maxMarkAge) {
-        List<Object> args = new ArrayList<>();
+        MarkPriceValues markPrices = freshMarkPrices(maxMarkAge);
+        if (markPrices.isEmpty()) {
+            return List.of();
+        }
+        List<Object> args = new ArrayList<>(markPrices.args());
         String productCondition = fundingInstrumentCondition(args, "i");
-        args.add(maxMarkAge.toMillis());
         return jdbcTemplate.query("""
+                WITH %s
                 SELECT i.symbol,
                        CAST(round(((pm.mark_price - pm.index_price) / pm.index_price) * 1000000) AS BIGINT)
                            AS premium_rate_ppm,
@@ -105,19 +119,14 @@ public class FundingRepository {
                   FROM instruments i
                   JOIN instrument_current_versions c
                     ON c.symbol = i.symbol AND c.version = i.version
-                  JOIN LATERAL (
-                      SELECT mark_price, index_price, event_time
-                        FROM price_mark_ticks m
-                       WHERE m.symbol = i.symbol
-                       ORDER BY event_time DESC
-                       LIMIT 1
-                  ) pm ON TRUE
+                  JOIN mark_prices pm
+                    ON pm.symbol = i.symbol
+                   AND pm.instrument_version = i.version
                  WHERE i.status = 'TRADING'
                    AND %s
                    AND i.funding_interval_hours > 0
                    AND pm.index_price > 0
-                   AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
-                """.formatted(productCondition), (rs, rowNum) -> new FundingRateInput(
+                """.formatted(markPrices.cte(), productCondition), (rs, rowNum) -> new FundingRateInput(
                 rs.getString("symbol"),
                 0L,
                 rs.getLong("premium_rate_ppm"),
@@ -232,6 +241,7 @@ public class FundingRepository {
             return List.of();
         }
         ProductLine productLine = fundingProductLine.get();
+        MarkPriceEvent markPrice = requireMarkPrice(rate.symbol());
         return jdbcTemplate.query("""
                 WITH rate_row AS (
                     SELECT funding_rate_ppm
@@ -250,7 +260,7 @@ public class FundingRepository {
                        i.price_tick_units,
                        ss.scale_units AS settle_scale_units,
                        p.signed_quantity_steps,
-                       mark_row.mark_price_ticks,
+                       ?::BIGINT AS mark_price_ticks,
                        rate_row.funding_rate_ppm
                   FROM account_positions p
                   JOIN instruments i
@@ -258,18 +268,11 @@ public class FundingRepository {
                    AND i.version = p.instrument_version
                    AND i.contract_type = ?
                   JOIN account_asset_scales ss ON ss.asset = i.settle_asset
-                  JOIN LATERAL (
-                      SELECT ((m.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_price_ticks
-                        FROM price_mark_ticks m
-                       WHERE m.symbol = p.symbol
-                       ORDER BY m.event_time DESC
-                       LIMIT 1
-                  ) mark_row ON TRUE
                   CROSS JOIN rate_row
                  WHERE p.symbol = ?
                    AND p.product_line = ?
+                   AND p.instrument_version = ?
                    AND p.signed_quantity_steps <> 0
-                   AND mark_row.mark_price_ticks > 0
                 ORDER BY p.user_id ASC
                 """, (rs, rowNum) -> {
             long signedQuantity = rs.getLong("signed_quantity_steps");
@@ -291,8 +294,8 @@ public class FundingRepository {
                     notionalUnits,
                     ratePpm,
                     FundingMath.paymentAmount(signedQuantity, notionalUnits, ratePpm));
-        }, rate.symbol(), Timestamp.from(rate.fundingTime()), productLine.contractTypeCode(), rate.symbol(),
-                productLine.name());
+        }, rate.symbol(), Timestamp.from(rate.fundingTime()), markPrice.markPriceTicks(),
+                productLine.contractTypeCode(), rate.symbol(), productLine.name(), markPrice.instrumentVersion());
     }
 
     public boolean insertPayment(long settlementId, FundingPaymentCandidate payment, Instant now) {
@@ -727,6 +730,39 @@ public class FundingRepository {
                 rs.getTimestamp("created_at").toInstant());
     }
 
+    private MarkPriceEvent requireMarkPrice(String symbol) {
+        if (markPriceCache == null) {
+            throw new IllegalStateException("mark price cache is not configured");
+        }
+        return markPriceCache.fresh(symbol, properties.getCalculation().getMaxMarkAge())
+                .orElseThrow(() -> new IllegalStateException("fresh mark price not found for " + symbol));
+    }
+
+    private MarkPriceValues freshMarkPrices(Duration maxAge) {
+        if (markPriceCache == null) {
+            throw new IllegalStateException("mark price cache is not configured");
+        }
+        List<MarkPriceEvent> snapshots = markPriceCache.freshSnapshots(maxAge);
+        if (snapshots.isEmpty()) {
+            return MarkPriceValues.empty();
+        }
+        StringBuilder values = new StringBuilder();
+        List<Object> args = new ArrayList<>(snapshots.size() * 5);
+        for (MarkPriceEvent snapshot : snapshots) {
+            if (!values.isEmpty()) {
+                values.append(", ");
+            }
+            values.append("(?::TEXT, ?::BIGINT, ?::NUMERIC, ?::NUMERIC, ?::TIMESTAMPTZ)");
+            args.add(snapshot.symbol());
+            args.add(snapshot.instrumentVersion());
+            args.add(snapshot.markPrice());
+            args.add(snapshot.indexPrice());
+            args.add(Timestamp.from(snapshot.eventTime()));
+        }
+        return new MarkPriceValues("mark_prices(symbol, instrument_version, mark_price, index_price, event_time) "
+                + "AS (VALUES " + values + ")", List.copyOf(args));
+    }
+
     private void requireSingleRow(int rows, String operation) {
         if (rows != 1) {
             throw new IllegalStateException("failed to write " + operation);
@@ -765,6 +801,17 @@ public class FundingRepository {
         private PositionMargin {
             marginMode = MarginMode.defaultIfNull(marginMode);
             positionSide = PositionSide.defaultIfNull(positionSide);
+        }
+    }
+
+    private record MarkPriceValues(String cte, List<Object> args) {
+
+        private static MarkPriceValues empty() {
+            return new MarkPriceValues("", List.of());
+        }
+
+        private boolean isEmpty() {
+            return args.isEmpty();
         }
     }
 }

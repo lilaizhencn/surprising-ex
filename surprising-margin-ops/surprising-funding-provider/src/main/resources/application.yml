@@ -27,6 +27,17 @@ management:
         include: health,info,metrics,prometheus
 
 surprising:
+  price:
+    consumer:
+      bootstrap-servers: localhost:9092
+      product-line: LINEAR_PERPETUAL
+      product-topics-enabled: false
+      topic: surprising.perp.mark.price.v1
+      group-id: surprising-funding-mark-price-${HOSTNAME:${random.uuid}}
+      max-age: 10s
+      allowed-future-skew: 1s
+      concurrency: 1
+      max-poll-records: 500
   funding:
     kafka:
       bootstrap-servers: localhost:9092
