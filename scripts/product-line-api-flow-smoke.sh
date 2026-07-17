@@ -811,9 +811,14 @@ SELECT GREATEST(
 
 seed_stress_prices() {
   local product_line="$1"
+  # Price consumers reject out-of-order events.  Use wall-clock milliseconds
+  # rather than the smoke run id so a fresh run always supersedes retained
+  # Kafka records from an earlier run.
+  local price_sequence_base
+  price_sequence_base="$(current_epoch_millis)"
   while IFS=$'\t' read -r symbol price_ticks sequence; do
     publish_mark_price "${product_line}" "${symbol}" 10000000 "${sequence}" "${price_ticks}"
-  done < <(python3 - "${product_line}" "${STRESS_SYMBOL_COUNT}" "${RUN_SEQ}" <<'PY'
+  done < <(python3 - "${product_line}" "${STRESS_SYMBOL_COUNT}" "${price_sequence_base}" <<'PY'
 import sys
 
 product_line = sys.argv[1]
@@ -1395,14 +1400,22 @@ publish_mark_price() {
   produce_json "$(topic_name "${product_line}" "mark.price")" "${symbol}" "${payload}"
 }
 
+current_epoch_millis() {
+  python3 - <<'PY'
+import time
+print(time.time_ns() // 1_000_000)
+PY
+}
+
 seed_prices_for_line() {
   local product_line="$1"
-  local symbol price_ticks tick_units
+  local symbol price_ticks tick_units sequence_base
   symbol="$(symbol_for "${product_line}")"
   price_ticks="$(price_ticks_for "${product_line}")"
   tick_units="$(price_tick_units_for "${product_line}")"
-  publish_mark_price "${product_line}" "${symbol}" "${tick_units}" "$((1000 + RUN_SEQ % 100000))" "${price_ticks}"
-  publish_mark_price "${product_line}" "BTC-USDT" 10000000 "$((2000 + RUN_SEQ % 100000))" 600000
+  sequence_base="$(current_epoch_millis)"
+  publish_mark_price "${product_line}" "${symbol}" "${tick_units}" "${sequence_base}" "${price_ticks}"
+  publish_mark_price "${product_line}" "BTC-USDT" 10000000 "$((sequence_base + 1))" 600000
 }
 
 seed_lifecycle_settlement_price() {
@@ -1411,7 +1424,7 @@ seed_lifecycle_settlement_price() {
   symbol="$(symbol_for "${product_line}")"
   price_ticks="$(price_ticks_for "${product_line}")"
   tick_units="$(price_tick_units_for "${product_line}")"
-  sequence="$((3000 + RUN_SEQ % 100000))"
+  sequence="$(current_epoch_millis)"
   if is_delivery_product "${product_line}"; then
     publish_mark_price "${product_line}" "${symbol}" "${tick_units}" "${sequence}" "$((price_ticks + 100))"
   elif is_option_product "${product_line}"; then
@@ -2809,7 +2822,7 @@ INSERT INTO funding_rate_ticks (
     premium_rate_ppm, interest_rate_ppm, funding_rate_ppm, status, event_time, created_at
 ) VALUES (
     '${symbol}', ${RUN_SEQ}, now() - interval '1 second', 8,
-    1000, 0, 1000, 'PREDICTED', now(), now()
+    1000, 0, 1000, 'FINAL', now(), now()
 ) ON CONFLICT (symbol, sequence) DO NOTHING;
 SQL
   wait_sql_nonzero "funding settlement completed ${product_line}" \

@@ -3,6 +3,7 @@ package com.surprising.price.mark.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPricePublishedEvent;
@@ -51,5 +52,17 @@ class MarkPriceAuditConsumerTest {
         });
         assertThat(consumer.markPriceTopic()).isEqualTo(properties.markPriceTopic());
         assertThat(consumer.groupId()).isEqualTo(properties.getKafka().getGroupId() + "-audit-writer");
+    }
+
+    @Test
+    void discardsMalformedAuditMessageWithoutRetryingTheBatch() {
+        MarkPriceRepository repository = mock(MarkPriceRepository.class);
+        MarkPriceProperties properties = new MarkPriceProperties();
+        MarkPriceAuditConsumer consumer = new MarkPriceAuditConsumer(new ObjectMapper(), repository, properties);
+
+        consumer.onAudit(List.of(new ConsumerRecord<>(properties.markPriceTopic(), 0, 0L,
+                "BTC-USDT", "{not-json")));
+
+        verifyNoInteractions(repository);
     }
 }

@@ -36,20 +36,25 @@ public class MarkPriceAuditConsumer {
             groupId = "#{__listener.groupId()}",
             containerFactory = "markAuditKafkaListenerContainerFactory")
     public void onAudit(List<ConsumerRecord<String, String>> records) {
-        try {
-            List<MarkPriceAuditRecord> auditRecords = new ArrayList<>(records.size());
-            for (ConsumerRecord<String, String> record : records) {
+        List<MarkPriceAuditRecord> auditRecords = new ArrayList<>(records.size());
+        for (ConsumerRecord<String, String> record : records) {
+            try {
                 MarkPricePublishedEvent event = objectMapper.readValue(record.value(), MarkPricePublishedEvent.class);
                 if (event.result() == null || record.key() == null
                         || !record.key().equals(event.result().symbol())) {
                     throw new IllegalArgumentException("mark price audit Kafka key must match payload symbol");
                 }
                 auditRecords.add(new MarkPriceAuditRecord(event, record.value()));
+            } catch (Exception ex) {
+                // Audit storage is asynchronous.  A permanently malformed
+                // record must not prevent later valid audit records from being
+                // persisted or keep this Kafka partition retrying forever.
+                log.warn("Discarding invalid mark price audit topic={} partition={} offset={}: {}",
+                        record.topic(), record.partition(), record.offset(), ex.getMessage(), ex);
             }
+        }
+        if (!auditRecords.isEmpty()) {
             repository.saveBatch(auditRecords);
-        } catch (Exception ex) {
-            log.error("Failed to persist mark price audit batch size={}: {}", records.size(), ex.getMessage(), ex);
-            throw new IllegalStateException("failed to persist mark price audit", ex);
         }
     }
 

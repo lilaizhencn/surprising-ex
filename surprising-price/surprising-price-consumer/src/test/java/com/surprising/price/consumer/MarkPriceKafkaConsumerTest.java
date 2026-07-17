@@ -1,6 +1,7 @@
 package com.surprising.price.consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPricePublishedEvent;
@@ -34,5 +35,17 @@ class MarkPriceKafkaConsumerTest {
                 new ObjectMapper().writeValueAsString(publication)));
 
         assertThat(cache.latest("BTC-USDT")).contains(result);
+    }
+
+    @Test
+    void discardsMalformedPublicationWithoutBlockingThePartition() {
+        MarkPriceConsumerProperties properties = new MarkPriceConsumerProperties();
+        LatestMarkPriceCache cache = new LatestMarkPriceCache(properties);
+        MarkPriceKafkaConsumer consumer = new MarkPriceKafkaConsumer(new ObjectMapper(), cache, properties);
+
+        assertThatCode(() -> consumer.onMarkPrice(new ConsumerRecord<>(properties.resolvedTopic(), 0, 0L,
+                "BTC-USDT", "{not-json"))).doesNotThrowAnyException();
+
+        assertThat(cache.latest("BTC-USDT")).isEmpty();
     }
 }

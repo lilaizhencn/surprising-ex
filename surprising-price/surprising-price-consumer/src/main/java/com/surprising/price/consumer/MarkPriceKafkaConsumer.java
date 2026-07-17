@@ -41,9 +41,11 @@ public class MarkPriceKafkaConsumer {
             }
             cache.update(publication.result());
         } catch (Exception ex) {
-            log.error("Failed to cache mark price topic={} partition={} offset={}: {}",
+            // A malformed upstream message can never succeed on retry.  Consume
+            // it after logging so it cannot stall the symbol's live-price
+            // partition; valid later publications remain usable immediately.
+            log.warn("Discarding invalid mark price topic={} partition={} offset={}: {}",
                     record.topic(), record.partition(), record.offset(), ex.getMessage(), ex);
-            throw new IllegalStateException("failed to cache mark price", ex);
         }
     }
 
