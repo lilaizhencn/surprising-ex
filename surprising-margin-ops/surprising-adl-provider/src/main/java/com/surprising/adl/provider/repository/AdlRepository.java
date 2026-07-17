@@ -128,10 +128,12 @@ public class AdlRepository {
 
     public List<String> candidateAssets() {
         return jdbcTemplate.query("""
-                SELECT DISTINCT settle_asset FROM account_positions
-                 WHERE account_type = ? AND signed_quantity_steps <> 0
-                 ORDER BY settle_asset ASC
-                """, (rs, rowNum) -> rs.getString(1), accountType());
+                SELECT DISTINCT i.settle_asset
+                  FROM account_positions p
+                  JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
+                 WHERE p.product_line = ? AND p.signed_quantity_steps <> 0
+                 ORDER BY i.settle_asset ASC
+                """, (rs, rowNum) -> rs.getString(1), properties.getKafka().getProductLine().name());
     }
 
     public List<AdlCandidate> queue(String asset, long excludedUserId, int limit, Duration maxMarkAge) {

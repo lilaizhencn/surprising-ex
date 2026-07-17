@@ -20,7 +20,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @ComponentScan(
         basePackages = {
                 "com.surprising.trading.order",
-                "com.surprising.trading.trigger"
+                "com.surprising.trading.trigger",
+                "com.surprising.price.consumer"
         },
         excludeFilters = @ComponentScan.Filter(
                 type = FilterType.ASSIGNABLE_TYPE,
