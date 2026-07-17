@@ -32,6 +32,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class AlgoOrderService {
@@ -42,13 +45,23 @@ public class AlgoOrderService {
     private final TradingOrderProperties properties;
     private final AlgoOrderRepository algoOrderRepository;
     private final OrderService orderService;
+    private final OrderScheduleIndex scheduleIndex;
 
     public AlgoOrderService(TradingOrderProperties properties,
                             AlgoOrderRepository algoOrderRepository,
                             OrderService orderService) {
+        this(properties, algoOrderRepository, orderService, OrderScheduleIndex.disabled());
+    }
+
+    @Autowired
+    public AlgoOrderService(TradingOrderProperties properties,
+                            AlgoOrderRepository algoOrderRepository,
+                            OrderService orderService,
+                            OrderScheduleIndex scheduleIndex) {
         this.properties = properties;
         this.algoOrderRepository = algoOrderRepository;
         this.orderService = orderService;
+        this.scheduleIndex = scheduleIndex;
     }
 
     @Transactional
@@ -108,6 +121,7 @@ public class AlgoOrderService {
         if (!inserted) {
             throw new IllegalStateException("failed to insert algo order " + algoOrderId);
         }
+        afterCommit(() -> scheduleIndex.synchronizeAlgo(record));
         return toResponse(record);
     }
 
@@ -126,6 +140,7 @@ public class AlgoOrderService {
             return toResponse(record);
         }
         cancelRecord(record);
+        afterCommit(() -> scheduleIndex.removeAlgo(record.productLine(), record.algoOrderId()));
         return get(request.algoOrderId());
     }
 
@@ -196,12 +211,21 @@ public class AlgoOrderService {
         }
         int limit = Math.max(1, properties.getAlgo().getClaimBatchSize());
         Instant now = Instant.now();
-        for (AlgoOrderRecord record : algoOrderRepository.dueOrders(currentProductLine(), now, limit)) {
+        List<AlgoOrderRecord> due = scheduleIndex.dueAlgos(currentProductLine(), now, limit)
+                .map(ids -> ids.stream()
+                        .map(id -> algoOrderRepository.claimDueOrder(currentProductLine(), id, now,
+                                now.plus(properties.getRedisIndex().getAlgoClaimLease())))
+                        .flatMap(java.util.Optional::stream)
+                        .toList())
+                .orElseGet(() -> algoOrderRepository.dueOrders(currentProductLine(), now, limit));
+        for (AlgoOrderRecord record : due) {
             try {
                 executeDue(record, now);
             } catch (RuntimeException ex) {
                 algoOrderRepository.markFailed(record.algoOrderId(), ex.getMessage(), now);
                 log.warn("algo order execution failed algoOrderId={}", record.algoOrderId(), ex);
+            } finally {
+                synchronizeAfterCommit(record.algoOrderId());
             }
         }
     }
@@ -273,6 +297,7 @@ public class AlgoOrderService {
             }
         }
         algoOrderRepository.markCanceled(record.algoOrderId(), Instant.now());
+        afterCommit(() -> scheduleIndex.removeAlgo(record.productLine(), record.algoOrderId()));
     }
 
     private AlgoOrderResponse toResponse(AlgoOrderRecord record) {
@@ -401,6 +426,21 @@ public class AlgoOrderService {
         return status == AlgoOrderStatus.CANCELED
                 || status == AlgoOrderStatus.COMPLETED
                 || status == AlgoOrderStatus.FAILED;
+    }
+
+    private void synchronizeAfterCommit(long algoOrderId) {
+        afterCommit(() -> algoOrderRepository.findByAlgoOrderId(algoOrderId)
+                .ifPresent(scheduleIndex::synchronizeAlgo));
+    }
+
+    private void afterCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override public void afterCommit() { action.run(); }
+        });
     }
 
     private AlgoOrderBatchResponse batchResponse(List<AlgoOrderBatchItemResponse> results) {

@@ -136,6 +136,31 @@ public class AlgoOrderRepository {
                 """, (rs, rowNum) -> toAlgoRecord(rs), productLine(productLine).name(), Timestamp.from(now), limit);
     }
 
+    /** Atomically leases a due parent before execution; caller must still execute under a DB transaction. */
+    public Optional<AlgoOrderRecord> claimDueOrder(ProductLine productLine,
+                                                    long algoOrderId,
+                                                    Instant now,
+                                                    Instant leaseUntil) {
+        return jdbcTemplate.query("""
+                UPDATE trading_algo_orders
+                   SET next_slice_at = ?, updated_at = ?
+                 WHERE product_line = ? AND algo_order_id = ?
+                   AND status IN ('PENDING', 'RUNNING') AND next_slice_at <= ?
+                RETURNING *
+                """, (rs, rowNum) -> toAlgoRecord(rs), Timestamp.from(leaseUntil), Timestamp.from(now),
+                productLine(productLine).name(), algoOrderId, Timestamp.from(now)).stream().findFirst();
+    }
+
+    public List<AlgoOrderRecord> scheduledOrdersForIndex(ProductLine productLine, long afterAlgoOrderId, int limit) {
+        return jdbcTemplate.query("""
+                SELECT * FROM trading_algo_orders
+                 WHERE product_line = ? AND algo_order_id > ?
+                   AND status IN ('PENDING', 'RUNNING') AND next_slice_at IS NOT NULL
+                 ORDER BY algo_order_id ASC
+                 LIMIT ?
+                """, (rs, rowNum) -> toAlgoRecord(rs), productLine(productLine).name(), afterAlgoOrderId, limit);
+    }
+
     public List<AlgoOrderRecord> cancelableOpenOrders(long userId, String symbol, AlgoOrderType algoType, int limit) {
         return cancelableOpenOrders(userId, symbol, algoType, limit, null);
     }

@@ -7,6 +7,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -79,6 +80,38 @@ public class CancelAllAfterRepository {
                           timer.canceled_order_count, timer.canceled_trigger_order_count
                 """, (rs, rowNum) -> map(rs), productLine(productLine).name(), Timestamp.from(now), limit,
                 Timestamp.from(now));
+    }
+
+    /** Exact PostgreSQL confirmation for a Redis ZSET candidate. */
+    public Optional<CancelAllAfterTimer> claimDueTimer(ProductLine productLine,
+                                                        long userId,
+                                                        String symbolScope,
+                                                        Instant now) {
+        return jdbcTemplate.query("""
+                UPDATE trading_cancel_all_after
+                   SET status = 'TRIGGERING', updated_at = ?
+                 WHERE product_line = ? AND user_id = ? AND symbol_scope = ?
+                   AND status = 'ACTIVE' AND trigger_at <= ?
+                RETURNING user_id, symbol_scope, countdown_ms, status, trigger_at, updated_at,
+                          canceled_order_count, canceled_trigger_order_count
+                """, (rs, rowNum) -> map(rs), Timestamp.from(now), productLine(productLine).name(), userId,
+                symbolScope, Timestamp.from(now)).stream().findFirst();
+    }
+
+    public List<CancelAllAfterTimer> activeTimersForIndex(ProductLine productLine,
+                                                           long afterUserId,
+                                                           String afterSymbolScope,
+                                                           int limit) {
+        return jdbcTemplate.query("""
+                SELECT user_id, symbol_scope, countdown_ms, status, trigger_at, updated_at,
+                       canceled_order_count, canceled_trigger_order_count
+                  FROM trading_cancel_all_after
+                 WHERE product_line = ? AND status = 'ACTIVE' AND trigger_at IS NOT NULL
+                   AND (user_id, symbol_scope) > (?, ?)
+                 ORDER BY user_id ASC, symbol_scope ASC
+                 LIMIT ?
+                """, (rs, rowNum) -> map(rs), productLine(productLine).name(), afterUserId,
+                afterSymbolScope == null ? "" : afterSymbolScope, limit);
     }
 
     public void markTriggered(long userId, String symbolScope, int canceledOrders,

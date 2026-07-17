@@ -13,6 +13,7 @@ public class TradingOrderProperties {
     private Risk risk = new Risk();
     private FeeTier feeTier = new FeeTier();
     private Algo algo = new Algo();
+    private RedisIndex redisIndex = new RedisIndex();
 
     public Kafka getKafka() {
         return kafka;
@@ -53,6 +54,10 @@ public class TradingOrderProperties {
     public void setAlgo(Algo algo) {
         this.algo = algo;
     }
+
+    public RedisIndex getRedisIndex() { return redisIndex; }
+
+    public void setRedisIndex(RedisIndex redisIndex) { this.redisIndex = redisIndex; }
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
@@ -341,5 +346,26 @@ public class TradingOrderProperties {
         public void setMaxDurationSeconds(long maxDurationSeconds) {
             this.maxDurationSeconds = maxDurationSeconds;
         }
+    }
+
+    public static class RedisIndex {
+        private String keyPrefix = "surprising:order:v1";
+        private long reconcileDelayMs = 10_000L;
+        private int rebuildBatchSize = 1_000;
+        private Duration readyTtl = Duration.ofSeconds(30);
+        private Duration lockTtl = Duration.ofSeconds(30);
+        private Duration algoClaimLease = Duration.ofSeconds(30);
+        public String getKeyPrefix() { return keyPrefix; }
+        public void setKeyPrefix(String keyPrefix) { this.keyPrefix = keyPrefix; }
+        public long getReconcileDelayMs() { return reconcileDelayMs; }
+        public void setReconcileDelayMs(long reconcileDelayMs) { this.reconcileDelayMs = reconcileDelayMs; }
+        public int getRebuildBatchSize() { return rebuildBatchSize; }
+        public void setRebuildBatchSize(int rebuildBatchSize) { this.rebuildBatchSize = rebuildBatchSize; }
+        public Duration getReadyTtl() { return readyTtl; }
+        public void setReadyTtl(Duration readyTtl) { this.readyTtl = readyTtl; }
+        public Duration getLockTtl() { return lockTtl; }
+        public void setLockTtl(Duration lockTtl) { this.lockTtl = lockTtl; }
+        public Duration getAlgoClaimLease() { return algoClaimLease; }
+        public void setAlgoClaimLease(Duration algoClaimLease) { this.algoClaimLease = algoClaimLease; }
     }
 }
