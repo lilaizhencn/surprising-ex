@@ -227,9 +227,7 @@ public class RiskOutboxRepository {
             return;
         }
         String prefix = alias == null || alias.isBlank() ? "" : alias + ".";
-        sql.append("   AND ").append(prefix).append("topic IN (?, ?, ?)\n");
-        args.add(kafka.getAccountRiskEventsTopic());
-        args.add(kafka.getPositionRiskEventsTopic());
+        sql.append("   AND ").append(prefix).append("topic = ?\n");
         args.add(kafka.getLiquidationCandidatesTopic());
     }
 
@@ -238,15 +236,10 @@ public class RiskOutboxRepository {
         if (!kafka.isProductTopicsEnabled()) {
             return;
         }
-        String accountRiskEventsTopic = kafka.getAccountRiskEventsTopic();
-        String positionRiskEventsTopic = kafka.getPositionRiskEventsTopic();
         String liquidationCandidatesTopic = kafka.getLiquidationCandidatesTopic();
-        if (!accountRiskEventsTopic.equals(topic)
-                && !positionRiskEventsTopic.equals(topic)
-                && !liquidationCandidatesTopic.equals(topic)) {
-            throw new IllegalStateException("risk outbox topic must match current product line: expected one of ["
-                    + accountRiskEventsTopic + ", " + positionRiskEventsTopic + ", "
-                    + liquidationCandidatesTopic + "] actual=" + topic);
+        if (!liquidationCandidatesTopic.equals(topic)) {
+            throw new IllegalStateException("risk outbox topic must match current product line: expected "
+                    + liquidationCandidatesTopic + " actual=" + topic);
         }
     }
 

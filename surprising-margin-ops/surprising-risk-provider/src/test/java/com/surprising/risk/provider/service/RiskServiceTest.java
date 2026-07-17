@@ -2,6 +2,13 @@ package com.surprising.risk.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.AdminCursorPage;
@@ -34,6 +41,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.kafka.core.KafkaTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 class RiskServiceTest {
@@ -43,14 +51,17 @@ class RiskServiceTest {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
         RiskService service = new RiskService(new ObjectMapper(), new RiskProperties(), riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+                new FakeRiskSequenceRepository(), outboxRepository, kafka, transactionManager);
 
         service.scan();
 
         assertThat(riskRepository.savedAccounts).isEqualTo(1);
         assertThat(riskRepository.savedPositions).isEqualTo(1);
-        assertThat(outboxRepository.eventTypes).containsExactly("RISK_ACCOUNT_UPDATED", "RISK_POSITION_UPDATED");
+        assertThat(outboxRepository.enqueued).isZero();
+        verifyNoInteractions(kafka);
         assertThat(transactionManager.commits).isZero();
         assertThat(transactionManager.rollbacks).isEqualTo(1);
     }
@@ -91,8 +102,12 @@ class RiskServiceTest {
         properties.getCoordination().setEnabled(false);
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
+        when(kafka.send(anyString(), anyString(), anyString()))
+                .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
         RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+                new FakeRiskSequenceRepository(), outboxRepository, kafka, transactionManager);
 
         service.scanPositionUpdate(2002L, "eth-usdt", MarginMode.CROSS, PositionSide.SHORT, 7L,
                 "trace-risk-1");
@@ -108,10 +123,11 @@ class RiskServiceTest {
         assertThat(riskRepository.savedPositions).isEqualTo(1);
         assertThat(riskRepository.savedPositionSnapshots).singleElement()
                 .satisfies(position -> assertThat(position.positionSide()).isEqualTo(PositionSide.SHORT));
-        assertThat(outboxRepository.eventTypes).containsExactly("RISK_ACCOUNT_UPDATED", "RISK_POSITION_UPDATED");
-        assertThat(outboxRepository.payloads)
-                .allSatisfy(payload -> assertThat(payload).contains("\"traceId\":\"trace-risk-1\""));
-        assertThat(outboxRepository.payloads.get(1)).contains("\"positionSide\":\"SHORT\"");
+        assertThat(outboxRepository.enqueued).isZero();
+        verify(kafka).send(eq(properties.getKafka().getAccountRiskEventsTopic()),
+                eq("2002:USDT_PERPETUAL:USDT"), contains("\"traceId\":\"trace-risk-1\""));
+        verify(kafka).send(eq(properties.getKafka().getPositionRiskEventsTopic()), eq("ETH-USDT"),
+                contains("\"positionSide\":\"SHORT\""));
         assertThat(transactionManager.commits).isEqualTo(1);
         assertThat(transactionManager.rollbacks).isZero();
     }
@@ -193,7 +209,7 @@ class RiskServiceTest {
             assertThat(position.unrealizedPnlUnits()).isZero();
             assertThat(position.maintenanceMarginUnits()).isZero();
         });
-        assertThat(outboxRepository.eventTypes).containsExactly("RISK_ACCOUNT_UPDATED", "RISK_POSITION_UPDATED");
+        assertThat(outboxRepository.enqueued).isZero();
         assertThat(transactionManager.commits).isEqualTo(1);
         assertThat(transactionManager.rollbacks).isZero();
     }
@@ -267,13 +283,12 @@ class RiskServiceTest {
 
         service.scan();
 
-        assertThat(outboxRepository.enqueued).isEqualTo(3);
-        assertThat(outboxRepository.eventTypes)
-                .containsExactly("RISK_ACCOUNT_UPDATED", "RISK_POSITION_UPDATED", "LIQUIDATION_CANDIDATE");
+        assertThat(outboxRepository.enqueued).isEqualTo(1);
+        assertThat(outboxRepository.eventTypes).containsExactly("LIQUIDATION_CANDIDATE");
         assertThat(outboxRepository.topic).isEqualTo("surprising.perp.liquidation.candidates.v1");
         assertThat(outboxRepository.eventKey).isEqualTo("BTC-USDT");
         assertThat(outboxRepository.eventType).isEqualTo("LIQUIDATION_CANDIDATE");
-        assertThat(outboxRepository.payloads.get(2)).contains("\"positionSide\":\"SHORT\"");
+        assertThat(outboxRepository.payloads.get(0)).contains("\"positionSide\":\"SHORT\"");
         assertThat(transactionManager.commits).isEqualTo(1);
         assertThat(transactionManager.rollbacks).isZero();
     }
@@ -318,7 +333,7 @@ class RiskServiceTest {
         assertThat(riskRepository.scanLeaseAttempts).isZero();
         assertThat(riskRepository.savedAccounts).isEqualTo(1);
         assertThat(riskRepository.savedPositions).isEqualTo(1);
-        assertThat(outboxRepository.enqueued).isEqualTo(3);
+        assertThat(outboxRepository.enqueued).isEqualTo(1);
     }
 
     @Test

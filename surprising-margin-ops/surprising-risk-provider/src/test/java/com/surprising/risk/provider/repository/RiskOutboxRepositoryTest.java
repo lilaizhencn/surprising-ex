@@ -33,7 +33,7 @@ class RiskOutboxRepositoryTest {
     private RiskSequenceRepository sequenceRepository;
 
     @Test
-    void enqueueAllowsCurrentProductTopicWhenProductTopicsAreEnabled() {
+    void enqueueAllowsCurrentLiquidationTopicWhenProductTopicsAreEnabled() {
         RiskProperties properties = new RiskProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
@@ -42,8 +42,8 @@ class RiskOutboxRepositoryTest {
         when(jdbcTemplate.update(contains("INSERT INTO risk_outbox_events"), any(Object[].class)))
                 .thenReturn(1);
 
-        repository.enqueue("surprising.linear-delivery.risk.position.events.v1",
-                "BTC-USDT-260925", "POSITION_RISK_UPDATED", "{}", Instant.parse("2026-07-01T00:00:00Z"));
+        repository.enqueue("surprising.linear-delivery.liquidation.candidates.v1",
+                "BTC-USDT-260925", "LIQUIDATION_CANDIDATE", "{}", Instant.parse("2026-07-01T00:00:00Z"));
 
         verify(sequenceRepository).nextSequence("risk-outbox");
         verify(jdbcTemplate).update(contains("INSERT INTO risk_outbox_events"), any(Object[].class));
@@ -61,7 +61,7 @@ class RiskOutboxRepositoryTest {
                 Instant.parse("2026-07-01T00:00:00Z")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("risk outbox topic must match current product line")
-                .hasMessageContaining("surprising.option.risk.position.events.v1");
+                .hasMessageContaining("surprising.option.liquidation.candidates.v1");
 
         verify(sequenceRepository, never()).nextSequence("risk-outbox");
         verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
@@ -113,21 +113,15 @@ class RiskOutboxRepositoryTest {
         properties.getKafka().setProductTopicsEnabled(true);
         RiskOutboxRepository repository = new RiskOutboxRepository(jdbcTemplate, sequenceRepository, properties);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(),
-                eq("surprising.inverse-delivery.risk.account.events.v1"),
-                eq("surprising.inverse-delivery.risk.position.events.v1"),
-                eq("surprising.inverse-delivery.liquidation.candidates.v1"),
-                eq(100))).thenReturn(List.of());
+                eq("surprising.inverse-delivery.liquidation.candidates.v1"), eq(100))).thenReturn(List.of());
 
         repository.lockPending(100);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
-                eq("surprising.inverse-delivery.risk.account.events.v1"),
-                eq("surprising.inverse-delivery.risk.position.events.v1"),
-                eq("surprising.inverse-delivery.liquidation.candidates.v1"),
-                eq(100));
+                eq("surprising.inverse-delivery.liquidation.candidates.v1"), eq(100));
         assertThat(sql.getValue())
-                .contains("topic IN (?, ?, ?)")
+                .contains("topic = ?")
                 .contains("next_attempt_at <= now()");
     }
 
@@ -174,7 +168,7 @@ class RiskOutboxRepositoryTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), any(Object[].class));
         assertThat(sql.getValue())
-                .contains("topic IN (?, ?, ?)")
+                .contains("topic = ?")
                 .contains("next_attempt_at <= ?");
     }
 

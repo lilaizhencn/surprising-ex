@@ -634,7 +634,7 @@ chain.
 The `trading_trigger_orders_trace_idx`, `trading_order_events_trace_idx`,
 `trading_match_results_trace_idx`, `trading_match_trades_trace_idx`,
 `trading_outbox_events_trace_idx`, `account_outbox_events_trace_idx`,
-`risk_outbox_events_trace_idx`, `gateway_admin_operation_logs_trace_idx`, and
+`gateway_admin_operation_logs_trace_idx`, and
 `gateway_admin_approval_requests_consumed_trace_idx` indexes support the admin
 TraceId lookup endpoint `/api/v1/admin/traces/{traceId}`.
 `gateway_admin_operation_logs.duration_ms` stores admin gateway proxy request duration for audit exports

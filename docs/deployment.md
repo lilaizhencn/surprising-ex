@@ -276,7 +276,7 @@ Recommended production settings:
 - WebSocket connection state is local memory only: socket, authenticated user id, subscriptions, and outbound queue.
 - User-related events are consumed by every WebSocket node, then locally filtered by `userId + channel + symbol`; the node that hosts the matching connection pushes, and other nodes drop the event.
 - Position push is downstream of account settlement: account DB transaction -> account outbox -> Kafka `surprising.account.position.events.v1` -> WebSocket fanout.
-- Backend-authoritative unrealized PnL, equity, maintenance margin, and margin ratio are pushed through risk-provider outbox events: risk scan transaction -> `risk_outbox_events` -> Kafka `surprising.risk.position.events.v1` / `surprising.risk.account.events.v1` -> WebSocket fanout.
+- Backend-authoritative unrealized PnL, equity, maintenance margin, and margin ratio are published directly to Kafka only after the risk-snapshot transaction commits: risk scan transaction -> Kafka `surprising.risk.position.events.v1` / `surprising.risk.account.events.v1` -> WebSocket fanout. These are latest-state updates; a temporary send failure is healed by the next scan. Only liquidation candidates use `risk_outbox_events` for at-least-once delivery.
 - Open candle updates are coalesced by `surprising.websocket.fanout.candle-partial-coalesce-window`; closed candles are pushed immediately.
 - Slow WebSocket clients are closed when their bounded outbound queue is full or sends time out.
 - Clients must implement ping, exponential reconnect, and full resubscribe after reconnect.
@@ -483,7 +483,7 @@ Do not point this script at a shared development database. Matching restores ope
 - Kafka consumer lag: increase topic partitions, provider instances, or stream threads. Do not create one topic per symbol.
 - WebSocket clients miss public market data on some pods: verify each WebSocket pod has a unique `surprising.websocket.kafka.group-id`.
 - WebSocket private positions not updating: check account outbox lag in `account_outbox_events`, Kafka topic `surprising.account.position.events.v1`, and the client's private `positions` subscription/authenticated user id.
-- WebSocket risk/PnL not updating: check risk scan freshness, `risk_outbox_events` pending rows, Kafka topics `surprising.risk.position.events.v1` and `surprising.risk.account.events.v1`, then the client's `positionRisk` / `accountRisk` subscriptions.
+- WebSocket risk/PnL not updating: check risk scan freshness and the Kafka topics `surprising.risk.position.events.v1` and `surprising.risk.account.events.v1`, then the client's `positionRisk` / `accountRisk` subscriptions. `risk_outbox_events` applies only to liquidation candidates.
 - Gateway private routes return 401: verify the auth layer forwards `X-User-Id` or `Authorization`.
 - Gateway routes return 404: verify the `{service}` segment is configured under `surprising.gateway.routes`.
 - RocksDB restore is slow: check changelog topic retention, local state directory persistence, disk throughput, and container file descriptor limits.
