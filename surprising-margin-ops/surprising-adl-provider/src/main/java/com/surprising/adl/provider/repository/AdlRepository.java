@@ -9,6 +9,8 @@ import com.surprising.adl.provider.model.DeficitRow;
 import com.surprising.adl.provider.service.AdlMath;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.sql.Timestamp;
@@ -28,15 +30,23 @@ public class AdlRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final AdlProperties properties;
+    private final LatestMarkPriceCache markPriceCache;
 
     public AdlRepository(JdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, new AdlProperties());
+        this(jdbcTemplate, new AdlProperties(), null);
+    }
+
+    public AdlRepository(JdbcTemplate jdbcTemplate, AdlProperties properties) {
+        this(jdbcTemplate, properties, null);
     }
 
     @Autowired
-    public AdlRepository(JdbcTemplate jdbcTemplate, AdlProperties properties) {
+    public AdlRepository(JdbcTemplate jdbcTemplate,
+                         AdlProperties properties,
+                         LatestMarkPriceCache markPriceCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties == null ? new AdlProperties() : properties;
+        this.markPriceCache = markPriceCache;
     }
 
     public long nextAdlSequence(String sequenceName) {
@@ -117,8 +127,12 @@ public class AdlRepository {
     }
 
     public List<AdlCandidate> queue(String asset, long excludedUserId, int limit, Duration maxMarkAge) {
+        MarkPriceValues markPrices = freshMarkPrices(maxMarkAge, null);
+        if (markPrices.isEmpty()) {
+            return List.of();
+        }
         int fetchLimit = Math.min(5000, Math.max(limit, limit * 5));
-        String sql = """
+        String sql = "WITH " + markPrices.cte() + "\n" + """
                 SELECT *
                   FROM (
                 """ + candidateSelect() + """
@@ -127,7 +141,8 @@ public class AdlRepository {
                  ORDER BY q.user_id ASC, q.symbol ASC
                  LIMIT ?
                 """;
-        List<Object> args = candidateArgs(asset, maxMarkAge);
+        List<Object> args = new ArrayList<>(markPrices.args());
+        args.addAll(candidateArgs(asset));
         args.add(excludedUserId);
         args.add(excludedUserId);
         args.add(fetchLimit);
@@ -148,14 +163,19 @@ public class AdlRepository {
                                                 PositionSide positionSide,
                                                 String asset,
                                                 Duration maxMarkAge) {
-        String sql = candidateSelect() + """
+        MarkPriceValues markPrices = freshMarkPrices(maxMarkAge, symbol);
+        if (markPrices.isEmpty()) {
+            return Optional.empty();
+        }
+        String sql = "WITH " + markPrices.cte() + "\n" + candidateSelect() + """
                    AND p.user_id = ?
                    AND p.symbol = ?
                    AND p.margin_mode = ?
                    AND p.position_side = ?
                  FOR UPDATE OF p SKIP LOCKED
                 """;
-        List<Object> args = candidateArgs(asset, maxMarkAge);
+        List<Object> args = new ArrayList<>(markPrices.args());
+        args.addAll(candidateArgs(asset));
         args.add(userId);
         args.add(symbol);
         args.add(MarginMode.defaultIfNull(marginMode).name());
@@ -367,14 +387,9 @@ public class AdlRepository {
                   FROM account_positions p
                   JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
                   JOIN account_asset_scales ss ON ss.asset = i.settle_asset
-                  JOIN LATERAL (
-                      SELECT ((pm.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_price_ticks,
-                             event_time
-                        FROM price_mark_ticks pm
-                       WHERE pm.symbol = p.symbol
-                       ORDER BY event_time DESC
-                       LIMIT 1
-                  ) pm ON TRUE
+                  JOIN mark_prices pm
+                    ON pm.symbol = p.symbol
+                   AND pm.instrument_version = p.instrument_version
                   LEFT JOIN account_position_margins m
                     ON m.user_id = p.user_id
                    AND m.symbol = p.symbol
@@ -384,24 +399,58 @@ public class AdlRepository {
                    AND m.product_line = p.product_line
                 %s
                  WHERE i.settle_asset = ?
-                   AND pm.event_time >= now() - (? * INTERVAL '1 millisecond')
                    AND p.signed_quantity_steps <> 0
                    AND COALESCE(d.deficit_units, 0) = 0
                 %s
                 """.formatted(deficitJoin, productFilter);
     }
 
-    private List<Object> candidateArgs(String asset, Duration maxMarkAge) {
+    private MarkPriceValues freshMarkPrices(Duration maxAge, String symbol) {
+        if (markPriceCache == null) {
+            throw new IllegalStateException("mark price cache is not configured");
+        }
+        List<MarkPriceEvent> snapshots = symbol == null
+                ? markPriceCache.freshSnapshots(maxAge)
+                : markPriceCache.fresh(symbol, maxAge).stream().toList();
+        if (snapshots.isEmpty()) {
+            return MarkPriceValues.empty();
+        }
+        StringBuilder values = new StringBuilder();
+        List<Object> args = new ArrayList<>(snapshots.size() * 3);
+        for (MarkPriceEvent snapshot : snapshots) {
+            if (!values.isEmpty()) {
+                values.append(", ");
+            }
+            values.append("(?::TEXT, ?::BIGINT, ?::BIGINT)");
+            args.add(snapshot.symbol());
+            args.add(snapshot.instrumentVersion());
+            args.add(snapshot.markPriceTicks());
+        }
+        return new MarkPriceValues("mark_prices(symbol, instrument_version, mark_price_ticks) AS (VALUES "
+                + values + ")", List.copyOf(args));
+    }
+
+    private List<Object> candidateArgs(String asset) {
         List<Object> args = new ArrayList<>();
         if (productTopicsEnabled()) {
             args.add(accountType());
         }
         args.add(asset);
-        args.add(maxMarkAge.toMillis());
         if (productTopicsEnabled()) {
             args.add(productLine());
         }
         return args;
+    }
+
+    private record MarkPriceValues(String cte, List<Object> args) {
+
+        private static MarkPriceValues empty() {
+            return new MarkPriceValues("", List.of());
+        }
+
+        private boolean isEmpty() {
+            return args.isEmpty();
+        }
     }
 
     private long insuranceBalance(String accountType, String asset) {

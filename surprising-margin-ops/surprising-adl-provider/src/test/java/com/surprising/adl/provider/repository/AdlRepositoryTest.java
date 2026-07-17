@@ -15,6 +15,8 @@ import com.surprising.adl.api.model.AdlSide;
 import com.surprising.adl.provider.config.AdlProperties;
 import com.surprising.adl.provider.model.AdlCandidate;
 import com.surprising.adl.provider.model.DeficitRow;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
@@ -22,6 +24,7 @@ import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -71,8 +74,9 @@ class AdlRepositoryTest {
 
     @Test
     void queueFiltersCandidatesByConfiguredProductLine() throws Exception {
-        when(jdbcTemplate.query(contains("FROM ("), anyRowMapper(), eq("USDT_DELIVERY"), eq("USDT"),
-                eq(5000L), eq("LINEAR_DELIVERY"), eq(0L), eq(0L), eq(5))).thenAnswer(invocation -> {
+        when(jdbcTemplate.query(contains("FROM ("), anyRowMapper(), eq("BTC-USDT-260925"), eq(4L), eq(110L),
+                eq("USDT_DELIVERY"), eq("USDT"), eq("LINEAR_DELIVERY"), eq(0L), eq(0L), eq(5)))
+                .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getLong("user_id")).thenReturn(1001L);
@@ -90,16 +94,19 @@ class AdlRepositoryTest {
                     when(rs.getLong("margin_units")).thenReturn(1_000L);
                     return List.of(mapper.mapRow(rs, 0));
                 });
-        AdlRepository repository = new AdlRepository(jdbcTemplate, productProperties(ProductLine.LINEAR_DELIVERY));
+        AdlRepository repository = repositoryWithMarkPrice(productProperties(ProductLine.LINEAR_DELIVERY),
+                "BTC-USDT-260925", 4L, 110L);
 
         List<AdlCandidate> queue = repository.queue("USDT", 1, Duration.ofSeconds(5));
 
         assertThat(queue).singleElement().satisfies(candidate ->
                 assertThat(candidate.symbol()).isEqualTo("BTC-USDT-260925"));
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq("USDT_DELIVERY"), eq("USDT"),
-                eq(5000L), eq("LINEAR_DELIVERY"), eq(0L), eq(0L), eq(5));
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq("BTC-USDT-260925"), eq(4L), eq(110L),
+                eq("USDT_DELIVERY"), eq("USDT"), eq("LINEAR_DELIVERY"), eq(0L), eq(0L), eq(5));
         assertThat(sql.getValue())
+                .contains("mark_prices(symbol, instrument_version, mark_price_ticks)")
+                .doesNotContain("price_mark_ticks")
                 .contains("account_product_deficits")
                 .contains("d.account_type = ?")
                 .contains("p.product_line = ?")
@@ -108,8 +115,8 @@ class AdlRepositoryTest {
 
     @Test
     void queueCalculatesProfitAndNotionalWithSharedLongMath() throws Exception {
-        when(jdbcTemplate.query(contains("FROM ("), anyRowMapper(), eq("USDT"),
-                eq(5000L), eq(0L), eq(0L), eq(5))).thenAnswer(invocation -> {
+        when(jdbcTemplate.query(contains("FROM ("), anyRowMapper(), eq("BTC-USDT"), eq(7L), eq(110L),
+                eq("USDT"), eq(0L), eq(0L), eq(5))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getLong("user_id")).thenReturn(1001L);
@@ -127,7 +134,7 @@ class AdlRepositoryTest {
                     when(rs.getLong("margin_units")).thenReturn(1_000L);
                     return List.of(mapper.mapRow(rs, 0));
                 });
-        AdlRepository repository = new AdlRepository(jdbcTemplate);
+        AdlRepository repository = repositoryWithMarkPrice(new AdlProperties(), "BTC-USDT", 7L, 110L);
 
         List<AdlCandidate> queue = repository.queue("USDT", 1, Duration.ofSeconds(5));
 
@@ -142,9 +149,10 @@ class AdlRepositoryTest {
             assertThat(candidate.effectiveLeveragePpm()).isEqualTo(110_000_000L);
         });
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq("USDT"),
-                eq(5000L), eq(0L), eq(0L), eq(5));
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq("BTC-USDT"), eq(7L), eq(110L),
+                eq("USDT"), eq(0L), eq(0L), eq(5));
         assertThat(sql.getValue())
+                .doesNotContain("price_mark_ticks")
                 .doesNotContain("abs(")
                 .doesNotContain("profit_ticks_per_step");
     }
@@ -460,6 +468,20 @@ class AdlRepositoryTest {
         properties.getKafka().setProductLine(productLine);
         properties.getKafka().setProductTopicsEnabled(true);
         return properties;
+    }
+
+    private AdlRepository repositoryWithMarkPrice(AdlProperties properties,
+                                                   String symbol,
+                                                   long instrumentVersion,
+                                                   long markPriceTicks) {
+        LatestMarkPriceCache markPriceCache = mock(LatestMarkPriceCache.class);
+        MarkPriceEvent markPrice = mock(MarkPriceEvent.class);
+        when(markPrice.symbol()).thenReturn(symbol);
+        when(markPrice.instrumentVersion()).thenReturn(instrumentVersion);
+        when(markPrice.markPriceTicks()).thenReturn(markPriceTicks);
+        when(markPriceCache.freshSnapshots(any(Duration.class))).thenReturn(List.of(markPrice));
+        when(markPriceCache.fresh(eq(symbol), any(Duration.class))).thenReturn(Optional.of(markPrice));
+        return new AdlRepository(jdbcTemplate, properties, markPriceCache);
     }
 
     @SuppressWarnings("unchecked")
