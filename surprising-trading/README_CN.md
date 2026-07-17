@@ -150,8 +150,8 @@ REST 接口：
 - `TRAILING_STOP` 要求执行单为 `MARKET`，`callbackRatePpm` 在 `[1000, 100000]`（`0.1%` 到 `10%`），`activationPriceTicks` 可选。SELL 追踪止损激活后维护最高价，价格从最高价回撤达到回调比例时触发；BUY 追踪止损维护最低价，反弹达到回调比例时触发。
 - trigger provider 对 `MARK_PRICE` 消费当前产品线的 mark-price topic，对 `INDEX_PRICE` 消费 index-price topic，对 `LAST_PRICE` 消费 match-trades topic；校验 Kafka key 等于 payload `symbol`，再把 mark/index 已落库价格行按当前 instrument tick size 转为 ticks，用 PostgreSQL `FOR UPDATE SKIP LOCKED` 抢占到期条件单。关闭产品线 topic 路由时才使用 legacy `surprising.perp.*` topic。
 - 多个 trigger-provider 节点可以同时运行。每条到期条件单只能被一个节点抢到；如果下游 order-provider 故障，`TRIGGERING` 状态超过 `surprising.trading.trigger.execution.stale-triggering-after` 后会重置，等待后续 mark 事件重试。
-- 设置 `TRIGGER_REDIS_INDEX_ENABLED=true` 后，静态 `TAKE_PROFIT`/`STOP_LOSS` 会通过 Spring Data Redis + Lettuce 写入按产品线、symbol、价格源隔离的 Redis ZSET。一次 Lua 调用同时读取大于等于和小于等于两个范围，PostgreSQL 再对候选 id 复核并执行原有 `FOR UPDATE SKIP LOCKED` 状态迁移；追踪止损的高低水位更新仍保留在 PostgreSQL。
-- Redis score 只使用 `2^53-1` 以内可精确表示的整数 ticks；已有数据超过范围时索引保持 not-ready 并退回数据库扫描，不能用浮点近似冒漏触发风险。启用 Redis 索引后，新静态 TP/SL 在索引写失败时 fail-closed；Redis 查询不可用时，已经提交的条件单仍走数据库 fallback 触发。
+- 静态 `TAKE_PROFIT`/`STOP_LOSS` 默认且始终通过 Spring Data Redis + Lettuce 写入按产品线、symbol、价格源隔离的 Redis ZSET，无需功能开关。一次 Lua 调用同时读取大于等于和小于等于两个范围，PostgreSQL 再对候选 id 复核并执行原有 `FOR UPDATE SKIP LOCKED` 状态迁移；追踪止损的高低水位更新仍保留在 PostgreSQL。
+- Redis score 只使用 `2^53-1` 以内可精确表示的整数 ticks；已有数据超过范围时索引保持 not-ready 并退回数据库扫描，不能用浮点近似冒漏触发风险。新静态 TP/SL 在 Redis 索引写失败时 fail-closed；Redis 查询不可用时，已经提交的条件单仍走数据库 fallback 触发。
 - readiness marker 使用短 TTL 并在校准后刷新。带 token 的 `SET NX` lease 和 compare-and-delete Lua 解锁只用于防止多节点重复重建，不串行业务触发。终态 DB 更新成功后再幂等删除 Redis member，因此故障最多留下会被 DB 拒绝的陈旧候选，不会制造错误数据库终态。
 - 触发后通过 order-provider 提交 `reduceOnly=true`、`postOnly=false` 的平仓单，`clientOrderId=trigger-<triggerOrderId>`。order-provider 的幂等键会保护重试不会创建重复平仓单。
 - 触发后的真实订单继续走普通订单、撮合、账户、手续费、PnL、风控、强平和 WebSocket 链路。trigger 服务不直接修改余额或持仓。

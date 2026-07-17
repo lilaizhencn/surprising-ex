@@ -155,21 +155,12 @@ public class TriggerProperties {
     }
 
     public static class RedisIndex {
-        private boolean enabled;
         private String keyPrefix = "surprising:trigger:v1";
         private int candidateBatchSize = 400;
         private int rebuildBatchSize = 1_000;
         private long reconcileDelayMs = 10_000L;
         private Duration readyTtl = Duration.ofSeconds(30);
         private Duration lockTtl = Duration.ofSeconds(30);
-
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
 
         public String getKeyPrefix() {
             return keyPrefix;

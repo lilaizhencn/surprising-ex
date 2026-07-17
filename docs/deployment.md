@@ -60,12 +60,11 @@ Keep the matching provider on JDK 21 unless exchange-core and Chronicle are reva
 
 ## Trigger Redis Index
 
-Static TP/SL price-range indexing uses Spring Data Redis with Lettuce. It is disabled by default for a controlled
-rollout. Configure every trigger-provider or combined trading-entry node for one product line with the same Redis
+Static TP/SL price-range indexing always uses Spring Data Redis with Lettuce and has no feature flag. Configure
+every trigger-provider or combined trading-entry node for one product line with the same Redis
 deployment and key prefix:
 
 ```bash
-export TRIGGER_REDIS_INDEX_ENABLED=true
 export REDIS_HOST=redis.internal
 export REDIS_PORT=6379
 export REDIS_PASSWORD='replace-with-secret-manager-value'
@@ -81,7 +80,7 @@ export TRIGGER_REDIS_KEY_PREFIX=surprising:trigger:v1
   to PostgreSQL and rebuild before marking the index ready again.
 - Do not enable Spring Data Redis global transaction support. Candidate reads and two-direction removal use Lua;
   PostgreSQL and Redis are deliberately not treated as an XA transaction.
-- New static TP/SL placement is fail-closed if its Redis member cannot be written while the feature is enabled.
+- New static TP/SL placement is fail-closed if its Redis member cannot be written.
   Existing committed orders fall back to PostgreSQL claims when the readiness marker or Redis lookup is unavailable.
 - The rebuild lease uses `SET NX` with a TTL and token-checked Lua release. Do not use that lease as the trigger
   execution lock; PostgreSQL conditional state transitions and `FOR UPDATE SKIP LOCKED` remain the final guard.

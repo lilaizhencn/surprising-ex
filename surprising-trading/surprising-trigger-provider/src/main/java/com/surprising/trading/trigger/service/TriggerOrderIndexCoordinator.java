@@ -40,9 +40,6 @@ public class TriggerOrderIndexCoordinator {
 
     @Scheduled(fixedDelayString = "${surprising.trading.trigger.redis-index.reconcile-delay-ms:10000}")
     public void reconcile() {
-        if (!index.enabled()) {
-            return;
-        }
         ProductLine productLine = properties.getKafka().getProductLine();
         if (index.ready(productLine)) {
             try {

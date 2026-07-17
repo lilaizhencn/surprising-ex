@@ -67,13 +67,8 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
     }
 
     @Override
-    public boolean enabled() {
-        return properties.getRedisIndex().isEnabled();
-    }
-
-    @Override
     public void indexPlaced(TriggerOrderRecord order) {
-        if (!enabled() || !isStaticOpenOrder(order)) {
+        if (!isStaticOpenOrder(order)) {
             return;
         }
         try {
@@ -88,7 +83,7 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
 
     @Override
     public void synchronize(TriggerOrderRecord order) {
-        if (!enabled() || !isStaticTrigger(order)) {
+        if (!isStaticTrigger(order)) {
             return;
         }
         if (isOpen(order.status())) {
@@ -100,7 +95,7 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
 
     @Override
     public void remove(TriggerOrderRecord order) {
-        if (order == null || !enabled() || !isStaticTrigger(order)) {
+        if (order == null || !isStaticTrigger(order)) {
             return;
         }
         remove(order.productLine(), order.symbol(), order.triggerPriceType(), order.triggerOrderId());
@@ -111,9 +106,6 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
                        String symbol,
                        TriggerPriceType triggerPriceType,
                        long triggerOrderId) {
-        if (!enabled()) {
-            return;
-        }
         try {
             removeStrict(productLine, symbol, triggerPriceType, triggerOrderId);
         } catch (RuntimeException ex) {
@@ -128,9 +120,6 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
                                               TriggerPriceType triggerPriceType,
                                               long priceTicks,
                                               int limit) {
-        if (!enabled()) {
-            return Optional.empty();
-        }
         try {
             if (!ready(productLine)) {
                 return Optional.empty();
@@ -161,9 +150,6 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
 
     @Override
     public boolean ready(ProductLine productLine) {
-        if (!enabled()) {
-            return false;
-        }
         try {
             return Boolean.TRUE.equals(redisTemplate.hasKey(readyKey(productLine)));
         } catch (RuntimeException ex) {
@@ -173,17 +159,11 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
 
     @Override
     public void markReady(ProductLine productLine) {
-        if (!enabled()) {
-            return;
-        }
         redisTemplate.opsForValue().set(readyKey(productLine), "1", properties.getRedisIndex().getReadyTtl());
     }
 
     @Override
     public void markNotReady(ProductLine productLine) {
-        if (!enabled()) {
-            return;
-        }
         try {
             redisTemplate.delete(readyKey(productLine));
         } catch (RuntimeException ignored) {

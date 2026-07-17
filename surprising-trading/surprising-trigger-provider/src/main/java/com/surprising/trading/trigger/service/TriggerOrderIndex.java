@@ -11,8 +11,6 @@ import java.util.Optional;
  */
 public interface TriggerOrderIndex {
 
-    boolean enabled();
-
     void indexPlaced(TriggerOrderRecord order);
 
     void synchronize(TriggerOrderRecord order);
@@ -44,11 +42,6 @@ public interface TriggerOrderIndex {
         private static final DisabledTriggerOrderIndex INSTANCE = new DisabledTriggerOrderIndex();
 
         private DisabledTriggerOrderIndex() {
-        }
-
-        @Override
-        public boolean enabled() {
-            return false;
         }
 
         @Override

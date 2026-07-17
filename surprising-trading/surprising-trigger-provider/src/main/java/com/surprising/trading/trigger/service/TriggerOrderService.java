@@ -147,7 +147,7 @@ public class TriggerOrderService {
                 null,
                 now,
                 now);
-        // Index before insertion: when Redis indexing is enabled, a committed static TP/SL can never exist
+        // Index before insertion: a committed static TP/SL can never exist
         // without its candidate member. A later database rollback only leaves a harmless stale candidate.
         triggerOrderIndex.indexPlaced(order);
         removeIndexOnRollback(order);
@@ -497,29 +497,18 @@ public class TriggerOrderService {
             claimed = triggerOrderRepository.claimTrailingTriggered(symbol, triggerPriceType, triggerPriceTicks,
                     triggerSequence, triggeredAt, limit, now, contractType);
         }
-        if (triggerOrderIndex.enabled()) {
-            try {
-                cleanupOcoIndex(claimed);
-            } catch (RuntimeException ex) {
-                log.warn("Trailing trigger OCO index cleanup failed line={} symbol={}: {}",
-                        currentProductLine(), symbol, ex.getMessage());
-            }
+        try {
+            cleanupOcoIndex(claimed);
+        } catch (RuntimeException ex) {
+            log.warn("Trailing trigger OCO index cleanup failed line={} symbol={}: {}",
+                    currentProductLine(), symbol, ex.getMessage());
         }
         return claimed;
     }
 
     private void expirePending(Instant now, int limit) {
-        if (triggerOrderIndex.enabled()) {
-            triggerOrderRepository.expirePendingOrders(now, limit, currentProductLine())
-                    .forEach(triggerOrderIndex::remove);
-            return;
-        }
-        String contractType = currentProductContractType();
-        if (contractType == null) {
-            triggerOrderRepository.expirePending(now, limit);
-        } else {
-            triggerOrderRepository.expirePending(now, limit, contractType);
-        }
+        triggerOrderRepository.expirePendingOrders(now, limit, currentProductLine())
+                .forEach(triggerOrderIndex::remove);
     }
 
     private void resetStaleTriggering(Instant staleBefore, Instant now, int limit) {

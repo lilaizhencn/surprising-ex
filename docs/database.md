@@ -510,7 +510,7 @@ same configured price-source stream without executing the same trigger twice. Th
 `TRIGGERING`, and cancels pending siblings in the same statement. The expiry and `TRIGGERING` indexes support
 scheduled expiry and stale execution retry.
 
-When `surprising.trading.trigger.redis-index.enabled=true`, Spring Data Redis with Lettuce keeps static TP/SL ids
+Spring Data Redis with Lettuce always keeps static TP/SL ids
 in product-line/symbol/price-source sorted sets. Redis performs one atomic Lua range lookup, but the returned ids
 still pass through the same PostgreSQL exact predicate and row claim. The database remains authoritative for user
 queries and all state transitions. Placement writes the candidate before DB insert and cleans it on rollback;

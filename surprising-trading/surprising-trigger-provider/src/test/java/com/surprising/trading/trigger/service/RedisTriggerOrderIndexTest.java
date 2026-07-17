@@ -71,9 +71,7 @@ class RedisTriggerOrderIndexTest {
     }
 
     private TriggerProperties properties() {
-        TriggerProperties properties = new TriggerProperties();
-        properties.getRedisIndex().setEnabled(true);
-        return properties;
+        return new TriggerProperties();
     }
 
     private TriggerOrderRecord order(long triggerOrderId,

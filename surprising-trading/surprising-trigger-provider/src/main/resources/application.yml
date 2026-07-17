@@ -29,9 +29,6 @@ spring:
       connect-timeout: ${REDIS_CONNECT_TIMEOUT:2s}
       timeout: ${REDIS_COMMAND_TIMEOUT:1s}
 management:
-  health:
-    redis:
-      enabled: ${TRIGGER_REDIS_INDEX_ENABLED:false}
   endpoints:
     web:
       exposure:
@@ -58,7 +55,6 @@ surprising:
         stale-triggering-after: 30s
         maintenance-delay-ms: 1000
       redis-index:
-        enabled: ${TRIGGER_REDIS_INDEX_ENABLED:false}
         key-prefix: ${TRIGGER_REDIS_KEY_PREFIX:surprising:trigger:v1}
         candidate-batch-size: 400
         rebuild-batch-size: 1000
