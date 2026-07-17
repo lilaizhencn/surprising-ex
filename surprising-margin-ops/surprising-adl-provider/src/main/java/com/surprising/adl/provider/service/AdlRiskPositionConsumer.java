@@ -13,7 +13,8 @@ public class AdlRiskPositionConsumer {
     public AdlRiskPositionConsumer(ObjectMapper objectMapper, RedisAdlCandidateIndex index, AdlProperties properties) {
         this.objectMapper=objectMapper; this.index=index; this.properties=properties;
     }
-    @KafkaListener(topics = "#{__listener.topic()}", groupId = "#{__listener.groupId()}")
+    @KafkaListener(topics = "#{__listener.topic()}", groupId = "#{__listener.groupId()}",
+            containerFactory = "riskKafkaListenerContainerFactory")
     public void onRiskPosition(ConsumerRecord<String,String> record) throws Exception {
         index.synchronize(objectMapper.readValue(record.value(), RiskPositionUpdatedEvent.class));
     }
