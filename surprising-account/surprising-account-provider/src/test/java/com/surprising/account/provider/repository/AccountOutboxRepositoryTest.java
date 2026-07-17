@@ -175,6 +175,22 @@ class AccountOutboxRepositoryTest {
                 .hasMessageContaining("account outbox event published 902");
     }
 
+    @Test
+    void deletesOnlyPublishedAccountRowsInLockedBatches() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        AccountOutboxRepository repository = new AccountOutboxRepository(jdbcTemplate, null, new ObjectMapper());
+        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(7);
+
+        assertThat(repository.deletePublishedBefore(Instant.parse("2026-07-01T00:00:00Z"), 100)).isEqualTo(7);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
+        assertThat(sql.getValue())
+                .contains("published_at < ?")
+                .contains("FOR UPDATE SKIP LOCKED")
+                .contains("DELETE FROM account_outbox_events");
+    }
+
     @SuppressWarnings("unchecked")
     private RowMapper<Object> anyRowMapper() {
         return any(RowMapper.class);

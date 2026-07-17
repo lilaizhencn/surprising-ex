@@ -263,6 +263,22 @@ public class AccountOutboxRepository {
         requireSingleRow(rows, "account outbox failure mark");
     }
 
+    public int deletePublishedBefore(Instant cutoff, int limit) {
+        return jdbcTemplate.update("""
+                WITH candidates AS (
+                    SELECT id
+                      FROM account_outbox_events
+                     WHERE published_at < ?
+                     ORDER BY published_at ASC, id ASC
+                     LIMIT ?
+                     FOR UPDATE SKIP LOCKED
+                )
+                DELETE FROM account_outbox_events e
+                 USING candidates c
+                 WHERE e.id = c.id
+                """, Timestamp.from(cutoff), Math.max(1, limit));
+    }
+
     private String truncate(String value) {
         if (value == null) {
             return null;

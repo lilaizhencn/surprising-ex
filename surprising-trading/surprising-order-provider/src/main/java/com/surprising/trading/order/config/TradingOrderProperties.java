@@ -112,6 +112,9 @@ public class TradingOrderProperties {
         private Duration sendTimeout = Duration.ofSeconds(3);
         private boolean asyncEnabled = true;
         private int maxInFlight = 64;
+        private Duration retention = Duration.ofDays(7);
+        private long cleanupDelayMs = 60_000L;
+        private int cleanupBatchSize = 10_000;
 
         public int getBatchSize() {
             return batchSize;
@@ -151,6 +154,30 @@ public class TradingOrderProperties {
 
         public void setMaxInFlight(int maxInFlight) {
             this.maxInFlight = maxInFlight;
+        }
+
+        public Duration getRetention() {
+            return retention;
+        }
+
+        public void setRetention(Duration retention) {
+            this.retention = retention;
+        }
+
+        public long getCleanupDelayMs() {
+            return cleanupDelayMs;
+        }
+
+        public void setCleanupDelayMs(long cleanupDelayMs) {
+            this.cleanupDelayMs = cleanupDelayMs;
+        }
+
+        public int getCleanupBatchSize() {
+            return cleanupBatchSize;
+        }
+
+        public void setCleanupBatchSize(int cleanupBatchSize) {
+            this.cleanupBatchSize = cleanupBatchSize;
         }
     }
 

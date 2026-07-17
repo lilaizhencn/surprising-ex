@@ -210,6 +210,22 @@ public class RiskOutboxRepository {
         requireSingleRow(rows, "risk outbox failure mark");
     }
 
+    public int deletePublishedBefore(Instant cutoff, int limit) {
+        return jdbcTemplate.update("""
+                WITH candidates AS (
+                    SELECT id
+                      FROM risk_outbox_events
+                     WHERE published_at < ?
+                     ORDER BY published_at ASC, id ASC
+                     LIMIT ?
+                     FOR UPDATE SKIP LOCKED
+                )
+                DELETE FROM risk_outbox_events e
+                 USING candidates c
+                 WHERE e.id = c.id
+                """, Timestamp.from(cutoff), Math.max(1, limit));
+    }
+
     private String truncate(String value) {
         if (value == null) {
             return null;

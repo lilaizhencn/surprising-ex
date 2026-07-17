@@ -1528,6 +1528,10 @@ CREATE INDEX IF NOT EXISTS trading_outbox_pending_stream_idx
     ON trading_outbox_events (aggregate_type, topic, event_key, id)
     WHERE published_at IS NULL;
 
+CREATE INDEX IF NOT EXISTS trading_outbox_published_cleanup_idx
+    ON trading_outbox_events (published_at, id)
+    WHERE published_at IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS trading_outbox_aggregate_idx
     ON trading_outbox_events (aggregate_type, aggregate_id);
 
@@ -2458,6 +2462,10 @@ CREATE INDEX IF NOT EXISTS account_outbox_pending_key_idx
     ON account_outbox_events (product_line, topic, event_key, id)
     WHERE published_at IS NULL;
 
+CREATE INDEX IF NOT EXISTS account_outbox_published_cleanup_idx
+    ON account_outbox_events (published_at, id)
+    WHERE published_at IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS account_outbox_aggregate_idx
     ON account_outbox_events (aggregate_type, aggregate_id);
 
@@ -2934,6 +2942,10 @@ CREATE INDEX IF NOT EXISTS risk_outbox_pending_idx
 CREATE INDEX IF NOT EXISTS risk_outbox_pending_key_idx
     ON risk_outbox_events (topic, event_key, id)
     WHERE published_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS risk_outbox_published_cleanup_idx
+    ON risk_outbox_events (published_at, id)
+    WHERE published_at IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS liquidation_sequences (
     sequence_name       TEXT PRIMARY KEY,

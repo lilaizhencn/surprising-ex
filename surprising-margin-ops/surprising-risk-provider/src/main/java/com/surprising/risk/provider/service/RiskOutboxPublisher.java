@@ -79,6 +79,15 @@ public class RiskOutboxPublisher {
         }
     }
 
+    @Scheduled(fixedDelayString = "${surprising.risk.outbox.cleanup-delay-ms:60000}")
+    public void cleanupPublished() {
+        int deleted = outboxRepository.deletePublishedBefore(Instant.now().minus(properties.getOutbox().getRetention()),
+                properties.getOutbox().getCleanupBatchSize());
+        if (deleted > 0) {
+            log.info("Deleted {} published risk outbox rows", deleted);
+        }
+    }
+
     @PreDestroy
     public void shutdown() {
         publishExecutor.shutdownNow();

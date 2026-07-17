@@ -79,6 +79,15 @@ public class OutboxPublisher {
         }
     }
 
+    @Scheduled(fixedDelayString = "${surprising.trading.order.outbox.cleanup-delay-ms:60000}")
+    public void cleanupPublished() {
+        int deleted = outboxRepository.deletePublishedBefore(Instant.now().minus(properties.getOutbox().getRetention()),
+                properties.getOutbox().getCleanupBatchSize());
+        if (deleted > 0) {
+            log.info("Deleted {} published trading outbox rows", deleted);
+        }
+    }
+
     @PreDestroy
     public void shutdown() {
         publishExecutor.shutdownNow();

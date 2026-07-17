@@ -772,12 +772,18 @@ CREATE INDEX account_outbox_pending_idx
 
 CREATE INDEX account_outbox_aggregate_idx
     ON account_outbox_events (aggregate_type, aggregate_id);
+
+CREATE INDEX account_outbox_published_cleanup_idx
+    ON account_outbox_events (published_at, id)
+    WHERE published_at IS NOT NULL;
 ```
 
 The publisher claims pending rows with `FOR UPDATE SKIP LOCKED`, so multiple account-provider nodes
 can drain the outbox safely. Publishing is at-least-once; consumers should deduplicate by event id,
 trade id, or their own latest-position version rules. Insurance uses
 `insurance_fund_ledger(reference_type, reference_id, asset)` with `reference_id = tradeId:orderId`.
+Published rows are transient delivery records: each physical outbox table deletes rows older than seven days in
+bounded `FOR UPDATE SKIP LOCKED` batches. Pending or failed rows are never selected for deletion.
 
 ## Liquidation Tables
 
