@@ -45,6 +45,13 @@ public class LatestMarkPriceCache {
         return latest(symbol).filter(this::isFresh);
     }
 
+    public Optional<MarkPriceEvent> fresh(String symbol, Duration maxAge) {
+        if (maxAge == null || maxAge.isZero() || maxAge.isNegative()) {
+            throw new IllegalArgumentException("maxAge must be positive");
+        }
+        return latest(symbol).filter(event -> isFresh(event, maxAge));
+    }
+
     public MarkPriceEvent requireFresh(String symbol) {
         MarkPriceEvent event = latest(symbol)
                 .orElseThrow(() -> new StaleMarkPriceException("mark price unavailable: " + normalizeSymbol(symbol)));
@@ -56,9 +63,13 @@ public class LatestMarkPriceCache {
     }
 
     public boolean isFresh(MarkPriceEvent event) {
+        return isFresh(event, properties.getMaxAge());
+    }
+
+    private boolean isFresh(MarkPriceEvent event, Duration maxAge) {
         Instant now = clock.instant();
         return !event.eventTime().isAfter(now.plus(properties.getAllowedFutureSkew()))
-                && !event.eventTime().isBefore(now.minus(properties.getMaxAge()));
+                && !event.eventTime().isBefore(now.minus(maxAge));
     }
 
     public List<MarkPriceEvent> freshSnapshots() {

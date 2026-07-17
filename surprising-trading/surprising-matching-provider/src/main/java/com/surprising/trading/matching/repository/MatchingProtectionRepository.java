@@ -1,6 +1,7 @@
 package com.surprising.trading.matching.repository;
 
 import com.surprising.trading.api.model.OrderSide;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.trading.matching.config.MatchingProperties;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -15,30 +16,33 @@ public class MatchingProtectionRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final MatchingProperties properties;
+    private final LatestMarkPriceCache markPriceCache;
 
     public MatchingProtectionRepository(JdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, new MatchingProperties());
+        this(jdbcTemplate, new MatchingProperties(), null);
+    }
+
+    public MatchingProtectionRepository(JdbcTemplate jdbcTemplate, MatchingProperties properties) {
+        this(jdbcTemplate, properties, null);
     }
 
     @Autowired
-    public MatchingProtectionRepository(JdbcTemplate jdbcTemplate, MatchingProperties properties) {
+    public MatchingProtectionRepository(JdbcTemplate jdbcTemplate,
+                                        MatchingProperties properties,
+                                        LatestMarkPriceCache markPriceCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties;
+        this.markPriceCache = markPriceCache;
     }
 
     public OptionalLong latestMarkPriceTicks(String symbol, long instrumentVersion, Duration maxAge) {
-        return jdbcTemplate.query("""
-                SELECT ((m.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_ticks
-                  FROM price_mark_ticks m
-                  JOIN instruments i ON i.symbol = m.symbol AND i.version = ?
-                 WHERE m.symbol = ?
-                   AND m.event_time >= now() - (? * INTERVAL '1 millisecond')
-                 ORDER BY m.event_time DESC
-                 LIMIT 1
-                """, (rs, rowNum) -> rs.getLong("mark_ticks"), instrumentVersion, symbol, maxAge.toMillis())
-                .stream()
-                .mapToLong(Long::longValue)
-                .findFirst();
+        if (markPriceCache == null) {
+            return OptionalLong.empty();
+        }
+        var event = markPriceCache.fresh(symbol, maxAge)
+                .filter(value -> value.instrumentVersion() == instrumentVersion)
+                .filter(value -> value.markPriceTicks() > 0);
+        return event.isPresent() ? OptionalLong.of(event.orElseThrow().markPriceTicks()) : OptionalLong.empty();
     }
 
     public boolean wouldSelfTrade(long userId,

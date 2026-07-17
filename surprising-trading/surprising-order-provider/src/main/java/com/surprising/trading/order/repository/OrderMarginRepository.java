@@ -8,12 +8,14 @@ import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.order.model.MarginRequirement;
+import com.surprising.trading.order.model.MarkPriceLookup;
 import com.surprising.trading.order.service.OrderMarginMath;
 import java.math.BigInteger;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -24,10 +26,19 @@ public class OrderMarginRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final OrderRepository orderRepository;
+    private final MarkPriceLookup markPriceLookup;
 
     public OrderMarginRepository(JdbcTemplate jdbcTemplate, OrderRepository orderRepository) {
+        this(jdbcTemplate, orderRepository, (symbol, version, maxAge) -> java.util.OptionalLong.empty());
+    }
+
+    @Autowired
+    public OrderMarginRepository(JdbcTemplate jdbcTemplate,
+                                 OrderRepository orderRepository,
+                                 MarkPriceLookup markPriceLookup) {
         this.jdbcTemplate = jdbcTemplate;
         this.orderRepository = orderRepository;
+        this.markPriceLookup = markPriceLookup;
     }
 
     public Optional<MarginRequirement> requirement(String symbol,
@@ -102,14 +113,7 @@ public class OrderMarginRepository {
                          AND o.reduce_only = FALSE
                          AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                   ) o ON TRUE
-                  LEFT JOIN LATERAL (
-                      SELECT ((m.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_ticks
-                        FROM price_mark_ticks m
-                       WHERE m.symbol = i.symbol
-                         AND m.event_time >= now() - (? * INTERVAL '1 millisecond')
-                       ORDER BY m.event_time DESC
-                       LIMIT 1
-                  ) pm ON TRUE
+                 CROSS JOIN (SELECT CAST(? AS bigint) AS mark_ticks) pm
                  WHERE i.symbol = ?
                    AND i.version = ?
                    AND (? <> 'MARKET' OR pm.mark_ticks IS NOT NULL)
@@ -119,6 +123,8 @@ public class OrderMarginRepository {
                 ProductLineSql.contractTypeProductLineCase("i.contract_type"));
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
+        Long markPriceTicks = markPriceLookup.latestMarkPriceTicks(symbol, instrumentVersion,
+                marketMaxMarkAgeMs).stream().boxed().findFirst().orElse(null);
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
             long markTicks = rs.getLong("mark_ticks");
             Long nullableMarkTicks = rs.wasNull() ? null : markTicks;
@@ -205,7 +211,7 @@ public class OrderMarginRepository {
                     selectedLeveragePpm, bracket.maxLeveragePpm(), effectiveInitialMarginRatePpm);
         }, userId, normalizedMarginMode.name(), userId, normalizedMarginMode.name(), normalizedPositionSide.name(),
                 userId, normalizedMarginMode.name(), normalizedPositionSide.name(), side.name(),
-                marketMaxMarkAgeMs, symbol, instrumentVersion, orderType.name()).stream().findFirst();
+                markPriceTicks, symbol, instrumentVersion, orderType.name()).stream().findFirst();
     }
 
     public Optional<MarginRequirement> requirement(String symbol,

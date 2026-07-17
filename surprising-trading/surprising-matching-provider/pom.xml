@@ -25,6 +25,11 @@
             <artifactId>surprising-trading-api</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-price-consumer</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>exchange.core2</groupId>
             <artifactId>exchange-core</artifactId>
         </dependency>

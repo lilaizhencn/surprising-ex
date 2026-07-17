@@ -3,6 +3,7 @@ package com.surprising.trading.order.repository;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
+import com.surprising.trading.order.model.MarkPriceLookup;
 import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.service.OrderMarginMath;
 import java.math.BigInteger;
@@ -10,6 +11,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -19,10 +21,19 @@ public class SpotOrderReservationRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final OrderRepository orderRepository;
+    private final MarkPriceLookup markPriceLookup;
 
     public SpotOrderReservationRepository(JdbcTemplate jdbcTemplate, OrderRepository orderRepository) {
+        this(jdbcTemplate, orderRepository, (symbol, version, maxAge) -> java.util.OptionalLong.empty());
+    }
+
+    @Autowired
+    public SpotOrderReservationRepository(JdbcTemplate jdbcTemplate,
+                                          OrderRepository orderRepository,
+                                          MarkPriceLookup markPriceLookup) {
         this.jdbcTemplate = jdbcTemplate;
         this.orderRepository = orderRepository;
+        this.markPriceLookup = markPriceLookup;
     }
 
     public Optional<SpotReservationRequirement> requirement(String symbol,
@@ -34,6 +45,8 @@ public class SpotOrderReservationRepository {
                                                             long marketMaxSlippagePpm,
                                                             long marketMaxMarkAgeMs,
                                                             OrderFeeSnapshot feeSnapshot) {
+        Long markPriceTicks = markPriceLookup.latestMarkPriceTicks(symbol, instrumentVersion, marketMaxMarkAgeMs)
+                .stream().boxed().findFirst().orElse(null);
         return jdbcTemplate.query("""
                 SELECT i.base_asset,
                        i.quote_asset,
@@ -41,14 +54,7 @@ public class SpotOrderReservationRepository {
                        i.notional_multiplier_units,
                        pm.mark_ticks
                   FROM instruments i
-                  LEFT JOIN LATERAL (
-                      SELECT ((m.mark_price_units + i.price_tick_units / 2) / i.price_tick_units) AS mark_ticks
-                        FROM price_mark_ticks m
-                       WHERE m.symbol = i.symbol
-                         AND m.event_time >= now() - (? * INTERVAL '1 millisecond')
-                       ORDER BY m.event_time DESC
-                       LIMIT 1
-                  ) pm ON TRUE
+                 CROSS JOIN (SELECT CAST(? AS bigint) AS mark_ticks) pm
                  WHERE i.symbol = ?
                    AND i.version = ?
                    AND i.instrument_type = 'SPOT'
@@ -70,7 +76,7 @@ public class SpotOrderReservationRepository {
             long feeUnits = feeUnits(notionalUnits, feeSnapshot);
             return new SpotReservationRequirement(rs.getString("quote_asset"),
                     Math.addExact(notionalUnits, feeUnits));
-        }, marketMaxMarkAgeMs, symbol, instrumentVersion, orderType.name()).stream().findFirst();
+        }, markPriceTicks, symbol, instrumentVersion, orderType.name()).stream().findFirst();
     }
 
     public boolean reserve(long userId,

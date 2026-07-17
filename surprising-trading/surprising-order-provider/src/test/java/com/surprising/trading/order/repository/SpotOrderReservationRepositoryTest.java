@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -26,7 +27,7 @@ class SpotOrderReservationRepositoryTest {
         SpotOrderReservationRepository repository = new SpotOrderReservationRepository(jdbcTemplate,
                 mock(OrderRepository.class));
         when(jdbcTemplate.query(contains("i.instrument_type = 'SPOT'"), anyRowMapper(),
-                eq(5_000L), eq("BTC-USDT-SPOT"), eq(3L), eq("LIMIT")))
+                isNull(), eq("BTC-USDT-SPOT"), eq(3L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     return List.of(mapper.mapRow(spotRow(), 0));
@@ -46,7 +47,7 @@ class SpotOrderReservationRepositoryTest {
         SpotOrderReservationRepository repository = new SpotOrderReservationRepository(jdbcTemplate,
                 mock(OrderRepository.class));
         when(jdbcTemplate.query(contains("i.instrument_type = 'SPOT'"), anyRowMapper(),
-                eq(5_000L), eq("BTC-USDT-SPOT"), eq(3L), eq("LIMIT")))
+                isNull(), eq("BTC-USDT-SPOT"), eq(3L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     return List.of(mapper.mapRow(spotRow(), 0));

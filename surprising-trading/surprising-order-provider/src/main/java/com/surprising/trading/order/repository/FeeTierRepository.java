@@ -2,6 +2,7 @@ package com.surprising.trading.order.repository;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineSql;
+import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.trading.api.model.FeeScheduleSourceType;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeTierAssignmentResponse;
@@ -143,6 +144,13 @@ public class FeeTierRepository {
     }
 
     public FeeTierMetrics metrics(ProductLine productLine, long userId, Instant since) {
+        return metrics(productLine, userId, since, List.of());
+    }
+
+    public FeeTierMetrics metrics(ProductLine productLine,
+                                  long userId,
+                                  Instant since,
+                                  List<MarkPriceEvent> markPrices) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
@@ -181,8 +189,34 @@ public class FeeTierRepository {
                   FROM filled_notional
                 """.formatted(productLineExpression("i")), Number.class, userId, Timestamp.from(since),
                 productLineName, userId, Timestamp.from(since), productLineName, productLineName));
+        List<MarkPriceEvent> prices = markPrices == null ? List.of() : markPrices;
+        List<Object> balanceArgs = new ArrayList<>();
+        String markPriceRows;
+        if (prices.isEmpty()) {
+            markPriceRows = """
+                    (SELECT CAST(NULL AS text) AS symbol,
+                            CAST(NULL AS bigint) AS instrument_version,
+                            CAST(NULL AS bigint) AS mark_price_units
+                       WHERE FALSE)
+                    """;
+        } else {
+            markPriceRows = "(VALUES " + String.join(", ", java.util.Collections.nCopies(prices.size(),
+                    "(?, ?, ?)")) + ")";
+            for (MarkPriceEvent price : prices) {
+                balanceArgs.add(price.symbol());
+                balanceArgs.add(price.instrumentVersion());
+                balanceArgs.add(price.markPriceUnits());
+            }
+        }
+        balanceArgs.add(accountType);
+        balanceArgs.add(userId);
+        balanceArgs.add(accountType);
+        balanceArgs.add(accountType);
+        balanceArgs.add(userId);
+        balanceArgs.add(userId);
         long assetBalance = number(jdbcTemplate.queryForObject("""
-                WITH raw_balances AS (
+                WITH mark_prices(symbol, instrument_version, mark_price_units) AS %s,
+                raw_balances AS (
                     SELECT b.user_id, b.asset, b.available_units, b.locked_units
                       FROM account_balances b
                      WHERE ? = 'USDT_PERPETUAL'
@@ -207,24 +241,22 @@ public class FeeTierRepository {
                       JOIN account_asset_scales s
                         ON s.asset = b.asset
                  LEFT JOIN LATERAL (
-                           SELECT m.mark_price_units
-                             FROM instrument_current_versions c
-                             JOIN instruments i
-                               ON i.symbol = c.symbol AND i.version = c.version
-                             JOIN price_mark_ticks m
-                               ON m.symbol = i.symbol
+                           SELECT mp.mark_price_units
+                             FROM instruments i
+                             JOIN mark_prices mp
+                               ON mp.symbol = i.symbol AND mp.instrument_version = i.version
                             WHERE i.base_asset = b.asset
                               AND i.quote_asset IN ('USDT', 'USD')
                               AND i.status = 'TRADING'
                             ORDER BY CASE WHEN i.quote_asset = 'USDT' THEN 0 ELSE 1 END,
-                                     m.event_time DESC
+                                     mp.symbol
                             LIMIT 1
                        ) pm ON TRUE
                      WHERE b.user_id = ?
                 )
                 SELECT LEAST(COALESCE(SUM(value_units), 0), 9223372036854775807)::bigint
                   FROM valued_balances
-                """, Number.class, accountType, userId, accountType, accountType, userId, userId));
+                """.formatted(markPriceRows), Number.class, balanceArgs.toArray()));
         return new FeeTierMetrics(trailingVolume, assetBalance);
     }
 

@@ -1,6 +1,7 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
@@ -22,6 +23,7 @@ import java.util.List;
 import java.util.Optional;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -31,15 +33,26 @@ public class FeeTierService {
     private final OrderFeeRepository orderFeeRepository;
     private final OrderRepository orderRepository;
     private final TradingOrderProperties properties;
+    private final LatestMarkPriceCache markPriceCache;
 
     public FeeTierService(FeeTierRepository feeTierRepository,
                           OrderFeeRepository orderFeeRepository,
                           OrderRepository orderRepository,
                           TradingOrderProperties properties) {
+        this(feeTierRepository, orderFeeRepository, orderRepository, properties, null);
+    }
+
+    @Autowired
+    public FeeTierService(FeeTierRepository feeTierRepository,
+                          OrderFeeRepository orderFeeRepository,
+                          OrderRepository orderRepository,
+                          TradingOrderProperties properties,
+                          LatestMarkPriceCache markPriceCache) {
         this.feeTierRepository = feeTierRepository;
         this.orderFeeRepository = orderFeeRepository;
         this.orderRepository = orderRepository;
         this.properties = properties;
+        this.markPriceCache = markPriceCache;
     }
 
     @Transactional
@@ -71,7 +84,9 @@ public class FeeTierService {
         ProductLine resolvedProductLine = productLine(productLine);
         Instant now = Instant.now();
         Instant since = lookbackStart(now);
-        FeeTierMetrics metrics = feeTierRepository.metrics(resolvedProductLine, userId, since);
+        FeeTierMetrics metrics = markPriceCache == null
+                ? feeTierRepository.metrics(resolvedProductLine, userId, since)
+                : feeTierRepository.metrics(resolvedProductLine, userId, since, markPriceCache.freshSnapshots());
         long proposedFeeScheduleId = orderRepository.nextSequence("fee-schedule");
         FeeTierAssignmentRecord assignment = feeTierRepository.lockAssignment(
                 resolvedProductLine, userId, proposedFeeScheduleId, now);

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -43,7 +44,7 @@ class OrderMarginRepositoryTest {
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
                 eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
                 eq(1001L), eq("CROSS"), eq("NET"),
-                eq("BUY"), eq(5_000L),
+                eq("BUY"), isNull(),
                 eq("BTC-USDT-240927"), eq(1L), eq("LIMIT")))
                 .thenReturn(List.of());
 
@@ -54,7 +55,7 @@ class OrderMarginRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
                 eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
                 eq(1001L), eq("CROSS"), eq("NET"),
-                eq("BUY"), eq(5_000L),
+                eq("BUY"), isNull(),
                 eq("BTC-USDT-240927"), eq(1L), eq("LIMIT"));
         assertThat(sql.getValue())
                 .contains("oi.product_line = CASE i.contract_type")
@@ -72,7 +73,7 @@ class OrderMarginRepositoryTest {
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
                 eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
                 eq(1001L), eq("CROSS"), eq("NET"),
-                eq("BUY"), eq(5_000L),
+                eq("BUY"), isNull(),
                 eq("BTC-USDT"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -93,7 +94,7 @@ class OrderMarginRepositoryTest {
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
                 eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
                 eq(1001L), eq("CROSS"), eq("NET"),
-                eq("BUY"), eq(5_000L),
+                eq("BUY"), isNull(),
                 eq("BTC-USDT"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -120,7 +121,7 @@ class OrderMarginRepositoryTest {
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
                 eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
                 eq(1001L), eq("CROSS"), eq("NET"),
-                eq("BUY"), eq(5_000L),
+                eq("BUY"), isNull(),
                 eq("BTC-USDT"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -141,7 +142,7 @@ class OrderMarginRepositoryTest {
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
                 eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
                 eq(1001L), eq("CROSS"), eq("NET"),
-                eq("BUY"), eq(5_000L),
+                eq("BUY"), isNull(),
                 eq("BTC-USDT"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -164,7 +165,7 @@ class OrderMarginRepositoryTest {
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
                 eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
                 eq(1001L), eq("CROSS"), eq("NET"),
-                eq("SELL"), eq(5_000L),
+                eq("SELL"), isNull(),
                 eq("BTC-USDT"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -191,7 +192,7 @@ class OrderMarginRepositoryTest {
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
                 eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
                 eq(1001L), eq("CROSS"), eq("NET"),
-                eq("SELL"), eq(5_000L),
+                eq("SELL"), isNull(),
                 eq("BTC-USD"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -221,7 +222,7 @@ class OrderMarginRepositoryTest {
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
                 eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
                 eq(1001L), eq("CROSS"), eq("NET"),
-                eq("BUY"), eq(5_000L),
+                eq("BUY"), isNull(),
                 eq("BTC-USDT-240927"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -251,7 +252,7 @@ class OrderMarginRepositoryTest {
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
                 eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
                 eq(1001L), eq("CROSS"), eq("NET"),
-                eq("SELL"), eq(5_000L),
+                eq("SELL"), isNull(),
                 eq("BTC-USD-240927"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -281,7 +282,7 @@ class OrderMarginRepositoryTest {
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
                 eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
                 eq(1001L), eq("CROSS"), eq("NET"),
-                eq("BUY"), eq(5_000L),
+                eq("BUY"), isNull(),
                 eq("BTC-USDT-260925-70000-C"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -311,7 +312,7 @@ class OrderMarginRepositoryTest {
         when(jdbcTemplate.query(contains("FROM instruments i"), anyRowMapper(),
                 eq(1001L), eq("CROSS"), eq(1001L), eq("CROSS"), eq("NET"),
                 eq(1001L), eq("CROSS"), eq("NET"),
-                eq("SELL"), eq(5_000L),
+                eq("SELL"), isNull(),
                 eq("BTC-USDT-260925-70000-C"), eq(1L), eq("LIMIT")))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
