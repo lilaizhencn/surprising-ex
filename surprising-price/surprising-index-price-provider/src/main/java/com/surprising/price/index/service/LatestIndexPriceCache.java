@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** Latest Kafka index snapshot per symbol. Audit tables are deliberately not a real-time input. */
@@ -20,6 +21,7 @@ public class LatestIndexPriceCache {
     private final Clock clock;
     private final ConcurrentMap<String, IndexPriceEvent> latestBySymbol = new ConcurrentHashMap<>();
 
+    @Autowired
     public LatestIndexPriceCache(IndexPriceProperties properties) {
         this(properties, Clock.systemUTC());
     }
