@@ -136,6 +136,7 @@ Legacy 永续 topic 仍保留用于兼容单线启动。产品线实例使用 `s
 - `surprising.perp.match.trades.v1`：撮合成交事件，long 定点数，供 K 线和公开成交推送消费。
 - `surprising.perp.orderbook.depth.v1`：exchange-core L2 盘口 `SNAPSHOT`/`DELTA` 事件，供前端深度推送消费。
 - `surprising.account.position.events.v1`：账户持仓变化事件，供私有 WebSocket 推送消费。
+- `surprising.<product-segment>.account.position-cache.events.v1`：带 revision 的用户持仓 Redis 投影事件；例如 `surprising.linear-perp.account.position-cache.events.v1`。仅 account-provider 缓存消费者使用。
 - `surprising.perp.liquidation.candidates.v1`：爆仓候选事件。
 - `surprising.perp.index.price.v1`：指数价格输出。
 - `surprising.perp.book.ticker.v1`：合约盘口最优价输入。
@@ -219,6 +220,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - 成对 TP/SL 可以使用同一个 `ocoGroupId`；同一用户、symbol、保证金模式组里任意一条 pending 触发单被抢占后，其它 pending sibling 会在同一条数据库语句里先置为 `CANCELED`，然后再提交生成的平仓单。
 - 普通平仓、强平成交、交割结算或期权行权把持仓降为零时，account 会在同一个 PostgreSQL 事务里取消该持仓剩余的 `PENDING` 条件单，并把 `CANCELED` 状态快照写入 trading outbox。提交后的持仓事件驱动 trigger-provider 删除对应静态止盈止损 Redis member，`trigger-order.events` 驱动认证用户 WebSocket 主动刷新；`GET /open` 始终以数据库已取消状态为准。
 - Account 消费撮合成交，按 `tradeId` 幂等更新 long-based 净持仓，把开仓成交保证金迁移到持仓保证金，并把已实现盈亏结算进余额。
+- 用户持仓、持仓列表和持仓保证金查询只读 Redis Hash；PostgreSQL 仍是唯一事实源。持仓/保证金数据库触发器会在同一事务写入 revision 化的 `POSITION_CACHE_PROJECTED` account outbox，覆盖成交、平仓、强平、资金费、ADL、交割/行权和手工逐仓调整。Redis 用 Lua CAS 原子更新持仓、保证金和 revision；未 ready 或 Redis 异常时用户查询返回 503，不回退数据库。详细设计见 [docs/position-redis-cache_CN.md](docs/position-redis-cache_CN.md)。
 - `CROSS` 和 `ISOLATED` 保证金模式会从下单一路传到撮合、账户、风控、资金费和强平。全仓亏损可以使用全仓可用余额和全仓持仓保证金；逐仓亏损只使用该 symbol 的逐仓持仓保证金，亏穿后记录 deficit。
 - 逐仓持仓保证金可以通过 account-provider 手动追加或减少。追加会把可用余额转入持仓保证金；减少必须依赖最新风险快照，并保证减少后权益仍高于维持保证金加配置缓冲。
 - 用户杠杆配置按 `userId + symbol + marginMode` 生效；订单入口会在冻结初始保证金前按当前风险档位重新校验配置杠杆。

@@ -22,6 +22,7 @@ import com.surprising.account.api.model.ProductTransferRecordQueryResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.provider.service.AccountService;
+import com.surprising.account.provider.service.PositionCacheUnavailableException;
 import com.surprising.product.api.ProductLine;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -211,6 +212,8 @@ public class AccountController {
             return accountService.position(userId, symbol, marginMode, positionSide);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (PositionCacheUnavailableException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         }
     }
 
@@ -222,7 +225,7 @@ public class AccountController {
             @RequestParam(value = "marginMode", required = false) String marginMode,
             @RequestParam(value = "positionSide", required = false) String positionSide) {
         requireAdmin(adminUserId);
-        return position(userId, symbol, marginMode, positionSide);
+        return accountService.adminPosition(userId, symbol, marginMode, positionSide);
     }
 
     @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-margin")
@@ -233,6 +236,8 @@ public class AccountController {
             return accountService.positionMargin(userId, symbol, marginMode);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (PositionCacheUnavailableException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         }
     }
 
@@ -255,6 +260,8 @@ public class AccountController {
             return accountService.positions(userId, positionSide);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (PositionCacheUnavailableException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         }
     }
 
@@ -264,7 +271,7 @@ public class AccountController {
             @RequestParam("userId") long userId,
             @RequestParam(value = "positionSide", required = false) String positionSide) {
         requireAdmin(adminUserId);
-        return positions(userId, positionSide);
+        return accountService.adminPositions(userId, positionSide);
     }
 
     @GetMapping(ADMIN_BASE_PATH + "/ledger")

@@ -2216,6 +2216,9 @@ CREATE INDEX IF NOT EXISTS account_spot_reservations_user_idx
 CREATE INDEX IF NOT EXISTS account_spot_reservations_symbol_idx
     ON account_spot_order_reservations (symbol, status, updated_at DESC);
 
+CREATE SEQUENCE IF NOT EXISTS account_position_cache_revision_seq AS BIGINT START WITH 1;
+CREATE SEQUENCE IF NOT EXISTS account_outbox_id_seq AS BIGINT START WITH 1;
+
 CREATE TABLE IF NOT EXISTS account_position_margins (
     product_line        TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     user_id             BIGINT NOT NULL,
@@ -2225,6 +2228,7 @@ CREATE TABLE IF NOT EXISTS account_position_margins (
     position_side       TEXT NOT NULL DEFAULT 'NET',
     margin_units        BIGINT NOT NULL,
     updated_at          TIMESTAMPTZ NOT NULL,
+    cache_revision      BIGINT NOT NULL DEFAULT nextval('account_position_cache_revision_seq'),
     PRIMARY KEY (product_line, user_id, symbol, asset, margin_mode, position_side),
     CONSTRAINT account_position_margins_product_line_check CHECK (
         product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
@@ -2253,6 +2257,7 @@ CREATE TABLE IF NOT EXISTS account_positions (
     entry_value_ticks       BIGINT NOT NULL DEFAULT 0,
     realized_pnl_units      BIGINT NOT NULL,
     updated_at              TIMESTAMPTZ NOT NULL,
+    cache_revision          BIGINT NOT NULL DEFAULT nextval('account_position_cache_revision_seq'),
     PRIMARY KEY (product_line, user_id, symbol, margin_mode, position_side),
     CONSTRAINT account_positions_product_line_check CHECK (
         product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
@@ -2287,6 +2292,8 @@ BEGIN
     IF to_regclass('public.account_positions') IS NOT NULL THEN
         ALTER TABLE account_positions ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
         ALTER TABLE account_positions ADD COLUMN IF NOT EXISTS entry_value_ticks BIGINT NOT NULL DEFAULT 0;
+        ALTER TABLE account_positions ADD COLUMN IF NOT EXISTS cache_revision
+            BIGINT NOT NULL DEFAULT nextval('account_position_cache_revision_seq');
         UPDATE account_positions
            SET entry_value_ticks = abs(signed_quantity_steps) * entry_price_ticks
          WHERE signed_quantity_steps <> 0
@@ -2325,6 +2332,8 @@ BEGIN
 
     IF to_regclass('public.account_position_margins') IS NOT NULL THEN
         ALTER TABLE account_position_margins ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+        ALTER TABLE account_position_margins ADD COLUMN IF NOT EXISTS cache_revision
+            BIGINT NOT NULL DEFAULT nextval('account_position_cache_revision_seq');
         ALTER TABLE account_position_margins DROP CONSTRAINT IF EXISTS account_position_margins_product_line_check;
         ALTER TABLE account_position_margins
             ADD CONSTRAINT account_position_margins_product_line_check CHECK (
@@ -2353,8 +2362,14 @@ DROP INDEX IF EXISTS account_positions_open_scan_idx;
 CREATE INDEX IF NOT EXISTS account_position_margins_user_idx
     ON account_position_margins (product_line, user_id, symbol, margin_mode, position_side);
 
+CREATE INDEX IF NOT EXISTS account_position_margins_revision_idx
+    ON account_position_margins (product_line, cache_revision);
+
 CREATE INDEX IF NOT EXISTS account_positions_user_idx
     ON account_positions (product_line, user_id);
+
+CREATE INDEX IF NOT EXISTS account_positions_revision_idx
+    ON account_positions (product_line, cache_revision);
 
 CREATE INDEX IF NOT EXISTS account_positions_symbol_idx
     ON account_positions (product_line, symbol, margin_mode, position_side);
@@ -2405,7 +2420,8 @@ CREATE INDEX IF NOT EXISTS account_processed_trades_symbol_idx
     ON account_processed_trades (product_line, symbol, processed_at DESC);
 
 CREATE TABLE IF NOT EXISTS account_outbox_events (
-    id                  BIGINT PRIMARY KEY,
+    id                  BIGINT PRIMARY KEY DEFAULT nextval('account_outbox_id_seq'),
+    product_line        TEXT NOT NULL,
     aggregate_type      TEXT NOT NULL,
     aggregate_id        BIGINT NOT NULL,
     topic               TEXT NOT NULL,
@@ -2419,16 +2435,46 @@ CREATE TABLE IF NOT EXISTS account_outbox_events (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT account_outbox_attempts_non_negative CHECK (attempts >= 0),
+    CONSTRAINT account_outbox_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT account_outbox_topic_non_empty CHECK (length(topic) > 0),
     CONSTRAINT account_outbox_event_key_non_empty CHECK (length(event_key) > 0)
 );
 
+ALTER TABLE account_outbox_events
+    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+
+ALTER TABLE account_outbox_events
+    ALTER COLUMN id SET DEFAULT nextval('account_outbox_id_seq');
+
+ALTER TABLE account_outbox_events
+    DROP CONSTRAINT IF EXISTS account_outbox_product_line_check;
+
+ALTER TABLE account_outbox_events
+    ADD CONSTRAINT account_outbox_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    );
+
+DO $$
+DECLARE
+    v_next_id BIGINT;
+BEGIN
+    SELECT GREATEST(
+        COALESCE((SELECT MAX(id) FROM account_outbox_events), 0),
+        (SELECT last_value FROM account_outbox_id_seq)
+    ) INTO v_next_id;
+    PERFORM setval('account_outbox_id_seq', GREATEST(v_next_id, 1), v_next_id > 0);
+END $$;
+
 CREATE INDEX IF NOT EXISTS account_outbox_pending_idx
-    ON account_outbox_events (next_attempt_at, id)
+    ON account_outbox_events (product_line, next_attempt_at, id)
     WHERE published_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS account_outbox_pending_key_idx
-    ON account_outbox_events (topic, event_key, id)
+    ON account_outbox_events (product_line, topic, event_key, id)
     WHERE published_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS account_outbox_aggregate_idx
@@ -2437,6 +2483,152 @@ CREATE INDEX IF NOT EXISTS account_outbox_aggregate_idx
 CREATE INDEX IF NOT EXISTS account_outbox_events_trace_idx
     ON account_outbox_events ((payload ->> 'traceId'))
     WHERE payload ? 'traceId';
+
+CREATE OR REPLACE FUNCTION account_set_position_cache_revision()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.cache_revision := nextval('account_position_cache_revision_seq');
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS account_positions_cache_revision_trigger ON account_positions;
+CREATE TRIGGER account_positions_cache_revision_trigger
+BEFORE UPDATE ON account_positions
+FOR EACH ROW EXECUTE FUNCTION account_set_position_cache_revision();
+
+DROP TRIGGER IF EXISTS account_position_margins_cache_revision_trigger ON account_position_margins;
+CREATE TRIGGER account_position_margins_cache_revision_trigger
+BEFORE UPDATE ON account_position_margins
+FOR EACH ROW EXECUTE FUNCTION account_set_position_cache_revision();
+
+CREATE OR REPLACE FUNCTION account_position_cache_topic(p_product_line TEXT)
+RETURNS TEXT AS $$
+DECLARE
+    v_segment TEXT;
+BEGIN
+    v_segment := CASE p_product_line
+        WHEN 'SPOT' THEN 'spot'
+        WHEN 'LINEAR_PERPETUAL' THEN 'linear-perp'
+        WHEN 'INVERSE_PERPETUAL' THEN 'inverse-perp'
+        WHEN 'LINEAR_DELIVERY' THEN 'linear-delivery'
+        WHEN 'INVERSE_DELIVERY' THEN 'inverse-delivery'
+        WHEN 'OPTION' THEN 'option'
+        ELSE NULL
+    END;
+    IF v_segment IS NULL THEN
+        RAISE EXCEPTION 'unsupported account position product line: %', p_product_line;
+    END IF;
+    RETURN 'surprising.' || v_segment || '.account.position-cache.events.v1';
+END;
+$$ LANGUAGE plpgsql IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION account_enqueue_position_cache_event(
+    p_product_line TEXT,
+    p_user_id BIGINT,
+    p_symbol TEXT,
+    p_margin_mode TEXT,
+    p_position_side TEXT,
+    p_revision BIGINT)
+RETURNS VOID AS $$
+DECLARE
+    v_payload JSONB;
+BEGIN
+    SELECT jsonb_build_object(
+               'eventId', p_revision,
+               'productLine', p.product_line,
+               'userId', p.user_id,
+               'symbol', p.symbol,
+               'instrumentVersion', p.instrument_version,
+               'marginMode', p.margin_mode,
+               'positionSide', p.position_side,
+               'signedQuantitySteps', p.signed_quantity_steps,
+               'entryPriceTicks', p.entry_price_ticks,
+               'entryValueTicks', p.entry_value_ticks,
+               'realizedPnlUnits', p.realized_pnl_units,
+               'marginAsset', COALESCE(m.asset, i.settle_asset, ''),
+               'marginUnits', COALESCE(m.margin_units, 0),
+               'positionUpdatedAt', p.updated_at,
+               'marginUpdatedAt', COALESCE(m.updated_at, p.updated_at),
+               'revision', p_revision)
+      INTO v_payload
+      FROM account_positions p
+      LEFT JOIN instruments i
+        ON i.symbol = p.symbol
+       AND i.version = p.instrument_version
+      LEFT JOIN LATERAL (
+          SELECT MIN(pm.asset) AS asset,
+                 COALESCE(SUM(pm.margin_units), 0)::BIGINT AS margin_units,
+                 MAX(pm.updated_at) AS updated_at
+            FROM account_position_margins pm
+           WHERE pm.product_line = p.product_line
+             AND pm.user_id = p.user_id
+             AND pm.symbol = p.symbol
+             AND pm.margin_mode = p.margin_mode
+             AND pm.position_side = p.position_side
+      ) m ON TRUE
+     WHERE p.product_line = p_product_line
+       AND p.user_id = p_user_id
+       AND p.symbol = p_symbol
+       AND p.margin_mode = p_margin_mode
+       AND p.position_side = p_position_side;
+
+    IF v_payload IS NULL THEN
+        RAISE EXCEPTION 'position cache projection source is missing: line=% user=% symbol=% mode=% side=%',
+            p_product_line, p_user_id, p_symbol, p_margin_mode, p_position_side;
+    END IF;
+
+    INSERT INTO account_outbox_events (
+        product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
+        next_attempt_at, created_at, updated_at
+    ) VALUES (
+        p_product_line, 'POSITION_CACHE', p_revision, account_position_cache_topic(p_product_line),
+        p_product_line || ':' || p_user_id, 'POSITION_CACHE_PROJECTED', v_payload,
+        now(), now(), now()
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION account_emit_position_cache_from_position()
+RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM account_enqueue_position_cache_event(
+        NEW.product_line, NEW.user_id, NEW.symbol, NEW.margin_mode, NEW.position_side, NEW.cache_revision);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS account_positions_cache_outbox_trigger ON account_positions;
+CREATE TRIGGER account_positions_cache_outbox_trigger
+AFTER INSERT OR UPDATE ON account_positions
+FOR EACH ROW EXECUTE FUNCTION account_emit_position_cache_from_position();
+
+CREATE OR REPLACE FUNCTION account_emit_position_cache_from_margin()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_row account_position_margins%ROWTYPE;
+    v_revision BIGINT;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        v_row := OLD;
+        v_revision := nextval('account_position_cache_revision_seq');
+    ELSE
+        v_row := NEW;
+        v_revision := NEW.cache_revision;
+    END IF;
+    PERFORM account_enqueue_position_cache_event(
+        v_row.product_line, v_row.user_id, v_row.symbol, v_row.margin_mode, v_row.position_side, v_revision);
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS account_position_margins_cache_outbox_trigger ON account_position_margins;
+CREATE TRIGGER account_position_margins_cache_outbox_trigger
+AFTER INSERT OR UPDATE OR DELETE ON account_position_margins
+FOR EACH ROW EXECUTE FUNCTION account_emit_position_cache_from_margin();
 
 CREATE TABLE IF NOT EXISTS risk_sequences (
     sequence_name       TEXT PRIMARY KEY,

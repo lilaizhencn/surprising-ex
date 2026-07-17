@@ -1069,6 +1069,8 @@ class AccountServiceTest {
                 .isEqualTo(new PositionState(8L, 2L, 90L, 0L));
         assertThat(repository.releasedPositionMargin)
                 .containsEntry(new PositionKey(2002L, "BTC-USDT", MarginMode.CROSS), 5L);
+        assertThat(repository.marginOperationOrder.indexOf("release-position:2002"))
+                .isLessThan(repository.marginOperationOrder.indexOf("consume:9005"));
         assertThat(repository.releasedOrderMargin).containsEntry(9005L, 5L);
         assertThat(repository.consumedOrderMargin).containsEntry(9005L, 3L).containsEntry(9006L, 8L);
         assertThat(repository.consumedOrderMarginUnits).containsEntry(9005L, 3L)
@@ -1089,6 +1091,7 @@ class AccountServiceTest {
         private final Map<Long, Boolean> consumeSweepByOrder = new HashMap<>();
         private final Map<Long, Boolean> releaseSweepByOrder = new HashMap<>();
         private final Map<PositionKey, Long> releasedPositionMargin = new HashMap<>();
+        private final List<String> marginOperationOrder = new ArrayList<>();
         private final Map<Long, Long> pnlByUser = new HashMap<>();
         private final Map<Long, Long> lifecyclePnlByUser = new HashMap<>();
         private final Map<Long, Long> optionPremiumByUser = new HashMap<>();
@@ -1377,6 +1380,7 @@ class AccountServiceTest {
             consumedOrderMargin.merge(orderId, openSteps, Long::sum);
             consumedOrderMarginUnits.merge(orderId, actualMarginUnits, Long::sum);
             consumeSweepByOrder.put(orderId, sweepRemainder);
+            marginOperationOrder.add("consume:" + orderId);
         }
 
         @Override
@@ -1424,6 +1428,7 @@ class AccountServiceTest {
             releasedPositionMargin.merge(new PositionKey(userId, symbol, marginMode,
                     PositionSide.defaultIfNull(positionSide)), closeSteps, Long::sum);
             assertThat(closeSteps).isLessThanOrEqualTo(positionAbsSteps);
+            marginOperationOrder.add("release-position:" + userId);
         }
 
         @Override

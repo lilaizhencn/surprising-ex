@@ -87,6 +87,39 @@ export TRIGGER_REDIS_KEY_PREFIX=surprising:trigger:v1
 - Keep Redis command timeout short relative to the price-event cadence. Monitor Redis latency/errors together with
   trigger DB fallback rate, stale candidate cleanup, `TRIGGERING` age, and Kafka consumer lag before widening rollout.
 
+## Position Redis Read Model
+
+Account-provider exposes user position endpoints from Redis only. Configure every account-provider instance for one
+product line and the same Redis deployment:
+
+```bash
+export REDIS_HOST=redis.internal
+export REDIS_PORT=6379
+export REDIS_PASSWORD='replace-with-secret-manager-value'
+export REDIS_DATABASE=0
+export POSITION_REDIS_KEY_PREFIX=surprising:position:v1
+```
+
+- Keep `maxmemory-policy noeviction` and Redis persistence enabled. A missing readiness marker makes user position
+  reads return HTTP 503; do not add a PostgreSQL fallback, because a partial Redis loss must not look like a zero
+  position.
+- The account schema creates one revisioned `POSITION_CACHE_PROJECTED` outbox row for every committed position or
+  position-collateral mutation. Account outbox publishes product-scoped topics such as
+  `surprising.linear-perp.account.position-cache.events.v1`; the cache consumer validates topic, product line, and
+  `productLine:userId` Kafka key before running its Lua compare-and-set.
+- The three user hashes share one Cluster tag: `state`, `margin`, and `revision` under
+  `surprising:position:v1:{PRODUCT_LINE:userId}`. Never manually edit one of the three hashes.
+- Startup uses a Redis token lease and a paged PostgreSQL rebuild. Revision CAS permits Kafka replay and rebuild to
+  overlap safely. The ready marker is refreshed periodically and one page is reconciled each cycle.
+- Do not enable Spring Redis global transaction support and do not attempt XA. PostgreSQL business rows plus the
+  outbox are the atomic write; Redis is a replayable read projection. Account writes additionally use an
+  after-commit accelerator, but outbox/Kafka is the recovery guarantee for every writer, including funding and ADL.
+- Monitor `surprising.account.position.cache.applied`, `.stale`, `.failures`, `.rebuild.rows`, the `positionCache`
+  health contributor, account outbox backlog, cache-topic lag, and Redis command latency/errors.
+
+The complete rationale, data model, recovery flow, and pre-production reset guidance are in
+[position-redis-cache.md](position-redis-cache.md) and [position-redis-cache_CN.md](position-redis-cache_CN.md).
+
 ## Product-Line Provider Instances
 
 The backend keeps one shared codebase and runs product-line instances by configuration. Use product topic routing for separated order, match, account, risk, liquidation, mark price, candlestick, WebSocket, and funding traffic.

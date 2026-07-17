@@ -64,6 +64,8 @@ public class AccountService {
     private final ClosedPositionTriggerOrderPruner closedPositionTriggerOrderPruner;
     private final AccountProperties properties;
     private final AccountOutboxRepository outboxRepository;
+    private final RedisPositionCache positionCache;
+    private final PositionCacheAfterCommitSynchronizer positionCacheAfterCommitSynchronizer;
     private final BoundedLocalCache<ContractSpecKey, ContractSpec> contractSpecCache;
     private final BoundedLocalCache<ContractSpecKey, InstrumentType> instrumentTypeCache;
     private final BoundedLocalCache<ContractSpecKey, SpotInstrumentSpec> spotInstrumentSpecCache;
@@ -82,19 +84,44 @@ public class AccountService {
         this(accountRepository, positionCalculator, reduceOnlyOrderPruner, null, properties, outboxRepository);
     }
 
-    @Autowired
     public AccountService(AccountRepository accountRepository,
                           PositionCalculator positionCalculator,
                           ReduceOnlyOrderPruner reduceOnlyOrderPruner,
                           ClosedPositionTriggerOrderPruner closedPositionTriggerOrderPruner,
                           AccountProperties properties,
                           AccountOutboxRepository outboxRepository) {
+        this(accountRepository, positionCalculator, reduceOnlyOrderPruner, closedPositionTriggerOrderPruner,
+                properties, outboxRepository, null);
+    }
+
+    public AccountService(AccountRepository accountRepository,
+                          PositionCalculator positionCalculator,
+                          ReduceOnlyOrderPruner reduceOnlyOrderPruner,
+                          ClosedPositionTriggerOrderPruner closedPositionTriggerOrderPruner,
+                          AccountProperties properties,
+                          AccountOutboxRepository outboxRepository,
+                          RedisPositionCache positionCache) {
+        this(accountRepository, positionCalculator, reduceOnlyOrderPruner, closedPositionTriggerOrderPruner,
+                properties, outboxRepository, positionCache, null);
+    }
+
+    @Autowired
+    public AccountService(AccountRepository accountRepository,
+                          PositionCalculator positionCalculator,
+                          ReduceOnlyOrderPruner reduceOnlyOrderPruner,
+                          ClosedPositionTriggerOrderPruner closedPositionTriggerOrderPruner,
+                          AccountProperties properties,
+                          AccountOutboxRepository outboxRepository,
+                          RedisPositionCache positionCache,
+                          PositionCacheAfterCommitSynchronizer positionCacheAfterCommitSynchronizer) {
         this.accountRepository = accountRepository;
         this.positionCalculator = positionCalculator;
         this.reduceOnlyOrderPruner = reduceOnlyOrderPruner;
         this.closedPositionTriggerOrderPruner = closedPositionTriggerOrderPruner;
         this.properties = properties;
         this.outboxRepository = outboxRepository;
+        this.positionCache = positionCache;
+        this.positionCacheAfterCommitSynchronizer = positionCacheAfterCommitSynchronizer;
         AccountProperties.Cache cacheProperties = properties.getCache() == null
                 ? new AccountProperties.Cache()
                 : properties.getCache();
@@ -322,6 +349,10 @@ public class AccountService {
         String normalizedSymbol = normalizeSymbol(symbol);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
         PositionSide normalizedPositionSide = normalizePositionSide(positionSide);
+        if (positionCache != null) {
+            return positionCache.position(positionCacheProductLine(), userId, normalizedSymbol,
+                    normalizedMarginMode, normalizedPositionSide);
+        }
         ProductLine productLine = currentProductLineFilter();
         Optional<PositionResponse> position = productLine == null
                 ? accountRepository.position(userId, normalizedSymbol, normalizedMarginMode, normalizedPositionSide)
@@ -335,6 +366,10 @@ public class AccountService {
     public PositionMarginResponse positionMargin(long userId, String symbol, String marginMode) {
         String normalizedSymbol = normalizeSymbol(symbol);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
+        if (positionCache != null) {
+            return positionCache.positionMargin(positionCacheProductLine(), userId, normalizedSymbol,
+                    normalizedMarginMode, PositionSide.NET);
+        }
         ProductLine productLine = currentProductLineFilter();
         Optional<PositionMarginResponse> margin = productLine == null
                 ? accountRepository.positionMargin(userId, normalizedSymbol, normalizedMarginMode, PositionSide.NET)
@@ -353,10 +388,35 @@ public class AccountService {
         PositionSide normalizedPositionSide = positionSide == null || positionSide.isBlank()
                 ? null
                 : normalizePositionSide(positionSide);
+        if (positionCache != null) {
+            List<PositionResponse> rows = positionCache.positions(
+                    positionCacheProductLine(), userId, normalizedPositionSide);
+            return new PositionQueryResponse(rows.size(), rows);
+        }
         ProductLine productLine = currentProductLineFilter();
         List<PositionResponse> rows = productLine == null
                 ? accountRepository.positions(userId, normalizedPositionSide)
                 : accountRepository.positions(productLine, userId, normalizedPositionSide);
+        return new PositionQueryResponse(rows.size(), rows);
+    }
+
+    public PositionResponse adminPosition(long userId, String symbol, String marginMode, String positionSide) {
+        String normalizedSymbol = normalizeSymbol(symbol);
+        MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
+        PositionSide normalizedPositionSide = normalizePositionSide(positionSide);
+        ProductLine productLine = positionCacheProductLine();
+        return accountRepository.position(
+                        productLine, userId, normalizedSymbol, normalizedMarginMode, normalizedPositionSide)
+                .orElse(new PositionResponse(userId, normalizedSymbol, 0L, normalizedMarginMode,
+                        normalizedPositionSide, 0L, 0L, 0L, Instant.EPOCH));
+    }
+
+    public PositionQueryResponse adminPositions(long userId, String positionSide) {
+        PositionSide normalizedPositionSide = positionSide == null || positionSide.isBlank()
+                ? null
+                : normalizePositionSide(positionSide);
+        List<PositionResponse> rows = accountRepository.positions(
+                positionCacheProductLine(), userId, normalizedPositionSide);
         return new PositionQueryResponse(rows.size(), rows);
     }
 
@@ -393,12 +453,21 @@ public class AccountService {
             outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
                     0L, current, Instant.now(), TraceContext.currentOrCreate());
         }
+        schedulePositionCacheSync(productLine == null ? positionCacheProductLine() : productLine,
+                request.userId(), symbol, MarginMode.ISOLATED, request.positionSide());
         return response;
     }
 
     private ProductLine currentProductLineFilter() {
         AccountProperties.Kafka kafka = properties == null ? null : properties.getKafka();
         return kafka != null && kafka.isProductTopicsEnabled() ? kafka.getProductLine() : null;
+    }
+
+    private ProductLine positionCacheProductLine() {
+        AccountProperties.Kafka kafka = properties == null ? null : properties.getKafka();
+        return kafka == null || kafka.getProductLine() == null
+                ? ProductLine.LINEAR_PERPETUAL
+                : kafka.getProductLine();
     }
 
     private AccountType currentProductAccountType() {
@@ -573,6 +642,8 @@ public class AccountService {
                 outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
                         0L, updated, eventTime, TraceContext.currentOrCreate());
             }
+            schedulePositionCacheSync(productLine, position.userId(), symbol, position.marginMode(),
+                    position.positionSide());
             settled++;
         }
         return settled;
@@ -786,6 +857,12 @@ public class AccountService {
                     positionSpec.settleAsset(), orderId, tradeId, symbol, normalizedMarginMode,
                     change.realizedPnlDeltaUnits(), eventTime);
         }
+        // A reversal first releases collateral belonging to the old position. Releasing after
+        // consuming the opening leg would treat the new collateral as old collateral and release it too.
+        if (closeSteps > 0) {
+            accountRepository.releasePositionMargin(productLine, userId, symbol, normalizedMarginMode, closeSteps,
+                    normalizedPositionSide, Math.absExact(current.signedQuantitySteps()), eventTime);
+        }
         if (openSteps > 0) {
             if (!fillSpec.contractType().isOption() || side == OrderSide.SELL) {
                 long actualMarginUnits = MarginTransferMath.openingInitialMarginUnits(fillSpec, priceTicks, openSteps);
@@ -802,8 +879,6 @@ public class AccountService {
                     priceTicks, quantitySteps, eventTime, traceId);
         }
         if (closeSteps > 0) {
-            accountRepository.releasePositionMargin(productLine, userId, symbol, normalizedMarginMode, closeSteps,
-                    normalizedPositionSide, Math.absExact(current.signedQuantitySteps()), eventTime);
             accountRepository.releaseOrderMargin(orderId, userId, symbol, closeSteps,
                     orderCompleted && openSteps == 0, eventTime);
         }
@@ -821,7 +896,18 @@ public class AccountService {
             outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
                     tradeId, updated, eventTime, traceId);
         }
+        schedulePositionCacheSync(productLine, userId, symbol, normalizedMarginMode, normalizedPositionSide);
         return updated;
+    }
+
+    private void schedulePositionCacheSync(ProductLine productLine,
+                                           long userId,
+                                           String symbol,
+                                           MarginMode marginMode,
+                                           PositionSide positionSide) {
+        if (positionCacheAfterCommitSynchronizer != null) {
+            positionCacheAfterCommitSynchronizer.schedule(productLine, userId, symbol, marginMode, positionSide);
+        }
     }
 
     private void pruneClosedPositionTriggers(ProductLine productLine,

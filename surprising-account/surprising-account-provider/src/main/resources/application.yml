@@ -20,6 +20,14 @@ spring:
       maximum-pool-size: 20
       minimum-idle: 4
       connection-timeout: 3000
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:2s}
+      timeout: ${REDIS_COMMAND_TIMEOUT:1s}
 management:
   endpoints:
     web:
@@ -69,6 +77,12 @@ surprising:
       instrument-type-max-entries: 4096
       spot-instrument-spec-max-entries: 4096
       liquidation-fee-context-max-entries: 200000
+    position-cache:
+      key-prefix: ${POSITION_REDIS_KEY_PREFIX:surprising:position:v1}
+      rebuild-batch-size: 1000
+      reconcile-delay-ms: 10000
+      ready-ttl: 30s
+      lock-ttl: 30s
     position-margin:
       max-risk-snapshot-age: 10s
       removal-buffer-ppm: 50000

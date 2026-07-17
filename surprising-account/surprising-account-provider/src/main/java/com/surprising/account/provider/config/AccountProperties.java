@@ -12,6 +12,7 @@ public class AccountProperties {
     private Outbox outbox = new Outbox();
     private Settlement settlement = new Settlement();
     private Cache cache = new Cache();
+    private PositionCache positionCache = new PositionCache();
     private PositionMargin positionMargin = new PositionMargin();
     private ExpiringSettlement expiringSettlement = new ExpiringSettlement();
 
@@ -45,6 +46,14 @@ public class AccountProperties {
 
     public void setCache(Cache cache) {
         this.cache = cache;
+    }
+
+    public PositionCache getPositionCache() {
+        return positionCache;
+    }
+
+    public void setPositionCache(PositionCache positionCache) {
+        this.positionCache = positionCache;
     }
 
     public PositionMargin getPositionMargin() {
@@ -150,6 +159,17 @@ public class AccountProperties {
 
         public void setPositionEventsTopic(String positionEventsTopic) {
             this.positionEventsTopic = positionEventsTopic;
+        }
+
+        /**
+         * Cache projection topics are always product-line scoped, even while legacy business topics are enabled.
+         */
+        public String getPositionCacheEventsTopic() {
+            return productTopics().accountPositionCacheEventsTopic();
+        }
+
+        public String getPositionCacheGroupId() {
+            return productTopics().consumerGroup("account-position-cache");
         }
 
         public String getLiquidationFeeEventsTopic() {
@@ -327,6 +347,67 @@ public class AccountProperties {
 
         public void setLiquidationFeeContextMaxEntries(int liquidationFeeContextMaxEntries) {
             this.liquidationFeeContextMaxEntries = liquidationFeeContextMaxEntries;
+        }
+    }
+
+    public static class PositionCache {
+        private String keyPrefix = "surprising:position:v1";
+        private int rebuildBatchSize = 1_000;
+        private long reconcileDelayMs = 10_000L;
+        private Duration readyTtl = Duration.ofSeconds(30);
+        private Duration lockTtl = Duration.ofSeconds(30);
+
+        public String getKeyPrefix() {
+            return keyPrefix;
+        }
+
+        public void setKeyPrefix(String keyPrefix) {
+            this.keyPrefix = keyPrefix;
+        }
+
+        public int getRebuildBatchSize() {
+            return rebuildBatchSize;
+        }
+
+        public void setRebuildBatchSize(int rebuildBatchSize) {
+            if (rebuildBatchSize <= 0) {
+                throw new IllegalArgumentException("position cache rebuildBatchSize must be positive");
+            }
+            this.rebuildBatchSize = rebuildBatchSize;
+        }
+
+        public long getReconcileDelayMs() {
+            return reconcileDelayMs;
+        }
+
+        public void setReconcileDelayMs(long reconcileDelayMs) {
+            if (reconcileDelayMs <= 0L) {
+                throw new IllegalArgumentException("position cache reconcileDelayMs must be positive");
+            }
+            this.reconcileDelayMs = reconcileDelayMs;
+        }
+
+        public Duration getReadyTtl() {
+            return readyTtl;
+        }
+
+        public void setReadyTtl(Duration readyTtl) {
+            this.readyTtl = requirePositive(readyTtl, "readyTtl");
+        }
+
+        public Duration getLockTtl() {
+            return lockTtl;
+        }
+
+        public void setLockTtl(Duration lockTtl) {
+            this.lockTtl = requirePositive(lockTtl, "lockTtl");
+        }
+
+        private Duration requirePositive(Duration value, String name) {
+            if (value == null || value.isZero() || value.isNegative()) {
+                throw new IllegalArgumentException("position cache " + name + " must be positive");
+            }
+            return value;
         }
     }
 

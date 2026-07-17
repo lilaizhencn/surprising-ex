@@ -59,13 +59,12 @@ public class AccountOutboxRepository {
         PositionUpdatedEvent event = new PositionUpdatedEvent(eventId, tradeId, position.userId(), position.symbol(),
                 position.instrumentVersion(), position.marginMode(), position.positionSide(), position.signedQuantitySteps(),
                 position.entryPriceTicks(), position.realizedPnlUnits(), now, traceId);
-        long outboxId = sequenceRepository.nextSequence("account-outbox");
         int rows = jdbcTemplate.update("""
                 INSERT INTO account_outbox_events (
-                    id, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
+                    product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
                     next_attempt_at, created_at, updated_at
                 ) VALUES (?, 'POSITION', ?, ?, ?, 'POSITION_UPDATED', ?::jsonb, ?, ?, ?)
-                """, outboxId, eventId, topic, position.symbol(), objectMapper.writeValueAsString(event),
+                """, currentProductLine().name(), eventId, topic, position.symbol(), objectMapper.writeValueAsString(event),
                 Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
         requireSingleRow(rows, "account position outbox enqueue");
         return event;
@@ -90,13 +89,12 @@ public class AccountOutboxRepository {
         LiquidationFeeSettledEvent event = new LiquidationFeeSettledEvent(eventId, tradeId, orderId,
                 liquidationOrderId, candidateId, userId, symbol, marginMode, accountType, asset, amountUnits, feeRatePpm,
                 now, traceId);
-        long outboxId = sequenceRepository.nextSequence("account-outbox");
         int rows = jdbcTemplate.update("""
                 INSERT INTO account_outbox_events (
-                    id, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
+                    product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
                     next_attempt_at, created_at, updated_at
                 ) VALUES (?, 'LIQUIDATION_FEE', ?, ?, ?, 'LIQUIDATION_FEE_SETTLED', ?::jsonb, ?, ?, ?)
-                """, outboxId, eventId, topic, asset, objectMapper.writeValueAsString(event),
+                """, currentProductLine().name(), eventId, topic, asset, objectMapper.writeValueAsString(event),
                 Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
         requireSingleRow(rows, "account liquidation fee outbox enqueue");
         return event;
@@ -166,6 +164,7 @@ public class AccountOutboxRepository {
                                         FROM account_outbox_events e
                                        WHERE e.topic = k.topic
                                          AND e.event_key = k.event_key
+                                         AND e.product_line = ?
                                          AND e.published_at IS NULL
                                        ORDER BY e.id
                                        LIMIT ?
@@ -188,6 +187,7 @@ public class AccountOutboxRepository {
         args.add(Timestamp.from(now));
         args.add(lockedKeyLimit);
         args.add(Timestamp.from(now));
+        args.add(currentProductLine().name());
         args.add(perKeyLimit);
         args.add(Timestamp.from(now));
         args.add(effectiveLimit);
@@ -272,12 +272,15 @@ public class AccountOutboxRepository {
 
     private void appendTopicScope(StringBuilder sql, List<Object> args) {
         AccountProperties.Kafka kafka = properties.getKafka();
+        sql.append("   AND product_line = ?\n");
+        args.add(currentProductLine().name());
         if (!kafka.isProductTopicsEnabled()) {
             return;
         }
-        sql.append("   AND topic IN (?, ?)\n");
+        sql.append("   AND topic IN (?, ?, ?)\n");
         args.add(kafka.getPositionEventsTopic());
         args.add(kafka.getLiquidationFeeEventsTopic());
+        args.add(kafka.getPositionCacheEventsTopic());
     }
 
     private void requireCurrentProductTopic(String topic) {
@@ -291,6 +294,10 @@ public class AccountOutboxRepository {
             throw new IllegalStateException("account outbox topic must match current product line: expected one of ["
                     + positionEventsTopic + ", " + liquidationFeeEventsTopic + "] actual=" + topic);
         }
+    }
+
+    private com.surprising.product.api.ProductLine currentProductLine() {
+        return properties.getKafka().getProductLine();
     }
 
     private void requireSingleRow(int rows, String operation) {

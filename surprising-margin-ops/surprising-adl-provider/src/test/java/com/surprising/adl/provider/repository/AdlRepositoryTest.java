@@ -207,7 +207,7 @@ class AdlRepositoryTest {
 
         assertThat(remaining).isZero();
         verify(jdbcTemplate).update(contains("UPDATE account_positions"),
-                eq(5L), eq(5L), eq(100L), eq(500L), any(Timestamp.class), eq(1001L),
+                eq(5L), eq(5L), eq(100L), eq(5L), eq(5L), eq(10L), eq(500L), any(Timestamp.class), eq(1001L),
                 eq("BTC-USDT-260925"), eq("CROSS"), eq("LONG"), eq("LINEAR_DELIVERY"));
         verify(jdbcTemplate).update(contains("INSERT INTO trading_symbol_open_interest"),
                 eq("LINEAR_DELIVERY"), eq("BTC-USDT-260925"), any(Timestamp.class));
@@ -329,7 +329,7 @@ class AdlRepositoryTest {
 
         assertThat(remaining).isZero();
         verify(jdbcTemplate).update(contains("UPDATE account_positions"),
-                eq(5L), eq(5L), eq(100L), eq(500L), any(Timestamp.class),
+                eq(5L), eq(5L), eq(100L), eq(5L), eq(5L), eq(10L), eq(500L), any(Timestamp.class),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("LONG"));
         verify(jdbcTemplate).update(contains("INSERT INTO trading_symbol_open_interest"),
                 eq("LINEAR_PERPETUAL"), eq("BTC-USDT"), any(Timestamp.class));

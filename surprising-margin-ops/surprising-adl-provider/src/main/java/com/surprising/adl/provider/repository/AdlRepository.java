@@ -479,13 +479,19 @@ public class AdlRepository {
                    SET signed_quantity_steps = ?,
                        instrument_version = CASE WHEN ? = 0 THEN NULL ELSE instrument_version END,
                        entry_price_ticks = ?,
+                       entry_value_ticks = CASE
+                           WHEN ? = 0 THEN 0
+                           ELSE entry_value_ticks
+                               - ((entry_value_ticks::numeric * ?) / ?)::BIGINT
+                       END,
                        realized_pnl_units = realized_pnl_units + ?,
                        updated_at = ?
                  WHERE user_id = ? AND symbol = ? AND margin_mode = ? AND position_side = ?
                    AND %s
                 """.formatted(productLinePredicate()), productLineArgs(nextSignedQuantity, nextSignedQuantity,
-                        nextEntryPrice, realizedPnlUnits, Timestamp.from(now), candidate.userId(), candidate.symbol(),
-                        candidate.marginMode().name(), candidate.positionSide().name()));
+                        nextEntryPrice, nextSignedQuantity, closeSteps, candidate.absQuantitySteps(), realizedPnlUnits,
+                        Timestamp.from(now), candidate.userId(), candidate.symbol(), candidate.marginMode().name(),
+                        candidate.positionSide().name()));
         requireSingleRow(rows, "ADL target position update");
         updateSymbolOpenInterest(candidate.symbol(), candidate.signedQuantitySteps(), nextSignedQuantity, now);
     }
