@@ -305,6 +305,9 @@ Partitions should continue to scale by symbol. All commands for the same symbol 
 
 `surprising-matching-provider` loads current `TRADING` symbols from instrument and creates stable exchange-core symbol/currency ids:
 
+- Symbol and asset mappings are loaded during the scheduled symbol refresh. The command hot path reads an atomically replaced in-memory active-symbol snapshot and does not query instrument, matching-symbol, or matching-asset tables per order.
+- A symbol removed from the current tradable set is rejected after the next successful refresh. Its exchange-core registration remains process-local for existing book safety but is no longer reachable by new commands.
+
 - `trading_matching_assets`
 - `trading_matching_symbols`
 

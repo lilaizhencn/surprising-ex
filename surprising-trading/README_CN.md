@@ -302,6 +302,9 @@ topic partition 继续按 symbol 扩展。同一个 symbol 的 command 必须固
 
 `surprising-matching-provider` 启动时从 instrument 当前版本加载 `TRADING` symbol，并为 exchange-core 建立稳定的 `symbolId`、asset/currency id：
 
+- symbol 和 asset 映射只在定时 symbol 刷新阶段加载。command 热路径读取原子替换的内存活跃 symbol 快照，不再逐单查询 instrument、matching symbol 或 matching asset 表。
+- symbol 从当前可交易集合移除后，会在下一次成功刷新后拒绝新 command。为保证已有订单簿安全，其 exchange-core 注册仍保留在当前进程内，但新 command 已无法访问。
+
 - `trading_matching_assets`
 - `trading_matching_symbols`
 

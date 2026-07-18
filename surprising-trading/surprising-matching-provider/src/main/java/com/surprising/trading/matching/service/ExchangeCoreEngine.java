@@ -28,9 +28,12 @@ import exchange.core2.core.common.config.PerformanceConfiguration;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,8 +48,9 @@ public class ExchangeCoreEngine {
     private final MatchingProperties properties;
     private final MatchingSymbolRepository symbolRepository;
     private final MatchingOrderBookRecoveryRepository recoveryRepository;
-    private final Set<String> loadedSymbols = ConcurrentHashMap.newKeySet();
+    private final ConcurrentMap<String, MatchingSymbol> loadedSymbols = new ConcurrentHashMap<>();
     private final Set<Long> createdUsers = ConcurrentHashMap.newKeySet();
+    private volatile Set<String> activeSymbols = Set.of();
 
     private ExchangeCore exchangeCore;
     private ExchangeApi api;
@@ -93,18 +97,29 @@ public class ExchangeCoreEngine {
 
     @Scheduled(fixedDelayString = "${surprising.trading.matching.engine.initial-symbol-refresh-delay-ms:30000}")
     public void refreshSymbols() {
-        for (InstrumentSymbol instrument : symbolRepository.currentTradingSymbols()) {
-            ensureSymbol(instrument.symbol());
+        List<InstrumentSymbol> instruments = symbolRepository.currentTradingSymbols();
+        Set<String> refreshedActiveSymbols = new HashSet<>(instruments.size());
+        for (InstrumentSymbol instrument : instruments) {
+            loadSymbol(instrument);
+            refreshedActiveSymbols.add(instrument.symbol());
         }
+        activeSymbols = Set.copyOf(refreshedActiveSymbols);
     }
 
     public Optional<MatchingSymbol> ensureSymbol(String symbol) {
-        Optional<InstrumentSymbol> instrument = symbolRepository.currentTradingSymbol(symbol);
-        if (instrument.isEmpty()) {
+        if (symbol == null || !activeSymbols.contains(symbol)) {
             return Optional.empty();
         }
-        MatchingSymbol matchingSymbol = symbolRepository.ensureMatchingSymbol(instrument.get());
-        if (loadedSymbols.add(matchingSymbol.symbol())) {
+        return Optional.ofNullable(loadedSymbols.get(symbol));
+    }
+
+    private MatchingSymbol loadSymbol(InstrumentSymbol instrument) {
+        return loadedSymbols.computeIfAbsent(instrument.symbol(), ignored -> {
+            MatchingSymbol matchingSymbol = symbolRepository.ensureMatchingSymbol(instrument);
+            if (!instrument.symbol().equals(matchingSymbol.symbol())) {
+                throw new IllegalStateException("matching symbol mismatch for " + instrument.symbol()
+                        + ": " + matchingSymbol.symbol());
+            }
             CoreSymbolSpecification spec = CoreSymbolSpecification.builder()
                     .symbolId(matchingSymbol.symbolId())
                     .type(SymbolType.CURRENCY_EXCHANGE_PAIR)
@@ -119,12 +134,12 @@ public class ExchangeCoreEngine {
                     .build();
             CommandResultCode result = api.submitBinaryDataAsync(new BatchAddSymbolsCommand(spec)).join();
             if (result != CommandResultCode.SUCCESS && result != CommandResultCode.SYMBOL_MGMT_SYMBOL_ALREADY_EXISTS) {
-                loadedSymbols.remove(matchingSymbol.symbol());
-                throw new IllegalStateException("exchange-core failed to add symbol " + symbol + ": " + result);
+                throw new IllegalStateException("exchange-core failed to add symbol "
+                        + matchingSymbol.symbol() + ": " + result);
             }
             log.info("Loaded exchange-core symbol={} symbolId={}", matchingSymbol.symbol(), matchingSymbol.symbolId());
-        }
-        return Optional.of(matchingSymbol);
+            return matchingSymbol;
+        });
     }
 
     public OrderCommand submit(OrderCommandEvent command, MatchingSymbol symbol, long effectivePrice) {

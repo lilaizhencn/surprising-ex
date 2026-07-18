@@ -70,6 +70,48 @@ class ExchangeCoreEngineRecoveryTest {
         }
     }
 
+    @Test
+    void resolvesLoadedSymbolFromMemoryWithoutPointRepositoryQueries() {
+        InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
+        MatchingSymbol matchingSymbol = new MatchingSymbol("BTC-USDT", 103, 11, 12);
+        FakeMatchingSymbolRepository symbolRepository = new FakeMatchingSymbolRepository(instrument, matchingSymbol);
+        ExchangeCoreEngine engine = engine(symbolRepository, matchingSymbol.symbolId());
+        try {
+            engine.start();
+
+            assertThat(engine.ensureSymbol("BTC-USDT")).contains(matchingSymbol);
+            assertThat(engine.ensureSymbol("BTC-USDT")).contains(matchingSymbol);
+            assertThat(engine.ensureSymbol("UNKNOWN")).isEmpty();
+            assertThat(symbolRepository.currentTradingSymbolsCalls).hasValue(1);
+            assertThat(symbolRepository.currentTradingSymbolCalls).hasValue(0);
+            assertThat(symbolRepository.ensureMatchingSymbolCalls).hasValue(1);
+        } finally {
+            engine.stop();
+        }
+    }
+
+    @Test
+    void removesInactiveSymbolFromCommandPathAfterRefresh() {
+        InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
+        MatchingSymbol matchingSymbol = new MatchingSymbol("BTC-USDT", 104, 11, 12);
+        FakeMatchingSymbolRepository symbolRepository = new FakeMatchingSymbolRepository(instrument, matchingSymbol);
+        ExchangeCoreEngine engine = engine(symbolRepository, matchingSymbol.symbolId());
+        try {
+            engine.start();
+            assertThat(engine.ensureSymbol("BTC-USDT")).contains(matchingSymbol);
+
+            symbolRepository.active = false;
+            engine.refreshSymbols();
+
+            assertThat(engine.ensureSymbol("BTC-USDT")).isEmpty();
+            assertThat(symbolRepository.currentTradingSymbolsCalls).hasValue(2);
+            assertThat(symbolRepository.currentTradingSymbolCalls).hasValue(0);
+            assertThat(symbolRepository.ensureMatchingSymbolCalls).hasValue(1);
+        } finally {
+            engine.stop();
+        }
+    }
+
     private ExchangeCoreEngine engineWithRecoveredOrders(MatchingSymbol matchingSymbol,
                                                          List<RecoveredOrderBookOrder> recoveredOrders) {
         InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
@@ -80,9 +122,20 @@ class ExchangeCoreEngineRecoveryTest {
                 new FakeRecoveryRepository(recoveredOrders));
     }
 
+    private ExchangeCoreEngine engine(FakeMatchingSymbolRepository symbolRepository, int symbolId) {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getEngine().setExchangeId("symbol-cache-test-" + symbolId);
+        properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
+        return new ExchangeCoreEngine(properties, symbolRepository, new FakeRecoveryRepository(List.of()));
+    }
+
     private static class FakeMatchingSymbolRepository extends MatchingSymbolRepository {
         private final InstrumentSymbol instrument;
         private final MatchingSymbol matchingSymbol;
+        private final AtomicInteger currentTradingSymbolsCalls = new AtomicInteger();
+        private final AtomicInteger currentTradingSymbolCalls = new AtomicInteger();
+        private final AtomicInteger ensureMatchingSymbolCalls = new AtomicInteger();
+        private volatile boolean active = true;
 
         FakeMatchingSymbolRepository(InstrumentSymbol instrument, MatchingSymbol matchingSymbol) {
             super(null, null);
@@ -92,16 +145,19 @@ class ExchangeCoreEngineRecoveryTest {
 
         @Override
         public List<InstrumentSymbol> currentTradingSymbols() {
-            return List.of(instrument);
+            currentTradingSymbolsCalls.incrementAndGet();
+            return active ? List.of(instrument) : List.of();
         }
 
         @Override
         public Optional<InstrumentSymbol> currentTradingSymbol(String symbol) {
+            currentTradingSymbolCalls.incrementAndGet();
             return instrument.symbol().equals(symbol) ? Optional.of(instrument) : Optional.empty();
         }
 
         @Override
         public MatchingSymbol ensureMatchingSymbol(InstrumentSymbol instrument) {
+            ensureMatchingSymbolCalls.incrementAndGet();
             return matchingSymbol;
         }
     }
