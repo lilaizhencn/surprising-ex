@@ -63,7 +63,10 @@ in that user's local database transaction and updates:
 - If settlement reduces the position to zero, account-provider also moves every exact-scope `PENDING` TP/SL/trailing trigger to `CANCELED` with `POSITION_CLOSED` in the same transaction. The position outbox event is emitted only after that update is part of the transaction, allowing trigger-provider to clean its Redis secondary index after commit.
 
 `account_commands.command_id` plus its immutable envelope hash is the execution idempotency key.
-`account_trade_settlements(product_line, symbol, trade_id)` tracks taker and maker completion; stale
+`account_trade_settlements(product_line, symbol, trade_id)` tracks taker and maker completion.
+Each side records completion with one participant-validated atomic UPSERT at the end of its funds
+transaction. This avoids holding the shared `trade_id` unique key for the full transaction while
+preserving fail-fast rollback on identity conflicts. Stale
 one-sided settlement makes the `accountTradeSettlement` health indicator `DOWN`.
 Command dependencies are persisted as `depends_on_command_id`, so correctness never depends on
 producer order or result-topic delivery order. See

@@ -659,30 +659,30 @@ public class AccountService {
         if (expectedUserId != sideCommand.userId()) {
             throw new IllegalArgumentException("trade side user does not match participant role");
         }
-        Instant now = trade.eventTime() == null ? Instant.now() : trade.eventTime();
-        accountRepository.registerTradeSettlement(actualProductLine, trade, now);
+        Instant effectiveAt = trade.eventTime() == null ? Instant.now() : trade.eventTime();
         if (takerInstrumentType == InstrumentType.SPOT) {
             if (role == TradeParticipantRole.TAKER) {
                 applySpotTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
                         trade.takerInstrumentVersion(), trade.takerSide(), trade.priceTicks(), trade.quantitySteps(),
-                        trade.takerOrderCompleted(), trade.takerFeeRatePpm(), "TAKER_FEE", now);
+                        trade.takerOrderCompleted(), trade.takerFeeRatePpm(), "TAKER_FEE", effectiveAt);
             } else {
                 applySpotTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
                         trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.priceTicks(),
-                        trade.quantitySteps(), trade.makerOrderCompleted(), trade.makerFeeRatePpm(), "MAKER_FEE", now);
+                        trade.quantitySteps(), trade.makerOrderCompleted(), trade.makerFeeRatePpm(), "MAKER_FEE",
+                        effectiveAt);
             }
         } else if (role == TradeParticipantRole.TAKER) {
             applyTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
                     trade.takerInstrumentVersion(), trade.takerSide(), trade.takerMarginMode(),
                     trade.takerPositionSide(), trade.priceTicks(), trade.quantitySteps(),
-                    trade.takerOrderCompleted(), trade.takerFeeRatePpm(), "TAKER_FEE", now, trade.traceId());
+                    trade.takerOrderCompleted(), trade.takerFeeRatePpm(), "TAKER_FEE", effectiveAt, trade.traceId());
         } else {
             applyTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
                     trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.makerMarginMode(),
                     trade.makerPositionSide(), trade.priceTicks(), trade.quantitySteps(),
-                    trade.makerOrderCompleted(), trade.makerFeeRatePpm(), "MAKER_FEE", now, trade.traceId());
+                    trade.makerOrderCompleted(), trade.makerFeeRatePpm(), "MAKER_FEE", effectiveAt, trade.traceId());
         }
-        accountRepository.markTradeSideApplied(actualProductLine, trade, role, commandId, now);
+        accountRepository.completeTradeSide(actualProductLine, trade, role, commandId, Instant.now());
     }
 
     private long optionIntrinsicPriceTicks(OptionExerciseEvent event, ContractSpec spec, long underlyingPriceUnits) {

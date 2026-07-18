@@ -2000,53 +2000,33 @@ public class AccountRepository {
                 rs.getLong("liquidation_fee_rate_ppm")), orderId, userId, symbol).stream().findFirst();
     }
 
-    public void registerTradeSettlement(ProductLine productLine, MatchTradeEvent trade, Instant now) {
-        int inserted = jdbcTemplate.update("""
-                INSERT INTO account_trade_settlements (
-                    product_line, symbol, trade_id, taker_user_id, maker_user_id,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (product_line, symbol, trade_id) DO NOTHING
-                """, productLine.name(), trade.symbol(), trade.tradeId(), trade.takerUserId(), trade.makerUserId(),
-                Timestamp.from(now), Timestamp.from(now));
-        if (inserted == 1) {
-            return;
-        }
-        boolean matches = jdbcTemplate.query("""
-                SELECT taker_user_id, maker_user_id
-                  FROM account_trade_settlements
-                 WHERE product_line = ? AND symbol = ? AND trade_id = ?
-                """, (rs, rowNum) -> rs.getLong("taker_user_id") == trade.takerUserId()
-                && rs.getLong("maker_user_id") == trade.makerUserId(),
-                productLine.name(), trade.symbol(), trade.tradeId()).stream().findFirst().orElse(false);
-        if (!matches) {
-            throw new IllegalStateException("conflicting duplicate trade settlement "
-                    + productLine + ":" + trade.symbol() + ":" + trade.tradeId());
-        }
-    }
-
-    public void markTradeSideApplied(ProductLine productLine,
-                                     MatchTradeEvent trade,
-                                     TradeParticipantRole role,
-                                     String commandId,
-                                     Instant now) {
+    public void completeTradeSide(ProductLine productLine,
+                                  MatchTradeEvent trade,
+                                  TradeParticipantRole role,
+                                  String commandId,
+                                  Instant now) {
         String ownStatus = role == TradeParticipantRole.TAKER ? "taker_status" : "maker_status";
         String ownCommand = role == TradeParticipantRole.TAKER ? "taker_command_id" : "maker_command_id";
         String otherStatus = role == TradeParticipantRole.TAKER ? "maker_status" : "taker_status";
         int rows = jdbcTemplate.update("""
-                UPDATE account_trade_settlements
+                INSERT INTO account_trade_settlements AS settlement (
+                    product_line, symbol, trade_id, taker_user_id, maker_user_id,
+                    %s, %s, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 'APPLIED', ?, ?, ?)
+                ON CONFLICT (product_line, symbol, trade_id) DO UPDATE
                    SET %s = 'APPLIED',
-                       %s = ?,
-                       completed_at = CASE WHEN %s = 'APPLIED'
-                                           THEN CAST(? AS TIMESTAMPTZ) ELSE NULL END,
-                       updated_at = ?
-                 WHERE product_line = ? AND symbol = ? AND trade_id = ?
-                   AND %s = 'PENDING'
-                """.formatted(ownStatus, ownCommand, otherStatus, ownStatus),
-                commandId, Timestamp.from(now), Timestamp.from(now), productLine.name(), trade.symbol(),
-                trade.tradeId());
+                       %s = EXCLUDED.%s,
+                       completed_at = CASE WHEN settlement.%s = 'APPLIED'
+                                           THEN EXCLUDED.updated_at ELSE NULL END,
+                       updated_at = EXCLUDED.updated_at
+                 WHERE settlement.taker_user_id = EXCLUDED.taker_user_id
+                   AND settlement.maker_user_id = EXCLUDED.maker_user_id
+                   AND settlement.%s = 'PENDING'
+                """.formatted(ownStatus, ownCommand, ownStatus, ownCommand, ownCommand, otherStatus, ownStatus),
+                productLine.name(), trade.symbol(), trade.tradeId(), trade.takerUserId(), trade.makerUserId(),
+                commandId, Timestamp.from(now), Timestamp.from(now));
         if (rows != 1) {
-            throw new IllegalStateException("failed to mark trade side applied "
+            throw new IllegalStateException("failed to complete trade side "
                     + productLine + ":" + trade.symbol() + ":" + trade.tradeId() + ":" + role);
         }
     }

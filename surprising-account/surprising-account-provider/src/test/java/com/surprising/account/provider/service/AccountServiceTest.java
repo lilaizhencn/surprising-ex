@@ -1235,16 +1235,11 @@ class AccountServiceTest {
         }
 
         @Override
-        public void registerTradeSettlement(ProductLine productLine, MatchTradeEvent trade, Instant now) {
-            // Command idempotency and bilateral persistence are covered by repository integration tests.
-        }
-
-        @Override
-        public void markTradeSideApplied(ProductLine productLine,
-                                         MatchTradeEvent trade,
-                                         TradeParticipantRole role,
-                                         String commandId,
-                                         Instant now) {
+        public void completeTradeSide(ProductLine productLine,
+                                      MatchTradeEvent trade,
+                                      TradeParticipantRole role,
+                                      String commandId,
+                                      Instant now) {
             // Command idempotency and bilateral persistence are covered by repository integration tests.
         }
 

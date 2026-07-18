@@ -109,6 +109,11 @@ trading_orders.PENDING_RESERVE
 `trade-settlement.stale-after`（默认 1 分钟）仍未完成，Actuator
 `accountTradeSettlement` health 变为 `DOWN`。不能人工把另一侧标成成功，必须修复根因并重放原命令。
 
+单侧事务不会在资金处理前预先插入共享结算行。余额、保证金、流水和仓位全部成功后，事务末尾
+通过一次 `INSERT ... ON CONFLICT DO UPDATE` 原子写入本侧 `APPLIED`；冲突更新同时校验
+taker/maker 用户和本侧仍为 `PENDING`。校验不通过时 UPSERT 影响 0 行并抛错，单侧事务全部回滚。
+这样两侧可以并行处理各自账户，只在事务末尾短暂竞争同一成交行。
+
 ### 资金费
 
 funding-provider 只计算并为每个用户写 `FUNDING_SETTLE`。结算保持

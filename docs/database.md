@@ -698,6 +698,9 @@ so later position-margin releases cannot over-credit available balance.
 The account provider executes every maker/taker side through `account_commands`. The immutable
 command id and envelope SHA-256 provide execution idempotency, while
 `account_trade_settlements(product_line, symbol, trade_id)` records bilateral completion.
+Each participant writes its `APPLIED` state with a participant-validated atomic UPSERT at the end of
+the account transaction; identity conflicts or an already-applied side affect zero rows and roll back
+the whole participant transaction.
 All balance and margin transitions run inside one PostgreSQL transaction and lock the affected
 position/margin rows with `FOR UPDATE`. Position, balance, deficit, ledger, reservation, and
 position-margin writes are fail-fast when an expected row is not written.
