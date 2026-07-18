@@ -10,7 +10,8 @@ public record MatchedOrderSnapshot(
         long makerFeeRatePpm,
         long takerFeeRatePpm,
         long quantitySteps,
-        long remainingQuantitySteps) {
+        long remainingQuantitySteps,
+        boolean reduceOnly) {
 
     public MatchedOrderSnapshot {
         marginMode = MarginMode.defaultIfNull(marginMode);

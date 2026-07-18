@@ -16,10 +16,12 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.model.OrderRecord;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.RowMapper;
 
 class OrderRepositoryTest {
@@ -89,6 +91,22 @@ class OrderRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
         assertThat(sql.getValue()).contains("WHERE product_line = ? AND user_id = ? AND client_order_id = ?");
         assertThat(args.getValue()).containsExactly("OPTION", 1001L, "cli-1");
+    }
+
+    @Test
+    void findByOrderIdsDeduplicatesAndLoadsOneDatabaseBatch() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OrderRepository repository = new OrderRepository(jdbcTemplate);
+
+        assertThat(repository.findByOrderIds(List.of(9001L, 9002L, 9001L))).isEmpty();
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowCallbackHandler.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("order_id IN (?, ?)")
+                .doesNotContain("ORDER BY");
+        assertThat(args.getValue()).containsExactly(9001L, 9002L);
     }
 
     @Test

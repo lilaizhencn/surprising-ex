@@ -7,7 +7,9 @@ import java.util.Map;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
+import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 
 class TradingOrderKafkaConfigurationTest {
 
@@ -27,6 +29,19 @@ class TradingOrderKafkaConfigurationTest {
         assertThat(config).containsEntry(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         assertThat(config).containsEntry(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
         assertThat(config).containsEntry(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);
+    }
+
+    @Test
+    void openOrderProjectionConsumesAndAcknowledgesKafkaInBatches() {
+        TradingOrderProperties properties = new TradingOrderProperties();
+        TradingOrderKafkaConfiguration configuration = new TradingOrderKafkaConfiguration();
+        var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
+                configuration.orderOpenViewConsumerFactory(properties);
+        var listenerFactory = configuration.orderOpenViewKafkaListenerContainerFactory(consumerFactory);
+
+        assertThat(listenerFactory.isBatchListener()).isTrue();
+        assertThat(listenerFactory.getContainerProperties().getAckMode())
+                .isEqualTo(ContainerProperties.AckMode.BATCH);
     }
 
     @Test

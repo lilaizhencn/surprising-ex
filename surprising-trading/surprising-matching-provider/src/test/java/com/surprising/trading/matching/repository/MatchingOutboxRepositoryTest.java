@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.matching.config.MatchingProperties;
+import com.surprising.trading.matching.repository.MatchingOutboxRepository.MatchingOutboxWrite;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -28,25 +29,49 @@ class MatchingOutboxRepositoryTest {
     @Mock
     private JdbcTemplate jdbcTemplate;
 
-    @Mock
-    private MatchingSequenceRepository sequenceRepository;
-
     @Test
     void enqueueAllowsCurrentProductTopicsWhenProductTopicsAreEnabled() {
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
-        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository,
-                properties);
-        when(sequenceRepository.nextSequence("outbox")).thenReturn(901L);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_outbox_events"), any(Object[].class)))
-                .thenReturn(1);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, properties);
+        when(jdbcTemplate.query(contains("trading_outbox_seq"), any(RowMapper.class), eq(1)))
+                .thenReturn(List.of(901L));
+        when(jdbcTemplate.batchUpdate(
+                contains("INSERT INTO trading_outbox_events"),
+                any(org.springframework.jdbc.core.BatchPreparedStatementSetter.class)))
+                .thenReturn(new int[]{1});
 
         repository.enqueue("MATCH_RESULT", 11L, "surprising.inverse-delivery.match.results.v1",
                 "BTC-USD-260925", "PLACE", "{}", Instant.parse("2026-07-01T00:00:00Z"));
 
-        verify(sequenceRepository).nextSequence("outbox");
-        verify(jdbcTemplate).update(contains("INSERT INTO trading_outbox_events"), any(Object[].class));
+        verify(jdbcTemplate).batchUpdate(
+                contains("INSERT INTO trading_outbox_events"),
+                any(org.springframework.jdbc.core.BatchPreparedStatementSetter.class));
+    }
+
+    @Test
+    void enqueueBatchAllocatesOrderedIdsAndUsesOneJdbcBatch() {
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        when(jdbcTemplate.query(contains("trading_outbox_seq"), any(RowMapper.class), eq(2)))
+                .thenReturn(List.of(901L, 902L));
+        when(jdbcTemplate.batchUpdate(
+                contains("INSERT INTO trading_outbox_events"),
+                any(org.springframework.jdbc.core.BatchPreparedStatementSetter.class)))
+                .thenReturn(new int[]{1, 1});
+
+        repository.enqueueBatch(List.of(
+                new MatchingOutboxWrite("ACCOUNT_COMMAND", 11L, "topic", "1001", "TRADE", "{}", now),
+                new MatchingOutboxWrite("MATCH_RESULT", 12L, "topic", "BTC-USDT", "PLACE", "{}", now)));
+
+        ArgumentCaptor<String> sequenceSql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sequenceSql.capture(), any(RowMapper.class), eq(2));
+        assertThat(sequenceSql.getValue()).contains("ORDER BY n");
+        ArgumentCaptor<org.springframework.jdbc.core.BatchPreparedStatementSetter> setter =
+                ArgumentCaptor.forClass(org.springframework.jdbc.core.BatchPreparedStatementSetter.class);
+        verify(jdbcTemplate).batchUpdate(contains("INSERT INTO trading_outbox_events"), setter.capture());
+        assertThat(setter.getValue().getBatchSize()).isEqualTo(2);
     }
 
     @Test
@@ -54,8 +79,7 @@ class MatchingOutboxRepositoryTest {
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
         properties.getKafka().setProductTopicsEnabled(true);
-        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository,
-                properties);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, properties);
 
         assertThatThrownBy(() -> repository.enqueue("MATCH_RESULT", 11L,
                 "surprising.linear-delivery.match.results.v1", "BTC-USDT-260925-70000-C", "PLACE", "{}",
@@ -64,16 +88,19 @@ class MatchingOutboxRepositoryTest {
                 .hasMessageContaining("matching outbox topic must match current product line")
                 .hasMessageContaining("surprising.option.match.results.v1");
 
-        verify(sequenceRepository, never()).nextSequence("outbox");
-        verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
+        verify(jdbcTemplate, never()).batchUpdate(
+                any(String.class), any(org.springframework.jdbc.core.BatchPreparedStatementSetter.class));
     }
 
     @Test
     void enqueueFailsWhenOutboxInsertIsSkipped() {
-        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
-        when(sequenceRepository.nextSequence("outbox")).thenReturn(901L);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_outbox_events"), any(Object[].class)))
-                .thenReturn(0);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate);
+        when(jdbcTemplate.query(contains("trading_outbox_seq"), any(RowMapper.class), eq(1)))
+                .thenReturn(List.of(901L));
+        when(jdbcTemplate.batchUpdate(
+                contains("INSERT INTO trading_outbox_events"),
+                any(org.springframework.jdbc.core.BatchPreparedStatementSetter.class)))
+                .thenReturn(new int[]{0});
 
         assertThatThrownBy(() -> repository.enqueue("MATCH_RESULT", 11L, "topic", "BTC-USDT",
                 "PLACE", "{}", Instant.parse("2026-07-01T00:00:00Z")))
@@ -83,7 +110,7 @@ class MatchingOutboxRepositoryTest {
 
     @Test
     void enqueueRejectsOrderBookDepthBecauseItUsesTheLatestOnlyPublisher() {
-        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate);
 
         assertThatThrownBy(() -> repository.enqueue("ORDER_BOOK_DEPTH", 11L,
                 "surprising.perp.orderbook.depth.v1", "BTC-USDT", "SNAPSHOT", "{}",
@@ -91,13 +118,13 @@ class MatchingOutboxRepositoryTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("dedicated in-memory publisher");
 
-        verify(sequenceRepository, never()).nextSequence("outbox");
-        verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
+        verify(jdbcTemplate, never()).batchUpdate(
+                any(String.class), any(org.springframework.jdbc.core.BatchPreparedStatementSetter.class));
     }
 
     @Test
     void enqueueRejectsPublicTradeBecauseFinancialOutboxMustStayIsolated() {
-        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate);
 
         assertThatThrownBy(() -> repository.enqueue("MATCH_TRADE", 11L,
                 "surprising.perp.match.trades.v1", "BTC-USDT", "TRADE", "{}",
@@ -105,13 +132,13 @@ class MatchingOutboxRepositoryTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("dedicated in-memory publisher");
 
-        verify(sequenceRepository, never()).nextSequence("outbox");
-        verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
+        verify(jdbcTemplate, never()).batchUpdate(
+                any(String.class), any(org.springframework.jdbc.core.BatchPreparedStatementSetter.class));
     }
 
     @Test
     void markPublishedFailsWhenNoRowIsUpdated() {
-        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate);
         when(jdbcTemplate.update(contains("SET published_at"), any(), any(), eq(901L)))
                 .thenReturn(0);
 
@@ -122,7 +149,7 @@ class MatchingOutboxRepositoryTest {
 
     @Test
     void markPublishedBatchUsesOneSqlUpdate() {
-        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate);
         when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(2);
 
         repository.markPublished(List.of(901L, 902L), Instant.parse("2026-07-01T00:00:00Z"));
@@ -141,7 +168,7 @@ class MatchingOutboxRepositoryTest {
 
     @Test
     void markPublishedBatchFailsWhenAnyRowIsSkipped() {
-        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate);
         when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
 
         assertThatThrownBy(() -> repository.markPublished(List.of(901L, 902L),
@@ -152,7 +179,7 @@ class MatchingOutboxRepositoryTest {
 
     @Test
     void claimPendingLeasesUnpublishedDueRowsForPublishOutsideTransaction() {
-        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Timestamp.class), eq(100),
                 any(Timestamp.class), any(Timestamp.class))).thenReturn(List.of());
 
@@ -179,8 +206,7 @@ class MatchingOutboxRepositoryTest {
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
         properties.getKafka().setProductTopicsEnabled(true);
-        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository,
-                properties);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, properties);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(),
                 eq("surprising.option.match.results.v1"),
                 eq("surprising.option.account.user.commands.v1"),
@@ -203,7 +229,7 @@ class MatchingOutboxRepositoryTest {
 
     @Test
     void markFailedSchedulesRetryWithBackoffAndTruncatesError() {
-        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate);
         when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
         String error = "x".repeat(1100);
 
@@ -223,7 +249,7 @@ class MatchingOutboxRepositoryTest {
 
     @Test
     void markFailedFailsWhenNoRowIsUpdated() {
-        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate);
         when(jdbcTemplate.update(contains("SET attempts = attempts + 1"), any(), any(), any(), eq(901L)))
                 .thenReturn(0);
 
@@ -235,7 +261,7 @@ class MatchingOutboxRepositoryTest {
 
     @Test
     void deletesOnlyPublishedMatchingRowsInLockedBatches() {
-        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate);
         when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(7);
 
         assertThat(repository.deletePublishedBefore(Instant.parse("2026-07-01T00:00:00Z"), 100)).isEqualTo(7);

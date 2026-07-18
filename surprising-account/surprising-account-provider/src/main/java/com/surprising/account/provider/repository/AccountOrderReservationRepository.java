@@ -1,5 +1,6 @@
 package com.surprising.account.provider.repository;
 
+import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.OrderReservationKind;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.account.provider.service.AccountMarginReleaseMath;
@@ -27,10 +28,15 @@ public class AccountOrderReservationRepository {
                            long userId,
                            OrderReserveAccountCommand command,
                            Instant now) {
-        requireOrderIdentity(productLine, userId, command.orderId(), command.symbol(), command.side().name(),
-                "PENDING_RESERVE");
+        requireAccountScope(productLine, command.accountType());
         if (command.reservationKind() == OrderReservationKind.SPOT_ASSET) {
+            if (command.accountType() != AccountType.SPOT) {
+                throw new IllegalStateException("spot reservation requires SPOT account");
+            }
             return reserveSpot(userId, command, now);
+        }
+        if (command.accountType() == AccountType.SPOT) {
+            throw new IllegalStateException("derivative reservation requires margin account");
         }
         return reserveDerivative(userId, command, now);
     }
@@ -41,31 +47,27 @@ public class AccountOrderReservationRepository {
                         boolean releaseAll,
                         long quantitySteps,
                         long remainingQuantitySteps,
+                        boolean reservationExpected,
                         String reason,
                         Instant now) {
-        requireOrderIdentity(productLine, userId, orderId, null, null, null);
         Reservation derivative = lockDerivative(orderId);
         if (derivative != null) {
+            requireReservationScope(productLine, userId, derivative.userId(), derivative.accountType(), orderId);
             releaseDerivative(orderId, derivative, releaseAll, quantitySteps, remainingQuantitySteps, reason, now);
             return;
         }
         SpotReservation spot = lockSpot(orderId);
         if (spot != null) {
+            requireReservationScope(productLine, userId, spot.userId(), "SPOT", orderId);
             releaseSpot(orderId, spot, releaseAll, quantitySteps, remainingQuantitySteps, reason, now);
             return;
         }
-        if (hasAnyReservation(orderId)) {
+        ReservationIdentity existing = anyReservation(orderId);
+        if (existing != null) {
+            requireReservationScope(productLine, userId, existing.userId(), existing.accountType(), orderId);
             return;
         }
-        Boolean reduceOnly = jdbcTemplate.query("""
-                SELECT reduce_only
-                  FROM trading_orders
-                 WHERE order_id = ?
-                """, (rs, rowNum) -> rs.getBoolean("reduce_only"), orderId).stream().findFirst().orElse(null);
-        if (reduceOnly == null) {
-            throw new IllegalStateException("order not found for account reservation release " + orderId);
-        }
-        if (!reduceOnly) {
+        if (reservationExpected) {
             throw new IllegalStateException("missing account reservation for non-reduce-only order " + orderId);
         }
     }
@@ -113,13 +115,15 @@ public class AccountOrderReservationRepository {
         int rows = jdbcTemplate.update("""
                 INSERT INTO account_margin_reservations (
                     reservation_id, account_type, user_id, asset, order_id, symbol,
-                    margin_mode, position_side, reserved_units, released_units, status, reason,
+                    margin_mode, position_side, order_quantity_steps, reduce_only,
+                    reserved_units, released_units, status, reason,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
                 ON CONFLICT (order_id) DO NOTHING
                 """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.MARGIN_RESERVATION),
                 accountType, userId, command.asset(),
                 command.orderId(), command.symbol(), command.marginMode().name(), command.positionSide().name(),
+                command.orderQuantitySteps(), command.reduceOnly(),
                 command.reservedUnits(), Timestamp.from(now), Timestamp.from(now));
         requireSingleRow(rows, "account margin reservation insert");
         return true;
@@ -263,40 +267,45 @@ public class AccountOrderReservationRepository {
                 orderId).stream().findFirst().orElse(null);
     }
 
-    private boolean hasAnyReservation(long orderId) {
+    private ReservationIdentity anyReservation(long orderId) {
         return jdbcTemplate.query("""
-                SELECT 1
+                SELECT user_id, account_type
                   FROM account_margin_reservations
                  WHERE order_id = ?
                 UNION ALL
-                SELECT 1
+                SELECT user_id, 'SPOT' AS account_type
                   FROM account_spot_order_reservations
                  WHERE order_id = ?
                  LIMIT 1
-                """, (rs, rowNum) -> 1, orderId, orderId).stream().findFirst().isPresent();
+                """, (rs, rowNum) -> new ReservationIdentity(
+                rs.getLong("user_id"), rs.getString("account_type")),
+                orderId, orderId).stream().findFirst().orElse(null);
     }
 
-    private void requireOrderIdentity(ProductLine productLine,
-                                      long userId,
-                                      long orderId,
-                                      String symbol,
-                                      String side,
-                                      String requiredStatus) {
-        boolean matches = jdbcTemplate.query("""
-                SELECT 1
-                  FROM trading_orders
-                 WHERE order_id = ?
-                   AND product_line = ?
-                   AND user_id = ?
-                   AND (CAST(? AS text) IS NULL OR symbol = ?)
-                   AND (CAST(? AS text) IS NULL OR side = ?)
-                   AND (CAST(? AS text) IS NULL OR status = ?)
-                """, (rs, rowNum) -> true, orderId, productLine.name(), userId,
-                symbol, symbol, side, side, requiredStatus, requiredStatus)
-                .stream().findFirst().orElse(false);
-        if (!matches) {
-            throw new IllegalStateException("account reservation order identity mismatch " + orderId);
+    private void requireAccountScope(ProductLine productLine,
+                                     AccountType accountType) {
+        ProductLine expected = accountType.productLine()
+                .orElseThrow(() -> new IllegalStateException("order reservation requires a product account"));
+        if (productLine != expected) {
+            throw new IllegalStateException("order reservation account does not match product line");
         }
+    }
+
+    private void requireReservationScope(ProductLine productLine,
+                                         long commandUserId,
+                                         long reservationUserId,
+                                         String accountType,
+                                         long orderId) {
+        if (reservationUserId != commandUserId) {
+            throw new IllegalStateException("account reservation user mismatch " + orderId);
+        }
+        AccountType type;
+        try {
+            type = AccountType.valueOf(accountType);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("invalid account reservation type " + accountType, ex);
+        }
+        requireAccountScope(productLine, type);
     }
 
     private void releaseBalance(String accountType,
@@ -362,5 +371,8 @@ public class AccountOrderReservationRepository {
             long reservedUnits,
             long settledUnits,
             long releasedUnits) {
+    }
+
+    private record ReservationIdentity(long userId, String accountType) {
     }
 }

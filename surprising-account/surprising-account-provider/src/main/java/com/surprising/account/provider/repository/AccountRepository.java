@@ -2445,30 +2445,23 @@ public class AccountRepository {
                                    long userId,
                                    String symbol,
                                    long closeSteps,
+                                   long orderQuantitySteps,
+                                   boolean reduceOnly,
                                    boolean sweepRemainder,
                                    Instant now) {
         OrderMarginReservation reservation = lockOrderMarginReservation(orderId, userId, symbol);
         if (reservation == null) {
-            requireReservationUnlessReduceOnly(orderId, userId, symbol);
+            if (!reduceOnly) {
+                throw new IllegalStateException("missing order margin reservation for closing fill " + orderId);
+            }
             return;
         }
+        requireReservationSnapshot(reservation, orderQuantitySteps, reduceOnly, orderId);
         long amountUnits = MarginTransferMath.orderMarginReleaseAmount(reservation.reservedUnits(),
                 reservation.releasedUnits(), reservation.positionMarginUnits(), reservation.orderQuantitySteps(),
                 closeSteps, sweepRemainder);
         releaseReservedMargin(orderId, reservation.accountType(), reservation.userId(), reservation.asset(), amountUnits,
                 "POSITION_REDUCED", now);
-    }
-
-    public void consumeOrderMargin(long orderId,
-                                   long userId,
-                                   String symbol,
-                                   MarginMode marginMode,
-                                   long openSteps,
-                                   long actualMarginUnits,
-                                   boolean sweepRemainder,
-                                   Instant now) {
-        consumeOrderMargin(ProductLine.LINEAR_PERPETUAL, orderId, userId, symbol, marginMode, openSteps,
-                actualMarginUnits, sweepRemainder, now);
     }
 
     public void consumeOrderMargin(ProductLine productLine,
@@ -2478,6 +2471,8 @@ public class AccountRepository {
                                    MarginMode marginMode,
                                    long openSteps,
                                    long actualMarginUnits,
+                                   long orderQuantitySteps,
+                                   boolean reduceOnly,
                                    boolean sweepRemainder,
                                    Instant now) {
         if (openSteps <= 0) {
@@ -2488,6 +2483,7 @@ public class AccountRepository {
         if (reservation == null) {
             throw new IllegalStateException("missing order margin reservation for opening fill " + orderId);
         }
+        requireReservationSnapshot(reservation, orderQuantitySteps, reduceOnly, orderId);
         if (reservation.reduceOnly()) {
             throw new IllegalStateException("reduce-only order cannot consume opening margin " + orderId);
         }
@@ -2615,10 +2611,9 @@ public class AccountRepository {
     private OrderMarginReservation lockOrderMarginReservation(long orderId, long userId, String symbol) {
         return jdbcTemplate.query("""
                 SELECT r.account_type, r.user_id, r.asset, r.reserved_units, r.released_units,
-                       r.position_margin_units, r.margin_mode, r.position_side, o.quantity_steps, o.reduce_only
+                       r.position_margin_units, r.margin_mode, r.position_side,
+                       r.order_quantity_steps, r.reduce_only
                   FROM account_margin_reservations r
-                  JOIN trading_orders o
-                    ON o.order_id = r.order_id
                  WHERE r.order_id = ?
                    AND r.user_id = ?
                    AND r.symbol = ?
@@ -2632,27 +2627,19 @@ public class AccountRepository {
                 rs.getLong("position_margin_units"),
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 PositionSide.fromNullableDbValue(rs.getString("position_side")),
-                rs.getLong("quantity_steps"),
+                rs.getLong("order_quantity_steps"),
                 rs.getBoolean("reduce_only")), orderId, userId, symbol).stream().findFirst().orElse(null);
     }
 
-    private void requireReservationUnlessReduceOnly(long orderId, long userId, String symbol) {
-        Boolean reduceOnly = jdbcTemplate.query("""
-                SELECT reduce_only
-                  FROM trading_orders
-                 WHERE order_id = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                 FOR UPDATE
-                """, (rs, rowNum) -> rs.getBoolean("reduce_only"), orderId, userId, symbol)
-                .stream()
-                .findFirst()
-                .orElse(null);
-        if (reduceOnly == null) {
-            throw new IllegalStateException("order not found for account margin release " + orderId);
+    private void requireReservationSnapshot(OrderMarginReservation reservation,
+                                            long orderQuantitySteps,
+                                            boolean reduceOnly,
+                                            long orderId) {
+        if (reservation.orderQuantitySteps() != orderQuantitySteps) {
+            throw new IllegalStateException("order quantity does not match account reservation " + orderId);
         }
-        if (!reduceOnly) {
-            throw new IllegalStateException("missing order margin reservation for closing fill " + orderId);
+        if (reservation.reduceOnly() != reduceOnly) {
+            throw new IllegalStateException("reduce-only flag does not match account reservation " + orderId);
         }
     }
 

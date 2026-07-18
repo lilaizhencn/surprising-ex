@@ -317,7 +317,8 @@ public class FundingRepository {
         }
         List<Long> paymentIds = jdbcTemplate.query("""
                 SELECT nextval('funding_payment_id_seq') AS payment_id
-                  FROM generate_series(1, ?)
+                  FROM generate_series(1, ?) AS n
+                 ORDER BY n
                 """, (rs, rowNum) -> rs.getLong("payment_id"), payments.size());
         if (paymentIds.size() != payments.size()) {
             throw new IllegalStateException("failed to allocate funding payment ids");

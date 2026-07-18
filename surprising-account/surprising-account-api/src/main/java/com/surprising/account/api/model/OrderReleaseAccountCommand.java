@@ -7,6 +7,7 @@ public record OrderReleaseAccountCommand(
         boolean releaseAll,
         long quantitySteps,
         long remainingQuantitySteps,
+        boolean reservationExpected,
         String reason,
         Instant effectiveAt) {
 

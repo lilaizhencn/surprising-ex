@@ -655,11 +655,13 @@ public class AccountService {
             applyTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
                     trade.takerInstrumentVersion(), trade.takerSide(), trade.takerMarginMode(),
                     trade.takerPositionSide(), trade.priceTicks(), trade.quantitySteps(),
+                    sideCommand.orderQuantitySteps(), sideCommand.reduceOnly(),
                     trade.takerOrderCompleted(), trade.takerFeeRatePpm(), "TAKER_FEE", effectiveAt, trade.traceId());
         } else {
             applyTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
                     trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.makerMarginMode(),
                     trade.makerPositionSide(), trade.priceTicks(), trade.quantitySteps(),
+                    sideCommand.orderQuantitySteps(), sideCommand.reduceOnly(),
                     trade.makerOrderCompleted(), trade.makerFeeRatePpm(), "MAKER_FEE", effectiveAt, trade.traceId());
         }
         accountRepository.completeTradeSide(actualProductLine, trade, role, commandId, Instant.now());
@@ -840,6 +842,8 @@ public class AccountService {
                                             PositionSide positionSide,
                                             long priceTicks,
                                             long quantitySteps,
+                                            long orderQuantitySteps,
+                                            boolean reduceOnly,
                                             boolean orderCompleted,
                                             long feeRatePpm,
                                             String feeReason,
@@ -879,7 +883,7 @@ public class AccountService {
             if (!fillSpec.contractType().isOption() || side == OrderSide.SELL) {
                 long actualMarginUnits = MarginTransferMath.openingInitialMarginUnits(fillSpec, priceTicks, openSteps);
                 accountRepository.consumeOrderMargin(productLine, orderId, userId, symbol, normalizedMarginMode, openSteps,
-                        actualMarginUnits, orderCompleted, eventTime);
+                        actualMarginUnits, orderQuantitySteps, reduceOnly, orderCompleted, eventTime);
             }
         }
         long feeDeltaUnits = TradeFeeMath.feeDeltaUnits(fillSpec, priceTicks, quantitySteps, feeRatePpm);
@@ -892,7 +896,7 @@ public class AccountService {
         }
         if (closeSteps > 0) {
             accountRepository.releaseOrderMargin(orderId, userId, symbol, closeSteps,
-                    orderCompleted && openSteps == 0, eventTime);
+                    orderQuantitySteps, reduceOnly, orderCompleted && openSteps == 0, eventTime);
         }
         PositionResponse updated = accountRepository.updatePosition(productLine, userId, symbol, normalizedMarginMode,
                 normalizedPositionSide,

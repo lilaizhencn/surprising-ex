@@ -4,11 +4,14 @@ import com.surprising.trading.api.model.MatchTradeEvent;
 
 public record TradeSideSettlementCommand(
         MatchTradeEvent trade,
-        TradeParticipantRole participantRole) {
+        TradeParticipantRole participantRole,
+        long orderQuantitySteps,
+        boolean reduceOnly) {
 
     public TradeSideSettlementCommand {
-        if (trade == null || participantRole == null) {
-            throw new IllegalArgumentException("trade and participantRole are required");
+        if (trade == null || participantRole == null || orderQuantitySteps <= 0
+                || orderQuantitySteps < trade.quantitySteps()) {
+            throw new IllegalArgumentException("valid trade, participantRole and order quantity are required");
         }
     }
 

@@ -2,12 +2,15 @@ package com.surprising.trading.matching.repository;
 
 import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.StoredOutboxRecord;
+import java.sql.PreparedStatement;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -15,19 +18,16 @@ import org.springframework.stereotype.Repository;
 public class MatchingOutboxRepository {
 
     private final JdbcTemplate jdbcTemplate;
-    private final MatchingSequenceRepository sequenceRepository;
     private final MatchingProperties properties;
 
-    public MatchingOutboxRepository(JdbcTemplate jdbcTemplate, MatchingSequenceRepository sequenceRepository) {
-        this(jdbcTemplate, sequenceRepository, new MatchingProperties());
+    public MatchingOutboxRepository(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, new MatchingProperties());
     }
 
     @Autowired
     public MatchingOutboxRepository(JdbcTemplate jdbcTemplate,
-                                    MatchingSequenceRepository sequenceRepository,
                                     MatchingProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
-        this.sequenceRepository = sequenceRepository;
         this.properties = properties == null ? new MatchingProperties() : properties;
     }
 
@@ -38,19 +38,60 @@ public class MatchingOutboxRepository {
                         String eventType,
                         String payload,
                         Instant now) {
-        if ("ORDER_BOOK_DEPTH".equals(aggregateType) || "MATCH_TRADE".equals(aggregateType)) {
-            throw new IllegalArgumentException("public market data must use its dedicated in-memory publisher");
+        enqueueBatch(List.of(new MatchingOutboxWrite(
+                aggregateType, aggregateId, topic, eventKey, eventType, payload, now)));
+    }
+
+    public void enqueueBatch(List<MatchingOutboxWrite> writes) {
+        if (writes == null || writes.isEmpty()) {
+            return;
         }
-        requireCurrentProductTopic(aggregateType, topic);
-        long id = sequenceRepository.nextSequence("outbox");
-        int rows = jdbcTemplate.update("""
+        for (MatchingOutboxWrite write : writes) {
+            if (write == null || write.now() == null) {
+                throw new IllegalArgumentException("matching outbox write and timestamp are required");
+            }
+            if ("ORDER_BOOK_DEPTH".equals(write.aggregateType())
+                    || "MATCH_TRADE".equals(write.aggregateType())) {
+                throw new IllegalArgumentException("public market data must use its dedicated in-memory publisher");
+            }
+            requireCurrentProductTopic(write.aggregateType(), write.topic());
+        }
+        List<Long> ids = jdbcTemplate.query("""
+                SELECT nextval('trading_outbox_seq') AS id
+                  FROM generate_series(1, ?) AS n
+                 ORDER BY n
+                """, (rs, rowNum) -> rs.getLong("id"), writes.size());
+        if (ids.size() != writes.size()) {
+            throw new IllegalStateException("failed to allocate matching outbox ids");
+        }
+        int[] rows = jdbcTemplate.batchUpdate("""
                 INSERT INTO trading_outbox_events (
                     id, aggregate_type, aggregate_id, topic, event_key, event_type,
                     payload, next_attempt_at, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
-                """, id, aggregateType, aggregateId, topic, eventKey, eventType, payload,
-                Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
-        requireSingleRow(rows, "matching outbox enqueue");
+                """, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(PreparedStatement statement, int index) throws java.sql.SQLException {
+                MatchingOutboxWrite write = writes.get(index);
+                Timestamp timestamp = Timestamp.from(write.now());
+                statement.setLong(1, ids.get(index));
+                statement.setString(2, write.aggregateType());
+                statement.setLong(3, write.aggregateId());
+                statement.setString(4, write.topic());
+                statement.setString(5, write.eventKey());
+                statement.setString(6, write.eventType());
+                statement.setString(7, write.payload());
+                statement.setTimestamp(8, timestamp);
+                statement.setTimestamp(9, timestamp);
+                statement.setTimestamp(10, timestamp);
+            }
+
+            @Override
+            public int getBatchSize() {
+                return writes.size();
+            }
+        });
+        requireCompleteBatch(rows, writes.size(), "matching outbox enqueue");
     }
 
     public List<StoredOutboxRecord> claimPending(int limit, Instant leaseUntil, Instant now) {
@@ -208,5 +249,26 @@ public class MatchingOutboxRepository {
         if (rows != 1) {
             throw new IllegalStateException("failed to write " + operation);
         }
+    }
+
+    private void requireCompleteBatch(int[] rows, int expected, String operation) {
+        if (rows == null || rows.length != expected) {
+            throw new IllegalStateException("failed to write " + operation);
+        }
+        for (int row : rows) {
+            if (row != 1 && row != Statement.SUCCESS_NO_INFO) {
+                throw new IllegalStateException("failed to write " + operation);
+            }
+        }
+    }
+
+    public record MatchingOutboxWrite(
+            String aggregateType,
+            long aggregateId,
+            String topic,
+            String eventKey,
+            String eventType,
+            String payload,
+            Instant now) {
     }
 }

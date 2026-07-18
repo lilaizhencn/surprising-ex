@@ -1001,9 +1001,11 @@ class AccountServiceTest {
                                     MatchTradeEvent trade,
                                     ProductLine productLine) {
         service.processTradeSide(productLine, "test:taker:" + trade.tradeId(),
-                new TradeSideSettlementCommand(trade, TradeParticipantRole.TAKER));
+                new TradeSideSettlementCommand(
+                        trade, TradeParticipantRole.TAKER, trade.quantitySteps(), false));
         service.processTradeSide(productLine, "test:maker:" + trade.tradeId(),
-                new TradeSideSettlementCommand(trade, TradeParticipantRole.MAKER));
+                new TradeSideSettlementCommand(
+                        trade, TradeParticipantRole.MAKER, trade.quantitySteps(), false));
     }
 
     private static int settleDelivery(AccountService service, DeliverySettlementEvent event) {
@@ -1330,21 +1332,6 @@ class AccountServiceTest {
         }
 
         @Override
-        public void consumeOrderMargin(long orderId,
-                                       long userId,
-                                       String symbol,
-                                       MarginMode marginMode,
-                                       long openSteps,
-                                       long actualMarginUnits,
-                                       boolean sweepRemainder,
-                                       Instant now) {
-            consumedOrderMargin.merge(orderId, openSteps, Long::sum);
-            consumedOrderMarginUnits.merge(orderId, actualMarginUnits, Long::sum);
-            consumeSweepByOrder.put(orderId, sweepRemainder);
-            marginOperationOrder.add("consume:" + orderId);
-        }
-
-        @Override
         public void consumeOrderMargin(ProductLine productLine,
                                        long orderId,
                                        long userId,
@@ -1352,9 +1339,15 @@ class AccountServiceTest {
                                        MarginMode marginMode,
                                        long openSteps,
                                        long actualMarginUnits,
+                                       long orderQuantitySteps,
+                                       boolean reduceOnly,
                                        boolean sweepRemainder,
                                        Instant now) {
-            consumeOrderMargin(orderId, userId, symbol, marginMode, openSteps, actualMarginUnits, sweepRemainder, now);
+            assertThat(orderQuantitySteps).isGreaterThanOrEqualTo(openSteps);
+            consumedOrderMargin.merge(orderId, openSteps, Long::sum);
+            consumedOrderMarginUnits.merge(orderId, actualMarginUnits, Long::sum);
+            consumeSweepByOrder.put(orderId, sweepRemainder);
+            marginOperationOrder.add("consume:" + orderId);
         }
 
         @Override
@@ -1362,8 +1355,11 @@ class AccountServiceTest {
                                        long userId,
                                        String symbol,
                                        long closeSteps,
+                                       long orderQuantitySteps,
+                                       boolean reduceOnly,
                                        boolean sweepRemainder,
                                        Instant now) {
+            assertThat(orderQuantitySteps).isGreaterThanOrEqualTo(closeSteps);
             releasedOrderMargin.merge(orderId, closeSteps, Long::sum);
             releaseSweepByOrder.put(orderId, sweepRemainder);
         }

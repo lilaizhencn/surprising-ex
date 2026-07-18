@@ -433,6 +433,7 @@ public class OrderService {
         return ReservationPlan.accept(new OrderReserveAccountCommand(
                 orderId, request.symbol(), request.side(), OrderReservationKind.SPOT_ASSET, AccountType.SPOT,
                 requirement.get().asset(), request.marginMode(), request.positionSide(),
+                request.quantitySteps(), request.reduceOnly(),
                 requirement.get().reservedUnits()));
     }
 
@@ -462,6 +463,7 @@ public class OrderService {
         return ReservationPlan.accept(new OrderReserveAccountCommand(
                 orderId, request.symbol(), request.side(), OrderReservationKind.DERIVATIVE_MARGIN, accountType,
                 requirement.get().asset(), request.marginMode(), request.positionSide(),
+                request.quantitySteps(), request.reduceOnly(),
                 requirement.get().initialMarginUnits()));
     }
 

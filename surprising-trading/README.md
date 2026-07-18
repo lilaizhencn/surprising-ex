@@ -322,8 +322,10 @@ For each `OrderCommandEvent`:
 - `GTC/IOC/FOK/GTX` -> exchange-core order types; GTX/post-only checks the book only for `PLACE` before submit and rejects if it would take liquidity. `CANCEL` must bypass post-only checks.
 - `MARKET` maps to an IOC/FOK protected limit order derived from the latest mark price and configured max slippage.
 - `IOC`, `FOK`, and `MARKET` orders are terminal when matching returns, so the unfilled frozen margin is released after the matching result is applied. If a filled MARKET order reserved at the conservative risk bound but executed at a better book price, account settlement releases the excess when the trade is processed.
-- `trading_match_trades` uses `(symbol, trade_id)` as the trade idempotency key, matching the Kafka partitioning and replay model.
-- `trading_match_results` and `trading_match_trades` are idempotent replay gates. If a result or trade row already exists, the service skips the downstream side effects for that row instead of reapplying order fills, margin release, or outbox writes.
+- `trading_match_trades` uses `(product_line, symbol, trade_id)` as the trade idempotency key. `trade_id` is derived deterministically as `commandId * 1_000_000 + matchIndex`, eliminating a database sequence round trip from every fill.
+- `trading_match_results` is the command replay gate. A replay whose `command_id` already exists is a no-op; a trade-id conflict while inserting a new result fails the whole transaction as an invariant violation.
+- Maker order snapshots are loaded in one bounded query per command. Trade rows and financial outbox rows use JDBC batches, while maker fills use one guarded set-based update.
+- Account settlement commands carry immutable order quantity and `reduceOnly` snapshots. Account-provider validates these against its own reservation row and never joins `trading_orders` on the fill hot path.
 - Guarded order fill/status updates, margin release, and matching outbox writes must still affect exactly one row. If an overfill guard, inconsistent quantity invariant, missing target row, or outbox write skips a row, the matcher fails and restarts instead of continuing with a mutated in-memory exchange-core book.
 
 The provider uses the real exchange-core order book and matcher event chain, but exchange-core risk processing and built-in fees are disabled. Order entry reserves initial margin before command publication; account-provider migrates filled opening margin into position margin and writes maker/taker `TRADE_FEE` ledger entries from the required fee rates on `MatchTradeEvent`. Funding, insurance, and ADL are handled by separate settlement modules.
@@ -461,7 +463,6 @@ curl 'http://localhost:9084/api/v1/trading/orders/open?userId=1001&symbol=BTC-US
 
 Root [init.sql](../init.sql) creates:
 
-- `trading_sequences` (legacy low-frequency counter compatibility; high-frequency trading ids use native sequences)
 - `trading_order_seq`, `trading_event_seq`, `trading_command_seq`, `trading_outbox_seq`
 - `trading_orders`
 - `trading_order_events`

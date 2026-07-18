@@ -23,9 +23,9 @@ import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.MatchedOrderSnapshot;
 import com.surprising.trading.matching.model.MatchingSymbol;
 import com.surprising.trading.matching.repository.MatchingOutboxRepository;
+import com.surprising.trading.matching.repository.MatchingOutboxRepository.MatchingOutboxWrite;
 import com.surprising.trading.matching.repository.MatchingProtectionRepository;
 import com.surprising.trading.matching.repository.MatchingResultRepository;
-import com.surprising.trading.matching.repository.MatchingSequenceRepository;
 import exchange.core2.core.common.L2MarketData;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherTradeEvent;
@@ -58,7 +58,6 @@ public class MatchingService {
     private final MatchingProperties properties;
     private final ExchangeCoreEngine exchangeCoreEngine;
     private final MatchingProtectionRepository protectionRepository;
-    private final MatchingSequenceRepository sequenceRepository;
     private final MatchingResultRepository resultRepository;
     private final MatchingOutboxRepository outboxRepository;
     private final OrderBookDepthPublisher depthPublisher;
@@ -70,7 +69,6 @@ public class MatchingService {
                            MatchingProperties properties,
                            ExchangeCoreEngine exchangeCoreEngine,
                            MatchingProtectionRepository protectionRepository,
-                           MatchingSequenceRepository sequenceRepository,
                            MatchingResultRepository resultRepository,
                            MatchingOutboxRepository outboxRepository,
                            OrderBookDepthPublisher depthPublisher,
@@ -79,7 +77,6 @@ public class MatchingService {
         this.properties = properties;
         this.exchangeCoreEngine = exchangeCoreEngine;
         this.protectionRepository = protectionRepository;
-        this.sequenceRepository = sequenceRepository;
         this.resultRepository = resultRepository;
         this.outboxRepository = outboxRepository;
         this.depthPublisher = depthPublisher;
@@ -90,19 +87,20 @@ public class MatchingService {
                     MatchingProperties properties,
                     ExchangeCoreEngine exchangeCoreEngine,
                     MatchingProtectionRepository protectionRepository,
-                    MatchingSequenceRepository sequenceRepository,
                     MatchingResultRepository resultRepository,
                     MatchingOutboxRepository outboxRepository) {
-        this(objectMapper, properties, exchangeCoreEngine, protectionRepository, sequenceRepository,
+        this(objectMapper, properties, exchangeCoreEngine, protectionRepository,
                 resultRepository, outboxRepository, OrderBookDepthPublisher.NOOP, PublicTradePublisher.NOOP);
     }
 
     @Transactional
     public void process(OrderCommandEvent command) {
-        if (resultRepository.commandResultExists(command.commandId())) {
+        MatchingResultRepository.CommandState commandState =
+                resultRepository.commandState(command.commandId(), command.orderId());
+        if (commandState.resultExists()) {
             return;
         }
-        if (!resultRepository.orderExists(command.orderId())) {
+        if (!commandState.orderExists()) {
             return;
         }
         Instant now = Instant.now();
@@ -208,41 +206,53 @@ public class MatchingService {
                                          OrderCommand response,
                                          Instant now,
                                          Map<Long, OrderQuantitySnapshot> makerQuantitySnapshots) {
-        List<MatchTradeEvent> trades = new ArrayList<>();
-        Map<Long, MatchedOrderSnapshot> makerSnapshots = new HashMap<>();
-        Map<Long, Long> makerRemainingQuantities = new HashMap<>();
-        AtomicInteger matchIndex = new AtomicInteger();
+        List<RawTrade> rawTrades = new ArrayList<>();
         response.processMatcherEvents(event -> {
-            if (event.eventType != MatcherEventType.TRADE) {
-                return;
+            if (event.eventType == MatcherEventType.TRADE) {
+                rawTrades.add(new RawTrade(
+                        event.matchedOrderId,
+                        event.matchedOrderUid,
+                        event.price,
+                        event.size,
+                        event.activeOrderCompleted,
+                        event.matchedOrderCompleted));
             }
-            int index = matchIndex.incrementAndGet();
-            trades.add(toTrade(command, event, index, now, makerSnapshots, makerRemainingQuantities,
-                    makerQuantitySnapshots));
         });
+        if (rawTrades.size() >= PUBLIC_TRADE_SEQUENCE_MULTIPLIER) {
+            throw new IllegalStateException("one matching command cannot produce "
+                    + PUBLIC_TRADE_SEQUENCE_MULTIPLIER + " or more trades");
+        }
+        Map<Long, MatchedOrderSnapshot> makerSnapshots = resultRepository.orderSnapshots(
+                rawTrades.stream().map(RawTrade::matchedOrderId).toList());
+        List<MatchTradeEvent> trades = new ArrayList<>(rawTrades.size());
+        Map<Long, Long> makerRemainingQuantities = new HashMap<>();
+        for (int i = 0; i < rawTrades.size(); i++) {
+            trades.add(toTrade(command, rawTrades.get(i), i + 1, now, makerSnapshots,
+                    makerRemainingQuantities, makerQuantitySnapshots));
+        }
         return trades;
     }
 
     private MatchTradeEvent toTrade(OrderCommandEvent command,
-                                    MatcherTradeEvent event,
+                                    RawTrade rawTrade,
                                     int matchIndex,
                                     Instant now,
                                     Map<Long, MatchedOrderSnapshot> makerSnapshots,
                                     Map<Long, Long> makerRemainingQuantities,
                                     Map<Long, OrderQuantitySnapshot> makerQuantitySnapshots) {
-        MatchedOrderSnapshot makerSnapshot = makerSnapshots.computeIfAbsent(event.matchedOrderId,
-                resultRepository::orderSnapshot);
-        long remainingBefore = makerRemainingQuantities.getOrDefault(
-                event.matchedOrderId, makerSnapshot.remainingQuantitySteps());
-        long remainingAfter = Math.subtractExact(remainingBefore, event.size);
-        if (remainingAfter < 0) {
-            throw new IllegalStateException("maker fill exceeds remaining quantity for order " + event.matchedOrderId);
+        MatchedOrderSnapshot makerSnapshot = makerSnapshots.get(rawTrade.matchedOrderId());
+        if (makerSnapshot == null) {
+            throw new IllegalStateException("maker order snapshot not found for order " + rawTrade.matchedOrderId());
         }
-        makerRemainingQuantities.put(event.matchedOrderId, remainingAfter);
-        long tradeId = isInternalMarketMaker(command.userId())
-                && isInternalMarketMaker(event.matchedOrderUid)
-                ? internalSelfTradeId(command.commandId(), matchIndex)
-                : sequenceRepository.nextSequence("match-trade");
+        long remainingBefore = makerRemainingQuantities.getOrDefault(
+                rawTrade.matchedOrderId(), makerSnapshot.remainingQuantitySteps());
+        long remainingAfter = Math.subtractExact(remainingBefore, rawTrade.size());
+        if (remainingAfter < 0) {
+            throw new IllegalStateException("maker fill exceeds remaining quantity for order "
+                    + rawTrade.matchedOrderId());
+        }
+        makerRemainingQuantities.put(rawTrade.matchedOrderId(), remainingAfter);
+        long tradeId = deterministicTradeId(command.commandId(), matchIndex);
         MatchTradeEvent trade = new MatchTradeEvent(
                 tradeId,
                 command.commandId(),
@@ -253,21 +263,22 @@ public class MatchingService {
                 command.side(),
                 command.marginMode(),
                 command.positionSide(),
-                event.matchedOrderId,
+                rawTrade.matchedOrderId(),
                 makerSnapshot.instrumentVersion(),
-                event.matchedOrderUid,
+                rawTrade.matchedOrderUid(),
                 makerSnapshot.marginMode(),
                 makerSnapshot.positionSide(),
                 command.takerFeeRatePpm(),
                 makerSnapshot.makerFeeRatePpm(),
-                event.price,
-                event.size,
-                event.activeOrderCompleted,
-                event.matchedOrderCompleted,
+                rawTrade.price(),
+                rawTrade.size(),
+                rawTrade.activeOrderCompleted(),
+                rawTrade.matchedOrderCompleted(),
                 now,
                 command.traceId());
         makerQuantitySnapshots.put(tradeId,
-                new OrderQuantitySnapshot(makerSnapshot.quantitySteps(), remainingAfter));
+                new OrderQuantitySnapshot(
+                        makerSnapshot.quantitySteps(), remainingAfter, makerSnapshot.reduceOnly()));
         return trade;
     }
 
@@ -326,26 +337,37 @@ public class MatchingService {
         resultRepository.applyActiveOrderStatus(result);
         boolean containsInternalSelfTrade = false;
         String lastTakerFinancialCommandId = null;
+        List<MatchTradeEvent> externalTrades = new ArrayList<>(result.trades().size());
+        List<MatchingOutboxWrite> outboxWrites = new ArrayList<>(
+                Math.max(1, result.trades().size() * 2 + 2));
         for (MatchTradeEvent trade : result.trades()) {
             if (isInternalSelfTrade(trade)) {
                 containsInternalSelfTrade = true;
-                resultRepository.applyMakerFill(trade);
-                enqueueInternalSelfTradeMakerRelease(trade, requireQuantitySnapshot(trade, makerQuantitySnapshots));
+                enqueueInternalSelfTradeMakerRelease(
+                        outboxWrites, trade, requireQuantitySnapshot(trade, makerQuantitySnapshots));
                 continue;
             }
-            if (!resultRepository.saveTrade(trade)) {
-                continue;
-            }
+            externalTrades.add(trade);
             lastTakerFinancialCommandId = tradeSideCommandId(
                     trade, TradeParticipantRole.TAKER, trade.takerUserId());
-            resultRepository.applyMakerFill(trade);
-            enqueueAccountTradeSide(trade, TradeParticipantRole.TAKER);
-            enqueueAccountTradeSide(trade, TradeParticipantRole.MAKER);
+            enqueueAccountTradeSide(outboxWrites, trade, TradeParticipantRole.TAKER,
+                    orderCommand, makerQuantitySnapshots);
+            enqueueAccountTradeSide(outboxWrites, trade, TradeParticipantRole.MAKER,
+                    orderCommand, makerQuantitySnapshots);
         }
-        enqueueActiveOrderReleaseIfRequired(result, orderCommand, containsInternalSelfTrade,
+        resultRepository.saveTrades(externalTrades);
+        resultRepository.applyMakerFills(result.trades());
+        enqueueActiveOrderReleaseIfRequired(outboxWrites, result, orderCommand, containsInternalSelfTrade,
                 lastTakerFinancialCommandId);
-        outboxRepository.enqueue("MATCH_RESULT", result.commandId(), properties.getKafka().getMatchResultsTopic(),
-                result.symbol(), result.commandType().name(), payload(result), result.eventTime());
+        outboxWrites.add(new MatchingOutboxWrite(
+                "MATCH_RESULT",
+                result.commandId(),
+                properties.getKafka().getMatchResultsTopic(),
+                result.symbol(),
+                result.commandType().name(),
+                payload(result),
+                result.eventTime()));
+        outboxRepository.enqueueBatch(outboxWrites);
     }
 
     private void publishOrderBookDepth(MatchingSymbol symbol, CommandResultCode resultCode, Instant eventTime) {
@@ -393,10 +415,21 @@ public class MatchingService {
         }
     }
 
-    private void enqueueAccountTradeSide(MatchTradeEvent trade, TradeParticipantRole role) {
+    private void enqueueAccountTradeSide(List<MatchingOutboxWrite> writes,
+                                         MatchTradeEvent trade,
+                                         TradeParticipantRole role,
+                                         OrderCommandEvent orderCommand,
+                                         Map<Long, OrderQuantitySnapshot> makerQuantitySnapshots) {
         long userId = role == TradeParticipantRole.TAKER ? trade.takerUserId() : trade.makerUserId();
         String commandId = tradeSideCommandId(trade, role, userId);
-        TradeSideSettlementCommand side = new TradeSideSettlementCommand(trade, role);
+        OrderQuantitySnapshot quantitySnapshot = role == TradeParticipantRole.TAKER
+                ? new OrderQuantitySnapshot(
+                        orderCommand.quantitySteps(),
+                        Math.subtractExact(orderCommand.quantitySteps(), trade.quantitySteps()),
+                        orderCommand.reduceOnly())
+                : requireQuantitySnapshot(trade, makerQuantitySnapshots);
+        TradeSideSettlementCommand side = new TradeSideSettlementCommand(
+                trade, role, quantitySnapshot.quantitySteps(), quantitySnapshot.reduceOnly());
         AccountUserCommand command = new AccountUserCommand(
                 AccountUserCommand.CURRENT_SCHEMA_VERSION,
                 commandId,
@@ -409,22 +442,30 @@ public class MatchingService {
                 payload(side),
                 trade.eventTime(),
                 trade.traceId());
-        outboxRepository.enqueue("ACCOUNT_COMMAND", trade.tradeId(),
-                properties.getKafka().getAccountUserCommandsTopic(), command.partitionKey(),
-                command.commandType().name(), payload(command), trade.eventTime());
+        writes.add(new MatchingOutboxWrite(
+                "ACCOUNT_COMMAND",
+                trade.tradeId(),
+                properties.getKafka().getAccountUserCommandsTopic(),
+                command.partitionKey(),
+                command.commandType().name(),
+                payload(command),
+                trade.eventTime()));
     }
 
-    private void enqueueInternalSelfTradeMakerRelease(MatchTradeEvent trade,
+    private void enqueueInternalSelfTradeMakerRelease(List<MatchingOutboxWrite> writes,
+                                                      MatchTradeEvent trade,
                                                       OrderQuantitySnapshot quantitySnapshot) {
         String commandId = "ORDER_RELEASE:" + properties.getKafka().getProductLine().name()
                 + ":" + trade.makerOrderId() + ":INTERNAL_SELF_TRADE:" + trade.tradeId();
-        enqueueOrderRelease(commandId, trade.tradeId(), trade.makerUserId(), trade.makerOrderId(),
+        enqueueOrderRelease(writes, commandId, trade.tradeId(), trade.makerUserId(), trade.makerOrderId(),
                 trade.makerOrderCompleted(), quantitySnapshot.quantitySteps(),
-                quantitySnapshot.remainingQuantitySteps(), "INTERNAL_MARKET_MAKER_SELF_TRADE", null,
+                quantitySnapshot.remainingQuantitySteps(), !quantitySnapshot.reduceOnly(),
+                "INTERNAL_MARKET_MAKER_SELF_TRADE", null,
                 trade.eventTime(), trade.traceId());
     }
 
-    private void enqueueActiveOrderReleaseIfRequired(MatchResultEvent result,
+    private void enqueueActiveOrderReleaseIfRequired(List<MatchingOutboxWrite> writes,
+                                                     MatchResultEvent result,
                                                      OrderCommandEvent orderCommand,
                                                      boolean containsInternalSelfTrade,
                                                      String dependencyCommandId) {
@@ -444,24 +485,27 @@ public class MatchingService {
         long remainingQuantitySteps = terminal
                 ? 0L
                 : Math.subtractExact(orderCommand.quantitySteps(), result.filledQuantitySteps());
-        enqueueOrderRelease(commandId, result.commandId(), result.userId(), result.orderId(),
+        enqueueOrderRelease(writes, commandId, result.commandId(), result.userId(), result.orderId(),
                 terminal, orderCommand.quantitySteps(), remainingQuantitySteps,
-                reason, dependencyCommandId, result.eventTime(), result.traceId());
+                !orderCommand.reduceOnly(), reason, dependencyCommandId, result.eventTime(), result.traceId());
     }
 
-    private void enqueueOrderRelease(String commandId,
+    private void enqueueOrderRelease(List<MatchingOutboxWrite> writes,
+                                     String commandId,
                                      long aggregateId,
                                      long userId,
                                      long orderId,
                                      boolean releaseAll,
                                      long quantitySteps,
                                      long remainingQuantitySteps,
+                                     boolean reservationExpected,
                                      String reason,
                                      String dependencyCommandId,
                                      Instant eventTime,
                                      String traceId) {
         OrderReleaseAccountCommand release = new OrderReleaseAccountCommand(
-                orderId, releaseAll, quantitySteps, remainingQuantitySteps, reason, eventTime);
+                orderId, releaseAll, quantitySteps, remainingQuantitySteps,
+                reservationExpected, reason, eventTime);
         AccountUserCommand command = new AccountUserCommand(
                 AccountUserCommand.CURRENT_SCHEMA_VERSION,
                 commandId,
@@ -474,9 +518,14 @@ public class MatchingService {
                 payload(release),
                 eventTime,
                 traceId);
-        outboxRepository.enqueue("ACCOUNT_COMMAND", aggregateId,
-                properties.getKafka().getAccountUserCommandsTopic(), command.partitionKey(),
-                command.commandType().name(), payload(command), eventTime);
+        writes.add(new MatchingOutboxWrite(
+                "ACCOUNT_COMMAND",
+                aggregateId,
+                properties.getKafka().getAccountUserCommandsTopic(),
+                command.partitionKey(),
+                command.commandType().name(),
+                payload(command),
+                eventTime));
     }
 
     private String tradeSideCommandId(MatchTradeEvent trade, TradeParticipantRole role, long userId) {
@@ -493,7 +542,10 @@ public class MatchingService {
         return properties.getProtection().isInternalMarketMaker(userId);
     }
 
-    private long internalSelfTradeId(long commandId, int matchIndex) {
+    private long deterministicTradeId(long commandId, int matchIndex) {
+        if (matchIndex <= 0 || matchIndex >= PUBLIC_TRADE_SEQUENCE_MULTIPLIER) {
+            throw new IllegalArgumentException("match index is outside deterministic trade-id range");
+        }
         return Math.addExact(Math.multiplyExact(commandId, PUBLIC_TRADE_SEQUENCE_MULTIPLIER), matchIndex);
     }
 
@@ -560,7 +612,19 @@ public class MatchingService {
                                  Map<Long, OrderBookLevel> asks) {
     }
 
-    private record OrderQuantitySnapshot(long quantitySteps, long remainingQuantitySteps) {
+    private record RawTrade(
+            long matchedOrderId,
+            long matchedOrderUid,
+            long price,
+            long size,
+            boolean activeOrderCompleted,
+            boolean matchedOrderCompleted) {
+    }
+
+    private record OrderQuantitySnapshot(
+            long quantitySteps,
+            long remainingQuantitySteps,
+            boolean reduceOnly) {
 
         private OrderQuantitySnapshot {
             if (quantitySteps <= 0 || remainingQuantitySteps < 0 || remainingQuantitySteps > quantitySteps) {

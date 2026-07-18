@@ -120,7 +120,7 @@ class MatchingCommandConsumerTest {
         private OrderCommandEvent processed;
 
         private FailingMatchingService() {
-            super(null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null);
         }
 
         @Override

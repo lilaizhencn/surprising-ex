@@ -1,6 +1,7 @@
 package com.surprising.trading.matching.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
@@ -27,13 +28,14 @@ import com.surprising.trading.matching.model.MatchingSymbol;
 import com.surprising.trading.matching.model.RecoveredOrderBookOrder;
 import com.surprising.trading.matching.repository.MatchingOrderBookRecoveryRepository;
 import com.surprising.trading.matching.repository.MatchingOutboxRepository;
+import com.surprising.trading.matching.repository.MatchingOutboxRepository.MatchingOutboxWrite;
 import com.surprising.trading.matching.repository.MatchingProtectionRepository;
 import com.surprising.trading.matching.repository.MatchingResultRepository;
-import com.surprising.trading.matching.repository.MatchingSequenceRepository;
 import com.surprising.trading.matching.repository.MatchingSymbolRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,13 +58,12 @@ class MatchingServiceTest {
         ExchangeCoreEngine engine = new ExchangeCoreEngine(properties,
                 new FakeMatchingSymbolRepository(instrument, matchingSymbol),
                 new FakeRecoveryRepository());
-        FakeSequenceRepository sequenceRepository = new FakeSequenceRepository();
         FakeResultRepository resultRepository = new FakeResultRepository();
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
         FakeDepthPublisher depthPublisher = new FakeDepthPublisher();
         FakePublicTradePublisher tradePublisher = new FakePublicTradePublisher(true);
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(), sequenceRepository, resultRepository, outboxRepository,
+                new FakeProtectionRepository(), resultRepository, outboxRepository,
                 depthPublisher, tradePublisher);
 
         try {
@@ -89,7 +90,7 @@ class MatchingServiceTest {
             assertThat(resultRepository.trades).hasSize(1);
 
             MatchTradeEvent trade = resultRepository.trades.get(0);
-            assertThat(trade.tradeId()).isEqualTo(1L);
+            assertThat(trade.tradeId()).isEqualTo(502_000_001L);
             assertThat(trade.commandId()).isEqualTo(502L);
             assertThat(trade.takerOrderId()).isEqualTo(202L);
             assertThat(trade.takerInstrumentVersion()).isEqualTo(7L);
@@ -180,12 +181,11 @@ class MatchingServiceTest {
         ExchangeCoreEngine engine = new ExchangeCoreEngine(properties,
                 new FakeMatchingSymbolRepository(instrument, matchingSymbol),
                 new FakeRecoveryRepository());
-        FakeSequenceRepository sequenceRepository = new FakeSequenceRepository();
         FakeResultRepository resultRepository = new FakeResultRepository();
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
         FakePublicTradePublisher tradePublisher = new FakePublicTradePublisher();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(), sequenceRepository, resultRepository, outboxRepository,
+                new FakeProtectionRepository(), resultRepository, outboxRepository,
                 OrderBookDepthPublisher.NOOP, tradePublisher);
 
         try {
@@ -206,7 +206,6 @@ class MatchingServiceTest {
             });
             assertThat(resultRepository.trades).isEmpty();
             assertThat(resultRepository.makerFillUpdates).isEqualTo(1);
-            assertThat(sequenceRepository.nextByName).doesNotContainKey("match-trade");
             assertThat(tradePublisher.events).singleElement()
                     .satisfies(event -> assertThat(event.tradeId()).isEqualTo("502:1"));
 
@@ -252,7 +251,7 @@ class MatchingServiceTest {
         FakeResultRepository resultRepository = new FakeResultRepository();
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository, outboxRepository);
+                new FakeProtectionRepository(), resultRepository, outboxRepository);
 
         try {
             engine.start();
@@ -298,7 +297,7 @@ class MatchingServiceTest {
         resultRepository.orderRemainingQuantitySteps.put(101L, 5L);
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository, outboxRepository);
+                new FakeProtectionRepository(), resultRepository, outboxRepository);
 
         try {
             engine.start();
@@ -338,7 +337,7 @@ class MatchingServiceTest {
         FakeResultRepository resultRepository = new FakeResultRepository();
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository, outboxRepository);
+                new FakeProtectionRepository(), resultRepository, outboxRepository);
 
         try {
             engine.start();
@@ -378,12 +377,11 @@ class MatchingServiceTest {
         ExchangeCoreEngine engine = new ExchangeCoreEngine(properties,
                 new FakeMatchingSymbolRepository(instrument, matchingSymbol),
                 new FakeRecoveryRepository());
-        FakeSequenceRepository sequenceRepository = new FakeSequenceRepository();
         FakeResultRepository resultRepository = new FakeResultRepository();
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
         FakePublicTradePublisher tradePublisher = new FakePublicTradePublisher();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(), sequenceRepository, resultRepository, outboxRepository,
+                new FakeProtectionRepository(), resultRepository, outboxRepository,
                 OrderBookDepthPublisher.NOOP, tradePublisher);
 
         try {
@@ -402,11 +400,10 @@ class MatchingServiceTest {
             assertThat(resultRepository.results.get(2).trades()).hasSize(2);
             assertThat(resultRepository.results.get(2).trades().get(0).tradeId()).isEqualTo(503_000_001L);
             assertThat(resultRepository.trades).singleElement().satisfies(trade -> {
-                assertThat(trade.tradeId()).isEqualTo(1L);
+                assertThat(trade.tradeId()).isEqualTo(503_000_002L);
                 assertThat(trade.makerUserId()).isEqualTo(1001L);
             });
             assertThat(resultRepository.makerFillUpdates).isEqualTo(2);
-            assertThat(sequenceRepository.nextByName.get("match-trade")).isEqualTo(1L);
             assertThat(tradePublisher.events)
                     .extracting(PublicTradeEvent::tradeId)
                     .containsExactly("503:1", "503:2");
@@ -447,7 +444,7 @@ class MatchingServiceTest {
         FakeResultRepository resultRepository = new FakeResultRepository();
         resultRepository.missingOrderIds.add(404L);
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository,
+                new FakeProtectionRepository(), resultRepository,
                 new FakeOutboxRepository());
 
         service.process(new OrderCommandEvent(OrderCommandType.PLACE, 901L, 404L, 1001L,
@@ -473,7 +470,7 @@ class MatchingServiceTest {
                 new FakeRecoveryRepository());
         FakeResultRepository resultRepository = new FakeResultRepository();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository,
+                new FakeProtectionRepository(), resultRepository,
                 new FakeOutboxRepository());
 
         try {
@@ -515,7 +512,7 @@ class MatchingServiceTest {
                 new FakeRecoveryRepository());
         FakeResultRepository resultRepository = new FakeResultRepository();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(OptionalLong.empty()), new FakeSequenceRepository(), resultRepository,
+                new FakeProtectionRepository(OptionalLong.empty()), resultRepository,
                 new FakeOutboxRepository());
 
         try {
@@ -552,7 +549,7 @@ class MatchingServiceTest {
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
         FakeDepthPublisher depthPublisher = new FakeDepthPublisher();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository, outboxRepository,
+                new FakeProtectionRepository(), resultRepository, outboxRepository,
                 depthPublisher, PublicTradePublisher.NOOP);
 
         try {
@@ -573,7 +570,7 @@ class MatchingServiceTest {
     }
 
     @Test
-    void keepsPublicTradeIndependentWhenFinancialTradePersistenceIsDuplicate() throws Exception {
+    void failsClosedWhenFinancialTradeBatchIsNotPersisted() throws Exception {
         MatchingProperties properties = new MatchingProperties();
         properties.getEngine().setExchangeId("matching-service-trade-replay-test");
         properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
@@ -588,7 +585,7 @@ class MatchingServiceTest {
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
         FakePublicTradePublisher tradePublisher = new FakePublicTradePublisher();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository, outboxRepository,
+                new FakeProtectionRepository(), resultRepository, outboxRepository,
                 OrderBookDepthPublisher.NOOP, tradePublisher);
 
         try {
@@ -598,18 +595,20 @@ class MatchingServiceTest {
                     "maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
                     100L, 10L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
             resultRepository.rejectNextSaveTrade = true;
-            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 2002L,
+            assertThatThrownBy(() -> service.process(new OrderCommandEvent(
+                    OrderCommandType.PLACE, 502L, 202L, 2002L,
                     "taker-202", "BTC-USDT", 7L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
-                    100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z")));
+                    100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z"))))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("match trade batch");
 
-            assertThat(resultRepository.results).hasSize(2);
             assertThat(resultRepository.trades).isEmpty();
             assertThat(resultRepository.makerFillUpdates).isZero();
             assertThat(tradePublisher.events).singleElement()
                     .satisfies(event -> assertThat(event.tradeId()).isEqualTo("502:1"));
             assertThat(outboxRepository.records)
                     .extracting(OutboxRecord::aggregateType)
-                    .containsExactly("MATCH_RESULT", "ACCOUNT_COMMAND", "MATCH_RESULT");
+                    .containsExactly("MATCH_RESULT");
         } finally {
             engine.stop();
         }
@@ -629,7 +628,7 @@ class MatchingServiceTest {
                 new FakeRecoveryRepository());
         FakeResultRepository resultRepository = new FakeResultRepository();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository,
+                new FakeProtectionRepository(), resultRepository,
                 new FakeOutboxRepository());
 
         try {
@@ -667,7 +666,7 @@ class MatchingServiceTest {
         FakeProtectionRepository protectionRepository = new FakeProtectionRepository(true);
         FakeResultRepository resultRepository = new FakeResultRepository();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                protectionRepository, new FakeSequenceRepository(), resultRepository, new FakeOutboxRepository());
+                protectionRepository, resultRepository, new FakeOutboxRepository());
 
         try {
             engine.start();
@@ -783,21 +782,6 @@ class MatchingServiceTest {
         }
     }
 
-    private static final class FakeSequenceRepository extends MatchingSequenceRepository {
-        private final Map<String, Long> nextByName = new HashMap<>();
-
-        private FakeSequenceRepository() {
-            super(null);
-        }
-
-        @Override
-        public long nextSequence(String sequenceName) {
-            long next = nextByName.getOrDefault(sequenceName, 0L) + 1L;
-            nextByName.put(sequenceName, next);
-            return next;
-        }
-    }
-
     private static final class FakeResultRepository extends MatchingResultRepository {
         private final List<MatchResultEvent> results = new ArrayList<>();
         private final List<MatchTradeEvent> trades = new ArrayList<>();
@@ -817,13 +801,10 @@ class MatchingServiceTest {
         }
 
         @Override
-        public boolean commandResultExists(long commandId) {
-            return results.stream().anyMatch(result -> result.commandId() == commandId);
-        }
-
-        @Override
-        public boolean orderExists(long orderId) {
-            return !missingOrderIds.contains(orderId);
+        public CommandState commandState(long commandId, long orderId) {
+            return new CommandState(
+                    results.stream().anyMatch(result -> result.commandId() == commandId),
+                    !missingOrderIds.contains(orderId));
         }
 
         @Override
@@ -850,7 +831,17 @@ class MatchingServiceTest {
             return new MatchedOrderSnapshot(orderInstrumentVersion(orderId), orderMarginMode(orderId),
                     orderPositionSide(orderId), 2L, 5L,
                     orderQuantitySteps.getOrDefault(orderId, 10L),
-                    orderRemainingQuantitySteps.getOrDefault(orderId, 10L));
+                    orderRemainingQuantitySteps.getOrDefault(orderId, 10L),
+                    false);
+        }
+
+        @Override
+        public Map<Long, MatchedOrderSnapshot> orderSnapshots(Collection<Long> orderIds) {
+            Map<Long, MatchedOrderSnapshot> snapshots = new HashMap<>();
+            for (long orderId : orderIds) {
+                snapshots.put(orderId, orderSnapshot(orderId));
+            }
+            return snapshots;
         }
 
         @Override
@@ -866,13 +857,12 @@ class MatchingServiceTest {
         }
 
         @Override
-        public boolean saveTrade(MatchTradeEvent trade) {
+        public void saveTrades(List<MatchTradeEvent> batch) {
             if (rejectNextSaveTrade) {
                 rejectNextSaveTrade = false;
-                return false;
+                throw new IllegalStateException("rejected fake match trade batch");
             }
-            trades.add(trade);
-            return true;
+            trades.addAll(batch);
         }
 
         @Override
@@ -881,10 +871,13 @@ class MatchingServiceTest {
         }
 
         @Override
-        public void applyMakerFill(MatchTradeEvent trade) {
-            makerFillUpdates++;
-            orderRemainingQuantitySteps.computeIfPresent(
-                    trade.makerOrderId(), (ignored, remaining) -> Math.subtractExact(remaining, trade.quantitySteps()));
+        public void applyMakerFills(List<MatchTradeEvent> batch) {
+            makerFillUpdates += batch.size();
+            for (MatchTradeEvent trade : batch) {
+                orderRemainingQuantitySteps.computeIfPresent(
+                        trade.makerOrderId(),
+                        (ignored, remaining) -> Math.subtractExact(remaining, trade.quantitySteps()));
+            }
         }
     }
 
@@ -892,18 +885,16 @@ class MatchingServiceTest {
         private final List<OutboxRecord> records = new ArrayList<>();
 
         private FakeOutboxRepository() {
-            super(null, null);
+            super(null);
         }
 
         @Override
-        public void enqueue(String aggregateType,
-                            long aggregateId,
-                            String topic,
-                            String eventKey,
-                            String eventType,
-                            String payload,
-                            Instant now) {
-            records.add(new OutboxRecord(aggregateType, aggregateId, topic, eventKey, eventType, payload));
+        public void enqueueBatch(List<MatchingOutboxWrite> writes) {
+            for (MatchingOutboxWrite write : writes) {
+                records.add(new OutboxRecord(
+                        write.aggregateType(), write.aggregateId(), write.topic(),
+                        write.eventKey(), write.eventType(), write.payload()));
+            }
         }
     }
 

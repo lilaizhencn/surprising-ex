@@ -23,7 +23,7 @@ The projection stores only `ACCEPTED` and `PARTIALLY_FILLED` orders. `CANCEL_REQ
 ## Write and recovery flow
 
 1. Order entry and every state mutation update `trading_orders` and write the existing transactional outbox in the same PostgreSQL transaction. `trading_orders.revision` starts at 1 and each direct order-state or matching fill mutation increments it.
-2. The cache consumer receives committed order events, matching results, and match trades, reloads the row from PostgreSQL, verifies the configured product line, and invokes one Lua revision compare-and-set.
+2. The cache consumer receives committed order events and matching results in Kafka batches, deduplicates all affected taker/maker order ids, and reloads them with one bounded PostgreSQL query per batch. It then verifies the configured product line and invokes one Lua revision compare-and-set per affected order.
 3. The Lua script clears a user's old epoch only once, ignores a revision not newer than the retained revision, and updates the ZSET/hash/revision hash atomically.
 4. A token-leased, paged rebuild scans active users and their active orders. It starts a new epoch, lets live Kafka updates safely overlap, and marks the line ready only after the scan completes. The ready marker is refreshed and a complete rebuild is required at most every configured `rebuild-max-age` (five minutes by default).
 

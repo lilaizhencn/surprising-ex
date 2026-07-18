@@ -186,7 +186,7 @@ class AccountUserCommandProcessorTest {
     @Test
     void partialOrderReleaseUsesTheMatchingQuantitySnapshot() {
         OrderReleaseAccountCommand payload = new OrderReleaseAccountCommand(
-                9007L, false, 10L, 4L, "INTERNAL_MARKET_MAKER_SELF_TRADE", OCCURRED_AT);
+                9007L, false, 10L, 4L, true, "INTERNAL_MARKET_MAKER_SELF_TRADE", OCCURRED_AT);
         AccountUserCommand command = new AccountUserCommand(
                 AccountUserCommand.CURRENT_SCHEMA_VERSION,
                 "order-release:9007",
@@ -208,7 +208,7 @@ class AccountUserCommandProcessorTest {
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.APPLIED);
         verify(reservationRepository).release(
                 ProductLine.LINEAR_PERPETUAL, 1001L, 9007L, false, 10L, 4L,
-                "INTERNAL_MARKET_MAKER_SELF_TRADE", OCCURRED_AT);
+                true, "INTERNAL_MARKET_MAKER_SELF_TRADE", OCCURRED_AT);
     }
 
     @Test
@@ -246,6 +246,8 @@ class AccountUserCommandProcessorTest {
                 "USDT",
                 MarginMode.CROSS,
                 PositionSide.NET,
+                100L,
+                false,
                 500L);
         return new AccountUserCommand(
                 AccountUserCommand.CURRENT_SCHEMA_VERSION,
@@ -269,7 +271,7 @@ class AccountUserCommandProcessorTest {
                 100L, 50L, 60_000L, 10L,
                 false, false, OCCURRED_AT, "trace-trade-8001");
         TradeSideSettlementCommand payload =
-                new TradeSideSettlementCommand(trade, TradeParticipantRole.TAKER);
+                new TradeSideSettlementCommand(trade, TradeParticipantRole.TAKER, 100L, false);
         return new AccountUserCommand(
                 AccountUserCommand.CURRENT_SCHEMA_VERSION,
                 "TRADE_SIDE_SETTLE:LINEAR_PERPETUAL:8001:TAKER:1001",

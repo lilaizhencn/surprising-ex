@@ -23,7 +23,7 @@ surprising:order:v1:{LINEAR_PERPETUAL:1001}:open:epoch
 ## 写入与恢复
 
 1. 订单创建和每次状态变更都在同一个 PostgreSQL 事务中更新 `trading_orders` 并写入既有 outbox。`trading_orders.revision` 从 1 开始；订单状态和撮合成交的每次直接更新都会递增它。
-2. 缓存消费者接收已提交的订单事件、撮合结果和成交事件，重新读取权威订单行，校验产品线后执行一次 Lua revision CAS。
+2. 缓存消费者批量接收已提交的订单事件和撮合结果，去重全部受影响的 taker/maker 订单号，并在每个 Kafka 批次内用一次有界 PostgreSQL 查询读取；随后校验产品线，对每个受影响订单执行一次 Lua revision CAS。
 3. Lua 脚本只在用户仍属旧 epoch 时清空旧 key；只接受更大的 revision，并原子更新 ZSET、快照 Hash 和 revision Hash。
 4. token lease 保护分页重建：先创建新 epoch，再扫描活跃用户及其活跃订单。实时 Kafka 投影可以并行运行并由更高 revision 胜出；扫描结束后才标记 ready。ready 会定时刷新，默认最长五分钟完成一次完整重建。
 

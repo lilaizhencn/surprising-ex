@@ -984,8 +984,9 @@ class AccountRepositoryTest {
         when(jdbcTemplate.query(contains("FROM account_margin_reservations"), anyRowMapper(),
                 eq(9001L), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
 
-        assertThatThrownBy(() -> repository.consumeOrderMargin(9001L, 1001L, "BTC-USDT",
-                MarginMode.CROSS, 3L, 30L, false, Instant.parse("2026-07-01T00:00:00Z")))
+        assertThatThrownBy(() -> repository.consumeOrderMargin(ProductLine.LINEAR_PERPETUAL,
+                9001L, 1001L, "BTC-USDT", MarginMode.CROSS,
+                3L, 30L, 10L, false, false, Instant.parse("2026-07-01T00:00:00Z")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("missing order margin reservation");
     }
@@ -1003,15 +1004,16 @@ class AccountRepositoryTest {
                     when(rs.getLong("released_units")).thenReturn(0L);
                     when(rs.getLong("position_margin_units")).thenReturn(0L);
                     when(rs.getString("margin_mode")).thenReturn("CROSS");
-                    when(rs.getLong("quantity_steps")).thenReturn(10L);
+                    when(rs.getLong("order_quantity_steps")).thenReturn(10L);
                     when(rs.getBoolean("reduce_only")).thenReturn(false);
                     return List.of(mapper.mapRow(rs, 0));
                 });
         when(jdbcTemplate.update(contains("UPDATE account_margin_reservations"), any(Object[].class)))
                 .thenReturn(0);
 
-        assertThatThrownBy(() -> repository.consumeOrderMargin(9001L, 1001L, "BTC-USDT",
-                MarginMode.CROSS, 3L, 30L, false, Instant.parse("2026-07-01T00:00:00Z")))
+        assertThatThrownBy(() -> repository.consumeOrderMargin(ProductLine.LINEAR_PERPETUAL,
+                9001L, 1001L, "BTC-USDT", MarginMode.CROSS,
+                3L, 30L, 10L, false, false, Instant.parse("2026-07-01T00:00:00Z")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("order margin consumption");
     }
@@ -1030,7 +1032,7 @@ class AccountRepositoryTest {
                     when(rs.getLong("released_units")).thenReturn(0L);
                     when(rs.getLong("position_margin_units")).thenReturn(0L);
                     when(rs.getString("margin_mode")).thenReturn("CROSS");
-                    when(rs.getLong("quantity_steps")).thenReturn(6L);
+                    when(rs.getLong("order_quantity_steps")).thenReturn(6L);
                     when(rs.getBoolean("reduce_only")).thenReturn(false);
                     return List.of(mapper.mapRow(rs, 0));
                 });
@@ -1041,7 +1043,9 @@ class AccountRepositoryTest {
         when(jdbcTemplate.update(contains("UPDATE account_balances"), any(Object[].class)))
                 .thenReturn(1);
 
-        repository.consumeOrderMargin(9001L, 1001L, "BTC-USDT", MarginMode.CROSS, 6L, 600L, true, now);
+        repository.consumeOrderMargin(ProductLine.LINEAR_PERPETUAL,
+                9001L, 1001L, "BTC-USDT", MarginMode.CROSS,
+                6L, 600L, 6L, false, true, now);
 
         verify(jdbcTemplate).update(contains("INSERT INTO account_position_margins"),
                 eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"), eq("NET"),
@@ -1067,7 +1071,7 @@ class AccountRepositoryTest {
                     when(rs.getLong("released_units")).thenReturn(0L);
                     when(rs.getLong("position_margin_units")).thenReturn(0L);
                     when(rs.getString("margin_mode")).thenReturn("CROSS");
-                    when(rs.getLong("quantity_steps")).thenReturn(6L);
+                    when(rs.getLong("order_quantity_steps")).thenReturn(6L);
                     when(rs.getBoolean("reduce_only")).thenReturn(false);
                     return List.of(mapper.mapRow(rs, 0));
                 });
@@ -1078,7 +1082,9 @@ class AccountRepositoryTest {
         when(jdbcTemplate.update(contains("UPDATE account_product_balances"), any(Object[].class)))
                 .thenReturn(1);
 
-        repository.consumeOrderMargin(9001L, 1001L, "BTC-USD", MarginMode.CROSS, 6L, 600L, true, now);
+        repository.consumeOrderMargin(ProductLine.LINEAR_PERPETUAL,
+                9001L, 1001L, "BTC-USD", MarginMode.CROSS,
+                6L, 600L, 6L, false, true, now);
 
         verify(jdbcTemplate).update(contains("INSERT INTO account_position_margins"),
                 eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USD"), eq("BTC"), eq("CROSS"), eq("NET"),
@@ -1096,19 +1102,12 @@ class AccountRepositoryTest {
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         when(jdbcTemplate.query(contains("FROM account_margin_reservations"), anyRowMapper(),
                 eq(9001L), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
-        when(jdbcTemplate.query(contains("SELECT reduce_only"), anyRowMapper(),
-                eq(9001L), eq(1001L), eq("BTC-USDT"))).thenAnswer(invocation -> {
-                    RowMapper<?> mapper = invocation.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.getBoolean("reduce_only")).thenReturn(false);
-                    return List.of(mapper.mapRow(rs, 0));
-                });
-
         assertThatThrownBy(() -> repository.releaseOrderMargin(9001L, 1001L, "BTC-USDT",
-                3L, false, now))
+                3L, 10L, false, false, now))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("missing order margin reservation for closing fill 9001");
         verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
+        verify(jdbcTemplate, never()).query(contains("trading_orders"), anyRowMapper(), any(Object[].class));
     }
 
     @Test
@@ -1117,33 +1116,35 @@ class AccountRepositoryTest {
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         when(jdbcTemplate.query(contains("FROM account_margin_reservations"), anyRowMapper(),
                 eq(9001L), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
-        when(jdbcTemplate.query(contains("SELECT reduce_only"), anyRowMapper(),
-                eq(9001L), eq(1001L), eq("BTC-USDT"))).thenAnswer(invocation -> {
-                    RowMapper<?> mapper = invocation.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.getBoolean("reduce_only")).thenReturn(true);
-                    return List.of(mapper.mapRow(rs, 0));
-                });
-
-        repository.releaseOrderMargin(9001L, 1001L, "BTC-USDT", 3L, true, now);
+        repository.releaseOrderMargin(9001L, 1001L, "BTC-USDT",
+                3L, 10L, true, true, now);
 
         verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
         verify(jdbcTemplate, never()).update(contains("UPDATE account_margin_reservations"), any(Object[].class));
     }
 
     @Test
-    void closingFillFailsWhenOrderRowIsMissingForMarginRelease() {
+    void closingFillRejectsMismatchedReservationSnapshotWithoutQueryingTradingTables() throws Exception {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         when(jdbcTemplate.query(contains("FROM account_margin_reservations"), anyRowMapper(),
-                eq(9001L), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
-        when(jdbcTemplate.query(contains("SELECT reduce_only"), anyRowMapper(),
-                eq(9001L), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
+                eq(9001L), eq(1001L), eq("BTC-USDT"))).thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getLong("user_id")).thenReturn(1001L);
+                    when(rs.getString("asset")).thenReturn("USDT");
+                    when(rs.getLong("reserved_units")).thenReturn(100L);
+                    when(rs.getString("margin_mode")).thenReturn("CROSS");
+                    when(rs.getLong("order_quantity_steps")).thenReturn(10L);
+                    when(rs.getBoolean("reduce_only")).thenReturn(false);
+                    return List.of(mapper.mapRow(rs, 0));
+                });
 
         assertThatThrownBy(() -> repository.releaseOrderMargin(9001L, 1001L, "BTC-USDT",
-                3L, false, now))
+                3L, 9L, false, false, now))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("order not found for account margin release 9001");
+                .hasMessageContaining("order quantity does not match account reservation");
+        verify(jdbcTemplate, never()).query(contains("trading_orders"), anyRowMapper(), any(Object[].class));
     }
 
     @SuppressWarnings("unchecked")

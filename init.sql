@@ -741,13 +741,6 @@ CREATE INDEX IF NOT EXISTS funding_payments_pending_command_idx
     INCLUDE (settlement_id, user_id)
     WHERE status = 'PENDING';
 
-CREATE TABLE IF NOT EXISTS trading_sequences (
-    sequence_name       TEXT PRIMARY KEY,
-    sequence_value      BIGINT NOT NULL,
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT trading_sequences_positive CHECK (sequence_value > 0)
-);
-
 CREATE SEQUENCE IF NOT EXISTS trading_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_command_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
@@ -755,7 +748,6 @@ CREATE SEQUENCE IF NOT EXISTS trading_outbox_seq AS BIGINT START WITH 1 INCREMEN
 CREATE SEQUENCE IF NOT EXISTS trading_margin_reservation_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_spot_reservation_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_fee_schedule_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
-CREATE SEQUENCE IF NOT EXISTS trading_match_trade_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_matching_symbol_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 CREATE SEQUENCE IF NOT EXISTS trading_matching_asset_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 CREATE SEQUENCE IF NOT EXISTS trading_trigger_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
@@ -2130,6 +2122,8 @@ CREATE TABLE IF NOT EXISTS account_margin_reservations (
     symbol              TEXT NOT NULL,
     margin_mode         TEXT NOT NULL DEFAULT 'CROSS',
     position_side       TEXT NOT NULL DEFAULT 'NET',
+    order_quantity_steps BIGINT NOT NULL,
+    reduce_only         BOOLEAN NOT NULL,
     reserved_units      BIGINT NOT NULL,
     released_units      BIGINT NOT NULL DEFAULT 0,
     position_margin_units BIGINT NOT NULL DEFAULT 0,
@@ -2146,7 +2140,8 @@ CREATE TABLE IF NOT EXISTS account_margin_reservations (
     CONSTRAINT account_margin_reservations_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
     CONSTRAINT account_margin_reservations_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
     CONSTRAINT account_margin_reservations_non_negative CHECK (
-        reserved_units >= 0
+        order_quantity_steps > 0
+        AND reserved_units >= 0
         AND released_units >= 0
         AND position_margin_units >= 0
         AND released_units + position_margin_units <= reserved_units

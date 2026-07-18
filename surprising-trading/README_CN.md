@@ -319,8 +319,10 @@ symbol 在 exchange-core 内注册为 `CURRENCY_EXCHANGE_PAIR`。这是有意设
 - `GTC/IOC/FOK/GTX` -> exchange-core 对应 order type；GTX/post-only 只对 `PLACE` 在提交前检查盘口，若会吃单则拒绝。`CANCEL` 必须绕过 post-only 检查。
 - `MARKET` 转换为基于最新 mark price 和配置最大滑点的 IOC/FOK 保护限价单。
 - `IOC`、`FOK`、`MARKET` 订单在撮合返回后就是终态，撮合结果落库后会释放未成交部分冻结保证金。如果 MARKET 订单按保守风险边界冻结、但按更优订单簿价格成交，account 结算成交时会释放差额。
-- `trading_match_trades` 使用 `(symbol, trade_id)` 作为成交幂等键，和 Kafka 按 symbol 分区、重放的模型保持一致。
-- `trading_match_results` 和 `trading_match_trades` 是撮合结果重放幂等门。结果或成交行已存在时，服务会跳过该行后续副作用，不能重复更新订单成交、释放保证金或写 outbox。
+- `trading_match_trades` 使用 `(product_line, symbol, trade_id)` 作为成交幂等键。`trade_id` 由 `commandId * 1_000_000 + matchIndex` 确定性生成，去掉每笔 fill 的数据库序列往返。
+- `trading_match_results` 是 command 重放幂等门；已有 `command_id` 的重放直接结束。新结果写入时若出现 trade-id 冲突，整笔事务按不变量异常失败。
+- 每个 command 的 maker 订单快照用一次有界批量查询读取；成交和资金 outbox 使用 JDBC batch，maker 成交量使用一条带条件保护的集合更新。
+- 资金结算命令携带不可变的订单总量和 `reduceOnly` 快照；account-provider 对照自己持有的 reservation 校验，成交热路径不再 join `trading_orders`。
 - guarded 订单成交/状态更新、保证金释放和 matching outbox 写入仍然必须影响 1 行。若 overfill guard、数量不变量不一致、目标订单缺失或 outbox 写入导致行数异常，matcher 会失败并走重启恢复，不能在已变更的 exchange-core 内存簿上继续处理。
 
 当前 matching-provider 使用 exchange-core 的真实订单簿和成交事件链，但关闭 exchange-core 内置风险处理和内置手续费。订单入口已接入下单前初始保证金冻结；账户 provider 已接入成交后的开仓保证金迁移，并按 `MatchTradeEvent` 必须携带的费率写入 maker/taker `TRADE_FEE` ledger。资金费率、保险基金和 ADL 由独立结算模块处理。
@@ -458,7 +460,6 @@ curl 'http://localhost:9084/api/v1/trading/orders/open?userId=1001&symbol=BTC-US
 
 根目录 [init.sql](../init.sql) 创建：
 
-- `trading_sequences`（兼容低频 legacy 计数器；高频交易链路 ID 使用 native sequence）
 - `trading_order_seq`、`trading_event_seq`、`trading_command_seq`、`trading_outbox_seq`
 - `trading_orders`
 - `trading_order_events`

@@ -13,17 +13,17 @@ public record OrderReserveAccountCommand(
         String asset,
         MarginMode marginMode,
         PositionSide positionSide,
+        long orderQuantitySteps,
+        boolean reduceOnly,
         long reservedUnits) {
 
     public OrderReserveAccountCommand {
         if (orderId <= 0 || symbol == null || symbol.isBlank() || side == null || reservationKind == null
-                || asset == null || asset.isBlank() || reservedUnits <= 0) {
+                || accountType == null || asset == null || asset.isBlank()
+                || orderQuantitySteps <= 0 || reservedUnits <= 0) {
             throw new IllegalArgumentException("invalid order reservation command");
         }
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
-        if (reservationKind == OrderReservationKind.DERIVATIVE_MARGIN && accountType == null) {
-            throw new IllegalArgumentException("accountType is required for derivative margin reservation");
-        }
     }
 }

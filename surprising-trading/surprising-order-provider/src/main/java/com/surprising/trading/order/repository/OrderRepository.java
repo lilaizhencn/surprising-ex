@@ -20,7 +20,11 @@ import com.surprising.trading.order.model.ReduceOnlyPosition;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -220,6 +224,24 @@ public class OrderRepository {
     public Optional<OrderRecord> findByOrderId(long orderId) {
         return jdbcTemplate.query("SELECT * FROM trading_orders WHERE order_id = ?",
                 (rs, rowNum) -> toRecord(rs), orderId).stream().findFirst();
+    }
+
+    public Map<Long, OrderRecord> findByOrderIds(Collection<Long> orderIds) {
+        if (orderIds == null || orderIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> uniqueIds = orderIds.stream().distinct().toList();
+        Map<Long, OrderRecord> orders = new LinkedHashMap<>(uniqueIds.size());
+        for (int offset = 0; offset < uniqueIds.size(); offset += 1_000) {
+            List<Long> batch = uniqueIds.subList(offset, Math.min(offset + 1_000, uniqueIds.size()));
+            String placeholders = String.join(", ", Collections.nCopies(batch.size(), "?"));
+            jdbcTemplate.query("SELECT * FROM trading_orders WHERE order_id IN (" + placeholders + ")",
+                    rs -> {
+                        OrderRecord order = toRecord(rs);
+                        orders.put(order.orderId(), order);
+                    }, batch.toArray());
+        }
+        return Map.copyOf(orders);
     }
 
     public boolean orderMatchesContractType(long orderId, String contractType) {

@@ -97,6 +97,11 @@ trading_orders.PENDING_RESERVE
 订单不能在 reservation 成功前进入撮合。撤单、拒单和成交后的释放使用 `ORDER_RELEASE`；
 需要等待成交侧结算时，release 依赖该侧的 `TRADE_SIDE_SETTLE`。
 
+`ORDER_RESERVE` 会把订单总量和 `reduceOnly` 写入 account 自己的 reservation 行；
+`TRADE_SIDE_SETTLE` 与 `ORDER_RELEASE` 都携带同一份不可变快照。account 必须校验
+产品线、账户类型、用户、订单总量和 `reduceOnly` 后才可迁移或释放保证金，成交热路径不再读取
+`trading_orders`。快照不一致、非 reduce-only 订单缺 reservation 或命令用户不匹配都必须整笔回滚。
+
 ### 双边成交
 
 一个成交涉及两个用户，不能放进“单用户分区”后仍声称原子。matching-provider 为同一成交写：
