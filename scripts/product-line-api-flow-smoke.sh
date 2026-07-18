@@ -851,9 +851,13 @@ def symbol_and_price(i):
 price_rows = []
 for i in range(count):
     symbol, ticks, underlying, underlying_ticks = symbol_and_price(i)
-    price_rows.append((symbol, ticks, 500000 + run_seq % 100000 + i))
+    # The mark-price consumers discard non-increasing sequences.  The refresher
+    # runs throughout a stress test, so derive every per-symbol sequence from
+    # the wall-clock millisecond base without truncating it.  Multiplication
+    # reserves enough consecutive values for all instruments emitted in a pass.
+    price_rows.append((symbol, ticks, run_seq * 100 + i))
     if underlying:
-        price_rows.append((underlying, underlying_ticks, 600000 + run_seq % 100000 + i))
+        price_rows.append((underlying, underlying_ticks, run_seq * 100 + count + i))
 
 deduped = {}
 for symbol, ticks, sequence in price_rows:
