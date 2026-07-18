@@ -24,14 +24,18 @@ class LiquidationPropertiesTest {
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("cleanupBatchSize");
         assertThatThrownBy(() -> outbox.setCleanupMaxBatches(0))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("cleanupMaxBatches");
+        assertThatThrownBy(() -> outbox.setMaxInFlight(0))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("maxInFlight");
 
         outbox.setRetention(Duration.ofSeconds(1));
         outbox.setCleanupDelayMs(1);
         outbox.setCleanupBatchSize(1);
         outbox.setCleanupMaxBatches(1);
+        outbox.setMaxInFlight(1);
         assertThat(outbox.getRetention()).isEqualTo(Duration.ofSeconds(1));
         assertThat(outbox.getCleanupDelayMs()).isEqualTo(1);
         assertThat(outbox.getCleanupBatchSize()).isEqualTo(1);
         assertThat(outbox.getCleanupMaxBatches()).isEqualTo(1);
+        assertThat(outbox.getMaxInFlight()).isEqualTo(1);
     }
 }

@@ -3,6 +3,7 @@ package com.surprising.liquidation.provider.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -19,6 +20,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.sql.ResultSet;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -220,6 +222,23 @@ class LiquidationOrderRepositoryTest {
         assertThatThrownBy(() -> repository.markPublished(901L, Instant.parse("2026-07-01T00:00:00Z")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("liquidation outbox publish mark");
+    }
+
+    @Test
+    void marksSuccessfulLiquidationPublishesInOneOwnedAggregateUpdate() {
+        LiquidationOrderRepository repository = repository();
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(2);
+
+        repository.markPublished(List.of(901L, 902L), Instant.parse("2026-07-01T00:00:00Z"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(sql.capture(), args.capture());
+        assertThat(sql.getValue())
+                .contains("aggregate_type = 'LIQUIDATION_ORDER'")
+                .contains("published_at IS NULL")
+                .contains("id IN (?, ?)");
+        assertThat(args.getValue()).contains(901L, 902L);
     }
 
     @Test

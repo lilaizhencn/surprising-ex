@@ -69,6 +69,7 @@ surprising:
         batch-size: 200
         publish-delay-ms: 200
         send-timeout: 3s
+        max-in-flight: 32
         retention: 7d
         cleanup-delay-ms: 60000
         cleanup-batch-size: 10000

@@ -108,6 +108,25 @@ class TriggerOrderOutboxRepositoryTest {
         assertThat(args.getValue()[0]).isEqualTo("TRIGGER_ORDER");
     }
 
+    @Test
+    void marksSuccessfulTriggerPublishesInOneScopedUpdate() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderOutboxRepository repository = new TriggerOrderOutboxRepository(
+                jdbcTemplate, mock(TriggerOrderRepository.class), new TriggerProperties(), mock(ObjectMapper.class));
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(2);
+
+        repository.markPublished(List.of(801L, 802L), Instant.parse("2026-07-01T00:00:00Z"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(sql.capture(), args.capture());
+        assertThat(sql.getValue())
+                .contains("aggregate_type = ?")
+                .contains("published_at IS NULL")
+                .contains("id IN (?, ?)");
+        assertThat(args.getValue()).contains("TRIGGER_ORDER", 801L, 802L);
+    }
+
     @SuppressWarnings("unchecked")
     private RowMapper<Object> anyRowMapper() {
         return any(RowMapper.class);

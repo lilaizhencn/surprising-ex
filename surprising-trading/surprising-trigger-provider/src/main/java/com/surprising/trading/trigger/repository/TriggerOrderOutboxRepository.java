@@ -7,6 +7,8 @@ import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import com.surprising.trading.trigger.model.TriggerOutboxRecord;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -96,6 +98,34 @@ public class TriggerOrderOutboxRepository {
                  WHERE id = ? AND aggregate_type = ?
                 """, Timestamp.from(now), Timestamp.from(now), id, AGGREGATE_TYPE);
         requireSingleRow(rows, "trigger order outbox publish mark");
+    }
+
+    public void markPublished(List<Long> ids, Instant now) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        List<Long> uniqueIds = ids.stream().distinct().toList();
+        Timestamp timestamp = Timestamp.from(now);
+        String placeholders = String.join(", ", Collections.nCopies(uniqueIds.size(), "?"));
+        String sql = """
+                UPDATE trading_outbox_events
+                   SET published_at = ?,
+                       updated_at = ?,
+                       last_error = NULL
+                 WHERE published_at IS NULL
+                   AND aggregate_type = ?
+                   AND id IN (%s)
+                """.formatted(placeholders);
+        List<Object> args = new ArrayList<>(uniqueIds.size() + 3);
+        args.add(timestamp);
+        args.add(timestamp);
+        args.add(AGGREGATE_TYPE);
+        args.addAll(uniqueIds);
+        int rows = jdbcTemplate.update(sql, args.toArray());
+        if (rows != uniqueIds.size()) {
+            throw new IllegalStateException("failed to mark all trigger order outbox events published: expected="
+                    + uniqueIds.size() + " actual=" + rows);
+        }
     }
 
     public void markFailed(long id, String error, Instant now) {

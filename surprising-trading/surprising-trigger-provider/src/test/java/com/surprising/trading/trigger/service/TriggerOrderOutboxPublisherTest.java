@@ -43,7 +43,7 @@ class TriggerOrderOutboxPublisherTest {
 
         publisher.publishPending();
 
-        verify(repository).markPublished(eq(11L), any(Instant.class));
+        verify(repository).markPublished(eq(List.of(11L)), any(Instant.class));
         verify(repository, never()).markFailed(eq(11L), any(), any(Instant.class));
     }
 
@@ -61,7 +61,7 @@ class TriggerOrderOutboxPublisherTest {
         publisher.publishPending();
 
         verify(repository).markFailed(eq(12L), any(), any(Instant.class));
-        verify(repository, never()).markPublished(eq(12L), any(Instant.class));
+        verify(repository, never()).markPublished(eq(List.of(12L)), any(Instant.class));
     }
 
     @Test

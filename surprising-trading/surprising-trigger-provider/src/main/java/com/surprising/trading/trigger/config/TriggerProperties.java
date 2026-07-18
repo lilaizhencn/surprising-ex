@@ -224,6 +224,7 @@ public class TriggerProperties {
         private int batchSize = 200;
         private long publishDelayMs = 200L;
         private Duration sendTimeout = Duration.ofSeconds(3);
+        private int maxInFlight = 32;
         private Duration retention = Duration.ofDays(7);
         private long cleanupDelayMs = 60_000L;
         private int cleanupBatchSize = 10_000;
@@ -251,6 +252,17 @@ public class TriggerProperties {
 
         public void setSendTimeout(Duration sendTimeout) {
             this.sendTimeout = sendTimeout;
+        }
+
+        public int getMaxInFlight() {
+            return maxInFlight;
+        }
+
+        public void setMaxInFlight(int maxInFlight) {
+            if (maxInFlight <= 0) {
+                throw new IllegalArgumentException("trigger outbox maxInFlight must be positive");
+            }
+            this.maxInFlight = maxInFlight;
         }
 
         public Duration getRetention() {
