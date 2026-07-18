@@ -124,7 +124,8 @@ admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Use
 
 根目录 [init.sql](../init.sql) 创建：
 
-- `account_sequences`
+- 原生 PostgreSQL 账户 ID Sequence，并由固定 10,000 ID 的 Hi/Lo 号段分配（`account_ledger_entry_seq`、
+  `account_product_ledger_entry_seq`、`account_product_transfer_seq` 及账户事件 Sequence）
 - `account_balances`
 - `account_deficits`
 - `account_ledger_entries`

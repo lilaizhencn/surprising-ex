@@ -1830,27 +1830,27 @@ WITH requested AS (
            ('stress-${RUN_ID}-${product_line}-user-' || gs || '-USDT')::text AS reference_id
       FROM generate_series(0, ${STRESS_USER_COUNT} - 1) AS gs
 ),
-counted AS (
-    SELECT count(*)::bigint AS row_count FROM requested
-),
-seq AS (
-    INSERT INTO account_sequences (sequence_name, sequence_value, updated_at)
-    SELECT 'ledger-entry', row_count, now() FROM counted
-    ON CONFLICT (sequence_name) DO UPDATE SET
-        sequence_value = account_sequences.sequence_value + EXCLUDED.sequence_value,
-        updated_at = now()
-    RETURNING sequence_value
-),
 numbered AS (
     SELECT r.*, row_number() OVER (ORDER BY r.user_id, r.asset) AS rn
       FROM requested r
+),
+block_requests AS (
+    SELECT ((rn - 1) / 10000)::bigint AS block_index
+      FROM numbered
+     GROUP BY ((rn - 1) / 10000)::bigint
+),
+allocated_blocks AS MATERIALIZED (
+    SELECT block_index,
+           nextval('account_ledger_entry_seq') AS high
+      FROM block_requests
 ),
 ledger_rows AS (
     INSERT INTO account_ledger_entries (
         entry_id, user_id, asset, amount_units, balance_after_units,
         reference_type, reference_id, reason, created_at
     )
-    SELECT (seq.sequence_value - counted.row_count + numbered.rn)::bigint,
+    SELECT ((allocated_blocks.high - 1) * 10000
+              + numbered.rn - allocated_blocks.block_index * 10000)::bigint,
            numbered.user_id,
            numbered.asset,
            numbered.amount_units,
@@ -1860,8 +1860,8 @@ ledger_rows AS (
            'PRODUCT_LINE_MULTI_SYMBOL_STRESS',
            now()
       FROM numbered
-      CROSS JOIN seq
-      CROSS JOIN counted
+      JOIN allocated_blocks
+        ON allocated_blocks.block_index = ((numbered.rn - 1) / 10000)::bigint
     ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
     RETURNING user_id, asset, amount_units, reference_id
 ),
@@ -1931,27 +1931,27 @@ WITH requested(user_id, asset, amount_units, reference_id) AS (
     VALUES
 {values}
 ),
-counted AS (
-    SELECT count(*)::bigint AS row_count FROM requested
-),
-seq AS (
-    INSERT INTO account_sequences (sequence_name, sequence_value, updated_at)
-    SELECT 'product-ledger-entry', row_count, now() FROM counted
-    ON CONFLICT (sequence_name) DO UPDATE SET
-        sequence_value = account_sequences.sequence_value + EXCLUDED.sequence_value,
-        updated_at = now()
-    RETURNING sequence_value
-),
 numbered AS (
     SELECT r.*, row_number() OVER (ORDER BY r.user_id, r.asset) AS rn
       FROM requested r
+),
+block_requests AS (
+    SELECT ((rn - 1) / 10000)::bigint AS block_index
+      FROM numbered
+     GROUP BY ((rn - 1) / 10000)::bigint
+),
+allocated_blocks AS MATERIALIZED (
+    SELECT block_index,
+           nextval('account_product_ledger_entry_seq') AS high
+      FROM block_requests
 ),
 ledger_rows AS (
     INSERT INTO account_product_ledger_entries (
         entry_id, user_id, account_type, asset, amount_units, balance_after_units,
         reference_type, reference_id, reason, created_at
     )
-    SELECT (seq.sequence_value - counted.row_count + numbered.rn)::bigint,
+    SELECT ((allocated_blocks.high - 1) * 10000
+              + numbered.rn - allocated_blocks.block_index * 10000)::bigint,
            numbered.user_id,
            {quote(account_type)},
            numbered.asset,
@@ -1962,8 +1962,8 @@ ledger_rows AS (
            'PRODUCT_LINE_MULTI_SYMBOL_STRESS',
            now()
       FROM numbered
-      CROSS JOIN seq
-      CROSS JOIN counted
+      JOIN allocated_blocks
+        ON allocated_blocks.block_index = ((numbered.rn - 1) / 10000)::bigint
     ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
     RETURNING user_id, account_type, asset, amount_units, reference_id
 ),

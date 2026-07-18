@@ -11,8 +11,11 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -21,9 +24,14 @@ import org.springframework.stereotype.Repository;
 public class InsuranceRepository {
 
     private static final String DEFAULT_ACCOUNT_TYPE = "USDT_PERPETUAL";
+    private static final int ACCOUNT_HI_LO_BLOCK_SIZE = 10_000;
+    private static final Map<String, String> ACCOUNT_DATABASE_SEQUENCES = Map.of(
+            "ledger-entry", "public.account_ledger_entry_seq",
+            "product-ledger-entry", "public.account_product_ledger_entry_seq");
 
     private final JdbcTemplate jdbcTemplate;
     private final InsuranceProperties properties;
+    private final ConcurrentMap<String, AccountIdRange> accountIdRanges = new ConcurrentHashMap<>();
 
     public InsuranceRepository(JdbcTemplate jdbcTemplate) {
         this(jdbcTemplate, new InsuranceProperties());
@@ -51,18 +59,39 @@ public class InsuranceRepository {
     }
 
     public long nextAccountSequence(String sequenceName) {
-        Long value = jdbcTemplate.queryForObject("""
-                INSERT INTO account_sequences (sequence_name, sequence_value, updated_at)
-                VALUES (?, 1, now())
-                ON CONFLICT (sequence_name) DO UPDATE SET
-                    sequence_value = account_sequences.sequence_value + 1,
-                    updated_at = now()
-                RETURNING sequence_value
-                """, Long.class, sequenceName);
-        if (value == null) {
-            throw new IllegalStateException("failed to allocate account sequence " + sequenceName);
+        String databaseSequence = ACCOUNT_DATABASE_SEQUENCES.get(sequenceName);
+        if (databaseSequence == null) {
+            throw new IllegalArgumentException("unsupported account sequence " + sequenceName);
         }
-        return value;
+        return accountIdRanges.computeIfAbsent(sequenceName, ignored -> new AccountIdRange())
+                .next(this, databaseSequence);
+    }
+
+    private long allocateAccountRangeStart(String databaseSequence) {
+        Long value = jdbcTemplate.queryForObject("""
+                SELECT nextval(CAST(? AS regclass))
+                """, Long.class, databaseSequence);
+        if (value == null) {
+            throw new IllegalStateException("failed to allocate account sequence " + databaseSequence);
+        }
+        try {
+            return Math.addExact(Math.multiplyExact(value - 1L, ACCOUNT_HI_LO_BLOCK_SIZE), 1L);
+        } catch (ArithmeticException ex) {
+            throw new IllegalStateException("account sequence exhausted " + databaseSequence, ex);
+        }
+    }
+
+    private static final class AccountIdRange {
+        private long next;
+        private long end;
+
+        synchronized long next(InsuranceRepository repository, String databaseSequence) {
+            if (next == 0L || next > end) {
+                next = repository.allocateAccountRangeStart(databaseSequence);
+                end = Math.addExact(next, ACCOUNT_HI_LO_BLOCK_SIZE - 1L);
+            }
+            return next++;
+        }
     }
 
     /**
@@ -428,7 +457,7 @@ public class InsuranceRepository {
                         reference_type, reference_id, reason, created_at
                     ) VALUES (?, ?, ?, ?, ?, ?, 'INSURANCE_COVERAGE', ?, 'COVER_ACCOUNT_DEFICIT', ?)
                     ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                    """, nextAccountSequence("ledger-entry"), deficit.accountType(), deficit.userId(),
+                    """, nextAccountSequence("product-ledger-entry"), deficit.accountType(), deficit.userId(),
                         deficit.asset(), coveredUnits, equityAfter, referenceId, Timestamp.from(now))
                 : jdbcTemplate.update("""
                     INSERT INTO account_ledger_entries (

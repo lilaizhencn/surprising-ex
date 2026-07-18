@@ -163,8 +163,8 @@ class AdlRepositoryTest {
                 .thenReturn(List.of(0L));
         when(jdbcTemplate.queryForObject(contains("INSERT INTO adl_sequences"), eq(Long.class),
                 eq("adl-event"))).thenReturn(301L);
-        when(jdbcTemplate.queryForObject(contains("INSERT INTO account_sequences"), eq(Long.class),
-                eq("ledger-entry"))).thenReturn(401L, 402L, 403L);
+        when(jdbcTemplate.queryForObject(contains("SELECT nextval"), eq(Long.class),
+                eq("public.account_product_ledger_entry_seq"))).thenReturn(1L);
         when(jdbcTemplate.update(contains("UPDATE account_positions"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE trading_symbol_open_interest"), any(Object[].class)))
@@ -226,7 +226,7 @@ class AdlRepositoryTest {
         verify(jdbcTemplate).update(contains("UPDATE account_product_deficits"),
                 eq(0L), any(Timestamp.class), eq("USDT_DELIVERY"), eq(2002L), eq("USDT"));
         verify(jdbcTemplate).update(contains("INSERT INTO account_product_ledger_entries"),
-                eq(401L), eq("USDT_DELIVERY"), eq(1001L), eq("USDT"), eq(500L), eq(600L),
+                eq(1L), eq("USDT_DELIVERY"), eq(1001L), eq("USDT"), eq(500L), eq(600L),
                 eq("ADL_REALIZED_PNL"), eq("301"), eq("ADL_POSITION_DELEVERAGED"), any(Timestamp.class));
         verify(jdbcTemplate).update(contains("INSERT INTO adl_events"),
                 eq(301L), eq("USDT_DELIVERY"), eq(2002L), eq(1001L), eq("USDT"), eq("BTC-USDT-260925"),
@@ -286,8 +286,8 @@ class AdlRepositoryTest {
                 .thenReturn(List.of(0L));
         when(jdbcTemplate.queryForObject(contains("INSERT INTO adl_sequences"), eq(Long.class),
                 eq("adl-event"))).thenReturn(301L);
-        when(jdbcTemplate.queryForObject(contains("INSERT INTO account_sequences"), eq(Long.class),
-                eq("ledger-entry"))).thenReturn(401L, 402L, 403L);
+        when(jdbcTemplate.queryForObject(contains("SELECT nextval"), eq(Long.class),
+                eq("public.account_ledger_entry_seq"))).thenReturn(1L);
         when(jdbcTemplate.update(contains("UPDATE account_positions"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE trading_symbol_open_interest"), any(Object[].class)))
@@ -348,15 +348,15 @@ class AdlRepositoryTest {
         verify(jdbcTemplate).update(contains("UPDATE account_deficits"),
                 eq(0L), any(Timestamp.class), eq(2002L), eq("USDT"));
         verify(jdbcTemplate).update(contains("INSERT INTO account_ledger_entries"),
-                eq(401L), eq(1001L), eq("USDT"), eq(500L), eq(600L),
+                eq(1L), eq(1001L), eq("USDT"), eq(500L), eq(600L),
                 eq("ADL_REALIZED_PNL"), eq("301"), eq("ADL_POSITION_DELEVERAGED"),
                 any(Timestamp.class));
         verify(jdbcTemplate).update(contains("INSERT INTO account_ledger_entries"),
-                eq(402L), eq(1001L), eq("USDT"), eq(-500L), eq(100L),
+                eq(2L), eq(1001L), eq("USDT"), eq(-500L), eq(100L),
                 eq("ADL_TRANSFER"), eq("301"), eq("ADL_DEFICIT_TRANSFER"),
                 any(Timestamp.class));
         verify(jdbcTemplate).update(contains("INSERT INTO account_ledger_entries"),
-                eq(403L), eq(2002L), eq("USDT"), eq(500L), eq(0L),
+                eq(3L), eq(2002L), eq("USDT"), eq(500L), eq(0L),
                 eq("ADL_COVERAGE"), eq("301"), eq("ADL_DEFICIT_COVERAGE"),
                 any(Timestamp.class));
         verify(jdbcTemplate).update(contains("INSERT INTO adl_events"),

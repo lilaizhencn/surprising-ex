@@ -157,8 +157,8 @@ class InsuranceRepositoryTest {
                 eq("insurance-coverage"))).thenReturn(9501L);
         when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
                 eq("insurance-ledger"))).thenReturn(9601L);
-        when(jdbcTemplate.queryForObject(contains("INSERT INTO account_sequences"), eq(Long.class),
-                eq("ledger-entry"))).thenReturn(9701L);
+        when(jdbcTemplate.queryForObject(contains("SELECT nextval"), eq(Long.class),
+                eq("public.account_ledger_entry_seq"))).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO insurance_deficit_coverages"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE insurance_fund_balances"), any(Object[].class)))
@@ -185,7 +185,7 @@ class InsuranceRepositoryTest {
                 eq(9601L), eq("USDT_PERPETUAL"), eq("USDT"), eq(-600L), eq(0L), eq("DEFICIT_COVERAGE"),
                 eq("9501"), eq("COVER_ACCOUNT_DEFICIT"), any(java.sql.Timestamp.class));
         verify(jdbcTemplate).update(contains("INSERT INTO account_ledger_entries"),
-                eq(9701L), eq(4004L), eq("USDT"), eq(600L), eq(-400L),
+                eq(1L), eq(4004L), eq("USDT"), eq(600L), eq(-400L),
                 eq("9501"), any(java.sql.Timestamp.class));
     }
 
@@ -212,8 +212,8 @@ class InsuranceRepositoryTest {
                 eq("insurance-coverage"))).thenReturn(9501L);
         when(jdbcTemplate.queryForObject(contains("INSERT INTO insurance_sequences"), eq(Long.class),
                 eq("insurance-ledger"))).thenReturn(9601L);
-        when(jdbcTemplate.queryForObject(contains("INSERT INTO account_sequences"), eq(Long.class),
-                eq("ledger-entry"))).thenReturn(9701L);
+        when(jdbcTemplate.queryForObject(contains("SELECT nextval"), eq(Long.class),
+                eq("public.account_product_ledger_entry_seq"))).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO insurance_deficit_coverages"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE insurance_fund_balances"), any(Object[].class)))
@@ -230,7 +230,7 @@ class InsuranceRepositoryTest {
         verify(jdbcTemplate).update(contains("UPDATE account_product_deficits"),
                 eq(400L), any(java.sql.Timestamp.class), eq("USDT_DELIVERY"), eq(4004L), eq("USDT"));
         verify(jdbcTemplate).update(contains("INSERT INTO account_product_ledger_entries"),
-                eq(9701L), eq("USDT_DELIVERY"), eq(4004L), eq("USDT"), eq(600L), eq(-400L),
+                eq(1L), eq("USDT_DELIVERY"), eq(4004L), eq("USDT"), eq(600L), eq(-400L),
                 eq("9501"), any(java.sql.Timestamp.class));
         verify(jdbcTemplate, never()).update(contains("UPDATE account_deficits"), any(Object[].class));
     }

@@ -1832,12 +1832,11 @@ CREATE INDEX IF NOT EXISTS trading_match_trades_trace_idx
     ON trading_match_trades (trace_id)
     WHERE trace_id IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS account_sequences (
-    sequence_name       TEXT PRIMARY KEY,
-    sequence_value      BIGINT NOT NULL,
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT account_sequences_positive CHECK (sequence_value > 0)
-);
+CREATE SEQUENCE IF NOT EXISTS account_ledger_entry_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+CREATE SEQUENCE IF NOT EXISTS account_product_ledger_entry_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+CREATE SEQUENCE IF NOT EXISTS account_product_transfer_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
+CREATE SEQUENCE IF NOT EXISTS account_position_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+CREATE SEQUENCE IF NOT EXISTS account_liquidation_fee_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 
 CREATE TABLE IF NOT EXISTS account_asset_scales (
     asset               TEXT PRIMARY KEY,

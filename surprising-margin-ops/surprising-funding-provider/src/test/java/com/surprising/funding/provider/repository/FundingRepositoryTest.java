@@ -251,8 +251,8 @@ class FundingRepositoryTest {
                 1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.SHORT, "USDT",
                 -10L, 1_000L, 90_000L, -90L);
 
-        when(jdbcTemplate.queryForObject(contains("INSERT INTO account_sequences"), eq(Long.class),
-                eq("ledger-entry"))).thenReturn(1L);
+        when(jdbcTemplate.queryForObject(contains("SELECT nextval"), eq(Long.class),
+                eq("public.account_ledger_entry_seq"))).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_ledger_entries"), any(Object[].class)))
@@ -308,8 +308,8 @@ class FundingRepositoryTest {
                 1001L, "BTC-USD", MarginMode.CROSS, PositionSide.NET, "BTC",
                 10L, 1_000L, 90_000L, -90L);
 
-        when(jdbcTemplate.queryForObject(contains("INSERT INTO account_sequences"), eq(Long.class),
-                eq("product-ledger-entry"))).thenReturn(1L);
+        when(jdbcTemplate.queryForObject(contains("SELECT nextval"), eq(Long.class),
+                eq("public.account_product_ledger_entry_seq"))).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO account_product_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_product_ledger_entries"), any(Object[].class)))
@@ -370,8 +370,8 @@ class FundingRepositoryTest {
         FundingPaymentCandidate payment = new FundingPaymentCandidate(
                 1001L, "BTC-USDT", "USDT", 10L, 1_000L, 90_000L, -90L);
 
-        when(jdbcTemplate.queryForObject(contains("INSERT INTO account_sequences"), eq(Long.class),
-                eq("ledger-entry"))).thenReturn(1L);
+        when(jdbcTemplate.queryForObject(contains("SELECT nextval"), eq(Long.class),
+                eq("public.account_ledger_entry_seq"))).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_ledger_entries"), any(Object[].class)))
@@ -421,8 +421,8 @@ class FundingRepositoryTest {
         FundingRepository repository = new FundingRepository(jdbcTemplate);
         FundingPaymentCandidate payment = new FundingPaymentCandidate(
                 1001L, "BTC-USDT", "USDT", 10L, 1_000L, 90_000L, -90L);
-        when(jdbcTemplate.queryForObject(contains("INSERT INTO account_sequences"), eq(Long.class),
-                eq("ledger-entry"))).thenReturn(1L);
+        when(jdbcTemplate.queryForObject(contains("SELECT nextval"), eq(Long.class),
+                eq("public.account_ledger_entry_seq"))).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(0);
 
@@ -437,8 +437,8 @@ class FundingRepositoryTest {
         FundingRepository repository = new FundingRepository(jdbcTemplate);
         FundingPaymentCandidate payment = new FundingPaymentCandidate(
                 1001L, "BTC-USDT", "USDT", -10L, 1_000L, 90_000L, 90L);
-        when(jdbcTemplate.queryForObject(contains("INSERT INTO account_sequences"), eq(Long.class),
-                eq("ledger-entry"))).thenReturn(1L);
+        when(jdbcTemplate.queryForObject(contains("SELECT nextval"), eq(Long.class),
+                eq("public.account_ledger_entry_seq"))).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.queryForObject(contains("SELECT b.available_units"), anyRowMapper(),

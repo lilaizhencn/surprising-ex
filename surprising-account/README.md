@@ -133,7 +133,8 @@ admin APIs must only be callable by deposit, settlement, or controlled back-offi
 
 Root [init.sql](../init.sql) creates:
 
-- `account_sequences`
+- native PostgreSQL account ID sequences with fixed 10,000-ID Hi/Lo allocation (`account_ledger_entry_seq`,
+  `account_product_ledger_entry_seq`, `account_product_transfer_seq`, and account event sequences)
 - `account_balances`
 - `account_deficits`
 - `account_ledger_entries`
