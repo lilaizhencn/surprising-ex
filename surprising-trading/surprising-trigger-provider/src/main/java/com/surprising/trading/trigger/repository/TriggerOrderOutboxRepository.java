@@ -110,6 +110,23 @@ public class TriggerOrderOutboxRepository {
         requireSingleRow(rows, "trigger order outbox failure mark");
     }
 
+    public int deletePublishedBefore(Instant cutoff, int limit) {
+        return jdbcTemplate.update("""
+                WITH candidates AS (
+                    SELECT id
+                      FROM trading_outbox_events
+                     WHERE aggregate_type = ?
+                       AND published_at < ?
+                     ORDER BY published_at ASC, id ASC
+                     LIMIT ?
+                     FOR UPDATE SKIP LOCKED
+                )
+                DELETE FROM trading_outbox_events e
+                 USING candidates c
+                 WHERE e.id = c.id
+                """, AGGREGATE_TYPE, Timestamp.from(cutoff), Math.max(1, limit));
+    }
+
     private String payload(Object value) {
         try {
             return objectMapper.writeValueAsString(value);

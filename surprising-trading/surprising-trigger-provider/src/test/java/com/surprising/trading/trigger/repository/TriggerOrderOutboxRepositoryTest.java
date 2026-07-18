@@ -88,6 +88,26 @@ class TriggerOrderOutboxRepositoryTest {
                 .contains("FOR UPDATE OF e SKIP LOCKED");
     }
 
+    @Test
+    void deletesOnlyPublishedTriggerRowsInLockedBatches() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        TriggerOrderOutboxRepository repository = new TriggerOrderOutboxRepository(
+                jdbcTemplate, mock(TriggerOrderRepository.class), new TriggerProperties(), mock(ObjectMapper.class));
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(7);
+
+        assertThat(repository.deletePublishedBefore(Instant.parse("2026-07-01T00:00:00Z"), 100)).isEqualTo(7);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(sql.capture(), args.capture());
+        assertThat(sql.getValue())
+                .contains("aggregate_type = ?")
+                .contains("published_at < ?")
+                .contains("FOR UPDATE SKIP LOCKED")
+                .contains("DELETE FROM trading_outbox_events");
+        assertThat(args.getValue()[0]).isEqualTo("TRIGGER_ORDER");
+    }
+
     @SuppressWarnings("unchecked")
     private RowMapper<Object> anyRowMapper() {
         return any(RowMapper.class);

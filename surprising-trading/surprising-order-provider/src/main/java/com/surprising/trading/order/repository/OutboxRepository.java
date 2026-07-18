@@ -158,7 +158,8 @@ public class OutboxRepository {
                 WITH candidates AS (
                     SELECT id
                       FROM trading_outbox_events
-                     WHERE published_at < ?
+                     WHERE aggregate_type = 'ORDER'
+                       AND published_at < ?
                      ORDER BY published_at ASC, id ASC
                      LIMIT ?
                      FOR UPDATE SKIP LOCKED

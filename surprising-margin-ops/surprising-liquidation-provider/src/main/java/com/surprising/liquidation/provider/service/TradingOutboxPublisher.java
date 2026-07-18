@@ -58,6 +58,23 @@ public class TradingOutboxPublisher {
         }
     }
 
+    @Scheduled(fixedDelayString = "${surprising.liquidation.outbox.cleanup-delay-ms:60000}")
+    public void cleanupPublished() {
+        int batchSize = Math.max(1, properties.getOutbox().getCleanupBatchSize());
+        int totalDeleted = 0;
+        Instant cutoff = Instant.now().minus(properties.getOutbox().getRetention());
+        for (int batch = 0; batch < Math.max(1, properties.getOutbox().getCleanupMaxBatches()); batch++) {
+            int deleted = orderRepository.deletePublishedBefore(cutoff, batchSize);
+            totalDeleted += deleted;
+            if (deleted < batchSize) {
+                break;
+            }
+        }
+        if (totalDeleted > 0) {
+            log.info("Deleted {} published liquidation outbox rows", totalDeleted);
+        }
+    }
+
     private Duration claimLease(int claimedLimit) {
         Duration budget = properties.getOutbox().getSendTimeout().multipliedBy(Math.max(1, claimedLimit))
                 .plus(CLAIM_LEASE_BUFFER);

@@ -780,8 +780,8 @@ CREATE INDEX account_outbox_pending_idx
 CREATE INDEX account_outbox_aggregate_idx
     ON account_outbox_events (aggregate_type, aggregate_id);
 
-CREATE INDEX account_outbox_published_cleanup_idx
-    ON account_outbox_events (published_at, id)
+CREATE INDEX account_outbox_published_line_cleanup_idx
+    ON account_outbox_events (product_line, published_at, id)
     WHERE published_at IS NOT NULL;
 ```
 
@@ -789,8 +789,10 @@ The publisher claims pending rows with `FOR UPDATE SKIP LOCKED`, so multiple acc
 can drain the outbox safely. Publishing is at-least-once; consumers should deduplicate by event id,
 trade id, or their own latest-position version rules. Insurance uses
 `insurance_fund_ledger(reference_type, reference_id, asset)` with `reference_id = tradeId:orderId`.
-Published rows are transient delivery records: each physical outbox table deletes rows older than seven days in
-bounded `FOR UPDATE SKIP LOCKED` batches. Pending or failed rows are never selected for deletion.
+Published rows are transient delivery records. Every publisher owns a scheduled retention task: the shared
+trading table is partitioned logically by `aggregate_type`, the account table by `product_line`, and the risk
+publisher owns the risk table. Rows older than seven days are deleted once per minute in up to ten short
+10,000-row `FOR UPDATE SKIP LOCKED` batches. Pending or failed rows are never selected for deletion.
 
 ## Liquidation Tables
 

@@ -1584,8 +1584,9 @@ CREATE INDEX IF NOT EXISTS trading_outbox_pending_stream_idx
     ON trading_outbox_events (aggregate_type, topic, event_key, id)
     WHERE published_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS trading_outbox_published_cleanup_idx
-    ON trading_outbox_events (published_at, id)
+DROP INDEX IF EXISTS trading_outbox_published_cleanup_idx;
+CREATE INDEX IF NOT EXISTS trading_outbox_published_owner_cleanup_idx
+    ON trading_outbox_events (aggregate_type, published_at, id)
     WHERE published_at IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS trading_outbox_aggregate_idx
@@ -2583,8 +2584,9 @@ CREATE INDEX IF NOT EXISTS account_outbox_pending_key_idx
     ON account_outbox_events (product_line, topic, event_key, id)
     WHERE published_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS account_outbox_published_cleanup_idx
-    ON account_outbox_events (published_at, id)
+DROP INDEX IF EXISTS account_outbox_published_cleanup_idx;
+CREATE INDEX IF NOT EXISTS account_outbox_published_line_cleanup_idx
+    ON account_outbox_events (product_line, published_at, id)
     WHERE published_at IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS account_outbox_aggregate_idx

@@ -145,6 +145,25 @@ public class MatchingOutboxRepository {
         requireSingleRow(rows, "matching outbox failure mark");
     }
 
+    public int deletePublishedBefore(Instant cutoff, int limit) {
+        return jdbcTemplate.update("""
+                WITH candidates AS (
+                    SELECT id
+                      FROM trading_outbox_events
+                     WHERE aggregate_type IN (
+                               'MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH', 'ACCOUNT_COMMAND'
+                           )
+                       AND published_at < ?
+                     ORDER BY published_at ASC, id ASC
+                     LIMIT ?
+                     FOR UPDATE SKIP LOCKED
+                )
+                DELETE FROM trading_outbox_events e
+                 USING candidates c
+                 WHERE e.id = c.id
+                """, Timestamp.from(cutoff), Math.max(1, limit));
+    }
+
     private String truncate(String value) {
         if (value == null) {
             return null;

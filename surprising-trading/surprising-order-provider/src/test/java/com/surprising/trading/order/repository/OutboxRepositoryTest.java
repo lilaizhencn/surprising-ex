@@ -188,6 +188,7 @@ class OutboxRepositoryTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
         assertThat(sql.getValue())
+                .contains("aggregate_type = 'ORDER'")
                 .contains("published_at < ?")
                 .contains("FOR UPDATE SKIP LOCKED")
                 .contains("DELETE FROM trading_outbox_events");

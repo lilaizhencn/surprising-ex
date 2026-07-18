@@ -138,11 +138,14 @@ class AccountOutboxRepositoryTest {
         assertThat(repository.deletePublishedBefore(Instant.parse("2026-07-01T00:00:00Z"), 100)).isEqualTo(7);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(sql.capture(), args.capture());
         assertThat(sql.getValue())
+                .contains("product_line = ?")
                 .contains("published_at < ?")
                 .contains("FOR UPDATE SKIP LOCKED")
                 .contains("DELETE FROM account_outbox_events");
+        assertThat(args.getValue()[0]).isEqualTo("LINEAR_PERPETUAL");
     }
 
     @SuppressWarnings("unchecked")

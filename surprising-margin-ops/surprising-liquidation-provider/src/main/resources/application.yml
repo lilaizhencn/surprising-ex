@@ -54,6 +54,10 @@ surprising:
       batch-size: 200
       publish-delay-ms: 100
       send-timeout: 3s
+      retention: 7d
+      cleanup-delay-ms: 60000
+      cleanup-batch-size: 10000
+      cleanup-max-batches: 10
     sizing:
       normal-close-ratio-ppm: 500000
       severe-margin-ratio-ppm: 1500000

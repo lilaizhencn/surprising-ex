@@ -278,6 +278,7 @@ public class AccountProperties {
         private Duration retention = Duration.ofDays(7);
         private long cleanupDelayMs = 60_000L;
         private int cleanupBatchSize = 10_000;
+        private int cleanupMaxBatches = 10;
 
         public int getBatchSize() {
             return batchSize;
@@ -360,6 +361,14 @@ public class AccountProperties {
 
         public void setCleanupBatchSize(int cleanupBatchSize) {
             this.cleanupBatchSize = cleanupBatchSize;
+        }
+
+        public int getCleanupMaxBatches() {
+            return cleanupMaxBatches;
+        }
+
+        public void setCleanupMaxBatches(int cleanupMaxBatches) {
+            this.cleanupMaxBatches = cleanupMaxBatches;
         }
     }
 

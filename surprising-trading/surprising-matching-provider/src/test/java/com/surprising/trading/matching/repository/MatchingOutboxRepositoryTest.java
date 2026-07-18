@@ -205,6 +205,23 @@ class MatchingOutboxRepositoryTest {
                 .hasMessageContaining("matching outbox failure mark");
     }
 
+    @Test
+    void deletesOnlyPublishedMatchingRowsInLockedBatches() {
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(7);
+
+        assertThat(repository.deletePublishedBefore(Instant.parse("2026-07-01T00:00:00Z"), 100)).isEqualTo(7);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
+        assertThat(sql.getValue())
+                .contains("aggregate_type IN")
+                .contains("'MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH', 'ACCOUNT_COMMAND'")
+                .contains("published_at < ?")
+                .contains("FOR UPDATE SKIP LOCKED")
+                .contains("DELETE FROM trading_outbox_events");
+    }
+
     @SuppressWarnings("unchecked")
     private RowMapper<Object> anyRowMapper() {
         return any(RowMapper.class);

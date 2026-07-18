@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -85,6 +86,20 @@ class MatchingOutboxPublisherTest {
         verify(kafkaTemplate, never()).send("topic", "key-a", "payload-3");
         verify(outboxRepository).markPublished(eq(List.of(1L)), any(Instant.class));
         verify(outboxRepository).markFailed(eq(2L), any(), any(Instant.class));
+    }
+
+    @Test
+    void cleanupDrainsBoundedPublishedBatches() {
+        MatchingProperties properties = properties();
+        properties.getOutbox().setCleanupBatchSize(2);
+        properties.getOutbox().setCleanupMaxBatches(3);
+        publisher = new MatchingOutboxPublisher(properties, outboxRepository, kafkaTemplate);
+        when(outboxRepository.deletePublishedBefore(any(Instant.class), eq(2)))
+                .thenReturn(2, 1);
+
+        publisher.cleanupPublished();
+
+        verify(outboxRepository, times(2)).deletePublishedBefore(any(Instant.class), eq(2));
     }
 
     private MatchingProperties properties() {

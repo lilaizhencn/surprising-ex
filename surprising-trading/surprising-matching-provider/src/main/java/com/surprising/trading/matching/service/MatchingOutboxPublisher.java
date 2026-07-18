@@ -79,6 +79,23 @@ public class MatchingOutboxPublisher {
         }
     }
 
+    @Scheduled(fixedDelayString = "${surprising.trading.matching.outbox.cleanup-delay-ms:60000}")
+    public void cleanupPublished() {
+        int batchSize = Math.max(1, properties.getOutbox().getCleanupBatchSize());
+        int totalDeleted = 0;
+        Instant cutoff = Instant.now().minus(properties.getOutbox().getRetention());
+        for (int batch = 0; batch < Math.max(1, properties.getOutbox().getCleanupMaxBatches()); batch++) {
+            int deleted = outboxRepository.deletePublishedBefore(cutoff, batchSize);
+            totalDeleted += deleted;
+            if (deleted < batchSize) {
+                break;
+            }
+        }
+        if (totalDeleted > 0) {
+            log.info("Deleted {} published matching outbox rows", totalDeleted);
+        }
+    }
+
     @PreDestroy
     public void shutdown() {
         publishExecutor.shutdownNow();

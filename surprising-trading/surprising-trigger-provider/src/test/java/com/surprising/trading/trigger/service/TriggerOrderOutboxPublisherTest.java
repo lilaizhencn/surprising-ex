@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -61,6 +62,21 @@ class TriggerOrderOutboxPublisherTest {
 
         verify(repository).markFailed(eq(12L), any(), any(Instant.class));
         verify(repository, never()).markPublished(eq(12L), any(Instant.class));
+    }
+
+    @Test
+    void cleanupDrainsBoundedPublishedBatches() {
+        TriggerProperties properties = properties();
+        properties.getOutbox().setCleanupBatchSize(2);
+        properties.getOutbox().setCleanupMaxBatches(3);
+        TriggerOrderOutboxPublisher publisher = new TriggerOrderOutboxPublisher(
+                properties, repository, kafkaTemplate);
+        when(repository.deletePublishedBefore(any(Instant.class), eq(2)))
+                .thenReturn(2, 1);
+
+        publisher.cleanupPublished();
+
+        verify(repository, times(2)).deletePublishedBefore(any(Instant.class), eq(2));
     }
 
     private TriggerProperties properties() {

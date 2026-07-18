@@ -158,6 +158,10 @@ public class LiquidationProperties {
         private int batchSize = 200;
         private long publishDelayMs = 100L;
         private Duration sendTimeout = Duration.ofSeconds(3);
+        private Duration retention = Duration.ofDays(7);
+        private long cleanupDelayMs = 60_000L;
+        private int cleanupBatchSize = 10_000;
+        private int cleanupMaxBatches = 10;
 
         public int getBatchSize() {
             return batchSize;
@@ -181,6 +185,38 @@ public class LiquidationProperties {
 
         public void setSendTimeout(Duration sendTimeout) {
             this.sendTimeout = sendTimeout;
+        }
+
+        public Duration getRetention() {
+            return retention;
+        }
+
+        public void setRetention(Duration retention) {
+            this.retention = retention;
+        }
+
+        public long getCleanupDelayMs() {
+            return cleanupDelayMs;
+        }
+
+        public void setCleanupDelayMs(long cleanupDelayMs) {
+            this.cleanupDelayMs = cleanupDelayMs;
+        }
+
+        public int getCleanupBatchSize() {
+            return cleanupBatchSize;
+        }
+
+        public void setCleanupBatchSize(int cleanupBatchSize) {
+            this.cleanupBatchSize = cleanupBatchSize;
+        }
+
+        public int getCleanupMaxBatches() {
+            return cleanupMaxBatches;
+        }
+
+        public void setCleanupMaxBatches(int cleanupMaxBatches) {
+            this.cleanupMaxBatches = cleanupMaxBatches;
         }
     }
 

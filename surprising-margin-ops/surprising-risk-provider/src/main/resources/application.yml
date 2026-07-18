@@ -67,3 +67,7 @@ surprising:
       max-in-flight: 32
       max-rows-per-key: 32
       send-timeout: 3s
+      retention: 7d
+      cleanup-delay-ms: 60000
+      cleanup-batch-size: 10000
+      cleanup-max-batches: 10

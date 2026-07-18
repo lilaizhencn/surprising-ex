@@ -62,6 +62,10 @@ surprising:
       async-enabled: true
       max-in-flight: 64
       send-timeout: 3s
+      retention: 7d
+      cleanup-delay-ms: 60000
+      cleanup-batch-size: 10000
+      cleanup-max-batches: 10
       risk:
         market-max-slippage-ppm: 10000
         market-max-mark-age-ms: 5000

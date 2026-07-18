@@ -74,6 +74,10 @@ surprising:
       max-rows-per-key: 32
       send-window-size: 5
       send-timeout: 3s
+      retention: 7d
+      cleanup-delay-ms: 60000
+      cleanup-batch-size: 10000
+      cleanup-max-batches: 10
     cache:
       contract-spec-max-entries: 4096
       instrument-type-max-entries: 4096

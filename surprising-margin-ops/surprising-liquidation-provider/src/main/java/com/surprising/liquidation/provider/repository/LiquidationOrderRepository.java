@@ -357,6 +357,23 @@ public class LiquidationOrderRepository {
         requireSingleRow(rows, "liquidation outbox failure mark");
     }
 
+    public int deletePublishedBefore(Instant cutoff, int limit) {
+        return jdbcTemplate.update("""
+                WITH candidates AS (
+                    SELECT id
+                      FROM trading_outbox_events
+                     WHERE aggregate_type = 'LIQUIDATION_ORDER'
+                       AND published_at < ?
+                     ORDER BY published_at ASC, id ASC
+                     LIMIT ?
+                     FOR UPDATE SKIP LOCKED
+                )
+                DELETE FROM trading_outbox_events e
+                 USING candidates c
+                 WHERE e.id = c.id
+                """, Timestamp.from(cutoff), Math.max(1, limit));
+    }
+
     private void enqueue(String aggregateType,
                          long aggregateId,
                          String topic,

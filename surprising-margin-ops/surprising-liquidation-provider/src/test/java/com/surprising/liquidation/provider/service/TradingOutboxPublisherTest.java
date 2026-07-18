@@ -3,6 +3,7 @@ package com.surprising.liquidation.provider.service;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -35,5 +36,21 @@ class TradingOutboxPublisherTest {
         verify(repository).claimPending(eq(properties.getOutbox().getBatchSize()), any(Instant.class), any(Instant.class));
         verify(kafka).send(row.topic(), row.eventKey(), row.payload());
         verify(repository).markPublished(eq(91L), any(Instant.class));
+    }
+
+    @Test
+    void cleanupDrainsBoundedPublishedBatches() {
+        LiquidationProperties properties = new LiquidationProperties();
+        properties.getOutbox().setCleanupBatchSize(2);
+        properties.getOutbox().setCleanupMaxBatches(3);
+        LiquidationOrderRepository repository = mock(LiquidationOrderRepository.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
+        when(repository.deletePublishedBefore(any(Instant.class), eq(2)))
+                .thenReturn(2, 1);
+
+        new TradingOutboxPublisher(properties, repository, kafka).cleanupPublished();
+
+        verify(repository, times(2)).deletePublishedBefore(any(Instant.class), eq(2));
     }
 }
