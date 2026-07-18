@@ -8,6 +8,7 @@ import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -40,6 +41,34 @@ public class MatchingKafkaConfiguration {
     public KafkaTemplate<String, String> matchingKafkaTemplate(
             ProducerFactory<String, String> matchingProducerFactory) {
         return new KafkaTemplate<>(matchingProducerFactory);
+    }
+
+    @Bean("matchingMarketDataProducerFactory")
+    public ProducerFactory<String, String> matchingMarketDataProducerFactory(MatchingProperties properties) {
+        MatchingProperties.MarketData marketData = properties.getMarketData();
+        Map<String, Object> config = new HashMap<>();
+        config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
+        config.put(ProducerConfig.CLIENT_ID_CONFIG, properties.getKafka().getClientId() + "-public-depth");
+        config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        config.put(ProducerConfig.ACKS_CONFIG, "1");
+        config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, false);
+        config.put(ProducerConfig.RETRIES_CONFIG, 0);
+        config.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "lz4");
+        config.put(ProducerConfig.LINGER_MS_CONFIG, marketData.getLingerMs());
+        config.put(ProducerConfig.BATCH_SIZE_CONFIG, marketData.getProducerBatchSize());
+        config.put(ProducerConfig.BUFFER_MEMORY_CONFIG, marketData.getBufferMemoryBytes());
+        config.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, marketData.getMaxBlockMs());
+        config.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, marketData.getDeliveryTimeoutMs());
+        config.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, marketData.getRequestTimeoutMs());
+        return new DefaultKafkaProducerFactory<>(config);
+    }
+
+    @Bean("matchingMarketDataKafkaTemplate")
+    public KafkaTemplate<String, String> matchingMarketDataKafkaTemplate(
+            @Qualifier("matchingMarketDataProducerFactory")
+            ProducerFactory<String, String> matchingMarketDataProducerFactory) {
+        return new KafkaTemplate<>(matchingMarketDataProducerFactory);
     }
 
     @Bean

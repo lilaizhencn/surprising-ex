@@ -39,6 +39,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
@@ -54,15 +55,18 @@ public class MatchingService {
     private final MatchingSequenceRepository sequenceRepository;
     private final MatchingResultRepository resultRepository;
     private final MatchingOutboxRepository outboxRepository;
+    private final OrderBookDepthPublisher depthPublisher;
     private final Map<String, DepthState> depthStates = new ConcurrentHashMap<>();
 
+    @Autowired
     public MatchingService(ObjectMapper objectMapper,
                            MatchingProperties properties,
                            ExchangeCoreEngine exchangeCoreEngine,
                            MatchingProtectionRepository protectionRepository,
                            MatchingSequenceRepository sequenceRepository,
                            MatchingResultRepository resultRepository,
-                           MatchingOutboxRepository outboxRepository) {
+                           MatchingOutboxRepository outboxRepository,
+                           OrderBookDepthPublisher depthPublisher) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.exchangeCoreEngine = exchangeCoreEngine;
@@ -70,6 +74,18 @@ public class MatchingService {
         this.sequenceRepository = sequenceRepository;
         this.resultRepository = resultRepository;
         this.outboxRepository = outboxRepository;
+        this.depthPublisher = depthPublisher;
+    }
+
+    MatchingService(ObjectMapper objectMapper,
+                    MatchingProperties properties,
+                    ExchangeCoreEngine exchangeCoreEngine,
+                    MatchingProtectionRepository protectionRepository,
+                    MatchingSequenceRepository sequenceRepository,
+                    MatchingResultRepository resultRepository,
+                    MatchingOutboxRepository outboxRepository) {
+        this(objectMapper, properties, exchangeCoreEngine, protectionRepository, sequenceRepository,
+                resultRepository, outboxRepository, OrderBookDepthPublisher.NOOP);
     }
 
     @Transactional
@@ -84,35 +100,36 @@ public class MatchingService {
         MatchingSymbol symbol = exchangeCoreEngine.ensureSymbol(command.symbol())
                 .orElse(null);
         if (symbol == null) {
-            saveAndPublish(null, rejected(command, "UNKNOWN_SYMBOL", now));
+            saveAndPublish(rejected(command, "UNKNOWN_SYMBOL", now));
             return;
         }
         long effectivePriceTicks = command.commandType() == OrderCommandType.PLACE
                 ? effectivePriceTicks(command)
                 : command.priceTicks();
         if (command.commandType() == OrderCommandType.PLACE && effectivePriceTicks <= 0) {
-            saveAndPublish(null, rejected(command, "MARK_PRICE_UNAVAILABLE", now));
+            saveAndPublish(rejected(command, "MARK_PRICE_UNAVAILABLE", now));
             return;
         }
         if (command.commandType() == OrderCommandType.PLACE
                 && protectionRepository.hasOpenOrdersWithDifferentInstrumentVersion(command.symbol(),
                 command.instrumentVersion(), command.orderId())) {
-            saveAndPublish(null, rejected(command, "INSTRUMENT_VERSION_OPEN_BOOK_MISMATCH", now));
+            saveAndPublish(rejected(command, "INSTRUMENT_VERSION_OPEN_BOOK_MISMATCH", now));
             return;
         }
         if (command.commandType() == OrderCommandType.PLACE
                 && exchangeCoreEngine.wouldTakeLiquidity(command, symbol, effectivePriceTicks)) {
-            saveAndPublish(null, rejected(command, "POST_ONLY_WOULD_TAKE", now));
+            saveAndPublish(rejected(command, "POST_ONLY_WOULD_TAKE", now));
             return;
         }
         if (wouldSelfTrade(command, effectivePriceTicks)) {
-            saveAndPublish(null, rejected(command, "SELF_TRADE_PREVENTED", now));
+            saveAndPublish(rejected(command, "SELF_TRADE_PREVENTED", now));
             return;
         }
 
         OrderCommand response = exchangeCoreEngine.submit(command, symbol, effectivePriceTicks);
+        publishOrderBookDepth(symbol, response.resultCode, now);
         MatchResultEvent result = toResultEvent(command, response, now);
-        saveAndPublish(symbol, result);
+        saveAndPublish(result);
     }
 
     public OrderBookSnapshotResponse orderBookSnapshot(String symbol, int requestedDepth) {
@@ -262,7 +279,7 @@ public class MatchingService {
                 || command.timeInForce() == TimeInForce.FOK;
     }
 
-    private void saveAndPublish(MatchingSymbol symbol, MatchResultEvent result) {
+    private void saveAndPublish(MatchResultEvent result) {
         if (!resultRepository.saveResult(result)) {
             return;
         }
@@ -280,13 +297,15 @@ public class MatchingService {
         enqueueAccountReleaseIfRequired(result);
         outboxRepository.enqueue("MATCH_RESULT", result.commandId(), properties.getKafka().getMatchResultsTopic(),
                 result.symbol(), result.commandType().name(), payload(result), result.eventTime());
-        if (symbol != null && "SUCCESS".equals(result.resultCode())) {
-            OrderBookDepthEvent depthEvent = orderBookDepthEvent(symbol, result.eventTime());
-            if (depthEvent != null) {
-                outboxRepository.enqueue("ORDER_BOOK_DEPTH", depthEvent.sequence(),
-                        properties.getKafka().getOrderBookDepthTopic(), depthEvent.symbol(),
-                        depthEvent.updateType().name(), payload(depthEvent), depthEvent.eventTime());
-            }
+    }
+
+    private void publishOrderBookDepth(MatchingSymbol symbol, CommandResultCode resultCode, Instant eventTime) {
+        if (symbol == null || resultCode != CommandResultCode.SUCCESS) {
+            return;
+        }
+        OrderBookDepthEvent depthEvent = orderBookDepthSnapshot(symbol, eventTime);
+        if (depthEvent != null) {
+            depthPublisher.offer(depthEvent);
         }
     }
 
@@ -347,37 +366,20 @@ public class MatchingService {
                 + ":" + trade.tradeId() + ":" + role.name() + ":" + userId;
     }
 
-    private OrderBookDepthEvent orderBookDepthEvent(MatchingSymbol symbol, Instant now) {
+    private OrderBookDepthEvent orderBookDepthSnapshot(MatchingSymbol symbol, Instant now) {
         int depth = Math.max(1, properties.getEngine().getOrderBookDepthLevels());
         DepthSnapshot current = snapshot(exchangeCoreEngine.requestOrderBook(symbol, depth));
         DepthState state = depthStates.computeIfAbsent(symbol.symbol(), ignored -> new DepthState());
         synchronized (state) {
-            boolean shouldSnapshot = state.snapshot == null
-                    || state.eventsSinceSnapshot >= Math.max(1L,
-                    properties.getEngine().getOrderBookSnapshotIntervalEvents());
-            if (shouldSnapshot) {
-                long sequence = sequenceRepository.nextSequence("orderbook-depth");
-                OrderBookDepthEvent event = new OrderBookDepthEvent(symbol.symbol(), sequence, state.lastSequence,
-                        OrderBookDepthUpdateType.SNAPSHOT, depth, List.copyOf(current.bids().values()),
-                        List.copyOf(current.asks().values()), now);
-                state.snapshot = current;
-                state.lastSequence = sequence;
-                state.eventsSinceSnapshot = 0L;
-                return event;
-            }
-
-            List<OrderBookLevel> bidDeltas = diffLevels(state.snapshot.bids(), current.bids());
-            List<OrderBookLevel> askDeltas = diffLevels(state.snapshot.asks(), current.asks());
-            if (bidDeltas.isEmpty() && askDeltas.isEmpty()) {
-                state.snapshot = current;
+            if (current.equals(state.snapshot)) {
                 return null;
             }
-            long sequence = sequenceRepository.nextSequence("orderbook-depth");
+            long sequence = Math.incrementExact(state.lastSequence);
             OrderBookDepthEvent event = new OrderBookDepthEvent(symbol.symbol(), sequence, state.lastSequence,
-                    OrderBookDepthUpdateType.DELTA, depth, bidDeltas, askDeltas, now);
+                    OrderBookDepthUpdateType.SNAPSHOT, depth, List.copyOf(current.bids().values()),
+                    List.copyOf(current.asks().values()), now);
             state.snapshot = current;
             state.lastSequence = sequence;
-            state.eventsSinceSnapshot++;
             return event;
         }
     }
@@ -405,22 +407,6 @@ public class MatchingService {
         return levels;
     }
 
-    private List<OrderBookLevel> diffLevels(Map<Long, OrderBookLevel> previous, Map<Long, OrderBookLevel> current) {
-        List<OrderBookLevel> changes = new ArrayList<>();
-        for (Map.Entry<Long, OrderBookLevel> entry : current.entrySet()) {
-            OrderBookLevel old = previous.get(entry.getKey());
-            if (!entry.getValue().equals(old)) {
-                changes.add(entry.getValue());
-            }
-        }
-        for (Long priceTicks : previous.keySet()) {
-            if (!current.containsKey(priceTicks)) {
-                changes.add(new OrderBookLevel(priceTicks, 0L, 0L));
-            }
-        }
-        return changes;
-    }
-
     private String payload(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -436,6 +422,5 @@ public class MatchingService {
     private static final class DepthState {
         private DepthSnapshot snapshot;
         private long lastSequence;
-        private long eventsSinceSnapshot;
     }
 }

@@ -6,8 +6,8 @@ import java.util.List;
 /**
  * L2 order-book update for WebSocket fanout.
  *
- * <p>DELTA levels are absolute price-level states, not quantity differences. A level with
- * quantitySteps=0 removes the price from the local book.</p>
+ * <p>The matching market-data publisher emits full snapshots. Consumers replace the complete
+ * local book for {@code symbol}; intermediate snapshots may be coalesced per symbol.</p>
  */
 public record OrderBookDepthEvent(
         String symbol,

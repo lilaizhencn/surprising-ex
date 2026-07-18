@@ -82,6 +82,20 @@ class MatchingOutboxRepositoryTest {
     }
 
     @Test
+    void enqueueRejectsOrderBookDepthBecauseItUsesTheLatestOnlyPublisher() {
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+
+        assertThatThrownBy(() -> repository.enqueue("ORDER_BOOK_DEPTH", 11L,
+                "surprising.perp.orderbook.depth.v1", "BTC-USDT", "SNAPSHOT", "{}",
+                Instant.parse("2026-07-01T00:00:00Z")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("latest-only market data publisher");
+
+        verify(sequenceRepository, never()).nextSequence("outbox");
+        verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
+    }
+
+    @Test
     void markPublishedFailsWhenNoRowIsUpdated() {
         MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
         when(jdbcTemplate.update(contains("SET published_at"), any(), any(), eq(901L)))
@@ -152,7 +166,6 @@ class MatchingOutboxRepositoryTest {
         when(jdbcTemplate.query(any(String.class), anyRowMapper(),
                 eq("surprising.option.match.results.v1"),
                 eq("surprising.option.match.trades.v1"),
-                eq("surprising.option.orderbook.depth.v1"),
                 eq("surprising.option.account.user.commands.v1"),
                 any(Timestamp.class), eq(100), any(Timestamp.class), any(Timestamp.class)))
                 .thenReturn(List.of());
@@ -164,11 +177,10 @@ class MatchingOutboxRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
                 eq("surprising.option.match.results.v1"),
                 eq("surprising.option.match.trades.v1"),
-                eq("surprising.option.orderbook.depth.v1"),
                 eq("surprising.option.account.user.commands.v1"),
                 any(Timestamp.class), eq(100), any(Timestamp.class), any(Timestamp.class));
         assertThat(sql.getValue())
-                .contains("e.topic IN (?, ?, ?, ?)")
+                .contains("e.topic IN (?, ?, ?)")
                 .contains("UPDATE trading_outbox_events")
                 .contains("RETURNING e.id");
     }
@@ -216,7 +228,8 @@ class MatchingOutboxRepositoryTest {
         verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
         assertThat(sql.getValue())
                 .contains("aggregate_type IN")
-                .contains("'MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH', 'ACCOUNT_COMMAND'")
+                .contains("'MATCH_TRADE', 'MATCH_RESULT', 'ACCOUNT_COMMAND'")
+                .doesNotContain("ORDER_BOOK_DEPTH")
                 .contains("published_at < ?")
                 .contains("FOR UPDATE SKIP LOCKED")
                 .contains("DELETE FROM trading_outbox_events");

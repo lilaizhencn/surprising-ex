@@ -38,6 +38,9 @@ public class MatchingOutboxRepository {
                         String eventType,
                         String payload,
                         Instant now) {
+        if ("ORDER_BOOK_DEPTH".equals(aggregateType)) {
+            throw new IllegalArgumentException("order-book depth must use the latest-only market data publisher");
+        }
         requireCurrentProductTopic(aggregateType, topic);
         long id = sequenceRepository.nextSequence("outbox");
         int rows = jdbcTemplate.update("""
@@ -58,7 +61,7 @@ public class MatchingOutboxRepository {
                            id
                       FROM trading_outbox_events
                      WHERE published_at IS NULL
-                       AND aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH', 'ACCOUNT_COMMAND')
+                       AND aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ACCOUNT_COMMAND')
                      ORDER BY topic, event_key, id
                 ),
                 candidates AS (
@@ -66,7 +69,7 @@ public class MatchingOutboxRepository {
                   FROM trading_outbox_events e
                   JOIN earliest c ON c.id = e.id
                  WHERE e.published_at IS NULL
-                   AND e.aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH', 'ACCOUNT_COMMAND')
+                   AND e.aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ACCOUNT_COMMAND')
                 """);
         appendTopicScope(sql, "e", args);
         sql.append("""
@@ -151,7 +154,7 @@ public class MatchingOutboxRepository {
                     SELECT id
                       FROM trading_outbox_events
                      WHERE aggregate_type IN (
-                               'MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH', 'ACCOUNT_COMMAND'
+                               'MATCH_TRADE', 'MATCH_RESULT', 'ACCOUNT_COMMAND'
                            )
                        AND published_at < ?
                      ORDER BY published_at ASC, id ASC
@@ -176,10 +179,9 @@ public class MatchingOutboxRepository {
         if (!kafka.isProductTopicsEnabled()) {
             return;
         }
-        sql.append("   AND ").append(alias).append(".topic IN (?, ?, ?, ?)\n");
+        sql.append("   AND ").append(alias).append(".topic IN (?, ?, ?)\n");
         args.add(kafka.getMatchResultsTopic());
         args.add(kafka.getMatchTradesTopic());
-        args.add(kafka.getOrderBookDepthTopic());
         args.add(kafka.getAccountUserCommandsTopic());
     }
 
@@ -190,22 +192,19 @@ public class MatchingOutboxRepository {
         }
         String matchResultsTopic = kafka.getMatchResultsTopic();
         String matchTradesTopic = kafka.getMatchTradesTopic();
-        String orderBookDepthTopic = kafka.getOrderBookDepthTopic();
         String accountUserCommandsTopic = kafka.getAccountUserCommandsTopic();
         if (!matchResultsTopic.equals(topic)
                 && !matchTradesTopic.equals(topic)
-                && !orderBookDepthTopic.equals(topic)
                 && !accountUserCommandsTopic.equals(topic)) {
             throw new IllegalStateException("matching outbox topic must match current product line: expected one of ["
-                    + matchResultsTopic + ", " + matchTradesTopic + ", " + orderBookDepthTopic + ", "
-                    + accountUserCommandsTopic + "] actual=" + topic);
+                    + matchResultsTopic + ", " + matchTradesTopic + ", " + accountUserCommandsTopic
+                    + "] actual=" + topic);
         }
     }
 
     private boolean isMatchingAggregate(String aggregateType) {
         return "MATCH_TRADE".equals(aggregateType)
                 || "MATCH_RESULT".equals(aggregateType)
-                || "ORDER_BOOK_DEPTH".equals(aggregateType)
                 || "ACCOUNT_COMMAND".equals(aggregateType);
     }
 

@@ -57,8 +57,10 @@ class MatchingServiceTest {
         FakeSequenceRepository sequenceRepository = new FakeSequenceRepository();
         FakeResultRepository resultRepository = new FakeResultRepository();
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
+        FakeDepthPublisher depthPublisher = new FakeDepthPublisher();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(), sequenceRepository, resultRepository, outboxRepository);
+                new FakeProtectionRepository(), sequenceRepository, resultRepository, outboxRepository,
+                depthPublisher);
 
         try {
             engine.start();
@@ -104,15 +106,14 @@ class MatchingServiceTest {
             assertThat(trade.traceId()).isEqualTo("trace-taker-502");
             assertThat(outboxRepository.records)
                     .extracting(OutboxRecord::aggregateType)
-                    .containsExactly("MATCH_RESULT", "ORDER_BOOK_DEPTH",
-                            "MATCH_TRADE", "ACCOUNT_COMMAND", "ACCOUNT_COMMAND", "ACCOUNT_COMMAND",
-                            "MATCH_RESULT", "ORDER_BOOK_DEPTH");
+                    .containsExactly("MATCH_RESULT", "MATCH_TRADE", "ACCOUNT_COMMAND", "ACCOUNT_COMMAND",
+                            "ACCOUNT_COMMAND", "MATCH_RESULT");
             AccountUserCommand takerSettlement = new ObjectMapper().readValue(
-                    outboxRepository.records.get(3).payload(), AccountUserCommand.class);
+                    outboxRepository.records.get(2).payload(), AccountUserCommand.class);
             AccountUserCommand makerSettlement = new ObjectMapper().readValue(
-                    outboxRepository.records.get(4).payload(), AccountUserCommand.class);
+                    outboxRepository.records.get(3).payload(), AccountUserCommand.class);
             AccountUserCommand takerRelease = new ObjectMapper().readValue(
-                    outboxRepository.records.get(5).payload(), AccountUserCommand.class);
+                    outboxRepository.records.get(4).payload(), AccountUserCommand.class);
             assertThat(takerSettlement.commandType()).isEqualTo(AccountUserCommandType.TRADE_SIDE_SETTLE);
             assertThat(takerSettlement.partitionKey()).isEqualTo("LINEAR_PERPETUAL:2002");
             assertThat(new ObjectMapper().readValue(
@@ -125,12 +126,12 @@ class MatchingServiceTest {
                     .isEqualTo(TradeParticipantRole.MAKER);
             assertThat(takerRelease.commandType()).isEqualTo(AccountUserCommandType.ORDER_RELEASE);
             assertThat(takerRelease.dependsOnCommandId()).isEqualTo(takerSettlement.commandId());
-            OrderBookDepthEvent depth = new ObjectMapper()
-                    .readValue(outboxRepository.records.get(7).payload(), OrderBookDepthEvent.class);
+            assertThat(depthPublisher.events).hasSize(2);
+            OrderBookDepthEvent depth = depthPublisher.events.get(1);
             assertThat(depth.symbol()).isEqualTo("BTC-USDT");
             assertThat(depth.sequence()).isEqualTo(2L);
             assertThat(depth.previousSequence()).isEqualTo(1L);
-            assertThat(depth.updateType().name()).isEqualTo("DELTA");
+            assertThat(depth.updateType().name()).isEqualTo("SNAPSHOT");
             assertThat(depth.bids()).isEmpty();
             assertThat(depth.asks()).singleElement().satisfies(level -> {
                 assertThat(level.priceTicks()).isEqualTo(100L);
@@ -255,7 +256,7 @@ class MatchingServiceTest {
     }
 
     @Test
-    void skipsOrderAndOutboxSideEffectsWhenMatchResultIsDuplicate() {
+    void publishesDepthBeforeMatchResultPersistenceAndSkipsDuplicateDatabaseSideEffects() {
         MatchingProperties properties = new MatchingProperties();
         properties.getEngine().setExchangeId("matching-service-result-replay-test");
         properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
@@ -269,8 +270,10 @@ class MatchingServiceTest {
         FakeResultRepository resultRepository = new FakeResultRepository();
         resultRepository.rejectNextSaveResult = true;
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
+        FakeDepthPublisher depthPublisher = new FakeDepthPublisher();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository, outboxRepository);
+                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository, outboxRepository,
+                depthPublisher);
 
         try {
             engine.start();
@@ -282,6 +285,8 @@ class MatchingServiceTest {
             assertThat(resultRepository.results).isEmpty();
             assertThat(resultRepository.activeStatusUpdates).isZero();
             assertThat(outboxRepository.records).isEmpty();
+            assertThat(depthPublisher.events).singleElement()
+                    .satisfies(depth -> assertThat(depth.updateType().name()).isEqualTo("SNAPSHOT"));
         } finally {
             engine.stop();
         }
@@ -320,8 +325,7 @@ class MatchingServiceTest {
             assertThat(resultRepository.makerFillUpdates).isZero();
             assertThat(outboxRepository.records)
                     .extracting(OutboxRecord::aggregateType)
-                    .containsExactly("MATCH_RESULT", "ORDER_BOOK_DEPTH", "ACCOUNT_COMMAND",
-                            "MATCH_RESULT", "ORDER_BOOK_DEPTH");
+                    .containsExactly("MATCH_RESULT", "ACCOUNT_COMMAND", "MATCH_RESULT");
         } finally {
             engine.stop();
         }
@@ -594,6 +598,15 @@ class MatchingServiceTest {
                             String payload,
                             Instant now) {
             records.add(new OutboxRecord(aggregateType, aggregateId, topic, eventKey, eventType, payload));
+        }
+    }
+
+    private static final class FakeDepthPublisher implements OrderBookDepthPublisher {
+        private final List<OrderBookDepthEvent> events = new ArrayList<>();
+
+        @Override
+        public void offer(OrderBookDepthEvent event) {
+            events.add(event);
         }
     }
 

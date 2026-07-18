@@ -14,6 +14,7 @@ public class MatchingProperties {
     private Engine engine = new Engine();
     private Recovery recovery = new Recovery();
     private Protection protection = new Protection();
+    private MarketData marketData = new MarketData();
     private Outbox outbox = new Outbox();
 
     public Kafka getKafka() {
@@ -46,6 +47,14 @@ public class MatchingProperties {
 
     public void setProtection(Protection protection) {
         this.protection = protection;
+    }
+
+    public MarketData getMarketData() {
+        return marketData;
+    }
+
+    public void setMarketData(MarketData marketData) {
+        this.marketData = marketData;
     }
 
     public Outbox getOutbox() {
@@ -193,7 +202,6 @@ public class MatchingProperties {
         private int riskEngines = 2;
         private int orderBookDepthForPostOnly = 1;
         private int orderBookDepthLevels = 50;
-        private long orderBookSnapshotIntervalEvents = 1000L;
         private int initialSymbolRefreshDelayMs = 30000;
 
         public String getExchangeId() {
@@ -242,14 +250,6 @@ public class MatchingProperties {
 
         public void setOrderBookDepthLevels(int orderBookDepthLevels) {
             this.orderBookDepthLevels = orderBookDepthLevels;
-        }
-
-        public long getOrderBookSnapshotIntervalEvents() {
-            return orderBookSnapshotIntervalEvents;
-        }
-
-        public void setOrderBookSnapshotIntervalEvents(long orderBookSnapshotIntervalEvents) {
-            this.orderBookSnapshotIntervalEvents = orderBookSnapshotIntervalEvents;
         }
 
         public int getInitialSymbolRefreshDelayMs() {
@@ -324,6 +324,126 @@ public class MatchingProperties {
 
         public void setMarketMaxMarkAgeMs(long marketMaxMarkAgeMs) {
             this.marketMaxMarkAgeMs = marketMaxMarkAgeMs;
+        }
+    }
+
+    public static class MarketData {
+        private boolean enabled = true;
+        private int batchSize = 512;
+        private int maxInFlight = 256;
+        private long publishDelayMs = 5L;
+        private long maxBlockMs = 5L;
+        private int deliveryTimeoutMs = 500;
+        private int requestTimeoutMs = 300;
+        private int lingerMs = 10;
+        private int producerBatchSize = 65_536;
+        private long bufferMemoryBytes = 33_554_432L;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getBatchSize() {
+            return batchSize;
+        }
+
+        public void setBatchSize(int batchSize) {
+            if (batchSize <= 0) {
+                throw new IllegalArgumentException("matching market data batchSize must be positive");
+            }
+            this.batchSize = batchSize;
+        }
+
+        public int getMaxInFlight() {
+            return maxInFlight;
+        }
+
+        public void setMaxInFlight(int maxInFlight) {
+            if (maxInFlight <= 0) {
+                throw new IllegalArgumentException("matching market data maxInFlight must be positive");
+            }
+            this.maxInFlight = maxInFlight;
+        }
+
+        public long getPublishDelayMs() {
+            return publishDelayMs;
+        }
+
+        public void setPublishDelayMs(long publishDelayMs) {
+            if (publishDelayMs <= 0) {
+                throw new IllegalArgumentException("matching market data publishDelayMs must be positive");
+            }
+            this.publishDelayMs = publishDelayMs;
+        }
+
+        public long getMaxBlockMs() {
+            return maxBlockMs;
+        }
+
+        public void setMaxBlockMs(long maxBlockMs) {
+            if (maxBlockMs < 0) {
+                throw new IllegalArgumentException("matching market data maxBlockMs must be non-negative");
+            }
+            this.maxBlockMs = maxBlockMs;
+        }
+
+        public int getDeliveryTimeoutMs() {
+            return deliveryTimeoutMs;
+        }
+
+        public void setDeliveryTimeoutMs(int deliveryTimeoutMs) {
+            if (deliveryTimeoutMs <= 0) {
+                throw new IllegalArgumentException("matching market data deliveryTimeoutMs must be positive");
+            }
+            this.deliveryTimeoutMs = deliveryTimeoutMs;
+        }
+
+        public int getRequestTimeoutMs() {
+            return requestTimeoutMs;
+        }
+
+        public void setRequestTimeoutMs(int requestTimeoutMs) {
+            if (requestTimeoutMs <= 0) {
+                throw new IllegalArgumentException("matching market data requestTimeoutMs must be positive");
+            }
+            this.requestTimeoutMs = requestTimeoutMs;
+        }
+
+        public int getLingerMs() {
+            return lingerMs;
+        }
+
+        public void setLingerMs(int lingerMs) {
+            if (lingerMs < 0) {
+                throw new IllegalArgumentException("matching market data lingerMs must be non-negative");
+            }
+            this.lingerMs = lingerMs;
+        }
+
+        public int getProducerBatchSize() {
+            return producerBatchSize;
+        }
+
+        public void setProducerBatchSize(int producerBatchSize) {
+            if (producerBatchSize <= 0) {
+                throw new IllegalArgumentException("matching market data producerBatchSize must be positive");
+            }
+            this.producerBatchSize = producerBatchSize;
+        }
+
+        public long getBufferMemoryBytes() {
+            return bufferMemoryBytes;
+        }
+
+        public void setBufferMemoryBytes(long bufferMemoryBytes) {
+            if (bufferMemoryBytes <= 0) {
+                throw new IllegalArgumentException("matching market data bufferMemoryBytes must be positive");
+            }
+            this.bufferMemoryBytes = bufferMemoryBytes;
         }
     }
 

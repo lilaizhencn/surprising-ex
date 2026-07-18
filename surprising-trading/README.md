@@ -323,13 +323,14 @@ The provider uses the real exchange-core order book and matcher event chain, but
 
 ### Order Book Depth
 
-After every successful exchange-core command that changes the book, matching publishes a depth event through the matching outbox:
+After every successful exchange-core command that changes the book, matching offers a full `SNAPSHOT` directly to a dedicated public-market-data publisher before database/outbox persistence:
 
-- first event for a symbol, and every `surprising.trading.matching.engine.order-book-snapshot-interval-events`, is `SNAPSHOT`;
-- normal updates are `DELTA` events containing only changed price levels;
-- `quantitySteps=0` and `orderCount=0` means delete that price level;
-- `sequence` is allocated from PostgreSQL and `previousSequence` links deltas to the last published depth event;
-- clients must reload a snapshot when `previousSequence` does not match their local last sequence.
+- the publisher keeps an independent latest-only slot for every symbol; a hot symbol never replaces another symbol's snapshot;
+- while one snapshot for a symbol is in flight, newer snapshots for that same symbol overwrite its one pending slot, so stale intermediate states are discarded instead of accumulating;
+- different symbols can publish concurrently up to `surprising.trading.matching.market-data.max-in-flight`;
+- the publisher uses a dedicated non-transactional Kafka producer and sends to the existing `orderbook.depth` topic with key = `symbol`;
+- Kafka backpressure and send failures do not block matching or create outbox rows. A failed snapshot may be dropped and is healed by the next book change;
+- every event is a self-contained full snapshot. Consumers replace their local symbol book and do not apply deltas.
 
 Public REST snapshot endpoint:
 
@@ -337,8 +338,6 @@ Public REST snapshot endpoint:
 curl 'http://localhost:9085/api/v1/trading/market/orderbook?symbol=BTC-USDT&depth=50'
 curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50'
 ```
-
-`DELTA` levels are absolute price-level states, not quantity differences. Apply them by replacing the local price level, or deleting it when `quantitySteps=0`.
 
 Depth events are market-data fanout, not accounting state. PostgreSQL remains the order-state audit source, and exchange-core remains the live order-book source.
 

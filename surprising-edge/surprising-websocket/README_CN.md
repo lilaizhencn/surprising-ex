@@ -77,20 +77,20 @@
 ```text
 order command
   -> exchange-core 修改订单簿
-  -> matching 对比最新 L2 book 和上一份内存 book image
-  -> matching outbox 发布 surprising.perp.orderbook.depth.v1
+  -> matching 把最新全量 L2 快照交给按 symbol 隔离的行情 publisher
+  -> 独立 Kafka producer 发布 surprising.perp.orderbook.depth.v1
   -> websocket 节点消费事件，并推送 channel=depth
 ```
 
-每个 symbol 的第一条 depth 是 `SNAPSHOT`。之后通常是 `DELTA`，只包含变化的价格档。delta 档位是价格档绝对状态，不是数量差值；客户端要直接替换本地档位，`quantitySteps=0` 时删除该价格档。
+每条 depth 都是全量 `SNAPSHOT`。每个 symbol 有独立的 latest-only 待发送槽位，热点 symbol 的中间快照可以被合并，但不会影响其他 symbol。客户端收到快照后整体替换该 symbol 的本地盘口。
 
 稳妥的客户端流程：
 
 1. 订阅 `depth`，并先缓存该 symbol 的事件。
 2. 拉取 `GET /api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50`。
-3. 用 REST 快照和其中的 `sequence` 初始化本地盘口。
-4. 只应用 `previousSequence` 等于本地最后 sequence 的缓存/新增 delta。
-5. 重连或 sequence 断号时，丢弃本地盘口，重新拉 REST 快照并重新订阅。
+3. 用 REST 快照初始化本地盘口。
+4. 收到该 symbol 更新的 WebSocket 快照后整体替换。
+5. 重连时丢弃本地盘口，重新拉 REST 快照并重新订阅。
 
 ## 持仓推送链路
 

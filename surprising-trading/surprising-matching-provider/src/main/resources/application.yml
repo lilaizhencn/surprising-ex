@@ -60,7 +60,6 @@ surprising:
         risk-engines: ${MATCHING_RISK_SHARDS:2}
         order-book-depth-for-post-only: 1
         order-book-depth-levels: 50
-        order-book-snapshot-interval-events: 1000
         initial-symbol-refresh-delay-ms: 30000
       recovery:
         open-order-book-restore-enabled: true
@@ -70,6 +69,17 @@ surprising:
         self-trade-prevention-bypass-user-ids: [900001, 900002, 910001]
         market-max-slippage-ppm: 10000
         market-max-mark-age-ms: 5000
+      market-data:
+        enabled: true
+        batch-size: 512
+        max-in-flight: 256
+        publish-delay-ms: 5
+        max-block-ms: 5
+        delivery-timeout-ms: 500
+        request-timeout-ms: 300
+        linger-ms: 10
+        producer-batch-size: 65536
+        buffer-memory-bytes: 33554432
     outbox:
       batch-size: 1000
       publish-delay-ms: 20

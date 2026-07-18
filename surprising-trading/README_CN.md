@@ -320,13 +320,14 @@ symbol 在 exchange-core 内注册为 `CURRENCY_EXCHANGE_PAIR`。这是有意设
 
 ### 盘口深度
 
-每个成功的 exchange-core 命令改变盘口后，matching 会通过 matching outbox 发布深度事件：
+每个成功的 exchange-core 命令改变盘口后，matching 会在数据库/outbox 持久化之前，把完整 `SNAPSHOT` 直接交给独立的公共行情 publisher：
 
-- 每个 symbol 的第一条，以及每隔 `surprising.trading.matching.engine.order-book-snapshot-interval-events` 条，会发布 `SNAPSHOT`；
-- 常规更新发布 `DELTA`，只包含发生变化的价格档；
-- `quantitySteps=0` 且 `orderCount=0` 表示删除该价格档；
-- `sequence` 由 PostgreSQL 分配，`previousSequence` 指向上一条已发布深度事件；
-- 客户端发现 `previousSequence` 和本地最后 sequence 不一致时，必须重新拉快照，不能继续套增量。
+- 每个 symbol 有独立的 latest-only 槽位，热点 symbol 不会覆盖其他 symbol 的快照；
+- 某个 symbol 有一条快照正在发送时，后续新快照只覆盖该 symbol 唯一的待发送槽位，过时的中间状态直接丢弃，不形成积压；
+- 不同 symbol 可并行发送，全局并发上限由 `surprising.trading.matching.market-data.max-in-flight` 控制；
+- publisher 使用独立的非事务 Kafka producer，继续写现有 `orderbook.depth` topic，key = `symbol`；
+- Kafka 背压或发送失败不会阻塞撮合，也不会产生 outbox 行。失败快照允许丢弃，并由下一次盘口变化发布的新快照修复；
+- 每条事件都是可独立使用的全量快照，消费者按 symbol 整体替换本地盘口，不再套用增量。
 
 公共 REST 快照接口：
 
@@ -334,8 +335,6 @@ symbol 在 exchange-core 内注册为 `CURRENCY_EXCHANGE_PAIR`。这是有意设
 curl 'http://localhost:9085/api/v1/trading/market/orderbook?symbol=BTC-USDT&depth=50'
 curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50'
 ```
-
-`DELTA` 里的档位是价格档绝对状态，不是数量差值。客户端应用时直接替换本地对应价格档；`quantitySteps=0` 时删除该价格档。
 
 深度事件只是行情 fanout，不是账户或订单状态权威。PostgreSQL 仍是订单状态审计源，exchange-core 仍是实时订单簿源。
 

@@ -77,20 +77,20 @@ Depth is produced by matching from the live exchange-core L2 book:
 ```text
 order command
   -> exchange-core mutates the book
-  -> matching compares the latest L2 book with the previous in-memory book image
-  -> matching outbox publishes surprising.perp.orderbook.depth.v1
+  -> matching offers the latest full L2 snapshot to the per-symbol market-data publisher
+  -> the dedicated Kafka producer publishes surprising.perp.orderbook.depth.v1
   -> websocket node consumes the event and pushes channel=depth
 ```
 
-The first depth event for a symbol is `SNAPSHOT`. Later events are usually `DELTA` and contain only changed price levels. Delta levels are absolute price-level states, not quantity differences; replace the local level, or delete it when `quantitySteps=0`.
+Every depth event is a full `SNAPSHOT`. Each symbol has its own latest-only pending slot, so intermediate snapshots may be coalesced for a hot symbol without affecting other symbols. Clients replace the complete local symbol book whenever a snapshot arrives.
 
 Robust client flow:
 
 1. Subscribe to `depth` and buffer events for the symbol.
 2. Load `GET /api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50`.
-3. Initialize the local book from the REST snapshot and its `sequence`.
-4. Apply buffered/new deltas only when `previousSequence` equals the local last sequence.
-5. On reconnect or sequence gap, discard the local book, reload the REST snapshot, and resubscribe.
+3. Initialize the local book from the REST snapshot.
+4. Replace it with each newer WebSocket snapshot for that symbol.
+5. On reconnect, discard the local book, reload the REST snapshot, and resubscribe.
 
 ## Position Push Flow
 

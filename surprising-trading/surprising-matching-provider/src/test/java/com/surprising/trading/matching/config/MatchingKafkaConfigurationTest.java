@@ -41,6 +41,29 @@ class MatchingKafkaConfigurationTest {
     }
 
     @Test
+    void marketDataProducerIsLossyAndIsolatedFromDurableBusinessPublishing() {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setBootstrapServers("kafka-market:9092");
+        properties.getKafka().setClientId("matching-node-market");
+        properties.getMarketData().setMaxBlockMs(7L);
+
+        var factory = (DefaultKafkaProducerFactory<String, String>)
+                new MatchingKafkaConfiguration().matchingMarketDataProducerFactory(properties);
+
+        Map<String, Object> config = factory.getConfigurationProperties();
+        assertThat(config).containsEntry(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka-market:9092");
+        assertThat(config).containsEntry(ProducerConfig.CLIENT_ID_CONFIG,
+                "matching-node-market-public-depth");
+        assertThat(config).containsEntry(ProducerConfig.ACKS_CONFIG, "1");
+        assertThat(config).containsEntry(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, false);
+        assertThat(config).containsEntry(ProducerConfig.RETRIES_CONFIG, 0);
+        assertThat(config).containsEntry(ProducerConfig.COMPRESSION_TYPE_CONFIG, "lz4");
+        assertThat(config).containsEntry(ProducerConfig.MAX_BLOCK_MS_CONFIG, 7L);
+        assertThat(config).containsEntry(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 500);
+        assertThat(config).containsEntry(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 300);
+    }
+
+    @Test
     void consumerUsesReplaySafeRecordAckSettings() {
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setBootstrapServers("kafka-c:9092");
