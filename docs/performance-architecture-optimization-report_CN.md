@@ -116,4 +116,3 @@ scripts/check-account-single-writer.sh
 - `c23e30e` `perf(risk): coalesce position event scans`
 - `9004b14` `perf(funding): page settlement dispatches`
 - `f145484` `perf(trading): batch matching persistence`
-
