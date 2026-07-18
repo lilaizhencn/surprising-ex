@@ -68,54 +68,6 @@ class AccountOutboxRepositoryTest {
     }
 
     @Test
-    void lockPendingLeavesLegacyTopicsUnfiltered() {
-        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
-        AccountOutboxRepository repository = new AccountOutboxRepository(jdbcTemplate, null, new ObjectMapper());
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq("LINEAR_PERPETUAL"), eq(100)))
-                .thenReturn(List.of());
-
-        repository.lockPending(100);
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq("LINEAR_PERPETUAL"), eq(100));
-        assertThat(sql.getValue())
-                .contains("FROM account_outbox_events")
-                .contains("published_at IS NULL")
-                .contains("product_line = ?")
-                .doesNotContain("topic IN (");
-    }
-
-    @Test
-    void lockPendingFiltersByProductTopicsWhenProductTopicsAreEnabled() {
-        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
-        AccountProperties properties = new AccountProperties();
-        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
-        AccountOutboxRepository repository = new AccountOutboxRepository(jdbcTemplate, null, new ObjectMapper(),
-                properties);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(),
-                eq("LINEAR_DELIVERY"),
-                eq("surprising.linear-delivery.account.position.events.v1"),
-                eq("surprising.linear-delivery.account.liquidation-fee.events.v1"),
-                eq("surprising.linear-delivery.account.position-cache.events.v1"),
-                eq(100))).thenReturn(List.of());
-
-        repository.lockPending(100);
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
-                eq("LINEAR_DELIVERY"),
-                eq("surprising.linear-delivery.account.position.events.v1"),
-                eq("surprising.linear-delivery.account.liquidation-fee.events.v1"),
-                eq("surprising.linear-delivery.account.position-cache.events.v1"),
-                eq(100));
-        assertThat(sql.getValue())
-                .contains("product_line = ?")
-                .contains("topic IN (?, ?, ?)")
-                .contains("next_attempt_at <= now()");
-    }
-
-    @Test
     void claimPendingLeasesDuePrefixesPerTopicKey() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         AccountProperties properties = new AccountProperties();

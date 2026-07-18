@@ -120,7 +120,6 @@ public class InsuranceRepository {
                    AND reference_id = ?
                    AND account_type = ?
                    AND asset = ?
-                 FOR UPDATE
                 """, (rs, rowNum) -> new FundAdjustmentReference(
                 rs.getLong("amount_units"),
                 rs.getString("reason")), referenceId, accountType, asset).stream().findFirst()
@@ -316,7 +315,6 @@ public class InsuranceRepository {
                    AND reference_id = ?
                    AND account_type = ?
                    AND asset = ?
-                 FOR UPDATE
                 """, (rs, rowNum) -> new FundAdjustmentReference(
                 rs.getLong("amount_units"),
                 rs.getString("reason")), referenceId, accountType, asset).stream().findFirst()

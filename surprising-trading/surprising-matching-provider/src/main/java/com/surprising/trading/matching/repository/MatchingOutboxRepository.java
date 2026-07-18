@@ -97,40 +97,6 @@ public class MatchingOutboxRepository {
                 args.toArray());
     }
 
-    public List<StoredOutboxRecord> lockPending(int limit) {
-        List<Object> args = new ArrayList<>();
-        StringBuilder sql = new StringBuilder("""
-                WITH earliest AS (
-                    SELECT DISTINCT ON (topic, event_key)
-                           id
-                      FROM trading_outbox_events
-                     WHERE published_at IS NULL
-                       AND aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH')
-                     ORDER BY topic, event_key, id
-                )
-                SELECT e.id, e.topic, e.event_key, e.payload::text AS payload, e.next_attempt_at
-                  FROM trading_outbox_events e
-                  JOIN earliest c ON c.id = e.id
-                 WHERE e.published_at IS NULL
-                   AND e.aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH')
-                """);
-        appendTopicScope(sql, "e", args);
-        sql.append("""
-                   AND e.next_attempt_at <= now()
-                   AND pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))
-                 ORDER BY e.topic, e.event_key, e.id
-                 LIMIT ?
-                 FOR UPDATE OF e SKIP LOCKED
-                """);
-        args.add(limit);
-        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new StoredOutboxRecord(
-                rs.getLong("id"),
-                rs.getString("topic"),
-                rs.getString("event_key"),
-                rs.getString("payload"),
-                rs.getTimestamp("next_attempt_at").toInstant()), args.toArray());
-    }
-
     public void markPublished(long id, Instant now) {
         int rows = jdbcTemplate.update("""
                 UPDATE trading_outbox_events

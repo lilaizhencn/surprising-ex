@@ -95,31 +95,7 @@ public class SpotOrderReservationRepository {
                 ) VALUES ('SPOT', ?, ?, 0, 0, ?)
                 ON CONFLICT (account_type, user_id, asset) DO NOTHING
                 """, userId, asset, Timestamp.from(now));
-        var balance = jdbcTemplate.query("""
-                SELECT available_units, locked_units
-                  FROM account_product_balances
-                 WHERE account_type = 'SPOT'
-                   AND user_id = ?
-                   AND asset = ?
-                 FOR UPDATE
-                """, (rs, rowNum) -> new long[] {rs.getLong("available_units"), rs.getLong("locked_units")},
-                userId, asset).stream().findFirst().orElse(new long[] {0L, 0L});
-        if (balance[0] < amountUnits) {
-            return false;
-        }
-        long reservationId = orderRepository.nextSequence("spot-reservation");
         int rows = jdbcTemplate.update("""
-                INSERT INTO account_spot_order_reservations (
-                    reservation_id, order_id, user_id, symbol, side, asset, reserved_units,
-                    settled_units, released_units, status, reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'ACTIVE', 'SPOT_ORDER_LOCK', ?, ?)
-                ON CONFLICT (order_id) DO NOTHING
-                """, reservationId, orderId, userId, symbol, side.name(), asset, amountUnits,
-                Timestamp.from(now), Timestamp.from(now));
-        if (rows != 1) {
-            throw new IllegalStateException("failed to insert spot reservation for order " + orderId);
-        }
-        rows = jdbcTemplate.update("""
                 UPDATE account_product_balances
                    SET available_units = available_units - ?,
                        locked_units = locked_units + ?,
@@ -129,8 +105,20 @@ public class SpotOrderReservationRepository {
                    AND asset = ?
                    AND available_units >= ?
                 """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
+        if (rows == 0) {
+            return false;
+        }
+        long reservationId = orderRepository.nextSequence("spot-reservation");
+        rows = jdbcTemplate.update("""
+                INSERT INTO account_spot_order_reservations (
+                    reservation_id, order_id, user_id, symbol, side, asset, reserved_units,
+                    settled_units, released_units, status, reason, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'ACTIVE', 'SPOT_ORDER_LOCK', ?, ?)
+                ON CONFLICT (order_id) DO NOTHING
+                """, reservationId, orderId, userId, symbol, side.name(), asset, amountUnits,
+                Timestamp.from(now), Timestamp.from(now));
         if (rows != 1) {
-            throw new IllegalStateException("failed to reserve spot balance for order " + orderId);
+            throw new IllegalStateException("failed to insert spot reservation for order " + orderId);
         }
         return true;
     }

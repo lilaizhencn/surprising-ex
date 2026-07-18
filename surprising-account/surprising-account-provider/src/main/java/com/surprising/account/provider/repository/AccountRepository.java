@@ -674,7 +674,6 @@ public class AccountRepository {
                    AND reference_id = ?
                    AND user_id = ?
                    AND asset = ?
-                 FOR UPDATE
                 """, (rs, rowNum) -> new AdjustmentReference(
                 rs.getLong("amount_units"),
                 rs.getString("reason")), referenceId, userId, asset).stream().findFirst()
@@ -1654,7 +1653,6 @@ public class AccountRepository {
                    AND reference_id = ?
                    AND user_id = ?
                    AND symbol = ?
-                 FOR UPDATE
                 """, (rs, rowNum) -> new PositionMarginAdjustmentReference(
                 rs.getString("asset"),
                 rs.getLong("amount_units"),
@@ -1672,7 +1670,6 @@ public class AccountRepository {
                    AND reference_id = ?
                    AND user_id = ?
                    AND asset = ?
-                 FOR UPDATE
                 """, (rs, rowNum) -> new PositionMarginAdjustmentReference(
                 rs.getString("asset"),
                 rs.getLong("amount_units"),
@@ -1692,7 +1689,6 @@ public class AccountRepository {
                    AND user_id = ?
                    AND account_type = ?
                    AND symbol = ?
-                 FOR UPDATE
                 """, (rs, rowNum) -> new PositionMarginAdjustmentReference(
                 rs.getString("asset"),
                 rs.getLong("amount_units"),
@@ -1712,7 +1708,6 @@ public class AccountRepository {
                    AND user_id = ?
                    AND account_type = ?
                    AND asset = ?
-                 FOR UPDATE
                 """, (rs, rowNum) -> new PositionMarginAdjustmentReference(
                 rs.getString("asset"),
                 rs.getLong("amount_units"),
@@ -3070,10 +3065,9 @@ public class AccountRepository {
                       FROM account_product_ledger_entries
                      WHERE reference_type = 'LIQUIDATION_FEE'
                        AND reference_id = ?
-                       AND user_id = ?
-                       AND account_type = ?
-                       AND asset = ?
-                     FOR UPDATE
+                     AND user_id = ?
+                     AND account_type = ?
+                     AND asset = ?
                     """, (rs, rowNum) -> 1, referenceId, userId, accountType.name(), asset)
                     .stream().findFirst().isPresent();
         }
@@ -3084,7 +3078,6 @@ public class AccountRepository {
                    AND reference_id = ?
                    AND user_id = ?
                    AND asset = ?
-                 FOR UPDATE
                 """, (rs, rowNum) -> 1, referenceId, userId, asset).stream().findFirst().isPresent();
     }
 
@@ -3463,10 +3456,9 @@ public class AccountRepository {
         ProductTransferRecord existing = jdbcTemplate.query("""
                 SELECT transfer_id, source_account_type, target_account_type, asset,
                        amount_units, status, reason, created_at
-                  FROM account_product_transfers
+                 FROM account_product_transfers
                  WHERE user_id = ?
                    AND reference_id = ?
-                 FOR UPDATE
                 """, (rs, rowNum) -> new ProductTransferRecord(
                 rs.getLong("transfer_id"),
                 AccountType.valueOf(rs.getString("source_account_type")),
@@ -3507,7 +3499,6 @@ public class AccountRepository {
                    AND user_id = ?
                    AND account_type = ?
                    AND asset = ?
-                 FOR UPDATE
                 """, (rs, rowNum) -> new AdjustmentReference(
                 rs.getLong("amount_units"),
                 rs.getString("reason")), referenceId, userId, accountType.name(), asset)

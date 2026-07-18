@@ -12,19 +12,15 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
-import java.util.concurrent.locks.ReentrantLock;
-
 @Service
 public class MatchingCommandConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(MatchingCommandConsumer.class);
-    private static final int SYMBOL_LOCK_STRIPES = 1024;
 
     private final ObjectMapper objectMapper;
     private final MatchingService matchingService;
     private final MatchingPartitionAssignmentGuard partitionAssignmentGuard;
     private final MatchingProperties properties;
-    private final ReentrantLock[] symbolLocks = new ReentrantLock[SYMBOL_LOCK_STRIPES];
 
     public MatchingCommandConsumer(ObjectMapper objectMapper,
                                    MatchingService matchingService,
@@ -41,9 +37,6 @@ public class MatchingCommandConsumer {
         this.matchingService = matchingService;
         this.partitionAssignmentGuard = partitionAssignmentGuard;
         this.properties = properties;
-        for (int i = 0; i < symbolLocks.length; i++) {
-            symbolLocks[i] = new ReentrantLock();
-        }
     }
 
     @KafkaListener(
@@ -58,15 +51,11 @@ public class MatchingCommandConsumer {
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), command.symbol(), "order command");
             requireCurrentProductTopic(record.topic());
             partitionAssignmentGuard.recordProcessedCommand(record.topic(), record.partition());
-            ReentrantLock lock = symbolLock(command.symbol());
-            lock.lock();
-            try {
-                // The lock is outside the transactional service proxy, so the DB commit completes
-                // before another command for the same symbol can produce the next depth sequence.
-                matchingService.process(command);
-            } finally {
-                lock.unlock();
-            }
+            // The symbol is the validated Kafka key, so all commands for one book are in one partition.
+            // A Kafka partition is processed serially by exactly one listener thread; process() returns only
+            // after its transactional proxy commits. A local striped lock would only serialize unrelated
+            // symbols that collide in the stripe and cannot improve cross-node ordering.
+            matchingService.process(command);
         } catch (SymbolKeyMismatchException ex) {
             log.error("Rejected matching command with invalid Kafka key: {}", ex.getMessage());
             throw new IllegalStateException("failed to process matching command", ex);
@@ -84,10 +73,6 @@ public class MatchingCommandConsumer {
             }
             throw new IllegalStateException("failed to process matching command", ex);
         }
-    }
-
-    private ReentrantLock symbolLock(String symbol) {
-        return symbolLocks[Math.floorMod(symbol.hashCode(), symbolLocks.length)];
     }
 
     public String orderCommandsTopic() {

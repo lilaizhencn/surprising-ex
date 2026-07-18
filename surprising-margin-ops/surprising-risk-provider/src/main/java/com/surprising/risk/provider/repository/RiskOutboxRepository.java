@@ -45,29 +45,6 @@ public class RiskOutboxRepository {
         requireSingleRow(rows, "risk outbox enqueue");
     }
 
-    public List<RiskOutboxRecord> lockPending(int limit) {
-        List<Object> args = new ArrayList<>();
-        StringBuilder sql = new StringBuilder("""
-                SELECT id, topic, event_key, payload::text AS payload, next_attempt_at
-                  FROM risk_outbox_events
-                 WHERE published_at IS NULL
-                """);
-        appendTopicScope(sql, args);
-        sql.append("""
-                   AND next_attempt_at <= now()
-                 ORDER BY next_attempt_at ASC, id ASC
-                 LIMIT ?
-                 FOR UPDATE SKIP LOCKED
-                """);
-        args.add(limit);
-        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new RiskOutboxRecord(
-                rs.getLong("id"),
-                rs.getString("topic"),
-                rs.getString("event_key"),
-                rs.getString("payload"),
-                rs.getTimestamp("next_attempt_at").toInstant()), args.toArray());
-    }
-
     public List<RiskOutboxRecord> claimPending(int limit, Instant leaseUntil, Instant now) {
         int effectiveLimit = Math.max(1, limit);
         int perKeyLimit = Math.max(1, Math.min(properties.getOutbox().getMaxRowsPerKey(), effectiveLimit));

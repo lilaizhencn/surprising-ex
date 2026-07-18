@@ -100,28 +100,6 @@ public class AccountOutboxRepository {
         return event;
     }
 
-    public List<AccountOutboxRecord> lockPending(int limit) {
-        List<Object> args = new ArrayList<>();
-        StringBuilder sql = new StringBuilder("""
-                SELECT id, topic, event_key, payload::text AS payload
-                  FROM account_outbox_events
-                 WHERE published_at IS NULL
-                """);
-        appendTopicScope(sql, args);
-        sql.append("""
-                   AND next_attempt_at <= now()
-                 ORDER BY next_attempt_at ASC, id ASC
-                 LIMIT ?
-                 FOR UPDATE SKIP LOCKED
-                """);
-        args.add(limit);
-        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new AccountOutboxRecord(
-                rs.getLong("id"),
-                rs.getString("topic"),
-                rs.getString("event_key"),
-                rs.getString("payload")), args.toArray());
-    }
-
     public List<AccountOutboxRecord> claimPending(int limit, Instant leaseUntil, Instant now) {
         int effectiveLimit = Math.max(1, limit);
         int perKeyLimit = Math.max(1, Math.min(properties.getOutbox().getMaxRowsPerKey(), effectiveLimit));

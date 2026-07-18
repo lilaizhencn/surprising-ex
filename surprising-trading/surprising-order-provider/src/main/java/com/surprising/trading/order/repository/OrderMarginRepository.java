@@ -340,18 +340,19 @@ public class OrderMarginRepository {
                 VALUES (?, ?, 0, 0, ?)
                 ON CONFLICT (user_id, asset) DO NOTHING
                 """, userId, asset, Timestamp.from(now));
-        var balance = jdbcTemplate.query("""
-                SELECT available_units, locked_units
-                  FROM account_balances
+        int rows = jdbcTemplate.update("""
+                UPDATE account_balances
+                   SET available_units = available_units - ?,
+                       locked_units = locked_units + ?,
+                       updated_at = ?
                  WHERE user_id = ? AND asset = ?
-                 FOR UPDATE
-                """, (rs, rowNum) -> new long[] {rs.getLong("available_units"), rs.getLong("locked_units")},
-                userId, asset).stream().findFirst().orElse(new long[] {0L, 0L});
-        if (balance[0] < amountUnits) {
+                   AND available_units >= ?
+                """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
+        if (rows == 0) {
             return false;
         }
         long reservationId = orderRepository.nextSequence("margin-reservation");
-        int rows = jdbcTemplate.update("""
+        rows = jdbcTemplate.update("""
                 INSERT INTO account_margin_reservations (
                     reservation_id, account_type, user_id, asset, order_id, symbol,
                     margin_mode, position_side, reserved_units, released_units, status, reason, created_at, updated_at
@@ -362,17 +363,6 @@ public class OrderMarginRepository {
                 Timestamp.from(now), Timestamp.from(now));
         if (rows != 1) {
             throw new IllegalStateException("failed to insert margin reservation for order " + orderId);
-        }
-        rows = jdbcTemplate.update("""
-                UPDATE account_balances
-                   SET available_units = available_units - ?,
-                       locked_units = locked_units + ?,
-                       updated_at = ?
-                 WHERE user_id = ? AND asset = ?
-                   AND available_units >= ?
-                """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
-        if (rows != 1) {
-            throw new IllegalStateException("failed to reserve order margin for order " + orderId);
         }
         return true;
     }
@@ -392,20 +382,21 @@ public class OrderMarginRepository {
                 ) VALUES (?, ?, ?, 0, 0, ?)
                 ON CONFLICT (account_type, user_id, asset) DO NOTHING
                 """, accountType, userId, asset, Timestamp.from(now));
-        var balance = jdbcTemplate.query("""
-                SELECT available_units, locked_units
-                  FROM account_product_balances
+        int rows = jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET available_units = available_units - ?,
+                       locked_units = locked_units + ?,
+                       updated_at = ?
                  WHERE account_type = ?
                    AND user_id = ?
                    AND asset = ?
-                 FOR UPDATE
-                """, (rs, rowNum) -> new long[] {rs.getLong("available_units"), rs.getLong("locked_units")},
-                accountType, userId, asset).stream().findFirst().orElse(new long[] {0L, 0L});
-        if (balance[0] < amountUnits) {
+                   AND available_units >= ?
+                """, amountUnits, amountUnits, Timestamp.from(now), accountType, userId, asset, amountUnits);
+        if (rows == 0) {
             return false;
         }
         long reservationId = orderRepository.nextSequence("margin-reservation");
-        int rows = jdbcTemplate.update("""
+        rows = jdbcTemplate.update("""
                 INSERT INTO account_margin_reservations (
                     reservation_id, account_type, user_id, asset, order_id, symbol,
                     margin_mode, position_side, reserved_units, released_units, status, reason, created_at, updated_at
@@ -416,19 +407,6 @@ public class OrderMarginRepository {
                 Timestamp.from(now), Timestamp.from(now));
         if (rows != 1) {
             throw new IllegalStateException("failed to insert margin reservation for order " + orderId);
-        }
-        rows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET available_units = available_units - ?,
-                       locked_units = locked_units + ?,
-                       updated_at = ?
-                 WHERE account_type = ?
-                   AND user_id = ?
-                   AND asset = ?
-                   AND available_units >= ?
-                """, amountUnits, amountUnits, Timestamp.from(now), accountType, userId, asset, amountUnits);
-        if (rows != 1) {
-            throw new IllegalStateException("failed to reserve order margin for order " + orderId);
         }
         return true;
     }

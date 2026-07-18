@@ -340,41 +340,20 @@ class OrderMarginRepositoryTest {
     }
 
     @Test
-    void reserveFailsFastWhenGuardedBalanceUpdateDoesNotApply() throws Exception {
+    void reserveReturnsFalseWhenAtomicBalanceReservationDoesNotApply() throws Exception {
         OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
-        when(jdbcTemplate.query(contains("FROM account_balances"), anyRowMapper(), eq(1001L), eq("USDT")))
-                .thenAnswer(invocation -> {
-                    RowMapper<?> mapper = invocation.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.getLong("available_units")).thenReturn(1_000L);
-                    when(rs.getLong("locked_units")).thenReturn(0L);
-                    return List.of(mapper.mapRow(rs, 0));
-                });
-        when(orderRepository.nextSequence("margin-reservation")).thenReturn(77L);
-        when(jdbcTemplate.update(contains("INSERT INTO account_margin_reservations"), any(Object[].class)))
-                .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_balances"), any(Object[].class)))
                 .thenReturn(0);
 
-        assertThatThrownBy(() -> repository.reserve(1001L, "USDT", 9002L, "BTC-USDT",
-                MarginMode.CROSS, 500L, Instant.parse("2026-07-01T00:00:00Z")))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("reserve order margin");
+        assertThat(repository.reserve(1001L, "USDT", 9002L, "BTC-USDT",
+                MarginMode.CROSS, 500L, Instant.parse("2026-07-01T00:00:00Z"))).isFalse();
+        verify(orderRepository, never()).nextSequence("margin-reservation");
     }
 
     @Test
     void reserveUsesProductBalanceForDeliveryMarginAccount() throws Exception {
         OrderMarginRepository repository = new OrderMarginRepository(jdbcTemplate, orderRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
-        when(jdbcTemplate.query(contains("FROM account_product_balances"), anyRowMapper(),
-                eq("USDT_DELIVERY"), eq(1001L), eq("USDT")))
-                .thenAnswer(invocation -> {
-                    RowMapper<?> mapper = invocation.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.getLong("available_units")).thenReturn(1_000L);
-                    when(rs.getLong("locked_units")).thenReturn(0L);
-                    return List.of(mapper.mapRow(rs, 0));
-                });
         when(orderRepository.nextSequence("margin-reservation")).thenReturn(77L);
         when(jdbcTemplate.update(contains("INSERT INTO account_margin_reservations"), any(Object[].class)))
                 .thenReturn(1);

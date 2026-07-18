@@ -60,50 +60,6 @@ class OutboxRepositoryTest {
     }
 
     @Test
-    void lockPendingSelectsUnpublishedDueRowsForRetry() {
-        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
-        OutboxRepository repository = new OutboxRepository(jdbcTemplate, org.mockito.Mockito.mock(OrderRepository.class));
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(100))).thenReturn(List.of());
-
-        repository.lockPending(100);
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(100));
-        assertThat(sql.getValue())
-                .contains("DISTINCT ON (topic, event_key)")
-                .contains("published_at IS NULL")
-                .contains("aggregate_type = 'ORDER'")
-                .contains("next_attempt_at <= now()")
-                .contains("pg_try_advisory_xact_lock")
-                .contains("FOR UPDATE OF e SKIP LOCKED");
-    }
-
-    @Test
-    void lockPendingFiltersByProductTopicsWhenProductTopicsAreEnabled() {
-        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
-        TradingOrderProperties properties = new TradingOrderProperties();
-        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
-        properties.getKafka().setProductTopicsEnabled(true);
-        OutboxRepository repository = new OutboxRepository(jdbcTemplate,
-                org.mockito.Mockito.mock(OrderRepository.class), properties);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(),
-                eq("surprising.inverse-perp.order.events.v1"),
-                eq("surprising.inverse-perp.order.commands.v1"),
-                eq(100))).thenReturn(List.of());
-
-        repository.lockPending(100);
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
-                eq("surprising.inverse-perp.order.events.v1"),
-                eq("surprising.inverse-perp.order.commands.v1"),
-                eq(100));
-        assertThat(sql.getValue())
-                .contains("e.topic IN (?, ?)")
-                .contains("aggregate_type = 'ORDER'");
-    }
-
-    @Test
     void claimPendingLeasesUnpublishedDueRowsForPublishOutsideTransaction() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         OutboxRepository repository = new OutboxRepository(jdbcTemplate, org.mockito.Mockito.mock(OrderRepository.class));
