@@ -173,7 +173,7 @@ Core indexes:
 - `account_commands_processing_idx`
 - `account_commands_dependency_idx`
 - `account_trade_settlements_incomplete_idx`
-- `account_outbox_pending_key_idx`
+- `account_outbox_pending_stream_idx`
 
 ## Configuration
 

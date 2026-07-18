@@ -780,6 +780,11 @@ CREATE INDEX account_outbox_pending_idx
     ON account_outbox_events (product_line, next_attempt_at, id)
     WHERE published_at IS NULL;
 
+CREATE INDEX account_outbox_pending_stream_idx
+    ON account_outbox_events (product_line, topic, event_key, id)
+    INCLUDE (next_attempt_at)
+    WHERE published_at IS NULL;
+
 CREATE INDEX account_outbox_aggregate_idx
     ON account_outbox_events (aggregate_type, aggregate_id);
 
@@ -788,10 +793,15 @@ CREATE INDEX account_outbox_published_line_cleanup_idx
     WHERE published_at IS NOT NULL;
 ```
 
-The publisher claims pending rows with `FOR UPDATE SKIP LOCKED`, so multiple account-provider nodes
-can drain the outbox safely. Publishing is at-least-once; consumers should deduplicate by event id,
-trade id, or their own latest-position version rules. Insurance uses
+The account publisher combines transaction-scoped advisory locks per `topic + event_key` with an
+atomic lease update, so multiple account-provider nodes can drain different streams safely.
+Publishing is at-least-once; consumers should deduplicate by event id, trade id, or their own
+latest-position version rules. Insurance uses
 `insurance_fund_ledger(reference_type, reference_id, asset)` with `reference_id = tradeId:orderId`.
+The account claim materializes the product-line pending set once, ranks each `topic + event_key`
+stream in one window pass, and leases only a continuous due prefix. A future retry still blocks every
+later row for that key, and the round-robin candidate order prevents a deep symbol stream from taking
+the whole batch.
 Published rows are transient delivery records. Every publisher owns a scheduled retention task: the shared
 trading table is partitioned logically by `aggregate_type`, the account table by `product_line`, and the risk
 publisher owns the risk table. Rows older than seven days are deleted once per minute in up to ten short
