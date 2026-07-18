@@ -13,7 +13,7 @@ spring:
         await-termination: true
         await-termination-period: 10s
   datasource:
-    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    url: jdbc:postgresql://localhost:5432/surprising_exchange?reWriteBatchedInserts=true
     username: surprising
     password: surprising
     hikari:
@@ -55,6 +55,9 @@ surprising:
     settlement:
       settle-delay-ms: 1000
       batch-size: 20
+      payment-page-size: 500
+      max-pages-per-run: 20
+      reconcile-batch-size: 500
     coordination:
       enabled: true
       node-id:

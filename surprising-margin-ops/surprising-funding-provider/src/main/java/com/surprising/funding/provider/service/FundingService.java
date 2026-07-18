@@ -9,11 +9,14 @@ import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.api.model.FundingSettlementResponse;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.model.FundingPaymentCandidate;
-import com.surprising.funding.provider.repository.FundingRepository;
 import com.surprising.funding.provider.repository.FundingAccountCommandOutboxRepository;
+import com.surprising.funding.provider.repository.FundingRepository;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -85,15 +88,38 @@ public class FundingService {
         }
         Instant now = Instant.now();
         freezeDuePredictions(now);
+        Deque<FundingRepository.FundingSettlementWork> settlements = new ArrayDeque<>();
         for (FundingRateResponse rate : fundingRepository.dueRates(now, properties.getSettlement().getBatchSize())) {
             if (!ownsSymbol(rate.symbol())) {
                 continue;
             }
             try {
-                transactionTemplate.executeWithoutResult(status -> settleRate(rate, Instant.now()));
+                FundingRepository.FundingSettlementWork settlement = transactionTemplate.execute(
+                        status -> fundingRepository.createOrResumeSettlement(rate, Instant.now()).orElse(null));
+                if (settlement != null) {
+                    settlements.addLast(settlement);
+                }
             } catch (Exception ex) {
-                log.error("Failed to settle funding rate symbol={} fundingTime={}: {}",
+                log.error("Failed to create or resume funding settlement symbol={} fundingTime={}: {}",
                         rate.symbol(), rate.fundingTime(), ex.getMessage(), ex);
+            }
+        }
+        int remainingPages = Math.max(1, properties.getSettlement().getMaxPagesPerRun());
+        while (remainingPages > 0 && !settlements.isEmpty()) {
+            FundingRepository.FundingSettlementWork settlement = settlements.removeFirst();
+            if (!ownsSymbol(settlement.symbol())) {
+                continue;
+            }
+            try {
+                Boolean completed = transactionTemplate.execute(
+                        status -> settlePage(settlement.settlementId(), Instant.now()));
+                remainingPages--;
+                if (!Boolean.TRUE.equals(completed)) {
+                    settlements.addLast(settlement);
+                }
+            } catch (Exception ex) {
+                log.error("Failed to dispatch funding settlement page settlementId={} symbol={}: {}",
+                        settlement.settlementId(), settlement.symbol(), ex.getMessage(), ex);
             }
         }
     }
@@ -133,48 +159,46 @@ public class FundingService {
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
-    private void settleRate(FundingRateResponse rate, Instant now) {
-        var settlementId = fundingRepository.createSettlement(rate, now);
-        if (settlementId.isEmpty()) {
-            return;
+    private boolean settlePage(long settlementId, Instant now) {
+        FundingRepository.FundingSettlementWork settlement = fundingRepository
+                .lockProcessingSettlement(settlementId)
+                .orElse(null);
+        if (settlement == null) {
+            return true;
         }
-        long totalLongPayment = 0L;
-        long totalShortPayment = 0L;
-        int positionCount = 0;
-        for (FundingPaymentCandidate payment : fundingRepository.paymentCandidates(rate)) {
-            if (payment.amountUnits() == 0L) {
-                continue;
-            }
-            var dispatch = fundingRepository.insertPayment(settlementId.get(), payment, now);
-            if (dispatch.isEmpty()) {
-                continue;
-            }
+        FundingRepository.FundingPaymentPage page = fundingRepository.paymentCandidatesPage(
+                settlement, Math.max(1, properties.getSettlement().getPaymentPageSize()));
+        List<FundingPaymentCandidate> payable = page.items().stream()
+                .filter(payment -> payment.amountUnits() != 0L)
+                .toList();
+        List<FundingRepository.FundingPaymentWrite> writes =
+                fundingRepository.insertPayments(settlementId, payable, now);
+        List<FundingAccountCommandOutboxRepository.FundingAccountCommandWrite> commands =
+                new ArrayList<>(writes.size());
+        for (FundingRepository.FundingPaymentWrite write : writes) {
+            FundingPaymentCandidate payment = write.payment();
             FundingSettlementAccountCommand payload = new FundingSettlementAccountCommand(
-                    settlementId.get(), dispatch.get().paymentId(), payment.symbol(), payment.marginMode(),
+                    settlementId, write.paymentId(), payment.symbol(), payment.marginMode(),
                     payment.positionSide(), payment.asset(), payment.signedQuantitySteps(),
                     payment.notionalUnits(), payment.fundingRatePpm(), payment.amountUnits());
             AccountUserCommand command = new AccountUserCommand(
                     AccountUserCommand.CURRENT_SCHEMA_VERSION,
-                    dispatch.get().commandId(),
+                    write.commandId(),
                     properties.getKafka().getProductLine(),
                     payment.userId(),
                     AccountUserCommandType.FUNDING_SETTLE,
                     "FUNDING",
-                    Long.toString(dispatch.get().paymentId()),
+                    Long.toString(write.paymentId()),
                     null,
                     objectMapper.writeValueAsString(payload),
                     now,
                     null);
-            accountCommandOutboxRepository.enqueue(dispatch.get().paymentId(), command, now);
-            if (payment.signedQuantitySteps() > 0) {
-                totalLongPayment = Math.addExact(totalLongPayment, payment.amountUnits());
-            } else {
-                totalShortPayment = Math.addExact(totalShortPayment, payment.amountUnits());
-            }
-            positionCount++;
+            commands.add(new FundingAccountCommandOutboxRepository.FundingAccountCommandWrite(
+                    write.paymentId(), command));
         }
-        fundingRepository.awaitAccountSettlement(
-                settlementId.get(), totalLongPayment, totalShortPayment, positionCount, now);
+        accountCommandOutboxRepository.enqueueBatch(commands, now);
+        fundingRepository.advanceSettlementPage(settlementId, page, writes, now);
+        return !page.hasMore();
     }
 
     private boolean ownsSymbol(String symbol) {

@@ -85,7 +85,8 @@ public class FundingKafkaConfiguration {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setConcurrency(Math.max(1, properties.getKafka().getCommandResultsConcurrency()));
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.setBatchListener(true);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
         return factory;
     }
 }

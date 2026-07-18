@@ -19,7 +19,9 @@
 
 - 业务包仍然按 `com.surprising.risk`、`com.surprising.liquidation`、`com.surprising.funding`、`com.surprising.insurance`、`com.surprising.adl` 隔离。
 - 五个模块仍然通过已有 PostgreSQL 表、Kafka topic、outbox、幂等键、租约和 sequence 协作。
-- 资金费账户命令返回时会先锁定所属 `funding_settlements` 行，再串行完成付款状态与已应用/已拒绝计数刷新，避免收付双方并发完成后把已结算批次永久留在 `WAITING_ACCOUNTS`。
+- 资金费结算只冻结一次标记价格输入，并持久化复合持仓游标；每个 keyset 分页使用独立短事务，批量写
+  payment 与账户 outbox。原生带缓存 PostgreSQL sequence 消除了逐付款争抢 sequence 行的问题；账户结果
+  批量消费并增量更新结算计数，不再为每个结果重新扫描全部 payment。
 - 风险模块批量消费账户持仓事件，同一具体持仓只保留最高 revision，并让每个受影响的
   `用户 + 账户类型 + 结算资产` 风险组只扫描一次。完整持仓事件已经能够定位风险组，不再额外查询
   instrument；定时 keyset 扫描继续作为安全兜底。

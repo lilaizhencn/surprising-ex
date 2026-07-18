@@ -228,7 +228,8 @@ The root `init.sql` creates:
 - `price_mark_ticks`: three-day mark-price audit snapshots keyed by `(symbol, sequence)`, including the
   complete calculation-input JSON and fixed-point output; real-time consumers use Kafka, not this table.
 - `funding_rate_ticks`: `FINAL` funding rates frozen at a settlement boundary and keyed by `(symbol, sequence)`; per-second predictions remain on Kafka/cache.
-- `funding_settlements`: idempotent funding settlement batches keyed by `(symbol, funding_time)`.
+- `funding_settlements`: idempotent funding settlement batches keyed by `(symbol, funding_time)`, including the frozen
+  mark/instrument input and durable composite position-scan cursor used for crash recovery.
 - `funding_payments`: per-user funding payments keyed by `(settlement_id, user_id)`.
 - `trading_orders`: accepted/rejected order state using long ticks and steps.
 - `trading_order_events`: order-entry audit events.
@@ -446,6 +447,18 @@ Do not point this script at a shared development database. Matching restores ope
   `userId + accountType + settleAsset`; lease expiry allows another node to take over after the owner dies.
 - Market-maker providers use `market_maker_strategy_leases` so only one live node quotes a given `strategyId + symbol`. If the owner dies, lease expiry allows another node to continue. The module places normal `LIMIT + GTX + postOnly` orders through order-provider and never writes matching state directly.
 - Funding-rate prediction is published directly to `surprising.perp.funding.rate.v1` and cached by symbol; it performs no rate-table or outbox write. At the funding boundary, the owner freezes the cached prediction into one idempotent `FINAL` rate row before settlement. If no current prediction is available, settlement fails closed for that symbol.
+- Funding settlement never holds one transaction across all symbol positions. It scans the partial
+  `account_positions_funding_scan_idx` with the persisted
+  `(userId, marginMode, positionSide)` keyset cursor, processes at most
+  `surprising.funding.settlement.payment-page-size` rows per transaction, and bounds scheduler work with
+  `max-pages-per-run`. A `PROCESSING` settlement resumes from its committed cursor after a crash or lease takeover.
+  Every page uses JDBC batch inserts for `funding_payments` and account-command outbox rows; keep
+  `reWriteBatchedInserts=true` in the PostgreSQL JDBC URL. Cached native sequences allocate settlement/payment ids
+  without a shared sequence table row.
+- Funding account results use Kafka batch acknowledgment. One conditional SQL batch changes only still-`PENDING`
+  payments, groups the winners by settlement, and increments parent applied/rejected counters once per settlement.
+  Duplicate results are no-ops, conflicting results fail closed, and the database reconciler uses the same bounded
+  set-based path. This removes the former full `funding_payments` aggregate scan per result.
 - Funding-rate publication and settlement can be paused independently with `surprising.funding.calculation.enabled=false` and `surprising.funding.settlement.enabled=false`.
 - Trading, matching, account, trigger, liquidation, and risk outbox publishers are at-least-once. They atomically lease only their own rows, with a lease sized for the configured bounded Kafka-send workload, then send outside a database transaction and mark the result. Account ordinary-event groups submit an ordered window of up to five sends before waiting and confirm only the continuous successful prefix; account financial-command groups wait for each acknowledgement to preserve per-user command order. Trigger and liquidation claim only the earliest unpublished row per `topic + event_key`, publish different keys concurrently up to `max-in-flight`, and preserve strict same-key order. Trading, matching, account, trigger, and liquidation publishers confirm successful batches with one SQL update. A Kafka send failure increments `attempts`, records `last_error`, and moves `next_attempt_at` forward with capped exponential backoff; the row remains unpublished and is retried by later scans.
 - The shared trading, account, and risk outbox tables retain published delivery rows for seven days. Order, matching, trigger, liquidation, account, and risk publishers each run retention cleanup once per minute and only delete their owned aggregate/product-line rows. A run performs at most ten short 10,000-row `FOR UPDATE SKIP LOCKED` delete statements, so it can catch up without one long lock-holding transaction. Cleanup is enabled by default and never selects unpublished or failed rows. `retention`, `cleanup-delay-ms`, `cleanup-batch-size`, and `cleanup-max-batches` must all be positive; invalid values fail configuration binding instead of widening the delete cutoff.
@@ -485,7 +498,8 @@ Do not point this script at a shared development database. Matching restores ope
 - Trigger-provider consumes account position events. A zero-position event atomically cancels exact-scope, pre-event `PENDING` triggers and enqueues their status events, then removes Redis members after commit. Monitor position-topic lag for the trigger group.
 - Order-provider also consumes account position events in the `order-position-maintenance` group. It serializes each user key, locks that position scope's open reduce-only orders, and emits conditional cancel commands for wrong-side, stale-version, or excess-capacity rows. Account-provider never writes trading order tables.
 - Risk consumes account position events only as scan triggers. It does not trust the event as accounting state; it re-reads positions, balances, deficits, and instruments inside the risk transaction, while mark prices come from one fresh immutable local Kafka-cache snapshot. Missing, stale, or version-mismatched marks skip the whole account risk group.
-- Funding settlement account ledger, balance, deficit, and settlement completion updates are fail-fast after a `funding_payments` row is inserted.
+- Funding settlement account ledger, balance, deficit, payment, and incremental settlement completion updates are
+  fail-fast. A payment row and its account-command outbox row commit in the same bounded page transaction.
 - Risk snapshot writes, liquidation-candidate outbox enqueue, and outbox publish/failure markers are fail-fast. Only the partial active-candidate `NEW/PROCESSING user_id + symbol + margin_mode` uniqueness conflict may skip a candidate write; candidate-id or snapshot uniqueness conflicts must fail. A successfully inserted candidate must always be readable and enqueued before the transaction commits.
 - Risk scan leases are best-effort ownership, not accounting state. A node may take over only when the prior row is owned by itself or `lease_until <= updated_at`; clock synchronization matters for predictable failover.
 - Risk scans can be paused with `surprising.risk.calculation.enabled=false`; both the scheduled scanner and position-event trigger return before reading positions or opening a transaction.

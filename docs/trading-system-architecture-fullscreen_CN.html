@@ -572,8 +572,8 @@
           <div xmlns="http://www.w3.org/1999/xhtml" class="box">
             <h2>Funding / 费用结算</h2>
             <ul>
-              <li>FundingProvider 定时发布 due funding rate</li>
-              <li>账户侧按持仓结算资金费并写 ledger</li>
+              <li>FundingProvider 冻结 rate/mark 后按持仓复合游标分页派发</li>
+              <li>每页短事务批量写 payment + account outbox；账户侧按用户串行结算并写 ledger</li>
               <li>Trade fee 在每笔成交里结算</li>
               <li>Liquidation fee 由 account 结算后发 <span class="mono">surprising.account.liquidation-fee.events.v1</span> 给 insurance</li>
             </ul>

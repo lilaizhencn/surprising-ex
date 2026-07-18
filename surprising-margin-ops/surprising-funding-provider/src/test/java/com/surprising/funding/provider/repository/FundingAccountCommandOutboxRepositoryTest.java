@@ -14,12 +14,14 @@ import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -74,6 +76,22 @@ class FundingAccountCommandOutboxRepositoryTest {
                 9001L, command(ProductLine.LINEAR_PERPETUAL, 42L), Instant.now()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("failed to enqueue funding account command");
+    }
+
+    @Test
+    void enqueuesPageAsOneJdbcBatch() {
+        when(jdbcTemplate.batchUpdate(anyString(), any(BatchPreparedStatementSetter.class)))
+                .thenReturn(new int[]{1, 1});
+
+        repository.enqueueBatch(List.of(
+                new FundingAccountCommandOutboxRepository.FundingAccountCommandWrite(
+                        9001L, command(ProductLine.LINEAR_PERPETUAL, 42L)),
+                new FundingAccountCommandOutboxRepository.FundingAccountCommandWrite(
+                        9002L, command(ProductLine.LINEAR_PERPETUAL, 43L))),
+                Instant.parse("2026-07-18T00:00:00Z"));
+
+        verify(jdbcTemplate).batchUpdate(contains("INSERT INTO account_outbox_events"),
+                any(BatchPreparedStatementSetter.class));
     }
 
     private AccountUserCommand command(ProductLine productLine, long userId) {

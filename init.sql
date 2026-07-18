@@ -611,12 +611,8 @@ CREATE INDEX IF NOT EXISTS price_mark_ticks_query_idx
 CREATE INDEX IF NOT EXISTS price_mark_ticks_retention_idx
     ON price_mark_ticks USING BRIN (event_time) WITH (pages_per_range = 64);
 
-CREATE TABLE IF NOT EXISTS funding_sequences (
-    sequence_name       TEXT PRIMARY KEY,
-    sequence_value      BIGINT NOT NULL,
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT funding_sequences_positive CHECK (sequence_value > 0)
-);
+CREATE SEQUENCE IF NOT EXISTS funding_settlement_id_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
+CREATE SEQUENCE IF NOT EXISTS funding_payment_id_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 4096;
 
 CREATE TABLE IF NOT EXISTS funding_rate_ticks (
     symbol                  TEXT NOT NULL,
@@ -643,16 +639,30 @@ CREATE TABLE IF NOT EXISTS funding_settlements (
     symbol                      TEXT NOT NULL,
     funding_time                TIMESTAMPTZ NOT NULL,
     funding_rate_ppm            BIGINT NOT NULL,
+    instrument_version          BIGINT NOT NULL,
+    mark_price_ticks            BIGINT NOT NULL,
     total_long_payment_units    BIGINT NOT NULL DEFAULT 0,
     total_short_payment_units   BIGINT NOT NULL DEFAULT 0,
     position_count              INTEGER NOT NULL DEFAULT 0,
     expected_payment_count      INTEGER NOT NULL DEFAULT 0,
     applied_payment_count       INTEGER NOT NULL DEFAULT 0,
     rejected_payment_count      INTEGER NOT NULL DEFAULT 0,
+    scan_user_id                BIGINT NOT NULL DEFAULT 0,
+    scan_margin_mode            TEXT NOT NULL DEFAULT '',
+    scan_position_side          TEXT NOT NULL DEFAULT '',
+    scan_completed              BOOLEAN NOT NULL DEFAULT FALSE,
     status                      TEXT NOT NULL,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT funding_settlements_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
+    CONSTRAINT funding_settlements_market_input_positive CHECK (
+        instrument_version > 0 AND mark_price_ticks > 0
+    ),
+    CONSTRAINT funding_settlements_scan_cursor_check CHECK (
+        scan_user_id >= 0
+        AND scan_margin_mode IN ('', 'CROSS', 'ISOLATED')
+        AND scan_position_side IN ('', 'NET', 'LONG', 'SHORT')
+    ),
     CONSTRAINT funding_settlements_position_count_non_negative CHECK (
         position_count >= 0 AND expected_payment_count >= 0
         AND applied_payment_count >= 0 AND rejected_payment_count >= 0
@@ -724,6 +734,11 @@ CREATE INDEX IF NOT EXISTS funding_payments_user_time_idx
 
 CREATE INDEX IF NOT EXISTS funding_payments_pending_idx
     ON funding_payments (settlement_id, payment_id)
+    WHERE status = 'PENDING';
+
+CREATE INDEX IF NOT EXISTS funding_payments_pending_command_idx
+    ON funding_payments (command_id)
+    INCLUDE (settlement_id, user_id)
     WHERE status = 'PENDING';
 
 CREATE TABLE IF NOT EXISTS trading_sequences (
@@ -2315,6 +2330,10 @@ CREATE INDEX IF NOT EXISTS account_positions_symbol_idx
 
 CREATE INDEX IF NOT EXISTS account_positions_open_scan_idx
     ON account_positions (product_line, user_id, symbol, margin_mode, position_side)
+    WHERE signed_quantity_steps <> 0;
+
+CREATE INDEX IF NOT EXISTS account_positions_funding_scan_idx
+    ON account_positions (product_line, symbol, instrument_version, user_id, margin_mode, position_side)
     WHERE signed_quantity_steps <> 0;
 
 DO $$

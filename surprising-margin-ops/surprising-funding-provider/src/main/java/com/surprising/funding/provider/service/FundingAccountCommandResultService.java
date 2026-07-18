@@ -4,6 +4,7 @@ import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.repository.FundingRepository;
+import java.util.List;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,20 +23,17 @@ public class FundingAccountCommandResultService {
 
     @Transactional
     public void apply(AccountCommandResultEvent event) {
-        if (event.commandType() != AccountUserCommandType.FUNDING_SETTLE
-                || !"FUNDING".equals(event.source())) {
-            return;
-        }
-        if (event.productLine() != properties.getKafka().getProductLine()) {
-            throw new IllegalStateException("funding result product line mismatch");
-        }
-        fundingRepository.completePayment(
-                event.commandId(),
-                event.userId(),
-                event.status().name(),
-                event.errorCode(),
-                event.errorMessage(),
-                event.completedAt());
+        applyBatch(List.of(event));
+    }
+
+    @Transactional
+    public void applyBatch(List<AccountCommandResultEvent> events) {
+        List<FundingRepository.PaymentResult> results = events.stream()
+                .filter(event -> event.commandType() == AccountUserCommandType.FUNDING_SETTLE
+                        && "FUNDING".equals(event.source()))
+                .map(this::toPaymentResult)
+                .toList();
+        fundingRepository.completePayments(results);
     }
 
     /**
@@ -45,15 +43,22 @@ public class FundingAccountCommandResultService {
     @Scheduled(fixedDelayString = "${surprising.funding.settlement.reconcile-delay-ms:1000}")
     @Transactional
     public void reconcileTerminalCommands() {
-        for (FundingRepository.TerminalAccountCommand command
-                : fundingRepository.terminalAccountCommandsForPendingPayments(500)) {
-            fundingRepository.completePayment(
-                    command.commandId(),
-                    command.userId(),
-                    command.status(),
-                    command.errorCode(),
-                    command.errorMessage(),
-                    command.completedAt());
+        List<FundingRepository.PaymentResult> results = fundingRepository
+                .terminalAccountCommandsForPendingPayments(
+                        Math.max(1, properties.getSettlement().getReconcileBatchSize()));
+        fundingRepository.completePayments(results);
+    }
+
+    private FundingRepository.PaymentResult toPaymentResult(AccountCommandResultEvent event) {
+        if (event.productLine() != properties.getKafka().getProductLine()) {
+            throw new IllegalStateException("funding result product line mismatch");
         }
+        return new FundingRepository.PaymentResult(
+                event.commandId(),
+                event.userId(),
+                event.status().name(),
+                event.errorCode(),
+                event.errorMessage(),
+                event.completedAt());
     }
 }

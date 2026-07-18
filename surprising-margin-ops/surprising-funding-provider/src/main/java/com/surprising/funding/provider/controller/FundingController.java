@@ -116,10 +116,22 @@ public class FundingController {
             properties.getCalculation().setPublishDelayMs(nonNegative(request.calculationPublishDelayMs(), "calculationPublishDelayMs"));
         }
         if (request.settleDelayMs() != null) {
-            properties.getSettlement().setSettleDelayMs(nonNegative(request.settleDelayMs(), "settleDelayMs"));
+            properties.getSettlement().setSettleDelayMs(positive(request.settleDelayMs(), "settleDelayMs"));
         }
         if (request.settlementBatchSize() != null) {
             properties.getSettlement().setBatchSize(bounded(request.settlementBatchSize(), 1, 10_000, "settlementBatchSize"));
+        }
+        if (request.paymentPageSize() != null) {
+            properties.getSettlement().setPaymentPageSize(
+                    bounded(request.paymentPageSize(), 1, 10_000, "paymentPageSize"));
+        }
+        if (request.maxPagesPerRun() != null) {
+            properties.getSettlement().setMaxPagesPerRun(
+                    bounded(request.maxPagesPerRun(), 1, 1_000, "maxPagesPerRun"));
+        }
+        if (request.reconcileBatchSize() != null) {
+            properties.getSettlement().setReconcileBatchSize(
+                    bounded(request.reconcileBatchSize(), 1, 10_000, "reconcileBatchSize"));
         }
         return runtimeConfig();
     }
@@ -134,6 +146,9 @@ public class FundingController {
         settlement.put("enabled", properties.getSettlement().isEnabled());
         settlement.put("settleDelayMs", properties.getSettlement().getSettleDelayMs());
         settlement.put("batchSize", properties.getSettlement().getBatchSize());
+        settlement.put("paymentPageSize", properties.getSettlement().getPaymentPageSize());
+        settlement.put("maxPagesPerRun", properties.getSettlement().getMaxPagesPerRun());
+        settlement.put("reconcileBatchSize", properties.getSettlement().getReconcileBatchSize());
 
         Map<String, Object> coordination = new LinkedHashMap<>();
         coordination.put("enabled", properties.getCoordination().isEnabled());
@@ -162,12 +177,22 @@ public class FundingController {
         return value;
     }
 
+    private long positive(long value, String field) {
+        if (value <= 0L) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " must be positive");
+        }
+        return value;
+    }
+
     public record RuntimeConfigUpdate(
             Boolean calculationEnabled,
             Boolean settlementEnabled,
             Boolean coordinationEnabled,
             Long calculationPublishDelayMs,
             Long settleDelayMs,
-            Integer settlementBatchSize) {
+            Integer settlementBatchSize,
+            Integer paymentPageSize,
+            Integer maxPagesPerRun,
+            Integer reconcileBatchSize) {
     }
 }

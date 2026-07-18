@@ -3,6 +3,8 @@ package com.surprising.funding.provider.service;
 import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.funding.provider.config.FundingProperties;
+import java.util.ArrayList;
+import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,27 +31,33 @@ public class FundingAccountCommandResultConsumer {
 
     @KafkaListener(topics = "#{__listener.topic()}", groupId = "#{__listener.groupId()}",
             containerFactory = "fundingCommandResultsKafkaListenerContainerFactory")
-    public void onResult(ConsumerRecord<String, String> record) {
-        AccountCommandResultEvent event;
-        try {
-            event = objectMapper.readValue(record.value(), AccountCommandResultEvent.class);
-        } catch (Exception ex) {
-            // The database reconciler is authoritative, so poison result notifications must not
-            // stop this group from consuming later valid results.
-            log.error("Ignoring malformed account result topic={} partition={} offset={}: {}",
-                    record.topic(), record.partition(), record.offset(), ex.getMessage(), ex);
+    public void onResult(List<ConsumerRecord<String, String>> records) {
+        if (records == null || records.isEmpty()) {
             return;
         }
-        if (event.productLine() != properties.getKafka().getProductLine()) {
-            return;
+        List<AccountCommandResultEvent> events = new ArrayList<>(records.size());
+        for (ConsumerRecord<String, String> record : records) {
+            AccountCommandResultEvent event;
+            try {
+                event = objectMapper.readValue(record.value(), AccountCommandResultEvent.class);
+            } catch (Exception ex) {
+                // The database reconciler is authoritative, so a poison notification does not block later results.
+                log.error("Ignoring malformed account result topic={} partition={} offset={}: {}",
+                        record.topic(), record.partition(), record.offset(), ex.getMessage(), ex);
+                continue;
+            }
+            if (event.productLine() != properties.getKafka().getProductLine()) {
+                continue;
+            }
+            String expectedKey = AccountUserCommand.partitionKey(event.productLine(), event.userId());
+            if (!expectedKey.equals(record.key())) {
+                log.error("Ignoring account result with invalid key commandId={} expected={} actual={}",
+                        event.commandId(), expectedKey, record.key());
+                continue;
+            }
+            events.add(event);
         }
-        String expectedKey = AccountUserCommand.partitionKey(event.productLine(), event.userId());
-        if (!expectedKey.equals(record.key())) {
-            log.error("Ignoring account result with invalid key commandId={} expected={} actual={}",
-                    event.commandId(), expectedKey, record.key());
-            return;
-        }
-        resultService.apply(event);
+        resultService.applyBatch(events);
     }
 
     public String topic() {

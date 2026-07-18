@@ -2,15 +2,24 @@ package com.surprising.funding.provider.config;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductTopicNames;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
+@Validated
 @ConfigurationProperties(prefix = "surprising.funding")
 public class FundingProperties {
 
+    @Valid
     private Kafka kafka = new Kafka();
+    @Valid
     private Calculation calculation = new Calculation();
+    @Valid
     private Settlement settlement = new Settlement();
+    @Valid
     private Coordination coordination = new Coordination();
 
     public Kafka getKafka() {
@@ -179,8 +188,20 @@ public class FundingProperties {
 
     public static class Settlement {
         private boolean enabled = true;
+        @Min(1)
         private long settleDelayMs = 1000L;
+        @Min(1)
+        @Max(10_000)
         private int batchSize = 20;
+        @Min(1)
+        @Max(10_000)
+        private int paymentPageSize = 500;
+        @Min(1)
+        @Max(1_000)
+        private int maxPagesPerRun = 20;
+        @Min(1)
+        @Max(10_000)
+        private int reconcileBatchSize = 500;
 
         public boolean isEnabled() {
             return enabled;
@@ -204,6 +225,30 @@ public class FundingProperties {
 
         public void setBatchSize(int batchSize) {
             this.batchSize = batchSize;
+        }
+
+        public int getPaymentPageSize() {
+            return paymentPageSize;
+        }
+
+        public void setPaymentPageSize(int paymentPageSize) {
+            this.paymentPageSize = paymentPageSize;
+        }
+
+        public int getMaxPagesPerRun() {
+            return maxPagesPerRun;
+        }
+
+        public void setMaxPagesPerRun(int maxPagesPerRun) {
+            this.maxPagesPerRun = maxPagesPerRun;
+        }
+
+        public int getReconcileBatchSize() {
+            return reconcileBatchSize;
+        }
+
+        public void setReconcileBatchSize(int reconcileBatchSize) {
+            this.reconcileBatchSize = reconcileBatchSize;
         }
     }
 

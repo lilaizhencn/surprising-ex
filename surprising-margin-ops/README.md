@@ -19,7 +19,10 @@ Margin-operation APIs and providers for risk, liquidation, funding, insurance, a
 
 - Business packages remain isolated under `com.surprising.risk`, `com.surprising.liquidation`, `com.surprising.funding`, `com.surprising.insurance`, and `com.surprising.adl`.
 - The five services still coordinate through their existing PostgreSQL tables, Kafka topics, outbox rows, idempotency keys, leases, and sequences.
-- Funding account-command results serialize terminal payment updates on their parent `funding_settlements` row, so concurrent payer/payee completions refresh the applied/rejected counters without leaving a completed settlement in `WAITING_ACCOUNTS`.
+- Funding freezes settlement mark inputs once, persists a composite position cursor, and dispatches bounded keyset pages
+  in separate transactions. Each page batch-inserts payments and account outbox commands; native cached PostgreSQL
+  sequences remove the former per-payment sequence-row hotspot. Account results are consumed in batches and update
+  settlement counters incrementally without rescanning all payments.
 - Risk consumes account position events in Kafka batches, keeps only the highest revision for each exact position, and
   scans each affected user/account/settlement-asset group once. Complete position events eliminate the former
   instrument target-resolution query; scheduled keyset scans remain the safety fallback.
