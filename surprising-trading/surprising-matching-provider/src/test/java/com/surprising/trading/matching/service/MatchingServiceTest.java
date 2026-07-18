@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
+import com.surprising.account.api.model.OrderReleaseAccountCommand;
 import com.surprising.account.api.model.TradeParticipantRole;
 import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.trading.api.model.MatchResultEvent;
@@ -161,6 +162,273 @@ class MatchingServiceTest {
                 assertThat(level.quantitySteps()).isEqualTo(7L);
                 assertThat(level.orderCount()).isEqualTo(1L);
             });
+        } finally {
+            engine.stop();
+        }
+    }
+
+    @Test
+    void internalMarketMakerSelfTradeSkipsFinancialPersistenceButKeepsPublicTrade() throws Exception {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getEngine().setExchangeId("matching-service-internal-mm-self-trade-test");
+        properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
+        properties.getProtection().setSelfTradePreventionEnabled(true);
+        properties.getProtection().setInternalMarketMakerUserIds(List.of(900001L, 900002L));
+
+        MatchingSymbol matchingSymbol = new MatchingSymbol("BTC-USDT", 301, 11, 12);
+        InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
+        ExchangeCoreEngine engine = new ExchangeCoreEngine(properties,
+                new FakeMatchingSymbolRepository(instrument, matchingSymbol),
+                new FakeRecoveryRepository());
+        FakeSequenceRepository sequenceRepository = new FakeSequenceRepository();
+        FakeResultRepository resultRepository = new FakeResultRepository();
+        FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
+        FakePublicTradePublisher tradePublisher = new FakePublicTradePublisher();
+        MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
+                new FakeProtectionRepository(), sequenceRepository, resultRepository, outboxRepository,
+                OrderBookDepthPublisher.NOOP, tradePublisher);
+
+        try {
+            engine.start();
+
+            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 900001L,
+                    "mm-maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
+                    100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
+            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 900002L,
+                    "mm-taker-202", "BTC-USDT", 5L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
+                    100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z")));
+
+            assertThat(resultRepository.results).hasSize(2);
+            assertThat(resultRepository.results.get(1).trades()).singleElement().satisfies(trade -> {
+                assertThat(trade.tradeId()).isEqualTo(502_000_001L);
+                assertThat(trade.takerUserId()).isEqualTo(900002L);
+                assertThat(trade.makerUserId()).isEqualTo(900001L);
+            });
+            assertThat(resultRepository.trades).isEmpty();
+            assertThat(resultRepository.makerFillUpdates).isEqualTo(1);
+            assertThat(sequenceRepository.nextByName).doesNotContainKey("match-trade");
+            assertThat(tradePublisher.events).singleElement()
+                    .satisfies(event -> assertThat(event.tradeId()).isEqualTo("502:1"));
+
+            assertThat(outboxRepository.records)
+                    .extracting(OutboxRecord::aggregateType)
+                    .containsExactly("MATCH_RESULT", "ACCOUNT_COMMAND", "ACCOUNT_COMMAND", "MATCH_RESULT");
+            AccountUserCommand makerRelease = accountCommand(outboxRepository.records.get(1));
+            AccountUserCommand takerRelease = accountCommand(outboxRepository.records.get(2));
+            assertThat(makerRelease.commandType()).isEqualTo(AccountUserCommandType.ORDER_RELEASE);
+            assertThat(makerRelease.userId()).isEqualTo(900001L);
+            assertThat(makerRelease.dependsOnCommandId()).isNull();
+            assertThat(releaseCommand(makerRelease)).satisfies(release -> {
+                assertThat(release.orderId()).isEqualTo(101L);
+                assertThat(release.releaseAll()).isTrue();
+                assertThat(release.reason()).isEqualTo("INTERNAL_MARKET_MAKER_SELF_TRADE");
+            });
+            assertThat(takerRelease.commandType()).isEqualTo(AccountUserCommandType.ORDER_RELEASE);
+            assertThat(takerRelease.userId()).isEqualTo(900002L);
+            assertThat(takerRelease.dependsOnCommandId()).isNull();
+            assertThat(releaseCommand(takerRelease)).satisfies(release -> {
+                assertThat(release.orderId()).isEqualTo(202L);
+                assertThat(release.releaseAll()).isTrue();
+                assertThat(release.reason()).isEqualTo("ORDER_TERMINAL");
+            });
+        } finally {
+            engine.stop();
+        }
+    }
+
+    @Test
+    void partialInternalMarketMakerSelfTradeReleasesOnlyFilledReservationShare() throws Exception {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getEngine().setExchangeId("matching-service-internal-mm-partial-self-trade-test");
+        properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
+        properties.getProtection().setSelfTradePreventionEnabled(true);
+        properties.getProtection().setInternalMarketMakerUserIds(List.of(900001L, 900002L));
+
+        MatchingSymbol matchingSymbol = new MatchingSymbol("BTC-USDT", 301, 11, 12);
+        InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
+        ExchangeCoreEngine engine = new ExchangeCoreEngine(properties,
+                new FakeMatchingSymbolRepository(instrument, matchingSymbol),
+                new FakeRecoveryRepository());
+        FakeResultRepository resultRepository = new FakeResultRepository();
+        FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
+        MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
+                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository, outboxRepository);
+
+        try {
+            engine.start();
+
+            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 900001L,
+                    "mm-maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
+                    100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
+            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 900002L,
+                    "mm-taker-202", "BTC-USDT", 5L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
+                    100L, 5L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z")));
+
+            assertThat(resultRepository.results.get(1).orderStatus()).isEqualTo(OrderStatus.PARTIALLY_FILLED);
+            assertThat(resultRepository.trades).isEmpty();
+            AccountUserCommand activeOrderRelease = accountCommand(outboxRepository.records.get(2));
+            assertThat(activeOrderRelease.commandType()).isEqualTo(AccountUserCommandType.ORDER_RELEASE);
+            assertThat(releaseCommand(activeOrderRelease)).satisfies(release -> {
+                assertThat(release.orderId()).isEqualTo(202L);
+                assertThat(release.releaseAll()).isFalse();
+                assertThat(release.quantitySteps()).isEqualTo(5L);
+                assertThat(release.remainingQuantitySteps()).isEqualTo(2L);
+                assertThat(release.reason()).isEqualTo("INTERNAL_MARKET_MAKER_SELF_TRADE");
+            });
+        } finally {
+            engine.stop();
+        }
+    }
+
+    @Test
+    void partialInternalMarketMakerMakerReleaseUsesPreMatchOrderSnapshot() throws Exception {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getEngine().setExchangeId("matching-service-internal-mm-partial-maker-test");
+        properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
+        properties.getProtection().setSelfTradePreventionEnabled(true);
+        properties.getProtection().setInternalMarketMakerUserIds(List.of(900001L, 900002L));
+
+        MatchingSymbol matchingSymbol = new MatchingSymbol("BTC-USDT", 301, 11, 12);
+        InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
+        ExchangeCoreEngine engine = new ExchangeCoreEngine(properties,
+                new FakeMatchingSymbolRepository(instrument, matchingSymbol),
+                new FakeRecoveryRepository());
+        FakeResultRepository resultRepository = new FakeResultRepository();
+        resultRepository.orderQuantitySteps.put(101L, 5L);
+        resultRepository.orderRemainingQuantitySteps.put(101L, 5L);
+        FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
+        MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
+                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository, outboxRepository);
+
+        try {
+            engine.start();
+
+            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 900001L,
+                    "mm-maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
+                    100L, 5L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
+            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 900002L,
+                    "mm-taker-202", "BTC-USDT", 5L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
+                    100L, 2L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z")));
+
+            AccountUserCommand makerRelease = accountCommand(outboxRepository.records.get(1));
+            assertThat(releaseCommand(makerRelease)).satisfies(release -> {
+                assertThat(release.orderId()).isEqualTo(101L);
+                assertThat(release.releaseAll()).isFalse();
+                assertThat(release.quantitySteps()).isEqualTo(5L);
+                assertThat(release.remainingQuantitySteps()).isEqualTo(3L);
+            });
+        } finally {
+            engine.stop();
+        }
+    }
+
+    @Test
+    void marketMakerTradeWithRealUserKeepsFullFinancialSettlement() throws Exception {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getEngine().setExchangeId("matching-service-mm-real-user-test");
+        properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
+        properties.getProtection().setSelfTradePreventionEnabled(true);
+        properties.getProtection().setInternalMarketMakerUserIds(List.of(900001L, 900002L));
+
+        MatchingSymbol matchingSymbol = new MatchingSymbol("BTC-USDT", 301, 11, 12);
+        InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
+        ExchangeCoreEngine engine = new ExchangeCoreEngine(properties,
+                new FakeMatchingSymbolRepository(instrument, matchingSymbol),
+                new FakeRecoveryRepository());
+        FakeResultRepository resultRepository = new FakeResultRepository();
+        FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
+        MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
+                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository, outboxRepository);
+
+        try {
+            engine.start();
+
+            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 900001L,
+                    "mm-maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
+                    100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
+            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 2002L,
+                    "real-taker-202", "BTC-USDT", 5L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
+                    100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z")));
+
+            assertThat(resultRepository.trades).singleElement().satisfies(trade -> {
+                assertThat(trade.takerUserId()).isEqualTo(2002L);
+                assertThat(trade.makerUserId()).isEqualTo(900001L);
+            });
+            assertThat(outboxRepository.records.stream()
+                    .map(OutboxRecord::payload)
+                    .map(MatchingServiceTest::accountCommandOrNull)
+                    .filter(command -> command != null
+                            && command.commandType() == AccountUserCommandType.TRADE_SIDE_SETTLE))
+                    .hasSize(2);
+        } finally {
+            engine.stop();
+        }
+    }
+
+    @Test
+    void mixedMarketMakerSweepSettlesRealFillBeforeReleasingInternalSelfTradeMargin() throws Exception {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getEngine().setExchangeId("matching-service-mm-mixed-sweep-test");
+        properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
+        properties.getProtection().setSelfTradePreventionEnabled(true);
+        properties.getProtection().setInternalMarketMakerUserIds(List.of(900001L, 900002L));
+
+        MatchingSymbol matchingSymbol = new MatchingSymbol("BTC-USDT", 301, 11, 12);
+        InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
+        ExchangeCoreEngine engine = new ExchangeCoreEngine(properties,
+                new FakeMatchingSymbolRepository(instrument, matchingSymbol),
+                new FakeRecoveryRepository());
+        FakeSequenceRepository sequenceRepository = new FakeSequenceRepository();
+        FakeResultRepository resultRepository = new FakeResultRepository();
+        FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
+        FakePublicTradePublisher tradePublisher = new FakePublicTradePublisher();
+        MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
+                new FakeProtectionRepository(), sequenceRepository, resultRepository, outboxRepository,
+                OrderBookDepthPublisher.NOOP, tradePublisher);
+
+        try {
+            engine.start();
+
+            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 900002L,
+                    "mm-maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
+                    100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
+            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 502L, 102L, 1001L,
+                    "real-maker-102", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
+                    101L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z")));
+            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 503L, 203L, 900001L,
+                    "mm-taker-203", "BTC-USDT", 5L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
+                    101L, 6L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:02Z")));
+
+            assertThat(resultRepository.results.get(2).trades()).hasSize(2);
+            assertThat(resultRepository.results.get(2).trades().get(0).tradeId()).isEqualTo(503_000_001L);
+            assertThat(resultRepository.trades).singleElement().satisfies(trade -> {
+                assertThat(trade.tradeId()).isEqualTo(1L);
+                assertThat(trade.makerUserId()).isEqualTo(1001L);
+            });
+            assertThat(resultRepository.makerFillUpdates).isEqualTo(2);
+            assertThat(sequenceRepository.nextByName.get("match-trade")).isEqualTo(1L);
+            assertThat(tradePublisher.events)
+                    .extracting(PublicTradeEvent::tradeId)
+                    .containsExactly("503:1", "503:2");
+
+            List<AccountUserCommand> accountCommands = outboxRepository.records.stream()
+                    .map(OutboxRecord::payload)
+                    .map(MatchingServiceTest::accountCommandOrNull)
+                    .filter(command -> command != null)
+                    .toList();
+            assertThat(accountCommands)
+                    .extracting(AccountUserCommand::commandType)
+                    .containsExactly(
+                            AccountUserCommandType.ORDER_RELEASE,
+                            AccountUserCommandType.TRADE_SIDE_SETTLE,
+                            AccountUserCommandType.TRADE_SIDE_SETTLE,
+                            AccountUserCommandType.ORDER_RELEASE);
+            AccountUserCommand activeOrderRelease = accountCommands.get(3);
+            AccountUserCommand takerSettlement = accountCommands.get(1);
+            assertThat(takerSettlement.userId()).isEqualTo(900001L);
+            assertThat(activeOrderRelease.userId()).isEqualTo(900001L);
+            assertThat(activeOrderRelease.dependsOnCommandId()).isEqualTo(takerSettlement.commandId());
+            assertThat(releaseCommand(activeOrderRelease).releaseAll()).isTrue();
         } finally {
             engine.stop();
         }
@@ -384,12 +652,12 @@ class MatchingServiceTest {
     }
 
     @Test
-    void marketMakerBypassSkipsSelfTradePreventionCheck() {
+    void internalMarketMakerWhitelistSkipsSelfTradePreventionCheck() {
         MatchingProperties properties = new MatchingProperties();
         properties.getEngine().setExchangeId("matching-service-mm-stp-bypass-test");
         properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
         properties.getProtection().setSelfTradePreventionEnabled(true);
-        properties.getProtection().setSelfTradePreventionBypassUserIds(List.of(900001L));
+        properties.getProtection().setInternalMarketMakerUserIds(List.of(900001L));
 
         MatchingSymbol matchingSymbol = new MatchingSymbol("BTC-USDT", 301, 11, 12);
         InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
@@ -414,6 +682,22 @@ class MatchingServiceTest {
         } finally {
             engine.stop();
         }
+    }
+
+    private static AccountUserCommand accountCommand(OutboxRecord record) throws Exception {
+        return new ObjectMapper().readValue(record.payload(), AccountUserCommand.class);
+    }
+
+    private static AccountUserCommand accountCommandOrNull(String payload) {
+        try {
+            return new ObjectMapper().readValue(payload, AccountUserCommand.class);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static OrderReleaseAccountCommand releaseCommand(AccountUserCommand command) throws Exception {
+        return new ObjectMapper().readValue(command.payload(), OrderReleaseAccountCommand.class);
     }
 
     private static final class FakeMatchingSymbolRepository extends MatchingSymbolRepository {
@@ -521,6 +805,8 @@ class MatchingServiceTest {
         private final Map<Long, Long> orderVersions = new HashMap<>();
         private final Map<Long, MarginMode> orderMarginModes = new HashMap<>();
         private final Map<Long, PositionSide> orderPositionSides = new HashMap<>();
+        private final Map<Long, Long> orderQuantitySteps = new HashMap<>();
+        private final Map<Long, Long> orderRemainingQuantitySteps = new HashMap<>();
         private boolean rejectNextSaveResult;
         private boolean rejectNextSaveTrade;
         private int activeStatusUpdates;
@@ -562,7 +848,9 @@ class MatchingServiceTest {
         @Override
         public MatchedOrderSnapshot orderSnapshot(long orderId) {
             return new MatchedOrderSnapshot(orderInstrumentVersion(orderId), orderMarginMode(orderId),
-                    orderPositionSide(orderId), 2L, 5L);
+                    orderPositionSide(orderId), 2L, 5L,
+                    orderQuantitySteps.getOrDefault(orderId, 10L),
+                    orderRemainingQuantitySteps.getOrDefault(orderId, 10L));
         }
 
         @Override
@@ -595,6 +883,8 @@ class MatchingServiceTest {
         @Override
         public void applyMakerFill(MatchTradeEvent trade) {
             makerFillUpdates++;
+            orderRemainingQuantitySteps.computeIfPresent(
+                    trade.makerOrderId(), (ignored, remaining) -> Math.subtractExact(remaining, trade.quantitySteps()));
         }
     }
 

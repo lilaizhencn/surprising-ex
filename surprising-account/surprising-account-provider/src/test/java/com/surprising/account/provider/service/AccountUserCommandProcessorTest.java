@@ -14,6 +14,7 @@ import com.surprising.account.api.model.AccountCommandStatus;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
+import com.surprising.account.api.model.OrderReleaseAccountCommand;
 import com.surprising.account.api.model.OrderReservationKind;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.account.api.model.TradeParticipantRole;
@@ -180,6 +181,34 @@ class AccountUserCommandProcessorTest {
         verify(commandRepository).markApplied(eq(command.commandId()), any(), any());
         verify(outboxRepository, never()).enqueueCommandResult(
                 any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void partialOrderReleaseUsesTheMatchingQuantitySnapshot() {
+        OrderReleaseAccountCommand payload = new OrderReleaseAccountCommand(
+                9007L, false, 10L, 4L, "INTERNAL_MARKET_MAKER_SELF_TRADE", OCCURRED_AT);
+        AccountUserCommand command = new AccountUserCommand(
+                AccountUserCommand.CURRENT_SCHEMA_VERSION,
+                "order-release:9007",
+                ProductLine.LINEAR_PERPETUAL,
+                1001L,
+                AccountUserCommandType.ORDER_RELEASE,
+                "MATCHING",
+                "9007",
+                null,
+                objectMapper.writeValueAsString(payload),
+                OCCURRED_AT,
+                "trace-order-release-9007");
+        when(commandRepository.register(eq(command), any(), any()))
+                .thenReturn(AccountCommandRegistration.READY);
+        when(commandRepository.waitingDependents(command.commandId())).thenReturn(List.of());
+
+        var outcome = processor.process(command, objectMapper.writeValueAsString(command));
+
+        assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.APPLIED);
+        verify(reservationRepository).release(
+                ProductLine.LINEAR_PERPETUAL, 1001L, 9007L, false, 10L, 4L,
+                "INTERNAL_MARKET_MAKER_SELF_TRADE", OCCURRED_AT);
     }
 
     @Test

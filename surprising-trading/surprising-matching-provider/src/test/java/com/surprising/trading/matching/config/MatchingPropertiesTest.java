@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class MatchingPropertiesTest {
@@ -33,5 +34,21 @@ class MatchingPropertiesTest {
         assertThat(outbox.getCleanupDelayMs()).isEqualTo(1);
         assertThat(outbox.getCleanupBatchSize()).isEqualTo(1);
         assertThat(outbox.getCleanupMaxBatches()).isEqualTo(1);
+    }
+
+    @Test
+    void internalMarketMakerWhitelistMustContainDistinctPositiveUserIds() {
+        MatchingProperties.Protection protection = new MatchingProperties.Protection();
+
+        assertThatThrownBy(() -> protection.setInternalMarketMakerUserIds(List.of(900001L, 900001L)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("duplicate");
+        assertThatThrownBy(() -> protection.setInternalMarketMakerUserIds(List.of(0L)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("positive");
+
+        protection.setInternalMarketMakerUserIds(List.of(900001L, 900002L));
+        assertThat(protection.isInternalMarketMaker(900001L)).isTrue();
+        assertThat(protection.isInternalMarketMaker(1001L)).isFalse();
     }
 }

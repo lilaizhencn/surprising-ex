@@ -4,6 +4,7 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -284,7 +285,7 @@ public class MatchingProperties {
 
     public static class Protection {
         private boolean selfTradePreventionEnabled = true;
-        private List<Long> selfTradePreventionBypassUserIds = new ArrayList<>();
+        private List<Long> internalMarketMakerUserIds = new ArrayList<>();
         private long marketMaxSlippagePpm = 10_000L;
         private long marketMaxMarkAgeMs = 5_000L;
 
@@ -296,18 +297,29 @@ public class MatchingProperties {
             this.selfTradePreventionEnabled = selfTradePreventionEnabled;
         }
 
-        public List<Long> getSelfTradePreventionBypassUserIds() {
-            return selfTradePreventionBypassUserIds;
+        public List<Long> getInternalMarketMakerUserIds() {
+            return internalMarketMakerUserIds;
         }
 
-        public void setSelfTradePreventionBypassUserIds(List<Long> selfTradePreventionBypassUserIds) {
-            this.selfTradePreventionBypassUserIds = selfTradePreventionBypassUserIds == null
-                    ? new ArrayList<>()
-                    : new ArrayList<>(selfTradePreventionBypassUserIds);
+        public void setInternalMarketMakerUserIds(List<Long> internalMarketMakerUserIds) {
+            if (internalMarketMakerUserIds == null) {
+                this.internalMarketMakerUserIds = new ArrayList<>();
+                return;
+            }
+            LinkedHashSet<Long> uniqueUserIds = new LinkedHashSet<>();
+            for (Long userId : internalMarketMakerUserIds) {
+                if (userId == null || userId <= 0) {
+                    throw new IllegalArgumentException("internal market-maker userId must be positive");
+                }
+                if (!uniqueUserIds.add(userId)) {
+                    throw new IllegalArgumentException("duplicate internal market-maker userId " + userId);
+                }
+            }
+            this.internalMarketMakerUserIds = List.copyOf(uniqueUserIds);
         }
 
-        public boolean isSelfTradePreventionBypassed(long userId) {
-            return selfTradePreventionBypassUserIds.contains(userId);
+        public boolean isInternalMarketMaker(long userId) {
+            return internalMarketMakerUserIds.contains(userId);
         }
 
         public long getMarketMaxSlippagePpm() {

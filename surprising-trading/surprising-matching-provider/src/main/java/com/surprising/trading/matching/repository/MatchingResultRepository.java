@@ -88,7 +88,9 @@ public class MatchingResultRepository {
                        margin_mode,
                        position_side,
                        maker_fee_rate_ppm,
-                       taker_fee_rate_ppm
+                       taker_fee_rate_ppm,
+                       quantity_steps,
+                       remaining_quantity_steps
                   FROM trading_orders
                  WHERE order_id = ?
                 """, (rs, rowNum) -> new MatchedOrderSnapshot(
@@ -96,7 +98,9 @@ public class MatchingResultRepository {
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
                 PositionSide.fromNullableDbValue(rs.getString("position_side")),
                 rs.getLong("maker_fee_rate_ppm"),
-                rs.getLong("taker_fee_rate_ppm")), orderId).stream().findFirst()
+                rs.getLong("taker_fee_rate_ppm"),
+                rs.getLong("quantity_steps"),
+                rs.getLong("remaining_quantity_steps")), orderId).stream().findFirst()
                 .orElseThrow(() -> new IllegalStateException("order snapshot not found for order " + orderId));
     }
 
