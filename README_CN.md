@@ -47,6 +47,7 @@ Surprising 多产品线交易所后端服务。
 - [产品线资金守恒与账账核对](docs/product-line-testing-and-funds-reconciliation_CN.md)
 - [全链路功能测试清单](docs/full-chain-test-plan_CN.md)
 - [四产品线资金与性能压测报告](docs/full-chain-funds-performance-report.md)
+- [永续后端性能与架构优化报告](docs/performance-architecture-optimization-report_CN.md)
 - [Matching symbol 分片和上线容量注意事项](docs/matching-symbol-sharding-and-capacity_CN.md)
 - [永续合约交易教程和系统实现说明](docs/perpetual-contract-tutorial_CN.md)
 - [surprising-candlestick](surprising-candlestick/README_CN.md)
@@ -217,7 +218,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - 止盈、止损和追踪止损只由 Kafka 标记价格事件触发。公共消费者会校验产品线、定点数 ticks、事件/发布时间和 3 秒时效；trigger-provider 每秒只处理各 symbol 最新且新鲜的一笔，不再按 sequence 回查审计表。满足规则后通过 order-provider 提交幂等的 `reduceOnly=true` 平仓单，`clientOrderId=trigger-<triggerOrderId>`。追踪止损使用整数 `callbackRatePpm`（`1000` = `0.1%`，`100000` = `10%`）和可选 `activationPriceTicks`，最高/最低水位同样只按每秒采样的最新标记价格更新。
 - 静态止盈止损默认且始终使用 Spring Data Redis + Lettuce ZSET 候选索引，无需功能开关。Redis 只做价格范围候选过滤；PostgreSQL 仍负责精确价格、状态、过期、OCO 条件校验和最终抢占，也是唯一权威状态。普通用户未完成订单查询使用按产品线隔离、可重放的 Redis 投影：每个用户在同一 hash slot 内有按 `orderId` 排序的 ZSET、完整快照 Hash 和 revision Hash；只缓存 `ACCEPTED`/`PARTIALLY_FILLED`，终态保留 revision tombstone，避免延迟事件把已删除订单恢复。带 opaque `orderId` cursor 的分页仅在当前 epoch ready 且每条快照完整时读取 Redis；否则安全回退产品线隔离的 PostgreSQL keyset 查询。撤单、改单、冻结/解冻、撮合、强平和订单终态仍以 PostgreSQL 条件更新与事务 outbox 为准。详见 [docs/open-order-redis-cache_CN.md](docs/open-order-redis-cache_CN.md)。
 - 成对 TP/SL 可以使用同一个 `ocoGroupId`；同一用户、symbol、保证金模式组里任意一条 pending 触发单被抢占后，其它 pending sibling 会在同一条数据库语句里先置为 `CANCELED`，然后再提交生成的平仓单。
-- 普通平仓、强平成交、交割结算或期权行权把持仓降为零时，account 会在同一个 PostgreSQL 事务里取消该持仓剩余的 `PENDING` 条件单，并把 `CANCELED` 状态快照写入 trading outbox。提交后的持仓事件驱动 trigger-provider 删除对应静态止盈止损 Redis member，`trigger-order.events` 驱动认证用户 WebSocket 主动刷新；`GET /open` 始终以数据库已取消状态为准。
+- 普通平仓、强平成交、交割结算或期权行权把持仓降为零时，account-provider 只发送持久化的完整持仓事件。trigger-provider 消费后在自己的事务里取消精确范围、创建时间不晚于事件的 `PENDING` 条件单及其状态 outbox；order-provider 独立剪枝失效的 reduce-only 订单。account-provider 不再写订单或条件单表。
 - Account 消费撮合成交，按 `tradeId` 幂等更新 long-based 净持仓，把开仓成交保证金迁移到持仓保证金，并把已实现盈亏结算进余额。
 - 用户持仓、持仓列表和持仓保证金查询只读 Redis Hash；PostgreSQL 仍是唯一事实源。账户事务为每个变化的持仓键生成一份完整、带 revision 的持仓事件，并以 `<PRODUCT_LINE>:<userId>` 为 Kafka key 写入 account outbox。同一份快照在提交后进入有界合并队列做低延迟 Redis 加速，独立的 account 持仓缓存 consumer 则负责进程退出或 Redis 故障后的耐久重放。两条路径都使用 Lua revision CAS；队列或 Redis 失败会移除 ready 标记，用户查询返回 503，直到 Kafka 重放或 PostgreSQL 对账修复。详细设计见 [docs/position-redis-cache_CN.md](docs/position-redis-cache_CN.md)。
 - `CROSS` 和 `ISOLATED` 保证金模式会从下单一路传到撮合、账户、风控、资金费和强平。全仓亏损可以使用全仓可用余额和全仓持仓保证金；逐仓亏损只使用该 symbol 的逐仓持仓保证金，亏穿后记录 deficit。

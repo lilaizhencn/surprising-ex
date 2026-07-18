@@ -12,6 +12,7 @@ stay under `/tmp` unless they are promoted into the current consolidated report.
 - [Product-Line Testing and Funds Conservation Reconciliation](product-line-testing-and-funds-reconciliation.md) / [简体中文](product-line-testing-and-funds-reconciliation_CN.md): real API smoke and reconciliation rules.
 - [Full-Chain Test Checklist](full-chain-test-plan_CN.md): current product-line acceptance checklist.
 - [Four Product-Line Funds and Performance Report](full-chain-funds-performance-report.md): consolidated latest high-concurrency report.
+- [Perpetual Backend Performance and Architecture Optimization Report](performance-architecture-optimization-report_CN.md): completed eight-part hot-path and ownership refactor, verification evidence, and production load-test acceptance criteria.
 - [Matching Symbol Sharding and Capacity Notes](matching-symbol-sharding-and-capacity_CN.md): exchange-core Disruptor and symbol shard behavior.
 - [Perpetual Contract Tutorial and Implementation Notes](perpetual-contract-tutorial_CN.md): user-facing perpetual concepts mapped to this codebase.
 - [Local Homebrew Middleware](local-homebrew-infra.md): local PostgreSQL/Kafka setup.

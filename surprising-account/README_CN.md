@@ -257,7 +257,7 @@ mvn -pl :surprising-account-provider -am spring-boot:run
 - 如果出现 `missing order margin reservation for opening fill`，要检查 order-provider 是否跳过冻结、matching 是否处理了不应存在的订单、或数据库中 reservation 是否被人工改动。
 - 如果出现 `missing order margin reservation for closing fill`，要检查是否有非 reduce-only 的平仓/翻仓订单在没有 order-provider reservation 事务的情况下被接受。
 - 已实现亏损可以扣 `availableUnits` 和由持仓保证金支撑的 `lockedUnits`，但不能扣未成交订单冻结。只要扣了持仓保证金支撑的 locked，就必须在同一事务内同步减少 `account_position_margins`。
-- 手续费扣款复用已实现亏损的余额/deficit 安全路径。手续费返佣先清理 deficit，再增加 available balance。结算时必须读取 `trading_orders` 上的费率快照，不能读取当前用户等级或当前 instrument 费率重算历史订单。
+- 手续费扣款复用已实现亏损的余额/deficit 安全路径。手续费返佣先清理 deficit，再增加 available balance。matching 会把订单接受时的不可变费率快照写入 `MatchTradeEvent`；account 结算直接使用命令快照，不查询 `trading_orders`，也不能按当前用户等级重算。
 - 余额结算会锁定 `account_deficits` 保证权益计算一致，但当 `deficit_units` 没有变化时会跳过 `UPDATE account_deficits`。不要在成交热路径重新引入无变化的 deficit 写入；真正产生或清理 deficit 时仍必须写入并检查 1 行。
 - 成交侧结算在计算下一版持仓前已经锁定当前持仓。后续维护时继续使用传入已锁定旧持仓数量的
   更新路径；每侧额外做 `SELECT ... FOR UPDATE` 或更新后回查会增加两次不必要 SQL 往返。
