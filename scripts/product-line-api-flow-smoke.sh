@@ -34,6 +34,7 @@ STRESS_MAKER_LEVEL_QUANTITY_STEPS="${STRESS_MAKER_LEVEL_QUANTITY_STEPS:-250}"
 STRESS_MAKER_BATCH_SIZE="${STRESS_MAKER_BATCH_SIZE:-12}"
 STRESS_TAKER_QUANTITY_STEPS="${STRESS_TAKER_QUANTITY_STEPS:-1}"
 STRESS_WAIT_SECONDS="${STRESS_WAIT_SECONDS:-420}"
+STRESS_PRICE_WARMUP_SECONDS="${STRESS_PRICE_WARMUP_SECONDS:-35}"
 STRESS_REPORT_FILE="${STRESS_REPORT_FILE:-${ROOT_DIR}/docs/product-line-multi-symbol-stress-report.md}"
 STRESS_MATCHING_KAFKA_CONCURRENCY="${STRESS_MATCHING_KAFKA_CONCURRENCY:-4}"
 STRESS_ACCOUNT_KAFKA_CONCURRENCY="${STRESS_ACCOUNT_KAFKA_CONCURRENCY:-4}"
@@ -2617,9 +2618,18 @@ run_multi_symbol_stress_flow() {
   echo "Scenario ${product_line}: multi-symbol high-frequency stress symbols=${STRESS_SYMBOL_COUNT} users=${STRESS_USER_COUNT}"
   seed_stress_prices "${product_line}"
   fund_stress_accounts_for_line "${product_line}"
-  wait_sql_nonzero "market-maker cycle success ${product_line}" \
-    "SELECT count(*) FROM market_maker_strategy_run_events WHERE product_line = '${product_line}' AND strategy_id LIKE 'stress-mm-%' AND event_type = 'CYCLE_SUCCESS'" \
+  wait_sql_equals "market-maker price coverage ${product_line}" \
+    "SELECT count(DISTINCT strategy_id) FROM market_maker_strategy_run_events WHERE product_line = '${product_line}' AND strategy_id LIKE 'stress-mm-%' AND event_type = 'CYCLE_SUCCESS'" \
+    "${STRESS_SYMBOL_COUNT}" \
     180
+  # Each provider keeps an independent in-memory Kafka price cache.  A full
+  # market-maker cycle proves the snapshot reached every symbol, then allow the
+  # matching consumer group to complete its initial assignment before sending
+  # the concurrent market-order burst.  Without this barrier, a new topic can
+  # reject the first burst while its matching cache is still empty.
+  seed_stress_prices "${product_line}"
+  echo "Warming matching mark-price cache for ${STRESS_PRICE_WARMUP_SECONDS}s"
+  sleep "${STRESS_PRICE_WARMUP_SECONDS}"
 
   echo "Placing ${product_line} initial maker book"
   commands=()
