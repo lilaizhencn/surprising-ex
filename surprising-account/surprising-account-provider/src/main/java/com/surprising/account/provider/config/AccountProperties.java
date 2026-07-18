@@ -162,17 +162,6 @@ public class AccountProperties {
             this.positionEventsTopic = positionEventsTopic;
         }
 
-        /**
-         * Cache projection topics are always product-line scoped, even while legacy business topics are enabled.
-         */
-        public String getPositionCacheEventsTopic() {
-            return productTopics().accountPositionCacheEventsTopic();
-        }
-
-        public String getPositionCacheGroupId() {
-            return productTopics().consumerGroup("account-position-cache");
-        }
-
         public String getLiquidationFeeEventsTopic() {
             return productTopicsEnabled ? productTopics().accountLiquidationFeeEventsTopic() : liquidationFeeEventsTopic;
         }

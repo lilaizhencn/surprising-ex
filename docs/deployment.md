@@ -105,22 +105,20 @@ export POSITION_REDIS_KEY_PREFIX=surprising:position:v1
 - Keep `maxmemory-policy noeviction` and Redis persistence enabled. A missing readiness marker makes user position
   reads return HTTP 503; do not add a PostgreSQL fallback, because a partial Redis loss must not look like a zero
   position.
-- Account-provider collects position and collateral mutations per local transaction and creates exactly one
-  revisioned `POSITION_CACHE_PROJECTED` outbox row for each distinct final position key. Account outbox publishes
-  product-scoped topics such as
-  `surprising.linear-perp.account.position-cache.events.v1`; the cache consumer validates topic, product line, and
-  `productLine:userId` Kafka key before running its Lua compare-and-set.
+- Account-provider collects position and collateral mutations per local transaction and captures exactly one
+  revisioned final snapshot for each distinct position key before commit. Only after commit is that snapshot
+  submitted to the local bounded Redis worker; cache snapshots do not use account outbox or Kafka.
 - The three user hashes share one Cluster tag: `state`, `margin`, and `revision` under
   `surprising:position:v1:{PRODUCT_LINE:userId}`. Never manually edit one of the three hashes.
-- Startup uses a Redis token lease and a paged PostgreSQL rebuild. Revision CAS permits Kafka replay and rebuild to
-  overlap safely. The ready marker is refreshed periodically and one page is reconciled each cycle.
-- Do not enable Spring Redis global transaction support and do not attempt XA. PostgreSQL business rows plus the
-  outbox are the atomic write; Redis is a replayable read projection. Account writes additionally offer the exact
-  committed snapshot to a bounded, coalescing after-commit worker. It never queries PostgreSQL or Redis on the
-  Kafka command thread; outbox/Kafka remains the recovery guarantee.
+- Startup uses a Redis token lease and a paged PostgreSQL rebuild. Revision CAS permits after-commit writes and
+  rebuild to overlap safely. The ready marker is refreshed periodically and one page is reconciled each cycle.
+- Do not enable Spring Redis global transaction support and do not attempt XA. PostgreSQL business rows are the
+  authority; Redis is a rebuildable snapshot projection. The transaction captures its exact final position state,
+  and the bounded, coalescing worker writes it after commit. Overflow or Redis failure removes readiness so the
+  PostgreSQL coordinator rebuilds before user reads resume.
 - Monitor `surprising.account.position.cache.applied`, `.stale`, `.failures`, `.rebuild.rows`,
   `.accelerator.submitted`, `.accelerator.coalesced`, `.accelerator.dropped`, the `positionCache`
-  health contributor, account outbox backlog, cache-topic lag, and Redis command latency/errors.
+  health contributor, rebuild duration, and Redis command latency/errors.
 
 The complete rationale, data model, recovery flow, and pre-production reset guidance are in
 [position-redis-cache.md](position-redis-cache.md) and [position-redis-cache_CN.md](position-redis-cache_CN.md).

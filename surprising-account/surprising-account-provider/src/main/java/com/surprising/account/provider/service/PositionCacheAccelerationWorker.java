@@ -18,9 +18,9 @@ import org.springframework.stereotype.Component;
 /**
  * Best-effort low-latency Redis accelerator.
  *
- * <p>The durable position-cache outbox is committed before an event reaches this worker. The bounded queue can
- * therefore drop acceleration work under overload without losing the authoritative projection. Revisions make a
- * coalesced newer snapshot safe to apply in place of an older snapshot for the same position key.</p>
+ * <p>PostgreSQL remains authoritative. The bounded queue coalesces newer snapshots for a hot position and uses
+ * revisions to prevent stale asynchronous writes. Overflow marks the product-line cache unavailable so the
+ * coordinator rebuilds it from PostgreSQL instead of serving a silently stale snapshot.</p>
  */
 @Component
 public class PositionCacheAccelerationWorker {
@@ -91,9 +91,10 @@ public class PositionCacheAccelerationWorker {
         scheduled.remove(key);
         pending.remove(key);
         metrics.recordAcceleratorDropped();
+        cache.markNotReady(key.productLine());
         long droppedCount = dropped.incrementAndGet();
         if (droppedCount == 1L || droppedCount % 1_000L == 0L) {
-            log.warn("Position-cache accelerator queue is full; dropped={} durable outbox will recover",
+            log.warn("Position-cache accelerator queue is full; dropped={} PostgreSQL rebuild required",
                     droppedCount);
         }
     }
@@ -120,6 +121,7 @@ public class PositionCacheAccelerationWorker {
                 cache.apply(event, false);
             }
         } catch (RuntimeException ex) {
+            cache.markNotReady(key.productLine());
             log.warn("Position-cache acceleration failed line={} user={} symbol={} mode={} side={}: {}",
                     key.productLine(), key.userId(), key.symbol(), key.marginMode(), key.positionSide(),
                     ex.getMessage());
