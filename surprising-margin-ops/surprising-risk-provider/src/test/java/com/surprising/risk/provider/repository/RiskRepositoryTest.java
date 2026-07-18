@@ -17,14 +17,12 @@ import com.surprising.risk.api.model.RiskAccountSnapshotResponse;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.model.CalculatedPositionRisk;
-import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -268,26 +266,6 @@ class RiskRepositoryTest {
                 .contains("WHERE product_line = ? AND account_type = ?")
                 .contains("ORDER BY a.event_time DESC, a.snapshot_id DESC");
         assertThat(args.getValue()).containsExactly("INVERSE_PERPETUAL", "COIN_PERPETUAL", 800_000L, 800_000L, 800_000L, 26);
-    }
-
-    @Test
-    void riskTargetForPositionEventUsesEventVersionOrCurrentVersionFallback() {
-        RiskRepository repository = new RiskRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("BTC-USDT"),
-                eq(7L), eq(7L), eq("BTC-USDT")))
-                .thenReturn(List.of(new PositionRiskTarget(1001L, "BTC-USDT", 7L, "USDT")));
-
-        Optional<PositionRiskTarget> target = repository.riskTargetForPositionEvent(1001L, "BTC-USDT", 7L);
-
-        assertThat(target).contains(new PositionRiskTarget(1001L, "BTC-USDT", 7L, "USDT"));
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("BTC-USDT"),
-                eq(7L), eq(7L), eq("BTC-USDT"));
-        assertThat(sql.getValue())
-                .contains("i.version AS instrument_version")
-                .contains("WHEN ? > 0 THEN ?")
-                .contains("instrument_current_versions")
-                .contains("WHERE cv.symbol = ?");
     }
 
     @Test

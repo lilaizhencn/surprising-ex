@@ -13,7 +13,6 @@ import com.surprising.risk.api.model.RiskPositionSnapshotResponse;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.model.CalculatedPositionRisk;
-import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
 import com.surprising.risk.provider.service.RiskMath;
 import com.surprising.trading.api.model.MarginMode;
@@ -109,59 +108,6 @@ public class RiskRepository {
         args.add(cappedLimit);
         return jdbcTemplate.query(sql, (rs, rowNum) -> new RiskGroupKey(rs.getLong("user_id"),
                 rs.getString("account_type"), rs.getString("settle_asset")), args.toArray());
-    }
-
-    public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId,
-                                                                   String symbol,
-                                                                   MarginMode marginMode,
-                                                                   PositionSide positionSide,
-                                                                   long instrumentVersion) {
-        List<Object> args = new ArrayList<>();
-        String sql = """
-                SELECT CAST(? AS bigint) AS user_id,
-                       i.symbol,
-                       i.version AS instrument_version,
-                       %s AS account_type,
-                       i.settle_asset
-                  FROM instruments i
-                 WHERE i.symbol = ?
-                   AND i.version = CASE
-                         WHEN ? > 0 THEN ?
-                         ELSE COALESCE((
-                             SELECT cv.version
-                               FROM instrument_current_versions cv
-                             WHERE cv.symbol = ?
-                         ), 0)
-                       END
-                   %s
-                 LIMIT 1
-                """.formatted(accountTypeExpression("i"), instrumentProductLineFilter("i", args));
-        args.add(0, userId);
-        args.add(1, symbol);
-        args.add(2, instrumentVersion);
-        args.add(3, instrumentVersion);
-        args.add(4, symbol);
-        return jdbcTemplate.query(sql, (rs, rowNum) -> new PositionRiskTarget(
-                rs.getLong("user_id"),
-                rs.getString("symbol"),
-                MarginMode.defaultIfNull(marginMode),
-                PositionSide.defaultIfNull(positionSide),
-                rs.getLong("instrument_version"),
-                rs.getString("account_type"),
-                rs.getString("settle_asset")), args.toArray())
-                .stream()
-                .findFirst();
-    }
-
-    public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId,
-                                                                   String symbol,
-                                                                   MarginMode marginMode,
-                                                                   long instrumentVersion) {
-        return riskTargetForPositionEvent(userId, symbol, marginMode, PositionSide.NET, instrumentVersion);
-    }
-
-    public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId, String symbol, long instrumentVersion) {
-        return riskTargetForPositionEvent(userId, symbol, MarginMode.CROSS, instrumentVersion);
     }
 
     public boolean hasOpenPositions(RiskGroupKey key) {

@@ -17,7 +17,7 @@ import org.springframework.kafka.listener.ContainerProperties;
 class RiskKafkaConfigurationTest {
 
     @Test
-    void consumerUsesReplaySafeRecordAckSettings() {
+    void consumerUsesReplaySafeBatchAckSettings() {
         RiskProperties properties = new RiskProperties();
         properties.getKafka().setBootstrapServers("kafka-g:9092");
         properties.getKafka().setGroupId("risk-test-group");
@@ -40,8 +40,9 @@ class RiskKafkaConfigurationTest {
         assertThat(config).containsEntry(
                 ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
                 CooperativeStickyAssignor.class.getName());
+        assertThat(listenerFactory.isBatchListener()).isTrue();
         assertThat(listenerFactory.getContainerProperties().getAckMode())
-                .isEqualTo(ContainerProperties.AckMode.RECORD);
+                .isEqualTo(ContainerProperties.AckMode.BATCH);
     }
 
     @Test

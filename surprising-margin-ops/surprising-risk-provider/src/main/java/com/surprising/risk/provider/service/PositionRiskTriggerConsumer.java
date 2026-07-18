@@ -2,6 +2,8 @@ package com.surprising.risk.provider.service;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.risk.provider.config.RiskProperties;
+import java.util.ArrayList;
+import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,23 +33,31 @@ public class PositionRiskTriggerConsumer {
     }
 
     /**
-     * Account position events are the low-latency trigger for risk scans. Kafka retry plus the DB scan lease make the
-     * handler safe for at-least-once delivery and multi-node risk deployments.
+     * Account position events are consumed in durable Kafka batches. RiskService coalesces every batch by risk group
+     * and exact position before scanning, while Kafka retry plus the DB lease preserve at-least-once safety.
      */
     @KafkaListener(
             topics = "#{__listener.positionEventsTopic()}",
             groupId = "#{__listener.groupId()}",
             containerFactory = "riskKafkaListenerContainerFactory")
-    public void onPositionUpdated(ConsumerRecord<String, String> record) {
+    public void onPositionUpdated(List<ConsumerRecord<String, String>> records) {
         try {
-            PositionUpdatedEvent event = objectMapper.readValue(record.value(), PositionUpdatedEvent.class);
-            requireCurrentProductTopic(record.topic());
-            requireUserPartitionKey(record.key(), event);
-            riskService.scanPositionUpdate(event.userId(), event.symbol(), event.marginMode(), event.positionSide(),
-                    event.instrumentVersion(), event.traceId());
+            if (records == null || records.isEmpty()) {
+                return;
+            }
+            List<PositionUpdatedEvent> events = new ArrayList<>(records.size());
+            for (ConsumerRecord<String, String> record : records) {
+                PositionUpdatedEvent event = objectMapper.readValue(record.value(), PositionUpdatedEvent.class);
+                requireCurrentProductTopic(record.topic());
+                requireUserPartitionKey(record.key(), event);
+                events.add(event);
+            }
+            riskService.scanPositionUpdates(events);
         } catch (Exception ex) {
-            log.error("Failed to process position risk trigger: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to process position risk trigger", ex);
+            int recordCount = records == null ? 0 : records.size();
+            log.error("Failed to process position risk trigger batch records={}: {}",
+                    recordCount, ex.getMessage(), ex);
+            throw new IllegalStateException("failed to process position risk trigger batch", ex);
         }
     }
 

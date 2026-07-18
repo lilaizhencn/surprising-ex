@@ -1,5 +1,6 @@
 package com.surprising.risk.provider.service;
 
+import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.risk.api.model.AdminCursorPage;
 import com.surprising.risk.api.model.LiquidationCandidateEvent;
 import com.surprising.risk.api.model.LiquidationCandidateQueryResponse;
@@ -25,7 +26,9 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -106,43 +109,27 @@ public class RiskService {
     }
 
     /**
-     * Event-driven fast path used by account position events. The scheduled scanner is still the authoritative
-     * fallback, but this method cuts liquidation latency after fills by scanning only the affected user/settle group.
+     * Event-driven fast path. A Kafka poll can contain many fills for one user, so events are reduced to the latest
+     * revision per exact position and every user/account/settle group is scanned only once. The complete account event
+     * is sufficient to derive the risk group; this path intentionally performs no target-resolution query.
      */
-    public void scanPositionUpdate(long userId, String symbol, MarginMode marginMode, long instrumentVersion) {
-        scanPositionUpdate(userId, symbol, marginMode, PositionSide.NET, instrumentVersion, null);
-    }
-
-    public void scanPositionUpdate(long userId,
-                                   String symbol,
-                                   MarginMode marginMode,
-                                   PositionSide positionSide,
-                                   long instrumentVersion,
-                                   String traceId) {
+    public void scanPositionUpdates(List<PositionUpdatedEvent> events) {
         if (!properties.getCalculation().isEnabled()) {
             return;
         }
-        PositionRiskTarget target = riskRepository.riskTargetForPositionEvent(userId, normalizeSymbol(symbol),
-                MarginMode.defaultIfNull(marginMode), PositionSide.defaultIfNull(positionSide),
-                instrumentVersion).orElse(null);
-        if (target == null) {
-            log.debug("Position update did not resolve to a risk group userId={} symbol={} version={}",
-                    userId, symbol, instrumentVersion);
+        if (events == null || events.isEmpty()) {
             return;
         }
-        scanRiskGroup(target.riskGroupKey(), target, traceId);
-    }
 
-    public void scanPositionUpdate(long userId,
-                                   String symbol,
-                                   MarginMode marginMode,
-                                   long instrumentVersion,
-                                   String traceId) {
-        scanPositionUpdate(userId, symbol, marginMode, PositionSide.NET, instrumentVersion, traceId);
-    }
-
-    public void scanPositionUpdate(long userId, String symbol, long instrumentVersion) {
-        scanPositionUpdate(userId, symbol, MarginMode.CROSS, instrumentVersion);
+        Map<RiskGroupKey, PositionEventGroup> groups = new LinkedHashMap<>();
+        for (PositionUpdatedEvent event : events) {
+            PositionRiskTarget target = targetFrom(event);
+            groups.computeIfAbsent(target.riskGroupKey(), ignored -> new PositionEventGroup())
+                    .merge(event.revision(), target, event.traceId());
+        }
+        for (Map.Entry<RiskGroupKey, PositionEventGroup> entry : groups.entrySet()) {
+            scanRiskGroup(entry.getKey(), entry.getValue().targets(), entry.getValue().traceId());
+        }
     }
 
     private boolean ownsRiskGroup(RiskGroupKey key) {
@@ -153,14 +140,10 @@ public class RiskService {
     }
 
     private void scanRiskGroup(RiskGroupKey key) {
-        scanRiskGroup(key, null, null);
+        scanRiskGroup(key, List.of(), null);
     }
 
-    private void scanRiskGroup(RiskGroupKey key, PositionRiskTarget eventTarget) {
-        scanRiskGroup(key, eventTarget, null);
-    }
-
-    private void scanRiskGroup(RiskGroupKey key, PositionRiskTarget eventTarget, String traceId) {
+    private void scanRiskGroup(RiskGroupKey key, List<PositionRiskTarget> eventTargets, String traceId) {
         if (!ownsRiskGroup(key)) {
             return;
         }
@@ -171,7 +154,7 @@ public class RiskService {
             if (positions.isEmpty() && riskRepository.hasOpenPositions(key)) {
                 return;
             }
-            scanGroup(key, positions, eventTarget, Instant.now(), traceId, realtimeEvents);
+            scanGroup(key, positions, eventTargets, Instant.now(), traceId, realtimeEvents);
         });
         publishRealtimeEvents(realtimeEvents);
     }
@@ -329,7 +312,7 @@ public class RiskService {
 
     private void scanGroup(RiskGroupKey key,
                            List<CalculatedPositionRisk> positions,
-                           PositionRiskTarget eventTarget,
+                           List<PositionRiskTarget> eventTargets,
                            Instant now,
                            String traceId,
                            List<RealtimeRiskEvent> realtimeEvents) {
@@ -366,14 +349,18 @@ public class RiskService {
                 createCandidate(account, position, positionMarginRatio, positionEquity, now);
             }
         }
-        if (eventTarget != null && positions.stream().noneMatch(position -> position.symbol().equals(eventTarget.symbol())
-                && position.marginMode() == eventTarget.marginMode()
-                && position.positionSide() == eventTarget.positionSide())) {
-            CalculatedPositionRisk flatPosition = new CalculatedPositionRisk(eventTarget.userId(),
-                    eventTarget.symbol(), eventTarget.marginMode(), eventTarget.positionSide(),
-                    eventTarget.instrumentVersion(), eventTarget.settleAsset(), 0L, 0L, 0L, 0L, 0L, 0L, 0L);
-            riskRepository.savePositionSnapshot(snapshotId, flatPosition, 0L, RiskStatus.NORMAL, now);
-            stagePositionRisk(snapshotId, flatPosition, 0L, RiskStatus.NORMAL, now, traceId, realtimeEvents);
+        for (PositionRiskTarget eventTarget : eventTargets) {
+            boolean positionStillOpen = positions.stream()
+                    .anyMatch(position -> position.symbol().equals(eventTarget.symbol())
+                            && position.marginMode() == eventTarget.marginMode()
+                            && position.positionSide() == eventTarget.positionSide());
+            if (!positionStillOpen) {
+                CalculatedPositionRisk flatPosition = new CalculatedPositionRisk(eventTarget.userId(),
+                        eventTarget.symbol(), eventTarget.marginMode(), eventTarget.positionSide(),
+                        eventTarget.instrumentVersion(), eventTarget.settleAsset(), 0L, 0L, 0L, 0L, 0L, 0L, 0L);
+                riskRepository.savePositionSnapshot(snapshotId, flatPosition, 0L, RiskStatus.NORMAL, now);
+                stagePositionRisk(snapshotId, flatPosition, 0L, RiskStatus.NORMAL, now, traceId, realtimeEvents);
+            }
         }
     }
 
@@ -536,6 +523,27 @@ public class RiskService {
         return normalized;
     }
 
+    private PositionRiskTarget targetFrom(PositionUpdatedEvent event) {
+        if (event == null) {
+            throw new IllegalArgumentException("position event is required");
+        }
+        ProductLine currentProductLine = properties.getKafka().getProductLine();
+        if (event.productLine() != currentProductLine) {
+            throw new IllegalArgumentException("position event product line must match current risk provider");
+        }
+        if (event.instrumentVersion() <= 0L) {
+            throw new IllegalArgumentException("position event instrumentVersion must be positive");
+        }
+        return new PositionRiskTarget(
+                event.userId(),
+                normalizeSymbol(event.symbol()),
+                MarginMode.defaultIfNull(event.marginMode()),
+                PositionSide.defaultIfNull(event.positionSide()),
+                event.instrumentVersion(),
+                event.productLine().accountTypeCode(),
+                normalizeAsset(event.marginAsset()));
+    }
+
     private RiskRuleOverride override(List<RiskRuleOverride> overrides, String ruleCode) {
         return overrides.stream()
                 .filter(item -> ruleCode.equals(item.ruleCode()))
@@ -620,6 +628,40 @@ public class RiskService {
     }
 
     private record RealtimeRiskEvent(String topic, String eventKey, String eventType, String payload) {
+    }
+
+    private record PositionScope(String symbol, MarginMode marginMode, PositionSide positionSide) {
+    }
+
+    private record VersionedPositionTarget(long revision, PositionRiskTarget target) {
+    }
+
+    private static final class PositionEventGroup {
+        private final Map<PositionScope, VersionedPositionTarget> targets = new LinkedHashMap<>();
+        private long latestRevision;
+        private String traceId;
+
+        private void merge(long revision, PositionRiskTarget target, String eventTraceId) {
+            PositionScope scope = new PositionScope(target.symbol(), target.marginMode(), target.positionSide());
+            VersionedPositionTarget current = targets.get(scope);
+            if (current == null || revision >= current.revision()) {
+                targets.put(scope, new VersionedPositionTarget(revision, target));
+            }
+            if (revision >= latestRevision) {
+                latestRevision = revision;
+                traceId = eventTraceId;
+            }
+        }
+
+        private List<PositionRiskTarget> targets() {
+            return targets.values().stream()
+                    .map(VersionedPositionTarget::target)
+                    .toList();
+        }
+
+        private String traceId() {
+            return traceId;
+        }
     }
 
     private String resolveNodeId(String configured) {

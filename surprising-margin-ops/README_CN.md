@@ -20,6 +20,9 @@
 - 业务包仍然按 `com.surprising.risk`、`com.surprising.liquidation`、`com.surprising.funding`、`com.surprising.insurance`、`com.surprising.adl` 隔离。
 - 五个模块仍然通过已有 PostgreSQL 表、Kafka topic、outbox、幂等键、租约和 sequence 协作。
 - 资金费账户命令返回时会先锁定所属 `funding_settlements` 行，再串行完成付款状态与已应用/已拒绝计数刷新，避免收付双方并发完成后把已结算批次永久留在 `WAITING_ACCOUNTS`。
+- 风险模块批量消费账户持仓事件，同一具体持仓只保留最高 revision，并让每个受影响的
+  `用户 + 账户类型 + 结算资产` 风险组只扫描一次。完整持仓事件已经能够定位风险组，不再额外查询
+  instrument；定时 keyset 扫描继续作为安全兜底。
 - 任何模块都不能直接读取另一个模块的内存状态。
 - 原来的独立 provider jar 仍然保留，可以随时拆分部署。
 

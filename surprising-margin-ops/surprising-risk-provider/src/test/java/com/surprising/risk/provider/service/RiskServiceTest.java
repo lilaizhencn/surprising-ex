@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.AdminCursorPage;
 import com.surprising.risk.api.model.LiquidationCandidateResponse;
@@ -24,7 +25,6 @@ import com.surprising.risk.provider.repository.RiskRepository;
 import com.surprising.risk.provider.repository.RiskRepository.HighRiskAccount;
 import com.surprising.risk.provider.repository.RiskRepository.RiskRuleOverride;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
-import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
@@ -89,15 +89,9 @@ class RiskServiceTest {
     }
 
     @Test
-    void positionUpdateScansResolvedRiskGroupImmediately() {
+    void positionEventBatchCoalescesRiskGroupAndKeepsLatestExactPositionRevision() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
-        riskRepository.positions = List.of(
-                new CalculatedPositionRisk(1001L, "BTC-USDT", 7L, "USDT",
-                        10L, 65_000L, 65_000L, 650_000L, 0L, 100L),
-                new CalculatedPositionRisk(2002L, "ETH-USDT", MarginMode.CROSS, PositionSide.SHORT, 7L,
-                        "USDT", -10L, 3_500L, 3_500L, 35_000L, 0L, 100L, 0L));
-        riskRepository.positionEventTarget = Optional.of(new PositionRiskTarget(2002L, "ETH-USDT",
-                MarginMode.CROSS, PositionSide.SHORT, 7L, "USDT"));
+        riskRepository.positions = List.of();
         riskRepository.walletBalanceUnits = 1_000_000L;
         RiskProperties properties = new RiskProperties();
         properties.getCoordination().setEnabled(false);
@@ -110,34 +104,55 @@ class RiskServiceTest {
         RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
                 new FakeRiskSequenceRepository(), outboxRepository, kafka, transactionManager);
 
-        service.scanPositionUpdate(2002L, "eth-usdt", MarginMode.CROSS, PositionSide.SHORT, 7L,
-                "trace-risk-1");
+        service.scanPositionUpdates(List.of(
+                positionEvent(31L, 2002L, "btc-usdt", 7L, "USDT", "trace-old"),
+                positionEvent(33L, 2002L, "BTC-USDT", 8L, "usdt", "trace-latest"),
+                positionEvent(32L, 2002L, "eth-usdt", 9L, "USDT", "trace-eth")));
 
-        assertThat(riskRepository.positionEventResolveCalls).isEqualTo(1);
-        assertThat(riskRepository.lastPositionEventUserId).isEqualTo(2002L);
-        assertThat(riskRepository.lastPositionEventSymbol).isEqualTo("ETH-USDT");
-        assertThat(riskRepository.lastPositionEventPositionSide).isEqualTo(PositionSide.SHORT);
-        assertThat(riskRepository.lastPositionEventVersion).isEqualTo(7L);
         assertThat(riskRepository.riskGroupCalls).isZero();
         assertThat(riskRepository.calculateCalls).isEqualTo(1);
         assertThat(riskRepository.savedAccounts).isEqualTo(1);
-        assertThat(riskRepository.savedPositions).isEqualTo(1);
-        assertThat(riskRepository.savedPositionSnapshots).singleElement()
-                .satisfies(position -> assertThat(position.positionSide()).isEqualTo(PositionSide.SHORT));
+        assertThat(riskRepository.savedPositions).isEqualTo(2);
+        assertThat(riskRepository.savedPositionSnapshots)
+                .extracting(CalculatedPositionRisk::symbol, CalculatedPositionRisk::instrumentVersion)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("BTC-USDT", 8L),
+                        org.assertj.core.groups.Tuple.tuple("ETH-USDT", 9L));
         assertThat(outboxRepository.enqueued).isZero();
         verify(kafka).send(eq(properties.getKafka().getAccountRiskEventsTopic()),
-                eq("2002:USDT_PERPETUAL:USDT"), contains("\"traceId\":\"trace-risk-1\""));
-        verify(kafka).send(eq(properties.getKafka().getPositionRiskEventsTopic()), eq("ETH-USDT"),
-                argThat(payload -> payload.contains("\"positionSide\":\"SHORT\"")
+                eq("2002:USDT_PERPETUAL:USDT"), contains("\"traceId\":\"trace-latest\""));
+        verify(kafka).send(eq(properties.getKafka().getPositionRiskEventsTopic()), eq("BTC-USDT"),
+                argThat(payload -> payload.contains("\"instrumentVersion\":8")
                         && payload.contains("\"productLine\":\"LINEAR_PERPETUAL\"")));
         assertThat(transactionManager.commits).isEqualTo(1);
         assertThat(transactionManager.rollbacks).isZero();
     }
 
     @Test
-    void positionUpdateDoesNothingWhenCalculationIsDisabled() {
+    void positionEventBatchScansDifferentRiskGroupsIndependently() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
-        riskRepository.positionEventTarget = Optional.of(new PositionRiskTarget(1001L, "BTC-USDT", 7L, "USDT"));
+        riskRepository.positions = List.of();
+        RiskProperties properties = new RiskProperties();
+        properties.getCoordination().setEnabled(false);
+        FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
+        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+
+        service.scanPositionUpdates(List.of(
+                positionEvent(31L, 1001L, "BTC-USDT", 7L, "USDT", "trace-usdt"),
+                positionEvent(32L, 1001L, "BTC-USDC", 8L, "USDC", "trace-usdc")));
+
+        assertThat(riskRepository.calculateCalls).isEqualTo(2);
+        assertThat(riskRepository.savedAccounts).isEqualTo(2);
+        assertThat(riskRepository.savedPositions).isEqualTo(2);
+        assertThat(outboxRepository.enqueued).isZero();
+        assertThat(transactionManager.commits).isEqualTo(2);
+    }
+
+    @Test
+    void positionEventBatchDoesNothingWhenCalculationIsDisabled() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
         RiskProperties properties = new RiskProperties();
         properties.getCalculation().setEnabled(false);
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
@@ -145,9 +160,9 @@ class RiskServiceTest {
         RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
                 new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
 
-        service.scanPositionUpdate(1001L, "BTC-USDT", 7L);
+        service.scanPositionUpdates(List.of(
+                positionEvent(31L, 1001L, "BTC-USDT", 7L, "USDT", "trace-1")));
 
-        assertThat(riskRepository.positionEventResolveCalls).isZero();
         assertThat(riskRepository.calculateCalls).isZero();
         assertThat(riskRepository.savedAccounts).isZero();
         assertThat(outboxRepository.enqueued).isZero();
@@ -155,9 +170,8 @@ class RiskServiceTest {
     }
 
     @Test
-    void positionUpdateRespectsRiskGroupLease() {
+    void positionEventBatchRespectsRiskGroupLease() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
-        riskRepository.positionEventTarget = Optional.of(new PositionRiskTarget(1001L, "BTC-USDT", 7L, "USDT"));
         riskRepository.scanLeaseAcquired = false;
         RiskProperties properties = new RiskProperties();
         properties.getCoordination().setNodeId("risk-node-b");
@@ -166,9 +180,9 @@ class RiskServiceTest {
         RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
                 new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
 
-        service.scanPositionUpdate(1001L, "BTC-USDT", 7L);
+        service.scanPositionUpdates(List.of(
+                positionEvent(31L, 1001L, "BTC-USDT", 7L, "USDT", "trace-1")));
 
-        assertThat(riskRepository.positionEventResolveCalls).isEqualTo(1);
         assertThat(riskRepository.scanLeaseAttempts).isEqualTo(1);
         assertThat(riskRepository.lastOwnerId).isEqualTo("risk-node-b");
         assertThat(riskRepository.calculateCalls).isZero();
@@ -178,50 +192,10 @@ class RiskServiceTest {
     }
 
     @Test
-    void positionUpdateWritesFlatRiskSnapshotsWhenPositionIsClosed() {
-        FakeRiskRepository riskRepository = new FakeRiskRepository();
-        riskRepository.positions = List.of();
-        riskRepository.positionEventTarget = Optional.of(new PositionRiskTarget(1001L, "BTC-USDT", 7L, "USDT"));
-        riskRepository.walletBalanceUnits = 1_000_000L;
-        RiskProperties properties = new RiskProperties();
-        properties.getCoordination().setEnabled(false);
-        FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
-        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
-        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
-
-        service.scanPositionUpdate(1001L, "BTC-USDT", 0L);
-
-        assertThat(riskRepository.positionEventResolveCalls).isEqualTo(1);
-        assertThat(riskRepository.calculateCalls).isEqualTo(1);
-        assertThat(riskRepository.savedAccounts).isEqualTo(1);
-        assertThat(riskRepository.lastAccountSnapshot.status()).isEqualTo(RiskStatus.NORMAL);
-        assertThat(riskRepository.lastAccountSnapshot.walletBalanceUnits()).isEqualTo(1_000_000L);
-        assertThat(riskRepository.lastAccountSnapshot.unrealizedPnlUnits()).isZero();
-        assertThat(riskRepository.lastAccountSnapshot.maintenanceMarginUnits()).isZero();
-        assertThat(riskRepository.lastAccountSnapshot.marginRatioPpm()).isZero();
-        assertThat(riskRepository.savedPositions).isEqualTo(1);
-        assertThat(riskRepository.savedPositionSnapshots).singleElement().satisfies(position -> {
-            assertThat(position.symbol()).isEqualTo("BTC-USDT");
-            assertThat(position.instrumentVersion()).isEqualTo(7L);
-            assertThat(position.signedQuantitySteps()).isZero();
-            assertThat(position.entryPriceTicks()).isZero();
-            assertThat(position.markPriceTicks()).isZero();
-            assertThat(position.notionalUnits()).isZero();
-            assertThat(position.unrealizedPnlUnits()).isZero();
-            assertThat(position.maintenanceMarginUnits()).isZero();
-        });
-        assertThat(outboxRepository.enqueued).isZero();
-        assertThat(transactionManager.commits).isEqualTo(1);
-        assertThat(transactionManager.rollbacks).isZero();
-    }
-
-    @Test
-    void positionUpdateDoesNotWriteFlatSnapshotWhenOpenPositionsRemainButMarksAreStale() {
+    void positionEventBatchDoesNotWriteFlatSnapshotWhenOpenPositionsRemainButMarksAreStale() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
         riskRepository.positions = List.of();
         riskRepository.openPositionsExist = true;
-        riskRepository.positionEventTarget = Optional.of(new PositionRiskTarget(1001L, "BTC-USDT", 7L, "USDT"));
         RiskProperties properties = new RiskProperties();
         properties.getCoordination().setEnabled(false);
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
@@ -229,7 +203,8 @@ class RiskServiceTest {
         RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
                 new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
 
-        service.scanPositionUpdate(1001L, "BTC-USDT", 7L);
+        service.scanPositionUpdates(List.of(
+                positionEvent(31L, 1001L, "BTC-USDT", 7L, "USDT", "trace-1")));
 
         assertThat(riskRepository.calculateCalls).isEqualTo(1);
         assertThat(riskRepository.hasOpenPositionsCalls).isEqualTo(1);
@@ -238,6 +213,19 @@ class RiskServiceTest {
         assertThat(outboxRepository.enqueued).isZero();
         assertThat(transactionManager.commits).isEqualTo(1);
         assertThat(transactionManager.rollbacks).isZero();
+    }
+
+    @Test
+    void positionEventBatchRejectsIncompleteProjectionFields() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        RiskService service = new RiskService(new ObjectMapper(), new RiskProperties(), riskRepository,
+                new FakeRiskSequenceRepository(), new FakeRiskOutboxRepository(), new TrackingTransactionManager());
+
+        assertThatThrownBy(() -> service.scanPositionUpdates(List.of(
+                positionEvent(31L, 1001L, "BTC-USDT", 7L, "", "trace-1"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("asset is required");
+        assertThat(riskRepository.calculateCalls).isZero();
     }
 
     @Test
@@ -491,6 +479,36 @@ class RiskServiceTest {
         assertThat(accounts.limit()).isEqualTo(25);
     }
 
+    private PositionUpdatedEvent positionEvent(long revision,
+                                               long userId,
+                                               String symbol,
+                                               long instrumentVersion,
+                                               String marginAsset,
+                                               String traceId) {
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        return new PositionUpdatedEvent(
+                PositionUpdatedEvent.CURRENT_SCHEMA_VERSION,
+                revision,
+                revision,
+                ProductLine.LINEAR_PERPETUAL,
+                revision,
+                userId,
+                symbol,
+                instrumentVersion,
+                MarginMode.CROSS,
+                PositionSide.NET,
+                0L,
+                0L,
+                0L,
+                0L,
+                marginAsset,
+                0L,
+                eventTime,
+                eventTime,
+                eventTime,
+                traceId);
+    }
+
     private static final class FakeRiskRepository extends RiskRepository {
         private List<CalculatedPositionRisk> positions = List.of(new CalculatedPositionRisk(1001L,
                 "BTC-USDT", 7L, "USDT", 10L, 65_000L, 60_000L, 600_000L, -100L, 100L));
@@ -504,13 +522,6 @@ class RiskServiceTest {
         private int calculateCalls;
         private int riskGroupCalls;
         private final List<Integer> riskGroupLimits = new ArrayList<>();
-        private Optional<PositionRiskTarget> positionEventTarget = Optional.empty();
-        private int positionEventResolveCalls;
-        private long lastPositionEventUserId;
-        private String lastPositionEventSymbol;
-        private MarginMode lastPositionEventMarginMode;
-        private PositionSide lastPositionEventPositionSide;
-        private long lastPositionEventVersion;
         private long walletBalanceUnits;
         private boolean openPositionsExist;
         private int hasOpenPositionsCalls;
@@ -553,36 +564,6 @@ class RiskServiceTest {
                             && key.settleAsset().compareTo(after.settleAsset()) > 0))
                     .limit(limit)
                     .toList();
-        }
-
-        @Override
-        public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId,
-                                                                       String symbol,
-                                                                       MarginMode marginMode,
-                                                                       PositionSide positionSide,
-                                                                       long instrumentVersion) {
-            positionEventResolveCalls++;
-            lastPositionEventUserId = userId;
-            lastPositionEventSymbol = symbol;
-            lastPositionEventMarginMode = marginMode;
-            lastPositionEventPositionSide = PositionSide.defaultIfNull(positionSide);
-            lastPositionEventVersion = instrumentVersion;
-            return positionEventTarget;
-        }
-
-        @Override
-        public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId,
-                                                                       String symbol,
-                                                                       MarginMode marginMode,
-                                                                       long instrumentVersion) {
-            return riskTargetForPositionEvent(userId, symbol, marginMode, PositionSide.NET, instrumentVersion);
-        }
-
-        @Override
-        public Optional<PositionRiskTarget> riskTargetForPositionEvent(long userId,
-                                                                       String symbol,
-                                                                       long instrumentVersion) {
-            return riskTargetForPositionEvent(userId, symbol, MarginMode.CROSS, instrumentVersion);
         }
 
         @Override

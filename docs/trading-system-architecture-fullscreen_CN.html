@@ -607,9 +607,9 @@
             <h2>RiskProvider</h2>
             <p>代码：<span class="mono">RiskService</span> + <span class="mono">PositionRiskTriggerConsumer</span></p>
             <ul>
-              <li>account position event 触发 <span class="mono">scanPositionUpdate</span></li>
+              <li>批量消费 position event，按风险组与持仓 revision 合并后触发 <span class="mono">scanPositionUpdates</span></li>
               <li><span class="mono">@Scheduled scan()</span> 每秒扫描兜底</li>
-              <li>按 <span class="mono">userId + settleAsset</span> 或 isolated position 算风险</li>
+              <li>按 <span class="mono">userId + accountType + settleAsset</span> 算风险</li>
               <li>写 risk snapshots、accountRisk/positionRisk outbox</li>
               <li>低于 liquidation 阈值生成 <span class="mono">risk_liquidation_candidates</span></li>
             </ul>
@@ -661,7 +661,7 @@
               <span class="mono">MatchingService.process/saveAndPublish</span>、
               <span class="mono">AccountUserCommandConsumer.onCommand</span>、
               <span class="mono">AccountUserCommandProcessor.process/AccountService.processTradeSide</span>、
-              <span class="mono">RiskService.scan/scanPositionUpdate</span>、
+              <span class="mono">RiskService.scan/scanPositionUpdates</span>、
               <span class="mono">LiquidationService.processCandidate</span>、
               <span class="mono">InsuranceService.coverDeficits</span>、
               <span class="mono">AdlService.processResidualDeficits</span>。

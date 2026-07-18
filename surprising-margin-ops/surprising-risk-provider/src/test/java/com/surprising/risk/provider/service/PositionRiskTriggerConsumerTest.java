@@ -6,12 +6,13 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.product.api.ProductLine;
 import com.surprising.risk.provider.config.RiskProperties;
-import com.surprising.trading.api.model.MarginMode;
-import com.surprising.trading.api.model.PositionSide;
+import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.ObjectMapper;
 
 class PositionRiskTriggerConsumerTest {
@@ -21,11 +22,15 @@ class PositionRiskTriggerConsumerTest {
         RiskService riskService = mock(RiskService.class);
         PositionRiskTriggerConsumer consumer = new PositionRiskTriggerConsumer(new ObjectMapper(), riskService);
 
-        consumer.onPositionUpdated(record("LINEAR_PERPETUAL:1001",
-                positionPayload(ProductLine.LINEAR_PERPETUAL, "BTC-USDT")));
+        consumer.onPositionUpdated(List.of(
+                record("LINEAR_PERPETUAL:1001", positionPayload(ProductLine.LINEAR_PERPETUAL, "BTC-USDT")),
+                record("LINEAR_PERPETUAL:1001", positionPayload(ProductLine.LINEAR_PERPETUAL, "ETH-USDT"))));
 
-        verify(riskService).scanPositionUpdate(1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET,
-                7L, "trace-1");
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<PositionUpdatedEvent>> events = ArgumentCaptor.forClass(List.class);
+        verify(riskService).scanPositionUpdates(events.capture());
+        assertThat(events.getValue()).extracting(PositionUpdatedEvent::symbol)
+                .containsExactly("BTC-USDT", "ETH-USDT");
     }
 
     @Test
@@ -33,10 +38,10 @@ class PositionRiskTriggerConsumerTest {
         RiskService riskService = mock(RiskService.class);
         PositionRiskTriggerConsumer consumer = new PositionRiskTriggerConsumer(new ObjectMapper(), riskService);
 
-        assertThatThrownBy(() -> consumer.onPositionUpdated(record(
-                "LINEAR_PERPETUAL:2002", positionPayload(ProductLine.LINEAR_PERPETUAL, "BTC-USDT"))))
+        assertThatThrownBy(() -> consumer.onPositionUpdated(List.of(record(
+                "LINEAR_PERPETUAL:2002", positionPayload(ProductLine.LINEAR_PERPETUAL, "BTC-USDT")))))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("failed to process position risk trigger");
+                .hasMessageContaining("failed to process position risk trigger batch");
         verifyNoInteractions(riskService);
     }
 
@@ -45,9 +50,10 @@ class PositionRiskTriggerConsumerTest {
         RiskService riskService = mock(RiskService.class);
         PositionRiskTriggerConsumer consumer = new PositionRiskTriggerConsumer(new ObjectMapper(), riskService);
 
-        assertThatThrownBy(() -> consumer.onPositionUpdated(record("LINEAR_PERPETUAL:1001", "not-json")))
+        assertThatThrownBy(() -> consumer.onPositionUpdated(
+                List.of(record("LINEAR_PERPETUAL:1001", "not-json"))))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("failed to process position risk trigger");
+                .hasMessageContaining("failed to process position risk trigger batch");
         verifyNoInteractions(riskService);
     }
 
@@ -60,14 +66,24 @@ class PositionRiskTriggerConsumerTest {
         PositionRiskTriggerConsumer consumer = new PositionRiskTriggerConsumer(new ObjectMapper(), riskService,
                 properties);
 
-        assertThatThrownBy(() -> consumer.onPositionUpdated(new ConsumerRecord<>(
+        assertThatThrownBy(() -> consumer.onPositionUpdated(List.of(new ConsumerRecord<>(
                 "surprising.linear-delivery.account.position.events.v1", 0, 1L, "BTC-USDT",
-                positionPayload(ProductLine.OPTION, "BTC-USDT"))))
+                positionPayload(ProductLine.OPTION, "BTC-USDT")))))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("failed to process position risk trigger")
+                .hasMessageContaining("failed to process position risk trigger batch")
                 .satisfies(ex -> assertThat(ex.getCause())
                         .hasMessageContaining("position update topic must match current product line")
                         .hasMessageContaining("surprising.option.account.position.events.v1"));
+        verifyNoInteractions(riskService);
+    }
+
+    @Test
+    void ignoresEmptyKafkaPoll() {
+        RiskService riskService = mock(RiskService.class);
+        PositionRiskTriggerConsumer consumer = new PositionRiskTriggerConsumer(new ObjectMapper(), riskService);
+
+        consumer.onPositionUpdated(List.of());
+
         verifyNoInteractions(riskService);
     }
 

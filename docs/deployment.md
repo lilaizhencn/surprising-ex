@@ -41,13 +41,15 @@ Keep the matching provider on JDK 21 unless exchange-core and Chronicle are reva
 - Scale by increasing service instances and Kafka partitions, not by creating per-symbol consumers.
 - Kafka Streams restores RocksDB state from changelog topics during rebalance or restart.
 - Matching command records must use `symbol` as the Kafka key, so all commands for one symbol stay ordered in one partition.
-- Matching command, risk position-event, and liquidation-candidate consumers reject records whose
-  Kafka key does not match the payload `symbol`. Account commands instead require
-  `<PRODUCT_LINE>:<userId>` and are always routed to product-scoped topics.
+- Matching-command and liquidation-candidate consumers reject records whose Kafka key does not match the payload
+  `symbol`. Account commands and account position events require `<PRODUCT_LINE>:<userId>` so one user's command and
+  risk-trigger order is stable across partitions.
 - Matching provider nodes share the same `surprising.trading.matching.kafka.group-id`; Kafka assigns each partition to one live matcher.
 - Matching restores open order books from PostgreSQL on startup. If a running matcher receives a new partition after processing commands, it closes the Spring context and should be restarted by Kubernetes/systemd.
 - Instrument, order, matching, price, risk, liquidation, and funding Kafka producers use `acks=all`, `enable.idempotence=true`, `compression.type=zstd`, and `max.in.flight.requests.per.connection=5`.
-- Matching, account, risk, liquidation, and insurance Kafka consumers use `enable.auto.commit=false`, `auto.offset.reset=earliest`, cooperative-sticky assignment, and Spring Kafka `AckMode.RECORD`.
+- Matching, account, risk, liquidation, and insurance Kafka consumers use `enable.auto.commit=false`,
+  `auto.offset.reset=earliest`, and cooperative-sticky assignment. Risk position events and account command windows use
+  batch listeners with `AckMode.BATCH`; single-record state transitions use `AckMode.RECORD`.
 - Tune `surprising.*.kafka.max-poll-records` with consumer lag, processing latency, and database transaction time. Defaults are intentionally conservative for local development.
 - Keep `surprising.trading.matching.kafka.restart-on-partition-reassignment=true` in production. Disable it only for local debugging.
 - Keep `surprising.trading.matching.kafka.partition-assignment-startup-grace-ms` large enough for concurrent listener containers to finish initial assignment; default is `30000`.
@@ -308,7 +310,12 @@ Recommended production settings:
 - Keep `surprising.risk.coordination.enabled=true` when more than one risk-provider instance is running.
 - Set `surprising.risk.coordination.node-id` to a stable pod name, hostname, or instance id. The default config uses `HOSTNAME`; if it is empty, the process generates a local random id.
 - Keep `surprising.risk.coordination.lease-duration` longer than the scan interval and shorter than your tolerated failover delay. The default is `15s` with a `1s` scan delay.
-- Risk consumes `surprising.account.position.events.v1` as a low-latency trigger and also runs keyset-paginated scheduled scans as the fallback. Both paths claim `risk_scan_leases` before calculating and writing each `userId + settleAsset` group.
+- Risk consumes `surprising.account.position.events.v1` in durable Kafka batches. Before touching PostgreSQL it derives
+  `userId + accountType + settleAsset` directly from the complete event, coalesces every exact
+  `symbol + marginMode + positionSide` to its highest revision, and scans each affected group once. It does not query
+  instruments merely to resolve an event target. A failed batch leaves its offsets uncommitted for Kafka retry.
+  Keyset-paginated scheduled scans remain the authoritative fallback, and both paths claim `risk_scan_leases` before
+  calculating and writing a group.
 - Keep `surprising.risk.kafka.group-id` identical across risk-provider nodes. Scale by increasing Kafka partitions and provider nodes; do not create per-symbol consumers.
 - Do not let risk-provider write snapshots when PostgreSQL is unavailable. Lease, snapshot id, candidate uniqueness, and outbox guarantees all depend on PostgreSQL.
 
@@ -435,7 +442,8 @@ Do not point this script at a shared development database. Matching restores ope
 - Index and mark providers use `price_symbol_leases` so only one live node publishes a given `module + symbol`.
 - Index and mark providers use `price_symbol_sequences` so a failover cannot reset sequence numbers.
 - Funding providers also use `price_symbol_leases` and `price_symbol_sequences`; settlement is additionally guarded by `funding_settlements(symbol, funding_time)`.
-- Risk providers use `risk_scan_leases` so only one live node writes snapshots and candidates for a given `userId + settleAsset`; lease expiry allows another node to take over after the owner dies.
+- Risk providers use `risk_scan_leases` so only one live node writes snapshots and candidates for a given
+  `userId + accountType + settleAsset`; lease expiry allows another node to take over after the owner dies.
 - Market-maker providers use `market_maker_strategy_leases` so only one live node quotes a given `strategyId + symbol`. If the owner dies, lease expiry allows another node to continue. The module places normal `LIMIT + GTX + postOnly` orders through order-provider and never writes matching state directly.
 - Funding-rate prediction is published directly to `surprising.perp.funding.rate.v1` and cached by symbol; it performs no rate-table or outbox write. At the funding boundary, the owner freezes the cached prediction into one idempotent `FINAL` rate row before settlement. If no current prediction is available, settlement fails closed for that symbol.
 - Funding-rate publication and settlement can be paused independently with `surprising.funding.calculation.enabled=false` and `surprising.funding.settlement.enabled=false`.
