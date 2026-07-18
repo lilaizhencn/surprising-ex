@@ -29,7 +29,7 @@ class AccountServicePositionCacheTest {
                 ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET))
                 .thenReturn(cached);
         AccountService service = new AccountService(
-                repository, new PositionCalculator(), null, null, properties, null, cache);
+                repository, new PositionCalculator(), properties, null, cache);
 
         PositionResponse response = service.position(1001L, "btc-usdt", "CROSS", "NET");
 

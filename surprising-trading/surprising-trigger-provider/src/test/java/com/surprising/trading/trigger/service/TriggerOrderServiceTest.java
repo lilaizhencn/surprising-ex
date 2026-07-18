@@ -534,14 +534,15 @@ class TriggerOrderServiceTest {
     }
 
     @Test
-    void closedPositionReconcilesAuthoritativelyCanceledTriggersOutOfRedis() {
+    void closedPositionCancelsTriggersPublishesStatusAndRemovesRedisIndex() {
         TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
         TriggerOrderIndex index = mock(TriggerOrderIndex.class);
+        TriggerOrderOutboxRepository outboxRepository = mock(TriggerOrderOutboxRepository.class);
         TriggerProperties properties = new TriggerProperties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
         properties.getKafka().setProductTopicsEnabled(true);
         TriggerOrderService service = new TriggerOrderService(
-                repository, mock(OrderRpcApi.class), properties, index);
+                repository, mock(OrderRpcApi.class), properties, index, outboxRepository, null);
         Instant closedAt = Instant.parse("2026-07-01T00:00:00Z");
         TriggerOrderRecord canceled = record(504L, TriggerOrderStatus.CANCELED);
         when(repository.positionClosedCancellations(ProductLine.INVERSE_PERPETUAL, 1001L, "BTC-USDT",
@@ -550,6 +551,7 @@ class TriggerOrderServiceTest {
         service.onPositionClosed(new PositionUpdatedEvent(701L, 801L, 1001L, "btc-usdt", 1L,
                 MarginMode.CROSS, PositionSide.NET, 0L, 0L, 0L, closedAt, "trace-close"));
 
+        verify(outboxRepository).enqueue(eq(canceled), any(TriggerOrderResponse.class));
         verify(index).synchronize(canceled);
     }
 

@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
+import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.product.api.ProductLine;
@@ -152,6 +153,44 @@ class OrderServiceTest {
                 anyLong(), anyLong(), anyLong(), anyLong());
         verify(outboxRepository, never()).enqueue(anyString(), anyLong(), anyString(), anyString(), anyString(),
                 anyString(), any());
+    }
+
+    @Test
+    void positionEventPrunesInvalidAndExcessReduceOnlyOrdersInsideOrderModule() {
+        OrderService service = service();
+        Instant eventTime = Instant.parse("2026-07-19T00:00:00Z");
+        OrderRecord firstValid = reduceOnlyOrder(9101L, OrderSide.SELL, 1L, OrderStatus.ACCEPTED);
+        OrderRecord excess = reduceOnlyOrder(9102L, OrderSide.SELL, 2L, OrderStatus.ACCEPTED);
+        OrderRecord wrongSide = reduceOnlyOrder(9103L, OrderSide.BUY, 1L, OrderStatus.PARTIALLY_FILLED);
+        OrderRecord alreadyCanceling = reduceOnlyOrder(
+                9104L, OrderSide.SELL, 1L, OrderStatus.CANCEL_REQUESTED);
+        when(orderRepository.lockOpenReduceOnlyOrders(
+                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", PositionSide.NET, eventTime))
+                .thenReturn(List.of(firstValid, excess, wrongSide, alreadyCanceling));
+        when(orderRepository.requestCancel(eq(9102L), eq(eventTime))).thenReturn(true);
+        when(orderRepository.requestCancel(eq(9103L), eq(eventTime))).thenReturn(true);
+        when(orderRepository.findByOrderId(9102L))
+                .thenReturn(Optional.of(reduceOnlyOrder(
+                        9102L, OrderSide.SELL, 2L, OrderStatus.CANCEL_REQUESTED)));
+        when(orderRepository.findByOrderId(9103L))
+                .thenReturn(Optional.of(reduceOnlyOrder(
+                        9103L, OrderSide.BUY, 1L, OrderStatus.CANCEL_REQUESTED)));
+        when(orderRepository.nextSequence("event")).thenReturn(9201L, 9202L);
+        when(orderRepository.nextSequence("command")).thenReturn(9301L, 9302L);
+        PositionUpdatedEvent event = new PositionUpdatedEvent(
+                9001L, 8001L, 1001L, "BTC-USDT", 7L, MarginMode.CROSS, PositionSide.NET,
+                2L, 65_000L, 0L, eventTime, "trace-position-prune");
+
+        service.onPositionUpdated(event);
+
+        verify(orderRepository).lockUserSymbolMarginScope(
+                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT");
+        verify(orderRepository).requestCancel(9102L, eventTime);
+        verify(orderRepository).requestCancel(9103L, eventTime);
+        verify(orderRepository, never()).requestCancel(eq(9101L), any());
+        verify(orderRepository, never()).requestCancel(eq(9104L), any());
+        verify(outboxRepository, times(4)).enqueue(
+                eq("ORDER"), anyLong(), anyString(), eq("BTC-USDT"), anyString(), anyString(), eq(eventTime));
     }
 
     @Test
@@ -926,5 +965,17 @@ class OrderServiceTest {
         return new OrderRecord(orderId, 1001L, clientOrderId, "BTC-USDT", 7L, OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, 0L, remaining,
                 200L, 500L, false, false, status, rejectReason, now, now);
+    }
+
+    private OrderRecord reduceOnlyOrder(long orderId,
+                                        OrderSide side,
+                                        long remainingQuantitySteps,
+                                        OrderStatus status) {
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        return new OrderRecord(
+                orderId, ProductLine.LINEAR_PERPETUAL, 1001L, "reduce-" + orderId, "BTC-USDT", 7L,
+                side, OrderType.LIMIT, TimeInForce.GTC, 65_000L, remainingQuantitySteps,
+                0L, remainingQuantitySteps, MarginMode.CROSS, PositionSide.NET,
+                200L, 500L, true, false, status, null, now, now, 1L);
     }
 }

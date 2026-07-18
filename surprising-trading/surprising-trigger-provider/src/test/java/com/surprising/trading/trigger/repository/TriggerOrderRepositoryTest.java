@@ -232,13 +232,15 @@ class TriggerOrderRepositoryTest {
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
         assertThat(sql.getValue())
+                .contains("UPDATE trading_trigger_orders")
                 .contains("product_line = ?")
                 .contains("position_side = ?")
-                .contains("status = 'CANCELED'")
+                .contains("status = 'PENDING'")
+                .contains("created_at <= ?")
                 .contains("reject_reason = 'POSITION_CLOSED'")
-                .contains("updated_at = ?");
-        assertThat(args.getValue()).containsExactly("LINEAR_DELIVERY", 1001L, "BTC-USDT-260925",
-                "ISOLATED", "LONG", java.sql.Timestamp.from(closedAt));
+                .contains("RETURNING *");
+        assertThat(args.getValue()).containsExactly(java.sql.Timestamp.from(closedAt), "LINEAR_DELIVERY",
+                1001L, "BTC-USDT-260925", "ISOLATED", "LONG", java.sql.Timestamp.from(closedAt));
     }
 
     @Test

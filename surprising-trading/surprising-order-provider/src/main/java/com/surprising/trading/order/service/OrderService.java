@@ -1,5 +1,6 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.api.model.AccountCommandStatus;
 import com.surprising.account.api.model.AccountType;
@@ -74,6 +75,7 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class OrderService {
 
+    private static final String REDUCE_ONLY_PRUNE_REASON = "REDUCE_ONLY_POSITION_REDUCED";
     private static final Set<OrderStatus> TERMINAL_STATUSES = Set.of(
             OrderStatus.REJECTED,
             OrderStatus.CANCELED,
@@ -851,11 +853,16 @@ public class OrderService {
     }
 
     private AdminCancelOrderResult requestCancel(OrderRecord order, String reason) {
+        return requestCancel(order, reason, Instant.now(), TraceContext.currentOrCreate());
+    }
+
+    private AdminCancelOrderResult requestCancel(OrderRecord order,
+                                                 String reason,
+                                                 Instant now,
+                                                 String traceId) {
         if (TERMINAL_STATUSES.contains(order.status()) || order.status() == OrderStatus.CANCEL_REQUESTED) {
             return cancelResult(order, false, "order is already " + order.status().name());
         }
-        Instant now = Instant.now();
-        String traceId = TraceContext.currentOrCreate();
         boolean cancelRequested = orderRepository.requestCancel(order.orderId(), now);
         OrderRecord updated = orderRepository.findByOrderId(order.orderId())
                 .orElseThrow(() -> new IllegalStateException("order disappeared after cancel update"));
@@ -865,6 +872,43 @@ public class OrderService {
         enqueueOrderEvent(updated, OrderEventType.CANCEL_REQUESTED, reason, now, traceId);
         enqueueCommand(updated, OrderCommandType.CANCEL, now, traceId);
         return cancelResult(updated, true, "cancel requested");
+    }
+
+    /**
+     * Owns order-side cleanup after the account single writer publishes a durable position snapshot.
+     * Replays are safe because requestCancel is conditional and CANCEL_REQUESTED orders are retained
+     * in the capacity calculation until matching acknowledges their cancellation.
+     */
+    @Transactional
+    public void onPositionUpdated(PositionUpdatedEvent event) {
+        if (event == null || event.productLine() != currentProductLine()) {
+            throw new IllegalArgumentException("position event product line does not match order provider");
+        }
+        String symbol = normalizeSymbol(event.symbol());
+        orderRepository.lockUserSymbolMarginScope(event.productLine(), event.userId(), symbol);
+        List<OrderRecord> orders = orderRepository.lockOpenReduceOnlyOrders(
+                event.productLine(), event.userId(), symbol, event.positionSide(), event.eventTime());
+        if (orders.isEmpty()) {
+            return;
+        }
+        long capacity = Math.absExact(event.signedQuantitySteps());
+        OrderSide closeSide = event.signedQuantitySteps() > 0L
+                ? OrderSide.SELL
+                : event.signedQuantitySteps() < 0L ? OrderSide.BUY : null;
+        long consumedCapacity = 0L;
+        for (OrderRecord order : orders) {
+            boolean validCloseSide = closeSide != null
+                    && order.side() == closeSide
+                    && order.instrumentVersion() == event.instrumentVersion();
+            boolean excessQuantity = false;
+            if (validCloseSide) {
+                consumedCapacity = Math.addExact(consumedCapacity, order.remainingQuantitySteps());
+                excessQuantity = consumedCapacity > capacity;
+            }
+            if ((!validCloseSide || excessQuantity) && order.status() != OrderStatus.CANCEL_REQUESTED) {
+                requestCancel(order, REDUCE_ONLY_PRUNE_REASON, event.eventTime(), event.traceId());
+            }
+        }
     }
 
     private AdminCancelOrderResult cancelResult(OrderRecord order, boolean cancelRequested, String message) {

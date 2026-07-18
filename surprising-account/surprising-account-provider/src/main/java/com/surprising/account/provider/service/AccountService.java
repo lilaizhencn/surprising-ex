@@ -63,8 +63,6 @@ public class AccountService {
 
     private final AccountRepository accountRepository;
     private final PositionCalculator positionCalculator;
-    private final ReduceOnlyOrderPruner reduceOnlyOrderPruner;
-    private final ClosedPositionTriggerOrderPruner closedPositionTriggerOrderPruner;
     private final AccountProperties properties;
     private final AccountOutboxRepository outboxRepository;
     private final RedisPositionCache positionCache;
@@ -76,51 +74,33 @@ public class AccountService {
             liquidationFeeContextCache;
 
     public AccountService(AccountRepository accountRepository, PositionCalculator positionCalculator) {
-        this(accountRepository, positionCalculator, null, new AccountProperties(), null);
+        this(accountRepository, positionCalculator, new AccountProperties(), null);
     }
 
     public AccountService(AccountRepository accountRepository,
-                          PositionCalculator positionCalculator,
-                          ReduceOnlyOrderPruner reduceOnlyOrderPruner,
-                          AccountProperties properties,
-                          AccountOutboxRepository outboxRepository) {
-        this(accountRepository, positionCalculator, reduceOnlyOrderPruner, null, properties, outboxRepository);
+                           PositionCalculator positionCalculator,
+                           AccountProperties properties,
+                           AccountOutboxRepository outboxRepository) {
+        this(accountRepository, positionCalculator, properties, outboxRepository, null);
     }
 
     public AccountService(AccountRepository accountRepository,
-                          PositionCalculator positionCalculator,
-                          ReduceOnlyOrderPruner reduceOnlyOrderPruner,
-                          ClosedPositionTriggerOrderPruner closedPositionTriggerOrderPruner,
-                          AccountProperties properties,
-                          AccountOutboxRepository outboxRepository) {
-        this(accountRepository, positionCalculator, reduceOnlyOrderPruner, closedPositionTriggerOrderPruner,
-                properties, outboxRepository, null);
-    }
-
-    public AccountService(AccountRepository accountRepository,
-                          PositionCalculator positionCalculator,
-                          ReduceOnlyOrderPruner reduceOnlyOrderPruner,
-                          ClosedPositionTriggerOrderPruner closedPositionTriggerOrderPruner,
-                          AccountProperties properties,
-                          AccountOutboxRepository outboxRepository,
-                          RedisPositionCache positionCache) {
-        this(accountRepository, positionCalculator, reduceOnlyOrderPruner, closedPositionTriggerOrderPruner,
-                properties, outboxRepository, positionCache, null);
+                           PositionCalculator positionCalculator,
+                           AccountProperties properties,
+                           AccountOutboxRepository outboxRepository,
+                           RedisPositionCache positionCache) {
+        this(accountRepository, positionCalculator, properties, outboxRepository, positionCache, null);
     }
 
     @Autowired
     public AccountService(AccountRepository accountRepository,
-                          PositionCalculator positionCalculator,
-                          ReduceOnlyOrderPruner reduceOnlyOrderPruner,
-                          ClosedPositionTriggerOrderPruner closedPositionTriggerOrderPruner,
-                          AccountProperties properties,
-                          AccountOutboxRepository outboxRepository,
-                          RedisPositionCache positionCache,
-                          PositionCacheAfterCommitSynchronizer positionCacheAfterCommitSynchronizer) {
+                           PositionCalculator positionCalculator,
+                           AccountProperties properties,
+                           AccountOutboxRepository outboxRepository,
+                           RedisPositionCache positionCache,
+                           PositionCacheAfterCommitSynchronizer positionCacheAfterCommitSynchronizer) {
         this.accountRepository = accountRepository;
         this.positionCalculator = positionCalculator;
-        this.reduceOnlyOrderPruner = reduceOnlyOrderPruner;
-        this.closedPositionTriggerOrderPruner = closedPositionTriggerOrderPruner;
         this.properties = properties;
         this.outboxRepository = outboxRepository;
         this.positionCache = positionCache;
@@ -619,8 +599,6 @@ public class AccountService {
         PositionResponse updated = accountRepository.updatePosition(productLine, userId, command.symbol(),
                 position.marginMode(), position.positionSide(), change.next(), position.signedQuantitySteps(),
                 command.eventTime());
-        pruneClosedPositionTriggers(productLine, userId, command.symbol(), position.marginMode(),
-                position.positionSide(), change.next(), command.eventTime());
         var event = outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
                 0L, updated, command.eventTime(), TraceContext.currentOrCreate());
         schedulePositionCacheSync(event.cacheEvent());
@@ -919,13 +897,6 @@ public class AccountService {
         PositionResponse updated = accountRepository.updatePosition(productLine, userId, symbol, normalizedMarginMode,
                 normalizedPositionSide,
                 change.next(), current.signedQuantitySteps(), eventTime);
-        if (closeSteps > 0 && reduceOnlyOrderPruner != null) {
-            reduceOnlyOrderPruner.prune(userId, symbol, normalizedPositionSide, change.next(), eventTime, traceId);
-        }
-        if (closeSteps > 0) {
-            pruneClosedPositionTriggers(productLine, userId, symbol, normalizedMarginMode, normalizedPositionSide,
-                    change.next(), eventTime);
-        }
         if (outboxRepository != null) {
             var event = outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
                     tradeId, updated, eventTime, traceId);
@@ -950,19 +921,6 @@ public class AccountService {
         if (positionCacheAfterCommitSynchronizer != null) {
             positionCacheAfterCommitSynchronizer.schedule(productLine, userId, symbol, marginMode, positionSide);
         }
-    }
-
-    private void pruneClosedPositionTriggers(ProductLine productLine,
-                                             long userId,
-                                             String symbol,
-                                             MarginMode marginMode,
-                                             PositionSide positionSide,
-                                             PositionState position,
-                                             Instant closedAt) {
-        if (closedPositionTriggerOrderPruner == null || position.signedQuantitySteps() != 0L) {
-            return;
-        }
-        closedPositionTriggerOrderPruner.prune(productLine, userId, symbol, marginMode, positionSide, closedAt);
     }
 
     private void settleLiquidationFeeIfNeeded(long tradeId,

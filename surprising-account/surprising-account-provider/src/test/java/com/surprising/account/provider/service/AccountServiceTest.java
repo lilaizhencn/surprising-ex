@@ -91,39 +91,6 @@ class AccountServiceTest {
     }
 
     @Test
-    void openingTradeDoesNotRunReduceOnlyPruner() {
-        FakeAccountRepository repository = new FakeAccountRepository();
-        repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 5L));
-        repository.feeSnapshots.put(9001L, new OrderFeeSnapshot(2L, 5L));
-        RecordingReduceOnlyOrderPruner pruner = new RecordingReduceOnlyOrderPruner();
-        AccountService service = new AccountService(repository, new PositionCalculator(), pruner,
-                new AccountProperties(), null);
-
-        MatchTradeEvent trade = new MatchTradeEvent(
-                9206L,
-                9106L,
-                "BTC-USDT",
-                9002L,
-                1L,
-                2002L,
-                OrderSide.BUY,
-                9001L,
-                1L,
-                1001L,
-                5L,
-                2L,
-                600_000L,
-                3L,
-                true,
-                false,
-                EVENT_TIME);
-
-        settleTrade(service, trade);
-
-        assertThat(pruner.calls).isEmpty();
-    }
-
-    @Test
     void tradeFeesUseOrderSnapshotRatesInsteadOfInstrumentDefaults() {
         FakeAccountRepository repository = new FakeAccountRepository();
         repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 1_000L));
@@ -243,8 +210,7 @@ class AccountServiceTest {
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
                 new PositionState(3L, 4L, 500_000L, 0L));
         repository.latestMarkPriceTicks.put(symbol + ":4", 600_000L);
-        RecordingClosedPositionTriggerOrderPruner triggerPruner = new RecordingClosedPositionTriggerOrderPruner();
-        AccountService service = new AccountService(repository, new PositionCalculator(), null, triggerPruner,
+        AccountService service = new AccountService(repository, new PositionCalculator(),
                 new AccountProperties(), new FakeOutboxRepository());
 
         int settled = settleDelivery(service, new DeliverySettlementEvent(
@@ -265,8 +231,6 @@ class AccountServiceTest {
         assertThat(repository.scopedPositionUpdateLines).containsExactly(ProductLine.LINEAR_DELIVERY);
         assertThat(repository.lastSettlementMarkPriceTime).isEqualTo(EVENT_TIME);
         assertThat(repository.lastSettlementPriceWindow).isEqualTo(Duration.ofMinutes(30));
-        assertThat(triggerPruner.calls).containsExactly(new ClosedTriggerPruneCall(
-                ProductLine.LINEAR_DELIVERY, 2002L, symbol, MarginMode.CROSS, PositionSide.NET, EVENT_TIME));
     }
 
     @Test
@@ -512,7 +476,7 @@ class AccountServiceTest {
         repository.feeSnapshots.put(9102L, new OrderFeeSnapshot(-100L, 800L));
         repository.feeSnapshots.put(9101L, new OrderFeeSnapshot(-200L, 900L));
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
-        AccountService service = new AccountService(repository, new PositionCalculator(), null,
+        AccountService service = new AccountService(repository, new PositionCalculator(),
                 new AccountProperties(), outboxRepository);
 
         MatchTradeEvent trade = new MatchTradeEvent(
@@ -656,7 +620,7 @@ class AccountServiceTest {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        AccountService service = new AccountService(repository, new PositionCalculator(), null, properties, null);
+        AccountService service = new AccountService(repository, new PositionCalculator(), properties, null);
 
         PositionResponse position = service.position(1001L, "BTC-USDT-260925", "CROSS", "SHORT");
         var positions = service.positions(1001L, "SHORT");
@@ -748,7 +712,7 @@ class AccountServiceTest {
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setPositionEventsTopic("surprising.account.position.events.v1");
-        AccountService service = new AccountService(repository, new PositionCalculator(), null,
+        AccountService service = new AccountService(repository, new PositionCalculator(),
                 properties, outboxRepository);
 
         PositionMarginAdjustmentResponse response = service.adjustPositionMargin(new PositionMarginAdjustmentRequest(
@@ -773,7 +737,7 @@ class AccountServiceTest {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
-        AccountService service = new AccountService(repository, new PositionCalculator(), null, properties, null);
+        AccountService service = new AccountService(repository, new PositionCalculator(), properties, null);
 
         PositionMarginAdjustmentResponse response = service.adjustPositionMargin(new PositionMarginAdjustmentRequest(
                 1001L, "BTC-USD-260925", MarginMode.ISOLATED, 500L, "margin-add-delivery", null));
@@ -790,7 +754,7 @@ class AccountServiceTest {
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setPositionEventsTopic("surprising.account.position.events.v1");
-        AccountService service = new AccountService(repository, new PositionCalculator(), null,
+        AccountService service = new AccountService(repository, new PositionCalculator(),
                 properties, outboxRepository);
 
         MatchTradeEvent trade = new MatchTradeEvent(
@@ -877,53 +841,6 @@ class AccountServiceTest {
     }
 
     @Test
-    void closingTradeRunsReduceOnlyPrunerAfterPositionUpdate() {
-        FakeAccountRepository repository = new FakeAccountRepository();
-        repository.feeSnapshots.put(9012L, new OrderFeeSnapshot(2L, 5L));
-        repository.feeSnapshots.put(9013L, new OrderFeeSnapshot(2L, 5L));
-        repository.positions.put(new PositionKey(2002L, "BTC-USDT", MarginMode.CROSS),
-                new PositionState(3L, 1L, 600_000L, 0L));
-        repository.positions.put(new PositionKey(1001L, "BTC-USDT", MarginMode.CROSS),
-                new PositionState(-3L, 1L, 600_000L, 0L));
-        RecordingReduceOnlyOrderPruner pruner = new RecordingReduceOnlyOrderPruner();
-        AccountService service = new AccountService(repository, new PositionCalculator(), pruner,
-                new AccountProperties(), null);
-
-        MatchTradeEvent close = new MatchTradeEvent(
-                9207L,
-                9107L,
-                "BTC-USDT",
-                9012L,
-                1L,
-                2002L,
-                OrderSide.SELL,
-                9013L,
-                1L,
-                1001L,
-                5L,
-                2L,
-                610_000L,
-                2L,
-                true,
-                true,
-                EVENT_TIME.plusSeconds(1),
-                "trace-prune");
-
-        settleTrade(service, close);
-
-        assertThat(pruner.calls).hasSize(2);
-        assertThat(pruner.calls)
-                .extracting(PruneCall::userId)
-                .containsExactly(2002L, 1001L);
-        assertThat(pruner.calls)
-                .extracting(call -> call.position().signedQuantitySteps())
-                .containsExactly(1L, -1L);
-        assertThat(pruner.calls)
-                .extracting(PruneCall::traceId)
-                .containsExactly("trace-prune", "trace-prune");
-    }
-
-    @Test
     void cachesMissingLiquidationFeeContextAcrossPartialClosingFills() {
         FakeAccountRepository repository = new FakeAccountRepository();
         repository.feeSnapshots.put(9014L, new OrderFeeSnapshot(2L, 5L));
@@ -989,8 +906,7 @@ class AccountServiceTest {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setPositionEventsTopic("surprising.account.position.events.v1");
         properties.getKafka().setLiquidationFeeEventsTopic("surprising.account.liquidation-fee.events.v1");
-        RecordingClosedPositionTriggerOrderPruner triggerPruner = new RecordingClosedPositionTriggerOrderPruner();
-        AccountService service = new AccountService(repository, new PositionCalculator(), null, triggerPruner,
+        AccountService service = new AccountService(repository, new PositionCalculator(),
                 properties, outboxRepository);
 
         MatchTradeEvent close = new MatchTradeEvent(
@@ -1016,9 +932,6 @@ class AccountServiceTest {
         settleTrade(service, close);
 
         assertThat(repository.liquidationFeeByUser).containsEntry(2002L, 3_600L);
-        assertThat(triggerPruner.calls).containsExactly(new ClosedTriggerPruneCall(
-                ProductLine.LINEAR_PERPETUAL, 2002L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET,
-                EVENT_TIME.plusSeconds(4)));
         assertThat(outboxRepository.liquidationFeeCalls).singleElement().satisfies(call -> {
             assertThat(call.topic()).isEqualTo("surprising.account.liquidation-fee.events.v1");
             assertThat(call.tradeId()).isEqualTo(9205L);
@@ -1124,7 +1037,7 @@ class AccountServiceTest {
     }
 
     private static AccountService settlementService(FakeAccountRepository repository) {
-        return new AccountService(repository, new PositionCalculator(), null,
+        return new AccountService(repository, new PositionCalculator(),
                 new AccountProperties(), new FakeOutboxRepository());
     }
 
@@ -1735,42 +1648,6 @@ class AccountServiceTest {
         }
     }
 
-    private static final class RecordingReduceOnlyOrderPruner extends ReduceOnlyOrderPruner {
-
-        private final List<PruneCall> calls = new ArrayList<>();
-
-        private RecordingReduceOnlyOrderPruner() {
-            super(null, null, null);
-        }
-
-        @Override
-        public void prune(long userId, String symbol, PositionSide positionSide, PositionState position, Instant now,
-                          String traceId) {
-            calls.add(new PruneCall(userId, symbol, positionSide, position, now, traceId));
-        }
-    }
-
-    private static final class RecordingClosedPositionTriggerOrderPruner
-            extends ClosedPositionTriggerOrderPruner {
-
-        private final List<ClosedTriggerPruneCall> calls = new ArrayList<>();
-
-        private RecordingClosedPositionTriggerOrderPruner() {
-            super(null);
-        }
-
-        @Override
-        public int prune(ProductLine productLine,
-                         long userId,
-                         String symbol,
-                         MarginMode marginMode,
-                         PositionSide positionSide,
-                         Instant closedAt) {
-            calls.add(new ClosedTriggerPruneCall(productLine, userId, symbol, marginMode, positionSide, closedAt));
-            return 1;
-        }
-    }
-
     private static final class FakeOutboxRepository extends AccountOutboxRepository {
 
         private final List<PositionUpdatedCall> calls = new ArrayList<>();
@@ -1962,22 +1839,6 @@ class AccountServiceTest {
                                       String feeReason,
                                       boolean orderCompleted,
                                       Instant eventTime) {
-    }
-
-    private record PruneCall(long userId,
-                             String symbol,
-                             PositionSide positionSide,
-                             PositionState position,
-                             Instant eventTime,
-                             String traceId) {
-    }
-
-    private record ClosedTriggerPruneCall(ProductLine productLine,
-                                          long userId,
-                                          String symbol,
-                                          MarginMode marginMode,
-                                          PositionSide positionSide,
-                                          Instant closedAt) {
     }
 
     private record PositionKey(long userId, String symbol, MarginMode marginMode, PositionSide positionSide) {

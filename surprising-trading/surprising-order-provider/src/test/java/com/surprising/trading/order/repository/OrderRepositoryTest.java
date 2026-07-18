@@ -12,6 +12,7 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.model.OrderRecord;
 import java.time.Instant;
@@ -88,6 +89,32 @@ class OrderRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
         assertThat(sql.getValue()).contains("WHERE product_line = ? AND user_id = ? AND client_order_id = ?");
         assertThat(args.getValue()).containsExactly("OPTION", 1001L, "cli-1");
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void reduceOnlyMaintenanceLocksOnlyTheOwnedProductUserAndPositionSide() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OrderRepository repository = new OrderRepository(jdbcTemplate);
+        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(java.util.List.of());
+
+        repository.lockOpenReduceOnlyOrders(
+                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", PositionSide.LONG,
+                java.time.Instant.parse("2026-07-19T00:00:00Z"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("product_line = ?")
+                .contains("reduce_only = TRUE")
+                .contains("CANCEL_REQUESTED")
+                .contains("created_at <= ?")
+                .contains("ORDER BY created_at ASC, order_id ASC")
+                .contains("FOR UPDATE");
+        assertThat(args.getValue()).containsExactly("LINEAR_PERPETUAL", 1001L, "BTC-USDT", "LONG",
+                java.sql.Timestamp.from(java.time.Instant.parse("2026-07-19T00:00:00Z")));
     }
 
     @Test

@@ -183,7 +183,7 @@ class ProductAccountServiceTest {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(productLine);
-        return new AccountService(repository, new PositionCalculator(), null, properties, null);
+        return new AccountService(repository, new PositionCalculator(), properties, null);
     }
 
     private static final class FakeProductAccountRepository extends AccountRepository {

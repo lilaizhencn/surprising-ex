@@ -308,20 +308,21 @@ public class TriggerOrderRepository {
                                                                  PositionSide positionSide,
                                                                  Instant closedAt) {
         return jdbcTemplate.query("""
-                SELECT *
-                  FROM trading_trigger_orders
+                UPDATE trading_trigger_orders
+                   SET status = 'CANCELED',
+                       reject_reason = 'POSITION_CLOSED',
+                       updated_at = ?
                  WHERE product_line = ?
                    AND user_id = ?
                    AND symbol = ?
                    AND margin_mode = ?
                    AND position_side = ?
-                   AND status = 'CANCELED'
-                   AND reject_reason = 'POSITION_CLOSED'
-                   AND updated_at = ?
-                 ORDER BY trigger_order_id ASC
-                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), userId, symbol,
-                MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name(),
-                Timestamp.from(closedAt));
+                   AND status = 'PENDING'
+                   AND created_at <= ?
+             RETURNING *
+                """, (rs, rowNum) -> toRecord(rs), Timestamp.from(closedAt), productLine(productLine).name(),
+                userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
+                PositionSide.defaultIfNull(positionSide).name(), Timestamp.from(closedAt));
     }
 
     public List<TriggerOrderRecord> findByIds(List<Long> triggerOrderIds) {

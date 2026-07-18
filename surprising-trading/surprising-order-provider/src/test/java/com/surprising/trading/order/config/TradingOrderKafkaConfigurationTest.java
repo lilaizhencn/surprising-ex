@@ -37,6 +37,10 @@ class TradingOrderKafkaConfigurationTest {
                 .isEqualTo("surprising.perp.order.commands.v1");
         assertThat(properties.getKafka().getOrderEventsTopic())
                 .isEqualTo("surprising.perp.order.events.v1");
+        assertThat(properties.getKafka().getPositionEventsTopic())
+                .isEqualTo("surprising.account.position.events.v1");
+        assertThat(properties.getKafka().getPositionMaintenanceGroupId())
+                .isEqualTo("surprising-order-position-maintenance-v1");
     }
 
     @Test
@@ -49,5 +53,10 @@ class TradingOrderKafkaConfigurationTest {
                 .isEqualTo("surprising.spot.order.commands.v1");
         assertThat(properties.getKafka().getOrderEventsTopic())
                 .isEqualTo("surprising.spot.order.events.v1");
+        assertThat(properties.getKafka().getPositionEventsTopic())
+                .isEqualTo("surprising.spot.account.position.events.v1");
+        assertThat(properties.getKafka().getPositionMaintenanceGroupId())
+                .contains("spot")
+                .contains("order-position-maintenance");
     }
 }

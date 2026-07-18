@@ -531,10 +531,12 @@ terminal DB changes remove the member afterward, so a process crash can only lea
 The rebuild coordinator uses a token-owned Redis lease with compare-and-delete Lua release. It is an efficiency
 lock only; trigger uniqueness depends on the PostgreSQL conditional update and `SKIP LOCKED`.
 
-When account settlement makes a position quantity zero, it updates matching `PENDING` trigger rows to `CANCELED`
-with `reject_reason = 'POSITION_CLOSED'` in the same transaction as `account_positions`. The position outbox event
-is therefore published only after the authoritative cancellation commits. Trigger-provider uses the exact event
-scope and timestamp to remove the canceled static TP/SL members from Redis; duplicate Kafka delivery is idempotent.
+When account settlement makes a position quantity zero, its transactional position outbox emits the full,
+user-keyed snapshot. Trigger-provider consumes that event and changes matching `PENDING` rows created no later
+than the close event to `CANCELED` with `reject_reason = 'POSITION_CLOSED'`. The trigger update and trigger-status
+outbox rows commit together, then Redis members are removed after commit. Duplicate Kafka delivery is idempotent,
+and the `created_at <= event_time` predicate prevents a delayed close event from canceling triggers for a reopened
+position.
 
 `trading_fee_schedules` stores user-level fee overrides:
 

@@ -271,6 +271,28 @@ public class OrderRepository {
                 userId, normalizedSymbol, normalizedSymbol, productLine, productLine, limit);
     }
 
+    public List<OrderRecord> lockOpenReduceOnlyOrders(ProductLine productLine,
+                                                      long userId,
+                                                      String symbol,
+                                                      PositionSide positionSide,
+                                                      Instant createdNoLaterThan) {
+        return jdbcTemplate.query("""
+                SELECT *
+                  FROM trading_orders
+                 WHERE product_line = ?
+                   AND user_id = ?
+                   AND symbol = ?
+                   AND position_side = ?
+                   AND reduce_only = TRUE
+                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                   AND remaining_quantity_steps > 0
+                   AND created_at <= ?
+                 ORDER BY created_at ASC, order_id ASC
+                 FOR UPDATE
+                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), userId, symbol,
+                PositionSide.defaultIfNull(positionSide).name(), Timestamp.from(createdNoLaterThan));
+    }
+
     /** Stable keyset scan used only to rebuild the optional Redis open-order read model. */
     public List<Long> activeOpenOrderUsers(ProductLine productLine, long afterUserId, int limit) {
         return jdbcTemplate.query("""

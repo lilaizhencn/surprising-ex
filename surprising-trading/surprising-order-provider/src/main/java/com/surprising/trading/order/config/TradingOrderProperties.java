@@ -66,7 +66,9 @@ public class TradingOrderProperties {
         private String orderCommandsTopic = "surprising.perp.order.commands.v1";
         private String orderEventsTopic = "surprising.perp.order.events.v1";
         private String matchResultsTopic = "surprising.perp.match.results.v1";
+        private String positionEventsTopic = "surprising.account.position.events.v1";
         private String openOrderViewGroupId = "surprising-order-open-view-v1";
+        private String positionMaintenanceGroupId = "surprising-order-position-maintenance-v1";
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -117,6 +119,20 @@ public class TradingOrderProperties {
         }
         public String getAccountCommandResultsGroupId() {
             return productTopics().consumerGroup("order-account-results");
+        }
+        public String getPositionEventsTopic() {
+            return productTopicsEnabled ? productTopics().accountPositionEventsTopic() : positionEventsTopic;
+        }
+        public void setPositionEventsTopic(String positionEventsTopic) {
+            this.positionEventsTopic = positionEventsTopic;
+        }
+        public String getPositionMaintenanceGroupId() {
+            return productTopicsEnabled
+                    ? productTopics().consumerGroup("order-position-maintenance")
+                    : positionMaintenanceGroupId;
+        }
+        public void setPositionMaintenanceGroupId(String positionMaintenanceGroupId) {
+            this.positionMaintenanceGroupId = positionMaintenanceGroupId;
         }
         public String getOpenOrderViewGroupId() { return openOrderViewGroupId; }
         public void setOpenOrderViewGroupId(String openOrderViewGroupId) { this.openOrderViewGroupId = openOrderViewGroupId; }

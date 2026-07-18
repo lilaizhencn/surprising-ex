@@ -559,7 +559,7 @@
             <ul>
               <li>开仓/平仓：只能由成交结算驱动</li>
               <li>手动 isolated margin add/remove：AccountService 锁仓位和风险快照</li>
-              <li>平仓后 ReduceOnlyOrderPruner 裁剪错误方向/超量 reduce-only 单</li>
+              <li>持仓事件由 order-provider 裁剪错误方向、旧版本或超量 reduce-only 单</li>
               <li>position-mode / margin-mode 切换会检查仓位、订单、触发单、算法单和未结算状态</li>
             </ul>
           </div>

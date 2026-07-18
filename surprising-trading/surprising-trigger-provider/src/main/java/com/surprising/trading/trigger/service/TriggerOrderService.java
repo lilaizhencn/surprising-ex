@@ -184,14 +184,16 @@ public class TriggerOrderService {
         return toResponse(order);
     }
 
+    @Transactional
     public void onPositionClosed(PositionUpdatedEvent event) {
         if (event == null || event.signedQuantitySteps() != 0L || event.eventTime() == null) {
             return;
         }
-        triggerOrderRepository.positionClosedCancellations(
-                        currentProductLine(), event.userId(), normalizeSymbol(event.symbol()), event.marginMode(),
-                        event.positionSide(), event.eventTime())
-                .forEach(triggerOrderIndex::synchronize);
+        List<TriggerOrderRecord> canceled = triggerOrderRepository.positionClosedCancellations(
+                currentProductLine(), event.userId(), normalizeSymbol(event.symbol()), event.marginMode(),
+                event.positionSide(), event.eventTime());
+        canceled.forEach(this::enqueueStatusChange);
+        afterCommit(() -> canceled.forEach(triggerOrderIndex::synchronize));
     }
 
     @Transactional
