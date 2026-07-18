@@ -220,11 +220,12 @@ public class AccountUserCommandProcessor {
                 }
                 accountRepository.position(command.productLine(), command.userId(), adl.symbol(),
                                 adl.marginMode(), adl.positionSide())
-                        .ifPresent(position -> outboxRepository.enqueuePositionUpdated(
-                                properties.getKafka().getPositionEventsTopic(), adl.executionId(), position,
-                                Instant.now(), command.traceId()));
-                positionCacheSynchronizer.schedule(command.productLine(), command.userId(), adl.symbol(),
-                        adl.marginMode(), adl.positionSide());
+                        .ifPresent(position -> {
+                            var event = outboxRepository.enqueuePositionUpdated(
+                                    properties.getKafka().getPositionEventsTopic(), adl.executionId(), position,
+                                    Instant.now(), command.traceId());
+                            positionCacheSynchronizer.schedule(event.cacheEvent());
+                        });
                 Map<String, Object> result = new LinkedHashMap<>();
                 result.put("executionId", adl.executionId());
                 result.put("realizedProfitUnits", settled.realizedProfitUnits());

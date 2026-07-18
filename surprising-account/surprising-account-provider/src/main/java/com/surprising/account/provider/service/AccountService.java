@@ -453,11 +453,13 @@ public class AccountService {
             PositionResponse current = currentPosition
                     .orElseThrow(() -> new IllegalStateException("isolated position missing after margin adjustment"));
             // Manual margin changes do not have a trade id; tradeId=0 tells downstream consumers this is a state trigger.
-            outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
+            var event = outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
                     0L, current, Instant.now(), TraceContext.currentOrCreate());
+            schedulePositionCacheSync(event.cacheEvent());
+        } else {
+            schedulePositionCacheSync(productLine == null ? positionCacheProductLine() : productLine,
+                    request.userId(), symbol, MarginMode.ISOLATED, request.positionSide());
         }
-        schedulePositionCacheSync(productLine == null ? positionCacheProductLine() : productLine,
-                request.userId(), symbol, MarginMode.ISOLATED, request.positionSide());
         return response;
     }
 
@@ -619,10 +621,9 @@ public class AccountService {
                 command.eventTime());
         pruneClosedPositionTriggers(productLine, userId, command.symbol(), position.marginMode(),
                 position.positionSide(), change.next(), command.eventTime());
-        outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
+        var event = outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
                 0L, updated, command.eventTime(), TraceContext.currentOrCreate());
-        schedulePositionCacheSync(productLine, userId, command.symbol(),
-                position.marginMode(), position.positionSide());
+        schedulePositionCacheSync(event.cacheEvent());
         return Optional.of(updated);
     }
 
@@ -925,11 +926,19 @@ public class AccountService {
                     change.next(), eventTime);
         }
         if (outboxRepository != null) {
-            outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
+            var event = outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
                     tradeId, updated, eventTime, traceId);
+            schedulePositionCacheSync(event.cacheEvent());
+        } else {
+            schedulePositionCacheSync(productLine, userId, symbol, normalizedMarginMode, normalizedPositionSide);
         }
-        schedulePositionCacheSync(productLine, userId, symbol, normalizedMarginMode, normalizedPositionSide);
         return updated;
+    }
+
+    private void schedulePositionCacheSync(com.surprising.account.api.model.PositionCacheEvent snapshot) {
+        if (positionCacheAfterCommitSynchronizer != null) {
+            positionCacheAfterCommitSynchronizer.schedule(snapshot);
+        }
     }
 
     private void schedulePositionCacheSync(ProductLine productLine,

@@ -3,6 +3,7 @@ package com.surprising.account.provider.repository;
 import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.api.model.AccountUserCommand;
+import com.surprising.account.api.model.PositionCacheEvent;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
@@ -32,22 +33,34 @@ public class AccountOutboxRepository {
     private final AccountSequenceRepository sequenceRepository;
     private final ObjectMapper objectMapper;
     private final AccountProperties properties;
+    private final PositionCacheProjectionRepository positionCacheProjectionRepository;
 
     public AccountOutboxRepository(JdbcTemplate jdbcTemplate,
                                    AccountSequenceRepository sequenceRepository,
                                    ObjectMapper objectMapper) {
-        this(jdbcTemplate, sequenceRepository, objectMapper, new AccountProperties());
+        this(jdbcTemplate, sequenceRepository, objectMapper, new AccountProperties(),
+                new PositionCacheProjectionRepository(jdbcTemplate));
+    }
+
+    public AccountOutboxRepository(JdbcTemplate jdbcTemplate,
+                                   AccountSequenceRepository sequenceRepository,
+                                   ObjectMapper objectMapper,
+                                   AccountProperties properties) {
+        this(jdbcTemplate, sequenceRepository, objectMapper, properties,
+                new PositionCacheProjectionRepository(jdbcTemplate));
     }
 
     @Autowired
     public AccountOutboxRepository(JdbcTemplate jdbcTemplate,
                                    AccountSequenceRepository sequenceRepository,
                                    ObjectMapper objectMapper,
-                                   AccountProperties properties) {
+                                   AccountProperties properties,
+                                   PositionCacheProjectionRepository positionCacheProjectionRepository) {
         this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
         this.objectMapper = objectMapper;
         this.properties = properties == null ? new AccountProperties() : properties;
+        this.positionCacheProjectionRepository = positionCacheProjectionRepository;
     }
 
     public PositionUpdatedEvent enqueuePositionUpdated(String topic,
@@ -56,16 +69,38 @@ public class AccountOutboxRepository {
                                                        Instant now,
                                                        String traceId) {
         requireCurrentProductTopic(topic);
+        PositionCacheEvent snapshot = positionCacheProjectionRepository.captureFinalSnapshot(
+                currentProductLine(), position.userId(), position.symbol(), position.marginMode(),
+                position.positionSide());
         long eventId = sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.POSITION_EVENT);
-        PositionUpdatedEvent event = new PositionUpdatedEvent(eventId, tradeId, position.userId(), position.symbol(),
-                position.instrumentVersion(), position.marginMode(), position.positionSide(), position.signedQuantitySteps(),
-                position.entryPriceTicks(), position.realizedPnlUnits(), now, traceId);
+        PositionUpdatedEvent event = new PositionUpdatedEvent(
+                PositionUpdatedEvent.CURRENT_SCHEMA_VERSION,
+                eventId,
+                tradeId,
+                snapshot.productLine(),
+                snapshot.revision(),
+                snapshot.userId(),
+                snapshot.symbol(),
+                snapshot.instrumentVersion() == null ? 0L : snapshot.instrumentVersion(),
+                snapshot.marginMode(),
+                snapshot.positionSide(),
+                snapshot.signedQuantitySteps(),
+                snapshot.entryPriceTicks(),
+                snapshot.entryValueTicks(),
+                snapshot.realizedPnlUnits(),
+                snapshot.marginAsset(),
+                snapshot.marginUnits(),
+                snapshot.positionUpdatedAt(),
+                snapshot.marginUpdatedAt(),
+                now,
+                traceId);
         int rows = jdbcTemplate.update("""
                 INSERT INTO account_outbox_events (
                     product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
                     next_attempt_at, created_at, updated_at
                 ) VALUES (?, 'POSITION', ?, ?, ?, 'POSITION_UPDATED', ?::jsonb, ?, ?, ?)
-                """, currentProductLine().name(), eventId, topic, position.symbol(), objectMapper.writeValueAsString(event),
+                """, currentProductLine().name(), eventId, topic, event.partitionKey(),
+                objectMapper.writeValueAsString(event),
                 Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
         requireSingleRow(rows, "account position outbox enqueue");
         return event;

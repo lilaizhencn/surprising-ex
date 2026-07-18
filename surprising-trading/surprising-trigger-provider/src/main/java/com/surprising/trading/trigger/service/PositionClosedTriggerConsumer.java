@@ -1,7 +1,6 @@
 package com.surprising.trading.trigger.service;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
-import com.surprising.trading.api.KafkaSymbolKeyValidator;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
@@ -37,7 +36,7 @@ public class PositionClosedTriggerConsumer {
             TriggerTopicGuard.requireCurrentProductTopic(
                     properties, record.topic(), positionEventsTopic(), "position update");
             PositionUpdatedEvent event = objectMapper.readValue(record.value(), PositionUpdatedEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "position update");
+            requireUserPartitionKey(record.key(), event);
             if (event.signedQuantitySteps() == 0L) {
                 triggerOrderService.onPositionClosed(event);
             }
@@ -53,5 +52,14 @@ public class PositionClosedTriggerConsumer {
 
     public String groupId() {
         return properties.getKafka().getGroupId();
+    }
+
+    private void requireUserPartitionKey(String key, PositionUpdatedEvent event) {
+        if (event.productLine() != properties.getKafka().getProductLine()) {
+            throw new IllegalArgumentException("position update product line must match current trigger provider");
+        }
+        if (!event.partitionKey().equals(key)) {
+            throw new IllegalArgumentException("position update Kafka key must be " + event.partitionKey());
+        }
     }
 }

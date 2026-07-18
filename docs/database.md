@@ -755,12 +755,14 @@ are deliberately excluded from this table:
 - `topic`: Kafka destination, for example `surprising.account.position.events.v1` or
   `surprising.account.liquidation-fee.events.v1`.
 - `product_line`: outbox ownership and publisher scope. A provider only claims rows for its configured product line.
-- `event_key`: Kafka key. Position updates use the normalized symbol; liquidation-fee events use the
-  settlement asset so insurance fund updates can be serialized by asset.
+- `event_key`: Kafka key. Position updates use `<PRODUCT_LINE>:<userId>` so all position revisions for one
+  account remain ordered; liquidation-fee events use the settlement asset so insurance fund updates can be
+  serialized by asset.
 - `payload`: JSONB event body.
 - `attempts`, `next_attempt_at`, `published_at`, and `last_error`: retry and publish state.
-- `POSITION_UPDATED` payloads carry the original match-trade `traceId`, so WebSocket/private-account
-  pushes can be correlated with the order and matching rows.
+- `POSITION_UPDATED` payloads carry the complete position/collateral snapshot, PostgreSQL `revision`, product line,
+  and original match-trade `traceId`. The same durable event drives Redis CAS projection, risk, trigger cleanup,
+  and WebSocket/private-account pushes.
 - `LIQUIDATION_FEE_SETTLED` payloads carry `tradeId`, `orderId`, `liquidationOrderId`, `candidateId`,
   `asset`, collected `amountUnits`, `feeRatePpm`, and `traceId`.
 - Account-provider captures one complete position/collateral snapshot per distinct changed key before commit and

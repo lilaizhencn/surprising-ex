@@ -41,15 +41,17 @@ class TriggerConsumerTopicTest {
         TriggerProperties properties = productProperties(ProductLine.INVERSE_PERPETUAL);
         ObjectMapper objectMapper = mock(ObjectMapper.class);
         TriggerOrderService triggerOrderService = mock(TriggerOrderService.class);
-        PositionUpdatedEvent closed = new PositionUpdatedEvent(701L, 801L, 1001L, "BTC-USD", 9L,
-                MarginMode.ISOLATED, PositionSide.SHORT, 0L, 0L, 123L,
-                Instant.parse("2026-07-01T00:00:00Z"), "trace-close");
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        PositionUpdatedEvent closed = new PositionUpdatedEvent(
+                PositionUpdatedEvent.CURRENT_SCHEMA_VERSION, 701L, 801L, ProductLine.INVERSE_PERPETUAL,
+                702L, 1001L, "BTC-USD", 9L, MarginMode.ISOLATED, PositionSide.SHORT,
+                0L, 0L, 0L, 123L, "BTC", 0L, now, now, now, "trace-close");
         when(objectMapper.readValue("{}", PositionUpdatedEvent.class)).thenReturn(closed);
         PositionClosedTriggerConsumer consumer = new PositionClosedTriggerConsumer(
                 objectMapper, triggerOrderService, properties);
 
         consumer.onPositionUpdated(new ConsumerRecord<>(
-                "surprising.inverse-perp.account.position.events.v1", 0, 1L, "BTC-USD", "{}"));
+                "surprising.inverse-perp.account.position.events.v1", 0, 1L, closed.partitionKey(), "{}"));
 
         verify(triggerOrderService).onPositionClosed(closed);
     }

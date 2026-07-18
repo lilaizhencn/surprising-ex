@@ -93,4 +93,21 @@ public class AccountKafkaConfiguration {
         factory.setCommonErrorHandler(errorHandler);
         return factory;
     }
+
+    /**
+     * Position projection failures are fail-closed: the partition is retried indefinitely and Redis readiness is
+     * removed by the consumer. Skipping a committed financial position event is never acceptable.
+     */
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, String> accountPositionCacheKafkaListenerContainerFactory(
+            ConsumerFactory<String, String> accountConsumerFactory,
+            AccountProperties properties) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(accountConsumerFactory);
+        factory.setConcurrency(properties.getKafka().getConcurrency());
+        factory.setBatchListener(false);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
+        return factory;
+    }
 }

@@ -405,7 +405,7 @@ class KafkaFanoutConsumerTest {
                 MarginMode.CROSS, PositionSide.LONG, 10L, 65_000L, 0L, eventTime, "trace-position-1");
 
         consumer.onPosition(new ConsumerRecord<>("surprising.account.position.events.v1", 0, 0L,
-                "BTC-USDT", objectMapper.writeValueAsString(event)));
+                event.partitionKey(), objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);

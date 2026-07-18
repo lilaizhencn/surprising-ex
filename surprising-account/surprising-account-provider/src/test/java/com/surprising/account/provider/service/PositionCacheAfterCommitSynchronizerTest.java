@@ -61,6 +61,30 @@ class PositionCacheAfterCommitSynchronizerTest {
     }
 
     @Test
+    void reusesDurableEventSnapshotWithoutAnotherDatabaseRead() {
+        PositionCacheProjectionRepository repository = mock(PositionCacheProjectionRepository.class);
+        PositionCacheAccelerationWorker worker = mock(PositionCacheAccelerationWorker.class);
+        PositionCacheEvent snapshot = snapshot();
+        PositionCacheAfterCommitSynchronizer synchronizer =
+                new PositionCacheAfterCommitSynchronizer(repository, worker);
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+
+        synchronizer.schedule(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
+                PositionSide.NET);
+        synchronizer.schedule(snapshot);
+
+        List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        synchronizations.forEach(synchronization -> synchronization.beforeCommit(false));
+        verifyNoInteractions(repository, worker);
+
+        synchronizations.forEach(TransactionSynchronization::afterCommit);
+        verify(worker).submitAll(List.of(snapshot));
+        synchronizations.forEach(synchronization ->
+                synchronization.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
+    }
+
+    @Test
     void rejectsSchedulingOutsideATransaction() {
         PositionCacheAfterCommitSynchronizer synchronizer = new PositionCacheAfterCommitSynchronizer(
                 mock(PositionCacheProjectionRepository.class), mock(PositionCacheAccelerationWorker.class));

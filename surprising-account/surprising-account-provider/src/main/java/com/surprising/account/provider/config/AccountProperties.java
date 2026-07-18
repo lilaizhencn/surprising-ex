@@ -186,6 +186,12 @@ public class AccountProperties {
             return productTopics().consumerGroup("account-user-command");
         }
 
+        public String getPositionCacheGroupId() {
+            return productTopicsEnabled
+                    ? productTopics().consumerGroup("account-position-cache")
+                    : groupId + "-position-cache";
+        }
+
         public String getTriggerOrderEventsTopic() {
             return productTopicsEnabled ? productTopics().triggerOrderEventsTopic() : triggerOrderEventsTopic;
         }

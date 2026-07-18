@@ -21,18 +21,20 @@ class PositionRiskTriggerConsumerTest {
         RiskService riskService = mock(RiskService.class);
         PositionRiskTriggerConsumer consumer = new PositionRiskTriggerConsumer(new ObjectMapper(), riskService);
 
-        consumer.onPositionUpdated(record("BTC-USDT", positionPayload("BTC-USDT")));
+        consumer.onPositionUpdated(record("LINEAR_PERPETUAL:1001",
+                positionPayload(ProductLine.LINEAR_PERPETUAL, "BTC-USDT")));
 
         verify(riskService).scanPositionUpdate(1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET,
                 7L, "trace-1");
     }
 
     @Test
-    void rejectsPositionEventWhenKafkaKeyDoesNotMatchSymbol() {
+    void rejectsPositionEventWhenKafkaKeyDoesNotMatchUser() {
         RiskService riskService = mock(RiskService.class);
         PositionRiskTriggerConsumer consumer = new PositionRiskTriggerConsumer(new ObjectMapper(), riskService);
 
-        assertThatThrownBy(() -> consumer.onPositionUpdated(record("ETH-USDT", positionPayload("BTC-USDT"))))
+        assertThatThrownBy(() -> consumer.onPositionUpdated(record(
+                "LINEAR_PERPETUAL:2002", positionPayload(ProductLine.LINEAR_PERPETUAL, "BTC-USDT"))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("failed to process position risk trigger");
         verifyNoInteractions(riskService);
@@ -43,7 +45,7 @@ class PositionRiskTriggerConsumerTest {
         RiskService riskService = mock(RiskService.class);
         PositionRiskTriggerConsumer consumer = new PositionRiskTriggerConsumer(new ObjectMapper(), riskService);
 
-        assertThatThrownBy(() -> consumer.onPositionUpdated(record("BTC-USDT", "not-json")))
+        assertThatThrownBy(() -> consumer.onPositionUpdated(record("LINEAR_PERPETUAL:1001", "not-json")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("failed to process position risk trigger");
         verifyNoInteractions(riskService);
@@ -60,7 +62,7 @@ class PositionRiskTriggerConsumerTest {
 
         assertThatThrownBy(() -> consumer.onPositionUpdated(new ConsumerRecord<>(
                 "surprising.linear-delivery.account.position.events.v1", 0, 1L, "BTC-USDT",
-                positionPayload("BTC-USDT"))))
+                positionPayload(ProductLine.OPTION, "BTC-USDT"))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("failed to process position risk trigger")
                 .satisfies(ex -> assertThat(ex.getCause())
@@ -86,20 +88,30 @@ class PositionRiskTriggerConsumerTest {
         return new ConsumerRecord<>("surprising.account.position.events.v1", 0, 1L, key, value);
     }
 
-    private String positionPayload(String symbol) {
+    private String positionPayload(ProductLine productLine, String symbol) {
         return """
                 {
+                  "schemaVersion": 1,
                   "eventId": 11,
                   "tradeId": 22,
+                  "productLine": "%s",
+                  "revision": 33,
                   "userId": 1001,
                   "symbol": "%s",
                   "instrumentVersion": 7,
+                  "marginMode": "CROSS",
+                  "positionSide": "NET",
                   "signedQuantitySteps": 10,
                   "entryPriceTicks": 65000,
+                  "entryValueTicks": 650000,
                   "realizedPnlUnits": 0,
+                  "marginAsset": "USDT",
+                  "marginUnits": 10000,
+                  "positionUpdatedAt": "2026-07-01T00:00:00Z",
+                  "marginUpdatedAt": "2026-07-01T00:00:00Z",
                   "eventTime": "2026-07-01T00:00:00Z",
                   "traceId": "trace-1"
                 }
-                """.formatted(symbol);
+                """.formatted(productLine.name(), symbol);
     }
 }

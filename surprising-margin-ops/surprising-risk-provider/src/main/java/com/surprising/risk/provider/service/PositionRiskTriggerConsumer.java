@@ -2,7 +2,6 @@ package com.surprising.risk.provider.service;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.risk.provider.config.RiskProperties;
-import com.surprising.trading.api.KafkaSymbolKeyValidator;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,8 +41,8 @@ public class PositionRiskTriggerConsumer {
     public void onPositionUpdated(ConsumerRecord<String, String> record) {
         try {
             PositionUpdatedEvent event = objectMapper.readValue(record.value(), PositionUpdatedEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "position update");
             requireCurrentProductTopic(record.topic());
+            requireUserPartitionKey(record.key(), event);
             riskService.scanPositionUpdate(event.userId(), event.symbol(), event.marginMode(), event.positionSide(),
                     event.instrumentVersion(), event.traceId());
         } catch (Exception ex) {
@@ -69,6 +68,15 @@ public class PositionRiskTriggerConsumer {
         if (!expectedTopic.equals(topic)) {
             throw new ProductTopicMismatchException("position update topic must match current product line: expected="
                     + expectedTopic + " actual=" + topic);
+        }
+    }
+
+    private void requireUserPartitionKey(String key, PositionUpdatedEvent event) {
+        if (event.productLine() != properties.getKafka().getProductLine()) {
+            throw new ProductTopicMismatchException("position update product line must match current risk provider");
+        }
+        if (!event.partitionKey().equals(key)) {
+            throw new IllegalArgumentException("position update Kafka key must be " + event.partitionKey());
         }
     }
 

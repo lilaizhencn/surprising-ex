@@ -282,7 +282,7 @@ public class KafkaFanoutConsumer {
         try {
             requireCurrentProductTopic(record.topic(), positionEventsTopic(), "position update");
             PositionUpdatedEvent event = objectMapper.readValue(record.value(), PositionUpdatedEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "position update");
+            requireMatchingPositionKey(record.key(), event);
             registry.publish(topic(WsChannel.POSITIONS, event.symbol(), event.userId()), event, event.eventTime());
         } catch (Exception ex) {
             log.error("Failed to fanout position update: {}", ex.getMessage(), ex);
@@ -390,6 +390,15 @@ public class KafkaFanoutConsumer {
         if (!expected.equalsIgnoreCase(normalizedKey) && !legacyExpected.equalsIgnoreCase(normalizedKey)) {
             throw new IllegalArgumentException("account risk key mismatch: expected=" + expected
                     + ", actual=" + recordKey);
+        }
+    }
+
+    private void requireMatchingPositionKey(String recordKey, PositionUpdatedEvent event) {
+        if (event.productLine() != properties.getKafka().getProductLine()) {
+            throw new IllegalArgumentException("position update product line must match WebSocket provider");
+        }
+        if (!event.partitionKey().equals(recordKey)) {
+            throw new IllegalArgumentException("position update Kafka key must be " + event.partitionKey());
         }
     }
 

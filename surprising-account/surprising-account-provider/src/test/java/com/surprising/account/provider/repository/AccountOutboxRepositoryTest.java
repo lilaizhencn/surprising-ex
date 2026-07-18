@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.account.api.model.PositionResponse;
+import com.surprising.account.api.model.PositionCacheEvent;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
@@ -32,15 +33,24 @@ class AccountOutboxRepositoryTest {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
+        PositionCacheProjectionRepository projectionRepository =
+                org.mockito.Mockito.mock(PositionCacheProjectionRepository.class);
         AccountOutboxRepository repository = new AccountOutboxRepository(jdbcTemplate, sequenceRepository,
-                new ObjectMapper(), properties);
+                new ObjectMapper(), properties, projectionRepository);
         when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.POSITION_EVENT)).thenReturn(101L);
+        when(projectionRepository.captureFinalSnapshot(
+                ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT-260925", MarginMode.CROSS, PositionSide.NET))
+                .thenReturn(snapshot(ProductLine.LINEAR_DELIVERY));
         when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
 
-        repository.enqueuePositionUpdated("surprising.linear-delivery.account.position.events.v1", 9201L,
+        var event = repository.enqueuePositionUpdated("surprising.linear-delivery.account.position.events.v1", 9201L,
                 position(), Instant.parse("2026-07-01T00:00:00Z"), "trace-1");
 
         verify(sequenceRepository).nextSequence(AccountSequenceRepository.Sequence.POSITION_EVENT);
+        assertThat(event.partitionKey()).isEqualTo("LINEAR_DELIVERY:1001");
+        assertThat(event.revision()).isEqualTo(77L);
+        assertThat(event.entryValueTicks()).isEqualTo(600_000L);
+        assertThat(event.marginUnits()).isEqualTo(20_000L);
     }
 
     @Test
@@ -193,5 +203,12 @@ class AccountOutboxRepositoryTest {
     private PositionResponse position() {
         return new PositionResponse(1001L, "BTC-USDT-260925", 7L, MarginMode.CROSS, PositionSide.NET,
                 10L, 60_000L, 0L, Instant.parse("2026-07-01T00:00:00Z"));
+    }
+
+    private PositionCacheEvent snapshot(ProductLine productLine) {
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        return new PositionCacheEvent(77L, productLine, 1001L, "BTC-USDT-260925", 7L,
+                MarginMode.CROSS, PositionSide.NET, 10L, 60_000L, 600_000L, 0L,
+                "USDT", 20_000L, now, now, 77L);
     }
 }

@@ -219,7 +219,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - 成对 TP/SL 可以使用同一个 `ocoGroupId`；同一用户、symbol、保证金模式组里任意一条 pending 触发单被抢占后，其它 pending sibling 会在同一条数据库语句里先置为 `CANCELED`，然后再提交生成的平仓单。
 - 普通平仓、强平成交、交割结算或期权行权把持仓降为零时，account 会在同一个 PostgreSQL 事务里取消该持仓剩余的 `PENDING` 条件单，并把 `CANCELED` 状态快照写入 trading outbox。提交后的持仓事件驱动 trigger-provider 删除对应静态止盈止损 Redis member，`trigger-order.events` 驱动认证用户 WebSocket 主动刷新；`GET /open` 始终以数据库已取消状态为准。
 - Account 消费撮合成交，按 `tradeId` 幂等更新 long-based 净持仓，把开仓成交保证金迁移到持仓保证金，并把已实现盈亏结算进余额。
-- 用户持仓、持仓列表和持仓保证金查询只读 Redis Hash；PostgreSQL 仍是唯一事实源。账户事务对每个变化的持仓键只捕获一份带 revision 的最终快照，提交后直接交给有界、可合并的 Redis 后台线程；缓存快照不再写 account outbox，也不经过 Kafka。队列溢出或 Redis 写失败会把对应产品线缓存标记为未就绪，由现有 PostgreSQL 对账重建修复。Redis 用 Lua CAS 原子更新持仓、保证金和 revision；未 ready 或 Redis 异常时用户查询返回 503，不回退数据库。详细设计见 [docs/position-redis-cache_CN.md](docs/position-redis-cache_CN.md)。
+- 用户持仓、持仓列表和持仓保证金查询只读 Redis Hash；PostgreSQL 仍是唯一事实源。账户事务为每个变化的持仓键生成一份完整、带 revision 的持仓事件，并以 `<PRODUCT_LINE>:<userId>` 为 Kafka key 写入 account outbox。同一份快照在提交后进入有界合并队列做低延迟 Redis 加速，独立的 account 持仓缓存 consumer 则负责进程退出或 Redis 故障后的耐久重放。两条路径都使用 Lua revision CAS；队列或 Redis 失败会移除 ready 标记，用户查询返回 503，直到 Kafka 重放或 PostgreSQL 对账修复。详细设计见 [docs/position-redis-cache_CN.md](docs/position-redis-cache_CN.md)。
 - `CROSS` 和 `ISOLATED` 保证金模式会从下单一路传到撮合、账户、风控、资金费和强平。全仓亏损可以使用全仓可用余额和全仓持仓保证金；逐仓亏损只使用该 symbol 的逐仓持仓保证金，亏穿后记录 deficit。
 - 逐仓持仓保证金可以通过 account-provider 手动追加或减少。追加会把可用余额转入持仓保证金；减少必须依赖最新风险快照，并保证减少后权益仍高于维持保证金加配置缓冲。
 - 用户杠杆配置按 `userId + symbol + marginMode` 生效；订单入口会在冻结初始保证金前按当前风险档位重新校验配置杠杆。
@@ -245,7 +245,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Matching 会把 L2 盘口深度发布成 `SNAPSHOT` 加按价格档绝对状态变化的 `DELTA`，topic 是 `surprising.perp.orderbook.depth.v1`。delta 中 `quantitySteps=0` 表示删除该价格档。客户端先拉 `GET /api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50`，再应用 `previousSequence` 等于本地 sequence 的 WebSocket 增量；断号或重连后要丢弃本地盘口，重新拉快照，再继续应用增量。
 - REST 客户端可以传 `X-Trace-Id`；gateway 和 order provider 会清洗或生成该值，交易事件会一路携带到订单事件、撮合结果、撮合成交和账户持仓推送。撮合引擎产生的事件必须保留这个字段，因为它连接 HTTP 请求、Kafka 重放、数据库审计行和 WebSocket/账户私有更新。
 - 交易链路 Kafka producer 使用幂等 `acks=all` 发布；Kafka consumer 关闭 auto commit，使用 cooperative-sticky assignment 和 record 级 ack，失败记录会通过幂等 DB 状态迁移重放。
-- Kafka record key 和 payload `symbol` 不一致时消费者会拒绝处理，因为错误 key 会破坏单 symbol 顺序保证。
+- 按 symbol 分区的消费者会拒绝 Kafka key 与 payload `symbol` 不一致的记录；账户用户命令和完整持仓事件则固定使用 `<PRODUCT_LINE>:<userId>`，保证同一用户的资金状态有序。
 - Outbox 发布是至少一次投递；Kafka 发送失败后会按有上限的指数退避重试，下游状态迁移保持幂等。
 - 订单入口已冻结初始保证金；账户成交处理会把开仓成交保证金迁移到持仓保证金，并在平仓时释放旧持仓保证金。
 - 用户主动平仓订单在进入撮合 command 前会经过 reduce-only 校验。
