@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.TradeParticipantRole;
 import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.service.PositionCacheAfterCommitSynchronizer;
@@ -19,6 +20,7 @@ import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.lang.reflect.Method;
@@ -47,6 +49,26 @@ class AccountRepositoryTest {
 
     @Mock
     private AccountSequenceRepository sequenceRepository;
+
+    @Test
+    void markTradeSideAppliedCastsConditionalCompletionTimestamp() {
+        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        MatchTradeEvent trade = mock(MatchTradeEvent.class);
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        Timestamp timestamp = Timestamp.from(now);
+        when(trade.symbol()).thenReturn("BTC-USDT");
+        when(trade.tradeId()).thenReturn(55L);
+        when(jdbcTemplate.update(contains("THEN CAST(? AS TIMESTAMPTZ)"),
+                eq("trade-command"), eq(timestamp), eq(timestamp), eq("LINEAR_PERPETUAL"),
+                eq("BTC-USDT"), eq(55L))).thenReturn(1);
+
+        repository.markTradeSideApplied(ProductLine.LINEAR_PERPETUAL, trade,
+                TradeParticipantRole.TAKER, "trade-command", now);
+
+        verify(jdbcTemplate).update(contains("THEN CAST(? AS TIMESTAMPTZ)"),
+                eq("trade-command"), eq(timestamp), eq(timestamp), eq("LINEAR_PERPETUAL"),
+                eq("BTC-USDT"), eq(55L));
+    }
 
     @Test
     void usdtPerpetualProductBalanceReadsLegacyPerpetualBalance() {
@@ -102,7 +124,7 @@ class AccountRepositoryTest {
     void duplicateBalanceAdjustmentReturnsCurrentBalanceWhenPayloadMatches() throws Exception {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
 
-        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(1L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY)).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(0);
         when(jdbcTemplate.query(contains("FROM account_ledger_entries"), anyRowMapper(),
@@ -137,7 +159,7 @@ class AccountRepositoryTest {
     void duplicateBalanceAdjustmentWithDifferentPayloadFailsBeforeBalanceMutation() throws Exception {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
 
-        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(1L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY)).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(0);
         when(jdbcTemplate.query(contains("FROM account_ledger_entries"), anyRowMapper(),
@@ -335,7 +357,7 @@ class AccountRepositoryTest {
     @Test
     void productPositionMarginAdjustmentUsesProductBalanceAndLedger() throws Exception {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
-        when(sequenceRepository.nextSequence("product-ledger-entry")).thenReturn(7101L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY)).thenReturn(7101L);
         when(jdbcTemplate.query(contains("FROM account_product_ledger_entries"), anyRowMapper(),
                 eq("iso-add-delivery"), eq(1001L), eq("USDT_DELIVERY"), eq("BTC-USDT-260925")))
                 .thenReturn(List.of());
@@ -444,7 +466,7 @@ class AccountRepositoryTest {
     @Test
     void addIsolatedPositionMarginMovesAvailableToLockedAndPositionMargin() throws Exception {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
-        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(10L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY)).thenReturn(10L);
         when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
                 eq("iso-add-1"), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
         when(jdbcTemplate.query(contains("FROM account_positions p"), anyRowMapper(),
@@ -482,7 +504,7 @@ class AccountRepositoryTest {
     @Test
     void removeIsolatedPositionMarginRequiresFreshRiskBuffer() throws Exception {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
-        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(11L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY)).thenReturn(11L);
         when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
                 eq("iso-remove-1"), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
         when(jdbcTemplate.query(contains("FROM account_positions p"), anyRowMapper(),
@@ -519,7 +541,7 @@ class AccountRepositoryTest {
     @Test
     void removeIsolatedPositionMarginRejectsUnsafeRiskAfterRemoval() throws Exception {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
-        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(12L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY)).thenReturn(12L);
         when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
                 eq("iso-remove-risky"), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
         when(jdbcTemplate.query(contains("FROM account_positions p"), anyRowMapper(),
@@ -576,7 +598,7 @@ class AccountRepositoryTest {
                 new AccountRepository(jdbcTemplate, sequenceRepository, null, cacheSynchronizer);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
-        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(1L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY)).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_ledger_entries"), any(Object[].class)))
@@ -628,7 +650,7 @@ class AccountRepositoryTest {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
-        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(1L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY)).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(0);
 
@@ -645,7 +667,7 @@ class AccountRepositoryTest {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
-        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(1L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY)).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(0);
 
@@ -710,7 +732,7 @@ class AccountRepositoryTest {
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_deficits"), any(Object[].class)))
                 .thenReturn(1);
-        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(7001L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY)).thenReturn(7001L);
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
 
@@ -808,7 +830,7 @@ class AccountRepositoryTest {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
-        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(1L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY)).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_ledger_entries"), any(Object[].class)))
@@ -848,7 +870,7 @@ class AccountRepositoryTest {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
-        when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(1L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY)).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_ledger_entries"), any(Object[].class)))
@@ -875,7 +897,7 @@ class AccountRepositoryTest {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
-        when(sequenceRepository.nextSequence("product-ledger-entry")).thenReturn(7001L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY)).thenReturn(7001L);
         when(jdbcTemplate.update(contains("INSERT INTO account_product_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_product_ledger_entries"), any(Object[].class)))
@@ -913,7 +935,7 @@ class AccountRepositoryTest {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
-        when(sequenceRepository.nextSequence("product-ledger-entry")).thenReturn(7001L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY)).thenReturn(7001L);
         when(jdbcTemplate.update(contains("INSERT INTO account_product_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_product_ledger_entries"), any(Object[].class)))

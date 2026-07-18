@@ -19,6 +19,7 @@ Margin-operation APIs and providers for risk, liquidation, funding, insurance, a
 
 - Business packages remain isolated under `com.surprising.risk`, `com.surprising.liquidation`, `com.surprising.funding`, `com.surprising.insurance`, and `com.surprising.adl`.
 - The five services still coordinate through their existing PostgreSQL tables, Kafka topics, outbox rows, idempotency keys, leases, and sequences.
+- Funding account-command results serialize terminal payment updates on their parent `funding_settlements` row, so concurrent payer/payee completions refresh the applied/rejected counters without leaving a completed settlement in `WAITING_ACCOUNTS`.
 - No module reads another module's in-memory state directly.
 - The original standalone provider jars remain available for split deployment.
 

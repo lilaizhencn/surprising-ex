@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -33,14 +34,13 @@ class AccountOutboxRepositoryTest {
         properties.getKafka().setProductTopicsEnabled(true);
         AccountOutboxRepository repository = new AccountOutboxRepository(jdbcTemplate, sequenceRepository,
                 new ObjectMapper(), properties);
-        when(sequenceRepository.nextSequence("position-event")).thenReturn(101L);
+        when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.POSITION_EVENT)).thenReturn(101L);
         when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
 
         repository.enqueuePositionUpdated("surprising.linear-delivery.account.position.events.v1", 9201L,
                 position(), Instant.parse("2026-07-01T00:00:00Z"), "trace-1");
 
-        verify(sequenceRepository).nextSequence("position-event");
-        verify(sequenceRepository, never()).nextSequence("account-outbox");
+        verify(sequenceRepository).nextSequence(AccountSequenceRepository.Sequence.POSITION_EVENT);
     }
 
     @Test
@@ -60,8 +60,7 @@ class AccountOutboxRepositoryTest {
                 .hasMessageContaining("account outbox topic must match current product line")
                 .hasMessageContaining("surprising.option.account.position.events.v1");
 
-        verify(sequenceRepository, never()).nextSequence("position-event");
-        verify(sequenceRepository, never()).nextSequence("account-outbox");
+        verifyNoInteractions(sequenceRepository);
         verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
     }
 

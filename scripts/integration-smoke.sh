@@ -278,8 +278,11 @@ VALUES ('USDT', 600, now());
 
 INSERT INTO insurance_deficit_coverages (
     coverage_id, user_id, asset, requested_units, covered_units,
-    remaining_deficit_units, status, reason, created_at, updated_at
-) VALUES (9501, 4004, 'USDT', 1000, 600, 400, 'PARTIALLY_COVERED', 'DEFICIT_COVERAGE', now(), now());
+    remaining_deficit_units, reserve_command_id, finalize_command_id,
+    status, reason, completed_at, created_at, updated_at
+) VALUES (9501, 4004, 'USDT', 1000, 600, 400,
+          'insurance-reserve-9501', 'insurance-finalize-9501',
+          'PARTIALLY_COVERED', 'DEFICIT_COVERAGE', now(), now(), now());
 
 UPDATE insurance_fund_balances
    SET balance_units = 0, updated_at = now()

@@ -555,7 +555,8 @@ public class AccountRepository {
                     reference_type, reference_id, reason, created_at
                 ) VALUES (?, ?, ?, ?, ?, 0, 'PRODUCT_BALANCE_ADJUSTMENT', ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextSequence("product-ledger-entry"), userId, normalizedType.name(), asset,
+                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
+                userId, normalizedType.name(), asset,
                 amountUnits, referenceId, reason, Timestamp.from(now));
         if (ledgerRows == 0) {
             requireDuplicateProductBalanceAdjustmentMatches(userId, normalizedType, asset, amountUnits, referenceId,
@@ -594,7 +595,7 @@ public class AccountRepository {
             throw new IllegalArgumentException("amountUnits must be positive");
         }
         Instant now = Instant.now();
-        long transferId = sequenceRepository.nextSequence("product-transfer");
+        long transferId = sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_TRANSFER);
         int rows = jdbcTemplate.update("""
                 INSERT INTO account_product_transfers (
                     transfer_id, user_id, source_account_type, target_account_type, asset,
@@ -631,7 +632,8 @@ public class AccountRepository {
                     reference_type, reference_id, reason, created_at
                 ) VALUES (?, ?, ?, ?, 0, 'BALANCE_ADJUSTMENT', ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, sequenceRepository.nextSequence("ledger-entry"), userId, asset, amountUnits,
+                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
+                userId, asset, amountUnits,
                 referenceId, reason, Timestamp.from(now));
         if (ledgerRows == 0) {
             requireDuplicateBalanceAdjustmentMatches(userId, asset, amountUnits, referenceId, reason);
@@ -1608,7 +1610,8 @@ public class AccountRepository {
                     reference_type, reference_id, reason, symbol, created_at
                 ) VALUES (?, ?, ?, ?, 0, 'POSITION_MARGIN_ADJUSTMENT', ?, ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, sequenceRepository.nextSequence("ledger-entry"), userId, asset, amountUnits,
+                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
+                userId, asset, amountUnits,
                 referenceId, reason, symbol, Timestamp.from(Instant.now()));
     }
 
@@ -1625,7 +1628,8 @@ public class AccountRepository {
                     reference_type, reference_id, reason, symbol, created_at
                 ) VALUES (?, ?, ?, ?, ?, 0, 'POSITION_MARGIN_ADJUSTMENT', ?, ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextSequence("product-ledger-entry"), userId, accountType.name(), asset,
+                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
+                userId, accountType.name(), asset,
                 amountUnits, referenceId, reason, symbol, Timestamp.from(Instant.now()));
     }
 
@@ -2033,7 +2037,8 @@ public class AccountRepository {
                 UPDATE account_trade_settlements
                    SET %s = 'APPLIED',
                        %s = ?,
-                       completed_at = CASE WHEN %s = 'APPLIED' THEN ? ELSE NULL END,
+                       completed_at = CASE WHEN %s = 'APPLIED'
+                                           THEN CAST(? AS TIMESTAMPTZ) ELSE NULL END,
                        updated_at = ?
                  WHERE product_line = ? AND symbol = ? AND trade_id = ?
                    AND %s = 'PENDING'
@@ -2079,7 +2084,8 @@ public class AccountRepository {
                         reference_type, reference_id, reason, created_at
                     ) VALUES (?, ?, ?, ?, 0, 'TRADE_PNL', ?, 'REALIZED_PNL', ?)
                     ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextSequence("ledger-entry"), userId, asset, realizedPnlDeltaUnits,
+                    """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
+                    userId, asset, realizedPnlDeltaUnits,
                     referenceId, Timestamp.from(now));
             requireSingleRow(ledgerRows, "trade pnl ledger insert");
             long balanceAfterUnits = applyAmountToBalance(normalizedType, userId, asset, symbol, marginMode,
@@ -2124,7 +2130,8 @@ public class AccountRepository {
                         reference_type, reference_id, reason, symbol, created_at
                     ) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
                     ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextSequence("ledger-entry"), userId, asset, realizedPnlDeltaUnits,
+                    """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
+                    userId, asset, realizedPnlDeltaUnits,
                     referenceType, referenceId, reason, symbol, Timestamp.from(now));
             if (ledgerRows == 0) {
                 return false;
@@ -2231,7 +2238,8 @@ public class AccountRepository {
                         reference_type, reference_id, reason, trade_id, order_id, symbol, fee_rate_ppm, created_at
                     ) VALUES (?, ?, ?, ?, 0, 'TRADE_FEE', ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextSequence("ledger-entry"), userId, asset, feeDeltaUnits, referenceId,
+                    """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
+                    userId, asset, feeDeltaUnits, referenceId,
                     reason, tradeId, orderId, symbol, feeRatePpm, Timestamp.from(now));
             requireSingleRow(ledgerRows, "trade fee ledger insert");
             long balanceAfterUnits = applyAmountToBalance(normalizedType, userId, asset, symbol, marginMode,
@@ -2367,7 +2375,7 @@ public class AccountRepository {
                         reference_type, reference_id, reason, trade_id, order_id, symbol, fee_rate_ppm, created_at
                     ) VALUES (?, ?, ?, ?, ?, 'LIQUIDATION_FEE', ?, 'COLLECT_LIQUIDATION_FEE', ?, ?, ?, ?, ?)
                     ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextSequence("ledger-entry"), userId, asset,
+                    """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY), userId, asset,
                     Math.negateExact(debit.debitedUnits()), debit.balanceAfterUnits(), referenceId, tradeId,
                     orderId, symbol, context.feeRatePpm(), Timestamp.from(now));
             requireSingleRow(ledgerRows, "liquidation fee ledger insert");
@@ -3178,7 +3186,8 @@ public class AccountRepository {
                     reference_type, reference_id, reason, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextSequence("product-ledger-entry"), userId, accountType.name(), asset,
+                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
+                userId, accountType.name(), asset,
                 amountUnits, balanceAfterUnits, referenceType, referenceId, reason, Timestamp.from(now));
         requireSingleRow(rows, referenceType.toLowerCase().replace('_', ' ') + " product ledger insert");
     }
@@ -3198,7 +3207,8 @@ public class AccountRepository {
                     reference_type, reference_id, reason, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextSequence("product-ledger-entry"), userId, accountType.name(), asset,
+                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
+                userId, accountType.name(), asset,
                 amountUnits, balanceAfterUnits, referenceType, referenceId, reason, Timestamp.from(now));
         return rows == 1;
     }
@@ -3489,7 +3499,8 @@ public class AccountRepository {
                     reference_type, reference_id, reason, created_at
                 ) VALUES (?, ?, 'SPOT', ?, ?, ?, 'SPOT_TRADE', ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextSequence("product-ledger-entry"), userId, asset, amountUnits,
+                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
+                userId, asset, amountUnits,
                 balanceAfterUnits, referenceId, reason, Timestamp.from(now));
         requireSingleRow(rows, "spot trade ledger insert");
     }
@@ -3691,7 +3702,8 @@ public class AccountRepository {
                     reference_type, reference_id, reason, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, 'PRODUCT_TRANSFER', ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextSequence("product-ledger-entry"), userId, accountType.name(), asset,
+                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
+                userId, accountType.name(), asset,
                 amountUnits, balanceAfterUnits, referenceId, reason, Timestamp.from(now));
         requireSingleRow(rows, "product transfer ledger insert");
     }

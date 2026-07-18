@@ -364,12 +364,13 @@ public class FundingRepository {
             }
             return false;
         }
+        lockSettlement(payment.settlementId());
         boolean applied = "APPLIED".equals(terminalStatus);
         int rows = jdbcTemplate.update("""
                 UPDATE funding_payments
                    SET status = ?,
-                       applied_at = CASE WHEN ? THEN ? ELSE NULL END,
-                       rejected_at = CASE WHEN ? THEN NULL ELSE ? END,
+                       applied_at = CASE WHEN ? THEN CAST(? AS TIMESTAMPTZ) ELSE NULL END,
+                       rejected_at = CASE WHEN ? THEN NULL ELSE CAST(? AS TIMESTAMPTZ) END,
                        error_code = ?,
                        error_message = ?,
                        updated_at = ?
@@ -379,6 +380,18 @@ public class FundingRepository {
         requireSingleRow(rows, "funding payment terminal result");
         refreshSettlement(payment.settlementId(), completedAt);
         return true;
+    }
+
+    private void lockSettlement(long settlementId) {
+        Long lockedSettlementId = jdbcTemplate.queryForObject("""
+                SELECT settlement_id
+                  FROM funding_settlements
+                 WHERE settlement_id = ?
+                 FOR UPDATE
+                """, Long.class, settlementId);
+        if (lockedSettlementId == null || lockedSettlementId != settlementId) {
+            throw new IllegalStateException("funding settlement not found for payment: " + settlementId);
+        }
     }
 
     public List<TerminalAccountCommand> terminalAccountCommandsForPendingPayments(int limit) {

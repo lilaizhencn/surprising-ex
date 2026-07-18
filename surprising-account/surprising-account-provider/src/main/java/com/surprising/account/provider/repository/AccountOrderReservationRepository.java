@@ -115,7 +115,8 @@ public class AccountOrderReservationRepository {
                     created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
                 ON CONFLICT (order_id) DO NOTHING
-                """, sequenceRepository.nextSequence("margin-reservation"), accountType, userId, command.asset(),
+                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.MARGIN_RESERVATION),
+                accountType, userId, command.asset(),
                 command.orderId(), command.symbol(), command.marginMode().name(), command.positionSide().name(),
                 command.reservedUnits(), Timestamp.from(now), Timestamp.from(now));
         requireSingleRow(rows, "account margin reservation insert");
@@ -147,7 +148,8 @@ public class AccountOrderReservationRepository {
                     settled_units, released_units, status, reason, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'ACTIVE', 'SPOT_ORDER_LOCK', ?, ?)
                 ON CONFLICT (order_id) DO NOTHING
-                """, sequenceRepository.nextSequence("spot-reservation"), command.orderId(), userId,
+                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.SPOT_RESERVATION),
+                command.orderId(), userId,
                 command.symbol(), command.side().name(), command.asset(), command.reservedUnits(),
                 Timestamp.from(now), Timestamp.from(now));
         requireSingleRow(rows, "account spot reservation insert");

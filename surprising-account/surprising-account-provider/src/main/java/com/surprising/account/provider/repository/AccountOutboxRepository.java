@@ -56,7 +56,7 @@ public class AccountOutboxRepository {
                                                        Instant now,
                                                        String traceId) {
         requireCurrentProductTopic(topic);
-        long eventId = sequenceRepository.nextSequence("position-event");
+        long eventId = sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.POSITION_EVENT);
         PositionUpdatedEvent event = new PositionUpdatedEvent(eventId, tradeId, position.userId(), position.symbol(),
                 position.instrumentVersion(), position.marginMode(), position.positionSide(), position.signedQuantitySteps(),
                 position.entryPriceTicks(), position.realizedPnlUnits(), now, traceId);
@@ -86,7 +86,7 @@ public class AccountOutboxRepository {
                                                                    Instant now,
                                                                    String traceId) {
         requireCurrentProductTopic(topic);
-        long eventId = sequenceRepository.nextSequence("liquidation-fee-event");
+        long eventId = sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LIQUIDATION_FEE_EVENT);
         LiquidationFeeSettledEvent event = new LiquidationFeeSettledEvent(eventId, tradeId, orderId,
                 liquidationOrderId, candidateId, userId, symbol, marginMode, accountType, asset, amountUnits, feeRatePpm,
                 now, traceId);
@@ -109,7 +109,7 @@ public class AccountOutboxRepository {
                                                           String errorMessage,
                                                           Instant now) {
         requireCurrentProductTopic(topic);
-        long eventId = sequenceRepository.nextSequence("account-command-result");
+        long eventId = sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.COMMAND_RESULT_EVENT);
         AccountCommandResultEvent event = new AccountCommandResultEvent(
                 eventId, command.commandId(), command.productLine(), command.userId(), command.commandType(),
                 status, command.source(), command.sourceReference(), resultPayload, errorCode, errorMessage,
@@ -130,7 +130,7 @@ public class AccountOutboxRepository {
                                         String serializedCommand,
                                         Instant now) {
         requireCurrentProductTopic(topic);
-        long aggregateId = sequenceRepository.nextSequence("account-command-retry");
+        long aggregateId = sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.COMMAND_RETRY_EVENT);
         int rows = jdbcTemplate.update("""
                 INSERT INTO account_outbox_events (
                     product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
@@ -146,7 +146,8 @@ public class AccountOutboxRepository {
                                    AccountUserCommand command,
                                    Instant now) {
         requireCurrentProductTopic(topic);
-        long aggregateId = sequenceRepository.nextSequence("account-user-command-outbox");
+        long aggregateId = sequenceRepository.nextSequence(
+                AccountSequenceRepository.Sequence.USER_COMMAND_OUTBOX_EVENT);
         int rows = jdbcTemplate.update("""
                 INSERT INTO account_outbox_events (
                     product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,

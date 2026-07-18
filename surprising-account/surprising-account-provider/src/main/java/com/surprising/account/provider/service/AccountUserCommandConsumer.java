@@ -2,7 +2,11 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.provider.config.AccountProperties;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -10,10 +14,13 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class AccountUserCommandConsumer {
 
+    private static final Logger log = LoggerFactory.getLogger(AccountUserCommandConsumer.class);
+
     private final ObjectMapper objectMapper;
     private final AccountUserCommandProcessor processor;
     private final AccountProperties properties;
     private final AccountCommandMetrics metrics;
+    private final Set<FailedRecord> failedRecords = ConcurrentHashMap.newKeySet();
 
     public AccountUserCommandConsumer(ObjectMapper objectMapper,
                                       AccountUserCommandProcessor processor,
@@ -51,9 +58,14 @@ public class AccountUserCommandConsumer {
                         + command.partitionKey());
             }
             var outcome = processor.process(command, record.value());
+            failedRecords.remove(FailedRecord.from(record));
             metrics.record(outcome, command.occurredAt(), startedAtNanos);
         } catch (RuntimeException ex) {
             metrics.recordFailure(command.occurredAt(), startedAtNanos);
+            if (failedRecords.add(FailedRecord.from(record))) {
+                log.warn("Account command failed commandId={} commandType={} topic={} partition={} offset={}",
+                        command.commandId(), command.commandType(), record.topic(), record.partition(), record.offset(), ex);
+            }
             throw ex;
         }
     }
@@ -64,5 +76,12 @@ public class AccountUserCommandConsumer {
 
     public String groupId() {
         return properties.getKafka().getUserCommandGroupId();
+    }
+
+    private record FailedRecord(String topic, int partition, long offset) {
+
+        private static FailedRecord from(ConsumerRecord<?, ?> record) {
+            return new FailedRecord(record.topic(), record.partition(), record.offset());
+        }
     }
 }

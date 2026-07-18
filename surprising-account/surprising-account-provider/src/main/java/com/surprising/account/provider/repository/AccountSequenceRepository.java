@@ -1,6 +1,5 @@
 package com.surprising.account.provider.repository;
 
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,16 +15,33 @@ public class AccountSequenceRepository {
      * could overlap.
      */
     static final int HI_LO_BLOCK_SIZE = 10_000;
-    private static final Map<String, String> DATABASE_SEQUENCES = Map.of(
-            "ledger-entry", "public.account_ledger_entry_seq",
-            "product-ledger-entry", "public.account_product_ledger_entry_seq",
-            "product-transfer", "public.account_product_transfer_seq",
-            "position-event", "public.account_position_event_seq",
-            "liquidation-fee-event", "public.account_liquidation_fee_event_seq");
+
+    enum Sequence {
+        LEDGER_ENTRY("public.account_ledger_entry_seq"),
+        PRODUCT_LEDGER_ENTRY("public.account_product_ledger_entry_seq"),
+        PRODUCT_TRANSFER("public.account_product_transfer_seq"),
+        MARGIN_RESERVATION("public.account_margin_reservation_seq"),
+        SPOT_RESERVATION("public.account_spot_reservation_seq"),
+        POSITION_EVENT("public.account_position_event_seq"),
+        LIQUIDATION_FEE_EVENT("public.account_liquidation_fee_event_seq"),
+        COMMAND_RESULT_EVENT("public.account_command_result_event_seq"),
+        COMMAND_RETRY_EVENT("public.account_command_retry_event_seq"),
+        USER_COMMAND_OUTBOX_EVENT("public.account_user_command_outbox_event_seq");
+
+        private final String databaseSequence;
+
+        Sequence(String databaseSequence) {
+            this.databaseSequence = databaseSequence;
+        }
+
+        String databaseSequence() {
+            return databaseSequence;
+        }
+    }
 
     private final JdbcTemplate jdbcTemplate;
     private final int hiLoBlockSize;
-    private final ConcurrentMap<String, IdRange> ranges = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Sequence, IdRange> ranges = new ConcurrentHashMap<>();
 
     @Autowired
     public AccountSequenceRepository(JdbcTemplate jdbcTemplate) {
@@ -40,13 +56,9 @@ public class AccountSequenceRepository {
         this.hiLoBlockSize = hiLoBlockSize;
     }
 
-    public long nextSequence(String sequenceName) {
-        String databaseSequence = DATABASE_SEQUENCES.get(sequenceName);
-        if (databaseSequence == null) {
-            throw new IllegalArgumentException("unsupported account sequence " + sequenceName);
-        }
-        return ranges.computeIfAbsent(sequenceName, ignored -> new IdRange())
-                .next(this, databaseSequence);
+    public long nextSequence(Sequence sequence) {
+        return ranges.computeIfAbsent(sequence, ignored -> new IdRange())
+                .next(this, sequence.databaseSequence());
     }
 
     private long allocateRangeStart(String databaseSequence) {

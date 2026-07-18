@@ -276,7 +276,8 @@ public class AccountAdlTargetSettlementRepository {
                         reference_type, reference_id, reason, created_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                    """, sequenceRepository.nextSequence("product-ledger-entry"), productLine.accountTypeCode(),
+                    """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
+                    productLine.accountTypeCode(),
                     userId, asset, amountUnits, balanceAfter, referenceType, commandId, reason, Timestamp.from(now))
                 : jdbcTemplate.update("""
                     INSERT INTO account_ledger_entries (
@@ -284,7 +285,8 @@ public class AccountAdlTargetSettlementRepository {
                         reference_type, reference_id, reason, created_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextSequence("ledger-entry"), userId, asset, amountUnits,
+                    """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
+                    userId, asset, amountUnits,
                     balanceAfter, referenceType, commandId, reason, Timestamp.from(now));
         requireSingleRow(rows, "ADL target ledger insert");
     }

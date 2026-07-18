@@ -650,7 +650,7 @@ funding_payment_scope AS (
            fp.position_side,
            fp.asset,
            fp.amount_units,
-           fp.settlement_id || ':' || fp.user_id || ':' || fp.symbol || ':' || fp.margin_mode || ':' || fp.position_side AS reference_id
+           fp.command_id AS reference_id
       FROM funding_payments fp
       JOIN instrument_products ip
         ON ip.symbol = fp.symbol
@@ -732,7 +732,7 @@ funding_payment_scope AS (
     SELECT ip.product_line,
            fp.user_id,
            fp.asset,
-           fp.settlement_id || ':' || fp.user_id || ':' || fp.symbol || ':' || fp.margin_mode || ':' || fp.position_side AS reference_id
+           fp.command_id AS reference_id
       FROM funding_payments fp
       JOIN instrument_products ip
         ON ip.symbol = fp.symbol

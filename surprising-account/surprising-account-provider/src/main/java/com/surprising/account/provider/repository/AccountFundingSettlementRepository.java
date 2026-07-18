@@ -50,7 +50,8 @@ public class AccountFundingSettlementRepository {
                     reference_type, reference_id, reason, created_at
                 ) VALUES (?, ?, ?, ?, 0, 'FUNDING', ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, sequenceRepository.nextSequence("ledger-entry"), userId, payment.asset(),
+                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
+                userId, payment.asset(),
                 payment.amountUnits(), commandId, reason(payment.amountUnits()), Timestamp.from(now));
         requireSingleRow(ledgerRows, "funding account ledger insert");
         long balanceAfter = applyBalance(productLine, userId, payment, now);
@@ -78,7 +79,8 @@ public class AccountFundingSettlementRepository {
                     reference_type, reference_id, reason, created_at
                 ) VALUES (?, ?, ?, ?, ?, 0, 'FUNDING', ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextSequence("product-ledger-entry"), userId, accountType,
+                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
+                userId, accountType,
                 payment.asset(), payment.amountUnits(), commandId, reason(payment.amountUnits()),
                 Timestamp.from(now));
         requireSingleRow(ledgerRows, "funding product account ledger insert");
