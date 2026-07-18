@@ -147,7 +147,8 @@ public class AdlService {
 
     private List<com.surprising.adl.provider.model.AdlCandidate> redisCandidates(DeficitRow deficit, int limit) {
         if (redisCandidateIndex != null) {
-            Optional<List<RedisAdlCandidateIndex.Member>> members = redisCandidateIndex.candidates(deficit.asset(), limit);
+            Optional<List<RedisAdlCandidateIndex.Member>> members = redisCandidateIndex.candidates(
+                    properties.getKafka().getProductLine(), deficit.asset(), limit);
             if (members.isPresent()) {
                 return members.get().stream()
                         .filter(member -> member.userId() != deficit.userId())

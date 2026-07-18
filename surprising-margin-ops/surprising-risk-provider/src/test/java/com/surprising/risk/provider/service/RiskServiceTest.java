@@ -2,6 +2,7 @@ package com.surprising.risk.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
@@ -127,7 +128,8 @@ class RiskServiceTest {
         verify(kafka).send(eq(properties.getKafka().getAccountRiskEventsTopic()),
                 eq("2002:USDT_PERPETUAL:USDT"), contains("\"traceId\":\"trace-risk-1\""));
         verify(kafka).send(eq(properties.getKafka().getPositionRiskEventsTopic()), eq("ETH-USDT"),
-                contains("\"positionSide\":\"SHORT\""));
+                argThat(payload -> payload.contains("\"positionSide\":\"SHORT\"")
+                        && payload.contains("\"productLine\":\"LINEAR_PERPETUAL\"")));
         assertThat(transactionManager.commits).isEqualTo(1);
         assertThat(transactionManager.rollbacks).isZero();
     }

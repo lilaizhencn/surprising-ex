@@ -16,7 +16,14 @@ public class AdlRiskPositionConsumer {
     @KafkaListener(topics = "#{__listener.topic()}", groupId = "#{__listener.groupId()}",
             containerFactory = "riskKafkaListenerContainerFactory")
     public void onRiskPosition(ConsumerRecord<String,String> record) throws Exception {
-        index.synchronize(objectMapper.readValue(record.value(), RiskPositionUpdatedEvent.class));
+        if (!topic().equals(record.topic())) {
+            throw new IllegalArgumentException("unexpected ADL risk event topic: " + record.topic());
+        }
+        RiskPositionUpdatedEvent event = objectMapper.readValue(record.value(), RiskPositionUpdatedEvent.class);
+        if (event.productLine() != properties.getKafka().getProductLine()) {
+            return;
+        }
+        index.synchronize(event);
     }
     public String topic() { return properties.getKafka().getPositionRiskEventsTopic(); }
     public String groupId() { return properties.getKafka().getGroupId(); }

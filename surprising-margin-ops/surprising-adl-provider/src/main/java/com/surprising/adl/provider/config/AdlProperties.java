@@ -1,6 +1,7 @@
 package com.surprising.adl.provider.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductTopicNames;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.adl")
@@ -56,10 +57,16 @@ public class AdlProperties {
         }
         public String getBootstrapServers() { return bootstrapServers; }
         public void setBootstrapServers(String bootstrapServers) { this.bootstrapServers = bootstrapServers; }
-        public String getPositionRiskEventsTopic() { return positionRiskEventsTopic; }
+        public String getPositionRiskEventsTopic() {
+            return productTopicsEnabled ? productTopics().positionRiskEventsTopic() : positionRiskEventsTopic;
+        }
         public void setPositionRiskEventsTopic(String positionRiskEventsTopic) { this.positionRiskEventsTopic = positionRiskEventsTopic; }
-        public String getGroupId() { return groupId; }
+        public String getGroupId() { return productTopicsEnabled ? productTopics().consumerGroup("adl-risk-index") : groupId; }
         public void setGroupId(String groupId) { this.groupId = groupId; }
+
+        private ProductTopicNames productTopics() {
+            return ProductTopicNames.of(productLine);
+        }
     }
 
     public static class RedisIndex {

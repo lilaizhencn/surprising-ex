@@ -396,6 +396,7 @@ public class RiskService {
                                    List<RealtimeRiskEvent> realtimeEvents) {
         RiskPositionUpdatedEvent event = new RiskPositionUpdatedEvent(
                 sequenceRepository.nextSequence("risk-event"),
+                properties.getKafka().getProductLine(),
                 snapshotId,
                 position.userId(),
                 position.symbol(),

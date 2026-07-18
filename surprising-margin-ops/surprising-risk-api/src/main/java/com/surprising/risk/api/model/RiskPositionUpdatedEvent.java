@@ -1,11 +1,13 @@
 package com.surprising.risk.api.model;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 
 public record RiskPositionUpdatedEvent(
         long eventId,
+        ProductLine productLine,
         long snapshotId,
         long userId,
         String symbol,
@@ -26,8 +28,36 @@ public record RiskPositionUpdatedEvent(
         String traceId) {
 
     public RiskPositionUpdatedEvent {
+        if (productLine == null) {
+            throw new IllegalArgumentException("productLine is required");
+        }
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
+    }
+
+    public RiskPositionUpdatedEvent(long eventId,
+                                    long snapshotId,
+                                    long userId,
+                                    String symbol,
+                                    MarginMode marginMode,
+                                    PositionSide positionSide,
+                                    long instrumentVersion,
+                                    String settleAsset,
+                                    long signedQuantitySteps,
+                                    long entryPriceTicks,
+                                    long markPriceTicks,
+                                    long notionalUnits,
+                                    long unrealizedPnlUnits,
+                                    long maintenanceMarginUnits,
+                                    long positionMarginUnits,
+                                    long marginRatioPpm,
+                                    RiskStatus status,
+                                    Instant eventTime,
+                                    String traceId) {
+        this(eventId, ProductLine.LINEAR_PERPETUAL, snapshotId, userId, symbol, marginMode, positionSide,
+                instrumentVersion, settleAsset, signedQuantitySteps, entryPriceTicks, markPriceTicks,
+                notionalUnits, unrealizedPnlUnits, maintenanceMarginUnits, positionMarginUnits, marginRatioPpm,
+                status, eventTime, traceId);
     }
 
     public RiskPositionUpdatedEvent(long eventId,

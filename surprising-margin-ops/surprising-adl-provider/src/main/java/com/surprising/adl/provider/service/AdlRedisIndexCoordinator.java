@@ -2,6 +2,7 @@ package com.surprising.adl.provider.service;
 
 import com.surprising.adl.provider.config.AdlProperties;
 import com.surprising.adl.provider.repository.AdlRepository;
+import com.surprising.product.api.ProductLine;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
@@ -25,16 +26,18 @@ public class AdlRedisIndexCoordinator {
     }
     @EventListener(ApplicationReadyEvent.class) public void onReady() { rebuild(); }
     @Scheduled(fixedDelayString = "${surprising.adl.redis-index.reconcile-delay-ms:10000}") public void rebuild() {
-        String token=UUID.randomUUID().toString(); String lock=prefix()+":rebuild-lock";
+        ProductLine productLine = properties.getKafka().getProductLine();
+        String token=UUID.randomUUID().toString(); String lock=rebuildLockKey(productLine);
         if (!Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(lock, token, Duration.ofSeconds(30)))) return;
         try {
             for (String asset : repository.candidateAssets()) {
-                index.clear(asset);
+                index.clear(productLine, asset);
                 repository.queue(asset, 5_000, Duration.ofMillis(Math.max(1L, properties.getScanner().getMaxMarkAgeMs())))
                         .forEach(index::synchronize);
-                index.markReady(asset);
+                index.markReady(productLine, asset);
             }
         } finally { redis.execute(RELEASE, List.of(lock), token); }
     }
+    String rebuildLockKey(ProductLine productLine) { return prefix()+":rebuild-lock:"+productLine.name(); }
     private String prefix() { String p=properties.getRedisIndex().getKeyPrefix(); return p==null||p.isBlank()?"surprising:adl:v1":p.trim(); }
 }

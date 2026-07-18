@@ -235,6 +235,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Funding 基于 mark/index premium 和 instrument 利率/上限/下限计算 long ppm 预测资金费率，直接发布到 Kafka；每个结算时点才把缓存中的最新预测冻结为 `FINAL` 数据库行并结算到账户余额。
 - Insurance 使用 long 资产单位覆盖显式账户亏损，并同时写保险基金流水和账户流水。
 - ADL 在保险基金耗尽后处理剩余亏损，削减盈利高优先级仓位，并把实现盈利转去覆盖 deficit。
+- ADL 的 Redis 候选排序、ready 标记和重建租约按 `ProductLine + settleAsset` 隔离；风险持仓事件携带产品线，ADL provider 仅接收自身产品线的事件，随后仍由 PostgreSQL 复核和加锁。
 - K 线服务用 Kafka Streams + RocksDB 分区状态，按 Kafka partition 水平扩展。
 - 指数价格和标记价格服务用 PostgreSQL 的 symbol 租约和数据库 sequence 避免多节点重复发布和 sequence 回退。
 - 每条标记价格 Kafka 事件都携带产品线、instrument 版本、定点数 units/ticks、计算时间和发布时间，并在同一消息中包含指数成分、盘口、最新成交、资金费、基差中间值和最终结果等完整审计输入。独立 consumer group 异步批量写入 PostgreSQL 并只保留 3 天；任何实时业务都不等待这次入库。

@@ -233,6 +233,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-U
 - Funding calculates long ppm predicted funding rates from mark/index premium plus instrument interest/cap/floor and publishes them directly to Kafka. At each funding boundary, the latest cached prediction is frozen as a `FINAL` database row and then settled into account balances.
 - Insurance covers explicit account deficits with long asset units and writes both fund ledger and account ledger records.
 - ADL handles residual deficits after insurance depletion by reducing profitable high-priority positions and transferring realized profit to deficit coverage.
+- ADL's Redis candidate ranking, readiness markers, and rebuild leases are isolated by `ProductLine + settleAsset`; a risk-position event carries its product line and an ADL provider accepts only its own line before PostgreSQL revalidation and locking.
 - Candlestick state scales with Kafka Streams partitions and local RocksDB state stores.
 - Index and mark price providers use PostgreSQL symbol leases and database sequences to avoid duplicate multi-node publishing and sequence rollback.
 - Every mark-price Kafka event carries product line, instrument version, fixed-point units/ticks,
