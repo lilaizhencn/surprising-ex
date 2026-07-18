@@ -2584,8 +2584,10 @@ CREATE INDEX IF NOT EXISTS account_outbox_pending_idx
     ON account_outbox_events (product_line, next_attempt_at, id)
     WHERE published_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS account_outbox_pending_key_idx
+DROP INDEX IF EXISTS account_outbox_pending_key_idx;
+CREATE INDEX IF NOT EXISTS account_outbox_pending_stream_idx
     ON account_outbox_events (product_line, topic, event_key, id)
+    INCLUDE (next_attempt_at)
     WHERE published_at IS NULL;
 
 DROP INDEX IF EXISTS account_outbox_published_cleanup_idx;

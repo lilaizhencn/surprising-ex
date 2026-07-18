@@ -165,17 +165,34 @@ public class AccountOutboxRepository {
         int lockedKeyLimit = lockedKeyLimit(effectiveLimit, perKeyLimit);
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
-                WITH earliest AS (
-                    SELECT DISTINCT ON (topic, event_key)
-                           topic, event_key, id AS first_id, next_attempt_at
-                      FROM account_outbox_events
-                     WHERE published_at IS NULL
+                WITH pending AS MATERIALIZED (
+                    SELECT e.id,
+                           e.topic,
+                           e.event_key,
+                           e.next_attempt_at,
+                           row_number() OVER key_order AS key_rank,
+                           bool_or(e.next_attempt_at > ?) OVER key_order AS blocked_by_retry
+                      FROM account_outbox_events e
+                     WHERE e.published_at IS NULL
                 """);
-        appendTopicScope(sql, args);
+        args.add(Timestamp.from(now));
+        appendTopicScope(sql, "e", args);
         sql.append("""
-                     ORDER BY topic, event_key, id
+                    WINDOW key_order AS (
+                        PARTITION BY e.topic, e.event_key
+                        ORDER BY e.id
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                    )
                 ),
-                locked_keys AS (
+                earliest AS MATERIALIZED (
+                    SELECT topic,
+                           event_key,
+                           id AS first_id,
+                           next_attempt_at
+                      FROM pending
+                     WHERE key_rank = 1
+                ),
+                locked_keys AS MATERIALIZED (
                     SELECT topic, event_key, first_id
                       FROM earliest
                      WHERE next_attempt_at <= ?
@@ -183,35 +200,16 @@ public class AccountOutboxRepository {
                      ORDER BY first_id
                      LIMIT ?
                 ),
-                candidates AS (
-                    SELECT due_prefix.id
+                candidates AS MATERIALIZED (
+                    SELECT p.id
                       FROM locked_keys k
-                      CROSS JOIN LATERAL (
-                          SELECT ranked.id, ranked.key_rank
-                            FROM (
-                                SELECT prefix.id,
-                                       prefix.next_attempt_at,
-                                       row_number() OVER (ORDER BY prefix.id) AS key_rank,
-                                       bool_or(prefix.next_attempt_at > ?) OVER (
-                                           ORDER BY prefix.id
-                                           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                                       ) AS blocked_by_retry
-                                  FROM (
-                                      SELECT e.id, e.next_attempt_at
-                                        FROM account_outbox_events e
-                                       WHERE e.topic = k.topic
-                                         AND e.event_key = k.event_key
-                                         AND e.product_line = ?
-                                         AND e.published_at IS NULL
-                                       ORDER BY e.id
-                                       LIMIT ?
-                                  ) prefix
-                            ) ranked
-                           WHERE ranked.next_attempt_at <= ?
-                             AND NOT ranked.blocked_by_retry
-                           ORDER BY ranked.id
-                      ) due_prefix
-                     ORDER BY due_prefix.key_rank, k.first_id, due_prefix.id
+                      JOIN pending p
+                        ON p.topic = k.topic
+                       AND p.event_key = k.event_key
+                     WHERE p.key_rank <= ?
+                       AND p.next_attempt_at <= ?
+                       AND NOT p.blocked_by_retry
+                     ORDER BY p.key_rank, k.first_id, p.id
                      LIMIT ?
                 )
                 UPDATE account_outbox_events e
@@ -223,8 +221,6 @@ public class AccountOutboxRepository {
                 """);
         args.add(Timestamp.from(now));
         args.add(lockedKeyLimit);
-        args.add(Timestamp.from(now));
-        args.add(currentProductLine().name());
         args.add(perKeyLimit);
         args.add(Timestamp.from(now));
         args.add(effectiveLimit);
@@ -316,14 +312,14 @@ public class AccountOutboxRepository {
         return value.length() <= 1000 ? value : value.substring(0, 1000);
     }
 
-    private void appendTopicScope(StringBuilder sql, List<Object> args) {
+    private void appendTopicScope(StringBuilder sql, String alias, List<Object> args) {
         AccountProperties.Kafka kafka = properties.getKafka();
-        sql.append("   AND product_line = ?\n");
+        sql.append("   AND ").append(alias).append(".product_line = ?\n");
         args.add(currentProductLine().name());
         if (!kafka.isProductTopicsEnabled()) {
             return;
         }
-        sql.append("   AND topic IN (?, ?, ?, ?, ?)\n");
+        sql.append("   AND ").append(alias).append(".topic IN (?, ?, ?, ?, ?)\n");
         args.add(kafka.getPositionEventsTopic());
         args.add(kafka.getLiquidationFeeEventsTopic());
         args.add(kafka.getPositionCacheEventsTopic());
