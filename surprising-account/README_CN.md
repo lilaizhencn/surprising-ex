@@ -178,11 +178,12 @@ surprising:
       timeout: 10s
       poll-delay-ms: 20
     outbox:
-      batch-size: 200
-      publish-delay-ms: 200
+      batch-size: 1000
+      publish-delay-ms: 20
       async-enabled: true
       max-in-flight: 32
       max-rows-per-key: 32
+      send-window-size: 5
       send-timeout: 3s
     cache:
       contract-spec-max-entries: 4096
@@ -200,7 +201,16 @@ surprising:
 带 revision 的可重放查询投影。
 
 account outbox 发布不改变 Kafka key，并按 `topic + event_key` claim 有界连续到期前缀。
-同 key 仍按 id 顺序发送，不同 key 可以并发发送。
+普通事件 Topic 会按 id 顺序一次提交最多 `send-window-size` 条，只把连续 ACK 成功的前缀批量确认为已发布。
+account user command Topic 固定使用窗口 1，保证同一用户后一条资金指令不会越过尚未确认的前一条。
+每轮成功 id 使用一条 SQL 批量确认。
+
+`TRADE_SIDE_SETTLE` 仍会在 `account_commands` 中保留持久终态，但不再产生没有消费者的 command-result
+outbox；订单冻结和资金费结算仍会为各自消费者发送结果事件。
+
+账户资金指令默认并发为 32，Hikari 连接池默认 40，为 outbox、定时对账和请求流量预留 8 个连接。
+多产品线、多副本部署时应一起调整 `ACCOUNT_USER_COMMAND_CONCURRENCY` 和
+`ACCOUNT_DB_MAX_POOL_SIZE`，并使用事务级连接池代理控制数据库总连接预算。
 
 账户指令消费者通过 Actuator/Prometheus 暴露：
 

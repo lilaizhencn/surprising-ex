@@ -16,6 +16,8 @@ import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.account.api.model.OrderReservationKind;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
+import com.surprising.account.api.model.TradeParticipantRole;
+import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountCommandRegistration;
 import com.surprising.account.provider.model.PendingAccountCommand;
@@ -28,6 +30,7 @@ import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
@@ -163,6 +166,23 @@ class AccountUserCommandProcessorTest {
     }
 
     @Test
+    void tradeSettlementKeepsDurableCommandAuditWithoutUnusedResultOutbox() {
+        AccountUserCommand command = tradeSettlementCommand();
+        when(commandRepository.register(eq(command), any(), any()))
+                .thenReturn(AccountCommandRegistration.READY);
+        when(commandRepository.waitingDependents(command.commandId())).thenReturn(List.of());
+
+        var outcome = processor.process(command, objectMapper.writeValueAsString(command));
+
+        assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.APPLIED);
+        verify(accountService).processTradeSide(
+                eq(ProductLine.LINEAR_PERPETUAL), eq(command.commandId()), any(TradeSideSettlementCommand.class));
+        verify(commandRepository).markApplied(eq(command.commandId()), any(), any());
+        verify(outboxRepository, never()).enqueueCommandResult(
+                any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void malformedPayloadIsPoisonAndTransactionCannotBeMarkedTerminal() {
         AccountUserCommand command = new AccountUserCommand(
                 AccountUserCommand.CURRENT_SCHEMA_VERSION,
@@ -210,5 +230,28 @@ class AccountUserCommandProcessorTest {
                 objectMapper.writeValueAsString(payload),
                 OCCURRED_AT,
                 "trace-" + commandId);
+    }
+
+    private AccountUserCommand tradeSettlementCommand() {
+        MatchTradeEvent trade = new MatchTradeEvent(
+                8001L, 7001L, "BTC-USDT",
+                9001L, 1L, 1001L, OrderSide.BUY,
+                9002L, 1L, 2002L,
+                100L, 50L, 60_000L, 10L,
+                false, false, OCCURRED_AT, "trace-trade-8001");
+        TradeSideSettlementCommand payload =
+                new TradeSideSettlementCommand(trade, TradeParticipantRole.TAKER);
+        return new AccountUserCommand(
+                AccountUserCommand.CURRENT_SCHEMA_VERSION,
+                "TRADE_SIDE_SETTLE:LINEAR_PERPETUAL:8001:TAKER:1001",
+                ProductLine.LINEAR_PERPETUAL,
+                1001L,
+                AccountUserCommandType.TRADE_SIDE_SETTLE,
+                "MATCHING",
+                "LINEAR_PERPETUAL:BTC-USDT:8001",
+                null,
+                objectMapper.writeValueAsString(payload),
+                OCCURRED_AT,
+                "trace-trade-8001");
     }
 }

@@ -66,7 +66,7 @@ public class MatchingProperties {
         private String matchResultsTopic = "surprising.perp.match.results.v1";
         private String matchTradesTopic = "surprising.perp.match.trades.v1";
         private String orderBookDepthTopic = "surprising.perp.orderbook.depth.v1";
-        private int concurrency = 1;
+        private int concurrency = 4;
         private int maxPollRecords = 500;
         private boolean restartOnPartitionReassignment = true;
         private long partitionAssignmentStartupGraceMs = 30000L;
@@ -152,6 +152,9 @@ public class MatchingProperties {
         }
 
         public void setConcurrency(int concurrency) {
+            if (concurrency < 1 || concurrency > 64) {
+                throw new IllegalArgumentException("matching Kafka concurrency must be in [1, 64]");
+            }
             this.concurrency = concurrency;
         }
 
@@ -186,8 +189,8 @@ public class MatchingProperties {
 
     public static class Engine {
         private String exchangeId = "surprising-perp";
-        private int matchingEngines = 1;
-        private int riskEngines = 1;
+        private int matchingEngines = 4;
+        private int riskEngines = 2;
         private int orderBookDepthForPostOnly = 1;
         private int orderBookDepthLevels = 50;
         private long orderBookSnapshotIntervalEvents = 1000L;
@@ -206,6 +209,7 @@ public class MatchingProperties {
         }
 
         public void setMatchingEngines(int matchingEngines) {
+            requirePowerOfTwo(matchingEngines, "matchingEngines");
             this.matchingEngines = matchingEngines;
         }
 
@@ -214,7 +218,14 @@ public class MatchingProperties {
         }
 
         public void setRiskEngines(int riskEngines) {
+            requirePowerOfTwo(riskEngines, "riskEngines");
             this.riskEngines = riskEngines;
+        }
+
+        private void requirePowerOfTwo(int value, String name) {
+            if (value < 1 || value > 64 || (value & (value - 1)) != 0) {
+                throw new IllegalArgumentException(name + " must be a power of two in [1, 64]");
+            }
         }
 
         public int getOrderBookDepthForPostOnly() {

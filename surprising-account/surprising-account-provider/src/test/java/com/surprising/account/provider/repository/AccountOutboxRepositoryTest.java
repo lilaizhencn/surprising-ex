@@ -14,12 +14,10 @@ import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
-import java.sql.Statement;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import tools.jackson.databind.ObjectMapper;
@@ -103,28 +101,32 @@ class AccountOutboxRepositoryTest {
     void markPublishedBatchAcceptsSuccessfulRows() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         AccountOutboxRepository repository = new AccountOutboxRepository(jdbcTemplate, null, new ObjectMapper());
-        when(jdbcTemplate.batchUpdate(any(String.class), any(BatchPreparedStatementSetter.class)))
-                .thenReturn(new int[] {1, Statement.SUCCESS_NO_INFO});
+        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(2);
 
         repository.markPublished(List.of(901L, 902L), Instant.parse("2026-07-01T00:00:00Z"));
 
-        ArgumentCaptor<BatchPreparedStatementSetter> setter =
-                ArgumentCaptor.forClass(BatchPreparedStatementSetter.class);
-        verify(jdbcTemplate).batchUpdate(contains("SET published_at"), setter.capture());
-        assertThat(setter.getValue().getBatchSize()).isEqualTo(2);
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(sql.capture(), args.capture());
+        assertThat(sql.getValue())
+                .contains("SET published_at")
+                .contains("WHERE published_at IS NULL")
+                .contains("id IN (?, ?)");
+        assertThat(args.getValue()).hasSize(4);
+        assertThat(args.getValue()[2]).isEqualTo(901L);
+        assertThat(args.getValue()[3]).isEqualTo(902L);
     }
 
     @Test
     void markPublishedBatchFailsWhenAnyRowIsSkipped() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         AccountOutboxRepository repository = new AccountOutboxRepository(jdbcTemplate, null, new ObjectMapper());
-        when(jdbcTemplate.batchUpdate(any(String.class), any(BatchPreparedStatementSetter.class)))
-                .thenReturn(new int[] {1, 0});
+        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
 
         assertThatThrownBy(() -> repository.markPublished(List.of(901L, 902L),
                 Instant.parse("2026-07-01T00:00:00Z")))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("account outbox event published 902");
+                .hasMessageContaining("expected=2 actual=1");
     }
 
     @Test

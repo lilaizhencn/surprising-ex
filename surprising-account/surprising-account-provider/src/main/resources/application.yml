@@ -16,12 +16,12 @@ spring:
         await-termination: true
         await-termination-period: 10s
   datasource:
-    url: jdbc:postgresql://localhost:5432/surprising_exchange
-    username: surprising
-    password: surprising
+    url: ${ACCOUNT_DB_URL:jdbc:postgresql://localhost:5432/surprising_exchange}
+    username: ${ACCOUNT_DB_USERNAME:surprising}
+    password: ${ACCOUNT_DB_PASSWORD:surprising}
     hikari:
-      maximum-pool-size: 20
-      minimum-idle: 4
+      maximum-pool-size: ${ACCOUNT_DB_MAX_POOL_SIZE:40}
+      minimum-idle: ${ACCOUNT_DB_MIN_IDLE:8}
       connection-timeout: 3000
   data:
     redis:
@@ -64,14 +64,15 @@ surprising:
       delivery-settlements-topic: surprising.linear-delivery.delivery.settlements.v1
       option-exercises-topic: surprising.option.option.exercises.v1
       concurrency: 2
-      user-command-concurrency: 32
+      user-command-concurrency: ${ACCOUNT_USER_COMMAND_CONCURRENCY:32}
       max-poll-records: 500
     outbox:
-      batch-size: 200
-      publish-delay-ms: 200
+      batch-size: 1000
+      publish-delay-ms: 20
       async-enabled: true
       max-in-flight: 32
       max-rows-per-key: 32
+      send-window-size: 5
       send-timeout: 3s
     cache:
       contract-spec-max-entries: 4096

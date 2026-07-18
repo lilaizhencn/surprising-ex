@@ -83,7 +83,7 @@ public class AccountUserCommandProcessor {
             Instant completedAt = Instant.now();
             String message = "dependency command was rejected: " + command.dependsOnCommandId();
             commandRepository.markRejected(command.commandId(), null, "DEPENDENCY_REJECTED", message, completedAt);
-            outboxRepository.enqueueCommandResult(properties.getKafka().getCommandResultsTopic(), command,
+            enqueueCommandResultIfObserved(command,
                     AccountCommandStatus.REJECTED, null, "DEPENDENCY_REJECTED", message, completedAt);
             requeueWaitingDependents(command.commandId(), completedAt);
             return ProcessingOutcome.REJECTED;
@@ -94,7 +94,7 @@ public class AccountUserCommandProcessor {
             resultPayload = dispatch(command);
             Instant completedAt = Instant.now();
             commandRepository.markApplied(command.commandId(), resultPayload, completedAt);
-            outboxRepository.enqueueCommandResult(properties.getKafka().getCommandResultsTopic(), command,
+            enqueueCommandResultIfObserved(command,
                     AccountCommandStatus.APPLIED, resultPayload, null, null, completedAt);
             requeueWaitingDependents(command.commandId(), completedAt);
             return ProcessingOutcome.APPLIED;
@@ -102,7 +102,7 @@ public class AccountUserCommandProcessor {
             Instant completedAt = Instant.now();
             commandRepository.markRejected(command.commandId(), ex.resultPayload(), ex.errorCode(),
                     ex.getMessage(), completedAt);
-            outboxRepository.enqueueCommandResult(properties.getKafka().getCommandResultsTopic(), command,
+            enqueueCommandResultIfObserved(command,
                     AccountCommandStatus.REJECTED, ex.resultPayload(), ex.errorCode(), ex.getMessage(), completedAt);
             requeueWaitingDependents(command.commandId(), completedAt);
             return ProcessingOutcome.REJECTED;
@@ -334,6 +334,20 @@ public class AccountUserCommandProcessor {
             outboxRepository.enqueueUserCommandRetry(properties.getKafka().getUserCommandsTopic(),
                     dependent.partitionKey(), dependent.serializedEnvelope(), now);
         }
+    }
+
+    private void enqueueCommandResultIfObserved(AccountUserCommand command,
+                                                AccountCommandStatus status,
+                                                String resultPayload,
+                                                String errorCode,
+                                                String errorMessage,
+                                                Instant completedAt) {
+        if (command.commandType()
+                == com.surprising.account.api.model.AccountUserCommandType.TRADE_SIDE_SETTLE) {
+            return;
+        }
+        outboxRepository.enqueueCommandResult(properties.getKafka().getCommandResultsTopic(), command,
+                status, resultPayload, errorCode, errorMessage, completedAt);
     }
 
     public enum ProcessingOutcome {

@@ -6,7 +6,7 @@
 
 - 订单服务通过 outbox 把 `OrderCommandEvent` 写入 order commands topic，Kafka key 使用订单的 `symbol`。
 - matching provider 使用一个共享 `@KafkaListener` 消费 order commands topic，要求 Kafka key 必须等于 payload 中的 `symbol`，保证同一 symbol 能稳定进入同一 Kafka partition。
-- matching provider 在进入事务处理前对 symbol 做本地 stripe lock，避免同一 JVM 内同一 symbol 并发生成无序深度事件。
+- Kafka partition 由单个 listener 线程串行消费，同一 symbol 的命令不再额外获取本地 stripe lock；不同 partition 可以并行进入 exchange-core。
 - `ExchangeCoreEngine` 只创建一个 `ExchangeCore` 和一个 `ExchangeApi`。业务代码不会为每个 symbol 创建单独的 `ExchangeCore`、producer 或 consumer。
 - `exchange-core2` 内部把所有命令发布到同一个 Disruptor RingBuffer，底层 producer 类型是 `ProducerType.MULTI`。
 - `exchange-core2` 创建固定数量的 `MatchingEngineRouter`，每个 router 持有一组 `symbolId -> orderBook`。路由规则是 `symbolId & shardMask == shardId`。
@@ -72,13 +72,14 @@ surprising:
   trading:
     matching:
       kafka:
-        concurrency: 1
+        concurrency: 4
       engine:
-        matching-engines: 1
-        risk-engines: 1
+        matching-engines: 4
+        risk-engines: 2
 ```
 
-这表示所有 symbol 都会进入同一个 matching shard。几十到上百个交易对本身通常不是问题，但热点 symbol 的订单、撤单和成交吞吐会直接决定瓶颈。
+入口最多由 4 个 Kafka partition 并行消费，exchange-core 使用 4 个 matching shard 和 2 个 risk shard。
+同一 symbol 仍固定在一个 Kafka partition 和一个 matching shard 内串行处理。
 
 ## 上线影响判断
 
@@ -109,10 +110,10 @@ surprising:
   trading:
     matching:
       kafka:
-        concurrency: 4
+        concurrency: 8
       engine:
-        matching-engines: 4
-        risk-engines: 2
+        matching-engines: 8
+        risk-engines: 4
 ```
 
 注意事项：
@@ -146,4 +147,8 @@ scripts/kafka-trading-smoke.sh
 
 ## 结论
 
-几十到上百个交易对可以先按当前架构上线评估，但不能把交易对数量等同于撮合并行度。当前默认 `matching-engines: 1` 适合低到中等流量验证；生产上线前必须用热点 symbol 压测确认 Kafka lag、matching 延迟、outbox backlog、account 结算延迟和资金对账结果。需要提升吞吐时，优先按 Kafka partition、listener concurrency、`matching-engines`、热点 `symbolId` 分布四项一起调整和验证。
+几十到上百个交易对可以先按当前架构上线评估，但不能把交易对数量等同于撮合并行度。当前默认
+`kafka.concurrency: 4`、`matching-engines: 4`、`risk-engines: 2` 是多交易对并行基线；生产上线前仍必须
+用热点 symbol 压测确认 Kafka lag、matching 延迟、outbox backlog、account 结算延迟和资金对账结果。
+需要继续提升吞吐时，按 Kafka partition、listener concurrency、`matching-engines`、热点 `symbolId`
+分布四项一起调整和验证。

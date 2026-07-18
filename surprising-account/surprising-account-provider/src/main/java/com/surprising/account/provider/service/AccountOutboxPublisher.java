@@ -11,11 +11,16 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.TimeUnit;
@@ -180,16 +185,89 @@ public class AccountOutboxPublisher {
     private GroupPublishResult publishGroup(List<AccountOutboxRecord> group) {
         List<Long> publishedIds = new ArrayList<>(group.size());
         List<FailedPublish> failures = new ArrayList<>(1);
-        for (AccountOutboxRecord row : group) {
-            Exception failure = publishToKafka(row);
-            if (failure == null) {
-                publishedIds.add(row.id());
-            } else {
-                failures.add(new FailedPublish(row, failure));
+        int windowSize = requiresStrictAckOrder(group)
+                ? 1
+                : Math.max(1, properties.getOutbox().getSendWindowSize());
+        for (int offset = 0; offset < group.size(); offset += windowSize) {
+            int end = Math.min(group.size(), offset + windowSize);
+            List<PendingPublish> pending = new ArrayList<>(end - offset);
+            FailedPublish synchronousFailure = null;
+            for (int index = offset; index < end; index++) {
+                AccountOutboxRecord row = group.get(index);
+                try {
+                    pending.add(new PendingPublish(
+                            row, kafkaTemplate.send(row.topic(), row.eventKey(), row.payload())));
+                } catch (Exception ex) {
+                    synchronousFailure = new FailedPublish(row, ex);
+                    break;
+                }
+            }
+
+            FailedPublish asynchronousFailure = awaitContinuousSuccessPrefix(pending, publishedIds);
+            if (asynchronousFailure != null) {
+                failures.add(asynchronousFailure);
+                break;
+            }
+            if (synchronousFailure != null) {
+                failures.add(synchronousFailure);
                 break;
             }
         }
         return new GroupPublishResult(publishedIds, failures);
+    }
+
+    private FailedPublish awaitContinuousSuccessPrefix(List<PendingPublish> pending,
+                                                       List<Long> publishedIds) {
+        if (pending.isEmpty()) {
+            return null;
+        }
+        try {
+            CompletableFuture.allOf(pending.stream()
+                            .map(PendingPublish::future)
+                            .toArray(CompletableFuture[]::new))
+                    .get(properties.getOutbox().getSendTimeout().toMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return new FailedPublish(firstUnconfirmed(pending), ex);
+        } catch (ExecutionException | TimeoutException ignored) {
+            // Inspect futures in submission order below and only confirm the continuous success prefix.
+        }
+
+        for (PendingPublish publish : pending) {
+            if (!publish.future().isDone()) {
+                return new FailedPublish(publish.row(),
+                        new TimeoutException("timed out waiting for Kafka send acknowledgement"));
+            }
+            try {
+                publish.future().join();
+                publishedIds.add(publish.row().id());
+            } catch (CompletionException | CancellationException ex) {
+                return new FailedPublish(publish.row(), unwrap(ex));
+            }
+        }
+        return null;
+    }
+
+    private AccountOutboxRecord firstUnconfirmed(List<PendingPublish> pending) {
+        return pending.stream()
+                .filter(publish -> !publish.future().isDone() || publish.future().isCompletedExceptionally())
+                .map(PendingPublish::row)
+                .findFirst()
+                .orElse(pending.get(0).row());
+    }
+
+    private Exception unwrap(Exception exception) {
+        Throwable current = exception;
+        while ((current instanceof CompletionException || current instanceof ExecutionException)
+                && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current instanceof Exception result ? result : new IllegalStateException(current);
+    }
+
+    private boolean requiresStrictAckOrder(List<AccountOutboxRecord> group) {
+        return !group.isEmpty()
+                && properties.getKafka().getUserCommandsTopic().equals(group.get(0).topic());
     }
 
     private Exception publishToKafka(AccountOutboxRecord row) {
@@ -235,6 +313,10 @@ public class AccountOutboxPublisher {
     }
 
     private record GroupPublishResult(List<Long> publishedIds, List<FailedPublish> failures) {
+    }
+
+    private record PendingPublish(AccountOutboxRecord row,
+                                  CompletableFuture<?> future) {
     }
 
     private record FailedPublish(AccountOutboxRecord row, Exception error) {

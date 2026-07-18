@@ -16,6 +16,7 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class MatchingKafkaConfigurationTest {
 
@@ -34,7 +35,9 @@ class MatchingKafkaConfigurationTest {
         assertThat(config).containsEntry(ProducerConfig.ACKS_CONFIG, "all");
         assertThat(config).containsEntry(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         assertThat(config).containsEntry(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
-        assertThat(config).containsEntry(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);
+        assertThat(config).containsEntry(ProducerConfig.LINGER_MS_CONFIG, 2);
+        assertThat(config).containsEntry(ProducerConfig.BATCH_SIZE_CONFIG, 65_536);
+        assertThat(config).containsEntry(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
     }
 
     @Test
@@ -67,6 +70,7 @@ class MatchingKafkaConfigurationTest {
                 CooperativeStickyAssignor.class.getName());
         assertThat(listenerFactory.getContainerProperties().getAckMode())
                 .isEqualTo(ContainerProperties.AckMode.RECORD);
+        assertThat(ReflectionTestUtils.getField(listenerFactory, "concurrency")).isEqualTo(4);
         assertThat(listenerFactory.getContainerProperties().getConsumerRebalanceListener())
                 .isInstanceOf(MatchingPartitionAssignmentGuard.class);
     }
@@ -84,6 +88,9 @@ class MatchingKafkaConfigurationTest {
                 .isEqualTo("surprising.perp.match.trades.v1");
         assertThat(properties.getKafka().getOrderBookDepthTopic())
                 .isEqualTo("surprising.perp.orderbook.depth.v1");
+        assertThat(properties.getKafka().getConcurrency()).isEqualTo(4);
+        assertThat(properties.getEngine().getMatchingEngines()).isEqualTo(4);
+        assertThat(properties.getEngine().getRiskEngines()).isEqualTo(2);
     }
 
     @Test

@@ -191,11 +191,12 @@ surprising:
       timeout: 10s
       poll-delay-ms: 20
     outbox:
-      batch-size: 200
-      publish-delay-ms: 200
+      batch-size: 1000
+      publish-delay-ms: 20
       async-enabled: true
       max-in-flight: 32
       max-rows-per-key: 32
+      send-window-size: 5
       send-timeout: 3s
     cache:
       contract-spec-max-entries: 4096
@@ -213,7 +214,18 @@ Balances, positions, margin reservations, command idempotency, ledgers, and outb
 PostgreSQL-authoritative. Redis positions are a revisioned, replayable query projection only.
 
 Account outbox publishing keeps the Kafka key unchanged and claims a bounded contiguous due prefix per `topic + event_key`.
-Rows with the same key are still sent in id order; different keys can publish concurrently.
+For ordinary event topics it submits up to `send-window-size` rows in id order before waiting and only
+marks the continuous acknowledged prefix. The account-user-command topic deliberately keeps a window
+of one, so a later financial command cannot overtake an unacknowledged command for the same user.
+Successful ids are confirmed with one SQL update per drained batch.
+
+`TRADE_SIDE_SETTLE` remains durably terminal in `account_commands`, but does not emit an unused command-result
+outbox event. Order reservations and funding settlements still emit result events for their consumers.
+
+The default account command concurrency is 32 and the default Hikari pool is 40, leaving eight connections
+for outbox, scheduled reconciliation, and request traffic. Override them together with
+`ACCOUNT_USER_COMMAND_CONCURRENCY` and `ACCOUNT_DB_MAX_POOL_SIZE`; use a transaction-pooling proxy and a
+database-wide connection budget when running multiple product-line pods.
 
 Account command metrics are exposed through Actuator/Prometheus:
 

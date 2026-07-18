@@ -2,13 +2,12 @@ package com.surprising.trading.order.repository;
 
 import com.surprising.trading.order.model.OutboxRecord;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -118,33 +117,25 @@ public class OutboxRepository {
         if (ids == null || ids.isEmpty()) {
             return;
         }
+        List<Long> uniqueIds = ids.stream().distinct().toList();
         Timestamp timestamp = Timestamp.from(now);
-        int[] rows = jdbcTemplate.batchUpdate("""
+        String placeholders = String.join(", ", Collections.nCopies(uniqueIds.size(), "?"));
+        String sql = """
                 UPDATE trading_outbox_events
                    SET published_at = ?,
                        updated_at = ?,
                        last_error = NULL
-                 WHERE id = ?
-                """, new BatchPreparedStatementSetter() {
-            @Override
-            public void setValues(java.sql.PreparedStatement ps, int i) throws java.sql.SQLException {
-                ps.setTimestamp(1, timestamp);
-                ps.setTimestamp(2, timestamp);
-                ps.setLong(3, ids.get(i));
-            }
-
-            @Override
-            public int getBatchSize() {
-                return ids.size();
-            }
-        });
-        if (rows.length != ids.size()) {
-            throw new IllegalStateException("failed to mark trading outbox events published");
-        }
-        for (int i = 0; i < rows.length; i++) {
-            if (rows[i] != 1 && rows[i] != Statement.SUCCESS_NO_INFO) {
-                throw new IllegalStateException("failed to mark trading outbox event published " + ids.get(i));
-            }
+                 WHERE published_at IS NULL
+                   AND id IN (%s)
+                """.formatted(placeholders);
+        List<Object> args = new ArrayList<>(uniqueIds.size() + 2);
+        args.add(timestamp);
+        args.add(timestamp);
+        args.addAll(uniqueIds);
+        int rows = jdbcTemplate.update(sql, args.toArray());
+        if (rows != uniqueIds.size()) {
+            throw new IllegalStateException("failed to mark all trading outbox events published: expected="
+                    + uniqueIds.size() + " actual=" + rows);
         }
     }
 

@@ -50,14 +50,14 @@ surprising:
         match-results-topic: surprising.perp.match.results.v1
         match-trades-topic: surprising.perp.match.trades.v1
         order-book-depth-topic: surprising.perp.orderbook.depth.v1
-        concurrency: 1
+        concurrency: ${MATCHING_KAFKA_CONCURRENCY:4}
         max-poll-records: 500
         restart-on-partition-reassignment: true
         partition-assignment-startup-grace-ms: 30000
       engine:
         exchange-id: surprising-perp
-        matching-engines: 1
-        risk-engines: 1
+        matching-engines: ${MATCHING_ENGINE_SHARDS:4}
+        risk-engines: ${MATCHING_RISK_SHARDS:2}
         order-book-depth-for-post-only: 1
         order-book-depth-levels: 50
         order-book-snapshot-interval-events: 1000

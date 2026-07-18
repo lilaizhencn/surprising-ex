@@ -268,12 +268,13 @@ public class AccountProperties {
     }
 
     public static class Outbox {
-        private int batchSize = 200;
-        private long publishDelayMs = 200L;
+        private int batchSize = 1_000;
+        private long publishDelayMs = 20L;
         private Duration sendTimeout = Duration.ofSeconds(3);
         private boolean asyncEnabled = true;
         private int maxInFlight = 32;
         private int maxRowsPerKey = 32;
+        private int sendWindowSize = 5;
         private Duration retention = Duration.ofDays(7);
         private long cleanupDelayMs = 60_000L;
         private int cleanupBatchSize = 10_000;
@@ -324,6 +325,17 @@ public class AccountProperties {
 
         public void setMaxRowsPerKey(int maxRowsPerKey) {
             this.maxRowsPerKey = maxRowsPerKey;
+        }
+
+        public int getSendWindowSize() {
+            return sendWindowSize;
+        }
+
+        public void setSendWindowSize(int sendWindowSize) {
+            if (sendWindowSize < 1 || sendWindowSize > 5) {
+                throw new IllegalArgumentException("account outbox sendWindowSize must be in [1, 5]");
+            }
+            this.sendWindowSize = sendWindowSize;
         }
 
         public Duration getRetention() {

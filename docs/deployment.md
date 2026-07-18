@@ -199,6 +199,17 @@ Initialize the schema from repository root:
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ```
 
+The account-provider baseline runs 32 user-command consumers with a 40-connection Hikari pool. The
+eight-connection reserve is for outbox publishing, reconciliation, and request traffic; a pool smaller
+than the active command concurrency turns the connection pool into the throughput bottleneck. Tune
+`ACCOUNT_USER_COMMAND_CONCURRENCY`, `ACCOUNT_DB_MAX_POOL_SIZE`, and `ACCOUNT_DB_MIN_IDLE` together.
+
+For multiple product lines or replicas, put PgBouncer in transaction-pooling mode in front of PostgreSQL
+and set `ACCOUNT_DB_URL` to the PgBouncer endpoint. Budget the database side globally rather than multiplying
+40 by every pod: the sum of PgBouncer database pools must remain within PostgreSQL `max_connections` after
+reserving admin, migration, and monitoring connections. Do not rely on session state in this mode; the
+outbox advisory locks are transaction-scoped and are compatible with transaction pooling.
+
 The root `init.sql` creates:
 
 - `instruments`: immutable product-rule snapshots keyed by `(symbol, version)`.
@@ -430,7 +441,7 @@ Do not point this script at a shared development database. Matching restores ope
 - Market-maker providers use `market_maker_strategy_leases` so only one live node quotes a given `strategyId + symbol`. If the owner dies, lease expiry allows another node to continue. The module places normal `LIMIT + GTX + postOnly` orders through order-provider and never writes matching state directly.
 - Funding-rate prediction is published directly to `surprising.perp.funding.rate.v1` and cached by symbol; it performs no rate-table or outbox write. At the funding boundary, the owner freezes the cached prediction into one idempotent `FINAL` rate row before settlement. If no current prediction is available, settlement fails closed for that symbol.
 - Funding-rate publication and settlement can be paused independently with `surprising.funding.calculation.enabled=false` and `surprising.funding.settlement.enabled=false`.
-- Trading, matching, account, trigger, liquidation, and risk outbox publishers are at-least-once. They atomically lease only their own rows, with a lease sized for the configured bounded Kafka-send workload, then send outside a database transaction and mark the result. A Kafka send failure increments `attempts`, records `last_error`, and moves `next_attempt_at` forward with capped exponential backoff; the row remains unpublished and is retried by later scans.
+- Trading, matching, account, trigger, liquidation, and risk outbox publishers are at-least-once. They atomically lease only their own rows, with a lease sized for the configured bounded Kafka-send workload, then send outside a database transaction and mark the result. Account ordinary-event groups submit an ordered window of up to five sends before waiting and confirm only the continuous successful prefix; account financial-command groups wait for each acknowledgement to preserve per-user command order. Trading, matching, and account publishers confirm successful batches with one SQL update. A Kafka send failure increments `attempts`, records `last_error`, and moves `next_attempt_at` forward with capped exponential backoff; the row remains unpublished and is retried by later scans.
 - The shared trading, account, and risk outbox tables retain published delivery rows for seven days, then delete them in 10,000-row `FOR UPDATE SKIP LOCKED` batches once per minute. This cleanup is enabled by default; it never selects unpublished or failed rows.
 - Order-provider keeps `cancel-all-after` timers and pending/running TWAP or Iceberg parents in two Redis sorted sets. The score is the exact Unix-millisecond trigger time; a token-owned lease rebuilds the sets on startup or cache loss. Redis only narrows candidates: every timer and algo slice is atomically rechecked and claimed in PostgreSQL before execution, and cache loss falls back to the bounded PostgreSQL due scan without losing work.
 - Order-provider maintains a Redis read projection for ordinary user open orders. A user has three same-slot keys under `surprising:order:v1:{PRODUCT_LINE:userId}`: `:open` is a ZSET whose member and exact score are the monotonic `order_id`; `:open:orders` is the full-order snapshot hash; `:open:revisions` retains the latest revision, including terminal tombstones. The committed order/matching outbox events cause the consumer to reload the authoritative row and execute one Lua revision compare-and-set. Only `ACCEPTED` and `PARTIALLY_FILLED` rows remain in the ZSET/hash; cancel, reject, fill, liquidation close, and any other terminal status removes the snapshot and index member while retaining the revision.

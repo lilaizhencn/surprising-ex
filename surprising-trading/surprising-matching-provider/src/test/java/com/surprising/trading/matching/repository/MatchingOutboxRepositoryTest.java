@@ -93,6 +93,36 @@ class MatchingOutboxRepositoryTest {
     }
 
     @Test
+    void markPublishedBatchUsesOneSqlUpdate() {
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(2);
+
+        repository.markPublished(List.of(901L, 902L), Instant.parse("2026-07-01T00:00:00Z"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(sql.capture(), args.capture());
+        assertThat(sql.getValue())
+                .contains("SET published_at")
+                .contains("WHERE published_at IS NULL")
+                .contains("id IN (?, ?)");
+        assertThat(args.getValue()).hasSize(4);
+        assertThat(args.getValue()[2]).isEqualTo(901L);
+        assertThat(args.getValue()[3]).isEqualTo(902L);
+    }
+
+    @Test
+    void markPublishedBatchFailsWhenAnyRowIsSkipped() {
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
+
+        assertThatThrownBy(() -> repository.markPublished(List.of(901L, 902L),
+                Instant.parse("2026-07-01T00:00:00Z")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("expected=2 actual=1");
+    }
+
+    @Test
     void claimPendingLeasesUnpublishedDueRowsForPublishOutsideTransaction() {
         MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Timestamp.class), eq(100),
