@@ -99,5 +99,6 @@ public interface OrderRpcApi {
     @GetMapping("/open")
     OrderQueryResponse openOrders(@RequestParam("userId") @Positive long userId,
                                   @RequestParam(value = "symbol", required = false) String symbol,
-                                  @RequestParam(value = "limit", defaultValue = "100") @Min(1) @Max(1000) int limit);
+                                  @RequestParam(value = "limit", defaultValue = "100") @Min(1) @Max(1000) int limit,
+                                  @RequestParam(value = "cursor", required = false) String cursor);
 }

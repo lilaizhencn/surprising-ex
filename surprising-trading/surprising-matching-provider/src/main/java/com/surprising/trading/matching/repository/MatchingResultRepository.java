@@ -152,7 +152,8 @@ public class MatchingResultRepository {
                        SET status = 'REJECTED',
                            reject_reason = ?,
                            remaining_quantity_steps = 0,
-                           updated_at = ?
+                           updated_at = ?,
+                           revision = revision + 1
                      WHERE order_id = ?
                     """, result.resultCode(), Timestamp.from(result.eventTime()), result.orderId());
             requireSingleRow(rows, "rejected order update");
@@ -183,7 +184,8 @@ public class MatchingResultRepository {
                    SET executed_quantity_steps = executed_quantity_steps + ?,
                        remaining_quantity_steps = remaining_quantity_steps - ?,
                        status = ?,
-                       updated_at = ?
+                       updated_at = ?,
+                       revision = revision + 1
                  WHERE order_id = ?
                    AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                    AND quantity_steps = executed_quantity_steps + remaining_quantity_steps
@@ -196,7 +198,8 @@ public class MatchingResultRepository {
         int rows = jdbcTemplate.update("""
                 UPDATE trading_orders
                    SET status = ?,
-                       updated_at = ?
+                       updated_at = ?,
+                       revision = revision + 1
                  WHERE order_id = ?
                 """, status.name(), Timestamp.from(now), orderId);
         requireSingleRow(rows, "order status update");
@@ -206,7 +209,8 @@ public class MatchingResultRepository {
         int rows = jdbcTemplate.update("""
                 UPDATE trading_orders
                    SET remaining_quantity_steps = 0,
-                       updated_at = ?
+                       updated_at = ?,
+                       revision = revision + 1
                  WHERE order_id = ?
                 """, Timestamp.from(now), orderId);
         requireSingleRow(rows, "order remaining quantity clear");

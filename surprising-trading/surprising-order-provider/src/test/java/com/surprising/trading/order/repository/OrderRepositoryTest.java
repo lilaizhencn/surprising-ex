@@ -56,7 +56,21 @@ class OrderRepositoryTest {
         verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
         assertThat(sql.getValue())
                 .contains("ON CONFLICT (product_line, user_id, client_order_id) WHERE client_order_id IS NOT NULL DO NOTHING")
+                .contains("created_at, updated_at, revision")
                 .doesNotContain("ON CONFLICT DO NOTHING");
+    }
+
+    @Test
+    void cancelRequestAtomicallyAdvancesTheOrderRevision() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OrderRepository repository = new OrderRepository(jdbcTemplate);
+        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
+
+        assertThat(repository.requestCancel(9001L, Instant.parse("2026-07-18T00:00:00Z"))).isTrue();
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
+        assertThat(sql.getValue()).contains("revision = revision + 1");
     }
 
     @Test

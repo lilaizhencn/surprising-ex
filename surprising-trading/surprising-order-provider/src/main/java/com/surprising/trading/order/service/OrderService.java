@@ -52,8 +52,10 @@ import com.surprising.trading.order.repository.OrderMarginRepository;
 import com.surprising.trading.order.repository.OrderRepository;
 import com.surprising.trading.order.repository.OutboxRepository;
 import com.surprising.trading.order.repository.SpotOrderReservationRepository;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -185,7 +187,8 @@ public class OrderService {
                 status,
                 validation.rejectReason(),
                 now,
-                now);
+                now,
+                1L);
 
         boolean inserted = orderRepository.insert(order);
         if (!inserted && hasClientOrderId(normalized)) {
@@ -596,6 +599,10 @@ public class OrderService {
     }
 
     public OrderQueryResponse openOrders(long userId, String symbol, int limit) {
+        return openOrders(userId, symbol, limit, null);
+    }
+
+    public OrderQueryResponse openOrders(long userId, String symbol, int limit, String cursor) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
@@ -604,16 +611,18 @@ public class OrderService {
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
         ProductLine productLine = currentProductLine();
-        List<OrderRecord> orders = openOrderView == null
-                ? orderRepository.openOrders(userId, normalizedSymbol, limit, currentProductContractType())
-                : openOrderView.orders(productLine, userId, normalizedSymbol, limit)
-                        .orElseGet(() -> orderRepository.openOrders(userId, normalizedSymbol, limit,
-                                currentProductContractType()));
-        List<OrderResponse> rows = orders
+        long beforeOrderId = decodeOpenOrderCursor(cursor);
+        RedisOpenOrderView.Page page = openOrderView == null
+                ? databaseOpenOrderPage(productLine, userId, normalizedSymbol, beforeOrderId, limit)
+                : openOrderView.orders(productLine, userId, normalizedSymbol, beforeOrderId, limit)
+                        .orElseGet(() -> databaseOpenOrderPage(productLine, userId, normalizedSymbol,
+                                beforeOrderId, limit));
+        List<OrderResponse> rows = page.orders()
                 .stream()
                 .map(this::toResponse)
                 .toList();
-        return new OrderQueryResponse(rows.size(), rows);
+        String nextCursor = page.hasMore() ? encodeOpenOrderCursor(page.nextOrderId()) : null;
+        return new OrderQueryResponse(rows.size(), rows, nextCursor, page.hasMore(), "orderId.desc", limit);
     }
 
     public OrderQueryResponse adminOrders(Long userId, String symbol, String status, Long orderId, int limit) {
@@ -965,7 +974,8 @@ public class OrderService {
                 OrderStatus.REJECTED,
                 rejectReason,
                 order.createdAt(),
-                now);
+                now,
+                order.revision() + 1);
     }
 
     private void enqueueOrderEvent(OrderRecord order,
@@ -1123,6 +1133,46 @@ public class OrderService {
 
     private String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private RedisOpenOrderView.Page databaseOpenOrderPage(ProductLine productLine,
+                                                           long userId,
+                                                           String symbol,
+                                                           long beforeOrderId,
+                                                           int limit) {
+        List<OrderRecord> fetched = orderRepository.openOrdersByOrderId(productLine, userId, symbol,
+                beforeOrderId, limit + 1);
+        boolean hasMore = fetched.size() > limit;
+        List<OrderRecord> page = hasMore ? List.copyOf(fetched.subList(0, limit)) : List.copyOf(fetched);
+        Long nextOrderId = hasMore && !page.isEmpty() ? page.get(page.size() - 1).orderId() : null;
+        return new RedisOpenOrderView.Page(page, hasMore, nextOrderId);
+    }
+
+    static String encodeOpenOrderCursor(long orderId) {
+        if (orderId <= 0L) {
+            throw new IllegalArgumentException("open-order cursor orderId must be positive");
+        }
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(
+                ("order:" + orderId).getBytes(StandardCharsets.UTF_8));
+    }
+
+    static long decodeOpenOrderCursor(String cursor) {
+        if (cursor == null || cursor.isBlank()) {
+            return Long.MAX_VALUE;
+        }
+        try {
+            String decoded = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
+            if (!decoded.startsWith("order:")) {
+                throw new IllegalArgumentException("invalid open-order cursor");
+            }
+            long orderId = Long.parseLong(decoded.substring("order:".length()));
+            if (orderId <= 0L) {
+                throw new IllegalArgumentException("invalid open-order cursor");
+            }
+            return orderId;
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("invalid open-order cursor", ex);
+        }
     }
 
     private ProductLine currentProductLine() {

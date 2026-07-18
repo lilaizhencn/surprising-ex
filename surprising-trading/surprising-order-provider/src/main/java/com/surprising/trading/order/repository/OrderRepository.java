@@ -33,8 +33,8 @@ public class OrderRepository {
                 order_id, product_line, user_id, client_order_id, symbol, instrument_version, side, order_type, time_in_force,
                 price_ticks, quantity_steps, executed_quantity_steps, remaining_quantity_steps,
                 margin_mode, position_side, maker_fee_rate_ppm, taker_fee_rate_ppm,
-                reduce_only, post_only, status, reject_reason, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                reduce_only, post_only, status, reject_reason, created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (product_line, user_id, client_order_id) WHERE client_order_id IS NOT NULL DO NOTHING
             """;
 
@@ -62,7 +62,7 @@ public class OrderRepository {
                 order.priceTicks(), order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
                 order.marginMode().name(), order.positionSide().name(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
                 order.reduceOnly(), order.postOnly(), order.status().name(), order.rejectReason(),
-                Timestamp.from(order.createdAt()), Timestamp.from(order.updatedAt()));
+                Timestamp.from(order.createdAt()), Timestamp.from(order.updatedAt()), order.revision());
         return rows == 1;
     }
 
@@ -162,7 +162,8 @@ public class OrderRepository {
         int rows = jdbcTemplate.update("""
                 UPDATE trading_orders
                    SET status = 'CANCEL_REQUESTED',
-                       updated_at = ?
+                       updated_at = ?,
+                       revision = revision + 1
                  WHERE order_id = ?
                    AND status IN ('ACCEPTED', 'PARTIALLY_FILLED')
                 """, Timestamp.from(now), orderId);
@@ -175,7 +176,8 @@ public class OrderRepository {
                    SET status = 'REJECTED',
                        remaining_quantity_steps = 0,
                        reject_reason = ?,
-                       updated_at = ?
+                       updated_at = ?,
+                       revision = revision + 1
                  WHERE order_id = ?
                    AND status = 'ACCEPTED'
                    AND executed_quantity_steps = 0
@@ -245,8 +247,8 @@ public class OrderRepository {
                  WHERE user_id = ?
                    AND (CAST(? AS text) IS NULL OR symbol = ?)
                    AND (CAST(? AS text) IS NULL OR product_line = ?)
-                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
-                 ORDER BY created_at DESC
+                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED')
+                 ORDER BY order_id DESC
                  LIMIT ?
                 """;
         return jdbcTemplate.query(sql, (rs, rowNum) -> toRecord(rs),
@@ -254,16 +256,54 @@ public class OrderRepository {
     }
 
     /** Stable keyset scan used only to rebuild the optional Redis open-order read model. */
-    public List<OrderRecord> activeOrdersForOpenOrderView(ProductLine productLine, long afterOrderId, int limit) {
+    public List<Long> activeOpenOrderUsers(ProductLine productLine, long afterUserId, int limit) {
+        return jdbcTemplate.query("""
+                SELECT DISTINCT user_id
+                  FROM trading_orders
+                 WHERE product_line = ?
+                   AND user_id > ?
+                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED')
+                 ORDER BY user_id ASC
+                 LIMIT ?
+                """, (rs, rowNum) -> rs.getLong(1), productLine(productLine).name(), afterUserId,
+                Math.max(1, Math.min(limit, 5_000)));
+    }
+
+    /** Stable keyset scan used only to rebuild the Redis open-order read model. */
+    public List<OrderRecord> activeOrdersForOpenOrderView(ProductLine productLine,
+                                                           long userId,
+                                                           long afterOrderId,
+                                                           int limit) {
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_orders
                  WHERE product_line = ?
+                   AND user_id = ?
                    AND order_id > ?
-                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED')
                  ORDER BY order_id ASC
                  LIMIT ?
-                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), afterOrderId, limit);
+                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), userId, afterOrderId, limit);
+    }
+
+    public List<OrderRecord> openOrdersByOrderId(ProductLine productLine,
+                                                   long userId,
+                                                   String symbol,
+                                                   long beforeOrderId,
+                                                   int limit) {
+        String normalizedSymbol = emptyToNull(symbol);
+        return jdbcTemplate.query("""
+                SELECT *
+                  FROM trading_orders
+                 WHERE product_line = ?
+                   AND user_id = ?
+                   AND (CAST(? AS text) IS NULL OR symbol = ?)
+                   AND order_id < ?
+                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED')
+                 ORDER BY order_id DESC
+                 LIMIT ?
+                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), userId,
+                normalizedSymbol, normalizedSymbol, beforeOrderId, limit);
     }
 
     public List<OrderRecord> adminOrders(Long userId,
@@ -569,7 +609,8 @@ public class OrderRepository {
                 OrderStatus.valueOf(rs.getString("status")),
                 rs.getString("reject_reason"),
                 rs.getTimestamp("created_at").toInstant(),
-                rs.getTimestamp("updated_at").toInstant());
+                rs.getTimestamp("updated_at").toInstant(),
+                rs.getLong("revision"));
     }
 
     private String emptyToNull(String value) {

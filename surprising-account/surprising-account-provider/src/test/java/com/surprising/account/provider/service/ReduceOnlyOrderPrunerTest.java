@@ -74,6 +74,11 @@ class ReduceOnlyOrderPrunerTest {
         verify(jdbcTemplate, never()).update(contains("UPDATE trading_orders"),
                 eq("REDUCE_ONLY_POSITION_REDUCED"), any(Timestamp.class), eq(101L));
 
+        ArgumentCaptor<String> orderUpdate = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).update(orderUpdate.capture(), eq("REDUCE_ONLY_POSITION_REDUCED"),
+                any(Timestamp.class), eq(102L));
+        assertThat(orderUpdate.getValue()).contains("revision = revision + 1");
+
         ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).update(contains("INSERT INTO trading_outbox_events"),
                 eq(602L), eq("ORDER"), eq(102L), eq("surprising.perp.order.commands.v1"),

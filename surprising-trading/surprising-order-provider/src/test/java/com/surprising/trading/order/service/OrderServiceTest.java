@@ -930,6 +930,16 @@ class OrderServiceTest {
         verify(orderRepository).adminCancelableOrders(null, "BTC-USDT", 1);
     }
 
+    @Test
+    void openOrderCursorRoundTripsAnOrderIdAndRejectsMalformedInput() {
+        String cursor = OrderService.encodeOpenOrderCursor(9001L);
+
+        assertThat(OrderService.decodeOpenOrderCursor(cursor)).isEqualTo(9001L);
+        assertThatThrownBy(() -> OrderService.decodeOpenOrderCursor("not-a-cursor"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("invalid open-order cursor");
+    }
+
     private OrderService service() {
         return service(new TradingOrderProperties());
     }

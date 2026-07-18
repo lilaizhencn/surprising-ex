@@ -32,12 +32,14 @@ public record OrderRecord(
         OrderStatus status,
         String rejectReason,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        long revision) {
 
     public OrderRecord {
         productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
+        revision = Math.max(1L, revision);
     }
 
     public OrderRecord(long orderId,
@@ -65,7 +67,7 @@ public record OrderRecord(
         this(orderId, ProductLine.LINEAR_PERPETUAL, userId, clientOrderId, symbol, instrumentVersion, side,
                 orderType, timeInForce, priceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
                 marginMode, positionSide, makerFeeRatePpm, takerFeeRatePpm, reduceOnly, postOnly, status,
-                rejectReason, createdAt, updatedAt);
+                rejectReason, createdAt, updatedAt, 1L);
     }
 
     public OrderRecord(long orderId,
@@ -92,7 +94,7 @@ public record OrderRecord(
         this(orderId, ProductLine.LINEAR_PERPETUAL, userId, clientOrderId, symbol, instrumentVersion, side, orderType, timeInForce,
                 priceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, marginMode,
                 PositionSide.NET,
-                makerFeeRatePpm, takerFeeRatePpm, reduceOnly, postOnly, status, rejectReason, createdAt, updatedAt);
+                makerFeeRatePpm, takerFeeRatePpm, reduceOnly, postOnly, status, rejectReason, createdAt, updatedAt, 1L);
     }
 
     public OrderRecord(long orderId,
@@ -118,6 +120,6 @@ public record OrderRecord(
         this(orderId, ProductLine.LINEAR_PERPETUAL, userId, clientOrderId, symbol, instrumentVersion, side, orderType, timeInForce,
                 priceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, MarginMode.CROSS,
                 PositionSide.NET,
-                makerFeeRatePpm, takerFeeRatePpm, reduceOnly, postOnly, status, rejectReason, createdAt, updatedAt);
+                makerFeeRatePpm, takerFeeRatePpm, reduceOnly, postOnly, status, rejectReason, createdAt, updatedAt, 1L);
     }
 }

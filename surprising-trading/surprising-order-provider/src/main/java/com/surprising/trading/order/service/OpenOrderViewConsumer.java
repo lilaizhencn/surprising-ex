@@ -24,7 +24,11 @@ public class OpenOrderViewConsumer {
         MatchTradeEvent trade=mapper.readValue(record.value(),MatchTradeEvent.class);
         project(trade.takerOrderId()); project(trade.makerOrderId());
     }
-    private void project(long id){repository.findByOrderId(id).ifPresent(view::synchronize);}
+    private void project(long id){
+        repository.findByOrderId(id)
+                .filter(order -> order.productLine() == properties.getKafka().getProductLine())
+                .ifPresent(view::synchronize);
+    }
     public String orderEventsTopic(){return properties.getKafka().getOrderEventsTopic();}
     public String matchResultsTopic(){return properties.getKafka().getMatchResultsTopic();}
     public String matchTradesTopic(){return properties.getKafka().getMatchTradesTopic();}

@@ -30,9 +30,9 @@ public class OpenOrderViewCoordinator {
     @Scheduled(fixedDelayString = "${surprising.trading.order.redis-index.reconcile-delay-ms:10000}")
     public void reconcile() {
         ProductLine line = properties.getKafka().getProductLine();
-        if (view.ready(line)) {
+        if (!view.rebuildRequired(line, properties.getRedisIndex().getRebuildMaxAge())) {
             try {
-                view.markReady(line, properties.getRedisIndex().getReadyTtl());
+                view.refreshReady(line, properties.getRedisIndex().getReadyTtl());
             } catch (RuntimeException ex) {
                 view.markNotReady(line);
             }
@@ -42,24 +42,42 @@ public class OpenOrderViewCoordinator {
         try {
             held = lease.tryAcquire(lockKey(line), properties.getRedisIndex().getLockTtl());
             if (held == null) return;
-            view.startRebuild(line);
-            long afterOrderId = 0;
+            long epoch = view.startRebuild(line);
+            long afterUserId = 0;
             int synchronizedRows = 0;
             int batch = Math.max(1, Math.min(5_000, properties.getRedisIndex().getRebuildBatchSize()));
             while (true) {
-                var rows = repository.activeOrdersForOpenOrderView(line, afterOrderId, batch);
-                if (rows.isEmpty()) break;
-                for (var row : rows) {
-                    view.synchronize(row);
-                    if (++synchronizedRows % 100 == 0
-                            && !lease.renew(held, properties.getRedisIndex().getLockTtl())) {
-                        throw new IllegalStateException("Redis open-order rebuild lease lost");
+                var users = repository.activeOpenOrderUsers(line, afterUserId, batch);
+                if (users.isEmpty()) {
+                    break;
+                }
+                for (long userId : users) {
+                    view.initializeUser(line, userId, epoch);
+                    long afterOrderId = 0;
+                    while (true) {
+                        var rows = repository.activeOrdersForOpenOrderView(line, userId, afterOrderId, batch);
+                        if (rows.isEmpty()) {
+                            break;
+                        }
+                        for (var row : rows) {
+                            view.synchronize(row);
+                            if (++synchronizedRows % 100 == 0
+                                    && !lease.renew(held, properties.getRedisIndex().getLockTtl())) {
+                                throw new IllegalStateException("Redis open-order rebuild lease lost");
+                            }
+                        }
+                        afterOrderId = rows.get(rows.size() - 1).orderId();
+                        if (rows.size() < batch) {
+                            break;
+                        }
                     }
                 }
-                afterOrderId = rows.get(rows.size() - 1).orderId();
-                if (rows.size() < batch) break;
+                afterUserId = users.get(users.size() - 1);
+                if (users.size() < batch) {
+                    break;
+                }
             }
-            view.markReady(line, properties.getRedisIndex().getReadyTtl());
+            view.markReady(line, epoch, properties.getRedisIndex().getReadyTtl());
         } catch (RuntimeException ex) {
             view.markNotReady(line);
         } finally {

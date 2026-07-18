@@ -63,6 +63,10 @@ class LiquidationOrderRepositoryTest {
 
         assertThat(preempted).isEqualTo(2);
         verify(jdbcTemplate, times(1)).update(contains("UPDATE trading_orders"), any(Object[].class));
+        ArgumentCaptor<String> orderUpdate = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).update(orderUpdate.capture(), eq("LIQUIDATION_PREEMPTED_REDUCE_ONLY"),
+                any(java.sql.Timestamp.class), eq(101L));
+        assertThat(orderUpdate.getValue()).contains("revision = revision + 1");
         verify(jdbcTemplate, times(1)).update(contains("INSERT INTO trading_order_events"), any(Object[].class));
         ArgumentCaptor<Object[]> outboxArgs = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate, times(3)).update(contains("INSERT INTO trading_outbox_events"), outboxArgs.capture());

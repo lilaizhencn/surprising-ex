@@ -255,7 +255,8 @@ public class LiquidationOrderRepository {
                 UPDATE trading_orders
                    SET status = 'CANCEL_REQUESTED',
                        reject_reason = ?,
-                       updated_at = ?
+                       updated_at = ?,
+                       revision = revision + 1
                  WHERE order_id = ?
                    AND status IN ('ACCEPTED', 'PARTIALLY_FILLED')
                 """, REDUCE_ONLY_PREEMPT_REASON, Timestamp.from(now), order.orderId());

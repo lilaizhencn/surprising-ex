@@ -367,6 +367,7 @@ public class AlgoOrderRepository {
     private OrderRecord toOrderRecord(ResultSet rs) throws SQLException {
         return new OrderRecord(
                 rs.getLong("order_id"),
+                ProductLine.valueOf(rs.getString("product_line")),
                 rs.getLong("user_id"),
                 rs.getString("client_order_id"),
                 rs.getString("symbol"),
@@ -387,7 +388,8 @@ public class AlgoOrderRepository {
                 OrderStatus.valueOf(rs.getString("status")),
                 rs.getString("reject_reason"),
                 rs.getTimestamp("created_at").toInstant(),
-                rs.getTimestamp("updated_at").toInstant());
+                rs.getTimestamp("updated_at").toInstant(),
+                rs.getLong("revision"));
     }
 
     private String emptyToNull(String value) {

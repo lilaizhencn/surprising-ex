@@ -982,11 +982,13 @@ CREATE TABLE IF NOT EXISTS trading_orders (
     reject_reason               TEXT,
     created_at                  TIMESTAMPTZ NOT NULL,
     updated_at                  TIMESTAMPTZ NOT NULL,
+    revision                    BIGINT NOT NULL DEFAULT 1,
     CONSTRAINT trading_orders_product_line_check CHECK (
         product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
                          'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
     ),
     CONSTRAINT trading_orders_user_positive CHECK (user_id > 0),
+    CONSTRAINT trading_orders_revision_positive CHECK (revision > 0),
     CONSTRAINT trading_orders_client_id_length CHECK (client_order_id IS NULL OR length(client_order_id) <= 64),
     CONSTRAINT trading_orders_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT trading_orders_instrument_fk
@@ -1023,6 +1025,13 @@ BEGIN
     ALTER TABLE trading_orders
         ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
     ALTER TABLE trading_orders
+        ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 1;
+    UPDATE trading_orders SET revision = 1 WHERE revision < 1;
+    ALTER TABLE trading_orders
+        DROP CONSTRAINT IF EXISTS trading_orders_revision_positive;
+    ALTER TABLE trading_orders
+        ADD CONSTRAINT trading_orders_revision_positive CHECK (revision > 0);
+    ALTER TABLE trading_orders
         DROP CONSTRAINT IF EXISTS trading_orders_product_line_check;
     ALTER TABLE trading_orders
         ADD CONSTRAINT trading_orders_product_line_check CHECK (
@@ -1058,6 +1067,15 @@ CREATE INDEX IF NOT EXISTS trading_orders_symbol_status_idx
 CREATE INDEX IF NOT EXISTS trading_orders_open_query_idx
     ON trading_orders (user_id, symbol, created_at DESC)
     WHERE status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED');
+
+-- Redis open-order projection rebuilds and PostgreSQL fallback use product-scoped order-id keysets.
+CREATE INDEX IF NOT EXISTS trading_orders_open_view_user_idx
+    ON trading_orders (product_line, user_id, order_id DESC)
+    WHERE status IN ('ACCEPTED', 'PARTIALLY_FILLED');
+
+CREATE INDEX IF NOT EXISTS trading_orders_open_view_user_symbol_idx
+    ON trading_orders (product_line, user_id, symbol, order_id DESC)
+    WHERE status IN ('ACCEPTED', 'PARTIALLY_FILLED');
 
 CREATE INDEX IF NOT EXISTS trading_orders_stp_open_idx
     ON trading_orders (user_id, symbol, side, price_ticks)

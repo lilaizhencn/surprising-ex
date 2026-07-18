@@ -219,9 +219,10 @@ public class OrderController {
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/open")
     public OrderQueryResponse openOrders(@RequestParam("userId") long userId,
                                          @RequestParam(value = "symbol", required = false) String symbol,
-                                         @RequestParam(value = "limit", defaultValue = "100") int limit) {
+                                         @RequestParam(value = "limit", defaultValue = "100") int limit,
+                                         @RequestParam(value = "cursor", required = false) String cursor) {
         try {
-            return orderService.openOrders(userId, symbol, limit);
+            return orderService.openOrders(userId, symbol, limit, cursor);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

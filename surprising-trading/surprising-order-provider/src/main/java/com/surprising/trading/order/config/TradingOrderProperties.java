@@ -361,6 +361,7 @@ public class TradingOrderProperties {
         private String keyPrefix = "surprising:order:v1";
         private long reconcileDelayMs = 10_000L;
         private int rebuildBatchSize = 1_000;
+        private Duration rebuildMaxAge = Duration.ofMinutes(5);
         private Duration readyTtl = Duration.ofSeconds(30);
         private Duration lockTtl = Duration.ofSeconds(30);
         private Duration algoClaimLease = Duration.ofSeconds(30);
@@ -370,6 +371,11 @@ public class TradingOrderProperties {
         public void setReconcileDelayMs(long reconcileDelayMs) { this.reconcileDelayMs = reconcileDelayMs; }
         public int getRebuildBatchSize() { return rebuildBatchSize; }
         public void setRebuildBatchSize(int rebuildBatchSize) { this.rebuildBatchSize = rebuildBatchSize; }
+        public Duration getRebuildMaxAge() { return rebuildMaxAge; }
+        public void setRebuildMaxAge(Duration rebuildMaxAge) {
+            this.rebuildMaxAge = rebuildMaxAge == null || rebuildMaxAge.isNegative() || rebuildMaxAge.isZero()
+                    ? Duration.ofMinutes(5) : rebuildMaxAge;
+        }
         public Duration getReadyTtl() { return readyTtl; }
         public void setReadyTtl(Duration readyTtl) { this.readyTtl = readyTtl; }
         public Duration getLockTtl() { return lockTtl; }

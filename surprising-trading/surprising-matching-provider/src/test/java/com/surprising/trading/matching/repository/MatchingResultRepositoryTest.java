@@ -167,6 +167,7 @@ class MatchingResultRepositoryTest {
                 .contains("remaining_quantity_steps >= ?")
                 .contains("quantity_steps = executed_quantity_steps + remaining_quantity_steps")
                 .contains("status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')")
+                .contains("revision = revision + 1")
                 .doesNotContain("LEAST")
                 .doesNotContain("GREATEST");
     }

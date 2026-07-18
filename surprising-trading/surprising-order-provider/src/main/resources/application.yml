@@ -49,6 +49,13 @@ surprising:
         product-topics-enabled: false
         order-commands-topic: surprising.perp.order.commands.v1
         order-events-topic: surprising.perp.order.events.v1
+      redis-index:
+        key-prefix: surprising:order:v1
+        reconcile-delay-ms: 10000
+        rebuild-batch-size: 1000
+        rebuild-max-age: 5m
+        ready-ttl: 30s
+        lock-ttl: 30s
     outbox:
       batch-size: 1000
       publish-delay-ms: 20
