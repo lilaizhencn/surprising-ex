@@ -105,8 +105,9 @@ export POSITION_REDIS_KEY_PREFIX=surprising:position:v1
 - Keep `maxmemory-policy noeviction` and Redis persistence enabled. A missing readiness marker makes user position
   reads return HTTP 503; do not add a PostgreSQL fallback, because a partial Redis loss must not look like a zero
   position.
-- The account schema creates one revisioned `POSITION_CACHE_PROJECTED` outbox row for every committed position or
-  position-collateral mutation. Account outbox publishes product-scoped topics such as
+- Account-provider collects position and collateral mutations per local transaction and creates exactly one
+  revisioned `POSITION_CACHE_PROJECTED` outbox row for each distinct final position key. Account outbox publishes
+  product-scoped topics such as
   `surprising.linear-perp.account.position-cache.events.v1`; the cache consumer validates topic, product line, and
   `productLine:userId` Kafka key before running its Lua compare-and-set.
 - The three user hashes share one Cluster tag: `state`, `margin`, and `revision` under
@@ -114,9 +115,11 @@ export POSITION_REDIS_KEY_PREFIX=surprising:position:v1
 - Startup uses a Redis token lease and a paged PostgreSQL rebuild. Revision CAS permits Kafka replay and rebuild to
   overlap safely. The ready marker is refreshed periodically and one page is reconciled each cycle.
 - Do not enable Spring Redis global transaction support and do not attempt XA. PostgreSQL business rows plus the
-  outbox are the atomic write; Redis is a replayable read projection. Account writes additionally use an
-  after-commit accelerator, but outbox/Kafka is the recovery guarantee for every writer, including funding and ADL.
-- Monitor `surprising.account.position.cache.applied`, `.stale`, `.failures`, `.rebuild.rows`, the `positionCache`
+  outbox are the atomic write; Redis is a replayable read projection. Account writes additionally offer the exact
+  committed snapshot to a bounded, coalescing after-commit worker. It never queries PostgreSQL or Redis on the
+  Kafka command thread; outbox/Kafka remains the recovery guarantee.
+- Monitor `surprising.account.position.cache.applied`, `.stale`, `.failures`, `.rebuild.rows`,
+  `.accelerator.submitted`, `.accelerator.coalesced`, `.accelerator.dropped`, the `positionCache`
   health contributor, account outbox backlog, cache-topic lag, and Redis command latency/errors.
 
 The complete rationale, data model, recovery flow, and pre-production reset guidance are in

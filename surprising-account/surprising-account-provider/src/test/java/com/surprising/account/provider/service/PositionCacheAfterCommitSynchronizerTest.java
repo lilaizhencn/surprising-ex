@@ -1,6 +1,8 @@
 package com.surprising.account.provider.service;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -11,8 +13,10 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 class PositionCacheAfterCommitSynchronizerTest {
@@ -22,26 +26,66 @@ class PositionCacheAfterCommitSynchronizerTest {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.clearSynchronization();
         }
+        TransactionSynchronizationManager.setActualTransactionActive(false);
     }
 
     @Test
-    void readsAndAppliesOnlyAfterDatabaseCommit() {
+    void enqueuesOneFinalSnapshotBeforeCommitAndAcceleratesOnlyAfterCommit() {
         PositionCacheProjectionRepository repository = mock(PositionCacheProjectionRepository.class);
-        RedisPositionCache cache = mock(RedisPositionCache.class);
+        PositionCacheAccelerationWorker worker = mock(PositionCacheAccelerationWorker.class);
         PositionCacheEvent snapshot = snapshot();
-        when(repository.snapshot(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
+        when(repository.enqueueFinalSnapshot(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
                 PositionSide.NET)).thenReturn(snapshot);
-        PositionCacheAfterCommitSynchronizer synchronizer = new PositionCacheAfterCommitSynchronizer(repository, cache);
+        PositionCacheAfterCommitSynchronizer synchronizer =
+                new PositionCacheAfterCommitSynchronizer(repository, worker);
+        TransactionSynchronizationManager.setActualTransactionActive(true);
         TransactionSynchronizationManager.initSynchronization();
 
         synchronizer.schedule(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
                 PositionSide.NET);
-
-        verifyNoInteractions(repository, cache);
-        TransactionSynchronizationManager.getSynchronizations().forEach(synchronization -> synchronization.afterCommit());
-        verify(repository).snapshot(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
+        synchronizer.schedule(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
                 PositionSide.NET);
-        verify(cache).apply(snapshot, false);
+
+        verifyNoInteractions(repository, worker);
+        List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        synchronizations.forEach(synchronization -> synchronization.beforeCommit(false));
+        verify(repository, times(1)).enqueueFinalSnapshot(
+                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
+                PositionSide.NET);
+        verifyNoInteractions(worker);
+
+        synchronizations.forEach(TransactionSynchronization::afterCommit);
+        verify(worker).submitAll(List.of(snapshot));
+        synchronizations.forEach(synchronization ->
+                synchronization.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
+    }
+
+    @Test
+    void rejectsSchedulingOutsideATransaction() {
+        PositionCacheAfterCommitSynchronizer synchronizer = new PositionCacheAfterCommitSynchronizer(
+                mock(PositionCacheProjectionRepository.class), mock(PositionCacheAccelerationWorker.class));
+
+        assertThatThrownBy(() -> synchronizer.schedule(
+                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("active transaction");
+    }
+
+    @Test
+    void rollbackDoesNotCaptureOrAccelerate() {
+        PositionCacheProjectionRepository repository = mock(PositionCacheProjectionRepository.class);
+        PositionCacheAccelerationWorker worker = mock(PositionCacheAccelerationWorker.class);
+        PositionCacheAfterCommitSynchronizer synchronizer =
+                new PositionCacheAfterCommitSynchronizer(repository, worker);
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+
+        synchronizer.schedule(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
+                PositionSide.NET);
+        TransactionSynchronizationManager.getSynchronizations().forEach(synchronization ->
+                synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+
+        verifyNoInteractions(repository, worker);
     }
 
     private PositionCacheEvent snapshot() {

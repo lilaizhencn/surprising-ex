@@ -84,6 +84,8 @@ surprising:
       reconcile-delay-ms: 10000
       ready-ttl: 30s
       lock-ttl: 30s
+      accelerator-threads: 4
+      accelerator-queue-capacity: 10000
     position-margin:
       max-risk-snapshot-age: 10s
       removal-buffer-ppm: 50000

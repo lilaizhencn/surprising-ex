@@ -1,34 +1,35 @@
 package com.surprising.account.provider.service;
 
+import com.surprising.account.api.model.PositionCacheEvent;
 import com.surprising.account.provider.repository.PositionCacheProjectionRepository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
- * Low-latency accelerator for account-provider writes.
+ * Collects changed position keys for one account transaction.
  *
- * <p>The database outbox remains the recovery path and covers other writers such as funding and ADL.
- * This callback only runs after commit, so a failed Redis write never rolls back or falsely reports a
- * funds mutation. The revisioned Kafka projection will retry the same state.</p>
+ * <p>Immediately before commit, each distinct key is captured once as a durable final-state outbox event.
+ * After commit, that exact event is offered to a bounded asynchronous Redis accelerator. No database or
+ * Redis I/O runs on the Kafka consumer thread after the transaction commits.</p>
  */
 @Component
 public class PositionCacheAfterCommitSynchronizer {
 
-    private static final Logger log = LoggerFactory.getLogger(PositionCacheAfterCommitSynchronizer.class);
-
     private final PositionCacheProjectionRepository repository;
-    private final RedisPositionCache cache;
+    private final PositionCacheAccelerationWorker accelerationWorker;
 
     public PositionCacheAfterCommitSynchronizer(PositionCacheProjectionRepository repository,
-                                                RedisPositionCache cache) {
+                                                PositionCacheAccelerationWorker accelerationWorker) {
         this.repository = repository;
-        this.cache = cache;
+        this.accelerationWorker = accelerationWorker;
     }
 
     public void schedule(ProductLine productLine,
@@ -36,30 +37,55 @@ public class PositionCacheAfterCommitSynchronizer {
                          String symbol,
                          MarginMode marginMode,
                          PositionSide positionSide) {
-        Runnable synchronize = () -> synchronize(productLine, userId, symbol, marginMode, positionSide);
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException("position cache projection must be scheduled inside an active transaction");
+        }
+        ProjectionKey key = new ProjectionKey(productLine, userId, symbol,
+                MarginMode.defaultIfNull(marginMode), PositionSide.defaultIfNull(positionSide));
+        TransactionState state = (TransactionState) TransactionSynchronizationManager.getResource(this);
+        if (state == null) {
+            state = new TransactionState();
+            TransactionSynchronizationManager.bindResource(this, state);
+            TransactionState registeredState = state;
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
+                public void beforeCommit(boolean readOnly) {
+                    if (readOnly) {
+                        throw new IllegalStateException("position cache projection cannot run in a read-only transaction");
+                    }
+                    for (ProjectionKey changed : registeredState.keys) {
+                        registeredState.events.add(repository.enqueueFinalSnapshot(
+                                changed.productLine(), changed.userId(), changed.symbol(),
+                                changed.marginMode(), changed.positionSide()));
+                    }
+                }
+
+                @Override
                 public void afterCommit() {
-                    synchronize.run();
+                    accelerationWorker.submitAll(List.copyOf(registeredState.events));
+                }
+
+                @Override
+                public void afterCompletion(int status) {
+                    TransactionSynchronizationManager.unbindResourceIfPossible(
+                            PositionCacheAfterCommitSynchronizer.this);
                 }
             });
-            return;
         }
-        synchronize.run();
+        state.keys.add(key);
     }
 
-    private void synchronize(ProductLine productLine,
-                             long userId,
-                             String symbol,
-                             MarginMode marginMode,
-                             PositionSide positionSide) {
-        try {
-            cache.apply(repository.snapshot(productLine, userId, symbol, marginMode, positionSide), false);
-        } catch (RuntimeException ex) {
-            cache.markNotReady(productLine);
-            log.warn("after-commit Redis position projection failed line={} user={} symbol={} mode={} side={}: {}",
-                    productLine, userId, symbol, marginMode, positionSide, ex.getMessage());
-        }
+    private static final class TransactionState {
+        private final Set<ProjectionKey> keys = new LinkedHashSet<>();
+        private final List<PositionCacheEvent> events = new ArrayList<>();
+    }
+
+    private record ProjectionKey(
+            ProductLine productLine,
+            long userId,
+            String symbol,
+            MarginMode marginMode,
+            PositionSide positionSide) {
     }
 }

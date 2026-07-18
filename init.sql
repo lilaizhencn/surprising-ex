@@ -2633,14 +2633,23 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION account_enqueue_position_cache_event(
+-- Position mutations are collected by account-provider and flushed once per distinct position key
+-- immediately before the local transaction commits. Remove the former row-level outbox triggers:
+-- updating position collateral and then position quantity must not serialize two intermediate snapshots.
+DROP TRIGGER IF EXISTS account_positions_cache_outbox_trigger ON account_positions;
+DROP TRIGGER IF EXISTS account_position_margins_cache_outbox_trigger ON account_position_margins;
+DROP FUNCTION IF EXISTS account_emit_position_cache_from_position();
+DROP FUNCTION IF EXISTS account_emit_position_cache_from_margin();
+DROP FUNCTION IF EXISTS account_enqueue_position_cache_event(TEXT, BIGINT, TEXT, TEXT, TEXT, BIGINT);
+
+CREATE FUNCTION account_enqueue_position_cache_event(
     p_product_line TEXT,
     p_user_id BIGINT,
     p_symbol TEXT,
     p_margin_mode TEXT,
     p_position_side TEXT,
     p_revision BIGINT)
-RETURNS VOID AS $$
+RETURNS JSONB AS $$
 DECLARE
     v_payload JSONB;
 BEGIN
@@ -2696,49 +2705,9 @@ BEGIN
         p_product_line || ':' || p_user_id, 'POSITION_CACHE_PROJECTED', v_payload,
         now(), now(), now()
     );
+    RETURN v_payload;
 END;
 $$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION account_emit_position_cache_from_position()
-RETURNS TRIGGER AS $$
-BEGIN
-    PERFORM account_enqueue_position_cache_event(
-        NEW.product_line, NEW.user_id, NEW.symbol, NEW.margin_mode, NEW.position_side, NEW.cache_revision);
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS account_positions_cache_outbox_trigger ON account_positions;
-CREATE TRIGGER account_positions_cache_outbox_trigger
-AFTER INSERT OR UPDATE ON account_positions
-FOR EACH ROW EXECUTE FUNCTION account_emit_position_cache_from_position();
-
-CREATE OR REPLACE FUNCTION account_emit_position_cache_from_margin()
-RETURNS TRIGGER AS $$
-DECLARE
-    v_row account_position_margins%ROWTYPE;
-    v_revision BIGINT;
-BEGIN
-    IF TG_OP = 'DELETE' THEN
-        v_row := OLD;
-        v_revision := nextval('account_position_cache_revision_seq');
-    ELSE
-        v_row := NEW;
-        v_revision := NEW.cache_revision;
-    END IF;
-    PERFORM account_enqueue_position_cache_event(
-        v_row.product_line, v_row.user_id, v_row.symbol, v_row.margin_mode, v_row.position_side, v_revision);
-    IF TG_OP = 'DELETE' THEN
-        RETURN OLD;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS account_position_margins_cache_outbox_trigger ON account_position_margins;
-CREATE TRIGGER account_position_margins_cache_outbox_trigger
-AFTER INSERT OR UPDATE OR DELETE ON account_position_margins
-FOR EACH ROW EXECUTE FUNCTION account_emit_position_cache_from_margin();
 
 CREATE TABLE IF NOT EXISTS risk_sequences (
     sequence_name       TEXT PRIMARY KEY,

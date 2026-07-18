@@ -24,6 +24,7 @@ import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.account.provider.service.MarginTransferMath;
 import com.surprising.account.provider.service.PnlSettlementMath;
+import com.surprising.account.provider.service.PositionCacheAfterCommitSynchronizer;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.price.api.model.MarkPriceEvent;
@@ -56,18 +57,27 @@ public class AccountRepository {
     private final JdbcTemplate jdbcTemplate;
     private final AccountSequenceRepository sequenceRepository;
     private final LatestMarkPriceCache markPriceCache;
+    private final PositionCacheAfterCommitSynchronizer positionCacheSynchronizer;
 
     public AccountRepository(JdbcTemplate jdbcTemplate, AccountSequenceRepository sequenceRepository) {
-        this(jdbcTemplate, sequenceRepository, null);
+        this(jdbcTemplate, sequenceRepository, null, null);
+    }
+
+    public AccountRepository(JdbcTemplate jdbcTemplate,
+                             AccountSequenceRepository sequenceRepository,
+                             LatestMarkPriceCache markPriceCache) {
+        this(jdbcTemplate, sequenceRepository, markPriceCache, null);
     }
 
     @Autowired
     public AccountRepository(JdbcTemplate jdbcTemplate,
                              AccountSequenceRepository sequenceRepository,
-                             LatestMarkPriceCache markPriceCache) {
+                             LatestMarkPriceCache markPriceCache,
+                             PositionCacheAfterCommitSynchronizer positionCacheSynchronizer) {
         this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
         this.markPriceCache = markPriceCache;
+        this.positionCacheSynchronizer = positionCacheSynchronizer;
     }
 
     public Optional<BalanceResponse> balance(long userId, String asset) {
@@ -1190,7 +1200,7 @@ public class AccountRepository {
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
         Instant now = Instant.now();
-        jdbcTemplate.update("""
+        int inserted = jdbcTemplate.update("""
                 INSERT INTO account_positions (
                     product_line, user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
                     entry_price_ticks, entry_value_ticks, realized_pnl_units, updated_at
@@ -1198,6 +1208,10 @@ public class AccountRepository {
                 ON CONFLICT (product_line, user_id, symbol, margin_mode, position_side) DO NOTHING
                 """, resolvedProductLine.name(), userId, symbol, normalizedMarginMode.name(),
                 normalizedPositionSide.name(), Timestamp.from(now));
+        if (inserted == 1) {
+            schedulePositionCacheProjection(resolvedProductLine, userId, symbol,
+                    normalizedMarginMode, normalizedPositionSide);
+        }
         return jdbcTemplate.queryForObject("""
                 SELECT instrument_version, signed_quantity_steps, entry_price_ticks, entry_value_ticks,
                        realized_pnl_units
@@ -1800,6 +1814,8 @@ public class AccountRepository {
                 normalizedPositionSide.name());
         requireSingleRow(rows, "account position update");
         updateSymbolOpenInterest(resolvedProductLine, symbol, previousSignedQuantitySteps, state.signedQuantitySteps(), now);
+        schedulePositionCacheProjection(resolvedProductLine, userId, symbol,
+                normalizedMarginMode, normalizedPositionSide);
         return new PositionResponse(userId, symbol, state.instrumentVersion(), normalizedMarginMode,
                 normalizedPositionSide,
                 state.signedQuantitySteps(), state.entryPriceTicks(), state.realizedPnlUnits(), now);
@@ -2446,6 +2462,8 @@ public class AccountRepository {
                     reservation.positionSide().name(), actualMarginUnits,
                     Timestamp.from(now));
             requireSingleRow(positionMarginRows, "position margin upsert");
+            schedulePositionCacheProjection(resolvedProductLine, userId, symbol,
+                    normalizedMarginMode, reservation.positionSide());
         }
         releaseReservedMargin(orderId, reservation.accountType(), reservation.userId(), reservation.asset(), excessUnits,
                 "ORDER_PRICE_IMPROVEMENT", now);
@@ -2527,6 +2545,8 @@ public class AccountRepository {
                        AND position_side = ? AND product_line = ? AND margin_units = 0
                     """, userId, symbol, margin.asset(), margin.marginMode().name(), margin.positionSide().name(),
                     resolvedProductLine.name());
+            schedulePositionCacheProjection(resolvedProductLine, userId, symbol,
+                    margin.marginMode(), margin.positionSide());
         }
     }
 
@@ -3214,7 +3234,7 @@ public class AccountRepository {
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         if (normalizedMarginMode == MarginMode.ISOLATED) {
             return jdbcTemplate.query("""
-                    SELECT symbol, asset, margin_mode, margin_units
+                    SELECT symbol, asset, margin_mode, position_side, margin_units
                       FROM account_position_margins
                      WHERE product_line = ?
                        AND user_id = ?
@@ -3222,30 +3242,36 @@ public class AccountRepository {
                        AND symbol = ?
                        AND margin_mode = ?
                        AND margin_units > 0
-                     ORDER BY updated_at ASC, symbol ASC, margin_mode ASC
+                     ORDER BY updated_at ASC, symbol ASC, margin_mode ASC, position_side ASC
                      FOR UPDATE
                     """, (rs, rowNum) -> new PositionMargin(
                     rs.getString("symbol"),
                     rs.getString("asset"),
                     MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                    rs.getLong("margin_units")), resolvedProductLine.name(), userId, asset, symbol,
+                    PositionSide.fromNullableDbValue(rs.getString("position_side")),
+                    rs.getLong("margin_units"),
+                    AccountType.valueOf(resolvedProductLine.accountTypeCode())), resolvedProductLine.name(), userId,
+                    asset, symbol,
                     normalizedMarginMode.name());
         }
         return jdbcTemplate.query("""
-                SELECT symbol, asset, margin_mode, margin_units
+                SELECT symbol, asset, margin_mode, position_side, margin_units
                   FROM account_position_margins
                  WHERE product_line = ?
                    AND user_id = ?
                    AND asset = ?
                    AND margin_mode = ?
                    AND margin_units > 0
-                 ORDER BY updated_at ASC, symbol ASC, margin_mode ASC
+                 ORDER BY updated_at ASC, symbol ASC, margin_mode ASC, position_side ASC
                  FOR UPDATE
                 """, (rs, rowNum) -> new PositionMargin(
                 rs.getString("symbol"),
                 rs.getString("asset"),
                 MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                rs.getLong("margin_units")), resolvedProductLine.name(), userId, asset, normalizedMarginMode.name());
+                PositionSide.fromNullableDbValue(rs.getString("position_side")),
+                rs.getLong("margin_units"),
+                AccountType.valueOf(resolvedProductLine.accountTypeCode())), resolvedProductLine.name(), userId,
+                asset, normalizedMarginMode.name());
     }
 
     private void reducePositionMargins(long userId,
@@ -3273,24 +3299,38 @@ public class AccountRepository {
                     UPDATE account_position_margins
                        SET margin_units = margin_units - ?,
                            updated_at = ?
-                     WHERE user_id = ? AND symbol = ? AND asset = ?
-                       AND margin_mode = ?
-                       AND product_line = ?
-                       AND margin_units >= ?
+                      WHERE user_id = ? AND symbol = ? AND asset = ?
+                        AND margin_mode = ?
+                        AND position_side = ?
+                        AND product_line = ?
+                        AND margin_units >= ?
                     """, debit, Timestamp.from(now), userId, margin.symbol(), asset,
-                    margin.marginMode().name(), resolvedProductLine.name(), debit);
+                    margin.marginMode().name(), margin.positionSide().name(), resolvedProductLine.name(), debit);
             if (rows != 1) {
                 throw new IllegalStateException("failed to reduce consumed position margin");
             }
             jdbcTemplate.update("""
                     DELETE FROM account_position_margins
                      WHERE user_id = ? AND symbol = ? AND asset = ? AND margin_mode = ?
-                       AND product_line = ? AND margin_units = 0
-                    """, userId, margin.symbol(), asset, margin.marginMode().name(), resolvedProductLine.name());
+                        AND position_side = ? AND product_line = ? AND margin_units = 0
+                    """, userId, margin.symbol(), asset, margin.marginMode().name(), margin.positionSide().name(),
+                    resolvedProductLine.name());
+            schedulePositionCacheProjection(resolvedProductLine, userId, margin.symbol(),
+                    margin.marginMode(), margin.positionSide());
             remaining = Math.subtractExact(remaining, debit);
         }
         if (remaining != 0) {
             throw new IllegalStateException("insufficient position margin for locked debit");
+        }
+    }
+
+    private void schedulePositionCacheProjection(ProductLine productLine,
+                                                 long userId,
+                                                 String symbol,
+                                                 MarginMode marginMode,
+                                                 PositionSide positionSide) {
+        if (positionCacheSynchronizer != null) {
+            positionCacheSynchronizer.schedule(productLine, userId, symbol, marginMode, positionSide);
         }
     }
 

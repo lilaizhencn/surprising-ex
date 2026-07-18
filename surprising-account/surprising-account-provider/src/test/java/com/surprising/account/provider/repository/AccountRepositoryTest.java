@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.provider.model.LiquidationFeeContext;
 import com.surprising.account.provider.model.PositionState;
+import com.surprising.account.provider.service.PositionCacheAfterCommitSynchronizer;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
@@ -569,7 +570,10 @@ class AccountRepositoryTest {
 
     @Test
     void realizedLossOnlyDebitsPositionMarginLockedCollateral() throws Exception {
-        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
+        PositionCacheAfterCommitSynchronizer cacheSynchronizer =
+                mock(PositionCacheAfterCommitSynchronizer.class);
+        AccountRepository repository =
+                new AccountRepository(jdbcTemplate, sequenceRepository, null, cacheSynchronizer);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
         when(sequenceRepository.nextSequence("ledger-entry")).thenReturn(1L);
@@ -591,6 +595,7 @@ class AccountRepositoryTest {
                     when(rs.getString("symbol")).thenReturn("ETH-USDT");
                     when(rs.getString("asset")).thenReturn("USDT");
                     when(rs.getString("margin_mode")).thenReturn("CROSS");
+                    when(rs.getString("position_side")).thenReturn("SHORT");
                     when(rs.getLong("margin_units")).thenReturn(50L);
                     return List.of(mapper.mapRow(rs, 0));
                 });
@@ -609,7 +614,9 @@ class AccountRepositoryTest {
 
         verify(jdbcTemplate).update(contains("UPDATE account_position_margins"),
                 eq(50L), any(Timestamp.class), eq(1001L), eq("ETH-USDT"), eq("USDT"), eq("CROSS"),
-                eq("LINEAR_PERPETUAL"), eq(50L));
+                eq("SHORT"), eq("LINEAR_PERPETUAL"), eq(50L));
+        verify(cacheSynchronizer).schedule(
+                ProductLine.LINEAR_PERPETUAL, 1001L, "ETH-USDT", MarginMode.CROSS, PositionSide.SHORT);
         verify(jdbcTemplate).update(contains("UPDATE account_balances"),
                 eq(0L), eq(50L), any(Timestamp.class), eq(1001L), eq("USDT"));
         verify(jdbcTemplate).update(contains("UPDATE account_deficits"),
@@ -713,7 +720,7 @@ class AccountRepositoryTest {
         assertThat(settlement.collectedFeeUnits()).isEqualTo(70L);
         verify(jdbcTemplate).update(contains("UPDATE account_position_margins"),
                 eq(50L), any(Timestamp.class), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("CROSS"),
-                eq("LINEAR_PERPETUAL"), eq(50L));
+                eq("NET"), eq("LINEAR_PERPETUAL"), eq(50L));
         verify(jdbcTemplate).update(contains("UPDATE account_balances"),
                 eq(0L), eq(0L), any(Timestamp.class), eq(1001L), eq("USDT"));
         verify(jdbcTemplate, never()).update(contains("UPDATE account_deficits"), any(Object[].class));

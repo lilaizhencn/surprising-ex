@@ -7,15 +7,18 @@ import com.surprising.trading.api.model.PositionSide;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import tools.jackson.databind.ObjectMapper;
 
-/** PostgreSQL scan used only to bootstrap and reconcile the Redis read model. */
+/** PostgreSQL final-state outbox capture plus bootstrap/reconciliation scan for the Redis read model. */
 @Repository
 public class PositionCacheProjectionRepository {
 
     private final JdbcTemplate jdbcTemplate;
+    private final ObjectMapper objectMapper;
 
-    public PositionCacheProjectionRepository(JdbcTemplate jdbcTemplate) {
+    public PositionCacheProjectionRepository(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
+        this.objectMapper = objectMapper;
     }
 
     public List<PositionCacheEvent> page(ProductLine productLine, Cursor after, int limit) {
@@ -80,53 +83,41 @@ public class PositionCacheProjectionRepository {
                 Math.max(1, limit));
     }
 
-    public PositionCacheEvent snapshot(ProductLine productLine,
-                                       long userId,
-                                       String symbol,
-                                       MarginMode marginMode,
-                                       PositionSide positionSide) {
-        return jdbcTemplate.query("""
-                SELECT p.product_line,
-                       p.user_id,
-                       p.symbol,
-                       p.instrument_version,
-                       p.margin_mode,
-                       p.position_side,
-                       p.signed_quantity_steps,
-                       p.entry_price_ticks,
-                       p.entry_value_ticks,
-                       p.realized_pnl_units,
-                       COALESCE(m.asset, i.settle_asset, '') AS margin_asset,
-                       COALESCE(m.margin_units, 0) AS margin_units,
-                       p.updated_at AS position_updated_at,
-                       COALESCE(m.updated_at, p.updated_at) AS margin_updated_at,
-                       GREATEST(p.cache_revision, COALESCE(m.cache_revision, 0)) AS revision
-                  FROM account_positions p
-                  LEFT JOIN instruments i
-                    ON i.symbol = p.symbol
-                   AND i.version = p.instrument_version
-                  LEFT JOIN LATERAL (
-                      SELECT MIN(pm.asset) AS asset,
-                             COALESCE(SUM(pm.margin_units), 0)::BIGINT AS margin_units,
-                             MAX(pm.updated_at) AS updated_at,
-                             MAX(pm.cache_revision) AS cache_revision
-                        FROM account_position_margins pm
-                       WHERE pm.product_line = p.product_line
-                         AND pm.user_id = p.user_id
-                         AND pm.symbol = p.symbol
-                         AND pm.margin_mode = p.margin_mode
-                         AND pm.position_side = p.position_side
-                  ) m ON TRUE
-                 WHERE p.product_line = ?
-                   AND p.user_id = ?
-                   AND p.symbol = ?
-                   AND p.margin_mode = ?
-                   AND p.position_side = ?
-                """, (rs, rowNum) -> toEvent(rs), productLine.name(), userId, symbol,
-                MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name())
-                .stream()
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("position cache projection source is missing"));
+    /**
+     * Captures the final committed shape of one position and inserts its durable projection event in one
+     * database round trip. This method must run inside the same transaction as the position mutation.
+     */
+    public PositionCacheEvent enqueueFinalSnapshot(ProductLine productLine,
+                                                   long userId,
+                                                   String symbol,
+                                                   MarginMode marginMode,
+                                                   PositionSide positionSide) {
+        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
+        String payload = jdbcTemplate.queryForObject("""
+                SELECT account_enqueue_position_cache_event(
+                    ?, ?, ?, ?, ?, nextval('account_position_cache_revision_seq')
+                )::text
+                """, String.class, productLine.name(), userId, symbol,
+                normalizedMarginMode.name(), normalizedPositionSide.name());
+        if (payload == null || payload.isBlank()) {
+            throw new IllegalStateException("position cache projection event was not returned");
+        }
+        try {
+            PositionCacheEvent event = objectMapper.readValue(payload, PositionCacheEvent.class);
+            if (event.productLine() != productLine
+                    || event.userId() != userId
+                    || !event.symbol().equals(symbol)
+                    || event.marginMode() != normalizedMarginMode
+                    || event.positionSide() != normalizedPositionSide) {
+                throw new IllegalStateException("position cache projection event identity mismatch");
+            }
+            return event;
+        } catch (RuntimeException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new IllegalStateException("failed to deserialize position cache projection event", ex);
+        }
     }
 
     public Cursor cursor(PositionCacheEvent event) {

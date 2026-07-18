@@ -396,6 +396,8 @@ public class AccountProperties {
         private long reconcileDelayMs = 10_000L;
         private Duration readyTtl = Duration.ofSeconds(30);
         private Duration lockTtl = Duration.ofSeconds(30);
+        private int acceleratorThreads = 4;
+        private int acceleratorQueueCapacity = 10_000;
 
         public String getKeyPrefix() {
             return keyPrefix;
@@ -441,6 +443,29 @@ public class AccountProperties {
 
         public void setLockTtl(Duration lockTtl) {
             this.lockTtl = requirePositive(lockTtl, "lockTtl");
+        }
+
+        public int getAcceleratorThreads() {
+            return acceleratorThreads;
+        }
+
+        public void setAcceleratorThreads(int acceleratorThreads) {
+            if (acceleratorThreads <= 0 || acceleratorThreads > 64) {
+                throw new IllegalArgumentException("position cache acceleratorThreads must be in [1, 64]");
+            }
+            this.acceleratorThreads = acceleratorThreads;
+        }
+
+        public int getAcceleratorQueueCapacity() {
+            return acceleratorQueueCapacity;
+        }
+
+        public void setAcceleratorQueueCapacity(int acceleratorQueueCapacity) {
+            if (acceleratorQueueCapacity <= 0 || acceleratorQueueCapacity > 1_000_000) {
+                throw new IllegalArgumentException(
+                        "position cache acceleratorQueueCapacity must be in [1, 1000000]");
+            }
+            this.acceleratorQueueCapacity = acceleratorQueueCapacity;
         }
 
         private Duration requirePositive(Duration value, String name) {
