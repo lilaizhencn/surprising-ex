@@ -57,7 +57,7 @@ public class OutboxRepository {
         // The earliest unpublished row still blocks later rows for the same topic+key, preserving stream order.
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
-                WITH earliest AS (
+                WITH earliest AS MATERIALIZED (
                     SELECT DISTINCT ON (topic, event_key)
                            id
                       FROM trading_outbox_events
@@ -65,12 +65,12 @@ public class OutboxRepository {
                        AND aggregate_type = 'ORDER'
                      ORDER BY topic, event_key, id
                 ),
-                candidates AS (
+                candidates AS MATERIALIZED (
                     SELECT e.id
                       FROM trading_outbox_events e
-                      JOIN earliest c ON c.id = e.id
                      WHERE e.published_at IS NULL
                        AND e.aggregate_type = 'ORDER'
+                       AND e.id = ANY (ARRAY(SELECT id FROM earliest))
                     """);
         appendTopicScope(sql, "e", args);
         sql.append("""

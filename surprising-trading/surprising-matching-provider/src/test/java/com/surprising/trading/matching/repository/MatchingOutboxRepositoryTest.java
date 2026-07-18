@@ -164,6 +164,10 @@ class MatchingOutboxRepositoryTest {
                 any(Timestamp.class), any(Timestamp.class));
         assertThat(sql.getValue())
                 .contains("DISTINCT ON (topic, event_key)")
+                .contains("earliest AS MATERIALIZED")
+                .contains("candidates AS MATERIALIZED")
+                .contains("e.id = ANY (ARRAY(SELECT id FROM earliest))")
+                .doesNotContain("JOIN earliest")
                 .contains("UPDATE trading_outbox_events")
                 .contains("SET next_attempt_at = ?")
                 .contains("RETURNING e.id")
