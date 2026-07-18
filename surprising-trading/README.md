@@ -47,7 +47,8 @@ client / internal gateway
   -> surprising.<product-segment>.order.commands.v1
   -> surprising-matching-provider / exchange-core
   -> trading_match_results / trading_match_trades
-  -> surprising.<product-segment>.match.results.v1 / surprising.<product-segment>.match.trades.v1
+  -> durable financial path: match.results.v1 + account.user.commands.v1
+  -> in-memory public path: match.trades.v1 + orderbook.depth.v1
 ```
 
 Trigger orders use a separate path:
@@ -287,10 +288,13 @@ The trading Java module remains long-only.
 
 - `surprising.<product-segment>.order.commands.v1`: matching commands, key = `symbol`.
 - `surprising.<product-segment>.order.events.v1`: order entry events, key = `symbol`.
-- `surprising.<product-segment>.match.results.v1`: matching results, key = `symbol`.
-- `surprising.<product-segment>.match.trades.v1`: matching trades, key = `symbol`, with prices and quantities still represented as long ticks/steps.
-- `surprising.<product-segment>.orderbook.depth.v1`: L2 order book depth updates, key = `symbol`.
+- `surprising.<product-segment>.match.results.v1`: durable matching results, key = `symbol`; private match/order projection consumers use this stream.
+- `surprising.<product-segment>.account.user.commands.v1`: durable per-user financial commands produced through the matching outbox; account settlement never consumes the public trade stream.
+- `surprising.<product-segment>.match.trades.v1`: lossy `PublicTradeEvent` stream for WebSocket public trades and candlestick calculation, key = `symbol`. Matching queues each symbol independently and flushes every 50 ms through a dedicated non-blocking Kafka producer. It preserves FIFO and does not coalesce trades; when one symbol exceeds 10,000 queued events, only that symbol's oldest events are dropped.
+- `surprising.<product-segment>.orderbook.depth.v1`: lossy L2 order-book snapshots, key = `symbol`; only the latest pending snapshot per symbol is retained.
 - `surprising.<product-segment>.mark.price.v1`: mark-price stream consumed by trigger-provider, key = `symbol`.
+
+The public trade/depth path does not read or write the matching database and cannot block or roll back financial processing. Full `MatchTradeEvent` rows remain in `trading_match_trades` for audit and are embedded in the durable `MatchResultEvent`; maker/taker settlement is performed only from durable account commands.
 
 Legacy `surprising.perp.*` topics remain available for backward-compatible single-line perpetual startup.
 

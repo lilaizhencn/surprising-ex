@@ -17,6 +17,7 @@ import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.OrderBookDepthEvent;
 import com.surprising.trading.api.model.OrderEvent;
 import com.surprising.trading.api.model.OrderSide;
+import com.surprising.trading.api.model.PublicTradeEvent;
 import com.surprising.trading.api.model.TriggerOrderUpdatedEvent;
 import com.surprising.websocket.api.model.ExecutionReportEvent;
 import com.surprising.websocket.api.model.SubscriptionTopic;
@@ -243,6 +244,14 @@ public class KafkaFanoutConsumer {
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "match result");
             registry.publish(topic(WsChannel.MATCHES, event.symbol(), event.userId()), event, event.eventTime());
             publishExecutionReport(fromMatchResult(event));
+            for (MatchTradeEvent trade : event.trades()) {
+                registry.publish(topic(WsChannel.MATCHES, trade.symbol(), trade.takerUserId()),
+                        trade, trade.eventTime());
+                registry.publish(topic(WsChannel.MATCHES, trade.symbol(), trade.makerUserId()),
+                        trade, trade.eventTime());
+                publishExecutionReport(fromTakerTrade(trade));
+                publishExecutionReport(fromMakerTrade(trade));
+            }
         } catch (Exception ex) {
             log.error("Failed to fanout match result: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout match result", ex);
@@ -253,19 +262,15 @@ public class KafkaFanoutConsumer {
             topics = "#{__listener.matchTradesTopic()}",
             groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
-    public void onMatchTrade(ConsumerRecord<String, String> record) {
+    public void onPublicTrade(ConsumerRecord<String, String> record) {
         try {
-            requireCurrentProductTopic(record.topic(), matchTradesTopic(), "match trade");
-            MatchTradeEvent event = objectMapper.readValue(record.value(), MatchTradeEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "match trade");
+            requireCurrentProductTopic(record.topic(), matchTradesTopic(), "public trade");
+            PublicTradeEvent event = objectMapper.readValue(record.value(), PublicTradeEvent.class);
+            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "public trade");
             registry.publish(topic(WsChannel.TRADES, event.symbol(), null), event, event.eventTime());
-            registry.publish(topic(WsChannel.MATCHES, event.symbol(), event.takerUserId()), event, event.eventTime());
-            registry.publish(topic(WsChannel.MATCHES, event.symbol(), event.makerUserId()), event, event.eventTime());
-            publishExecutionReport(fromTakerTrade(event));
-            publishExecutionReport(fromMakerTrade(event));
         } catch (Exception ex) {
-            log.error("Failed to fanout match trade: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to fanout match trade", ex);
+            log.error("Failed to fanout public trade: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to fanout public trade", ex);
         }
     }
 

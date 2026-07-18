@@ -54,14 +54,14 @@ Private channels require an authenticated user id. In production the ingress/aut
 | Channel | Public | Required fields | Source topic |
 | --- | --- | --- | --- |
 | `candles` | yes | `symbol`, `period` | `surprising.perp.candle.events.v1` |
-| `trades` | yes | `symbol` | `surprising.perp.trade.events.v1` |
+| `trades` | yes | `symbol` | `surprising.perp.trade.events.v1`, `surprising.perp.match.trades.v1` |
 | `depth` | yes | `symbol` | `surprising.perp.orderbook.depth.v1` |
 | `index` | yes | `symbol` | `surprising.perp.index.price.v1` |
 | `mark` | yes | `symbol` | `surprising.perp.mark.price.v1` |
 | `funding` | yes | `symbol` | `surprising.perp.funding.rate.v1` |
 | `orders` | no | optional `symbol` | `surprising.perp.order.events.v1` |
 | `triggerOrders` | no | optional `symbol` | `surprising.perp.trigger-order.events.v1` |
-| `matches` | no | optional `symbol` | `surprising.perp.match.results.v1`, `surprising.perp.match.trades.v1` |
+| `matches` | no | optional `symbol` | `surprising.perp.match.results.v1` |
 | `positions` | no | optional `symbol` | `surprising.account.position.events.v1` |
 | `positionRisk` | no | optional `symbol` | `surprising.risk.position.events.v1` |
 | `accountRisk` | no | optional `symbol` ignored as wildcard | `surprising.risk.account.events.v1` |
@@ -69,6 +69,8 @@ Private channels require an authenticated user id. In production the ingress/aut
 Private subscriptions without `symbol` use wildcard symbol `*` and receive all events for the authenticated user.
 
 `triggerOrders` carries a full `TriggerOrderUpdatedEvent` wrapper with `eventId`, `productLine`, `order`, `eventTime`, and `traceId`. Clients keep `PENDING`/`TRIGGERING` snapshots in the open list, remove terminal snapshots immediately, ignore replayed or out-of-order `eventId` values, and reload the REST open-trigger snapshot after reconnect.
+
+Matching tick trades reach the public `trades` channel as lightweight, loss-tolerant `PublicTradeEvent` messages. Private `matches` and execution reports are rebuilt only from the durable `MatchResultEvent`, so public Kafka backpressure or dropped market-data events cannot affect user notifications or settlement.
 
 ## Depth Push Flow
 

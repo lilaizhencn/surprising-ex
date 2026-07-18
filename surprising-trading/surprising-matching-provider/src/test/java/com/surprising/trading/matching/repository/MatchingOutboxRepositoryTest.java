@@ -57,12 +57,12 @@ class MatchingOutboxRepositoryTest {
         MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository,
                 properties);
 
-        assertThatThrownBy(() -> repository.enqueue("MATCH_TRADE", 11L,
-                "surprising.linear-delivery.match.trades.v1", "BTC-USDT-260925-70000-C", "TRADE", "{}",
+        assertThatThrownBy(() -> repository.enqueue("MATCH_RESULT", 11L,
+                "surprising.linear-delivery.match.results.v1", "BTC-USDT-260925-70000-C", "PLACE", "{}",
                 Instant.parse("2026-07-01T00:00:00Z")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("matching outbox topic must match current product line")
-                .hasMessageContaining("surprising.option.match.trades.v1");
+                .hasMessageContaining("surprising.option.match.results.v1");
 
         verify(sequenceRepository, never()).nextSequence("outbox");
         verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
@@ -89,7 +89,21 @@ class MatchingOutboxRepositoryTest {
                 "surprising.perp.orderbook.depth.v1", "BTC-USDT", "SNAPSHOT", "{}",
                 Instant.parse("2026-07-01T00:00:00Z")))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("latest-only market data publisher");
+                .hasMessageContaining("dedicated in-memory publisher");
+
+        verify(sequenceRepository, never()).nextSequence("outbox");
+        verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
+    }
+
+    @Test
+    void enqueueRejectsPublicTradeBecauseFinancialOutboxMustStayIsolated() {
+        MatchingOutboxRepository repository = new MatchingOutboxRepository(jdbcTemplate, sequenceRepository);
+
+        assertThatThrownBy(() -> repository.enqueue("MATCH_TRADE", 11L,
+                "surprising.perp.match.trades.v1", "BTC-USDT", "TRADE", "{}",
+                Instant.parse("2026-07-01T00:00:00Z")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("dedicated in-memory publisher");
 
         verify(sequenceRepository, never()).nextSequence("outbox");
         verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
@@ -165,7 +179,6 @@ class MatchingOutboxRepositoryTest {
                 properties);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(),
                 eq("surprising.option.match.results.v1"),
-                eq("surprising.option.match.trades.v1"),
                 eq("surprising.option.account.user.commands.v1"),
                 any(Timestamp.class), eq(100), any(Timestamp.class), any(Timestamp.class)))
                 .thenReturn(List.of());
@@ -176,11 +189,10 @@ class MatchingOutboxRepositoryTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
                 eq("surprising.option.match.results.v1"),
-                eq("surprising.option.match.trades.v1"),
                 eq("surprising.option.account.user.commands.v1"),
                 any(Timestamp.class), eq(100), any(Timestamp.class), any(Timestamp.class));
         assertThat(sql.getValue())
-                .contains("e.topic IN (?, ?, ?)")
+                .contains("e.topic IN (?, ?)")
                 .contains("UPDATE trading_outbox_events")
                 .contains("RETURNING e.id");
     }
@@ -228,7 +240,8 @@ class MatchingOutboxRepositoryTest {
         verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
         assertThat(sql.getValue())
                 .contains("aggregate_type IN")
-                .contains("'MATCH_TRADE', 'MATCH_RESULT', 'ACCOUNT_COMMAND'")
+                .contains("'MATCH_RESULT', 'ACCOUNT_COMMAND'")
+                .doesNotContain("MATCH_TRADE")
                 .doesNotContain("ORDER_BOOK_DEPTH")
                 .contains("published_at < ?")
                 .contains("FOR UPDATE SKIP LOCKED")

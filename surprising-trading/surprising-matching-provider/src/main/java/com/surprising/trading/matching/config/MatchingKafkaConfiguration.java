@@ -71,6 +71,33 @@ public class MatchingKafkaConfiguration {
         return new KafkaTemplate<>(matchingMarketDataProducerFactory);
     }
 
+    @Bean("matchingPublicTradeProducerFactory")
+    public ProducerFactory<String, String> matchingPublicTradeProducerFactory(MatchingProperties properties) {
+        Map<String, Object> config = new HashMap<>();
+        config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
+        config.put(ProducerConfig.CLIENT_ID_CONFIG, properties.getKafka().getClientId() + "-public-trade");
+        config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        config.put(ProducerConfig.ACKS_CONFIG, "1");
+        config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, false);
+        config.put(ProducerConfig.RETRIES_CONFIG, 0);
+        config.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "lz4");
+        config.put(ProducerConfig.LINGER_MS_CONFIG, 25);
+        config.put(ProducerConfig.BATCH_SIZE_CONFIG, 131_072);
+        config.put(ProducerConfig.BUFFER_MEMORY_CONFIG, 67_108_864L);
+        config.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 5L);
+        config.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 1_000);
+        config.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 500);
+        return new DefaultKafkaProducerFactory<>(config);
+    }
+
+    @Bean("matchingPublicTradeKafkaTemplate")
+    public KafkaTemplate<String, String> matchingPublicTradeKafkaTemplate(
+            @Qualifier("matchingPublicTradeProducerFactory")
+            ProducerFactory<String, String> matchingPublicTradeProducerFactory) {
+        return new KafkaTemplate<>(matchingPublicTradeProducerFactory);
+    }
+
     @Bean
     public ConsumerFactory<String, String> matchingConsumerFactory(MatchingProperties properties) {
         Map<String, Object> config = new HashMap<>();

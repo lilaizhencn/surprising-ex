@@ -38,8 +38,8 @@ public class MatchingOutboxRepository {
                         String eventType,
                         String payload,
                         Instant now) {
-        if ("ORDER_BOOK_DEPTH".equals(aggregateType)) {
-            throw new IllegalArgumentException("order-book depth must use the latest-only market data publisher");
+        if ("ORDER_BOOK_DEPTH".equals(aggregateType) || "MATCH_TRADE".equals(aggregateType)) {
+            throw new IllegalArgumentException("public market data must use its dedicated in-memory publisher");
         }
         requireCurrentProductTopic(aggregateType, topic);
         long id = sequenceRepository.nextSequence("outbox");
@@ -61,7 +61,7 @@ public class MatchingOutboxRepository {
                            id
                       FROM trading_outbox_events
                      WHERE published_at IS NULL
-                       AND aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ACCOUNT_COMMAND')
+                       AND aggregate_type IN ('MATCH_RESULT', 'ACCOUNT_COMMAND')
                      ORDER BY topic, event_key, id
                 ),
                 candidates AS (
@@ -69,7 +69,7 @@ public class MatchingOutboxRepository {
                   FROM trading_outbox_events e
                   JOIN earliest c ON c.id = e.id
                  WHERE e.published_at IS NULL
-                   AND e.aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ACCOUNT_COMMAND')
+                   AND e.aggregate_type IN ('MATCH_RESULT', 'ACCOUNT_COMMAND')
                 """);
         appendTopicScope(sql, "e", args);
         sql.append("""
@@ -154,7 +154,7 @@ public class MatchingOutboxRepository {
                     SELECT id
                       FROM trading_outbox_events
                      WHERE aggregate_type IN (
-                               'MATCH_TRADE', 'MATCH_RESULT', 'ACCOUNT_COMMAND'
+                               'MATCH_RESULT', 'ACCOUNT_COMMAND'
                            )
                        AND published_at < ?
                      ORDER BY published_at ASC, id ASC
@@ -179,9 +179,8 @@ public class MatchingOutboxRepository {
         if (!kafka.isProductTopicsEnabled()) {
             return;
         }
-        sql.append("   AND ").append(alias).append(".topic IN (?, ?, ?)\n");
+        sql.append("   AND ").append(alias).append(".topic IN (?, ?)\n");
         args.add(kafka.getMatchResultsTopic());
-        args.add(kafka.getMatchTradesTopic());
         args.add(kafka.getAccountUserCommandsTopic());
     }
 
@@ -191,20 +190,17 @@ public class MatchingOutboxRepository {
             return;
         }
         String matchResultsTopic = kafka.getMatchResultsTopic();
-        String matchTradesTopic = kafka.getMatchTradesTopic();
         String accountUserCommandsTopic = kafka.getAccountUserCommandsTopic();
         if (!matchResultsTopic.equals(topic)
-                && !matchTradesTopic.equals(topic)
                 && !accountUserCommandsTopic.equals(topic)) {
             throw new IllegalStateException("matching outbox topic must match current product line: expected one of ["
-                    + matchResultsTopic + ", " + matchTradesTopic + ", " + accountUserCommandsTopic
+                    + matchResultsTopic + ", " + accountUserCommandsTopic
                     + "] actual=" + topic);
         }
     }
 
     private boolean isMatchingAggregate(String aggregateType) {
-        return "MATCH_TRADE".equals(aggregateType)
-                || "MATCH_RESULT".equals(aggregateType)
+        return "MATCH_RESULT".equals(aggregateType)
                 || "ACCOUNT_COMMAND".equals(aggregateType);
     }
 

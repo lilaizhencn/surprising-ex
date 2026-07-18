@@ -14,10 +14,10 @@ import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import com.surprising.trading.api.model.OrderCommandEvent;
 import com.surprising.trading.api.model.OrderCommandType;
-import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
+import com.surprising.trading.api.model.PublicTradeEvent;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.MatchedOrderSnapshot;
@@ -39,6 +39,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,6 +50,9 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class MatchingService {
 
+    private static final Logger log = LoggerFactory.getLogger(MatchingService.class);
+    private static final long PUBLIC_TRADE_SEQUENCE_MULTIPLIER = 1_000_000L;
+
     private final ObjectMapper objectMapper;
     private final MatchingProperties properties;
     private final ExchangeCoreEngine exchangeCoreEngine;
@@ -56,6 +61,7 @@ public class MatchingService {
     private final MatchingResultRepository resultRepository;
     private final MatchingOutboxRepository outboxRepository;
     private final OrderBookDepthPublisher depthPublisher;
+    private final PublicTradePublisher tradePublisher;
     private final Map<String, DepthState> depthStates = new ConcurrentHashMap<>();
 
     @Autowired
@@ -66,7 +72,8 @@ public class MatchingService {
                            MatchingSequenceRepository sequenceRepository,
                            MatchingResultRepository resultRepository,
                            MatchingOutboxRepository outboxRepository,
-                           OrderBookDepthPublisher depthPublisher) {
+                           OrderBookDepthPublisher depthPublisher,
+                           PublicTradePublisher tradePublisher) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.exchangeCoreEngine = exchangeCoreEngine;
@@ -75,6 +82,7 @@ public class MatchingService {
         this.resultRepository = resultRepository;
         this.outboxRepository = outboxRepository;
         this.depthPublisher = depthPublisher;
+        this.tradePublisher = tradePublisher;
     }
 
     MatchingService(ObjectMapper objectMapper,
@@ -85,7 +93,7 @@ public class MatchingService {
                     MatchingResultRepository resultRepository,
                     MatchingOutboxRepository outboxRepository) {
         this(objectMapper, properties, exchangeCoreEngine, protectionRepository, sequenceRepository,
-                resultRepository, outboxRepository, OrderBookDepthPublisher.NOOP);
+                resultRepository, outboxRepository, OrderBookDepthPublisher.NOOP, PublicTradePublisher.NOOP);
     }
 
     @Transactional
@@ -128,6 +136,7 @@ public class MatchingService {
 
         OrderCommand response = exchangeCoreEngine.submit(command, symbol, effectivePriceTicks);
         publishOrderBookDepth(symbol, response.resultCode, now);
+        publishPublicTrades(command, response, now);
         MatchResultEvent result = toResultEvent(command, response, now);
         saveAndPublish(result);
     }
@@ -289,8 +298,6 @@ public class MatchingService {
                 continue;
             }
             resultRepository.applyMakerFill(trade);
-            outboxRepository.enqueue("MATCH_TRADE", trade.tradeId(), properties.getKafka().getMatchTradesTopic(),
-                    trade.symbol(), OrderEventType.ACCEPTED.name(), payload(trade), trade.eventTime());
             enqueueAccountTradeSide(trade, TradeParticipantRole.TAKER);
             enqueueAccountTradeSide(trade, TradeParticipantRole.MAKER);
         }
@@ -303,9 +310,44 @@ public class MatchingService {
         if (symbol == null || resultCode != CommandResultCode.SUCCESS) {
             return;
         }
-        OrderBookDepthEvent depthEvent = orderBookDepthSnapshot(symbol, eventTime);
-        if (depthEvent != null) {
-            depthPublisher.offer(depthEvent);
+        try {
+            OrderBookDepthEvent depthEvent = orderBookDepthSnapshot(symbol, eventTime);
+            if (depthEvent != null) {
+                depthPublisher.offer(depthEvent);
+            }
+        } catch (RuntimeException error) {
+            log.warn("Public depth publication isolated from financial processing symbol={}: {}",
+                    symbol.symbol(), error.getMessage());
+        }
+    }
+
+    private void publishPublicTrades(OrderCommandEvent command, OrderCommand response, Instant eventTime) {
+        if (response.resultCode != CommandResultCode.SUCCESS) {
+            return;
+        }
+        int[] matchIndex = {0};
+        try {
+            response.processMatcherEvents(event -> {
+                if (event.eventType != MatcherEventType.TRADE) {
+                    return;
+                }
+                int index = Math.incrementExact(matchIndex[0]);
+                long sequence = Math.addExact(
+                        Math.multiplyExact(command.commandId(), PUBLIC_TRADE_SEQUENCE_MULTIPLIER), index);
+                tradePublisher.offer(new PublicTradeEvent(
+                        command.commandId() + ":" + index,
+                        sequence,
+                        command.symbol(),
+                        command.instrumentVersion(),
+                        command.side(),
+                        event.price,
+                        event.size,
+                        eventTime,
+                        command.traceId()));
+            });
+        } catch (RuntimeException error) {
+            log.warn("Public trade publication isolated from financial processing symbol={} commandId={}: {}",
+                    command.symbol(), command.commandId(), error.getMessage());
         }
     }
 

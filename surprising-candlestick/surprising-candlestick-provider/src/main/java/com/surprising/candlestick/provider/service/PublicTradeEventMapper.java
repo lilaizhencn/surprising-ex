@@ -3,7 +3,7 @@ package com.surprising.candlestick.provider.service;
 import com.surprising.candlestick.api.model.TradeEvent;
 import com.surprising.candlestick.api.model.TradeSide;
 import com.surprising.candlestick.provider.aggregation.CandleKey;
-import com.surprising.trading.api.model.MatchTradeEvent;
+import com.surprising.trading.api.model.PublicTradeEvent;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Map;
@@ -12,51 +12,53 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
-public class MatchTradeEventMapper {
+public class PublicTradeEventMapper {
 
     private static final int DISPLAY_SCALE = 18;
-    private static final long SEQUENCE_TIME_MULTIPLIER = 1_000_000L;
 
     private final JdbcTemplate jdbcTemplate;
     private final Map<InstrumentKey, InstrumentScale> scales = new ConcurrentHashMap<>();
 
-    public MatchTradeEventMapper(JdbcTemplate jdbcTemplate) {
+    public PublicTradeEventMapper(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public TradeEvent toTradeEvent(MatchTradeEvent matchTrade) {
-        if (matchTrade == null) {
-            throw new IllegalArgumentException("match trade is required");
+    public TradeEvent toTradeEvent(PublicTradeEvent publicTrade) {
+        if (publicTrade == null) {
+            throw new IllegalArgumentException("public trade is required");
         }
-        String symbol = CandleKey.normalizeSymbol(matchTrade.symbol());
-        if (matchTrade.tradeId() < 0) {
-            throw new IllegalArgumentException("match trade id must be non-negative");
+        String symbol = CandleKey.normalizeSymbol(publicTrade.symbol());
+        if (publicTrade.tradeId() == null || publicTrade.tradeId().isBlank()) {
+            throw new IllegalArgumentException("public trade id is required");
         }
-        if (matchTrade.priceTicks() <= 0 || matchTrade.quantitySteps() <= 0) {
-            throw new IllegalArgumentException("match trade price and quantity must be positive");
+        if (publicTrade.sequence() < 0) {
+            throw new IllegalArgumentException("public trade sequence must be non-negative");
         }
-        if (matchTrade.eventTime() == null) {
-            throw new IllegalArgumentException("match trade eventTime is required");
+        if (publicTrade.priceTicks() <= 0 || publicTrade.quantitySteps() <= 0) {
+            throw new IllegalArgumentException("public trade price and quantity must be positive");
+        }
+        if (publicTrade.eventTime() == null) {
+            throw new IllegalArgumentException("public trade eventTime is required");
         }
 
-        InstrumentScale scale = scale(symbol, matchTrade.takerInstrumentVersion());
-        BigDecimal price = toDecimal(matchTrade.priceTicks(), scale.priceTickUnits(), scale.quoteScaleUnits());
-        BigDecimal quantity = toDecimal(matchTrade.quantitySteps(), scale.quantityStepUnits(), scale.baseScaleUnits());
+        InstrumentScale scale = scale(symbol, publicTrade.instrumentVersion());
+        BigDecimal price = toDecimal(publicTrade.priceTicks(), scale.priceTickUnits(), scale.quoteScaleUnits());
+        BigDecimal quantity = toDecimal(publicTrade.quantitySteps(), scale.quantityStepUnits(), scale.baseScaleUnits());
         return new TradeEvent(
                 symbol,
-                Long.toString(matchTrade.tradeId()),
-                sequence(matchTrade),
-                matchTrade.eventTime(),
+                publicTrade.tradeId(),
+                publicTrade.sequence(),
+                publicTrade.eventTime(),
                 price,
                 quantity,
-                side(matchTrade.takerSide() == null ? null : matchTrade.takerSide().name()),
-                Long.toString(matchTrade.makerOrderId()),
-                Long.toString(matchTrade.takerOrderId()));
+                side(publicTrade.takerSide() == null ? null : publicTrade.takerSide().name()),
+                null,
+                null);
     }
 
     private InstrumentScale scale(String symbol, long instrumentVersion) {
         if (instrumentVersion <= 0) {
-            throw new IllegalArgumentException("match trade instrument version must be positive");
+            throw new IllegalArgumentException("public trade instrument version must be positive");
         }
         return scales.computeIfAbsent(new InstrumentKey(symbol, instrumentVersion), this::loadScale);
     }
@@ -101,11 +103,6 @@ public class MatchTradeEventMapper {
         } catch (IllegalArgumentException ex) {
             return TradeSide.UNKNOWN;
         }
-    }
-
-    private long sequence(MatchTradeEvent matchTrade) {
-        long timeSequence = Math.multiplyExact(matchTrade.eventTime().toEpochMilli(), SEQUENCE_TIME_MULTIPLIER);
-        return Math.addExact(timeSequence, Math.floorMod(matchTrade.tradeId(), SEQUENCE_TIME_MULTIPLIER));
     }
 
     private record InstrumentKey(String symbol, long instrumentVersion) {

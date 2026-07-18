@@ -17,6 +17,7 @@ import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PositionSide;
+import com.surprising.trading.api.model.PublicTradeEvent;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.InstrumentSymbol;
@@ -43,7 +44,7 @@ import org.junit.jupiter.api.Test;
 class MatchingServiceTest {
 
     @Test
-    void emitsVersionedTradeEventsFromExchangeCoreMatchesAndSkipsDuplicateCommands() throws Exception {
+    void isolatesPublicTradeFailureWhileCompletingFinancialMatchProcessing() throws Exception {
         MatchingProperties properties = new MatchingProperties();
         properties.getEngine().setExchangeId("matching-service-test");
         properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
@@ -58,9 +59,10 @@ class MatchingServiceTest {
         FakeResultRepository resultRepository = new FakeResultRepository();
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
         FakeDepthPublisher depthPublisher = new FakeDepthPublisher();
+        FakePublicTradePublisher tradePublisher = new FakePublicTradePublisher(true);
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
                 new FakeProtectionRepository(), sequenceRepository, resultRepository, outboxRepository,
-                depthPublisher);
+                depthPublisher, tradePublisher);
 
         try {
             engine.start();
@@ -106,14 +108,14 @@ class MatchingServiceTest {
             assertThat(trade.traceId()).isEqualTo("trace-taker-502");
             assertThat(outboxRepository.records)
                     .extracting(OutboxRecord::aggregateType)
-                    .containsExactly("MATCH_RESULT", "MATCH_TRADE", "ACCOUNT_COMMAND", "ACCOUNT_COMMAND",
+                    .containsExactly("MATCH_RESULT", "ACCOUNT_COMMAND", "ACCOUNT_COMMAND",
                             "ACCOUNT_COMMAND", "MATCH_RESULT");
             AccountUserCommand takerSettlement = new ObjectMapper().readValue(
-                    outboxRepository.records.get(2).payload(), AccountUserCommand.class);
+                    outboxRepository.records.get(1).payload(), AccountUserCommand.class);
             AccountUserCommand makerSettlement = new ObjectMapper().readValue(
-                    outboxRepository.records.get(3).payload(), AccountUserCommand.class);
+                    outboxRepository.records.get(2).payload(), AccountUserCommand.class);
             AccountUserCommand takerRelease = new ObjectMapper().readValue(
-                    outboxRepository.records.get(4).payload(), AccountUserCommand.class);
+                    outboxRepository.records.get(3).payload(), AccountUserCommand.class);
             assertThat(takerSettlement.commandType()).isEqualTo(AccountUserCommandType.TRADE_SIDE_SETTLE);
             assertThat(takerSettlement.partitionKey()).isEqualTo("LINEAR_PERPETUAL:2002");
             assertThat(new ObjectMapper().readValue(
@@ -126,6 +128,16 @@ class MatchingServiceTest {
                     .isEqualTo(TradeParticipantRole.MAKER);
             assertThat(takerRelease.commandType()).isEqualTo(AccountUserCommandType.ORDER_RELEASE);
             assertThat(takerRelease.dependsOnCommandId()).isEqualTo(takerSettlement.commandId());
+            assertThat(tradePublisher.events).singleElement().satisfies(publicTrade -> {
+                assertThat(publicTrade.tradeId()).isEqualTo("502:1");
+                assertThat(publicTrade.sequence()).isEqualTo(502_000_001L);
+                assertThat(publicTrade.symbol()).isEqualTo("BTC-USDT");
+                assertThat(publicTrade.instrumentVersion()).isEqualTo(7L);
+                assertThat(publicTrade.takerSide()).isEqualTo(OrderSide.BUY);
+                assertThat(publicTrade.priceTicks()).isEqualTo(100L);
+                assertThat(publicTrade.quantitySteps()).isEqualTo(3L);
+                assertThat(publicTrade.traceId()).isEqualTo("trace-taker-502");
+            });
             assertThat(depthPublisher.events).hasSize(2);
             OrderBookDepthEvent depth = depthPublisher.events.get(1);
             assertThat(depth.symbol()).isEqualTo("BTC-USDT");
@@ -273,7 +285,7 @@ class MatchingServiceTest {
         FakeDepthPublisher depthPublisher = new FakeDepthPublisher();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
                 new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository, outboxRepository,
-                depthPublisher);
+                depthPublisher, PublicTradePublisher.NOOP);
 
         try {
             engine.start();
@@ -293,7 +305,7 @@ class MatchingServiceTest {
     }
 
     @Test
-    void skipsMakerFillAndTradeOutboxWhenMatchTradeIsDuplicate() throws Exception {
+    void keepsPublicTradeIndependentWhenFinancialTradePersistenceIsDuplicate() throws Exception {
         MatchingProperties properties = new MatchingProperties();
         properties.getEngine().setExchangeId("matching-service-trade-replay-test");
         properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
@@ -306,8 +318,10 @@ class MatchingServiceTest {
                 new FakeRecoveryRepository());
         FakeResultRepository resultRepository = new FakeResultRepository();
         FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
+        FakePublicTradePublisher tradePublisher = new FakePublicTradePublisher();
         MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
-                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository, outboxRepository);
+                new FakeProtectionRepository(), new FakeSequenceRepository(), resultRepository, outboxRepository,
+                OrderBookDepthPublisher.NOOP, tradePublisher);
 
         try {
             engine.start();
@@ -323,6 +337,8 @@ class MatchingServiceTest {
             assertThat(resultRepository.results).hasSize(2);
             assertThat(resultRepository.trades).isEmpty();
             assertThat(resultRepository.makerFillUpdates).isZero();
+            assertThat(tradePublisher.events).singleElement()
+                    .satisfies(event -> assertThat(event.tradeId()).isEqualTo("502:1"));
             assertThat(outboxRepository.records)
                     .extracting(OutboxRecord::aggregateType)
                     .containsExactly("MATCH_RESULT", "ACCOUNT_COMMAND", "MATCH_RESULT");
@@ -607,6 +623,27 @@ class MatchingServiceTest {
         @Override
         public void offer(OrderBookDepthEvent event) {
             events.add(event);
+        }
+    }
+
+    private static final class FakePublicTradePublisher implements PublicTradePublisher {
+        private final List<PublicTradeEvent> events = new ArrayList<>();
+        private final boolean failAfterOffer;
+
+        private FakePublicTradePublisher() {
+            this(false);
+        }
+
+        private FakePublicTradePublisher(boolean failAfterOffer) {
+            this.failAfterOffer = failAfterOffer;
+        }
+
+        @Override
+        public void offer(PublicTradeEvent event) {
+            events.add(event);
+            if (failAfterOffer) {
+                throw new IllegalStateException("public Kafka queue unavailable");
+            }
         }
     }
 

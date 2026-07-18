@@ -28,6 +28,7 @@ import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PositionSide;
+import com.surprising.trading.api.model.PublicTradeEvent;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.TriggerCondition;
 import com.surprising.trading.api.model.TriggerOrderResponse;
@@ -195,33 +196,50 @@ class KafkaFanoutConsumerTest {
     }
 
     @Test
-    void fansOutMatchTradeToPublicTradesAndPrivateMatches() throws Exception {
+    void fansOutPublicTradeWithoutPrivateFinancialData() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
-        MatchTradeEvent event = new MatchTradeEvent(91L, 11L, "BTC-USDT", 202L, 7L,
-                2002L, OrderSide.BUY, MarginMode.CROSS, 101L, 5L, 1001L, MarginMode.CROSS,
-                5L, 2L, 600_000L, 3L, true, false, eventTime, "trace-trade-1");
+        PublicTradeEvent event = new PublicTradeEvent("11:1", 11_000_001L, "BTC-USDT", 7L,
+                OrderSide.BUY, 600_000L, 3L, eventTime, "trace-trade-1");
 
-        consumer.onMatchTrade(new ConsumerRecord<>("surprising.perp.match.trades.v1", 0, 0L,
+        consumer.onPublicTrade(new ConsumerRecord<>("surprising.perp.match.trades.v1", 0, 0L,
                 "BTC-USDT", objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
-        verify(registry, org.mockito.Mockito.times(5)).publish(topic.capture(), payload.capture(), eq(eventTime));
-        assertThat(topic.getAllValues().get(0).channel()).isEqualTo(WsChannel.TRADES);
-        assertThat(topic.getAllValues().get(0).userId()).isNull();
-        assertThat(topic.getAllValues().get(1).channel()).isEqualTo(WsChannel.MATCHES);
-        assertThat(topic.getAllValues().get(1).userId()).isEqualTo(2002L);
-        assertThat(topic.getAllValues().get(2).channel()).isEqualTo(WsChannel.MATCHES);
-        assertThat(topic.getAllValues().get(2).userId()).isEqualTo(1001L);
-        assertThat(topic.getAllValues().get(3).channel()).isEqualTo(WsChannel.EXECUTION_REPORTS);
-        assertThat(topic.getAllValues().get(3).userId()).isEqualTo(2002L);
-        assertThat(topic.getAllValues().get(4).channel()).isEqualTo(WsChannel.EXECUTION_REPORTS);
-        assertThat(topic.getAllValues().get(4).userId()).isEqualTo(1001L);
-        assertThat(payload.getAllValues().subList(0, 3)).containsOnly(event);
-        ExecutionReportEvent takerReport = (ExecutionReportEvent) payload.getAllValues().get(3);
-        ExecutionReportEvent makerReport = (ExecutionReportEvent) payload.getAllValues().get(4);
+        verify(registry).publish(topic.capture(), payload.capture(), eq(eventTime));
+        assertThat(topic.getValue().channel()).isEqualTo(WsChannel.TRADES);
+        assertThat(topic.getValue().userId()).isNull();
+        assertThat(payload.getValue()).isEqualTo(event);
+    }
+
+    @Test
+    void fansOutPrivateFinancialTradesOnlyFromDurableMatchResult() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        MatchTradeEvent trade = new MatchTradeEvent(91L, 11L, "BTC-USDT", 202L, 7L,
+                2002L, OrderSide.BUY, MarginMode.CROSS, 101L, 5L, 1001L, MarginMode.CROSS,
+                5L, 2L, 600_000L, 3L, true, false, eventTime, "trace-trade-1");
+        MatchResultEvent result = new MatchResultEvent(11L, 202L, 2002L, "BTC-USDT", 7L,
+                OrderCommandType.PLACE, "SUCCESS", 3L, OrderStatus.FILLED, eventTime, List.of(trade),
+                "trace-trade-1");
+
+        consumer.onMatchResult(new ConsumerRecord<>("surprising.perp.match.results.v1", 0, 0L,
+                "BTC-USDT", objectMapper.writeValueAsString(result)));
+
+        ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
+        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+        verify(registry, org.mockito.Mockito.times(6)).publish(topic.capture(), payload.capture(), eq(eventTime));
+        assertThat(topic.getAllValues()).extracting(SubscriptionTopic::channel)
+                .containsExactly(WsChannel.MATCHES, WsChannel.EXECUTION_REPORTS,
+                        WsChannel.MATCHES, WsChannel.MATCHES,
+                        WsChannel.EXECUTION_REPORTS, WsChannel.EXECUTION_REPORTS);
+        assertThat(topic.getAllValues().get(2).userId()).isEqualTo(2002L);
+        assertThat(topic.getAllValues().get(3).userId()).isEqualTo(1001L);
+        ExecutionReportEvent takerReport = (ExecutionReportEvent) payload.getAllValues().get(4);
+        ExecutionReportEvent makerReport = (ExecutionReportEvent) payload.getAllValues().get(5);
         assertThat(takerReport.reportType()).isEqualTo("TRADE");
         assertThat(takerReport.liquidityRole()).isEqualTo("TAKER");
         assertThat(takerReport.side()).isEqualTo("BUY");

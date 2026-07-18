@@ -413,7 +413,8 @@ public class GatewayProperties {
         private static List<KafkaConsumerGroup> defaultKafkaConsumerGroups() {
             return List.of(
                     new KafkaConsumerGroup("surprising-matching-v1", List.of("surprising.perp.order.commands.v1")),
-                    new KafkaConsumerGroup("surprising-account-v1", List.of("surprising.perp.match.trades.v1")),
+                    new KafkaConsumerGroup("surprising-linear-perp-account-user-command-v1",
+                            List.of("surprising.linear-perp.account.user.commands.v1")),
                     new KafkaConsumerGroup("surprising-risk-v1", List.of("surprising.account.position.events.v1")),
                     new KafkaConsumerGroup("surprising-liquidation-v1", List.of(
                             "surprising.perp.liquidation.candidates.v1",
@@ -437,8 +438,8 @@ public class GatewayProperties {
             return List.of(
                     new KafkaConsumerGroup(topics.consumerGroup("matching"),
                             List.of(topics.orderCommandsTopic())),
-                    new KafkaConsumerGroup(topics.consumerGroup("account"),
-                            List.of(topics.matchTradesTopic())),
+                    new KafkaConsumerGroup(topics.consumerGroup("account-user-command"),
+                            List.of(topics.accountUserCommandsTopic())),
                     new KafkaConsumerGroup(topics.consumerGroup("risk"),
                             List.of(topics.accountPositionEventsTopic())),
                     new KafkaConsumerGroup(topics.consumerGroup("liquidation"),

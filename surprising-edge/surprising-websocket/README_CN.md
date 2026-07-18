@@ -54,14 +54,14 @@
 | 频道 | 公共频道 | 必填字段 | 来源 topic |
 | --- | --- | --- | --- |
 | `candles` | 是 | `symbol`, `period` | `surprising.perp.candle.events.v1` |
-| `trades` | 是 | `symbol` | `surprising.perp.trade.events.v1` |
+| `trades` | 是 | `symbol` | `surprising.perp.trade.events.v1`, `surprising.perp.match.trades.v1` |
 | `depth` | 是 | `symbol` | `surprising.perp.orderbook.depth.v1` |
 | `index` | 是 | `symbol` | `surprising.perp.index.price.v1` |
 | `mark` | 是 | `symbol` | `surprising.perp.mark.price.v1` |
 | `funding` | 是 | `symbol` | `surprising.perp.funding.rate.v1` |
 | `orders` | 否 | 可选 `symbol` | `surprising.perp.order.events.v1` |
 | `triggerOrders` | 否 | 可选 `symbol` | `surprising.perp.trigger-order.events.v1` |
-| `matches` | 否 | 可选 `symbol` | `surprising.perp.match.results.v1`, `surprising.perp.match.trades.v1` |
+| `matches` | 否 | 可选 `symbol` | `surprising.perp.match.results.v1` |
 | `positions` | 否 | 可选 `symbol` | `surprising.account.position.events.v1` |
 | `positionRisk` | 否 | 可选 `symbol` | `surprising.risk.position.events.v1` |
 | `accountRisk` | 否 | 可选 `symbol` 会按通配符处理 | `surprising.risk.account.events.v1` |
@@ -69,6 +69,8 @@
 私有订阅不传 `symbol` 时使用通配符 `*`，表示接收该认证用户的所有相关事件。
 
 `triggerOrders` 推送完整的 `TriggerOrderUpdatedEvent` 包装，包含 `eventId`、`productLine`、`order`、`eventTime` 和 `traceId`。客户端把 `PENDING`/`TRIGGERING` 快照保留在开放条件单列表，收到终态立即移除；重复或乱序 `eventId` 必须忽略，重连后要重新拉 REST 开放条件单快照。
+
+撮合逐笔以轻量、允许丢失的 `PublicTradeEvent` 进入公共 `trades` 频道。私有 `matches` 和成交回报只从可靠的 `MatchResultEvent` 重建，因此公共 Kafka 背压或行情消息丢失不会影响用户通知与资金结算。
 
 ## 盘口深度推送链路
 

@@ -655,9 +655,9 @@ surprising:
           - group-id: surprising-matching-v1
             topics:
               - surprising.perp.order.commands.v1
-          - group-id: surprising-account-v1
+          - group-id: surprising-linear-perp-account-user-command-v1
             topics:
-              - surprising.perp.match.trades.v1
+              - surprising.linear-perp.account.user.commands.v1
           - group-id: surprising-risk-v1
             topics:
               - surprising.account.position.events.v1

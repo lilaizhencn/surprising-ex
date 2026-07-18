@@ -13,7 +13,8 @@ Surprising Exchange 合约 K 线服务。
 
 K 线服务按多节点部署设计，采用分区化行情数据流水线：
 
-- 撮合模块把 `MatchTradeEvent` JSON 写入 Kafka topic：`surprising.perp.match.trades.v1`。
+- 撮合模块直接从 exchange-core 生成轻量 `PublicTradeEvent` JSON，写入 Kafka topic：`surprising.perp.match.trades.v1`，不依赖数据库或 outbox。
+- matching 按 symbol 使用独立有界 FIFO，每 50ms 刷新一次。公共行情流在队列溢出或 Kafka 故障时允许少量丢失；资金结算走另一条可靠的账户命令链路。
 - Kafka record key 必须是标准化后的交易对，例如 `BTC-USDT`。
 - Kafka partition 在多个服务节点之间分配 symbol，不采用“一个合约一个线程”的模型。
 - Kafka Streams 使用 RocksDB state store 保存热 K 线状态、成交幂等状态、待落库 dirty snapshot、每个 symbol 的最新 sequence。

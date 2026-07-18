@@ -18,11 +18,10 @@ public class OpenOrderViewConsumer {
     @KafkaListener(topics="#{__listener.orderEventsTopic()}",groupId="#{__listener.groupId()}", containerFactory="orderOpenViewKafkaListenerContainerFactory")
     public void onOrder(ConsumerRecord<String,String> record)throws Exception{project(mapper.readValue(record.value(),OrderEvent.class).orderId());}
     @KafkaListener(topics="#{__listener.matchResultsTopic()}",groupId="#{__listener.groupId()}", containerFactory="orderOpenViewKafkaListenerContainerFactory")
-    public void onMatch(ConsumerRecord<String,String> record)throws Exception{project(mapper.readValue(record.value(),MatchResultEvent.class).orderId());}
-    @KafkaListener(topics="#{__listener.matchTradesTopic()}",groupId="#{__listener.groupId()}", containerFactory="orderOpenViewKafkaListenerContainerFactory")
-    public void onTrade(ConsumerRecord<String,String> record)throws Exception{
-        MatchTradeEvent trade=mapper.readValue(record.value(),MatchTradeEvent.class);
-        project(trade.takerOrderId()); project(trade.makerOrderId());
+    public void onMatch(ConsumerRecord<String,String> record)throws Exception{
+        MatchResultEvent result=mapper.readValue(record.value(),MatchResultEvent.class);
+        project(result.orderId());
+        for(MatchTradeEvent trade:result.trades()){project(trade.makerOrderId());}
     }
     private void project(long id){
         repository.findByOrderId(id)
@@ -31,6 +30,5 @@ public class OpenOrderViewConsumer {
     }
     public String orderEventsTopic(){return properties.getKafka().getOrderEventsTopic();}
     public String matchResultsTopic(){return properties.getKafka().getMatchResultsTopic();}
-    public String matchTradesTopic(){return properties.getKafka().getMatchTradesTopic();}
     public String groupId(){return properties.getKafka().getOpenOrderViewGroupId();}
 }

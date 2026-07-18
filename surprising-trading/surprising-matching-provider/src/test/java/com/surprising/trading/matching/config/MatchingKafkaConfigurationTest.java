@@ -64,6 +64,27 @@ class MatchingKafkaConfigurationTest {
     }
 
     @Test
+    void publicTradeProducerBatchesIndependentlyFromFinancialPublishing() {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setBootstrapServers("kafka-trades:9092");
+        properties.getKafka().setClientId("matching-node-trades");
+
+        var factory = (DefaultKafkaProducerFactory<String, String>)
+                new MatchingKafkaConfiguration().matchingPublicTradeProducerFactory(properties);
+
+        Map<String, Object> config = factory.getConfigurationProperties();
+        assertThat(config).containsEntry(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka-trades:9092");
+        assertThat(config).containsEntry(ProducerConfig.CLIENT_ID_CONFIG,
+                "matching-node-trades-public-trade");
+        assertThat(config).containsEntry(ProducerConfig.ACKS_CONFIG, "1");
+        assertThat(config).containsEntry(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, false);
+        assertThat(config).containsEntry(ProducerConfig.RETRIES_CONFIG, 0);
+        assertThat(config).containsEntry(ProducerConfig.LINGER_MS_CONFIG, 25);
+        assertThat(config).containsEntry(ProducerConfig.BATCH_SIZE_CONFIG, 131_072);
+        assertThat(config).containsEntry(ProducerConfig.MAX_BLOCK_MS_CONFIG, 5L);
+    }
+
+    @Test
     void consumerUsesReplaySafeRecordAckSettings() {
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setBootstrapServers("kafka-c:9092");

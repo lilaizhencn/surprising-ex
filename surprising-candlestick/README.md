@@ -13,7 +13,8 @@ Perpetual candlestick service for Surprising Exchange.
 
 The candlestick service is designed for multi-node deployment and follows a partitioned market-data pipeline:
 
-- The matching service produces `MatchTradeEvent` JSON to Kafka topic `surprising.perp.match.trades.v1`.
+- The matching service produces lightweight `PublicTradeEvent` JSON directly from exchange-core to Kafka topic `surprising.perp.match.trades.v1`, without a database or outbox dependency.
+- Matching keeps an independent bounded FIFO per symbol and flushes every 50 ms. This public market-data stream is intentionally lossy under overflow or Kafka failure; financial settlement uses a separate durable account-command path.
 - Kafka record key must be the normalized symbol, for example `BTC-USDT`.
 - Kafka partitions distribute symbols across service nodes. There is no one-thread-per-symbol model.
 - Kafka Streams uses RocksDB state stores for hot candle state, trade idempotency, dirty snapshots, and latest sequence per symbol.

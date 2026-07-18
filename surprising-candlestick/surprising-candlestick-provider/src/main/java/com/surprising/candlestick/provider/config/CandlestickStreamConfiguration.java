@@ -6,9 +6,9 @@ import com.surprising.candlestick.provider.aggregation.CandleAggregationProcesso
 import com.surprising.candlestick.provider.aggregation.CandleSink;
 import com.surprising.candlestick.provider.aggregation.CandleSnapshot;
 import com.surprising.candlestick.provider.aggregation.CandleStores;
-import com.surprising.candlestick.provider.service.MatchTradeEventMapper;
+import com.surprising.candlestick.provider.service.PublicTradeEventMapper;
 import com.surprising.candlestick.provider.service.SymbolRegistryService;
-import com.surprising.trading.api.model.MatchTradeEvent;
+import com.surprising.trading.api.model.PublicTradeEvent;
 import java.util.HashMap;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -84,9 +84,9 @@ public class CandlestickStreamConfiguration {
             CandlestickProperties properties,
             CandleSink candleSink,
             SymbolRegistryService symbolRegistryService,
-            MatchTradeEventMapper tradeEventMapper) {
+            PublicTradeEventMapper tradeEventMapper) {
 
-        Serde<MatchTradeEvent> tradeSerde = jsonSerde(MatchTradeEvent.class);
+        Serde<PublicTradeEvent> tradeSerde = jsonSerde(PublicTradeEvent.class);
         Serde<CandleUpdatedEvent> updateSerde = jsonSerde(CandleUpdatedEvent.class);
         Serde<CandleAccumulator> accumulatorSerde = jsonSerde(CandleAccumulator.class);
         Serde<CandleSnapshot> snapshotSerde = jsonSerde(CandleSnapshot.class);

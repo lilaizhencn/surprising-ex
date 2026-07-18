@@ -46,7 +46,8 @@ client / internal gateway
   -> surprising.<product-segment>.order.commands.v1
   -> surprising-matching-provider / exchange-core
   -> trading_match_results / trading_match_trades
-  -> surprising.<product-segment>.match.results.v1 / surprising.<product-segment>.match.trades.v1
+  -> 可靠资金链路：match.results.v1 + account.user.commands.v1
+  -> 内存公共行情链路：match.trades.v1 + orderbook.depth.v1
 ```
 
 止盈止损走独立链路：
@@ -284,10 +285,13 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
 - `surprising.<product-segment>.order.commands.v1`：订单撮合命令，key = `symbol`。
 - `surprising.<product-segment>.order.events.v1`：订单入口事件，key = `symbol`。
-- `surprising.<product-segment>.match.results.v1`：撮合结果，key = `symbol`。
-- `surprising.<product-segment>.match.trades.v1`：撮合成交，key = `symbol`，价格和数量仍然是 long tick/step。
-- `surprising.<product-segment>.orderbook.depth.v1`：L2 盘口深度更新，key = `symbol`。
+- `surprising.<product-segment>.match.results.v1`：可靠撮合结果，key = `symbol`；私有成交和开放订单投影只消费这条链路。
+- `surprising.<product-segment>.account.user.commands.v1`：matching outbox 产生的可靠用户资金命令；账户结算绝不消费公共逐笔流。
+- `surprising.<product-segment>.match.trades.v1`：供 WebSocket 公共逐笔与 K 线计算使用的可丢失 `PublicTradeEvent`，key = `symbol`。matching 按 symbol 使用独立队列，每 50ms 由专用非阻塞 Kafka producer 批量刷新；逐笔保持 FIFO、不合并，同一 symbol 排队超过 10,000 条时只丢弃该 symbol 最旧的消息。
+- `surprising.<product-segment>.orderbook.depth.v1`：可丢失的 L2 盘口快照，key = `symbol`；每个 symbol 只保留最新一份待发送快照。
 - `surprising.<product-segment>.mark.price.v1`：trigger-provider 消费的标记价格流，key = `symbol`。
+
+公共逐笔/盘口链路不读写 matching 数据库，也不能阻塞或回滚资金处理。完整 `MatchTradeEvent` 仍落在 `trading_match_trades` 用于审计，并包含在可靠的 `MatchResultEvent` 中；maker/taker 结算只通过可靠的账户命令执行。
 
 legacy `surprising.perp.*` topic 仍保留，用于兼容单线永续启动。
 
