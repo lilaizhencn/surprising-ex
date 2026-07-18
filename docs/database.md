@@ -695,14 +695,16 @@ so later position-margin releases cannot over-credit available balance.
   creates a new `account_deficits` row. Insurance fund income is driven only by these collected
   amounts, not by liquidation estimates.
 
-The account provider deduplicates `trading_match_trades` with `account_processed_trades(symbol, trade_id)`.
+The account provider executes every maker/taker side through `account_commands`. The immutable
+command id and envelope SHA-256 provide execution idempotency, while
+`account_trade_settlements(product_line, symbol, trade_id)` records bilateral completion.
 All balance and margin transitions run inside one PostgreSQL transaction and lock the affected
 position/margin rows with `FOR UPDATE`. Position, balance, deficit, ledger, reservation, and
 position-margin writes are fail-fast when an expected row is not written.
-For `TRADE_PNL` and `TRADE_FEE`, both the ledger insert and the balance-after backfill must touch one row; trade
-deduplication is handled by `account_processed_trades(symbol, trade_id)`, not by skipping trade ledger
-conflicts. `LIQUIDATION_FEE` uses `tradeId:orderId` as the reference id and is emitted to the
-insurance fund only after the balance debit succeeds.
+For `TRADE_PNL` and `TRADE_FEE`, both the ledger insert and the balance-after backfill must touch one
+row; command idempotency is checked before dispatch, and ledger conflicts are never silently skipped.
+`LIQUIDATION_FEE` uses `tradeId:orderId` as the reference id and is emitted to the insurance fund
+only after the balance debit succeeds.
 Manual isolated-margin transfers write `account_ledger_entries.reference_type = POSITION_MARGIN_ADJUSTMENT`
 with signed `amount_units`: positive means collateral added to the position, negative means collateral
 released from the position. The unique `account_ledger_reference_uidx` makes these requests idempotent

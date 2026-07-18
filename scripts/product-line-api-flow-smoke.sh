@@ -1677,7 +1677,7 @@ wait_account_processed_order() {
   local product_line="$1"
   local order_id="$2"
   wait_sql_nonzero "account processed order ${order_id}" \
-    "SELECT count(*) FROM account_processed_trades p JOIN trading_match_trades t ON t.product_line = p.product_line AND t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.product_line = '${product_line}' AND (t.taker_order_id = ${order_id} OR t.maker_order_id = ${order_id})"
+    "SELECT count(*) FROM account_trade_settlements s JOIN trading_match_trades t ON t.product_line = s.product_line AND t.symbol = s.symbol AND t.trade_id = s.trade_id WHERE s.completed_at IS NOT NULL AND t.product_line = '${product_line}' AND (t.taker_order_id = ${order_id} OR t.maker_order_id = ${order_id})"
 }
 
 wait_position() {
@@ -2335,7 +2335,7 @@ wait_stress_phase_settled() {
     "SELECT count(DISTINCT taker_order_id) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'" \
     "${STRESS_USER_COUNT}" "${STRESS_WAIT_SECONDS}"
   wait_sql_equals "${product_line} ${phase} account settled taker orders" \
-    "SELECT count(DISTINCT t.taker_order_id) FROM account_processed_trades p JOIN trading_match_trades t ON t.product_line = p.product_line AND t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.product_line = '${product_line}' AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'" \
+    "SELECT count(DISTINCT t.taker_order_id) FROM account_trade_settlements s JOIN trading_match_trades t ON t.product_line = s.product_line AND t.symbol = s.symbol AND t.trade_id = s.trade_id WHERE s.completed_at IS NOT NULL AND t.product_line = '${product_line}' AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'" \
     "${STRESS_USER_COUNT}" "${STRESS_WAIT_SECONDS}"
   wait_sql_equals "${product_line} ${phase} active symbols" \
     "SELECT count(DISTINCT symbol) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'" \
@@ -2349,12 +2349,13 @@ stress_latency_summary() {
   slug="$(stress_product_slug "${product_line}")"
   query_value "
 WITH lat AS (
-  SELECT EXTRACT(EPOCH FROM (p.processed_at - e.event_time)) * 1000 AS ms
+  SELECT EXTRACT(EPOCH FROM (s.completed_at - e.event_time)) * 1000 AS ms
     FROM trading_orders o
     JOIN trading_order_events e ON e.order_id = o.order_id AND e.event_type = 'ACCEPTED'
     JOIN trading_match_trades t ON t.taker_order_id = o.order_id
-    JOIN account_processed_trades p ON p.product_line = t.product_line AND p.symbol = t.symbol AND p.trade_id = t.trade_id
+    JOIN account_trade_settlements s ON s.product_line = t.product_line AND s.symbol = t.symbol AND s.trade_id = t.trade_id
    WHERE o.product_line = '${product_line}'
+     AND s.completed_at IS NOT NULL
      AND o.client_order_id LIKE 'stress-user-${RUN_ID}-${slug}-${phase}-%'
 )
 SELECT count(*) || ' ' || round(min(ms)::numeric, 3) || ' ' ||
@@ -2372,13 +2373,14 @@ stress_account_consumer_lag_summary() {
   slug="$(stress_product_slug "${product_line}")"
   query_value "
 WITH lag AS (
-  SELECT EXTRACT(EPOCH FROM (p.processed_at - t.event_time)) * 1000 AS ms
+  SELECT EXTRACT(EPOCH FROM (s.completed_at - t.event_time)) * 1000 AS ms
     FROM trading_match_trades t
-    JOIN account_processed_trades p
-      ON p.product_line = t.product_line
-     AND p.symbol = t.symbol
-     AND p.trade_id = t.trade_id
+    JOIN account_trade_settlements s
+      ON s.product_line = t.product_line
+     AND s.symbol = t.symbol
+     AND s.trade_id = t.trade_id
    WHERE t.product_line = '${product_line}'
+     AND s.completed_at IS NOT NULL
      AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'
 )
 SELECT count(*) || ' ' || round(min(ms)::numeric, 3) || ' ' ||
@@ -2418,13 +2420,14 @@ WITH events AS (
     account)
       sql="
 WITH events AS (
-  SELECT p.processed_at AS ts
-    FROM account_processed_trades p
+  SELECT s.completed_at AS ts
+    FROM account_trade_settlements s
     JOIN trading_match_trades t
-      ON t.product_line = p.product_line
-     AND t.symbol = p.symbol
-     AND t.trade_id = p.trade_id
+      ON t.product_line = s.product_line
+     AND t.symbol = s.symbol
+     AND t.trade_id = s.trade_id
    WHERE t.product_line = '${product_line}'
+     AND s.completed_at IS NOT NULL
      AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'
 )"
       ;;
@@ -2706,8 +2709,8 @@ PY
   close_account_tps="$(stress_phase_throughput_summary "${product_line}" "close" "account")"
   open_trades="$(query_value "SELECT count(*) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-open-%'")"
   close_trades="$(query_value "SELECT count(*) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-close-%'")"
-  settled_open="$(query_value "SELECT count(DISTINCT t.taker_order_id) FROM account_processed_trades p JOIN trading_match_trades t ON t.product_line = p.product_line AND t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.product_line = '${product_line}' AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-open-%'")"
-  settled_close="$(query_value "SELECT count(DISTINCT t.taker_order_id) FROM account_processed_trades p JOIN trading_match_trades t ON t.product_line = p.product_line AND t.symbol = p.symbol AND t.trade_id = p.trade_id WHERE t.product_line = '${product_line}' AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-close-%'")"
+  settled_open="$(query_value "SELECT count(DISTINCT t.taker_order_id) FROM account_trade_settlements s JOIN trading_match_trades t ON t.product_line = s.product_line AND t.symbol = s.symbol AND t.trade_id = s.trade_id WHERE s.completed_at IS NOT NULL AND t.product_line = '${product_line}' AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-open-%'")"
+  settled_close="$(query_value "SELECT count(DISTINCT t.taker_order_id) FROM account_trade_settlements s JOIN trading_match_trades t ON t.product_line = s.product_line AND t.symbol = s.symbol AND t.trade_id = s.trade_id WHERE s.completed_at IS NOT NULL AND t.product_line = '${product_line}' AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-close-%'")"
   active_symbols="$(query_value "SELECT count(DISTINCT symbol) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-%'")"
   maker_users="$(query_value "SELECT count(DISTINCT user_id) FROM trading_orders WHERE product_line = '${product_line}' AND client_order_id LIKE 'stress-mm-${RUN_ID}-${slug}-%'")"
   maker_orders="$(query_value "SELECT count(*) FROM trading_orders WHERE product_line = '${product_line}' AND client_order_id LIKE 'stress-mm-${RUN_ID}-${slug}-%'")"

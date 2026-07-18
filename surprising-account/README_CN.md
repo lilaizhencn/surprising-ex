@@ -7,7 +7,7 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 ## 模块
 
 - `surprising-account-api`：账户/持仓 RPC 合约和 DTO。
-- `surprising-account-provider`：余额、ledger、持仓和成交消费实现。
+- `surprising-account-provider`：余额、ledger、持仓、预占、亏空、资金费、ADL、交割/行权和成交侧结算的唯一写者。
 
 ## long 单位
 
@@ -24,15 +24,20 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - 强平费使用 `liquidation_orders.liquidation_fee_rate_ppm` 冻结费率。账户结算只扣实际可从用户保证金中收上的金额，并把已收金额发布给保险基金。
 - 当亏损超过 `availableUnits + lockedUnits` 时，超额亏损写入 `account_deficits`，不让余额列变成负数。
 
-## 成交处理
+## 单用户指令处理
 
-`surprising-account-provider` 消费：
+所有资金变更统一进入产品线隔离的账户指令 Topic：
 
 ```text
-surprising.<product-segment>.match.trades.v1
+surprising.<product-segment>.account.user.commands.v1
 ```
 
-每条 `MatchTradeEvent` 会同时更新：
+Kafka key 固定为 `<PRODUCT_LINE>:<userId>`。命令、DLT 和结果 Topic 都使用 32 个分区，
+account-provider 使用 32 个 listener lane 和逐记录确认。同一产品线、同一用户的资金指令自然串行，
+不再依赖应用层 stripe 锁；不同用户可以并行。订单、撮合、资金费、ADL、保险、交割/行权和 HTTP
+写接口只产生账户命令，不能直接更新可变账户表。
+
+撮合为同一成交分别产生 taker 和 maker 的 `TRADE_SIDE_SETTLE`。每一侧在对应用户的本地事务中更新：
 
 - taker 用户持仓，方向使用 `takerSide`。
 - maker 用户持仓，方向为 taker 的反方向。
@@ -50,7 +55,11 @@ surprising.<product-segment>.match.trades.v1
 - 持仓数量或版本变化后会触发 reduce-only 挂单剪枝：反向、版本不一致或超过新持仓容量的未完成 reduce-only 订单会被写为 `CANCEL_REQUESTED` 并通过 order command outbox 发送撤单。容量检查使用 checked absolute value 和 checked 待平数量累加，异常持仓数量会在发出撤单命令前失败。
 - 结算把持仓降为零时，account-provider 还会在同一个事务里把精确持仓范围内全部 `PENDING` 止盈、止损和追踪止损置为 `CANCELED`，原因为 `POSITION_CLOSED`。持仓 outbox 事件在该更新进入事务后才写出，trigger-provider 因而只会在数据库提交后清理 Redis 二级索引。
 
-`account_processed_trades(symbol, trade_id)` 是成交幂等键，重复投递不会重复更新持仓，也不会把不同 symbol 的同号 tradeId 误判为重复。
+`account_commands.command_id` 与不可变 envelope hash 是执行幂等键。
+`account_trade_settlements(product_line, symbol, trade_id)` 跟踪 taker/maker 两侧完成状态；
+单侧长时间未完成时 `accountTradeSettlement` health 会变为 `DOWN`。命令依赖持久化为
+`depends_on_command_id`，正确性不依赖生产顺序或结果 Topic 顺序。完整设计见
+[账户资金单写者与单用户串行通道](../docs/account-single-writer-command-lane_CN.md)。
 
 ## API
 
@@ -133,7 +142,9 @@ admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Use
 - `account_margin_reservations`
 - `account_position_margins`
 - `account_positions`
-- `account_processed_trades`
+- `account_commands`
+- `account_command_submissions`
+- `account_trade_settlements`
 
 核心索引：
 
@@ -143,7 +154,9 @@ admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Use
 - `account_margin_reservations_user_idx`
 - `account_position_margins_user_idx`
 - `account_positions_user_idx`
-- `account_processed_trades_symbol_idx`
+- `account_commands_processing_idx`
+- `account_commands_dependency_idx`
+- `account_trade_settlements_incomplete_idx`
 - `account_outbox_pending_key_idx`
 
 ## 配置
@@ -154,13 +167,16 @@ surprising:
     kafka:
       product-line: LINEAR_PERPETUAL
       product-topics-enabled: true
-      match-trades-topic: surprising.linear-perp.match.trades.v1
       position-events-topic: surprising.linear-perp.account.position.events.v1
       liquidation-fee-events-topic: surprising.linear-perp.account.liquidation-fee.events.v1
       concurrency: 2
+      user-command-concurrency: 32
       max-poll-records: 500
-    settlement:
-      match-trade-user-lock-stripes: 4096
+    trade-settlement:
+      stale-after: 1m
+    command-wait:
+      timeout: 10s
+      poll-delay-ms: 20
     outbox:
       batch-size: 200
       publish-delay-ms: 200
@@ -172,28 +188,30 @@ surprising:
       contract-spec-max-entries: 4096
 ```
 
-启动独立产品线实例时，把 `product-line` 设置为 `SPOT`、`LINEAR_PERPETUAL`、`LINEAR_DELIVERY` 或 `OPTION`。`product-topics-enabled=false` 时仍可使用 legacy topic。
+启动独立产品线实例时，把 `product-line` 设置为 `SPOT`、`LINEAR_PERPETUAL`、
+`LINEAR_DELIVERY` 或 `OPTION`。账户命令、DLT 和结果 Topic 始终按产品线隔离，不提供共享 legacy
+资金指令回退。
 
 本地缓存只用于不可变读快照：
 
 - `contract-spec-max-entries` 按 `(symbol, instrumentVersion)` 缓存合约数学配置。
 
-余额、持仓、保证金冻结、成交幂等、ledger 和 outbox 状态不会缓存，仍然以 PostgreSQL 为准。
+余额、持仓、保证金冻结、命令幂等、ledger 和 outbox 状态仍以 PostgreSQL 为准。Redis 持仓只作为
+带 revision 的可重放查询投影。
 
 account outbox 发布不改变 Kafka key，并按 `topic + event_key` claim 有界连续到期前缀。
 同 key 仍按 id 顺序发送，不同 key 可以并发发送。
 
-account match-trade consumer 会通过 Actuator/Prometheus 暴露以下指标：
+账户指令消费者通过 Actuator/Prometheus 暴露：
 
-- `surprising.account.match_trade.events{outcome=processed|duplicate|failed}`
-- `surprising.account.match_trade.processing{outcome=...}`
-- `surprising.account.match_trade.event_lag{outcome=...}`
-- `surprising.account.match_trade.user_lock_wait`
+- `surprising.account.command.events{outcome=applied|rejected|waiting_dependency|duplicate|failed}`
+- `surprising.account.command.processing{outcome=...}`
+- `surprising.account.command.event_lag{outcome=...}`
+- `accountTradeSettlement` 单侧成交超时健康状态
 
-压测和生产排障时，把这些指标与 Kafka consumer lag、PostgreSQL 延迟一起看，才能区分瓶颈是在 Kafka fetch、account 结算 SQL、重复重放，还是下游 outbox/fanout。consumer 并行度仍受 Kafka 分区限制：match trade 按 `symbol` 做 key，同一个热门 symbol 必须在一个分区内有序结算，不同 symbol 才能并行。
-进入 `processTradeIfNew(...)` 前，listener 会对 taker/maker 做确定性用户级 stripe 锁。这样同一用户跨不同 symbol 的 match-trade 结算不会并发执行，不相关用户仍然可以并行结算。`surprising.account.match_trade.user_lock_wait` 应保持低位；如果持续升高，说明热点用户或做市账号已经在 account 结算层排队。
-match-trade listener 使用 Spring Kafka batch delivery 和 `AckMode.BATCH`，减少每条记录单独提交 offset 的开销。批次里的每条记录仍然独立调用 `processTradeIfNew(...)`，所以 PostgreSQL 事务、`(symbol, trade_id)` 幂等、symbol 内顺序和用户级结算锁仍是正确性边界。批次中某条失败时 Kafka 会重投整个批次，已经结算成功的成交会被 processed-trade key 跳过。
-`surprising.account.kafka.client-id` 要给每个 account-provider pod 配成稳定且唯一的值。`surprising.account.kafka.group-id` 仍然要在同一服务副本间保持一致；唯一 client id 只用于 consumer group 观测和节点级故障排查。
+排障时要与 Kafka lag、DLT 数量、PostgreSQL 延迟、等待依赖和 outbox 年龄一起观察。技术故障会持续
+重试并阻塞所在分区，不会跳过资金指令；poison envelope 才进入相同分区号的 DLT。每个
+account-provider pod 使用稳定且唯一的 client id，同产品线副本共享相同消费组。
 
 ## 本地运行
 
@@ -212,8 +230,10 @@ mvn -pl :surprising-account-provider -am spring-boot:run
 ## 生产注意事项
 
 - 余额调整必须携带全局唯一 `referenceId`，防止充值/冲正重复入账。同一 reference 的重放只有在 `amountUnits` 和 `reason` 与原流水一致时才会幂等返回；payload 不一致会在改余额前失败。
-- 账户 provider 消费撮合成交时必须按 `(symbol, trade_id)` 幂等，不能只按裸 `tradeId` 去重。
-- 调高 `surprising.account.kafka.concurrency` 时不能移除 match-trade 用户级结算保护。同一用户跨 symbol 的资金结算必须在 account-provider 层串行；PostgreSQL 行锁和非负约束是最后防线，不应该作为主要排队机制。
+- 除 `AccountUserCommandProcessor` 外不能调用账户写服务。CI 运行
+  `scripts/check-account-single-writer.sh`，防止其他模块重新引入账户资金表 DML。
+- 账户命令 Kafka key 不能从 `<PRODUCT_LINE>:<userId>` 改掉；并发数超过 32 个 Topic 分区不会增加吞吐。
+- HTTP 超时表示结果未知，不代表失败。调用方必须使用原 `referenceId` 重试；新 reference 表示一笔新资金意图。
 - 订单入口会在发布撮合命令前冻结初始保证金。账户 provider 消费成交后，按实际成交价计算开仓保证金并迁移为持仓保证金，委托价或市价保护价多冻结的部分释放回可用余额。
 - `account_positions`、`account_position_margins`、`account_margin_reservations` 都会持久化 `margin_mode`。不要从事件或查询里丢掉这个字段；后续逐仓风控依赖它。
 - 用户逐仓保证金调整按 `referenceId` 幂等，并写入 `account_ledger_entries.reference_type = POSITION_MARGIN_ADJUSTMENT`。正向调整只把可用余额转入持仓保证金；负向调整必须先校验最新逐仓风险快照，再释放持仓保证金。
@@ -225,12 +245,15 @@ mvn -pl :surprising-account-provider -am spring-boot:run
 - 已实现亏损可以扣 `availableUnits` 和由持仓保证金支撑的 `lockedUnits`，但不能扣未成交订单冻结。只要扣了持仓保证金支撑的 locked，就必须在同一事务内同步减少 `account_position_margins`。
 - 手续费扣款复用已实现亏损的余额/deficit 安全路径。手续费返佣先清理 deficit，再增加 available balance。结算时必须读取 `trading_orders` 上的费率快照，不能读取当前用户等级或当前 instrument 费率重算历史订单。
 - 余额结算会锁定 `account_deficits` 保证权益计算一致，但当 `deficit_units` 没有变化时会跳过 `UPDATE account_deficits`。不要在成交热路径重新引入无变化的 deficit 写入；真正产生或清理 deficit 时仍必须写入并检查 1 行。
-- match-trade 结算在计算下一版持仓前已经锁定当前持仓。后续维护时要继续使用传入已锁定旧持仓数量的更新路径；如果每个成交侧再额外做一次 `SELECT ... FOR UPDATE` 或更新后回查，会给每个成交侧增加两次不必要 SQL 往返。
-- match-trade Kafka 消费故意使用批量投递，并在 listener 批次成功后提交 offset。不要把整个 Kafka 批次放进一个大数据库事务里做资金结算；那会拉长锁持有时间并扩大回滚影响。这里的批量只用于传输和 ack 优化。
+- 成交侧结算在计算下一版持仓前已经锁定当前持仓。后续维护时继续使用传入已锁定旧持仓数量的
+  更新路径；每侧额外做 `SELECT ... FOR UPDATE` 或更新后回查会增加两次不必要 SQL 往返。
+- 不能根据跨 Topic 到达顺序推断依赖。必须持久化 `dependsOnCommandId`；结果 Topic 只用于降低延迟
+  和观测，reconciliation 以 `account_commands` 为准。
 - 强平费扣款故意不创建新的 `account_deficits`。保险基金只接收 account-provider 已经从用户 collateral 实际收上的金额，避免把未收上的惩罚费记成保险基金收入。
 - `surprising.account.liquidation-fee.events.v1` 是 at-least-once 投递。insurance 消费端必须使用 `(reference_type, reference_id, asset)` 幂等，其中 `reference_id = tradeId:orderId`。
 - `contract_type` 决定已实现盈亏公式：`LINEAR_PERPETUAL` 使用 `signedQty * (exitTicks - entryTicks) * notional_multiplier_units`；`INVERSE_PERPETUAL` 使用 `signedQty * faceValueUnits * settleScaleUnits * (exitTicks - entryTicks) / (entryTicks * exitTicks * price_tick_units)`。
-- 维持保证金和未实现盈亏由 risk 模块计算。资金费率、保险基金和自动减仓由独立结算模块处理，不放在本 provider 内。
+- 维持保证金和未实现盈亏由 risk 模块计算。资金费、保险基金和 ADL 模块保留各自编排状态，
+  但最终账户资金变更只在本 provider 执行。
 
 ## 验证
 

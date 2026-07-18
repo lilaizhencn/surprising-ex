@@ -10,11 +10,12 @@ public class AccountProperties {
 
     private Kafka kafka = new Kafka();
     private Outbox outbox = new Outbox();
-    private Settlement settlement = new Settlement();
     private Cache cache = new Cache();
     private PositionCache positionCache = new PositionCache();
     private PositionMargin positionMargin = new PositionMargin();
     private ExpiringSettlement expiringSettlement = new ExpiringSettlement();
+    private TradeSettlement tradeSettlement = new TradeSettlement();
+    private CommandWait commandWait = new CommandWait();
 
     public Kafka getKafka() {
         return kafka;
@@ -30,14 +31,6 @@ public class AccountProperties {
 
     public void setOutbox(Outbox outbox) {
         this.outbox = outbox;
-    }
-
-    public Settlement getSettlement() {
-        return settlement;
-    }
-
-    public void setSettlement(Settlement settlement) {
-        this.settlement = settlement;
     }
 
     public Cache getCache() {
@@ -72,13 +65,28 @@ public class AccountProperties {
         this.expiringSettlement = expiringSettlement;
     }
 
+    public TradeSettlement getTradeSettlement() {
+        return tradeSettlement;
+    }
+
+    public void setTradeSettlement(TradeSettlement tradeSettlement) {
+        this.tradeSettlement = tradeSettlement == null ? new TradeSettlement() : tradeSettlement;
+    }
+
+    public CommandWait getCommandWait() {
+        return commandWait;
+    }
+
+    public void setCommandWait(CommandWait commandWait) {
+        this.commandWait = commandWait == null ? new CommandWait() : commandWait;
+    }
+
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
         private boolean productTopicsEnabled;
         private String groupId = "surprising-account-v1";
         private String clientId = "surprising-account";
-        private String matchTradesTopic = "surprising.perp.match.trades.v1";
         private String orderCommandsTopic = "surprising.perp.order.commands.v1";
         private String orderEventsTopic = "surprising.perp.order.events.v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
@@ -87,6 +95,7 @@ public class AccountProperties {
         private String deliverySettlementsTopic = "surprising.linear-delivery.delivery.settlements.v1";
         private String optionExercisesTopic = "surprising.option.option.exercises.v1";
         private int concurrency = 2;
+        private int userCommandConcurrency = 32;
         private int maxPollRecords = 500;
 
         public String getBootstrapServers() {
@@ -127,14 +136,6 @@ public class AccountProperties {
 
         public void setClientId(String clientId) {
             this.clientId = clientId;
-        }
-
-        public String getMatchTradesTopic() {
-            return productTopicsEnabled ? productTopics().matchTradesTopic() : matchTradesTopic;
-        }
-
-        public void setMatchTradesTopic(String matchTradesTopic) {
-            this.matchTradesTopic = matchTradesTopic;
         }
 
         public String getOrderCommandsTopic() {
@@ -178,6 +179,22 @@ public class AccountProperties {
 
         public void setLiquidationFeeEventsTopic(String liquidationFeeEventsTopic) {
             this.liquidationFeeEventsTopic = liquidationFeeEventsTopic;
+        }
+
+        public String getUserCommandsTopic() {
+            return productTopics().accountUserCommandsTopic();
+        }
+
+        public String getUserCommandsDltTopic() {
+            return productTopics().accountUserCommandsDltTopic();
+        }
+
+        public String getCommandResultsTopic() {
+            return productTopics().accountCommandResultsTopic();
+        }
+
+        public String getUserCommandGroupId() {
+            return productTopics().consumerGroup("account-user-command");
         }
 
         public String getTriggerOrderEventsTopic() {
@@ -224,6 +241,17 @@ public class AccountProperties {
 
         public void setConcurrency(int concurrency) {
             this.concurrency = concurrency;
+        }
+
+        public int getUserCommandConcurrency() {
+            return userCommandConcurrency;
+        }
+
+        public void setUserCommandConcurrency(int userCommandConcurrency) {
+            if (userCommandConcurrency <= 0) {
+                throw new IllegalArgumentException("userCommandConcurrency must be positive");
+            }
+            this.userCommandConcurrency = userCommandConcurrency;
         }
 
         public int getMaxPollRecords() {
@@ -320,21 +348,6 @@ public class AccountProperties {
 
         public void setCleanupBatchSize(int cleanupBatchSize) {
             this.cleanupBatchSize = cleanupBatchSize;
-        }
-    }
-
-    public static class Settlement {
-        private int matchTradeUserLockStripes = 4096;
-
-        public int getMatchTradeUserLockStripes() {
-            return matchTradeUserLockStripes;
-        }
-
-        public void setMatchTradeUserLockStripes(int matchTradeUserLockStripes) {
-            if (matchTradeUserLockStripes <= 0) {
-                throw new IllegalArgumentException("matchTradeUserLockStripes must be positive");
-            }
-            this.matchTradeUserLockStripes = matchTradeUserLockStripes;
         }
     }
 
@@ -470,6 +483,48 @@ public class AccountProperties {
 
         public void setRemovalBufferPpm(long removalBufferPpm) {
             this.removalBufferPpm = removalBufferPpm;
+        }
+    }
+
+    public static class TradeSettlement {
+        private Duration staleAfter = Duration.ofMinutes(1);
+
+        public Duration getStaleAfter() {
+            return staleAfter;
+        }
+
+        public void setStaleAfter(Duration staleAfter) {
+            if (staleAfter == null || staleAfter.isZero() || staleAfter.isNegative()) {
+                throw new IllegalArgumentException("trade settlement staleAfter must be positive");
+            }
+            this.staleAfter = staleAfter;
+        }
+    }
+
+    public static class CommandWait {
+        private Duration timeout = Duration.ofSeconds(10);
+        private long pollDelayMs = 20L;
+
+        public Duration getTimeout() {
+            return timeout;
+        }
+
+        public void setTimeout(Duration timeout) {
+            if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+                throw new IllegalArgumentException("command wait timeout must be positive");
+            }
+            this.timeout = timeout;
+        }
+
+        public long getPollDelayMs() {
+            return pollDelayMs;
+        }
+
+        public void setPollDelayMs(long pollDelayMs) {
+            if (pollDelayMs <= 0L) {
+                throw new IllegalArgumentException("command wait pollDelayMs must be positive");
+            }
+            this.pollDelayMs = pollDelayMs;
         }
     }
 }

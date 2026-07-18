@@ -2,6 +2,10 @@ package com.surprising.trading.matching.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.account.api.model.AccountUserCommand;
+import com.surprising.account.api.model.AccountUserCommandType;
+import com.surprising.account.api.model.TradeParticipantRole;
+import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
@@ -101,9 +105,28 @@ class MatchingServiceTest {
             assertThat(outboxRepository.records)
                     .extracting(OutboxRecord::aggregateType)
                     .containsExactly("MATCH_RESULT", "ORDER_BOOK_DEPTH",
-                            "MATCH_TRADE", "MATCH_RESULT", "ORDER_BOOK_DEPTH");
+                            "MATCH_TRADE", "ACCOUNT_COMMAND", "ACCOUNT_COMMAND", "ACCOUNT_COMMAND",
+                            "MATCH_RESULT", "ORDER_BOOK_DEPTH");
+            AccountUserCommand takerSettlement = new ObjectMapper().readValue(
+                    outboxRepository.records.get(3).payload(), AccountUserCommand.class);
+            AccountUserCommand makerSettlement = new ObjectMapper().readValue(
+                    outboxRepository.records.get(4).payload(), AccountUserCommand.class);
+            AccountUserCommand takerRelease = new ObjectMapper().readValue(
+                    outboxRepository.records.get(5).payload(), AccountUserCommand.class);
+            assertThat(takerSettlement.commandType()).isEqualTo(AccountUserCommandType.TRADE_SIDE_SETTLE);
+            assertThat(takerSettlement.partitionKey()).isEqualTo("LINEAR_PERPETUAL:2002");
+            assertThat(new ObjectMapper().readValue(
+                    takerSettlement.payload(), TradeSideSettlementCommand.class).participantRole())
+                    .isEqualTo(TradeParticipantRole.TAKER);
+            assertThat(makerSettlement.commandType()).isEqualTo(AccountUserCommandType.TRADE_SIDE_SETTLE);
+            assertThat(makerSettlement.partitionKey()).isEqualTo("LINEAR_PERPETUAL:1001");
+            assertThat(new ObjectMapper().readValue(
+                    makerSettlement.payload(), TradeSideSettlementCommand.class).participantRole())
+                    .isEqualTo(TradeParticipantRole.MAKER);
+            assertThat(takerRelease.commandType()).isEqualTo(AccountUserCommandType.ORDER_RELEASE);
+            assertThat(takerRelease.dependsOnCommandId()).isEqualTo(takerSettlement.commandId());
             OrderBookDepthEvent depth = new ObjectMapper()
-                    .readValue(outboxRepository.records.get(4).payload(), OrderBookDepthEvent.class);
+                    .readValue(outboxRepository.records.get(7).payload(), OrderBookDepthEvent.class);
             assertThat(depth.symbol()).isEqualTo("BTC-USDT");
             assertThat(depth.sequence()).isEqualTo(2L);
             assertThat(depth.previousSequence()).isEqualTo(1L);
@@ -297,7 +320,8 @@ class MatchingServiceTest {
             assertThat(resultRepository.makerFillUpdates).isZero();
             assertThat(outboxRepository.records)
                     .extracting(OutboxRecord::aggregateType)
-                    .containsExactly("MATCH_RESULT", "ORDER_BOOK_DEPTH", "MATCH_RESULT", "ORDER_BOOK_DEPTH");
+                    .containsExactly("MATCH_RESULT", "ORDER_BOOK_DEPTH", "ACCOUNT_COMMAND",
+                            "MATCH_RESULT", "ORDER_BOOK_DEPTH");
         } finally {
             engine.stop();
         }

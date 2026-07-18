@@ -123,6 +123,7 @@ class MatchingOutboxRepositoryTest {
                 eq("surprising.option.match.results.v1"),
                 eq("surprising.option.match.trades.v1"),
                 eq("surprising.option.orderbook.depth.v1"),
+                eq("surprising.option.account.user.commands.v1"),
                 any(Timestamp.class), eq(100), any(Timestamp.class), any(Timestamp.class)))
                 .thenReturn(List.of());
 
@@ -134,9 +135,10 @@ class MatchingOutboxRepositoryTest {
                 eq("surprising.option.match.results.v1"),
                 eq("surprising.option.match.trades.v1"),
                 eq("surprising.option.orderbook.depth.v1"),
+                eq("surprising.option.account.user.commands.v1"),
                 any(Timestamp.class), eq(100), any(Timestamp.class), any(Timestamp.class));
         assertThat(sql.getValue())
-                .contains("e.topic IN (?, ?, ?)")
+                .contains("e.topic IN (?, ?, ?, ?)")
                 .contains("UPDATE trading_outbox_events")
                 .contains("RETURNING e.id");
     }

@@ -43,14 +43,15 @@ surprising:
       bootstrap-servers: localhost:9092
       product-line: LINEAR_PERPETUAL
       product-topics-enabled: false
-        funding-rate-topic: surprising.perp.funding.rate.v1
-        cache-group-id: surprising-funding-rate-cache-${HOSTNAME:${random.uuid}}
-        concurrency: 1
-        max-poll-records: 500
+      funding-rate-topic: surprising.perp.funding.rate.v1
+      cache-group-id: surprising-funding-rate-cache-${HOSTNAME:${random.uuid}}
+      concurrency: 1
+      command-results-concurrency: 4
+      max-poll-records: 500
     calculation:
       publish-delay-ms: 1000
-        max-mark-age: 10s
-        max-rate-age: 5s
+      max-mark-age: 10s
+      max-rate-age: 5s
     settlement:
       settle-delay-ms: 1000
       batch-size: 20

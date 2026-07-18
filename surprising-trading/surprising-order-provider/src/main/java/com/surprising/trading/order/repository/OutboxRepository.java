@@ -190,9 +190,10 @@ public class OutboxRepository {
         if (!kafka.isProductTopicsEnabled()) {
             return;
         }
-        sql.append("   AND ").append(alias).append(".topic IN (?, ?)\n");
+        sql.append("   AND ").append(alias).append(".topic IN (?, ?, ?)\n");
         args.add(kafka.getOrderEventsTopic());
         args.add(kafka.getOrderCommandsTopic());
+        args.add(kafka.getAccountUserCommandsTopic());
     }
 
     private void requireCurrentProductTopic(String aggregateType, String topic) {
@@ -202,9 +203,13 @@ public class OutboxRepository {
         }
         String orderEventsTopic = kafka.getOrderEventsTopic();
         String orderCommandsTopic = kafka.getOrderCommandsTopic();
-        if (!orderEventsTopic.equals(topic) && !orderCommandsTopic.equals(topic)) {
+        String accountUserCommandsTopic = kafka.getAccountUserCommandsTopic();
+        if (!orderEventsTopic.equals(topic)
+                && !orderCommandsTopic.equals(topic)
+                && !accountUserCommandsTopic.equals(topic)) {
             throw new IllegalStateException("trading outbox topic must match current product line: expected one of ["
-                    + orderEventsTopic + ", " + orderCommandsTopic + "] actual=" + topic);
+                    + orderEventsTopic + ", " + orderCommandsTopic + ", " + accountUserCommandsTopic
+                    + "] actual=" + topic);
         }
     }
 }

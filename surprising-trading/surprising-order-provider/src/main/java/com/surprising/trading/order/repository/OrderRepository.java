@@ -187,6 +187,22 @@ public class OrderRepository {
         }
     }
 
+    public boolean completeReservation(long orderId, boolean accepted, String rejectReason, Instant now) {
+        int rows = jdbcTemplate.update("""
+                UPDATE trading_orders
+                   SET status = ?,
+                       reject_reason = ?,
+                       remaining_quantity_steps = CASE WHEN ? THEN remaining_quantity_steps ELSE 0 END,
+                       updated_at = ?,
+                       revision = revision + 1
+                 WHERE order_id = ?
+                   AND status = 'PENDING_RESERVE'
+                   AND executed_quantity_steps = 0
+                """, accepted ? OrderStatus.ACCEPTED.name() : OrderStatus.REJECTED.name(),
+                accepted ? null : rejectReason, accepted, Timestamp.from(now), orderId);
+        return rows == 1;
+    }
+
     public void insertEvent(OrderEvent event) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO trading_order_events (

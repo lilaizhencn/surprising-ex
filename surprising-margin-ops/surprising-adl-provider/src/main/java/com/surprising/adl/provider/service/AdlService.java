@@ -7,7 +7,9 @@ import com.surprising.adl.api.model.AdlQueuePositionResponse;
 import com.surprising.adl.api.model.AdlQueueQueryResponse;
 import com.surprising.adl.provider.config.AdlProperties;
 import com.surprising.adl.provider.model.AdlCandidate;
+import com.surprising.adl.provider.model.AdlExecutionPlan;
 import com.surprising.adl.provider.model.DeficitRow;
+import com.surprising.adl.provider.repository.AdlExecutionRepository;
 import com.surprising.adl.provider.repository.AdlRepository;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -27,18 +29,21 @@ public class AdlService {
 
     private final AdlProperties properties;
     private final AdlRepository adlRepository;
+    private final AdlExecutionRepository executionRepository;
     private final RedisAdlCandidateIndex redisCandidateIndex;
 
     public AdlService(AdlProperties properties, AdlRepository adlRepository) {
-        this(properties, adlRepository, null);
+        this(properties, adlRepository, null, null);
     }
 
     @Autowired
     public AdlService(AdlProperties properties, AdlRepository adlRepository,
-                      RedisAdlCandidateIndex redisCandidateIndex) {
+                      RedisAdlCandidateIndex redisCandidateIndex,
+                      AdlExecutionRepository executionRepository) {
         this.properties = properties;
         this.adlRepository = adlRepository;
         this.redisCandidateIndex = redisCandidateIndex;
+        this.executionRepository = executionRepository;
     }
 
     /**
@@ -140,9 +145,35 @@ public class AdlService {
             if (locked.isEmpty()) {
                 continue;
             }
-            remaining = adlRepository.executeAdl(deficit, locked.get(), remaining);
+            AdlExecutionPlan plan = plan(deficit, locked.get(), remaining);
+            if (executionRepository == null) {
+                throw new IllegalStateException("ADL execution repository is not configured");
+            }
+            executionRepository.create(plan, java.time.Instant.now());
+            remaining = Math.subtractExact(remaining, plan.coveredUnits());
             executions++;
         }
+    }
+
+    private AdlExecutionPlan plan(DeficitRow deficit, AdlCandidate candidate, long remainingDeficitUnits) {
+        long closeSteps = AdlMath.closeStepsForCover(remainingDeficitUnits, candidate.absQuantitySteps(),
+                candidate.unrealizedProfitUnits());
+        long realizedProfitUnits = AdlMath.proportionalUnits(candidate.unrealizedProfitUnits(), closeSteps,
+                candidate.absQuantitySteps());
+        long coveredUnits = Math.min(remainingDeficitUnits, realizedProfitUnits);
+        if (closeSteps <= 0 || realizedProfitUnits <= 0 || coveredUnits <= 0) {
+            throw new IllegalStateException("invalid ADL execution plan");
+        }
+        long executionId = adlRepository.nextAdlSequence("adl-execution");
+        var productLine = properties.getKafka().getProductLine();
+        String prefix = productLine.name() + ":" + executionId;
+        return new AdlExecutionPlan(
+                executionId, productLine, deficit.accountType(), deficit.userId(), candidate.userId(),
+                candidate.asset(), candidate.symbol(), candidate.side(), candidate.marginMode(),
+                candidate.positionSide(), candidate.signedQuantitySteps(), closeSteps,
+                candidate.entryPriceTicks(), candidate.markPriceTicks(), deficit.deficitUnits(),
+                realizedProfitUnits, coveredUnits, candidate.priorityScorePpm(),
+                "ADL_RESERVE:" + prefix, "ADL_TARGET:" + prefix, "ADL_FINALIZE:" + prefix);
     }
 
     private List<com.surprising.adl.provider.model.AdlCandidate> redisCandidates(DeficitRow deficit, int limit) {

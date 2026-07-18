@@ -11,6 +11,8 @@ import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
 import com.surprising.account.api.model.PositionMarginResponse;
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.api.model.PositionResponse;
+import com.surprising.account.api.model.TradeParticipantRole;
+import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.ContractSpec;
 import com.surprising.account.provider.model.LiquidationFeeContext;
@@ -50,7 +52,7 @@ class AccountServiceTest {
     private static final Instant EVENT_TIME = Instant.parse("2026-07-01T00:00:00Z");
 
     @Test
-    void processesBothSidesAndSkipsDuplicateTrade() {
+    void processesBothTradeSides() {
         FakeAccountRepository repository = new FakeAccountRepository();
         repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 5L));
         repository.feeSnapshots.put(9001L, new OrderFeeSnapshot(2L, 5L));
@@ -75,8 +77,7 @@ class AccountServiceTest {
                 false,
                 EVENT_TIME);
 
-        service.processTrade(trade);
-        service.processTrade(trade);
+        settleTrade(service, trade);
 
         assertThat(repository.positionState(2002L, "BTC-USDT"))
                 .isEqualTo(new PositionState(3L, 1L, 600_000L, 0L));
@@ -86,7 +87,6 @@ class AccountServiceTest {
         assertThat(repository.consumedOrderMarginUnits).containsEntry(9002L, 18_000L)
                 .containsEntry(9001L, 18_000L);
         assertThat(repository.feeByUser).containsEntry(2002L, -9L).containsEntry(1001L, -4L);
-        assertThat(repository.tradeProcessingAttempts).isEqualTo(2);
         assertThat(repository.positionUpdates).isEqualTo(2);
     }
 
@@ -118,7 +118,7 @@ class AccountServiceTest {
                 false,
                 EVENT_TIME);
 
-        service.processTrade(trade);
+        settleTrade(service, trade);
 
         assertThat(pruner.calls).isEmpty();
     }
@@ -149,7 +149,7 @@ class AccountServiceTest {
                 false,
                 EVENT_TIME);
 
-        service.processTrade(trade);
+        settleTrade(service, trade);
 
         assertThat(repository.feeByUser).containsEntry(2002L, -1_800L).containsEntry(1001L, 180L);
     }
@@ -185,7 +185,7 @@ class AccountServiceTest {
                 false,
                 EVENT_TIME.plusSeconds(10));
 
-        service.processTrade(trade);
+        settleTrade(service, trade, ProductLine.LINEAR_DELIVERY);
 
         assertThat(repository.pnlAccountTypes).containsExactly(AccountType.USDT_DELIVERY);
         assertThat(repository.feeAccountTypes).containsExactly(AccountType.USDT_DELIVERY, AccountType.USDT_DELIVERY);
@@ -223,7 +223,7 @@ class AccountServiceTest {
                 false,
                 EVENT_TIME.plusSeconds(11));
 
-        service.processTrade(trade);
+        settleTrade(service, trade, ProductLine.OPTION);
 
         assertThat(repository.pnlAccountTypes).isEmpty();
         assertThat(repository.optionPremiumAccountTypes).containsExactly(AccountType.OPTION, AccountType.OPTION);
@@ -245,9 +245,9 @@ class AccountServiceTest {
         repository.latestMarkPriceTicks.put(symbol + ":4", 600_000L);
         RecordingClosedPositionTriggerOrderPruner triggerPruner = new RecordingClosedPositionTriggerOrderPruner();
         AccountService service = new AccountService(repository, new PositionCalculator(), null, triggerPruner,
-                new AccountProperties(), null);
+                new AccountProperties(), new FakeOutboxRepository());
 
-        int settled = service.processDeliverySettlement(new DeliverySettlementEvent(
+        int settled = settleDelivery(service, new DeliverySettlementEvent(
                 symbol, 4L, ContractType.LINEAR_DELIVERY, EVENT_TIME, EVENT_TIME,
                 ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
                 deliveryInstrument(symbol, 4L, ContractType.LINEAR_DELIVERY)));
@@ -280,9 +280,9 @@ class AccountServiceTest {
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
                 new PositionState(3L, 4L, 500_000L, 0L));
         repository.latestMarkPriceTicks.put(symbol + ":4", 600_000L);
-        AccountService service = new AccountService(repository, new PositionCalculator());
+        AccountService service = settlementService(repository);
 
-        int settled = service.processDeliverySettlement(new DeliverySettlementEvent(
+        int settled = settleDelivery(service, new DeliverySettlementEvent(
                 symbol, 5L, ContractType.LINEAR_DELIVERY, EVENT_TIME, EVENT_TIME,
                 ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
                 deliveryInstrument(symbol, 5L, ContractType.LINEAR_DELIVERY)));
@@ -303,9 +303,9 @@ class AccountServiceTest {
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
                 new PositionState(3L, 4L, 500_000L, 0L));
         repository.latestMarkPriceTicks.put(symbol + ":4", 600_000L);
-        AccountService service = new AccountService(repository, new PositionCalculator());
+        AccountService service = settlementService(repository);
 
-        assertThatThrownBy(() -> service.processDeliverySettlement(new DeliverySettlementEvent(
+        assertThatThrownBy(() -> settleDelivery(service, new DeliverySettlementEvent(
                 symbol, 4L, ContractType.LINEAR_DELIVERY, EVENT_TIME, EVENT_TIME,
                 ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME, null)))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -325,9 +325,9 @@ class AccountServiceTest {
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
                 new PositionState(2L, 6L, 20L, 0L));
         repository.latestMarkPriceUnits.put("BTC-USDT", 150L);
-        AccountService service = new AccountService(repository, new PositionCalculator());
+        AccountService service = settlementService(repository);
 
-        int settled = service.processOptionExercise(new OptionExerciseEvent(
+        int settled = settleOption(service, new OptionExerciseEvent(
                 symbol, 6L, "BTC-USDT", 100L, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
                 EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
                 optionInstrument(symbol, 6L, "BTC-USDT", 100L, OptionType.CALL)));
@@ -356,9 +356,9 @@ class AccountServiceTest {
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
                 new PositionState(2L, 6L, 20L, 0L));
         repository.latestMarkPriceUnits.put("BTC-USDT", 150L);
-        AccountService service = new AccountService(repository, new PositionCalculator());
+        AccountService service = settlementService(repository);
 
-        int settled = service.processOptionExercise(new OptionExerciseEvent(
+        int settled = settleOption(service, new OptionExerciseEvent(
                 symbol, 7L, "BTC-USDT", 100L, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
                 EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
                 optionInstrument(symbol, 7L, "BTC-USDT", 100L, OptionType.CALL)));
@@ -381,9 +381,9 @@ class AccountServiceTest {
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
                 new PositionState(-3L, 6L, 8L, 0L));
         repository.latestMarkPriceUnits.put("BTC-USDT", 70L);
-        AccountService service = new AccountService(repository, new PositionCalculator());
+        AccountService service = settlementService(repository);
 
-        int settled = service.processOptionExercise(new OptionExerciseEvent(
+        int settled = settleOption(service, new OptionExerciseEvent(
                 symbol, 6L, "BTC-USDT", 100L, OptionType.PUT, OptionExerciseStyle.EUROPEAN,
                 EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
                 optionInstrument(symbol, 6L, "BTC-USDT", 100L, OptionType.PUT)));
@@ -415,9 +415,9 @@ class AccountServiceTest {
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
                 new PositionState(-2L, 6L, 5L, 0L));
         repository.latestMarkPriceUnits.put("BTC-USDT", 90L);
-        AccountService service = new AccountService(repository, new PositionCalculator());
+        AccountService service = settlementService(repository);
 
-        int settled = service.processOptionExercise(new OptionExerciseEvent(
+        int settled = settleOption(service, new OptionExerciseEvent(
                 symbol, 6L, "BTC-USDT", 100L, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
                 EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
                 optionInstrument(symbol, 6L, "BTC-USDT", 100L, OptionType.CALL)));
@@ -442,14 +442,14 @@ class AccountServiceTest {
         repository.positions.put(new PositionKey(1001L, symbol, MarginMode.CROSS, PositionSide.NET),
                 new PositionState(2L, 6L, 20L, 0L));
         repository.latestMarkPriceUnits.put("BTC-USDT", 150L);
-        AccountService service = new AccountService(repository, new PositionCalculator());
+        AccountService service = settlementService(repository);
         OptionExerciseEvent event = new OptionExerciseEvent(
                 symbol, 6L, "BTC-USDT", 100L, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
                 EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
                 optionInstrument(symbol, 6L, "BTC-USDT", 100L, OptionType.CALL));
 
-        assertThat(service.processOptionExercise(event)).isEqualTo(1);
-        assertThat(service.processOptionExercise(event)).isZero();
+        assertThat(settleOption(service, event)).isEqualTo(1);
+        assertThat(settleOption(service, event)).isZero();
 
         assertThat(repository.lifecyclePnlByUser).containsEntry(1001L, 100L);
         assertThat(repository.lifecycleReferences).containsExactly(
@@ -469,7 +469,7 @@ class AccountServiceTest {
         repository.latestMarkPriceUnits.put("BTC-USDT", 150L);
         AccountService service = new AccountService(repository, new PositionCalculator());
 
-        assertThatThrownBy(() -> service.processOptionExercise(new OptionExerciseEvent(
+        assertThatThrownBy(() -> settleOption(service, new OptionExerciseEvent(
                 symbol, 6L, "BTC-USDT", 100L, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
                 EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME, null)))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -491,7 +491,7 @@ class AccountServiceTest {
         repository.latestMarkPriceUnits.put("BTC-USDT", 150L);
         AccountService service = new AccountService(repository, new PositionCalculator());
 
-        assertThatThrownBy(() -> service.processOptionExercise(new OptionExerciseEvent(
+        assertThatThrownBy(() -> settleOption(service, new OptionExerciseEvent(
                 symbol, 6L, "BTC-USDT", 100L, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
                 EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME,
                 optionInstrument(symbol, 6L, "BTC-USDT", 120L, OptionType.CALL))))
@@ -535,7 +535,7 @@ class AccountServiceTest {
                 EVENT_TIME.plusSeconds(5),
                 "trace-spot");
 
-        service.processTrade(trade);
+        settleTrade(service, trade, ProductLine.SPOT);
 
         assertThat(repository.spotSettlements).hasSize(2);
         assertThat(repository.spotSettlements)
@@ -605,8 +605,8 @@ class AccountServiceTest {
                 false,
                 EVENT_TIME.plusMillis(1));
 
-        service.processTrade(first);
-        service.processTrade(second);
+        settleTrade(service, first);
+        settleTrade(service, second);
 
         assertThat(repository.instrumentTypeLoads).containsEntry("BTC-USDT:1", 1);
         assertThat(repository.contractSpecLoads).containsEntry("BTC-USDT:1", 1);
@@ -716,8 +716,8 @@ class AccountServiceTest {
                 false,
                 EVENT_TIME.plusSeconds(1));
 
-        service.processTrade(btcTrade);
-        service.processTrade(ethTrade);
+        settleTrade(service, btcTrade);
+        settleTrade(service, ethTrade);
 
         assertThat(repository.positionState(2002L, "BTC-USDT"))
                 .isEqualTo(new PositionState(3L, 1L, 600_000L, 0L));
@@ -727,7 +727,6 @@ class AccountServiceTest {
                 .isEqualTo(new PositionState(-3L, 1L, 600_000L, 0L));
         assertThat(repository.positionState(1001L, "ETH-USDT"))
                 .isEqualTo(new PositionState(-5L, 1L, 30_000L, 0L));
-        assertThat(repository.tradeProcessingAttempts).isEqualTo(2);
         assertThat(repository.positionUpdates).isEqualTo(4);
     }
 
@@ -814,7 +813,7 @@ class AccountServiceTest {
                 EVENT_TIME.plusSeconds(3),
                 "trace-9401");
 
-        service.processTrade(trade);
+        settleTrade(service, trade);
 
         assertThat(outboxRepository.calls).hasSize(2);
         assertThat(outboxRepository.calls)
@@ -862,7 +861,7 @@ class AccountServiceTest {
                 true,
                 EVENT_TIME.plusSeconds(1));
 
-        service.processTrade(close);
+        settleTrade(service, close);
 
         assertThat(repository.positionState(2002L, "BTC-USDT"))
                 .isEqualTo(new PositionState(1L, 1L, 600_000L, 20_000L));
@@ -910,7 +909,7 @@ class AccountServiceTest {
                 EVENT_TIME.plusSeconds(1),
                 "trace-prune");
 
-        service.processTrade(close);
+        settleTrade(service, close);
 
         assertThat(pruner.calls).hasSize(2);
         assertThat(pruner.calls)
@@ -971,8 +970,8 @@ class AccountServiceTest {
                 true,
                 EVENT_TIME.plusSeconds(2));
 
-        service.processTrade(firstFill);
-        service.processTrade(secondFill);
+        settleTrade(service, firstFill);
+        settleTrade(service, secondFill);
 
         assertThat(repository.liquidationFeeContextLoads).containsEntry(9014L, 1);
         assertThat(repository.liquidationFeeContextLoads).doesNotContainKeys(9015L, 9016L);
@@ -1014,7 +1013,7 @@ class AccountServiceTest {
                 EVENT_TIME.plusSeconds(4),
                 "trace-liquidation-fee");
 
-        service.processTrade(close);
+        settleTrade(service, close);
 
         assertThat(repository.liquidationFeeByUser).containsEntry(2002L, 3_600L);
         assertThat(triggerPruner.calls).containsExactly(new ClosedTriggerPruneCall(
@@ -1061,7 +1060,7 @@ class AccountServiceTest {
                 true,
                 EVENT_TIME.plusSeconds(2));
 
-        service.processTrade(flip);
+        settleTrade(service, flip);
 
         assertThat(repository.positionState(2002L, "BTC-USDT"))
                 .isEqualTo(new PositionState(-3L, 2L, 90L, -50L));
@@ -1079,6 +1078,54 @@ class AccountServiceTest {
         assertThat(repository.consumeSweepByOrder).containsEntry(9005L, true).containsEntry(9006L, true);
         assertThat(repository.pnlByUser).containsEntry(2002L, -50L);
         assertThat(repository.positionUpdates).isEqualTo(2);
+    }
+
+    private static void settleTrade(AccountService service, MatchTradeEvent trade) {
+        settleTrade(service, trade, ProductLine.LINEAR_PERPETUAL);
+    }
+
+    private static void settleTrade(AccountService service,
+                                    MatchTradeEvent trade,
+                                    ProductLine productLine) {
+        service.processTradeSide(productLine, "test:taker:" + trade.tradeId(),
+                new TradeSideSettlementCommand(trade, TradeParticipantRole.TAKER));
+        service.processTradeSide(productLine, "test:maker:" + trade.tradeId(),
+                new TradeSideSettlementCommand(trade, TradeParticipantRole.MAKER));
+    }
+
+    private static int settleDelivery(AccountService service, DeliverySettlementEvent event) {
+        var plans = service.planDeliverySettlement(event);
+        int settled = 0;
+        for (var plan : plans) {
+            if (service.processExpiringPosition(plan.productLine(), plan.userId(),
+                    settlementCommandId(plan), plan.command()).isPresent()) {
+                settled++;
+            }
+        }
+        return settled;
+    }
+
+    private static int settleOption(AccountService service, OptionExerciseEvent event) {
+        var plans = service.planOptionExercise(event);
+        int settled = 0;
+        for (var plan : plans) {
+            if (service.processExpiringPosition(plan.productLine(), plan.userId(),
+                    settlementCommandId(plan), plan.command()).isPresent()) {
+                settled++;
+            }
+        }
+        return settled;
+    }
+
+    private static String settlementCommandId(AccountService.UserExpiringSettlementPlan plan) {
+        var command = plan.command();
+        return command.referenceType() + ":" + command.symbol() + ":" + command.instrumentVersion()
+                + ":" + plan.userId() + ":" + command.marginMode() + ":" + command.positionSide();
+    }
+
+    private static AccountService settlementService(FakeAccountRepository repository) {
+        return new AccountService(repository, new PositionCalculator(), null,
+                new AccountProperties(), new FakeOutboxRepository());
     }
 
     private static final class FakeAccountRepository extends AccountRepository {
@@ -1120,10 +1167,8 @@ class AccountServiceTest {
         private final List<ProductLine> scopedPositionMarginAdjustmentLines = new ArrayList<>();
         private final List<ProductLine> scopedPositionMarginReleaseLines = new ArrayList<>();
         private final List<ProductLine> scopedPositionUpdateLines = new ArrayList<>();
-        private final Set<ProcessedTradeKey> processedTradeIds = new HashSet<>();
         private Instant lastSettlementMarkPriceTime;
         private Duration lastSettlementPriceWindow;
-        private int tradeProcessingAttempts;
         private int positionUpdates;
         private int positionMarginAdjustmentCalls;
 
@@ -1190,9 +1235,17 @@ class AccountServiceTest {
         }
 
         @Override
-        public boolean markTradeProcessing(ProductLine productLine, long tradeId, String symbol) {
-            tradeProcessingAttempts++;
-            return processedTradeIds.add(new ProcessedTradeKey(productLine, symbol, tradeId));
+        public void registerTradeSettlement(ProductLine productLine, MatchTradeEvent trade, Instant now) {
+            // Command idempotency and bilateral persistence are covered by repository integration tests.
+        }
+
+        @Override
+        public void markTradeSideApplied(ProductLine productLine,
+                                         MatchTradeEvent trade,
+                                         TradeParticipantRole role,
+                                         String commandId,
+                                         Instant now) {
+            // Command idempotency and bilateral persistence are covered by repository integration tests.
         }
 
         @Override
@@ -1941,6 +1994,4 @@ class AccountServiceTest {
     private record OrderFeeSnapshot(long makerFeeRatePpm, long takerFeeRatePpm) {
     }
 
-    private record ProcessedTradeKey(ProductLine productLine, String symbol, long tradeId) {
-    }
 }

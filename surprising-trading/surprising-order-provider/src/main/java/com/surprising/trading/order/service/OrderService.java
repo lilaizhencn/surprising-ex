@@ -1,5 +1,12 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.account.api.model.AccountCommandResultEvent;
+import com.surprising.account.api.model.AccountCommandStatus;
+import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.AccountUserCommand;
+import com.surprising.account.api.model.AccountUserCommandType;
+import com.surprising.account.api.model.OrderReservationKind;
+import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.AmendOrderBatchItemResponse;
@@ -163,7 +170,17 @@ public class OrderService {
             }
         }
         long orderId = orderRepository.nextSequence("order");
-        OrderStatus status = validation.accepted() ? OrderStatus.ACCEPTED : OrderStatus.REJECTED;
+        ReservationPlan reservationPlan = ReservationPlan.none();
+        if (validation.accepted() && (!normalized.reduceOnly() || requiresReduceOnlyFunds(normalized, validation))) {
+            reservationPlan = planOpeningFunds(normalized, orderId, validation, feeSnapshot);
+            if (!reservationPlan.accepted()) {
+                validation = ValidationResult.reject(reservationPlan.rejectReason(),
+                        validation.instrumentVersion(), validation.instrumentType(), validation.contractType());
+            }
+        }
+        OrderStatus status = !validation.accepted()
+                ? OrderStatus.REJECTED
+                : reservationPlan.command() == null ? OrderStatus.ACCEPTED : OrderStatus.PENDING_RESERVE;
         OrderRecord order = new OrderRecord(
                 orderId,
                 productLine,
@@ -203,17 +220,13 @@ public class OrderService {
             throw new IllegalStateException("failed to insert order " + orderId);
         }
 
-        if (validation.accepted() && (!normalized.reduceOnly() || requiresReduceOnlyFunds(normalized, validation))) {
-            validation = reserveOpeningFunds(normalized, orderId, validation, feeSnapshot, now);
-            if (!validation.accepted()) {
-                orderRepository.reject(orderId, validation.rejectReason(), now);
-                order = rejectOrder(order, validation.rejectReason(), now);
-            }
-        }
-
-        OrderEventType eventType = validation.accepted() ? OrderEventType.ACCEPTED : OrderEventType.REJECTED;
+        OrderEventType eventType = !validation.accepted()
+                ? OrderEventType.REJECTED
+                : status == OrderStatus.PENDING_RESERVE ? OrderEventType.RESERVE_PENDING : OrderEventType.ACCEPTED;
         enqueueOrderEvent(order, eventType, validation.rejectReason(), now, traceId);
-        if (validation.accepted()) {
+        if (status == OrderStatus.PENDING_RESERVE) {
+            enqueueAccountReservation(order, reservationPlan.command(), now, traceId);
+        } else if (validation.accepted()) {
             enqueueCommand(order, OrderCommandType.PLACE, now, traceId);
         }
         return toResponse(order);
@@ -391,63 +404,63 @@ public class OrderService {
         return place(closeOrder);
     }
 
-    private ValidationResult reserveOpeningFunds(PlaceOrderRequest request,
-                                                 long orderId,
-                                                 ValidationResult validation,
-                                                 OrderFeeSnapshot feeSnapshot,
-                                                 Instant now) {
+    private ReservationPlan planOpeningFunds(PlaceOrderRequest request,
+                                             long orderId,
+                                             ValidationResult validation,
+                                             OrderFeeSnapshot feeSnapshot) {
         if (validation.instrumentType() == InstrumentType.SPOT) {
-            return reserveSpotAssets(request, orderId, validation.instrumentVersion(), feeSnapshot, now);
+            return planSpotReservation(request, orderId, validation.instrumentVersion(), feeSnapshot);
         }
-        return reserveInitialMargin(request, orderId, validation.instrumentVersion(), now);
+        return planDerivativeReservation(request, orderId, validation.instrumentVersion());
     }
 
-    private ValidationResult reserveSpotAssets(PlaceOrderRequest request,
-                                               long orderId,
-                                               long instrumentVersion,
-                                               OrderFeeSnapshot feeSnapshot,
-                                               Instant now) {
+    private ReservationPlan planSpotReservation(PlaceOrderRequest request,
+                                                long orderId,
+                                                long instrumentVersion,
+                                                OrderFeeSnapshot feeSnapshot) {
         var requirement = spotOrderReservationRepository.requirement(
                 request.symbol(), instrumentVersion, request.side(), request.orderType(), request.priceTicks(),
                 request.quantitySteps(), properties.getRisk().getMarketMaxSlippagePpm(),
                 properties.getRisk().getMarketMaxMarkAgeMs(), feeSnapshot);
         if (requirement.isEmpty()) {
-            return ValidationResult.reject("spot reservation requirement unavailable", instrumentVersion,
-                    InstrumentType.SPOT);
+            return ReservationPlan.reject("spot reservation requirement unavailable");
         }
         if (!requirement.get().accepted()) {
-            return ValidationResult.reject(requirement.get().rejectReason(), instrumentVersion, InstrumentType.SPOT);
+            return ReservationPlan.reject(requirement.get().rejectReason());
         }
-        boolean reserved = spotOrderReservationRepository.reserve(request.userId(), requirement.get().asset(),
-                orderId, request.symbol(), request.side(), requirement.get().reservedUnits(), now);
-        return reserved ? ValidationResult.ok(instrumentVersion, InstrumentType.SPOT)
-                : ValidationResult.reject("insufficient spot available balance", instrumentVersion,
-                InstrumentType.SPOT);
+        return ReservationPlan.accept(new OrderReserveAccountCommand(
+                orderId, request.symbol(), request.side(), OrderReservationKind.SPOT_ASSET, AccountType.SPOT,
+                requirement.get().asset(), request.marginMode(), request.positionSide(),
+                requirement.get().reservedUnits()));
     }
 
-    private ValidationResult reserveInitialMargin(PlaceOrderRequest request,
-                                                  long orderId,
-                                                  long instrumentVersion,
-                                                  Instant now) {
+    private ReservationPlan planDerivativeReservation(PlaceOrderRequest request,
+                                                      long orderId,
+                                                      long instrumentVersion) {
         var requirement = orderMarginRepository.requirement(
                 request.symbol(), instrumentVersion, request.userId(), request.marginMode(), request.positionSide(), request.side(),
                 request.orderType(), request.priceTicks(), request.quantitySteps(),
                 properties.getRisk().getMarketMaxSlippagePpm(),
                 properties.getRisk().getMarketMaxMarkAgeMs());
         if (requirement.isEmpty()) {
-            return ValidationResult.reject("margin requirement unavailable", instrumentVersion);
+            return ReservationPlan.reject("margin requirement unavailable");
         }
         if (!requirement.get().accepted()) {
-            return ValidationResult.reject(requirement.get().rejectReason(), instrumentVersion);
+            return ReservationPlan.reject(requirement.get().rejectReason());
         }
         if (requirement.get().initialMarginUnits() <= 0) {
-            return ValidationResult.reject("invalid margin requirement", instrumentVersion);
+            return ReservationPlan.reject("invalid margin requirement");
         }
-        boolean reserved = orderMarginRepository.reserve(request.userId(), requirement.get().accountType(),
-                requirement.get().asset(), orderId, request.symbol(), request.marginMode(),
-                request.positionSide(), requirement.get().initialMarginUnits(), now);
-        return reserved ? ValidationResult.ok(instrumentVersion)
-                : ValidationResult.reject("insufficient available margin", instrumentVersion);
+        AccountType accountType;
+        try {
+            accountType = AccountType.valueOf(requirement.get().accountType());
+        } catch (IllegalArgumentException ex) {
+            return ReservationPlan.reject("unsupported margin account type " + requirement.get().accountType());
+        }
+        return ReservationPlan.accept(new OrderReserveAccountCommand(
+                orderId, request.symbol(), request.side(), OrderReservationKind.DERIVATIVE_MARGIN, accountType,
+                requirement.get().asset(), request.marginMode(), request.positionSide(),
+                requirement.get().initialMarginUnits()));
     }
 
     private TestOrderResponse dryRunOpeningFunds(PlaceOrderRequest request,
@@ -917,6 +930,74 @@ public class OrderService {
         return new OrderBatchResponse(results.size(), completed, results.size() - completed, results);
     }
 
+    @Transactional
+    public void processAccountCommandResult(AccountCommandResultEvent result) {
+        if (result == null
+                || result.commandType() != AccountUserCommandType.ORDER_RESERVE
+                || !"ORDER".equals(result.source())) {
+            return;
+        }
+        long orderId;
+        try {
+            orderId = Long.parseLong(result.sourceReference());
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("invalid order account command source reference", ex);
+        }
+        OrderRecord current = orderRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new IllegalStateException("order not found for account command result " + orderId));
+        requireOrderCurrentProductLine(current);
+        if (current.productLine() != result.productLine() || current.userId() != result.userId()) {
+            throw new IllegalStateException("account command result does not match order identity " + orderId);
+        }
+        String expectedCommandId = reservationCommandId(current.productLine(), current.orderId());
+        if (!expectedCommandId.equals(result.commandId())) {
+            throw new IllegalStateException("account command result id does not match order " + orderId);
+        }
+        boolean accepted = result.status() == AccountCommandStatus.APPLIED;
+        String rejectReason = accepted ? null
+                : result.errorMessage() == null || result.errorMessage().isBlank()
+                ? result.errorCode() : result.errorMessage();
+        Instant now = result.completedAt() == null ? Instant.now() : result.completedAt();
+        if (!orderRepository.completeReservation(orderId, accepted, rejectReason, now)) {
+            OrderRecord existing = orderRepository.findByOrderId(orderId).orElseThrow();
+            if (existing.status() == OrderStatus.PENDING_RESERVE) {
+                throw new IllegalStateException("failed to complete order reservation " + orderId);
+            }
+            return;
+        }
+        OrderRecord updated = orderRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new IllegalStateException("updated order not found " + orderId));
+        enqueueOrderEvent(updated, accepted ? OrderEventType.ACCEPTED : OrderEventType.REJECTED,
+                rejectReason, now, result.traceId());
+        if (accepted) {
+            enqueueCommand(updated, OrderCommandType.PLACE, now, result.traceId());
+        }
+    }
+
+    private void enqueueAccountReservation(OrderRecord order,
+                                           OrderReserveAccountCommand reservation,
+                                           Instant now,
+                                           String traceId) {
+        AccountUserCommand command = new AccountUserCommand(
+                AccountUserCommand.CURRENT_SCHEMA_VERSION,
+                reservationCommandId(order.productLine(), order.orderId()),
+                order.productLine(),
+                order.userId(),
+                AccountUserCommandType.ORDER_RESERVE,
+                "ORDER",
+                String.valueOf(order.orderId()),
+                null,
+                payload(reservation),
+                now,
+                traceId);
+        outboxRepository.enqueue("ORDER", order.orderId(), properties.getKafka().getAccountUserCommandsTopic(),
+                command.partitionKey(), command.commandType().name(), payload(command), now);
+    }
+
+    private String reservationCommandId(ProductLine productLine, long orderId) {
+        return "ORDER_RESERVE:" + productLine.name() + ":" + orderId;
+    }
+
     private AmendOrderBatchResponse amendBatchResponse(List<AmendOrderBatchItemResponse> results) {
         int completed = (int) results.stream().filter(AmendOrderBatchItemResponse::success).count();
         return new AmendOrderBatchResponse(results.size(), completed, results.size() - completed, results);
@@ -1004,6 +1085,25 @@ public class OrderService {
             return objectMapper.writeValueAsString(value);
         } catch (JacksonException ex) {
             throw new IllegalStateException("failed to serialize order event", ex);
+        }
+    }
+
+    private record ReservationPlan(OrderReserveAccountCommand command, String rejectReason) {
+
+        private static ReservationPlan none() {
+            return new ReservationPlan(null, null);
+        }
+
+        private static ReservationPlan accept(OrderReserveAccountCommand command) {
+            return new ReservationPlan(command, null);
+        }
+
+        private static ReservationPlan reject(String reason) {
+            return new ReservationPlan(null, reason);
+        }
+
+        private boolean accepted() {
+            return rejectReason == null || rejectReason.isBlank();
         }
     }
 

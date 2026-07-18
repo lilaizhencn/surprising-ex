@@ -7,7 +7,8 @@ Surprising Exchange account and product settlement module. The current implement
 ## Modules
 
 - `surprising-account-api`: account/position RPC contracts and DTOs.
-- `surprising-account-provider`: balances, ledger, positions, and match-trade consumption.
+- `surprising-account-provider`: the sole writer for balances, ledgers, positions, reservations,
+  deficits, funding, ADL, delivery/exercise, and trade-side settlement.
 
 ## Long Units
 
@@ -28,15 +29,22 @@ Surprising Exchange account and product settlement module. The current implement
 - Liquidation fees use the frozen `liquidation_orders.liquidation_fee_rate_ppm`. Account settlement charges only the actually collectible amount from user collateral and publishes the collected amount to the insurance-fund topic.
 - Losses beyond `availableUnits + lockedUnits` are recorded in `account_deficits` instead of making balance columns negative.
 
-## Trade Processing
+## Per-user command processing
 
-`surprising-account-provider` consumes:
+All fund mutations enter the product-scoped account command topic:
 
 ```text
-surprising.<product-segment>.match.trades.v1
+surprising.<product-segment>.account.user.commands.v1
 ```
 
-Each `MatchTradeEvent` updates:
+The Kafka key is `<PRODUCT_LINE>:<userId>`. The command, DLT, and result topics have 32 partitions,
+and account-provider uses record acknowledgement and 32 listener lanes. This serializes one user's
+commands within a product line without application locks while allowing unrelated users to run in
+parallel. Order, matching, funding, ADL, insurance, delivery/exercise, and HTTP mutations emit
+commands and never directly update mutable account tables.
+
+Matching emits one `TRADE_SIDE_SETTLE` command for the taker and one for the maker. Each side runs
+in that user's local database transaction and updates:
 
 - The taker user's position using `takerSide`.
 - The maker user's position using the opposite side.
@@ -54,7 +62,12 @@ Each `MatchTradeEvent` updates:
 - After position quantity or version changes, reduce-only pruning runs: wrong-side, stale-version, or excess open reduce-only orders are marked `CANCEL_REQUESTED` and cancel commands are emitted through the order-command outbox. Capacity checks use checked absolute value and checked pending-quantity accumulation, so impossible position quantities fail before cancel commands are emitted.
 - If settlement reduces the position to zero, account-provider also moves every exact-scope `PENDING` TP/SL/trailing trigger to `CANCELED` with `POSITION_CLOSED` in the same transaction. The position outbox event is emitted only after that update is part of the transaction, allowing trigger-provider to clean its Redis secondary index after commit.
 
-`account_processed_trades(symbol, trade_id)` is the trade idempotency key, so repeated delivery does not update positions twice and same-number trade ids from different symbols are not treated as duplicates.
+`account_commands.command_id` plus its immutable envelope hash is the execution idempotency key.
+`account_trade_settlements(product_line, symbol, trade_id)` tracks taker and maker completion; stale
+one-sided settlement makes the `accountTradeSettlement` health indicator `DOWN`.
+Command dependencies are persisted as `depends_on_command_id`, so correctness never depends on
+producer order or result-topic delivery order. See
+[account single-writer design](../docs/account-single-writer-command-lane_CN.md).
 
 ## API
 
@@ -142,7 +155,9 @@ Root [init.sql](../init.sql) creates:
 - `account_margin_reservations`
 - `account_position_margins`
 - `account_positions`
-- `account_processed_trades`
+- `account_commands`
+- `account_command_submissions`
+- `account_trade_settlements`
 
 Core indexes:
 
@@ -152,7 +167,9 @@ Core indexes:
 - `account_margin_reservations_user_idx`
 - `account_position_margins_user_idx`
 - `account_positions_user_idx`
-- `account_processed_trades_symbol_idx`
+- `account_commands_processing_idx`
+- `account_commands_dependency_idx`
+- `account_trade_settlements_incomplete_idx`
 - `account_outbox_pending_key_idx`
 
 ## Configuration
@@ -163,13 +180,16 @@ surprising:
     kafka:
       product-line: LINEAR_PERPETUAL
       product-topics-enabled: true
-      match-trades-topic: surprising.linear-perp.match.trades.v1
       position-events-topic: surprising.linear-perp.account.position.events.v1
       liquidation-fee-events-topic: surprising.linear-perp.account.liquidation-fee.events.v1
       concurrency: 2
+      user-command-concurrency: 32
       max-poll-records: 500
-    settlement:
-      match-trade-user-lock-stripes: 4096
+    trade-settlement:
+      stale-after: 1m
+    command-wait:
+      timeout: 10s
+      poll-delay-ms: 20
     outbox:
       batch-size: 200
       publish-delay-ms: 200
@@ -181,28 +201,31 @@ surprising:
       contract-spec-max-entries: 4096
 ```
 
-Set `product-line` to `SPOT`, `LINEAR_PERPETUAL`, `LINEAR_DELIVERY`, or `OPTION` when running isolated product-line instances. Legacy topics remain available when `product-topics-enabled=false`.
+Set `product-line` to `SPOT`, `LINEAR_PERPETUAL`, `LINEAR_DELIVERY`, or `OPTION` when running
+isolated product-line instances. Account command, DLT, and result topics are always product scoped;
+there is no shared legacy fallback for financial commands.
 
 The local cache is intentionally limited to immutable read snapshots:
 
 - `contract-spec-max-entries` caches contract math by `(symbol, instrumentVersion)`.
 
-Balances, positions, margin reservations, processed-trade idempotency, ledgers, and outbox state are never cached and remain PostgreSQL-authoritative.
+Balances, positions, margin reservations, command idempotency, ledgers, and outbox state remain
+PostgreSQL-authoritative. Redis positions are a revisioned, replayable query projection only.
 
 Account outbox publishing keeps the Kafka key unchanged and claims a bounded contiguous due prefix per `topic + event_key`.
 Rows with the same key are still sent in id order; different keys can publish concurrently.
 
-Account match-trade consumer metrics are exposed through Actuator/Prometheus:
+Account command metrics are exposed through Actuator/Prometheus:
 
-- `surprising.account.match_trade.events{outcome=processed|duplicate|failed}`
-- `surprising.account.match_trade.processing{outcome=...}`
-- `surprising.account.match_trade.event_lag{outcome=...}`
-- `surprising.account.match_trade.user_lock_wait`
+- `surprising.account.command.events{outcome=applied|rejected|waiting_dependency|duplicate|failed}`
+- `surprising.account.command.processing{outcome=...}`
+- `surprising.account.command.event_lag{outcome=...}`
+- `accountTradeSettlement` health details for stale one-sided trades
 
-Use these metrics with Kafka consumer lag and PostgreSQL latency to identify whether the bottleneck is Kafka fetch, account settlement SQL, duplicate replay, or downstream outbox/fanout. Consumer parallelism is still bounded by Kafka partitions: because match trades are keyed by `symbol`, one hot symbol remains ordered on one partition while different symbols can settle in parallel.
-Before entering `processTradeIfNew(...)`, the listener also takes deterministic per-user striped locks for the taker and maker. This keeps the same user's match-trade settlement from running concurrently across different symbols while still allowing unrelated users to settle in parallel. `surprising.account.match_trade.user_lock_wait` should stay low; a sustained increase means hot users or maker accounts are becoming the account-settlement queue.
-The match-trade listener uses Spring Kafka batch delivery and `AckMode.BATCH` to reduce per-record offset commit overhead. Each record in the batch still calls `processTradeIfNew(...)` independently, so PostgreSQL transactions, `(symbol, trade_id)` idempotency, per-symbol ordering, and per-user settlement locks remain the correctness boundary. If one record fails, Kafka redelivers the batch and already-settled rows are skipped by the processed-trade key.
-Set `surprising.account.kafka.client-id` to a stable unique value per account-provider pod. Keep `surprising.account.kafka.group-id` identical across replicas; use the unique client id only for consumer-group observability and node-level failover diagnosis.
+Use these metrics with Kafka lag, DLT count, PostgreSQL latency, waiting dependencies, and outbox age.
+A technical failure deliberately retries without skipping the record and blocks that partition. Poison
+envelopes go to the same-numbered DLT partition. Set `surprising.account.kafka.client-id` to a stable
+unique value per account-provider pod and keep the product-line consumer group identical across replicas.
 
 ## Local Run
 
@@ -221,8 +244,12 @@ Port:
 ## Production Notes
 
 - Balance adjustments must include a globally unique `referenceId` to prevent duplicate deposits or reversals. A replay with the same reference is accepted only when `amountUnits` and `reason` match the original ledger row; conflicting payloads fail before mutating balances.
-- Account provider must deduplicate match trades by `(symbol, trade_id)`, not by bare `tradeId`.
-- Do not remove the match-trade per-user settlement guard when raising `surprising.account.kafka.concurrency`. Cross-symbol settlement for the same user must remain serialized at the account-provider layer; PostgreSQL row locks and non-negative constraints are the final safety net, not the primary queueing mechanism.
+- Do not call account mutation services outside `AccountUserCommandProcessor`. Run
+  `scripts/check-account-single-writer.sh` in CI to preserve this boundary.
+- Do not change the account command Kafka key from `<PRODUCT_LINE>:<userId>`. Raising consumer
+  concurrency above the 32 topic partitions adds no parallelism.
+- An HTTP timeout is an unknown result, not a failure. Retry with the same `referenceId`; a new
+  reference creates a new financial intent.
 - Order entry reserves initial margin before publishing to matching. Account provider consumes match trades, calculates opening collateral from the actual fill price, migrates that amount into position margin, and releases any order-price or market-protection excess.
 - `account_positions`, `account_position_margins`, and `account_margin_reservations` persist `margin_mode`. Do not drop this field from events or queries; later isolated-margin risk depends on it.
 - User isolated margin adjustments are idempotent by `referenceId` and write `account_ledger_entries.reference_type = POSITION_MARGIN_ADJUSTMENT`. A positive adjustment only moves available balance into position collateral; a negative adjustment only releases position collateral after checking the latest isolated risk snapshot.
@@ -234,12 +261,16 @@ Port:
 - Realized losses may consume `availableUnits` and position-margin-backed `lockedUnits`, but they must not consume open-order reservation locks. If position-backed locked collateral is debited, `account_position_margins` is reduced in the same transaction.
 - Trade-fee debits use the same balance/deficit safety path as realized losses. Fee rebates first clear deficits, then increase available balance. Settlement must read the rate snapshot from `trading_orders`, not recompute old orders from the user's current tier or the current instrument fee.
 - Balance settlement locks `account_deficits` for equity correctness, but skips the `UPDATE account_deficits` statement when `deficit_units` is unchanged. Do not reintroduce unconditional zero-delta deficit writes on the hot trade path; when a deficit is created or cleared, the changed row must still be written and checked.
-- Match-trade settlement already locks the current position before calculating the next state. Keep using the update path that accepts the previously locked signed quantity; adding another `SELECT ... FOR UPDATE` or post-update read on every side adds two avoidable SQL round trips per trade side.
-- Match-trade Kafka consumption intentionally batches delivery and commits offsets after the listener batch succeeds. Do not move financial settlement into one large database transaction for the whole Kafka batch; that would increase lock hold time and rollback blast radius. The batch is only a transport/ack optimization.
+- Trade-side settlement already locks the current position before calculating the next state. Keep
+  using the update path that accepts the previously locked signed quantity; adding another
+  `SELECT ... FOR UPDATE` or post-update read adds two avoidable SQL round trips per side.
+- Never infer a dependency from cross-topic arrival order. Persist `dependsOnCommandId`; result topics
+  are only latency/observability hints and reconciliation reads `account_commands`.
 - Liquidation-fee debits intentionally do not create new `account_deficits`. The insurance fund receives only amounts that account-provider actually collected from user collateral. This prevents the fund from being credited from an unpaid penalty.
 - `surprising.account.liquidation-fee.events.v1` is at-least-once. Downstream insurance consumers must use `(reference_type, reference_id, asset)` with `reference_id = tradeId:orderId` as the idempotency key.
 - `contract_type` controls realized PnL: `LINEAR_PERPETUAL` settles `signedQty * (exitTicks - entryTicks) * notional_multiplier_units`; `INVERSE_PERPETUAL` settles `signedQty * faceValueUnits * settleScaleUnits * (exitTicks - entryTicks) / (entryTicks * exitTicks * price_tick_units)`.
-- Maintenance margin and unrealized PnL are calculated by the risk module. Funding fees, insurance fund, and auto-deleveraging are handled by separate settlement modules, not by this provider.
+- Maintenance margin and unrealized PnL are calculated by risk. Funding, insurance, and ADL modules
+  own their orchestration state, but all resulting account mutations execute only in this provider.
 
 ## Verification
 

@@ -63,7 +63,9 @@ public class AdlProperties {
         public void setPositionRiskEventsTopic(String positionRiskEventsTopic) { this.positionRiskEventsTopic = positionRiskEventsTopic; }
         public String getGroupId() { return productTopicsEnabled ? productTopics().consumerGroup("adl-risk-index") : groupId; }
         public void setGroupId(String groupId) { this.groupId = groupId; }
-
+        public String getUserCommandsTopic() {
+            return productTopics().accountUserCommandsTopic();
+        }
         private ProductTopicNames productTopics() {
             return ProductTopicNames.of(productLine);
         }

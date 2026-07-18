@@ -1,5 +1,8 @@
 package com.surprising.funding.provider.service;
 
+import com.surprising.account.api.model.AccountUserCommand;
+import com.surprising.account.api.model.AccountUserCommandType;
+import com.surprising.account.api.model.FundingSettlementAccountCommand;
 import com.surprising.funding.api.model.FundingPaymentQueryResponse;
 import com.surprising.funding.api.model.FundingRateQueryResponse;
 import com.surprising.funding.api.model.FundingRateResponse;
@@ -7,6 +10,7 @@ import com.surprising.funding.api.model.FundingSettlementResponse;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.model.FundingPaymentCandidate;
 import com.surprising.funding.provider.repository.FundingRepository;
+import com.surprising.funding.provider.repository.FundingAccountCommandOutboxRepository;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -28,20 +32,26 @@ public class FundingService {
 
     private final FundingProperties properties;
     private final FundingRepository fundingRepository;
+    private final FundingAccountCommandOutboxRepository accountCommandOutboxRepository;
     private final LatestFundingRateCache latestFundingRateCache;
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final TransactionTemplate transactionTemplate;
     private final String nodeId;
+    private final tools.jackson.databind.ObjectMapper objectMapper;
 
     public FundingService(FundingProperties properties,
                           FundingRepository fundingRepository,
+                          FundingAccountCommandOutboxRepository accountCommandOutboxRepository,
                           LatestFundingRateCache latestFundingRateCache,
                           @Qualifier("fundingKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
+                          tools.jackson.databind.ObjectMapper objectMapper,
                           PlatformTransactionManager transactionManager) {
         this.properties = properties;
         this.fundingRepository = fundingRepository;
+        this.accountCommandOutboxRepository = accountCommandOutboxRepository;
         this.latestFundingRateCache = latestFundingRateCache;
         this.kafkaTemplate = kafkaTemplate;
+        this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
     }
@@ -135,10 +145,27 @@ public class FundingService {
             if (payment.amountUnits() == 0L) {
                 continue;
             }
-            if (!fundingRepository.insertPayment(settlementId.get(), payment, now)) {
+            var dispatch = fundingRepository.insertPayment(settlementId.get(), payment, now);
+            if (dispatch.isEmpty()) {
                 continue;
             }
-            fundingRepository.applyPaymentToAccount(settlementId.get(), payment, now);
+            FundingSettlementAccountCommand payload = new FundingSettlementAccountCommand(
+                    settlementId.get(), dispatch.get().paymentId(), payment.symbol(), payment.marginMode(),
+                    payment.positionSide(), payment.asset(), payment.signedQuantitySteps(),
+                    payment.notionalUnits(), payment.fundingRatePpm(), payment.amountUnits());
+            AccountUserCommand command = new AccountUserCommand(
+                    AccountUserCommand.CURRENT_SCHEMA_VERSION,
+                    dispatch.get().commandId(),
+                    properties.getKafka().getProductLine(),
+                    payment.userId(),
+                    AccountUserCommandType.FUNDING_SETTLE,
+                    "FUNDING",
+                    Long.toString(dispatch.get().paymentId()),
+                    null,
+                    objectMapper.writeValueAsString(payload),
+                    now,
+                    null);
+            accountCommandOutboxRepository.enqueue(dispatch.get().paymentId(), command, now);
             if (payment.signedQuantitySteps() > 0) {
                 totalLongPayment = Math.addExact(totalLongPayment, payment.amountUnits());
             } else {
@@ -146,7 +173,8 @@ public class FundingService {
             }
             positionCount++;
         }
-        fundingRepository.completeSettlement(settlementId.get(), totalLongPayment, totalShortPayment, positionCount, now);
+        fundingRepository.awaitAccountSettlement(
+                settlementId.get(), totalLongPayment, totalShortPayment, positionCount, now);
     }
 
     private boolean ownsSymbol(String symbol) {

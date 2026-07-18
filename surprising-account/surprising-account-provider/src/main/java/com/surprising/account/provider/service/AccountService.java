@@ -1,6 +1,9 @@
 package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.ExpiringPositionSettlementAccountCommand;
+import com.surprising.account.api.model.TradeParticipantRole;
+import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.account.api.model.AdminBalanceAdjustmentQueryResponse;
 import com.surprising.account.api.model.AccountLedgerQueryResponse;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
@@ -518,13 +521,7 @@ public class AccountService {
         }
     }
 
-    @Transactional
-    public void processTrade(MatchTradeEvent trade) {
-        processTradeIfNew(trade);
-    }
-
-    @Transactional
-    public int processDeliverySettlement(DeliverySettlementEvent event) {
+    public List<UserExpiringSettlementPlan> planDeliverySettlement(DeliverySettlementEvent event) {
         if (event == null) {
             throw new IllegalArgumentException("delivery settlement event is required");
         }
@@ -539,14 +536,21 @@ public class AccountService {
         }
         Instant settlementTime = settlementTime(event.deliveryTime(), event.eventTime());
         Duration priceWindow = settlementPriceWindow();
-        return settleExpiringPositions(spec.contractType().productLine(), symbol, event.eventTime(),
-                "DELIVERY_SETTLEMENT", "DELIVERY_SETTLEMENT",
-                (position, positionSpec) -> accountRepository.settlementMarkPriceTicks(symbol,
-                        position.instrumentVersion(), settlementTime, priceWindow));
+        ProductLine productLine = spec.contractType().productLine();
+        return accountRepository.openPositionStatesForSettlement(productLine, symbol).stream()
+                .filter(position -> position.signedQuantitySteps() != 0L)
+                .map(position -> new UserExpiringSettlementPlan(
+                        productLine,
+                        position.userId(),
+                        new ExpiringPositionSettlementAccountCommand(
+                                symbol, position.instrumentVersion(), position.marginMode(), position.positionSide(),
+                                accountRepository.settlementMarkPriceTicks(
+                                        symbol, position.instrumentVersion(), settlementTime, priceWindow),
+                                "DELIVERY_SETTLEMENT", "DELIVERY_SETTLEMENT", settlementTime)))
+                .toList();
     }
 
-    @Transactional
-    public int processOptionExercise(OptionExerciseEvent event) {
+    public List<UserExpiringSettlementPlan> planOptionExercise(OptionExerciseEvent event) {
         if (event == null) {
             throw new IllegalArgumentException("option exercise event is required");
         }
@@ -556,16 +560,87 @@ public class AccountService {
         ContractSpec spec = contractSpec(symbol, event.version());
         requireMatchingOptionInstrument(event, spec);
         String underlyingSymbol = normalizeSymbol(event.underlyingSymbol());
-        long underlyingPriceUnits = accountRepository.settlementMarkPriceUnits(underlyingSymbol,
-                settlementTime(event.deliveryTime(), event.eventTime()), settlementPriceWindow());
-        return settleExpiringPositions(spec.contractType().productLine(), symbol, event.eventTime(),
-                "OPTION_EXERCISE", "OPTION_EXERCISE",
-                (position, positionSpec) -> optionIntrinsicPriceTicks(event, positionSpec, underlyingPriceUnits));
+        Instant settlementTime = settlementTime(event.deliveryTime(), event.eventTime());
+        long underlyingPriceUnits = accountRepository.settlementMarkPriceUnits(
+                underlyingSymbol, settlementTime, settlementPriceWindow());
+        ProductLine productLine = spec.contractType().productLine();
+        return accountRepository.openPositionStatesForSettlement(productLine, symbol).stream()
+                .filter(position -> position.signedQuantitySteps() != 0L)
+                .map(position -> {
+                    ContractSpec positionSpec = contractSpec(symbol, position.instrumentVersion());
+                    return new UserExpiringSettlementPlan(
+                            productLine,
+                            position.userId(),
+                            new ExpiringPositionSettlementAccountCommand(
+                                    symbol, position.instrumentVersion(), position.marginMode(),
+                                    position.positionSide(),
+                                    optionIntrinsicPriceTicks(event, positionSpec, underlyingPriceUnits),
+                                    "OPTION_EXERCISE", "OPTION_EXERCISE", settlementTime));
+                })
+                .toList();
     }
 
-    @Transactional
-    public boolean processTradeIfNew(MatchTradeEvent trade) {
-        String traceId = trade.traceId();
+    public Optional<PositionResponse> processExpiringPosition(
+            ProductLine productLine,
+            long userId,
+            String commandId,
+            ExpiringPositionSettlementAccountCommand command) {
+        PositionSettlementState position = accountRepository
+                .openPositionStatesForSettlement(productLine, command.symbol()).stream()
+                .filter(candidate -> candidate.userId() == userId
+                        && candidate.instrumentVersion() == command.instrumentVersion()
+                        && candidate.marginMode() == command.marginMode()
+                        && candidate.positionSide() == command.positionSide())
+                .findFirst()
+                .orElse(null);
+        if (position == null || position.signedQuantitySteps() == 0L) {
+            return Optional.empty();
+        }
+        ContractSpec spec = contractSpec(command.symbol(), position.instrumentVersion());
+        if (spec.contractType().productLine() != productLine) {
+            throw new IllegalStateException("expiring position product line mismatch");
+        }
+        PositionChange change = positionCalculator.closeAtSettlement(position.state(),
+                command.settlementPriceTicks(), spec);
+        long ledgerDeltaUnits = lifecycleLedgerDeltaUnits(command.referenceType(),
+                command.settlementPriceTicks(), spec, position, change);
+        boolean applied = accountRepository.settleLifecyclePnl(
+                derivativeAccountType(spec), userId, spec.settleAsset(), command.referenceType(), commandId,
+                command.reason(), command.symbol(), position.marginMode(), ledgerDeltaUnits, command.eventTime());
+        if (!applied) {
+            return accountRepository.position(productLine, userId, command.symbol(),
+                    position.marginMode(), position.positionSide());
+        }
+        long closeSteps = Math.absExact(position.signedQuantitySteps());
+        accountRepository.releasePositionMargin(productLine, userId, command.symbol(), position.marginMode(),
+                closeSteps, position.positionSide(), closeSteps, command.eventTime());
+        PositionResponse updated = accountRepository.updatePosition(productLine, userId, command.symbol(),
+                position.marginMode(), position.positionSide(), change.next(), position.signedQuantitySteps(),
+                command.eventTime());
+        pruneClosedPositionTriggers(productLine, userId, command.symbol(), position.marginMode(),
+                position.positionSide(), change.next(), command.eventTime());
+        outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
+                0L, updated, command.eventTime(), TraceContext.currentOrCreate());
+        schedulePositionCacheSync(productLine, userId, command.symbol(),
+                position.marginMode(), position.positionSide());
+        return Optional.of(updated);
+    }
+
+    public record UserExpiringSettlementPlan(
+            ProductLine productLine,
+            long userId,
+            ExpiringPositionSettlementAccountCommand command) {
+    }
+
+    /**
+     * Applies exactly one participant of a match. Idempotency is owned by account_commands and the
+     * bilateral completion state is tracked in account_trade_settlements.
+     */
+    public void processTradeSide(ProductLine commandProductLine,
+                                 String commandId,
+                                 TradeSideSettlementCommand sideCommand) {
+        MatchTradeEvent trade = sideCommand.trade();
+        TradeParticipantRole role = sideCommand.participantRole();
         InstrumentType takerInstrumentType = instrumentType(trade.symbol(), trade.takerInstrumentVersion());
         InstrumentType makerInstrumentType = trade.takerInstrumentVersion() == trade.makerInstrumentVersion()
                 ? takerInstrumentType
@@ -573,80 +648,41 @@ public class AccountService {
         if (takerInstrumentType != makerInstrumentType) {
             throw new IllegalStateException("matched orders use different instrument types for " + trade.symbol());
         }
-        ProductLine productLine = takerInstrumentType == InstrumentType.SPOT
+        ProductLine actualProductLine = takerInstrumentType == InstrumentType.SPOT
                 ? ProductLine.SPOT
                 : contractSpec(trade.symbol(), trade.takerInstrumentVersion()).contractType().productLine();
-        if (!accountRepository.markTradeProcessing(productLine, trade.tradeId(), trade.symbol())) {
-            return false;
+        if (actualProductLine != commandProductLine) {
+            throw new IllegalArgumentException("trade product line does not match account command: expected="
+                    + actualProductLine + " actual=" + commandProductLine);
         }
+        long expectedUserId = role == TradeParticipantRole.TAKER ? trade.takerUserId() : trade.makerUserId();
+        if (expectedUserId != sideCommand.userId()) {
+            throw new IllegalArgumentException("trade side user does not match participant role");
+        }
+        Instant now = trade.eventTime() == null ? Instant.now() : trade.eventTime();
+        accountRepository.registerTradeSettlement(actualProductLine, trade, now);
         if (takerInstrumentType == InstrumentType.SPOT) {
-            applySpotTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
-                    trade.takerInstrumentVersion(), trade.takerSide(), trade.priceTicks(), trade.quantitySteps(),
-                    trade.takerOrderCompleted(), trade.takerFeeRatePpm(), "TAKER_FEE", trade.eventTime());
-            applySpotTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
-                    trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.priceTicks(),
-                    trade.quantitySteps(), trade.makerOrderCompleted(), trade.makerFeeRatePpm(), "MAKER_FEE",
-                    trade.eventTime());
-            return true;
+            if (role == TradeParticipantRole.TAKER) {
+                applySpotTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
+                        trade.takerInstrumentVersion(), trade.takerSide(), trade.priceTicks(), trade.quantitySteps(),
+                        trade.takerOrderCompleted(), trade.takerFeeRatePpm(), "TAKER_FEE", now);
+            } else {
+                applySpotTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
+                        trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.priceTicks(),
+                        trade.quantitySteps(), trade.makerOrderCompleted(), trade.makerFeeRatePpm(), "MAKER_FEE", now);
+            }
+        } else if (role == TradeParticipantRole.TAKER) {
+            applyTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
+                    trade.takerInstrumentVersion(), trade.takerSide(), trade.takerMarginMode(),
+                    trade.takerPositionSide(), trade.priceTicks(), trade.quantitySteps(),
+                    trade.takerOrderCompleted(), trade.takerFeeRatePpm(), "TAKER_FEE", now, trade.traceId());
+        } else {
+            applyTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
+                    trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.makerMarginMode(),
+                    trade.makerPositionSide(), trade.priceTicks(), trade.quantitySteps(),
+                    trade.makerOrderCompleted(), trade.makerFeeRatePpm(), "MAKER_FEE", now, trade.traceId());
         }
-        applyTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
-                trade.takerInstrumentVersion(), trade.takerSide(), trade.takerMarginMode(), trade.takerPositionSide(),
-                trade.priceTicks(), trade.quantitySteps(),
-                trade.takerOrderCompleted(), trade.takerFeeRatePpm(), "TAKER_FEE", trade.eventTime(), traceId);
-        applyTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
-                trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.makerMarginMode(),
-                trade.makerPositionSide(), trade.priceTicks(), trade.quantitySteps(),
-                trade.makerOrderCompleted(), trade.makerFeeRatePpm(), "MAKER_FEE", trade.eventTime(), traceId);
-        return true;
-    }
-
-    private int settleExpiringPositions(ProductLine productLine,
-                                        String symbol,
-                                        Instant eventTime,
-                                        String referenceType,
-                                        String reason,
-                                        SettlementPriceResolver settlementPriceResolver) {
-        List<PositionSettlementState> positions = accountRepository.openPositionStatesForSettlement(productLine, symbol);
-        int settled = 0;
-        for (PositionSettlementState position : positions) {
-            if (position.signedQuantitySteps() == 0L) {
-                continue;
-            }
-            ContractSpec spec = contractSpec(symbol, position.instrumentVersion());
-            if (spec.contractType().productLine() != productLine) {
-                throw new IllegalStateException("settlement position product line does not match event: "
-                        + symbol + ":" + position.instrumentVersion());
-            }
-            AccountType accountType = derivativeAccountType(spec);
-            long settlementPriceTicks = settlementPriceResolver.settlementPriceTicks(position, spec);
-            PositionState current = position.state();
-            PositionChange change = positionCalculator.closeAtSettlement(current, settlementPriceTicks, spec);
-            String referenceId = lifecycleReferenceId(referenceType, symbol, position.instrumentVersion(), position);
-            long ledgerDeltaUnits = lifecycleLedgerDeltaUnits(referenceType, settlementPriceTicks, spec, position,
-                    change);
-            boolean applied = accountRepository.settleLifecyclePnl(accountType, position.userId(),
-                    spec.settleAsset(), referenceType, referenceId, reason, symbol, position.marginMode(),
-                    ledgerDeltaUnits, eventTime);
-            if (!applied) {
-                continue;
-            }
-            long closeSteps = Math.absExact(position.signedQuantitySteps());
-            accountRepository.releasePositionMargin(productLine, position.userId(), symbol, position.marginMode(),
-                    closeSteps, position.positionSide(), closeSteps, eventTime);
-            PositionResponse updated = accountRepository.updatePosition(productLine, position.userId(), symbol,
-                    position.marginMode(), position.positionSide(), change.next(), position.signedQuantitySteps(),
-                    eventTime);
-            pruneClosedPositionTriggers(productLine, position.userId(), symbol, position.marginMode(),
-                    position.positionSide(), change.next(), eventTime);
-            if (outboxRepository != null) {
-                outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
-                        0L, updated, eventTime, TraceContext.currentOrCreate());
-            }
-            schedulePositionCacheSync(productLine, position.userId(), symbol, position.marginMode(),
-                    position.positionSide());
-            settled++;
-        }
-        return settled;
+        accountRepository.markTradeSideApplied(actualProductLine, trade, role, commandId, now);
     }
 
     private long optionIntrinsicPriceTicks(OptionExerciseEvent event, ContractSpec spec, long underlyingPriceUnits) {
@@ -666,10 +702,6 @@ public class AccountService {
             case PUT -> Math.max(0L, Math.subtractExact(strikePriceUnits, underlyingPriceUnits));
         };
         return Math.addExact(intrinsicUnits, spec.priceTickUnits() / 2L) / spec.priceTickUnits();
-    }
-
-    private interface SettlementPriceResolver {
-        long settlementPriceTicks(PositionSettlementState position, ContractSpec spec);
     }
 
     private void requireCashSettlement(ContractSettlementMethod settlementMethod) {

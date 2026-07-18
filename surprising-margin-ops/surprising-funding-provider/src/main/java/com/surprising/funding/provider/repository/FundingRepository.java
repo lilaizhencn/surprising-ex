@@ -7,8 +7,8 @@ import com.surprising.funding.api.model.FundingPaymentResponse;
 import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.api.model.FundingSettlementResponse;
 import com.surprising.funding.provider.config.FundingProperties;
-import com.surprising.funding.provider.model.FundingBalanceState;
 import com.surprising.funding.provider.model.FundingPaymentCandidate;
+import com.surprising.funding.provider.model.FundingPaymentDispatch;
 import com.surprising.funding.provider.model.FundingRateInput;
 import com.surprising.funding.provider.service.FundingMath;
 import com.surprising.price.api.model.MarkPriceEvent;
@@ -21,10 +21,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -33,15 +30,10 @@ import org.springframework.stereotype.Repository;
 public class FundingRepository {
 
     private static final String RATE_MODULE = "funding-rate";
-    private static final int ACCOUNT_HI_LO_BLOCK_SIZE = 10_000;
-    private static final Map<String, String> ACCOUNT_DATABASE_SEQUENCES = Map.of(
-            "ledger-entry", "public.account_ledger_entry_seq",
-            "product-ledger-entry", "public.account_product_ledger_entry_seq");
 
     private final JdbcTemplate jdbcTemplate;
     private final FundingProperties properties;
     private final LatestMarkPriceCache markPriceCache;
-    private final ConcurrentMap<String, AccountIdRange> accountIdRanges = new ConcurrentHashMap<>();
 
     public FundingRepository(JdbcTemplate jdbcTemplate, FundingProperties properties) {
         this(jdbcTemplate, properties, null);
@@ -301,107 +293,134 @@ public class FundingRepository {
                 productLine.contractTypeCode(), rate.symbol(), productLine.name(), markPrice.instrumentVersion());
     }
 
-    public boolean insertPayment(long settlementId, FundingPaymentCandidate payment, Instant now) {
+    public Optional<FundingPaymentDispatch> insertPayment(long settlementId,
+                                                          FundingPaymentCandidate payment,
+                                                          Instant now) {
         if (payment.amountUnits() == 0L) {
-            return false;
+            return Optional.empty();
         }
         long paymentId = nextSequence("funding-payment");
+        String commandId = "FUNDING:" + properties.getKafka().getProductLine().name()
+                + ":" + settlementId + ":" + paymentId;
         int rows = jdbcTemplate.update("""
                 INSERT INTO funding_payments (
                     payment_id, settlement_id, user_id, symbol, margin_mode, position_side, asset,
                     signed_quantity_steps, notional_units, funding_rate_ppm,
-                    amount_units, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    amount_units, command_id, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
                 ON CONFLICT (settlement_id, user_id, symbol, margin_mode, position_side) DO NOTHING
                 """, paymentId, settlementId, payment.userId(), payment.symbol(), payment.marginMode().name(),
                 payment.positionSide().name(), payment.asset(),
                 payment.signedQuantitySteps(), payment.notionalUnits(), payment.fundingRatePpm(),
-                payment.amountUnits(), Timestamp.from(now));
-        return rows == 1;
+                payment.amountUnits(), commandId, Timestamp.from(now), Timestamp.from(now));
+        return rows == 1
+                ? Optional.of(new FundingPaymentDispatch(paymentId, commandId))
+                : Optional.empty();
     }
 
-    public void applyPaymentToAccount(long settlementId, FundingPaymentCandidate payment, Instant now) {
-        ProductLine productLine = currentFundingProductLine()
-                .orElseThrow(() -> new IllegalStateException("funding payment requires a funding product line"));
-        if (!usesProductAccount(productLine)) {
-            applyPaymentToLegacyAccount(settlementId, payment, now);
-            return;
-        }
-        applyPaymentToProductAccount(productLine, settlementId, payment, now);
-    }
-
-    private void applyPaymentToLegacyAccount(long settlementId, FundingPaymentCandidate payment, Instant now) {
-        String referenceId = settlementId + ":" + payment.userId() + ":" + payment.symbol() + ":"
-                + payment.marginMode().name() + ":" + payment.positionSide().name();
-        int ledgerRows = jdbcTemplate.update("""
-                INSERT INTO account_ledger_entries (
-                    entry_id, user_id, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, created_at
-                ) VALUES (?, ?, ?, ?, 0, 'FUNDING', ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, nextAccountSequence("ledger-entry"), payment.userId(), payment.asset(), payment.amountUnits(),
-                referenceId, payment.amountUnits() >= 0 ? "FUNDING_RECEIVED" : "FUNDING_PAID", Timestamp.from(now));
-        requireSingleRow(ledgerRows, "funding account ledger insert");
-        long balanceAfterUnits = applyBalance(payment.userId(), payment.symbol(), payment.marginMode(),
-                payment.positionSide(), payment.asset(), payment.amountUnits(), now);
-        int ledgerUpdateRows = jdbcTemplate.update("""
-                UPDATE account_ledger_entries
-                   SET balance_after_units = ?
-                 WHERE reference_type = 'FUNDING'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, balanceAfterUnits, referenceId, payment.userId(), payment.asset());
-        requireSingleRow(ledgerUpdateRows, "funding account ledger balance update");
-    }
-
-    private void applyPaymentToProductAccount(ProductLine productLine,
-                                              long settlementId,
-                                              FundingPaymentCandidate payment,
-                                              Instant now) {
-        String accountType = productLine.accountTypeCode();
-        String referenceId = settlementId + ":" + payment.userId() + ":" + payment.symbol() + ":"
-                + payment.marginMode().name() + ":" + payment.positionSide().name();
-        int ledgerRows = jdbcTemplate.update("""
-                INSERT INTO account_product_ledger_entries (
-                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, 0, 'FUNDING', ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, nextAccountSequence("product-ledger-entry"), payment.userId(), accountType, payment.asset(),
-                payment.amountUnits(), referenceId,
-                payment.amountUnits() >= 0 ? "FUNDING_RECEIVED" : "FUNDING_PAID", Timestamp.from(now));
-        requireSingleRow(ledgerRows, "funding product account ledger insert");
-        long balanceAfterUnits = applyProductBalance(productLine, payment.userId(), payment.symbol(),
-                payment.marginMode(), payment.positionSide(), payment.asset(), payment.amountUnits(), now);
-        int ledgerUpdateRows = jdbcTemplate.update("""
-                UPDATE account_product_ledger_entries
-                   SET balance_after_units = ?
-                 WHERE reference_type = 'FUNDING'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND account_type = ?
-                   AND asset = ?
-                """, balanceAfterUnits, referenceId, payment.userId(), accountType, payment.asset());
-        requireSingleRow(ledgerUpdateRows, "funding product account ledger balance update");
-    }
-
-    public void completeSettlement(long settlementId,
-                                   long totalLongPaymentUnits,
-                                   long totalShortPaymentUnits,
-                                   int positionCount,
-                                   Instant now) {
+    public void awaitAccountSettlement(long settlementId,
+                                       long totalLongPaymentUnits,
+                                       long totalShortPaymentUnits,
+                                       int positionCount,
+                                       Instant now) {
         int rows = jdbcTemplate.update("""
                 UPDATE funding_settlements
                    SET total_long_payment_units = ?,
                        total_short_payment_units = ?,
                        position_count = ?,
-                       status = 'COMPLETED',
+                       expected_payment_count = ?,
+                       status = CASE WHEN ? = 0 THEN 'COMPLETED' ELSE 'WAITING_ACCOUNTS' END,
                        updated_at = ?
-                 WHERE settlement_id = ?
-                """, totalLongPaymentUnits, totalShortPaymentUnits, positionCount,
+                 WHERE settlement_id = ? AND status = 'PROCESSING'
+                """, totalLongPaymentUnits, totalShortPaymentUnits, positionCount, positionCount, positionCount,
                 Timestamp.from(now), settlementId);
-        requireSingleRow(rows, "funding settlement completion");
+        requireSingleRow(rows, "funding settlement dispatch");
+    }
+
+    public boolean completePayment(String commandId,
+                                   long expectedUserId,
+                                   String terminalStatus,
+                                   String errorCode,
+                                   String errorMessage,
+                                   Instant completedAt) {
+        PaymentState payment = jdbcTemplate.query("""
+                SELECT payment_id, settlement_id, user_id, status
+                  FROM funding_payments
+                 WHERE command_id = ?
+                 FOR UPDATE
+                """, (rs, rowNum) -> new PaymentState(
+                rs.getLong("payment_id"), rs.getLong("settlement_id"),
+                rs.getLong("user_id"), rs.getString("status")), commandId).stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("funding payment not found for " + commandId));
+        if (payment.userId() != expectedUserId) {
+            throw new IllegalStateException("funding payment user mismatch for " + commandId);
+        }
+        if (!"APPLIED".equals(terminalStatus) && !"REJECTED".equals(terminalStatus)) {
+            throw new IllegalArgumentException("funding payment requires a terminal account status");
+        }
+        if (!"PENDING".equals(payment.status())) {
+            if (!payment.status().equals(terminalStatus)) {
+                throw new IllegalStateException("conflicting funding payment result for " + commandId);
+            }
+            return false;
+        }
+        boolean applied = "APPLIED".equals(terminalStatus);
+        int rows = jdbcTemplate.update("""
+                UPDATE funding_payments
+                   SET status = ?,
+                       applied_at = CASE WHEN ? THEN ? ELSE NULL END,
+                       rejected_at = CASE WHEN ? THEN NULL ELSE ? END,
+                       error_code = ?,
+                       error_message = ?,
+                       updated_at = ?
+                 WHERE payment_id = ? AND status = 'PENDING'
+                """, terminalStatus, applied, Timestamp.from(completedAt), applied, Timestamp.from(completedAt),
+                errorCode, truncate(errorMessage), Timestamp.from(completedAt), payment.paymentId());
+        requireSingleRow(rows, "funding payment terminal result");
+        refreshSettlement(payment.settlementId(), completedAt);
+        return true;
+    }
+
+    public List<TerminalAccountCommand> terminalAccountCommandsForPendingPayments(int limit) {
+        return jdbcTemplate.query("""
+                SELECT c.command_id, c.user_id, c.status, c.error_code, c.error_message, c.completed_at
+                  FROM funding_payments p
+                  JOIN account_commands c ON c.command_id = p.command_id
+                 WHERE p.status = 'PENDING'
+                   AND c.product_line = ?
+                   AND c.command_type = 'FUNDING_SETTLE'
+                   AND c.status IN ('APPLIED', 'REJECTED')
+                 ORDER BY c.completed_at ASC, c.command_id ASC
+                 LIMIT ?
+                """, (rs, rowNum) -> new TerminalAccountCommand(
+                rs.getString("command_id"), rs.getLong("user_id"), rs.getString("status"),
+                rs.getString("error_code"), rs.getString("error_message"),
+                rs.getTimestamp("completed_at").toInstant()),
+                properties.getKafka().getProductLine().name(), Math.max(1, limit));
+    }
+
+    private void refreshSettlement(long settlementId, Instant now) {
+        int rows = jdbcTemplate.update("""
+                UPDATE funding_settlements s
+                   SET applied_payment_count = counts.applied_count,
+                       rejected_payment_count = counts.rejected_count,
+                       status = CASE
+                           WHEN counts.rejected_count > 0 THEN 'FAILED'
+                           WHEN counts.applied_count = s.expected_payment_count THEN 'COMPLETED'
+                           ELSE 'WAITING_ACCOUNTS'
+                       END,
+                       updated_at = ?
+                  FROM (
+                      SELECT settlement_id,
+                             count(*) FILTER (WHERE status = 'APPLIED')::INTEGER AS applied_count,
+                             count(*) FILTER (WHERE status = 'REJECTED')::INTEGER AS rejected_count
+                        FROM funding_payments
+                       WHERE settlement_id = ?
+                       GROUP BY settlement_id
+                  ) counts
+                 WHERE s.settlement_id = counts.settlement_id
+                """, Timestamp.from(now), settlementId);
+        requireSingleRow(rows, "funding settlement account progress");
     }
 
     public Optional<FundingSettlementResponse> latestSettlement(String symbol) {
@@ -458,257 +477,6 @@ public class FundingRepository {
         AdminCursorPage.SortSpec desc = new AdminCursorPage.SortSpec("createdAt", "created_at", idColumn, true);
         AdminCursorPage.SortSpec asc = new AdminCursorPage.SortSpec("createdAt", "created_at", idColumn, false);
         return AdminCursorPage.parseSort(sort, desc, List.of(desc, asc));
-    }
-
-    private long applyBalance(long userId,
-                              String symbol,
-                              MarginMode marginMode,
-                              PositionSide positionSide,
-                              String asset,
-                              long amountUnits,
-                              Instant now) {
-        jdbcTemplate.update("""
-                INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
-                VALUES (?, ?, 0, 0, ?)
-                ON CONFLICT (user_id, asset) DO NOTHING
-                """, userId, asset, Timestamp.from(now));
-        jdbcTemplate.update("""
-                INSERT INTO account_deficits (user_id, asset, deficit_units, updated_at)
-                VALUES (?, ?, 0, ?)
-                ON CONFLICT (user_id, asset) DO NOTHING
-                """, userId, asset, Timestamp.from(now));
-        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
-        List<PositionMargin> lockedMargins = amountUnits < 0
-                ? lockPositionMargins(userId, symbol, normalizedMarginMode, PositionSide.defaultIfNull(positionSide),
-                asset)
-                : List.of();
-        long maxLockedDebitUnits = lockedMargins.stream()
-                .mapToLong(PositionMargin::marginUnits)
-                .reduce(0L, Math::addExact);
-        FundingBalanceState current = jdbcTemplate.queryForObject("""
-                SELECT b.available_units, b.locked_units, d.deficit_units
-                  FROM account_balances b
-                  JOIN account_deficits d USING (user_id, asset)
-                 WHERE b.user_id = ? AND b.asset = ?
-                 FOR UPDATE OF b, d
-                """, (rs, rowNum) -> new FundingBalanceState(
-                rs.getLong("available_units"),
-                rs.getLong("locked_units"),
-                rs.getLong("deficit_units")), userId, asset);
-        long availableInput = amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED
-                ? 0L
-                : current.availableUnits();
-        FundingBalanceState next = FundingMath.applyPayment(availableInput, current.lockedUnits(),
-                current.deficitUnits(), amountUnits, maxLockedDebitUnits);
-        if (amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED) {
-            next = new FundingBalanceState(current.availableUnits(), next.lockedUnits(), next.deficitUnits());
-        }
-        long lockedDebitUnits = Math.subtractExact(current.lockedUnits(), next.lockedUnits());
-        reducePositionMargins(userId, asset, lockedDebitUnits, lockedMargins, now);
-        int balanceRows = jdbcTemplate.update("""
-                UPDATE account_balances
-                   SET available_units = ?,
-                       locked_units = ?,
-                       updated_at = ?
-                 WHERE user_id = ? AND asset = ?
-                """, next.availableUnits(), next.lockedUnits(), Timestamp.from(now), userId, asset);
-        requireSingleRow(balanceRows, "funding account balance update");
-        int deficitRows = jdbcTemplate.update("""
-                UPDATE account_deficits
-                   SET deficit_units = ?,
-                       updated_at = ?
-                 WHERE user_id = ? AND asset = ?
-                """, next.deficitUnits(), Timestamp.from(now), userId, asset);
-        requireSingleRow(deficitRows, "funding account deficit update");
-        return Math.subtractExact(Math.addExact(next.availableUnits(), next.lockedUnits()), next.deficitUnits());
-    }
-
-    private long applyProductBalance(ProductLine productLine,
-                                     long userId,
-                                     String symbol,
-                                     MarginMode marginMode,
-                                     PositionSide positionSide,
-                                     String asset,
-                                     long amountUnits,
-                                     Instant now) {
-        String accountType = productLine.accountTypeCode();
-        jdbcTemplate.update("""
-                INSERT INTO account_product_balances (
-                    account_type, user_id, asset, available_units, locked_units, updated_at
-                ) VALUES (?, ?, ?, 0, 0, ?)
-                ON CONFLICT (account_type, user_id, asset) DO NOTHING
-                """, accountType, userId, asset, Timestamp.from(now));
-        jdbcTemplate.update("""
-                INSERT INTO account_product_deficits (account_type, user_id, asset, deficit_units, updated_at)
-                VALUES (?, ?, ?, 0, ?)
-                ON CONFLICT (account_type, user_id, asset) DO NOTHING
-                """, accountType, userId, asset, Timestamp.from(now));
-        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
-        List<PositionMargin> lockedMargins = amountUnits < 0
-                ? lockPositionMargins(userId, symbol, normalizedMarginMode, PositionSide.defaultIfNull(positionSide),
-                asset)
-                : List.of();
-        long maxLockedDebitUnits = lockedMargins.stream()
-                .mapToLong(PositionMargin::marginUnits)
-                .reduce(0L, Math::addExact);
-        FundingBalanceState current = jdbcTemplate.queryForObject("""
-                SELECT b.available_units, b.locked_units, d.deficit_units
-                  FROM account_product_balances b
-                  JOIN account_product_deficits d USING (account_type, user_id, asset)
-                 WHERE b.account_type = ? AND b.user_id = ? AND b.asset = ?
-                 FOR UPDATE OF b, d
-                """, (rs, rowNum) -> new FundingBalanceState(
-                rs.getLong("available_units"),
-                rs.getLong("locked_units"),
-                rs.getLong("deficit_units")), accountType, userId, asset);
-        long availableInput = amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED
-                ? 0L
-                : current.availableUnits();
-        FundingBalanceState next = FundingMath.applyPayment(availableInput, current.lockedUnits(),
-                current.deficitUnits(), amountUnits, maxLockedDebitUnits);
-        if (amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED) {
-            next = new FundingBalanceState(current.availableUnits(), next.lockedUnits(), next.deficitUnits());
-        }
-        long lockedDebitUnits = Math.subtractExact(current.lockedUnits(), next.lockedUnits());
-        reducePositionMargins(userId, asset, lockedDebitUnits, lockedMargins, now);
-        int balanceRows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET available_units = ?,
-                       locked_units = ?,
-                       updated_at = ?
-                 WHERE account_type = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, next.availableUnits(), next.lockedUnits(), Timestamp.from(now), accountType, userId, asset);
-        requireSingleRow(balanceRows, "funding product account balance update");
-        int deficitRows = jdbcTemplate.update("""
-                UPDATE account_product_deficits
-                   SET deficit_units = ?,
-                       updated_at = ?
-                 WHERE account_type = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, next.deficitUnits(), Timestamp.from(now), accountType, userId, asset);
-        requireSingleRow(deficitRows, "funding product account deficit update");
-        return Math.subtractExact(Math.addExact(next.availableUnits(), next.lockedUnits()), next.deficitUnits());
-    }
-
-    private List<PositionMargin> lockPositionMargins(long userId,
-                                                     String symbol,
-                                                     MarginMode marginMode,
-                                                     PositionSide positionSide,
-                                                     String asset) {
-        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
-        PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
-        ProductLine productLine = currentFundingProductLine()
-                .orElseThrow(() -> new IllegalStateException("funding payment requires a funding product line"));
-        if (normalizedMarginMode == MarginMode.ISOLATED) {
-            return jdbcTemplate.query("""
-                    SELECT product_line, symbol, asset, margin_mode, position_side, margin_units
-                      FROM account_position_margins
-                     WHERE user_id = ? AND symbol = ? AND product_line = ?
-                       AND margin_mode = ? AND position_side = ? AND asset = ?
-                       AND margin_units > 0
-                     ORDER BY updated_at ASC, symbol ASC, margin_mode ASC, position_side ASC
-                     FOR UPDATE
-                    """, (rs, rowNum) -> new PositionMargin(
-                    ProductLine.valueOf(rs.getString("product_line")),
-                    rs.getString("symbol"),
-                    rs.getString("asset"),
-                    MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                    PositionSide.fromNullableDbValue(rs.getString("position_side")),
-                    rs.getLong("margin_units")), userId, symbol, productLine.name(), normalizedMarginMode.name(),
-                    normalizedPositionSide.name(), asset);
-        }
-        return jdbcTemplate.query("""
-                SELECT product_line, symbol, asset, margin_mode, position_side, margin_units
-                  FROM account_position_margins
-                 WHERE user_id = ? AND product_line = ? AND asset = ? AND margin_mode = ? AND position_side = ?
-                   AND margin_units > 0
-                 ORDER BY updated_at ASC, symbol ASC, margin_mode ASC, position_side ASC
-                 FOR UPDATE
-                """, (rs, rowNum) -> new PositionMargin(
-                ProductLine.valueOf(rs.getString("product_line")),
-                rs.getString("symbol"),
-                rs.getString("asset"),
-                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                PositionSide.fromNullableDbValue(rs.getString("position_side")),
-                rs.getLong("margin_units")), userId, productLine.name(), asset, normalizedMarginMode.name(),
-                normalizedPositionSide.name());
-    }
-
-    private void reducePositionMargins(long userId,
-                                       String asset,
-                                       long amountUnits,
-                                       List<PositionMargin> lockedMargins,
-                                       Instant now) {
-        long remaining = amountUnits;
-        for (PositionMargin margin : lockedMargins) {
-            if (remaining <= 0) {
-                break;
-            }
-            long debit = Math.min(margin.marginUnits(), remaining);
-            int rows = jdbcTemplate.update("""
-                    UPDATE account_position_margins
-                       SET margin_units = margin_units - ?,
-                           updated_at = ?
-                     WHERE user_id = ? AND symbol = ? AND asset = ?
-                       AND margin_mode = ?
-                       AND position_side = ?
-                       AND product_line = ?
-                       AND margin_units >= ?
-                    """, debit, Timestamp.from(now), userId, margin.symbol(), asset, margin.marginMode().name(),
-                    margin.positionSide().name(), margin.productLine().name(), debit);
-            if (rows != 1) {
-                throw new IllegalStateException("failed to reduce consumed position margin");
-            }
-            jdbcTemplate.update("""
-                    DELETE FROM account_position_margins
-                     WHERE user_id = ? AND symbol = ? AND asset = ? AND margin_mode = ?
-                       AND position_side = ? AND product_line = ? AND margin_units = 0
-                    """, userId, margin.symbol(), asset, margin.marginMode().name(), margin.positionSide().name(),
-                    margin.productLine().name());
-            remaining = Math.subtractExact(remaining, debit);
-        }
-        if (remaining != 0) {
-            throw new IllegalStateException("insufficient position margin for locked debit");
-        }
-    }
-
-    private long nextAccountSequence(String sequenceName) {
-        String databaseSequence = ACCOUNT_DATABASE_SEQUENCES.get(sequenceName);
-        if (databaseSequence == null) {
-            throw new IllegalArgumentException("unsupported account sequence " + sequenceName);
-        }
-        return accountIdRanges.computeIfAbsent(sequenceName, ignored -> new AccountIdRange())
-                .next(this, databaseSequence);
-    }
-
-    private long allocateAccountRangeStart(String databaseSequence) {
-        Long value = jdbcTemplate.queryForObject("""
-                SELECT nextval(CAST(? AS regclass))
-                """, Long.class, databaseSequence);
-        if (value == null) {
-            throw new IllegalStateException("failed to allocate account sequence " + databaseSequence);
-        }
-        try {
-            return Math.addExact(Math.multiplyExact(value - 1L, ACCOUNT_HI_LO_BLOCK_SIZE), 1L);
-        } catch (ArithmeticException ex) {
-            throw new IllegalStateException("account sequence exhausted " + databaseSequence, ex);
-        }
-    }
-
-    private static final class AccountIdRange {
-        private long next;
-        private long end;
-
-        synchronized long next(FundingRepository repository, String databaseSequence) {
-            if (next == 0L || next > end) {
-                next = repository.allocateAccountRangeStart(databaseSequence);
-                end = Math.addExact(next, ACCOUNT_HI_LO_BLOCK_SIZE - 1L);
-            }
-            return next++;
-        }
     }
 
     private FundingRateResponse toRate(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -793,6 +561,13 @@ public class FundingRepository {
         }
     }
 
+    private String truncate(String value) {
+        if (value == null || value.length() <= 1000) {
+            return value;
+        }
+        return value.substring(0, 1000);
+    }
+
     private String fundingInstrumentCondition(List<Object> args, String alias) {
         ProductLine productLine = properties.getKafka().getProductLine();
         if (properties.getKafka().isProductTopicsEnabled()) {
@@ -812,20 +587,16 @@ public class FundingRepository {
         return productLine.isFundingProduct() ? Optional.of(productLine) : Optional.empty();
     }
 
-    private boolean usesProductAccount(ProductLine productLine) {
-        return productLine != ProductLine.LINEAR_PERPETUAL;
+    private record PaymentState(long paymentId, long settlementId, long userId, String status) {
     }
 
-    private record PositionMargin(ProductLine productLine,
-                                  String symbol,
-                                  String asset,
-                                  MarginMode marginMode,
-                                  PositionSide positionSide,
-                                  long marginUnits) {
-        private PositionMargin {
-            marginMode = MarginMode.defaultIfNull(marginMode);
-            positionSide = PositionSide.defaultIfNull(positionSide);
-        }
+    public record TerminalAccountCommand(
+            String commandId,
+            long userId,
+            String status,
+            String errorCode,
+            String errorMessage,
+            Instant completedAt) {
     }
 
     private record MarkPriceValues(String cte, List<Object> args) {

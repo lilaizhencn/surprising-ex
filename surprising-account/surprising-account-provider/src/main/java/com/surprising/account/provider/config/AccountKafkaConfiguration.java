@@ -1,5 +1,6 @@
 package com.surprising.account.provider.config;
 
+import com.surprising.account.provider.service.AccountCommandPoisonPillException;
 import java.util.HashMap;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -7,6 +8,7 @@ import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.apache.kafka.common.TopicPartition;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -16,6 +18,9 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.util.backoff.FixedBackOff;
 
 @Configuration
 public class AccountKafkaConfiguration {
@@ -63,6 +68,27 @@ public class AccountKafkaConfiguration {
         factory.setConcurrency(properties.getKafka().getConcurrency());
         factory.setBatchListener(true);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, String> accountUserCommandKafkaListenerContainerFactory(
+            ConsumerFactory<String, String> accountConsumerFactory,
+            AccountProperties properties,
+            KafkaTemplate<String, String> accountKafkaTemplate) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(accountConsumerFactory);
+        factory.setConcurrency(properties.getKafka().getUserCommandConcurrency());
+        factory.setBatchListener(false);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
+                accountKafkaTemplate,
+                (record, ex) -> new TopicPartition(properties.getKafka().getUserCommandsDltTopic(),
+                        record.partition()));
+        DefaultErrorHandler errorHandler = new DefaultErrorHandler(
+                recoverer, new FixedBackOff(1_000L, Long.MAX_VALUE));
+        errorHandler.addNotRetryableExceptions(AccountCommandPoisonPillException.class);
+        factory.setCommonErrorHandler(errorHandler);
         return factory;
     }
 }

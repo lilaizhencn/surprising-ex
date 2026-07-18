@@ -112,6 +112,15 @@ public class TradingOrderProperties {
         public void setMatchResultsTopic(String matchResultsTopic) { this.matchResultsTopic = matchResultsTopic; }
         public String getMatchTradesTopic() { return productTopicsEnabled ? productTopics().matchTradesTopic() : matchTradesTopic; }
         public void setMatchTradesTopic(String matchTradesTopic) { this.matchTradesTopic = matchTradesTopic; }
+        public String getAccountUserCommandsTopic() {
+            return productTopics().accountUserCommandsTopic();
+        }
+        public String getAccountCommandResultsTopic() {
+            return productTopics().accountCommandResultsTopic();
+        }
+        public String getAccountCommandResultsGroupId() {
+            return productTopics().consumerGroup("order-account-results");
+        }
         public String getOpenOrderViewGroupId() { return openOrderViewGroupId; }
         public void setOpenOrderViewGroupId(String openOrderViewGroupId) { this.openOrderViewGroupId = openOrderViewGroupId; }
 

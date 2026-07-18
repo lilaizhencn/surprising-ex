@@ -44,16 +44,27 @@ public class FundingKafkaConfiguration {
 
     @Bean
     public ConsumerFactory<String, String> fundingRateCacheConsumerFactory(FundingProperties properties) {
+        return new DefaultKafkaConsumerFactory<>(consumerProperties(
+                properties, properties.getKafka().getCacheGroupId()));
+    }
+
+    @Bean
+    public ConsumerFactory<String, String> fundingCommandResultsConsumerFactory(FundingProperties properties) {
+        return new DefaultKafkaConsumerFactory<>(consumerProperties(
+                properties, properties.getKafka().getCommandResultsGroupId()));
+    }
+
+    private Map<String, Object> consumerProperties(FundingProperties properties, String groupId) {
         Map<String, Object> config = new HashMap<>();
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
-        config.put(ConsumerConfig.GROUP_ID_CONFIG, properties.getKafka().getCacheGroupId());
+        config.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         config.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, properties.getKafka().getMaxPollRecords());
         config.put(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG, CooperativeStickyAssignor.class.getName());
-        return new DefaultKafkaConsumerFactory<>(config);
+        return config;
     }
 
     @Bean
@@ -63,6 +74,17 @@ public class FundingKafkaConfiguration {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setConcurrency(Math.max(1, properties.getKafka().getConcurrency()));
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, String> fundingCommandResultsKafkaListenerContainerFactory(
+            @Qualifier("fundingCommandResultsConsumerFactory") ConsumerFactory<String, String> consumerFactory,
+            FundingProperties properties) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory);
+        factory.setConcurrency(Math.max(1, properties.getKafka().getCommandResultsConcurrency()));
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
         return factory;
     }

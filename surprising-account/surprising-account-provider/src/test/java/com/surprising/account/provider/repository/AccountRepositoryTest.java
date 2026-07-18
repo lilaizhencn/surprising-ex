@@ -65,20 +65,6 @@ class AccountRepositoryTest {
     }
 
     @Test
-    void processedTradeIdempotencyIsScopedByProductLineAndSymbol() {
-        AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
-        when(jdbcTemplate.update(contains("INSERT INTO account_processed_trades"),
-                eq("LINEAR_DELIVERY"), eq(9001L), eq("BTC-USDT-260626")))
-                .thenReturn(1);
-
-        repository.markTradeProcessing(ProductLine.LINEAR_DELIVERY, 9001L, "BTC-USDT-260626");
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).update(sql.capture(), eq("LINEAR_DELIVERY"), eq(9001L), eq("BTC-USDT-260626"));
-        assertThat(sql.getValue()).contains("ON CONFLICT (product_line, symbol, trade_id) DO NOTHING");
-    }
-
-    @Test
     void settlementMarkPriceTicksUsesFreshKafkaCacheValue() {
         LatestMarkPriceCache markPriceCache = mock(LatestMarkPriceCache.class);
         MarkPriceEvent markPrice = mock(MarkPriceEvent.class);

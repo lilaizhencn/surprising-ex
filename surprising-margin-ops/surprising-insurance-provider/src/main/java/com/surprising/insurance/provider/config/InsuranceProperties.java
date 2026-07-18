@@ -77,6 +77,10 @@ public class InsuranceProperties {
             this.liquidationFeeEventsTopic = liquidationFeeEventsTopic;
         }
 
+        public String getUserCommandsTopic() {
+            return productTopics().accountUserCommandsTopic();
+        }
+
         public int getConcurrency() {
             return concurrency;
         }

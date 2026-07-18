@@ -610,7 +610,7 @@ class MarketMakerServiceTest {
         }
 
         @Override
-        public OrderQueryResponse openOrders(long userId, String symbol, int limit) {
+        public OrderQueryResponse openOrders(long userId, String symbol, int limit, String cursor) {
             productLinesDuringOpenOrders.add(MarketMakerProductLineContext.current());
             return new OrderQueryResponse(openOrders.size(), openOrders);
         }

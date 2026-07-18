@@ -1,6 +1,8 @@
 package com.surprising.account.provider.repository;
 
 import com.surprising.account.api.model.LiquidationFeeSettledEvent;
+import com.surprising.account.api.model.AccountCommandResultEvent;
+import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
@@ -98,6 +100,63 @@ public class AccountOutboxRepository {
                 Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
         requireSingleRow(rows, "account liquidation fee outbox enqueue");
         return event;
+    }
+
+    public AccountCommandResultEvent enqueueCommandResult(String topic,
+                                                          AccountUserCommand command,
+                                                          com.surprising.account.api.model.AccountCommandStatus status,
+                                                          String resultPayload,
+                                                          String errorCode,
+                                                          String errorMessage,
+                                                          Instant now) {
+        requireCurrentProductTopic(topic);
+        long eventId = sequenceRepository.nextSequence("account-command-result");
+        AccountCommandResultEvent event = new AccountCommandResultEvent(
+                eventId, command.commandId(), command.productLine(), command.userId(), command.commandType(),
+                status, command.source(), command.sourceReference(), resultPayload, errorCode, errorMessage,
+                now, command.traceId());
+        int rows = jdbcTemplate.update("""
+                INSERT INTO account_outbox_events (
+                    product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
+                    next_attempt_at, created_at, updated_at
+                ) VALUES (?, 'ACCOUNT_COMMAND_RESULT', ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                """, currentProductLine().name(), eventId, topic, command.partitionKey(), status.name(),
+                objectMapper.writeValueAsString(event), Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
+        requireSingleRow(rows, "account command result outbox enqueue");
+        return event;
+    }
+
+    public void enqueueUserCommandRetry(String topic,
+                                        String partitionKey,
+                                        String serializedCommand,
+                                        Instant now) {
+        requireCurrentProductTopic(topic);
+        long aggregateId = sequenceRepository.nextSequence("account-command-retry");
+        int rows = jdbcTemplate.update("""
+                INSERT INTO account_outbox_events (
+                    product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
+                    next_attempt_at, created_at, updated_at
+                ) VALUES (?, 'ACCOUNT_COMMAND_RETRY', ?, ?, ?, 'DEPENDENCY_READY', ?::jsonb, ?, ?, ?)
+                """, currentProductLine().name(), aggregateId, topic, partitionKey, serializedCommand,
+                Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
+        requireSingleRow(rows, "account command retry outbox enqueue");
+    }
+
+    public void enqueueUserCommand(String topic,
+                                   String aggregateType,
+                                   AccountUserCommand command,
+                                   Instant now) {
+        requireCurrentProductTopic(topic);
+        long aggregateId = sequenceRepository.nextSequence("account-user-command-outbox");
+        int rows = jdbcTemplate.update("""
+                INSERT INTO account_outbox_events (
+                    product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
+                    next_attempt_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                """, command.productLine().name(), aggregateType, aggregateId, topic, command.partitionKey(),
+                command.commandType().name(), objectMapper.writeValueAsString(command), Timestamp.from(now),
+                Timestamp.from(now), Timestamp.from(now));
+        requireSingleRow(rows, "account user command outbox enqueue");
     }
 
     public List<AccountOutboxRecord> claimPending(int limit, Instant leaseUntil, Instant now) {
@@ -271,10 +330,12 @@ public class AccountOutboxRepository {
         if (!kafka.isProductTopicsEnabled()) {
             return;
         }
-        sql.append("   AND topic IN (?, ?, ?)\n");
+        sql.append("   AND topic IN (?, ?, ?, ?, ?)\n");
         args.add(kafka.getPositionEventsTopic());
         args.add(kafka.getLiquidationFeeEventsTopic());
         args.add(kafka.getPositionCacheEventsTopic());
+        args.add(kafka.getCommandResultsTopic());
+        args.add(kafka.getUserCommandsTopic());
     }
 
     private void requireCurrentProductTopic(String topic) {
@@ -284,9 +345,15 @@ public class AccountOutboxRepository {
         }
         String positionEventsTopic = kafka.getPositionEventsTopic();
         String liquidationFeeEventsTopic = kafka.getLiquidationFeeEventsTopic();
-        if (!positionEventsTopic.equals(topic) && !liquidationFeeEventsTopic.equals(topic)) {
+        String commandResultsTopic = kafka.getCommandResultsTopic();
+        String userCommandsTopic = kafka.getUserCommandsTopic();
+        if (!positionEventsTopic.equals(topic)
+                && !liquidationFeeEventsTopic.equals(topic)
+                && !commandResultsTopic.equals(topic)
+                && !userCommandsTopic.equals(topic)) {
             throw new IllegalStateException("account outbox topic must match current product line: expected one of ["
-                    + positionEventsTopic + ", " + liquidationFeeEventsTopic + "] actual=" + topic);
+                    + positionEventsTopic + ", " + liquidationFeeEventsTopic + ", " + commandResultsTopic
+                    + ", " + userCommandsTopic + "] actual=" + topic);
         }
     }
 

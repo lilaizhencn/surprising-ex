@@ -69,12 +69,10 @@ class AccountKafkaConfigurationTest {
     }
 
     @Test
-    void defaultsToLegacyPerpTopicsUntilProductTopicsAreEnabled() {
+    void keepsLegacyBusinessTopicsButAlwaysIsolatesAccountCommandTopics() {
         AccountProperties properties = new AccountProperties();
 
         assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-account-v1");
-        assertThat(properties.getKafka().getMatchTradesTopic())
-                .isEqualTo("surprising.perp.match.trades.v1");
         assertThat(properties.getKafka().getOrderCommandsTopic())
                 .isEqualTo("surprising.perp.order.commands.v1");
         assertThat(properties.getKafka().getOrderEventsTopic())
@@ -89,6 +87,14 @@ class AccountKafkaConfigurationTest {
                 .isEqualTo("surprising.linear-delivery.delivery.settlements.v1");
         assertThat(properties.getKafka().getOptionExercisesTopic())
                 .isEqualTo("surprising.option.option.exercises.v1");
+        assertThat(properties.getKafka().getUserCommandsTopic())
+                .isEqualTo("surprising.linear-perp.account.user.commands.v1");
+        assertThat(properties.getKafka().getUserCommandsDltTopic())
+                .isEqualTo("surprising.linear-perp.account.user.commands.dlt.v1");
+        assertThat(properties.getKafka().getCommandResultsTopic())
+                .isEqualTo("surprising.linear-perp.account.command.results.v1");
+        assertThat(properties.getKafka().getUserCommandGroupId())
+                .isEqualTo("surprising-linear-perp-account-user-command-v1");
     }
 
     @Test
@@ -99,8 +105,6 @@ class AccountKafkaConfigurationTest {
 
         assertThat(properties.getKafka().getGroupId())
                 .isEqualTo("surprising-linear-perp-account-v1");
-        assertThat(properties.getKafka().getMatchTradesTopic())
-                .isEqualTo("surprising.linear-perp.match.trades.v1");
         assertThat(properties.getKafka().getOrderCommandsTopic())
                 .isEqualTo("surprising.linear-perp.order.commands.v1");
         assertThat(properties.getKafka().getOrderEventsTopic())

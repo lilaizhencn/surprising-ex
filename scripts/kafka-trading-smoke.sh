@@ -388,16 +388,22 @@ wait_consumer_group_lag_zero() {
   done
 }
 
-publish_duplicate_match_trade() {
+publish_duplicate_account_command() {
   local payload
-  payload="$(query_value "SELECT payload::text FROM trading_outbox_events WHERE aggregate_type = 'MATCH_TRADE' AND event_key = '${SYMBOL}' ORDER BY created_at DESC LIMIT 1")"
-  if [[ -z "${payload}" ]]; then
-    echo "Could not find MATCH_TRADE outbox payload for duplicate replay" >&2
+  local event_key
+  local topic
+  event_key="LINEAR_PERPETUAL:${TAKER_USER}"
+  payload="$(query_value "SELECT payload::text FROM trading_outbox_events WHERE aggregate_type = 'ACCOUNT_COMMAND' AND event_type = 'TRADE_SIDE_SETTLE' AND event_key = '${event_key}' ORDER BY created_at DESC LIMIT 1")"
+  topic="$(query_value "SELECT topic FROM trading_outbox_events WHERE aggregate_type = 'ACCOUNT_COMMAND' AND event_type = 'TRADE_SIDE_SETTLE' AND event_key = '${event_key}' ORDER BY created_at DESC LIMIT 1")"
+  if [[ -z "${payload}" || -z "${topic}" ]]; then
+    echo "Could not find TRADE_SIDE_SETTLE account command for duplicate replay" >&2
     exit 1
   fi
-  printf '%s\n' "${payload}" | infra_exec kafka kafka-console-producer.sh \
+  printf '%s|%s\n' "${event_key}" "${payload}" | infra_exec kafka kafka-console-producer.sh \
     --bootstrap-server localhost:9092 \
-    --topic surprising.perp.match.trades.v1 >/dev/null
+    --topic "${topic}" \
+    --property parse.key=true \
+    --property key.separator='|' >/dev/null
 }
 
 require_command curl
@@ -455,17 +461,18 @@ positions_sql="SELECT COALESCE(string_agg(user_id || ':' || signed_quantity_step
 expected_positions="${MAKER_USER}:-${QUANTITY_STEPS}:${PRICE_TICKS},${TAKER_USER}:${QUANTITY_STEPS}:${PRICE_TICKS}"
 wait_sql_equals "account positions after Kafka match" "${positions_sql}" "${expected_positions}"
 wait_sql_equals "match trade persistence" "SELECT count(*) FROM trading_match_trades WHERE symbol = '${SYMBOL}' AND taker_user_id = ${TAKER_USER} AND maker_user_id = ${MAKER_USER}" "1"
-wait_consumer_group_lag_zero "surprising-account-v1" "surprising.perp.match.trades.v1"
+wait_sql_equals "bilateral account settlement" "SELECT count(*) FROM account_trade_settlements WHERE product_line = 'LINEAR_PERPETUAL' AND symbol = '${SYMBOL}' AND completed_at IS NOT NULL" "1"
+wait_consumer_group_lag_zero "surprising-linear-perp-account-user-command-v1" "surprising.linear-perp.account.user.commands.v1"
 
 before_positions="$(query_value "${positions_sql}")"
-before_processed="$(query_value "SELECT count(*) FROM account_processed_trades WHERE symbol = '${SYMBOL}'")"
-publish_duplicate_match_trade
-wait_consumer_group_lag_zero "surprising-account-v1" "surprising.perp.match.trades.v1"
+before_processed="$(query_value "SELECT count(*) FROM account_commands WHERE product_line = 'LINEAR_PERPETUAL' AND command_type = 'TRADE_SIDE_SETTLE' AND status = 'APPLIED'")"
+publish_duplicate_account_command
+wait_consumer_group_lag_zero "surprising-linear-perp-account-user-command-v1" "surprising.linear-perp.account.user.commands.v1"
 after_positions="$(query_value "${positions_sql}")"
-after_processed="$(query_value "SELECT count(*) FROM account_processed_trades WHERE symbol = '${SYMBOL}'")"
+after_processed="$(query_value "SELECT count(*) FROM account_commands WHERE product_line = 'LINEAR_PERPETUAL' AND command_type = 'TRADE_SIDE_SETTLE' AND status = 'APPLIED'")"
 
 if [[ "${before_positions}" != "${after_positions}" || "${before_processed}" != "${after_processed}" ]]; then
-  echo "Duplicate match-trade replay changed account state" >&2
+  echo "Duplicate account-command replay changed account state" >&2
   echo "before_positions=${before_positions}" >&2
   echo "after_positions=${after_positions}" >&2
   echo "before_processed=${before_processed}" >&2

@@ -91,6 +91,7 @@ class OutboxRepositoryTest {
         when(jdbcTemplate.query(any(String.class), anyRowMapper(),
                 eq("surprising.option.order.events.v1"),
                 eq("surprising.option.order.commands.v1"),
+                eq("surprising.option.account.user.commands.v1"),
                 any(Timestamp.class), eq(100), any(Timestamp.class), any(Timestamp.class)))
                 .thenReturn(List.of());
 
@@ -101,9 +102,10 @@ class OutboxRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
                 eq("surprising.option.order.events.v1"),
                 eq("surprising.option.order.commands.v1"),
+                eq("surprising.option.account.user.commands.v1"),
                 any(Timestamp.class), eq(100), any(Timestamp.class), any(Timestamp.class));
         assertThat(sql.getValue())
-                .contains("e.topic IN (?, ?)")
+                .contains("e.topic IN (?, ?, ?)")
                 .contains("UPDATE trading_outbox_events")
                 .contains("RETURNING e.id");
     }

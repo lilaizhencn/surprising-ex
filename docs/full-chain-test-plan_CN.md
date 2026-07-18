@@ -91,7 +91,8 @@ expectedEnding
 
 - `available + locked` 与流水推导的期末余额一致。
 - product balance、account balance、position margin、reservation 没有负数。
-- `account_processed_trades(symbol, trade_id)` 幂等生效，重复成交不会重复结算。
+- taker/maker 的 `TRADE_SIDE_SETTLE` 均以 `account_commands.command_id` 幂等，
+  `account_trade_settlements.completed_at` 只在双边都成功后写入；重复命令不会重复结算。
 - 强平成交后，用户强平费、保险基金入账和 deficit/ADL 状态一致。
 - 主动平仓后仓位归零或剩余仓位正确，PnL、手续费、保证金释放正确。
 - outbox pending 最终归零，Kafka lag 最终回落。

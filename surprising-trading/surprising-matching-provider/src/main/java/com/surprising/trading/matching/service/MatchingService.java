@@ -1,5 +1,10 @@
 package com.surprising.trading.matching.service;
 
+import com.surprising.account.api.model.AccountUserCommand;
+import com.surprising.account.api.model.AccountUserCommandType;
+import com.surprising.account.api.model.OrderReleaseAccountCommand;
+import com.surprising.account.api.model.TradeParticipantRole;
+import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarketPriceProtection;
@@ -269,7 +274,10 @@ public class MatchingService {
             resultRepository.applyMakerFill(trade);
             outboxRepository.enqueue("MATCH_TRADE", trade.tradeId(), properties.getKafka().getMatchTradesTopic(),
                     trade.symbol(), OrderEventType.ACCEPTED.name(), payload(trade), trade.eventTime());
+            enqueueAccountTradeSide(trade, TradeParticipantRole.TAKER);
+            enqueueAccountTradeSide(trade, TradeParticipantRole.MAKER);
         }
+        enqueueAccountReleaseIfRequired(result);
         outboxRepository.enqueue("MATCH_RESULT", result.commandId(), properties.getKafka().getMatchResultsTopic(),
                 result.symbol(), result.commandType().name(), payload(result), result.eventTime());
         if (symbol != null && "SUCCESS".equals(result.resultCode())) {
@@ -280,6 +288,63 @@ public class MatchingService {
                         depthEvent.updateType().name(), payload(depthEvent), depthEvent.eventTime());
             }
         }
+    }
+
+    private void enqueueAccountTradeSide(MatchTradeEvent trade, TradeParticipantRole role) {
+        long userId = role == TradeParticipantRole.TAKER ? trade.takerUserId() : trade.makerUserId();
+        String commandId = tradeSideCommandId(trade, role, userId);
+        TradeSideSettlementCommand side = new TradeSideSettlementCommand(trade, role);
+        AccountUserCommand command = new AccountUserCommand(
+                AccountUserCommand.CURRENT_SCHEMA_VERSION,
+                commandId,
+                properties.getKafka().getProductLine(),
+                userId,
+                AccountUserCommandType.TRADE_SIDE_SETTLE,
+                "MATCHING",
+                properties.getKafka().getProductLine().name() + ":" + trade.symbol() + ":" + trade.tradeId(),
+                null,
+                payload(side),
+                trade.eventTime(),
+                trade.traceId());
+        outboxRepository.enqueue("ACCOUNT_COMMAND", trade.tradeId(),
+                properties.getKafka().getAccountUserCommandsTopic(), command.partitionKey(),
+                command.commandType().name(), payload(command), trade.eventTime());
+    }
+
+    private void enqueueAccountReleaseIfRequired(MatchResultEvent result) {
+        boolean rejected = result.orderStatus() == OrderStatus.REJECTED;
+        boolean canceled = result.orderStatus() == OrderStatus.CANCELED;
+        boolean terminal = result.orderStatus() == OrderStatus.FILLED || canceled || rejected;
+        if (!terminal) {
+            return;
+        }
+        String reason = rejected ? "ORDER_REJECTED" : canceled ? "ORDER_CANCELED" : "ORDER_TERMINAL";
+        String dependency = result.trades().isEmpty() ? null
+                : tradeSideCommandId(result.trades().get(result.trades().size() - 1),
+                TradeParticipantRole.TAKER, result.userId());
+        OrderReleaseAccountCommand release = new OrderReleaseAccountCommand(
+                result.orderId(), rejected, reason, result.eventTime());
+        AccountUserCommand command = new AccountUserCommand(
+                AccountUserCommand.CURRENT_SCHEMA_VERSION,
+                "ORDER_RELEASE:" + properties.getKafka().getProductLine().name() + ":" + result.orderId()
+                        + ":" + result.commandId(),
+                properties.getKafka().getProductLine(),
+                result.userId(),
+                AccountUserCommandType.ORDER_RELEASE,
+                "MATCHING",
+                String.valueOf(result.orderId()),
+                dependency,
+                payload(release),
+                result.eventTime(),
+                result.traceId());
+        outboxRepository.enqueue("ACCOUNT_COMMAND", result.commandId(),
+                properties.getKafka().getAccountUserCommandsTopic(), command.partitionKey(),
+                command.commandType().name(), payload(command), result.eventTime());
+    }
+
+    private String tradeSideCommandId(MatchTradeEvent trade, TradeParticipantRole role, long userId) {
+        return "TRADE:" + properties.getKafka().getProductLine().name() + ":" + trade.symbol()
+                + ":" + trade.tradeId() + ":" + role.name() + ":" + userId;
     }
 
     private OrderBookDepthEvent orderBookDepthEvent(MatchingSymbol symbol, Instant now) {

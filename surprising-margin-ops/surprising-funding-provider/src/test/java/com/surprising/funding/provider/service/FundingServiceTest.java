@@ -11,6 +11,7 @@ import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.model.FundingRateInput;
 import com.surprising.funding.provider.repository.FundingRepository;
+import com.surprising.funding.provider.repository.FundingAccountCommandOutboxRepository;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import java.time.Duration;
 import java.time.Instant;
@@ -22,6 +23,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.SimpleTransactionStatus;
+import tools.jackson.databind.ObjectMapper;
 
 class FundingServiceTest {
 
@@ -54,7 +56,9 @@ class FundingServiceTest {
         cache.update(due);
         cache.update(new FundingRateResponse("BTC-USDT", 12L, 120L, 100L, 20L,
                 Instant.now().plusSeconds(8 * 60 * 60), 8, "PREDICTED", Instant.now()));
-        FundingService service = new FundingService(properties, repository, cache, kafka, transactionManager());
+        FundingService service = new FundingService(properties, repository,
+                mock(FundingAccountCommandOutboxRepository.class), cache, kafka,
+                new ObjectMapper(), transactionManager());
 
         service.settleDueRates();
 
@@ -80,8 +84,8 @@ class FundingServiceTest {
     private FundingService service(FundingProperties properties,
                                    FakeFundingRepository repository,
                                    KafkaTemplate<String, Object> kafka) {
-        return new FundingService(properties, repository, new LatestFundingRateCache(properties), kafka,
-                transactionManager());
+        return new FundingService(properties, repository, mock(FundingAccountCommandOutboxRepository.class),
+                new LatestFundingRateCache(properties), kafka, new ObjectMapper(), transactionManager());
     }
 
     private static final class FakeFundingRepository extends FundingRepository {

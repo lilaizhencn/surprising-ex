@@ -41,7 +41,9 @@ Keep the matching provider on JDK 21 unless exchange-core and Chronicle are reva
 - Scale by increasing service instances and Kafka partitions, not by creating per-symbol consumers.
 - Kafka Streams restores RocksDB state from changelog topics during rebalance or restart.
 - Matching command records must use `symbol` as the Kafka key, so all commands for one symbol stay ordered in one partition.
-- Matching command, account match-trade, risk position-event, and liquidation-candidate consumers reject records whose Kafka key does not match the payload `symbol`.
+- Matching command, risk position-event, and liquidation-candidate consumers reject records whose
+  Kafka key does not match the payload `symbol`. Account commands instead require
+  `<PRODUCT_LINE>:<userId>` and are always routed to product-scoped topics.
 - Matching provider nodes share the same `surprising.trading.matching.kafka.group-id`; Kafka assigns each partition to one live matcher.
 - Matching restores open order books from PostgreSQL on startup. If a running matcher receives a new partition after processing commands, it closes the Spring context and should be restarted by Kubernetes/systemd.
 - Instrument, order, matching, price, risk, liquidation, and funding Kafka producers use `acks=all`, `enable.idempotence=true`, `compression.type=zstd`, and `max.in.flight.requests.per.connection=5`.
@@ -398,7 +400,8 @@ The basic script:
 - packages and starts order, matching, and account providers for the split smoke;
 - funds a maker and taker through the account admin REST API;
 - submits crossing REST orders, waits for exchange-core matching, and waits for account Kafka settlement;
-- republishes the same match-trade payload to verify `(symbol, trade_id)` account idempotency.
+- republishes the same `TRADE_SIDE_SETTLE` account command to verify command-id and envelope-hash
+  idempotency without changing balances or positions.
 
 Useful options:
 
@@ -445,7 +448,9 @@ Do not point this script at a shared development database. Matching restores ope
 - Order entry inserts `trading_orders` before reserving margin. Only the partial `(user_id, client_order_id)` uniqueness conflict is idempotent; a duplicate `clientOrderId` must return the original order without writing `account_margin_reservations` or changing `account_balances`.
 - Account opening fills require an existing non-reduce-only `account_margin_reservations` row. Missing reservations or skipped account margin updates must fail the trade transaction rather than creating uncollateralized positions.
 - Account closing fills may skip order-reservation release only for `reduce_only = TRUE` orders. Non-reduce-only close or flip fills must find the original reservation row; otherwise the account transaction fails.
-- Account `TRADE_PNL` ledger insert/backfill writes are fail-fast. Duplicate trade delivery is handled before settlement by `account_processed_trades(symbol, trade_id)`; ledger conflicts during a new trade transaction indicate inconsistent state.
+- Account `TRADE_PNL` ledger insert/backfill writes are fail-fast. Each maker/taker side is
+  idempotent by its immutable `account_commands.command_id`; conflicting envelope hashes or ledger
+  conflicts indicate inconsistent state. `account_trade_settlements` must reach bilateral completion.
 - Account maker/taker fees are settled from the required `taker_fee_rate_ppm` / `maker_fee_rate_ppm`
   values on `trading_match_trades` and written as `TRADE_FEE` with `trade_id`, `order_id`, `symbol`,
   and `fee_rate_ppm`. Positive ppm rates debit the user; negative ppm rates rebate. Fee ledger

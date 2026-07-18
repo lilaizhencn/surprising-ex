@@ -4,6 +4,9 @@ server:
 spring:
   application:
     name: surprising-account-provider
+  threads:
+    virtual:
+      enabled: true
   task:
     scheduling:
       pool:
@@ -53,7 +56,6 @@ surprising:
       product-topics-enabled: false
       group-id: surprising-account-v1
       client-id: surprising-account-${HOSTNAME:${random.uuid}}
-      match-trades-topic: surprising.perp.match.trades.v1
       order-commands-topic: surprising.perp.order.commands.v1
       order-events-topic: surprising.perp.order.events.v1
       position-events-topic: surprising.account.position.events.v1
@@ -62,9 +64,8 @@ surprising:
       delivery-settlements-topic: surprising.linear-delivery.delivery.settlements.v1
       option-exercises-topic: surprising.option.option.exercises.v1
       concurrency: 2
+      user-command-concurrency: 32
       max-poll-records: 500
-    settlement:
-      match-trade-user-lock-stripes: 4096
     outbox:
       batch-size: 200
       publish-delay-ms: 200
@@ -86,3 +87,8 @@ surprising:
     position-margin:
       max-risk-snapshot-age: 10s
       removal-buffer-ppm: 50000
+    trade-settlement:
+      stale-after: 1m
+    command-wait:
+      timeout: 10s
+      poll-delay-ms: 20

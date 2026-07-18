@@ -59,7 +59,7 @@ public class MatchingOutboxRepository {
                            id
                       FROM trading_outbox_events
                      WHERE published_at IS NULL
-                       AND aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH')
+                       AND aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH', 'ACCOUNT_COMMAND')
                      ORDER BY topic, event_key, id
                 ),
                 candidates AS (
@@ -67,7 +67,7 @@ public class MatchingOutboxRepository {
                   FROM trading_outbox_events e
                   JOIN earliest c ON c.id = e.id
                  WHERE e.published_at IS NULL
-                   AND e.aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH')
+                   AND e.aggregate_type IN ('MATCH_TRADE', 'MATCH_RESULT', 'ORDER_BOOK_DEPTH', 'ACCOUNT_COMMAND')
                 """);
         appendTopicScope(sql, "e", args);
         sql.append("""
@@ -166,10 +166,11 @@ public class MatchingOutboxRepository {
         if (!kafka.isProductTopicsEnabled()) {
             return;
         }
-        sql.append("   AND ").append(alias).append(".topic IN (?, ?, ?)\n");
+        sql.append("   AND ").append(alias).append(".topic IN (?, ?, ?, ?)\n");
         args.add(kafka.getMatchResultsTopic());
         args.add(kafka.getMatchTradesTopic());
         args.add(kafka.getOrderBookDepthTopic());
+        args.add(kafka.getAccountUserCommandsTopic());
     }
 
     private void requireCurrentProductTopic(String aggregateType, String topic) {
@@ -180,16 +181,22 @@ public class MatchingOutboxRepository {
         String matchResultsTopic = kafka.getMatchResultsTopic();
         String matchTradesTopic = kafka.getMatchTradesTopic();
         String orderBookDepthTopic = kafka.getOrderBookDepthTopic();
-        if (!matchResultsTopic.equals(topic) && !matchTradesTopic.equals(topic) && !orderBookDepthTopic.equals(topic)) {
+        String accountUserCommandsTopic = kafka.getAccountUserCommandsTopic();
+        if (!matchResultsTopic.equals(topic)
+                && !matchTradesTopic.equals(topic)
+                && !orderBookDepthTopic.equals(topic)
+                && !accountUserCommandsTopic.equals(topic)) {
             throw new IllegalStateException("matching outbox topic must match current product line: expected one of ["
-                    + matchResultsTopic + ", " + matchTradesTopic + ", " + orderBookDepthTopic + "] actual=" + topic);
+                    + matchResultsTopic + ", " + matchTradesTopic + ", " + orderBookDepthTopic + ", "
+                    + accountUserCommandsTopic + "] actual=" + topic);
         }
     }
 
     private boolean isMatchingAggregate(String aggregateType) {
         return "MATCH_TRADE".equals(aggregateType)
                 || "MATCH_RESULT".equals(aggregateType)
-                || "ORDER_BOOK_DEPTH".equals(aggregateType);
+                || "ORDER_BOOK_DEPTH".equals(aggregateType)
+                || "ACCOUNT_COMMAND".equals(aggregateType);
     }
 
     private void requireSingleRow(int rows, String operation) {

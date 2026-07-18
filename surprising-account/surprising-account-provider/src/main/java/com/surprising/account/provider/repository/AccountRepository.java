@@ -1,6 +1,7 @@
 package com.surprising.account.provider.repository;
 
 import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.TradeParticipantRole;
 import com.surprising.account.api.model.AdminBalanceAdjustmentRecord;
 import com.surprising.account.api.model.AdminCursorPage;
 import com.surprising.account.api.model.AccountLedgerEntryResponse;
@@ -30,6 +31,7 @@ import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineSql;
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
@@ -804,12 +806,12 @@ public class AccountRepository {
                 SELECT EXISTS (
                     SELECT 1
                       FROM trading_match_trades mt
-                      LEFT JOIN account_processed_trades pt
-                        ON pt.product_line = mt.product_line
-                       AND pt.symbol = mt.symbol
-                       AND pt.trade_id = mt.trade_id
+                      LEFT JOIN account_trade_settlements ts
+                        ON ts.product_line = mt.product_line
+                       AND ts.symbol = mt.symbol
+                       AND ts.trade_id = mt.trade_id
                      WHERE (mt.taker_user_id = ? OR mt.maker_user_id = ?)
-                       AND pt.trade_id IS NULL
+                       AND (ts.trade_id IS NULL OR ts.completed_at IS NULL)
                        AND mt.product_line = ?
                 )
                 """, Boolean.class, userId, userId, productLineName);
@@ -1978,18 +1980,54 @@ public class AccountRepository {
                 rs.getLong("liquidation_fee_rate_ppm")), orderId, userId, symbol).stream().findFirst();
     }
 
-    public boolean markTradeProcessing(long tradeId, String symbol) {
-        return markTradeProcessing(ProductLine.LINEAR_PERPETUAL, tradeId, symbol);
+    public void registerTradeSettlement(ProductLine productLine, MatchTradeEvent trade, Instant now) {
+        int inserted = jdbcTemplate.update("""
+                INSERT INTO account_trade_settlements (
+                    product_line, symbol, trade_id, taker_user_id, maker_user_id,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (product_line, symbol, trade_id) DO NOTHING
+                """, productLine.name(), trade.symbol(), trade.tradeId(), trade.takerUserId(), trade.makerUserId(),
+                Timestamp.from(now), Timestamp.from(now));
+        if (inserted == 1) {
+            return;
+        }
+        boolean matches = jdbcTemplate.query("""
+                SELECT taker_user_id, maker_user_id
+                  FROM account_trade_settlements
+                 WHERE product_line = ? AND symbol = ? AND trade_id = ?
+                """, (rs, rowNum) -> rs.getLong("taker_user_id") == trade.takerUserId()
+                && rs.getLong("maker_user_id") == trade.makerUserId(),
+                productLine.name(), trade.symbol(), trade.tradeId()).stream().findFirst().orElse(false);
+        if (!matches) {
+            throw new IllegalStateException("conflicting duplicate trade settlement "
+                    + productLine + ":" + trade.symbol() + ":" + trade.tradeId());
+        }
     }
 
-    public boolean markTradeProcessing(ProductLine productLine, long tradeId, String symbol) {
-        ProductLine resolvedProductLine = productLine(productLine);
+    public void markTradeSideApplied(ProductLine productLine,
+                                     MatchTradeEvent trade,
+                                     TradeParticipantRole role,
+                                     String commandId,
+                                     Instant now) {
+        String ownStatus = role == TradeParticipantRole.TAKER ? "taker_status" : "maker_status";
+        String ownCommand = role == TradeParticipantRole.TAKER ? "taker_command_id" : "maker_command_id";
+        String otherStatus = role == TradeParticipantRole.TAKER ? "maker_status" : "taker_status";
         int rows = jdbcTemplate.update("""
-                INSERT INTO account_processed_trades (product_line, trade_id, symbol, processed_at)
-                VALUES (?, ?, ?, now())
-                ON CONFLICT (product_line, symbol, trade_id) DO NOTHING
-                """, resolvedProductLine.name(), tradeId, symbol);
-        return rows == 1;
+                UPDATE account_trade_settlements
+                   SET %s = 'APPLIED',
+                       %s = ?,
+                       completed_at = CASE WHEN %s = 'APPLIED' THEN ? ELSE NULL END,
+                       updated_at = ?
+                 WHERE product_line = ? AND symbol = ? AND trade_id = ?
+                   AND %s = 'PENDING'
+                """.formatted(ownStatus, ownCommand, otherStatus, ownStatus),
+                commandId, Timestamp.from(now), Timestamp.from(now), productLine.name(), trade.symbol(),
+                trade.tradeId());
+        if (rows != 1) {
+            throw new IllegalStateException("failed to mark trade side applied "
+                    + productLine + ":" + trade.symbol() + ":" + trade.tradeId() + ":" + role);
+        }
     }
 
     public void settleRealizedPnl(long userId,
@@ -2715,7 +2753,7 @@ public class AccountRepository {
                 .mapToLong(PositionMargin::marginUnits)
                 .reduce(0L, Math::addExact);
         BalanceSettlementState current = jdbcTemplate.queryForObject("""
-                SELECT b.available_units, b.locked_units, d.deficit_units
+                SELECT b.available_units, b.locked_units, d.deficit_units, d.reserved_units
                   FROM account_balances b
                   JOIN account_deficits d USING (user_id, asset)
                  WHERE b.user_id = ? AND b.asset = ?
@@ -2723,14 +2761,22 @@ public class AccountRepository {
         """, (rs, rowNum) -> new BalanceSettlementState(
                 rs.getLong("available_units"),
                 rs.getLong("locked_units"),
-                rs.getLong("deficit_units")), userId, asset);
+                rs.getLong("deficit_units"),
+                rs.getLong("reserved_units")), userId, asset);
         long availableInput = amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED
                 ? 0L
                 : current.availableUnits();
+        long settlementDeficit = amountUnits > 0
+                ? Math.subtractExact(current.deficitUnits(), current.reservedDeficitUnits())
+                : current.deficitUnits();
         BalanceSettlementState next = PnlSettlementMath.apply(availableInput, current.lockedUnits(),
-                current.deficitUnits(), amountUnits, maxLockedDebitUnits);
+                settlementDeficit, amountUnits, maxLockedDebitUnits);
+        next = new BalanceSettlementState(next.availableUnits(), next.lockedUnits(),
+                Math.addExact(next.deficitUnits(), amountUnits > 0 ? current.reservedDeficitUnits() : 0L),
+                current.reservedDeficitUnits());
         if (amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED) {
-            next = new BalanceSettlementState(current.availableUnits(), next.lockedUnits(), next.deficitUnits());
+            next = new BalanceSettlementState(current.availableUnits(), next.lockedUnits(), next.deficitUnits(),
+                    current.reservedDeficitUnits());
         }
         long lockedDebitUnits = Math.subtractExact(current.lockedUnits(), next.lockedUnits());
         reducePositionMargins(ProductLine.LINEAR_PERPETUAL, userId, asset, lockedDebitUnits, lockedMargins, now);
@@ -2784,7 +2830,7 @@ public class AccountRepository {
                 .mapToLong(PositionMargin::marginUnits)
                 .reduce(0L, Math::addExact);
         BalanceSettlementState current = jdbcTemplate.queryForObject("""
-                SELECT b.available_units, b.locked_units, d.deficit_units
+                SELECT b.available_units, b.locked_units, d.deficit_units, d.reserved_units
                   FROM account_product_balances b
                   JOIN account_product_deficits d USING (account_type, user_id, asset)
                  WHERE b.account_type = ? AND b.user_id = ? AND b.asset = ?
@@ -2792,14 +2838,22 @@ public class AccountRepository {
         """, (rs, rowNum) -> new BalanceSettlementState(
                 rs.getLong("available_units"),
                 rs.getLong("locked_units"),
-                rs.getLong("deficit_units")), accountType.name(), userId, asset);
+                rs.getLong("deficit_units"),
+                rs.getLong("reserved_units")), accountType.name(), userId, asset);
         long availableInput = amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED
                 ? 0L
                 : current.availableUnits();
+        long settlementDeficit = amountUnits > 0
+                ? Math.subtractExact(current.deficitUnits(), current.reservedDeficitUnits())
+                : current.deficitUnits();
         BalanceSettlementState next = PnlSettlementMath.apply(availableInput, current.lockedUnits(),
-                current.deficitUnits(), amountUnits, maxLockedDebitUnits);
+                settlementDeficit, amountUnits, maxLockedDebitUnits);
+        next = new BalanceSettlementState(next.availableUnits(), next.lockedUnits(),
+                Math.addExact(next.deficitUnits(), amountUnits > 0 ? current.reservedDeficitUnits() : 0L),
+                current.reservedDeficitUnits());
         if (amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED) {
-            next = new BalanceSettlementState(current.availableUnits(), next.lockedUnits(), next.deficitUnits());
+            next = new BalanceSettlementState(current.availableUnits(), next.lockedUnits(), next.deficitUnits(),
+                    current.reservedDeficitUnits());
         }
         long lockedDebitUnits = Math.subtractExact(current.lockedUnits(), next.lockedUnits());
         reducePositionMargins(resolvedProductLine, userId, asset, lockedDebitUnits, lockedMargins, now);
@@ -2856,7 +2910,7 @@ public class AccountRepository {
                 .mapToLong(PositionMargin::marginUnits)
                 .reduce(0L, Math::addExact);
         BalanceSettlementState current = jdbcTemplate.queryForObject("""
-                SELECT b.available_units, b.locked_units, d.deficit_units
+                SELECT b.available_units, b.locked_units, d.deficit_units, d.reserved_units
                   FROM account_balances b
                   JOIN account_deficits d USING (user_id, asset)
                  WHERE b.user_id = ? AND b.asset = ?
@@ -2864,7 +2918,8 @@ public class AccountRepository {
         """, (rs, rowNum) -> new BalanceSettlementState(
                 rs.getLong("available_units"),
                 rs.getLong("locked_units"),
-                rs.getLong("deficit_units")), userId, asset);
+                rs.getLong("deficit_units"),
+                rs.getLong("reserved_units")), userId, asset);
         long availableInput = normalizedMarginMode == MarginMode.ISOLATED ? 0L : current.availableUnits();
         long collectibleUnits = Math.min(requestedDebitUnits, Math.addExact(availableInput, maxLockedDebitUnits));
         if (collectibleUnits <= 0) {
@@ -2873,8 +2928,11 @@ public class AccountRepository {
         }
         BalanceSettlementState next = PnlSettlementMath.apply(availableInput, current.lockedUnits(),
                 current.deficitUnits(), Math.negateExact(collectibleUnits), maxLockedDebitUnits);
+        next = new BalanceSettlementState(next.availableUnits(), next.lockedUnits(), next.deficitUnits(),
+                current.reservedDeficitUnits());
         if (normalizedMarginMode == MarginMode.ISOLATED) {
-            next = new BalanceSettlementState(current.availableUnits(), next.lockedUnits(), next.deficitUnits());
+            next = new BalanceSettlementState(current.availableUnits(), next.lockedUnits(), next.deficitUnits(),
+                    current.reservedDeficitUnits());
         }
         if (next.deficitUnits() != current.deficitUnits()) {
             throw new IllegalStateException("liquidation fee must not create account deficit");
@@ -2921,7 +2979,7 @@ public class AccountRepository {
                 .mapToLong(PositionMargin::marginUnits)
                 .reduce(0L, Math::addExact);
         BalanceSettlementState current = jdbcTemplate.queryForObject("""
-                SELECT b.available_units, b.locked_units, d.deficit_units
+                SELECT b.available_units, b.locked_units, d.deficit_units, d.reserved_units
                   FROM account_product_balances b
                   JOIN account_product_deficits d USING (account_type, user_id, asset)
                  WHERE b.account_type = ? AND b.user_id = ? AND b.asset = ?
@@ -2929,7 +2987,8 @@ public class AccountRepository {
         """, (rs, rowNum) -> new BalanceSettlementState(
                 rs.getLong("available_units"),
                 rs.getLong("locked_units"),
-                rs.getLong("deficit_units")), accountType.name(), userId, asset);
+                rs.getLong("deficit_units"),
+                rs.getLong("reserved_units")), accountType.name(), userId, asset);
         long availableInput = normalizedMarginMode == MarginMode.ISOLATED ? 0L : current.availableUnits();
         long collectibleUnits = Math.min(requestedDebitUnits, Math.addExact(availableInput, maxLockedDebitUnits));
         if (collectibleUnits <= 0) {
@@ -2938,8 +2997,11 @@ public class AccountRepository {
         }
         BalanceSettlementState next = PnlSettlementMath.apply(availableInput, current.lockedUnits(),
                 current.deficitUnits(), Math.negateExact(collectibleUnits), maxLockedDebitUnits);
+        next = new BalanceSettlementState(next.availableUnits(), next.lockedUnits(), next.deficitUnits(),
+                current.reservedDeficitUnits());
         if (normalizedMarginMode == MarginMode.ISOLATED) {
-            next = new BalanceSettlementState(current.availableUnits(), next.lockedUnits(), next.deficitUnits());
+            next = new BalanceSettlementState(current.availableUnits(), next.lockedUnits(), next.deficitUnits(),
+                    current.reservedDeficitUnits());
         }
         if (next.deficitUnits() != current.deficitUnits()) {
             throw new IllegalStateException("liquidation fee must not create account deficit");

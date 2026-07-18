@@ -24,37 +24,40 @@ class ExpiringContractSettlementConsumerTest {
     @Test
     void processesDeliverySettlementWhenKafkaKeyMatchesPayloadSymbol() {
         ObjectMapper objectMapper = new ObjectMapper();
-        RecordingAccountService accountService = new RecordingAccountService();
+        RecordingFanoutService fanoutService = new RecordingFanoutService();
+        AccountProperties properties = new AccountProperties();
         ExpiringContractSettlementConsumer consumer =
-                new ExpiringContractSettlementConsumer(objectMapper, accountService);
+                new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
         DeliverySettlementEvent event = deliveryEvent("BTC-USDT-260327");
 
         consumer.onDeliverySettlement(new ConsumerRecord<>("surprising.linear-delivery.delivery.settlements.v1",
                 0, 1L, "BTC-USDT-260327", objectMapper.writeValueAsString(event)));
 
-        assertThat(accountService.deliveryEvent).isEqualTo(event);
+        assertThat(fanoutService.deliveryEvent).isEqualTo(event);
     }
 
     @Test
     void processesOptionExerciseWhenKafkaKeyMatchesPayloadSymbol() {
         ObjectMapper objectMapper = new ObjectMapper();
-        RecordingAccountService accountService = new RecordingAccountService();
+        RecordingFanoutService fanoutService = new RecordingFanoutService();
+        AccountProperties properties = new AccountProperties();
         ExpiringContractSettlementConsumer consumer =
-                new ExpiringContractSettlementConsumer(objectMapper, accountService);
+                new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
         OptionExerciseEvent event = optionEvent("BTC-USDT-260925-70000-C");
 
         consumer.onOptionExercise(new ConsumerRecord<>("surprising.option.option.exercises.v1",
                 0, 1L, "BTC-USDT-260925-70000-C", objectMapper.writeValueAsString(event)));
 
-        assertThat(accountService.optionEvent).isEqualTo(event);
+        assertThat(fanoutService.optionEvent).isEqualTo(event);
     }
 
     @Test
     void rejectsDeliverySettlementWhenKafkaKeyDoesNotMatchPayloadSymbol() {
         ObjectMapper objectMapper = new ObjectMapper();
-        RecordingAccountService accountService = new RecordingAccountService();
+        RecordingFanoutService fanoutService = new RecordingFanoutService();
+        AccountProperties properties = new AccountProperties();
         ExpiringContractSettlementConsumer consumer =
-                new ExpiringContractSettlementConsumer(objectMapper, accountService);
+                new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
 
         assertThatThrownBy(() -> consumer.onDeliverySettlement(new ConsumerRecord<>(
                 "surprising.linear-delivery.delivery.settlements.v1", 0, 1L, "ETH-USDT-260327",
@@ -64,18 +67,18 @@ class ExpiringContractSettlementConsumerTest {
                 .satisfies(ex -> assertThat(ex.getCause())
                         .hasMessageContaining("delivery settlement Kafka key must match payload symbol"));
 
-        assertThat(accountService.deliveryEvent).isNull();
+        assertThat(fanoutService.deliveryEvent).isNull();
     }
 
     @Test
     void rejectsDeliverySettlementFromOtherProductTopicBeforeSettlement() {
         ObjectMapper objectMapper = new ObjectMapper();
-        RecordingAccountService accountService = new RecordingAccountService();
+        RecordingFanoutService fanoutService = new RecordingFanoutService();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
         ExpiringContractSettlementConsumer consumer =
-                new ExpiringContractSettlementConsumer(objectMapper, accountService, properties);
+                new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
 
         assertThatThrownBy(() -> consumer.onDeliverySettlement(new ConsumerRecord<>(
                 "surprising.inverse-delivery.delivery.settlements.v1", 0, 1L, "BTC-USDT-260327",
@@ -86,18 +89,18 @@ class ExpiringContractSettlementConsumerTest {
                         .hasMessageContaining("delivery settlement topic must match current product line")
                         .hasMessageContaining("surprising.linear-delivery.delivery.settlements.v1"));
 
-        assertThat(accountService.deliveryEvent).isNull();
+        assertThat(fanoutService.deliveryEvent).isNull();
     }
 
     @Test
     void rejectsOptionExerciseFromOtherProductTopicBeforeSettlement() {
         ObjectMapper objectMapper = new ObjectMapper();
-        RecordingAccountService accountService = new RecordingAccountService();
+        RecordingFanoutService fanoutService = new RecordingFanoutService();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
         properties.getKafka().setProductTopicsEnabled(true);
         ExpiringContractSettlementConsumer consumer =
-                new ExpiringContractSettlementConsumer(objectMapper, accountService, properties);
+                new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
 
         assertThatThrownBy(() -> consumer.onOptionExercise(new ConsumerRecord<>(
                 "surprising.linear-delivery.option.exercises.v1", 0, 1L, "BTC-USDT-260925-70000-C",
@@ -108,7 +111,7 @@ class ExpiringContractSettlementConsumerTest {
                         .hasMessageContaining("option exercise topic must match current product line")
                         .hasMessageContaining("surprising.option.option.exercises.v1"));
 
-        assertThat(accountService.optionEvent).isNull();
+        assertThat(fanoutService.optionEvent).isNull();
     }
 
     @Test
@@ -117,7 +120,7 @@ class ExpiringContractSettlementConsumerTest {
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
         ExpiringContractSettlementConsumer deliveryConsumer = new ExpiringContractSettlementConsumer(
-                new ObjectMapper(), new RecordingAccountService(), properties);
+                new ObjectMapper(), new RecordingFanoutService(), properties);
 
         assertThat(deliveryConsumer.deliverySettlementsTopic())
                 .isEqualTo("surprising.linear-delivery.delivery.settlements.v1");
@@ -144,22 +147,22 @@ class ExpiringContractSettlementConsumerTest {
                 ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME, null);
     }
 
-    private static final class RecordingAccountService extends AccountService {
+    private static final class RecordingFanoutService extends ExpiringContractSettlementFanoutService {
         private DeliverySettlementEvent deliveryEvent;
         private OptionExerciseEvent optionEvent;
 
-        private RecordingAccountService() {
-            super(null, null);
+        private RecordingFanoutService() {
+            super(null, null, null, null);
         }
 
         @Override
-        public int processDeliverySettlement(DeliverySettlementEvent event) {
+        public int fanout(DeliverySettlementEvent event) {
             this.deliveryEvent = event;
             return 1;
         }
 
         @Override
-        public int processOptionExercise(OptionExerciseEvent event) {
+        public int fanout(OptionExerciseEvent event) {
             this.optionEvent = event;
             return 1;
         }

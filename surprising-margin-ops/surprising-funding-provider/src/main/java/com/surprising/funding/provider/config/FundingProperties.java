@@ -52,6 +52,7 @@ public class FundingProperties {
         private String fundingRateTopic = "surprising.perp.funding.rate.v1";
         private String cacheGroupId = "surprising-funding-rate-cache-local";
         private int concurrency = 1;
+        private int commandResultsConcurrency = 4;
         private int maxPollRecords = 500;
 
         public String getBootstrapServers() {
@@ -92,6 +93,14 @@ public class FundingProperties {
             this.fundingRateTopic = fundingRateTopic;
         }
 
+        public String getUserCommandsTopic() {
+            return ProductTopicNames.of(productLine).accountUserCommandsTopic();
+        }
+
+        public String getCommandResultsTopic() {
+            return ProductTopicNames.of(productLine).accountCommandResultsTopic();
+        }
+
         public String getCacheGroupId() {
             return cacheGroupId;
         }
@@ -100,12 +109,24 @@ public class FundingProperties {
             this.cacheGroupId = cacheGroupId;
         }
 
+        public String getCommandResultsGroupId() {
+            return ProductTopicNames.of(productLine).consumerGroup("funding-account-results");
+        }
+
         public int getConcurrency() {
             return concurrency;
         }
 
         public void setConcurrency(int concurrency) {
             this.concurrency = concurrency;
+        }
+
+        public int getCommandResultsConcurrency() {
+            return commandResultsConcurrency;
+        }
+
+        public void setCommandResultsConcurrency(int commandResultsConcurrency) {
+            this.commandResultsConcurrency = commandResultsConcurrency;
         }
 
         public int getMaxPollRecords() {

@@ -1073,7 +1073,7 @@ public class MarketMakerService {
 
     private List<OrderResponse> openOrders(long accountId, String symbol) {
         OrderQueryResponse response = orderRpcApi.openOrders(accountId, symbol,
-                properties.getQuoting().getMaxOpenOrdersPerAccountSymbol());
+                properties.getQuoting().getMaxOpenOrdersPerAccountSymbol(), null);
         return response == null || response.orders() == null ? List.of() : response.orders();
     }
 

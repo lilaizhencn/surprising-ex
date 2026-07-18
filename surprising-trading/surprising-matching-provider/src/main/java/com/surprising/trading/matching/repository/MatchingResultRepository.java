@@ -19,19 +19,16 @@ import org.springframework.stereotype.Repository;
 public class MatchingResultRepository {
 
     private final JdbcTemplate jdbcTemplate;
-    private final MatchingMarginRepository marginRepository;
     private final MatchingProperties properties;
 
-    public MatchingResultRepository(JdbcTemplate jdbcTemplate, MatchingMarginRepository marginRepository) {
-        this(jdbcTemplate, marginRepository, new MatchingProperties());
+    public MatchingResultRepository(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, new MatchingProperties());
     }
 
     @Autowired
     public MatchingResultRepository(JdbcTemplate jdbcTemplate,
-                                    MatchingMarginRepository marginRepository,
                                     MatchingProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
-        this.marginRepository = marginRepository;
         this.properties = properties;
     }
 
@@ -141,7 +138,6 @@ public class MatchingResultRepository {
         if (result.commandType() == OrderCommandType.CANCEL) {
             if ("SUCCESS".equals(result.resultCode())) {
                 updateOrderStatus(result.orderId(), OrderStatus.CANCELED, result.eventTime());
-                marginRepository.releaseUnused(result.orderId(), "ORDER_CANCELED", result.eventTime());
                 clearRemainingQuantity(result.orderId(), result.eventTime());
             }
             return;
@@ -157,7 +153,6 @@ public class MatchingResultRepository {
                      WHERE order_id = ?
                     """, result.resultCode(), Timestamp.from(result.eventTime()), result.orderId());
             requireSingleRow(rows, "rejected order update");
-            marginRepository.releaseAll(result.orderId(), "ORDER_REJECTED", result.eventTime());
             return;
         }
         if (result.filledQuantitySteps() > 0) {
@@ -166,7 +161,6 @@ public class MatchingResultRepository {
             updateOrderStatus(result.orderId(), result.orderStatus(), result.eventTime());
         }
         if (isTerminal(result.orderStatus())) {
-            marginRepository.releaseUnused(result.orderId(), "ORDER_TERMINAL", result.eventTime());
             if (result.orderStatus() == OrderStatus.CANCELED) {
                 clearRemainingQuantity(result.orderId(), result.eventTime());
             }

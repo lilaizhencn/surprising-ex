@@ -135,6 +135,10 @@ public class MatchingProperties {
             this.matchTradesTopic = matchTradesTopic;
         }
 
+        public String getAccountUserCommandsTopic() {
+            return productTopics().accountUserCommandsTopic();
+        }
+
         public String getOrderBookDepthTopic() {
             return productTopicsEnabled ? productTopics().orderBookDepthTopic() : orderBookDepthTopic;
         }

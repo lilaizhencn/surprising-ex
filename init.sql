@@ -646,12 +646,28 @@ CREATE TABLE IF NOT EXISTS funding_settlements (
     total_long_payment_units    BIGINT NOT NULL DEFAULT 0,
     total_short_payment_units   BIGINT NOT NULL DEFAULT 0,
     position_count              INTEGER NOT NULL DEFAULT 0,
+    expected_payment_count      INTEGER NOT NULL DEFAULT 0,
+    applied_payment_count       INTEGER NOT NULL DEFAULT 0,
+    rejected_payment_count      INTEGER NOT NULL DEFAULT 0,
     status                      TEXT NOT NULL,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT funding_settlements_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
-    CONSTRAINT funding_settlements_position_count_non_negative CHECK (position_count >= 0),
-    CONSTRAINT funding_settlements_status_check CHECK (status IN ('PROCESSING', 'COMPLETED', 'FAILED'))
+    CONSTRAINT funding_settlements_position_count_non_negative CHECK (
+        position_count >= 0 AND expected_payment_count >= 0
+        AND applied_payment_count >= 0 AND rejected_payment_count >= 0
+        AND applied_payment_count + rejected_payment_count <= expected_payment_count
+    ),
+    CONSTRAINT funding_settlements_status_check CHECK (
+        status IN ('PROCESSING', 'WAITING_ACCOUNTS', 'COMPLETED', 'FAILED')
+    ),
+    CONSTRAINT funding_settlements_completion_check CHECK (
+        (status = 'COMPLETED'
+            AND applied_payment_count = expected_payment_count
+            AND rejected_payment_count = 0)
+        OR (status = 'FAILED' AND rejected_payment_count > 0)
+        OR status IN ('PROCESSING', 'WAITING_ACCOUNTS')
+    )
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS funding_settlements_symbol_time_uidx
@@ -672,7 +688,14 @@ CREATE TABLE IF NOT EXISTS funding_payments (
     notional_units          BIGINT NOT NULL,
     funding_rate_ppm        BIGINT NOT NULL,
     amount_units            BIGINT NOT NULL,
+    command_id              VARCHAR(160) NOT NULL,
+    status                  TEXT NOT NULL DEFAULT 'PENDING',
+    applied_at              TIMESTAMPTZ,
+    rejected_at             TIMESTAMPTZ,
+    error_code              VARCHAR(80),
+    error_message           VARCHAR(1000),
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT funding_payments_settlement_fk
         FOREIGN KEY (settlement_id) REFERENCES funding_settlements(settlement_id),
     CONSTRAINT funding_payments_user_positive CHECK (user_id > 0),
@@ -681,14 +704,27 @@ CREATE TABLE IF NOT EXISTS funding_payments (
     CONSTRAINT funding_payments_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
     CONSTRAINT funding_payments_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
     CONSTRAINT funding_payments_notional_non_negative CHECK (notional_units >= 0),
-    CONSTRAINT funding_payments_amount_non_zero CHECK (amount_units <> 0)
+    CONSTRAINT funding_payments_amount_non_zero CHECK (amount_units <> 0),
+    CONSTRAINT funding_payments_status_check CHECK (status IN ('PENDING', 'APPLIED', 'REJECTED')),
+    CONSTRAINT funding_payments_terminal_check CHECK (
+        (status = 'PENDING' AND applied_at IS NULL AND rejected_at IS NULL)
+        OR (status = 'APPLIED' AND applied_at IS NOT NULL AND rejected_at IS NULL)
+        OR (status = 'REJECTED' AND applied_at IS NULL AND rejected_at IS NOT NULL)
+    )
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS funding_payments_settlement_user_uidx
     ON funding_payments (settlement_id, user_id, symbol, margin_mode, position_side);
 
+CREATE UNIQUE INDEX IF NOT EXISTS funding_payments_command_uidx
+    ON funding_payments (command_id);
+
 CREATE INDEX IF NOT EXISTS funding_payments_user_time_idx
     ON funding_payments (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS funding_payments_pending_idx
+    ON funding_payments (settlement_id, payment_id)
+    WHERE status = 'PENDING';
 
 CREATE TABLE IF NOT EXISTS trading_sequences (
     sequence_name       TEXT PRIMARY KEY,
@@ -1003,7 +1039,7 @@ CREATE TABLE IF NOT EXISTS trading_orders (
     CONSTRAINT trading_orders_type_check CHECK (order_type IN ('LIMIT', 'MARKET')),
     CONSTRAINT trading_orders_tif_check CHECK (time_in_force IN ('GTC', 'IOC', 'FOK', 'GTX')),
     CONSTRAINT trading_orders_status_check CHECK (
-        status IN ('ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED', 'CANCELED', 'PARTIALLY_FILLED', 'FILLED')
+        status IN ('PENDING_RESERVE', 'ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED', 'CANCELED', 'PARTIALLY_FILLED', 'FILLED')
     ),
     CONSTRAINT trading_orders_long_values CHECK (
         price_ticks >= 0
@@ -1275,7 +1311,7 @@ CREATE TABLE IF NOT EXISTS trading_algo_order_children (
     CONSTRAINT trading_algo_order_children_type_check CHECK (order_type IN ('LIMIT', 'MARKET')),
     CONSTRAINT trading_algo_order_children_tif_check CHECK (time_in_force IN ('GTC', 'IOC', 'GTX')),
     CONSTRAINT trading_algo_order_children_status_check CHECK (
-        status IN ('ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED', 'CANCELED', 'PARTIALLY_FILLED', 'FILLED')
+        status IN ('PENDING_RESERVE', 'ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED', 'CANCELED', 'PARTIALLY_FILLED', 'FILLED')
     )
 );
 
@@ -1505,9 +1541,11 @@ CREATE TABLE IF NOT EXISTS trading_order_events (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT trading_order_events_order_fk
         FOREIGN KEY (order_id) REFERENCES trading_orders(order_id),
-    CONSTRAINT trading_order_events_type_check CHECK (event_type IN ('ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED')),
+    CONSTRAINT trading_order_events_type_check CHECK (
+        event_type IN ('RESERVE_PENDING', 'ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED')
+    ),
     CONSTRAINT trading_order_events_status_check CHECK (
-        status IN ('ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED', 'CANCELED', 'PARTIALLY_FILLED', 'FILLED')
+        status IN ('PENDING_RESERVE', 'ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED', 'CANCELED', 'PARTIALLY_FILLED', 'FILLED')
     )
 );
 
@@ -1656,7 +1694,7 @@ CREATE TABLE IF NOT EXISTS trading_match_results (
     ),
     CONSTRAINT trading_match_results_quantity_non_negative CHECK (filled_quantity_steps >= 0),
     CONSTRAINT trading_match_results_status_check CHECK (
-        order_status IN ('ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED', 'CANCELED', 'PARTIALLY_FILLED', 'FILLED')
+        order_status IN ('PENDING_RESERVE', 'ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED', 'CANCELED', 'PARTIALLY_FILLED', 'FILLED')
     )
 );
 
@@ -1895,6 +1933,7 @@ CREATE TABLE IF NOT EXISTS account_product_deficits (
     user_id             BIGINT NOT NULL,
     asset               TEXT NOT NULL,
     deficit_units       BIGINT NOT NULL DEFAULT 0,
+    reserved_units      BIGINT NOT NULL DEFAULT 0,
     updated_at          TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (account_type, user_id, asset),
     CONSTRAINT account_product_deficits_type_check CHECK (
@@ -1903,7 +1942,9 @@ CREATE TABLE IF NOT EXISTS account_product_deficits (
     ),
     CONSTRAINT account_product_deficits_user_positive CHECK (user_id > 0),
     CONSTRAINT account_product_deficits_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
-    CONSTRAINT account_product_deficits_non_negative CHECK (deficit_units >= 0)
+    CONSTRAINT account_product_deficits_non_negative CHECK (
+        deficit_units >= 0 AND reserved_units >= 0 AND reserved_units <= deficit_units
+    )
 );
 
 CREATE INDEX IF NOT EXISTS account_product_deficits_user_idx
@@ -1986,11 +2027,14 @@ CREATE TABLE IF NOT EXISTS account_deficits (
     user_id             BIGINT NOT NULL,
     asset               TEXT NOT NULL,
     deficit_units       BIGINT NOT NULL DEFAULT 0,
+    reserved_units      BIGINT NOT NULL DEFAULT 0,
     updated_at          TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (user_id, asset),
     CONSTRAINT account_deficits_user_positive CHECK (user_id > 0),
     CONSTRAINT account_deficits_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
-    CONSTRAINT account_deficits_non_negative CHECK (deficit_units >= 0)
+    CONSTRAINT account_deficits_non_negative CHECK (
+        deficit_units >= 0 AND reserved_units >= 0 AND reserved_units <= deficit_units
+    )
 );
 
 CREATE INDEX IF NOT EXISTS account_deficits_user_idx
@@ -2380,46 +2424,106 @@ CREATE INDEX IF NOT EXISTS account_positions_open_scan_idx
     ON account_positions (product_line, user_id, symbol, margin_mode, position_side)
     WHERE signed_quantity_steps <> 0;
 
-CREATE TABLE IF NOT EXISTS account_processed_trades (
-    product_line        TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
-    trade_id            BIGINT NOT NULL,
-    symbol              TEXT NOT NULL,
-    processed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (product_line, symbol, trade_id),
-    CONSTRAINT account_processed_trades_product_line_check CHECK (
+CREATE TABLE IF NOT EXISTS account_commands (
+    command_id              VARCHAR(160) PRIMARY KEY,
+    product_line            TEXT NOT NULL,
+    user_id                 BIGINT NOT NULL,
+    command_type            TEXT NOT NULL,
+    source                  VARCHAR(64) NOT NULL,
+    source_reference        VARCHAR(160) NOT NULL,
+    depends_on_command_id   VARCHAR(160),
+    payload                 JSONB NOT NULL,
+    payload_sha256          CHAR(64) NOT NULL,
+    status                  TEXT NOT NULL,
+    result_payload          JSONB,
+    error_code              VARCHAR(80),
+    error_message           VARCHAR(1000),
+    occurred_at             TIMESTAMPTZ NOT NULL,
+    started_at              TIMESTAMPTZ NOT NULL,
+    completed_at            TIMESTAMPTZ,
+    updated_at              TIMESTAMPTZ NOT NULL,
+    trace_id                VARCHAR(160),
+    CONSTRAINT account_commands_product_line_check CHECK (
         product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
                          'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
     ),
-    CONSTRAINT account_processed_trades_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$')
+    CONSTRAINT account_commands_user_positive CHECK (user_id > 0),
+    CONSTRAINT account_commands_status_check CHECK (
+        status IN ('WAITING_DEPENDENCY', 'PROCESSING', 'APPLIED', 'REJECTED')
+    ),
+    CONSTRAINT account_commands_terminal_check CHECK (
+        (status IN ('WAITING_DEPENDENCY', 'PROCESSING') AND completed_at IS NULL)
+        OR (status IN ('APPLIED', 'REJECTED') AND completed_at IS NOT NULL)
+    ),
+    CONSTRAINT account_commands_dependency_not_self CHECK (
+        depends_on_command_id IS NULL OR depends_on_command_id <> command_id
+    )
 );
 
-ALTER TABLE account_processed_trades
-    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+CREATE INDEX IF NOT EXISTS account_commands_user_time_idx
+    ON account_commands (product_line, user_id, started_at DESC);
 
-UPDATE account_processed_trades pt
-   SET product_line = COALESCE(mt.product_line, pt.product_line)
-  FROM trading_match_trades mt
- WHERE mt.symbol = pt.symbol
-   AND mt.trade_id = pt.trade_id;
+CREATE INDEX IF NOT EXISTS account_commands_source_idx
+    ON account_commands (source, source_reference, command_type);
 
-ALTER TABLE account_processed_trades
-    DROP CONSTRAINT IF EXISTS account_processed_trades_pkey;
+CREATE INDEX IF NOT EXISTS account_commands_processing_idx
+    ON account_commands (product_line, started_at)
+    WHERE status IN ('WAITING_DEPENDENCY', 'PROCESSING');
 
-ALTER TABLE account_processed_trades
-    DROP CONSTRAINT IF EXISTS account_processed_trades_product_line_check;
+CREATE INDEX IF NOT EXISTS account_commands_dependency_idx
+    ON account_commands (depends_on_command_id, started_at)
+    WHERE status = 'WAITING_DEPENDENCY';
 
-ALTER TABLE account_processed_trades
-    ADD CONSTRAINT account_processed_trades_product_line_check CHECK (
+CREATE TABLE IF NOT EXISTS account_command_submissions (
+    command_id              VARCHAR(160) PRIMARY KEY,
+    product_line            TEXT NOT NULL,
+    user_id                 BIGINT NOT NULL,
+    command_type            TEXT NOT NULL,
+    source                  VARCHAR(64) NOT NULL,
+    source_reference        VARCHAR(160) NOT NULL,
+    identity_sha256         CHAR(64) NOT NULL,
+    payload                 JSONB NOT NULL,
+    created_at              TIMESTAMPTZ NOT NULL,
+    CONSTRAINT account_command_submissions_user_positive CHECK (user_id > 0),
+    CONSTRAINT account_command_submissions_product_line_check CHECK (
         product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
                          'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-    );
+    )
+);
 
-ALTER TABLE account_processed_trades
-    ADD CONSTRAINT account_processed_trades_pkey PRIMARY KEY (product_line, symbol, trade_id);
+CREATE INDEX IF NOT EXISTS account_command_submissions_user_idx
+    ON account_command_submissions (product_line, user_id, created_at DESC);
 
-DROP INDEX IF EXISTS account_processed_trades_symbol_idx;
-CREATE INDEX IF NOT EXISTS account_processed_trades_symbol_idx
-    ON account_processed_trades (product_line, symbol, processed_at DESC);
+CREATE TABLE IF NOT EXISTS account_trade_settlements (
+    product_line            TEXT NOT NULL,
+    symbol                  TEXT NOT NULL,
+    trade_id                BIGINT NOT NULL,
+    taker_user_id           BIGINT NOT NULL,
+    maker_user_id           BIGINT NOT NULL,
+    taker_status            TEXT NOT NULL DEFAULT 'PENDING',
+    maker_status            TEXT NOT NULL DEFAULT 'PENDING',
+    taker_command_id        VARCHAR(160),
+    maker_command_id        VARCHAR(160),
+    created_at              TIMESTAMPTZ NOT NULL,
+    updated_at              TIMESTAMPTZ NOT NULL,
+    completed_at            TIMESTAMPTZ,
+    PRIMARY KEY (product_line, symbol, trade_id),
+    CONSTRAINT account_trade_settlements_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
+    CONSTRAINT account_trade_settlements_users_positive CHECK (taker_user_id > 0 AND maker_user_id > 0),
+    CONSTRAINT account_trade_settlements_taker_status_check CHECK (taker_status IN ('PENDING', 'APPLIED')),
+    CONSTRAINT account_trade_settlements_maker_status_check CHECK (maker_status IN ('PENDING', 'APPLIED')),
+    CONSTRAINT account_trade_settlements_completion_check CHECK (
+        (taker_status = 'APPLIED' AND maker_status = 'APPLIED' AND completed_at IS NOT NULL)
+        OR ((taker_status <> 'APPLIED' OR maker_status <> 'APPLIED') AND completed_at IS NULL)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS account_trade_settlements_incomplete_idx
+    ON account_trade_settlements (product_line, created_at)
+    WHERE completed_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS account_outbox_events (
     id                  BIGINT PRIMARY KEY DEFAULT nextval('account_outbox_id_seq'),
@@ -3047,13 +3151,16 @@ CREATE TABLE IF NOT EXISTS insurance_fund_balances (
     account_type        TEXT NOT NULL DEFAULT 'USDT_PERPETUAL',
     asset               TEXT NOT NULL,
     balance_units       BIGINT NOT NULL DEFAULT 0,
+    reserved_units      BIGINT NOT NULL DEFAULT 0,
     updated_at          TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (account_type, asset),
     CONSTRAINT insurance_fund_balances_type_check CHECK (
         account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL', 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
     ),
     CONSTRAINT insurance_fund_balances_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
-    CONSTRAINT insurance_fund_balances_non_negative CHECK (balance_units >= 0)
+    CONSTRAINT insurance_fund_balances_non_negative CHECK (
+        balance_units >= 0 AND reserved_units >= 0 AND reserved_units <= balance_units
+    )
 );
 
 CREATE TABLE IF NOT EXISTS insurance_fund_ledger (
@@ -3089,8 +3196,13 @@ CREATE TABLE IF NOT EXISTS insurance_deficit_coverages (
     requested_units             BIGINT NOT NULL,
     covered_units               BIGINT NOT NULL,
     remaining_deficit_units     BIGINT NOT NULL,
+    reserve_command_id          VARCHAR(160) NOT NULL,
+    finalize_command_id         VARCHAR(160) NOT NULL,
     status                      TEXT NOT NULL,
     reason                      TEXT,
+    error_code                  VARCHAR(80),
+    error_message               VARCHAR(1000),
+    completed_at                TIMESTAMPTZ,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT insurance_coverages_type_check CHECK (
@@ -3104,8 +3216,20 @@ CREATE TABLE IF NOT EXISTS insurance_deficit_coverages (
         AND remaining_deficit_units >= 0
         AND covered_units <= requested_units
     ),
-    CONSTRAINT insurance_coverages_status_check CHECK (status IN ('COVERED', 'PARTIALLY_COVERED'))
+    CONSTRAINT insurance_coverages_status_check CHECK (
+        status IN ('PENDING_RESERVE', 'PENDING_FINALIZE', 'COVERED', 'PARTIALLY_COVERED', 'FAILED')
+    ),
+    CONSTRAINT insurance_coverages_completion_check CHECK (
+        (status IN ('COVERED', 'PARTIALLY_COVERED', 'FAILED') AND completed_at IS NOT NULL)
+        OR (status IN ('PENDING_RESERVE', 'PENDING_FINALIZE') AND completed_at IS NULL)
+    )
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS insurance_coverages_reserve_command_uidx
+    ON insurance_deficit_coverages (reserve_command_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS insurance_coverages_finalize_command_uidx
+    ON insurance_deficit_coverages (finalize_command_id);
 
 CREATE INDEX IF NOT EXISTS insurance_coverages_user_time_idx
     ON insurance_deficit_coverages (account_type, user_id, created_at DESC);
@@ -3209,6 +3333,58 @@ CREATE TABLE IF NOT EXISTS adl_events (
         AND priority_score_ppm >= 0
     )
 );
+
+CREATE TABLE IF NOT EXISTS adl_execution_sagas (
+    execution_id                BIGINT PRIMARY KEY,
+    product_line                TEXT NOT NULL,
+    account_type                TEXT NOT NULL,
+    deficit_user_id             BIGINT NOT NULL,
+    target_user_id              BIGINT NOT NULL,
+    asset                       TEXT NOT NULL,
+    symbol                      TEXT NOT NULL,
+    target_side                 TEXT NOT NULL,
+    target_margin_mode          TEXT NOT NULL,
+    target_position_side        TEXT NOT NULL,
+    expected_signed_steps       BIGINT NOT NULL,
+    closed_quantity_steps       BIGINT NOT NULL,
+    entry_price_ticks           BIGINT NOT NULL,
+    mark_price_ticks            BIGINT NOT NULL,
+    requested_deficit_units     BIGINT NOT NULL,
+    realized_profit_units       BIGINT NOT NULL,
+    covered_units               BIGINT NOT NULL,
+    priority_score_ppm          BIGINT NOT NULL,
+    reserve_command_id          VARCHAR(160) NOT NULL UNIQUE,
+    target_command_id           VARCHAR(160) NOT NULL UNIQUE,
+    finalize_command_id         VARCHAR(160) NOT NULL UNIQUE,
+    release_command_id          VARCHAR(160) UNIQUE,
+    status                      TEXT NOT NULL,
+    error_code                  VARCHAR(80),
+    error_message               VARCHAR(1000),
+    created_at                  TIMESTAMPTZ NOT NULL,
+    updated_at                  TIMESTAMPTZ NOT NULL,
+    completed_at                TIMESTAMPTZ,
+    CONSTRAINT adl_execution_product_line_check CHECK (
+        product_line IN ('LINEAR_PERPETUAL', 'INVERSE_PERPETUAL')
+    ),
+    CONSTRAINT adl_execution_type_check CHECK (
+        account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL')
+    ),
+    CONSTRAINT adl_execution_users_check CHECK (
+        deficit_user_id > 0 AND target_user_id > 0 AND deficit_user_id <> target_user_id
+    ),
+    CONSTRAINT adl_execution_status_check CHECK (
+        status IN ('PENDING', 'RELEASING', 'COMPLETED', 'FAILED')
+    ),
+    CONSTRAINT adl_execution_values_check CHECK (
+        expected_signed_steps <> 0 AND closed_quantity_steps > 0
+        AND requested_deficit_units > 0 AND realized_profit_units > 0
+        AND covered_units > 0 AND covered_units <= realized_profit_units
+    )
+);
+
+CREATE INDEX IF NOT EXISTS adl_execution_sagas_pending_idx
+    ON adl_execution_sagas (product_line, created_at, execution_id)
+    WHERE status IN ('PENDING', 'RELEASING');
 
 CREATE INDEX IF NOT EXISTS adl_events_deficit_user_time_idx
     ON adl_events (account_type, deficit_user_id, created_at DESC);

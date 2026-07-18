@@ -436,16 +436,17 @@
       </g>
 
       <g class="node n-kafka">
-        <rect x="1920" y="260" width="380" height="245"></rect>
-        <foreignObject x="1920" y="260" width="380" height="245">
+        <rect x="1920" y="260" width="380" height="270"></rect>
+        <foreignObject x="1920" y="260" width="380" height="270">
           <div xmlns="http://www.w3.org/1999/xhtml" class="box">
             <h2>撮合事件 Topics</h2>
             <p class="mono">surprising.perp.match.results.v1</p>
             <p class="mono">surprising.perp.match.trades.v1</p>
+            <p class="mono">surprising.linear-perp.account.user.commands.v1</p>
             <p class="mono">surprising.perp.orderbook.depth.v1</p>
             <ul>
               <li>结果给订单生命周期、强平生命周期、WebSocket</li>
-              <li>成交明细给账户结算和 LAST_PRICE 条件单</li>
+              <li>成交明细给 LAST_PRICE 条件单；taker/maker 单用户指令给账户结算</li>
               <li>depth 给行情和 mark-price 计算</li>
             </ul>
           </div>
@@ -457,10 +458,10 @@
         <foreignObject x="1920" y="545" width="420" height="325">
           <div xmlns="http://www.w3.org/1999/xhtml" class="box">
             <h2>AccountProvider 账户结算</h2>
-            <p>代码：<span class="mono">MatchTradeConsumer</span> -> <span class="mono">AccountService.processTradeIfNew</span></p>
+            <p>代码：<span class="mono">AccountUserCommandConsumer</span> -> <span class="mono">AccountUserCommandProcessor</span></p>
             <ul>
-              <li><span class="mono">(symbol, tradeId)</span> 幂等：先写 <span class="mono">account_processed_trades</span></li>
-              <li>同一事务内处理 taker + maker 两边</li>
+              <li><span class="mono">commandId + envelope hash</span> 幂等，key 为 <span class="mono">PRODUCT_LINE:userId</span></li>
+              <li>taker/maker 分别进入各自用户事务，双边完成写 <span class="mono">account_trade_settlements</span></li>
               <li>锁定 <span class="mono">account_positions</span>，计算 closeSteps/openSteps</li>
               <li>平仓：结算 realized PnL、释放 position/order margin</li>
               <li>开仓：消费预占保证金到 position margin</li>
@@ -658,8 +659,8 @@
               <span class="mono">OrderService.place/enqueueCommand</span>、
               <span class="mono">MatchingCommandConsumer.onCommand</span>、
               <span class="mono">MatchingService.process/saveAndPublish</span>、
-              <span class="mono">MatchTradeConsumer.onTrade</span>、
-              <span class="mono">AccountService.processTradeIfNew/applyTradeSide</span>、
+              <span class="mono">AccountUserCommandConsumer.onCommand</span>、
+              <span class="mono">AccountUserCommandProcessor.process/AccountService.processTradeSide</span>、
               <span class="mono">RiskService.scan/scanPositionUpdate</span>、
               <span class="mono">LiquidationService.processCandidate</span>、
               <span class="mono">InsuranceService.coverDeficits</span>、

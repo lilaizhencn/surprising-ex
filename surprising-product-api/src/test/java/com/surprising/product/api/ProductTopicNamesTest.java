@@ -27,6 +27,12 @@ class ProductTopicNamesTest {
                 .isEqualTo("surprising.linear-perp.account.position-cache.events.v1");
         assertThat(linear.accountLiquidationFeeEventsTopic())
                 .isEqualTo("surprising.linear-perp.account.liquidation-fee.events.v1");
+        assertThat(linear.accountUserCommandsTopic())
+                .isEqualTo("surprising.linear-perp.account.user.commands.v1");
+        assertThat(linear.accountUserCommandsDltTopic())
+                .isEqualTo("surprising.linear-perp.account.user.commands.dlt.v1");
+        assertThat(linear.accountCommandResultsTopic())
+                .isEqualTo("surprising.linear-perp.account.command.results.v1");
         assertThat(linear.accountRiskEventsTopic()).isEqualTo("surprising.linear-perp.risk.account.events.v1");
         assertThat(linear.positionRiskEventsTopic()).isEqualTo("surprising.linear-perp.risk.position.events.v1");
         assertThat(linear.liquidationCandidatesTopic())

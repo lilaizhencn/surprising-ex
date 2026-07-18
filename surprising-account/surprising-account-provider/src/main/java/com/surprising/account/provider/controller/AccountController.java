@@ -22,6 +22,8 @@ import com.surprising.account.api.model.ProductTransferRecordQueryResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.provider.service.AccountService;
+import com.surprising.account.provider.service.AccountCommandGateway;
+import com.surprising.account.provider.service.AccountCommandTimeoutException;
 import com.surprising.account.provider.service.PositionCacheUnavailableException;
 import com.surprising.product.api.ProductLine;
 import org.springframework.http.HttpStatus;
@@ -39,15 +41,19 @@ public class AccountController {
     private static final String ADMIN_BASE_PATH = "/api/v1/admin/accounts";
 
     private final AccountService accountService;
+    private final AccountCommandGateway commandGateway;
 
-    public AccountController(AccountService accountService) {
+    public AccountController(AccountService accountService, AccountCommandGateway commandGateway) {
         this.accountService = accountService;
+        this.commandGateway = commandGateway;
     }
 
     @PostMapping(AccountApiPaths.ACCOUNT_ADMIN_BASE_PATH + "/balance-adjustments")
     public BalanceResponse adjustBalance(@RequestBody BalanceAdjustmentRequest request) {
         try {
-            return accountService.adjustBalance(request);
+            return commandGateway.adjustBalance(request, null, null);
+        } catch (AccountCommandTimeoutException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -60,7 +66,9 @@ public class AccountController {
             @RequestBody BalanceAdjustmentRequest request) {
         requireAdmin(adminUserId);
         try {
-            return accountService.adminAdjustBalance(adminUserId, adminUsername, request);
+            return commandGateway.adjustBalance(request, adminUserId, adminUsername);
+        } catch (AccountCommandTimeoutException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -71,7 +79,9 @@ public class AccountController {
     @PostMapping(AccountApiPaths.ACCOUNT_ADMIN_BASE_PATH + "/product-balance-adjustments")
     public ProductBalanceResponse adjustProductBalance(@RequestBody ProductBalanceAdjustmentRequest request) {
         try {
-            return accountService.adjustProductBalance(request);
+            return commandGateway.adjustProductBalance(request, null, null);
+        } catch (AccountCommandTimeoutException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -86,7 +96,9 @@ public class AccountController {
             @RequestBody ProductBalanceAdjustmentRequest request) {
         requireAdmin(adminUserId);
         try {
-            return accountService.adminAdjustProductBalance(adminUserId, adminUsername, request);
+            return commandGateway.adjustProductBalance(request, adminUserId, adminUsername);
+        } catch (AccountCommandTimeoutException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -151,7 +163,9 @@ public class AccountController {
     @PostMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/transfers")
     public ProductTransferResponse transfer(@RequestBody ProductTransferRequest request) {
         try {
-            return accountService.transfer(request);
+            return commandGateway.transfer(request);
+        } catch (AccountCommandTimeoutException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -179,8 +193,10 @@ public class AccountController {
                                                    @RequestParam(value = "productLine", required = false)
                                                    String productLineValue) {
         try {
-            return accountService.updatePositionMode(
+            return commandGateway.updatePositionMode(
                     withProductLine(request, productLine(productLineValue, productLineHeader)));
+        } catch (AccountCommandTimeoutException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -192,7 +208,8 @@ public class AccountController {
         if (request == null || request.productLine() != null || productLine == null) {
             return request;
         }
-        return new PositionModeUpdateRequest(request.userId(), productLine, request.positionMode());
+        return new PositionModeUpdateRequest(
+                request.userId(), productLine, request.positionMode(), request.referenceId());
     }
 
     private ProductLine productLine(String queryValue, String headerValue) {
@@ -245,7 +262,9 @@ public class AccountController {
     public PositionMarginAdjustmentResponse adjustPositionMargin(
             @RequestBody PositionMarginAdjustmentRequest request) {
         try {
-            return accountService.adjustPositionMargin(request);
+            return commandGateway.adjustPositionMargin(request);
+        } catch (AccountCommandTimeoutException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

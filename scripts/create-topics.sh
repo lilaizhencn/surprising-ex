@@ -7,11 +7,12 @@ SYMBOL_COUNT="${SYMBOL_COUNT:-0}"
 TARGET_SYMBOLS_PER_PARTITION="${TARGET_SYMBOLS_PER_PARTITION:-10}"
 PROVIDER_INSTANCES="${PROVIDER_INSTANCES:-1}"
 STREAM_THREADS="${STREAM_THREADS:-2}"
-MIN_PARTITIONS="${MIN_PARTITIONS:-24}"
+MIN_PARTITIONS="${MIN_PARTITIONS:-32}"
 MAX_PARTITIONS="${MAX_PARTITIONS:-384}"
 PARTITION_STEP="${PARTITION_STEP:-12}"
+ACCOUNT_COMMAND_PARTITIONS="${ACCOUNT_COMMAND_PARTITIONS:-32}"
 INCLUDE_SHARED_TOPICS="${INCLUDE_SHARED_TOPICS:-true}"
-INCLUDE_LEGACY_PERP_TOPICS="${INCLUDE_LEGACY_PERP_TOPICS:-true}"
+INCLUDE_LEGACY_PERP_TOPICS="${INCLUDE_LEGACY_PERP_TOPICS:-false}"
 INCLUDE_PRODUCT_TOPICS="${INCLUDE_PRODUCT_TOPICS:-true}"
 PRODUCT_LINES="${PRODUCT_LINES:-}"
 PRODUCT_TOPIC_LINES="${PRODUCT_TOPIC_LINES:-}"
@@ -101,14 +102,20 @@ echo "Creating exchange topics with partitions=${PARTITIONS}, replication_factor
 
 create_topic() {
   local topic="$1"
-  echo "create topic ${topic}"
+  create_topic_with_partitions "${topic}" "${PARTITIONS}"
+}
+
+create_topic_with_partitions() {
+  local topic="$1"
+  local partitions="$2"
+  echo "create topic ${topic} partitions=${partitions}"
   if [[ "${DRY_RUN:-false}" == "true" ]]; then
     return
   fi
   "${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
     --create --if-not-exists \
     --topic "${topic}" \
-    --partitions "${PARTITIONS}" \
+    --partitions "${partitions}" \
     --replication-factor "${REPLICATION_FACTOR}"
 }
 
@@ -124,6 +131,9 @@ create_product_topics() {
   create_topic "${prefix}.match.trades.v1"
   create_topic "${prefix}.orderbook.depth.v1"
   create_topic "${prefix}.mark.price.v1"
+  create_topic_with_partitions "${prefix}.account.user.commands.v1" "${ACCOUNT_COMMAND_PARTITIONS}"
+  create_topic_with_partitions "${prefix}.account.user.commands.dlt.v1" "${ACCOUNT_COMMAND_PARTITIONS}"
+  create_topic_with_partitions "${prefix}.account.command.results.v1" "${ACCOUNT_COMMAND_PARTITIONS}"
   case "${product_line}" in
     linear-perp|inverse-perp|linear-delivery|inverse-delivery|option)
       create_topic "${prefix}.index.price.v1"
@@ -172,6 +182,9 @@ if [[ "${INCLUDE_LEGACY_PERP_TOPICS}" == "true" ]]; then
   create_topic surprising.perp.book.ticker.v1
   create_topic surprising.perp.funding.rate.v1
   create_topic surprising.perp.mark.price.v1
+  create_topic_with_partitions surprising.perp.account.user.commands.v1 "${ACCOUNT_COMMAND_PARTITIONS}"
+  create_topic_with_partitions surprising.perp.account.user.commands.dlt.v1 "${ACCOUNT_COMMAND_PARTITIONS}"
+  create_topic_with_partitions surprising.perp.account.command.results.v1 "${ACCOUNT_COMMAND_PARTITIONS}"
 fi
 
 if [[ "${INCLUDE_PRODUCT_TOPICS}" == "true" ]]; then

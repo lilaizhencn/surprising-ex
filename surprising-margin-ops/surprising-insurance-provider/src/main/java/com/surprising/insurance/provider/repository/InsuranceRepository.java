@@ -1,5 +1,9 @@
 package com.surprising.insurance.provider.repository;
 
+import com.surprising.account.api.model.AccountCommandStatus;
+import com.surprising.account.api.model.AccountUserCommand;
+import com.surprising.account.api.model.AccountUserCommandType;
+import com.surprising.account.api.model.DeficitReservationAccountCommand;
 import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.insurance.api.model.AdminCursorPage;
 import com.surprising.insurance.api.model.InsuranceCoverageResponse;
@@ -11,36 +15,37 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import tools.jackson.databind.ObjectMapper;
 
 @Repository
 public class InsuranceRepository {
 
     private static final String DEFAULT_ACCOUNT_TYPE = "USDT_PERPETUAL";
-    private static final int ACCOUNT_HI_LO_BLOCK_SIZE = 10_000;
-    private static final Map<String, String> ACCOUNT_DATABASE_SEQUENCES = Map.of(
-            "ledger-entry", "public.account_ledger_entry_seq",
-            "product-ledger-entry", "public.account_product_ledger_entry_seq");
 
     private final JdbcTemplate jdbcTemplate;
     private final InsuranceProperties properties;
-    private final ConcurrentMap<String, AccountIdRange> accountIdRanges = new ConcurrentHashMap<>();
+    private final ObjectMapper objectMapper;
 
     public InsuranceRepository(JdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, new InsuranceProperties());
+        this(jdbcTemplate, new InsuranceProperties(), null);
+    }
+
+    public InsuranceRepository(JdbcTemplate jdbcTemplate, InsuranceProperties properties) {
+        this(jdbcTemplate, properties, null);
     }
 
     @Autowired
-    public InsuranceRepository(JdbcTemplate jdbcTemplate, InsuranceProperties properties) {
+    public InsuranceRepository(JdbcTemplate jdbcTemplate,
+                               InsuranceProperties properties,
+                               ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties == null ? new InsuranceProperties() : properties;
+        this.objectMapper = objectMapper;
     }
 
     public long nextInsuranceSequence(String sequenceName) {
@@ -58,42 +63,6 @@ public class InsuranceRepository {
         return value;
     }
 
-    public long nextAccountSequence(String sequenceName) {
-        String databaseSequence = ACCOUNT_DATABASE_SEQUENCES.get(sequenceName);
-        if (databaseSequence == null) {
-            throw new IllegalArgumentException("unsupported account sequence " + sequenceName);
-        }
-        return accountIdRanges.computeIfAbsent(sequenceName, ignored -> new AccountIdRange())
-                .next(this, databaseSequence);
-    }
-
-    private long allocateAccountRangeStart(String databaseSequence) {
-        Long value = jdbcTemplate.queryForObject("""
-                SELECT nextval(CAST(? AS regclass))
-                """, Long.class, databaseSequence);
-        if (value == null) {
-            throw new IllegalStateException("failed to allocate account sequence " + databaseSequence);
-        }
-        try {
-            return Math.addExact(Math.multiplyExact(value - 1L, ACCOUNT_HI_LO_BLOCK_SIZE), 1L);
-        } catch (ArithmeticException ex) {
-            throw new IllegalStateException("account sequence exhausted " + databaseSequence, ex);
-        }
-    }
-
-    private static final class AccountIdRange {
-        private long next;
-        private long end;
-
-        synchronized long next(InsuranceRepository repository, String databaseSequence) {
-            if (next == 0L || next > end) {
-                next = repository.allocateAccountRangeStart(databaseSequence);
-                end = Math.addExact(next, ACCOUNT_HI_LO_BLOCK_SIZE - 1L);
-            }
-            return next++;
-        }
-    }
-
     /**
      * Admin fund changes are idempotent by reference id. This keeps manual deposits,
      * operational transfers, or replayed requests from changing the fund twice.
@@ -105,14 +74,15 @@ public class InsuranceRepository {
         Instant now = Instant.now();
         String accountType = accountType();
         ensureFundBalance(accountType, asset, now);
-        Long current = jdbcTemplate.queryForObject("""
-                SELECT balance_units
+        FundBalanceState current = jdbcTemplate.queryForObject("""
+                SELECT balance_units, reserved_units
                   FROM insurance_fund_balances
                  WHERE account_type = ? AND asset = ?
                  FOR UPDATE
-                """, Long.class, accountType, asset);
-        long nextBalance = Math.addExact(current == null ? 0L : current, amountUnits);
-        if (nextBalance < 0) {
+                """, (rs, rowNum) -> new FundBalanceState(
+                rs.getLong("balance_units"), rs.getLong("reserved_units")), accountType, asset);
+        long nextBalance = Math.addExact(current == null ? 0L : current.balanceUnits(), amountUnits);
+        if (nextBalance < (current == null ? 0L : current.reservedUnits())) {
             throw new IllegalArgumentException("insufficient insurance fund balance");
         }
         long entryId = nextInsuranceSequence("insurance-ledger");
@@ -166,25 +136,25 @@ public class InsuranceRepository {
         String accountType = accountType();
         List<DeficitRow> rows = properties.getKafka().isProductTopicsEnabled()
                 ? jdbcTemplate.query("""
-                    SELECT account_type, user_id, asset, deficit_units
+                    SELECT account_type, user_id, asset,
+                           deficit_units - reserved_units AS deficit_units
                       FROM account_product_deficits
                      WHERE account_type = ?
-                       AND deficit_units > 0
+                       AND deficit_units - reserved_units > 0
                      ORDER BY updated_at ASC
                      LIMIT ?
-                     FOR UPDATE SKIP LOCKED
                     """, (rs, rowNum) -> new DeficitRow(
                         rs.getString("account_type"),
                         rs.getLong("user_id"),
                         rs.getString("asset"),
                         rs.getLong("deficit_units")), accountType, batchSize)
                 : jdbcTemplate.query("""
-                    SELECT ? AS account_type, user_id, asset, deficit_units
+                    SELECT ? AS account_type, user_id, asset,
+                           deficit_units - reserved_units AS deficit_units
                       FROM account_deficits
-                     WHERE deficit_units > 0
+                     WHERE deficit_units - reserved_units > 0
                      ORDER BY updated_at ASC
                      LIMIT ?
-                     FOR UPDATE SKIP LOCKED
                     """, (rs, rowNum) -> new DeficitRow(
                         rs.getString("account_type"),
                         rs.getLong("user_id"),
@@ -357,71 +327,65 @@ public class InsuranceRepository {
     private boolean coverDeficit(DeficitRow deficit) {
         Instant now = Instant.now();
         ensureFundBalance(deficit.accountType(), deficit.asset(), now);
-        Long fundBalance = jdbcTemplate.queryForObject("""
-                SELECT balance_units
+        FundBalanceState fund = jdbcTemplate.queryForObject("""
+                SELECT balance_units, reserved_units
                   FROM insurance_fund_balances
                  WHERE account_type = ? AND asset = ?
                  FOR UPDATE
-                """, Long.class, deficit.accountType(), deficit.asset());
-        long coverUnits = InsuranceMath.coverAmount(deficit.deficitUnits(), fundBalance == null ? 0L : fundBalance);
+                """, (rs, rowNum) -> new FundBalanceState(
+                rs.getLong("balance_units"), rs.getLong("reserved_units")),
+                deficit.accountType(), deficit.asset());
+        long availableFund = fund == null
+                ? 0L
+                : Math.subtractExact(fund.balanceUnits(), fund.reservedUnits());
+        long coverUnits = InsuranceMath.coverAmount(deficit.deficitUnits(), availableFund);
         if (coverUnits <= 0) {
-            // Keep the deficit row for a future scan after the insurance fund is topped up.
             return false;
         }
-        long nextFundBalance = Math.subtractExact(fundBalance, coverUnits);
         long remainingDeficit = Math.subtractExact(deficit.deficitUnits(), coverUnits);
-        long coverageId = insertCoverage(deficit, coverUnits, remainingDeficit,
-                remainingDeficit == 0 ? "COVERED" : "PARTIALLY_COVERED", "DEFICIT_COVERAGE", now);
-        int fundRows = jdbcTemplate.update("""
+        long coverageId = nextInsuranceSequence("insurance-coverage");
+        String commandPrefix = properties.getKafka().getProductLine().name() + ":" + coverageId;
+        String reserveCommandId = "INSURANCE_RESERVE:" + commandPrefix;
+        String finalizeCommandId = "INSURANCE_FINALIZE:" + commandPrefix;
+        int reserveRows = jdbcTemplate.update("""
                 UPDATE insurance_fund_balances
-                   SET balance_units = ?,
-                       updated_at = ?
+                   SET reserved_units = reserved_units + ?, updated_at = ?
                  WHERE account_type = ? AND asset = ?
-                """, nextFundBalance, Timestamp.from(now), deficit.accountType(), deficit.asset());
-        requireSingleRow(fundRows, "insurance fund balance deduction");
-        int deficitRows = updateDeficit(deficit, remainingDeficit, now);
-        requireSingleRow(deficitRows, "account deficit coverage");
-        insertInsuranceLedger(deficit.accountType(), deficit.asset(), -coverUnits, nextFundBalance,
-                "DEFICIT_COVERAGE", String.valueOf(coverageId), "COVER_ACCOUNT_DEFICIT", now);
-        insertAccountLedger(deficit, coverUnits, remainingDeficit,
-                String.valueOf(coverageId), now);
+                   AND balance_units - reserved_units >= ?
+                """, coverUnits, Timestamp.from(now), deficit.accountType(), deficit.asset(), coverUnits);
+        requireSingleRow(reserveRows, "insurance fund coverage reservation");
+        insertCoverage(coverageId, deficit, coverUnits, remainingDeficit,
+                reserveCommandId, finalizeCommandId, now);
+        DeficitReservationAccountCommand payload =
+                new DeficitReservationAccountCommand(deficit.asset(), coverUnits);
+        AccountUserCommand reserve = accountCommand(
+                reserveCommandId, deficit.userId(), AccountUserCommandType.INSURANCE_DEFICIT_RESERVE,
+                coverageId, null, payload, now);
+        AccountUserCommand finalize = accountCommand(
+                finalizeCommandId, deficit.userId(), AccountUserCommandType.INSURANCE_DEFICIT_FINALIZE,
+                coverageId, reserveCommandId, payload, now);
+        enqueueAccountCommand(coverageId, reserve, now);
+        enqueueAccountCommand(coverageId, finalize, now);
         return true;
     }
 
-    private int updateDeficit(DeficitRow deficit, long remainingDeficit, Instant now) {
-        if (properties.getKafka().isProductTopicsEnabled()) {
-            return jdbcTemplate.update("""
-                    UPDATE account_product_deficits
-                       SET deficit_units = ?,
-                           updated_at = ?
-                     WHERE account_type = ? AND user_id = ? AND asset = ?
-                    """, remainingDeficit, Timestamp.from(now), deficit.accountType(), deficit.userId(),
-                    deficit.asset());
-        }
-        return jdbcTemplate.update("""
-                UPDATE account_deficits
-                   SET deficit_units = ?,
-                       updated_at = ?
-                 WHERE user_id = ? AND asset = ?
-                """, remainingDeficit, Timestamp.from(now), deficit.userId(), deficit.asset());
-    }
-
-    private long insertCoverage(DeficitRow deficit,
+    private void insertCoverage(long coverageId,
+                                DeficitRow deficit,
                                 long coveredUnits,
                                 long remainingDeficit,
-                                String status,
-                                String reason,
+                                String reserveCommandId,
+                                String finalizeCommandId,
                                 Instant now) {
-        long coverageId = nextInsuranceSequence("insurance-coverage");
         int rows = jdbcTemplate.update("""
                 INSERT INTO insurance_deficit_coverages (
                     coverage_id, account_type, user_id, asset, requested_units, covered_units,
-                    remaining_deficit_units, status, reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    remaining_deficit_units, reserve_command_id, finalize_command_id,
+                    status, reason, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_RESERVE',
+                          'DEFICIT_COVERAGE', ?, ?)
                 """, coverageId, deficit.accountType(), deficit.userId(), deficit.asset(), deficit.deficitUnits(), coveredUnits,
-                remainingDeficit, status, reason, Timestamp.from(now), Timestamp.from(now));
+                remainingDeficit, reserveCommandId, finalizeCommandId, Timestamp.from(now), Timestamp.from(now));
         requireSingleRow(rows, "insurance deficit coverage insert");
-        return coverageId;
     }
 
     private void insertInsuranceLedger(String accountType,
@@ -443,31 +407,124 @@ public class InsuranceRepository {
         requireSingleRow(rows, "insurance fund ledger insert");
     }
 
-    private void insertAccountLedger(DeficitRow deficit,
-                                     long coveredUnits,
-                                     long remainingDeficit,
-                                     String referenceId,
-                                     Instant now) {
-        // Coverage reduces the explicit deficit. It does not credit available balance.
-        long equityAfter = -remainingDeficit;
-        int rows = properties.getKafka().isProductTopicsEnabled()
-                ? jdbcTemplate.update("""
-                    INSERT INTO account_product_ledger_entries (
-                        entry_id, account_type, user_id, asset, amount_units, balance_after_units,
-                        reference_type, reference_id, reason, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, 'INSURANCE_COVERAGE', ?, 'COVER_ACCOUNT_DEFICIT', ?)
-                    ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                    """, nextAccountSequence("product-ledger-entry"), deficit.accountType(), deficit.userId(),
-                        deficit.asset(), coveredUnits, equityAfter, referenceId, Timestamp.from(now))
-                : jdbcTemplate.update("""
-                    INSERT INTO account_ledger_entries (
-                        entry_id, user_id, asset, amount_units, balance_after_units,
-                        reference_type, reference_id, reason, created_at
-                    ) VALUES (?, ?, ?, ?, ?, 'INSURANCE_COVERAGE', ?, 'COVER_ACCOUNT_DEFICIT', ?)
-                    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, nextAccountSequence("ledger-entry"), deficit.userId(), deficit.asset(), coveredUnits,
-                        equityAfter, referenceId, Timestamp.from(now));
-        requireSingleRow(rows, "insurance account ledger insert");
+    public List<PendingCoverage> lockPendingCoverages(int limit) {
+        return jdbcTemplate.query("""
+                SELECT c.coverage_id, c.account_type, c.user_id, c.asset, c.covered_units,
+                       c.reserve_command_id, c.finalize_command_id, c.status,
+                       reserve.status AS reserve_status,
+                       finalize.status AS finalize_status,
+                       finalize.result_payload::text AS finalize_result,
+                       COALESCE(reserve.error_code, finalize.error_code) AS error_code,
+                       COALESCE(reserve.error_message, finalize.error_message) AS error_message
+                  FROM insurance_deficit_coverages c
+                  LEFT JOIN account_commands reserve ON reserve.command_id = c.reserve_command_id
+                  LEFT JOIN account_commands finalize ON finalize.command_id = c.finalize_command_id
+                 WHERE c.account_type = ?
+                   AND c.status IN ('PENDING_RESERVE', 'PENDING_FINALIZE')
+                 ORDER BY c.created_at ASC, c.coverage_id ASC
+                 LIMIT ?
+                 FOR UPDATE OF c SKIP LOCKED
+                """, (rs, rowNum) -> new PendingCoverage(
+                rs.getLong("coverage_id"), rs.getString("account_type"), rs.getLong("user_id"),
+                rs.getString("asset"), rs.getLong("covered_units"), rs.getString("reserve_command_id"),
+                rs.getString("finalize_command_id"), rs.getString("status"),
+                rs.getString("reserve_status"), rs.getString("finalize_status"),
+                rs.getString("finalize_result"), rs.getString("error_code"), rs.getString("error_message")),
+                accountType(), Math.max(1, limit));
+    }
+
+    public void markPendingFinalize(long coverageId, Instant now) {
+        int rows = jdbcTemplate.update("""
+                UPDATE insurance_deficit_coverages
+                   SET status = 'PENDING_FINALIZE', updated_at = ?
+                 WHERE coverage_id = ? AND status = 'PENDING_RESERVE'
+                """, Timestamp.from(now), coverageId);
+        if (rows != 0 && rows != 1) {
+            throw new IllegalStateException("failed to update insurance coverage progress");
+        }
+    }
+
+    public void failCoverage(PendingCoverage coverage, Instant now) {
+        int fundRows = jdbcTemplate.update("""
+                UPDATE insurance_fund_balances
+                   SET reserved_units = reserved_units - ?, updated_at = ?
+                 WHERE account_type = ? AND asset = ? AND reserved_units >= ?
+                """, coverage.coveredUnits(), Timestamp.from(now), coverage.accountType(),
+                coverage.asset(), coverage.coveredUnits());
+        requireSingleRow(fundRows, "insurance fund reservation release");
+        int rows = jdbcTemplate.update("""
+                UPDATE insurance_deficit_coverages
+                   SET status = 'FAILED', error_code = ?, error_message = ?,
+                       completed_at = ?, updated_at = ?
+                 WHERE coverage_id = ? AND status IN ('PENDING_RESERVE', 'PENDING_FINALIZE')
+                """, coverage.errorCode(), truncate(coverage.errorMessage()), Timestamp.from(now),
+                Timestamp.from(now), coverage.coverageId());
+        requireSingleRow(rows, "insurance coverage failed transition");
+    }
+
+    public void completeCoverage(PendingCoverage coverage, long remainingDeficitUnits, Instant now) {
+        List<Long> balances = jdbcTemplate.query("""
+                UPDATE insurance_fund_balances
+                   SET balance_units = balance_units - ?,
+                       reserved_units = reserved_units - ?,
+                       updated_at = ?
+                 WHERE account_type = ? AND asset = ?
+                   AND balance_units >= ? AND reserved_units >= ?
+             RETURNING balance_units
+                """, (rs, rowNum) -> rs.getLong("balance_units"),
+                coverage.coveredUnits(), coverage.coveredUnits(), Timestamp.from(now),
+                coverage.accountType(), coverage.asset(), coverage.coveredUnits(), coverage.coveredUnits());
+        if (balances == null || balances.size() != 1) {
+            throw new IllegalStateException("insurance fund reservation missing at coverage completion");
+        }
+        insertInsuranceLedger(coverage.accountType(), coverage.asset(), Math.negateExact(coverage.coveredUnits()),
+                balances.getFirst(), "DEFICIT_COVERAGE", Long.toString(coverage.coverageId()),
+                "COVER_ACCOUNT_DEFICIT", now);
+        int rows = jdbcTemplate.update("""
+                UPDATE insurance_deficit_coverages
+                   SET remaining_deficit_units = ?,
+                       status = CASE WHEN ? = 0 THEN 'COVERED' ELSE 'PARTIALLY_COVERED' END,
+                       completed_at = ?, updated_at = ?
+                 WHERE coverage_id = ? AND status IN ('PENDING_RESERVE', 'PENDING_FINALIZE')
+                """, remainingDeficitUnits, remainingDeficitUnits, Timestamp.from(now),
+                Timestamp.from(now), coverage.coverageId());
+        requireSingleRow(rows, "insurance coverage completion");
+    }
+
+    private AccountUserCommand accountCommand(String commandId,
+                                              long userId,
+                                              AccountUserCommandType type,
+                                              long coverageId,
+                                              String dependency,
+                                              Object payload,
+                                              Instant now) {
+        if (objectMapper == null) {
+            throw new IllegalStateException("insurance account command serializer is not configured");
+        }
+        return new AccountUserCommand(
+                AccountUserCommand.CURRENT_SCHEMA_VERSION,
+                commandId,
+                properties.getKafka().getProductLine(),
+                userId,
+                type,
+                "INSURANCE",
+                Long.toString(coverageId),
+                dependency,
+                objectMapper.writeValueAsString(payload),
+                now,
+                null);
+    }
+
+    private void enqueueAccountCommand(long coverageId, AccountUserCommand command, Instant now) {
+        int rows = jdbcTemplate.update("""
+                INSERT INTO account_outbox_events (
+                    product_line, aggregate_type, aggregate_id, topic, event_key, event_type,
+                    payload, next_attempt_at, created_at, updated_at
+                ) VALUES (?, 'INSURANCE_ACCOUNT_COMMAND', ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                """, command.productLine().name(), coverageId, properties.getKafka().getUserCommandsTopic(),
+                command.partitionKey(), command.commandType().name(), objectMapper.writeValueAsString(command),
+                Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
+        requireSingleRow(rows, "insurance account command enqueue");
     }
 
     private void ensureFundBalance(String accountType, String asset, Instant now) {
@@ -482,6 +539,13 @@ public class InsuranceRepository {
         if (rows != 1) {
             throw new IllegalStateException("failed to write " + operation);
         }
+    }
+
+    private String truncate(String value) {
+        if (value == null || value.length() <= 1000) {
+            return value;
+        }
+        return value.substring(0, 1000);
     }
 
     private InsuranceFundLedgerResponse toLedger(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -534,6 +598,37 @@ public class InsuranceRepository {
     private record DeficitRow(String accountType, long userId, String asset, long deficitUnits) {
     }
 
+    private record FundBalanceState(long balanceUnits, long reservedUnits) {
+    }
+
     private record FundAdjustmentReference(long amountUnits, String reason) {
+    }
+
+    public record PendingCoverage(
+            long coverageId,
+            String accountType,
+            long userId,
+            String asset,
+            long coveredUnits,
+            String reserveCommandId,
+            String finalizeCommandId,
+            String coverageStatus,
+            String reserveStatus,
+            String finalizeStatus,
+            String finalizeResult,
+            String errorCode,
+            String errorMessage) {
+
+        public boolean reserveApplied() {
+            return AccountCommandStatus.APPLIED.name().equals(reserveStatus);
+        }
+
+        public boolean reserveRejected() {
+            return AccountCommandStatus.REJECTED.name().equals(reserveStatus);
+        }
+
+        public boolean finalizeApplied() {
+            return AccountCommandStatus.APPLIED.name().equals(finalizeStatus);
+        }
     }
 }

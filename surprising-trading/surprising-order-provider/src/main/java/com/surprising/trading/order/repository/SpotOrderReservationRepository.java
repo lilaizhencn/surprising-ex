@@ -7,8 +7,6 @@ import com.surprising.trading.order.model.MarkPriceLookup;
 import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.service.OrderMarginMath;
 import java.math.BigInteger;
-import java.sql.Timestamp;
-import java.time.Instant;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,7 +18,6 @@ public class SpotOrderReservationRepository {
     private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);
 
     private final JdbcTemplate jdbcTemplate;
-    private final OrderRepository orderRepository;
     private final MarkPriceLookup markPriceLookup;
 
     public SpotOrderReservationRepository(JdbcTemplate jdbcTemplate, OrderRepository orderRepository) {
@@ -32,7 +29,6 @@ public class SpotOrderReservationRepository {
                                           OrderRepository orderRepository,
                                           MarkPriceLookup markPriceLookup) {
         this.jdbcTemplate = jdbcTemplate;
-        this.orderRepository = orderRepository;
         this.markPriceLookup = markPriceLookup;
     }
 
@@ -77,50 +73,6 @@ public class SpotOrderReservationRepository {
             return new SpotReservationRequirement(rs.getString("quote_asset"),
                     Math.addExact(notionalUnits, feeUnits));
         }, markPriceTicks, symbol, instrumentVersion, orderType.name()).stream().findFirst();
-    }
-
-    public boolean reserve(long userId,
-                           String asset,
-                           long orderId,
-                           String symbol,
-                           OrderSide side,
-                           long amountUnits,
-                           Instant now) {
-        if (amountUnits <= 0) {
-            throw new IllegalArgumentException("amountUnits must be positive");
-        }
-        jdbcTemplate.update("""
-                INSERT INTO account_product_balances (
-                    account_type, user_id, asset, available_units, locked_units, updated_at
-                ) VALUES ('SPOT', ?, ?, 0, 0, ?)
-                ON CONFLICT (account_type, user_id, asset) DO NOTHING
-                """, userId, asset, Timestamp.from(now));
-        int rows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET available_units = available_units - ?,
-                       locked_units = locked_units + ?,
-                       updated_at = ?
-                 WHERE account_type = 'SPOT'
-                   AND user_id = ?
-                   AND asset = ?
-                   AND available_units >= ?
-                """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
-        if (rows == 0) {
-            return false;
-        }
-        long reservationId = orderRepository.nextSequence("spot-reservation");
-        rows = jdbcTemplate.update("""
-                INSERT INTO account_spot_order_reservations (
-                    reservation_id, order_id, user_id, symbol, side, asset, reserved_units,
-                    settled_units, released_units, status, reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'ACTIVE', 'SPOT_ORDER_LOCK', ?, ?)
-                ON CONFLICT (order_id) DO NOTHING
-                """, reservationId, orderId, userId, symbol, side.name(), asset, amountUnits,
-                Timestamp.from(now), Timestamp.from(now));
-        if (rows != 1) {
-            throw new IllegalStateException("failed to insert spot reservation for order " + orderId);
-        }
-        return true;
     }
 
     private long feeUnits(long notionalUnits, OrderFeeSnapshot feeSnapshot) {

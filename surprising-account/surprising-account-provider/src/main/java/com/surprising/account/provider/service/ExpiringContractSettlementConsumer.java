@@ -19,19 +19,15 @@ public class ExpiringContractSettlementConsumer {
     private static final Logger log = LoggerFactory.getLogger(ExpiringContractSettlementConsumer.class);
 
     private final ObjectMapper objectMapper;
-    private final AccountService accountService;
+    private final ExpiringContractSettlementFanoutService fanoutService;
     private final AccountProperties properties;
-
-    public ExpiringContractSettlementConsumer(ObjectMapper objectMapper, AccountService accountService) {
-        this(objectMapper, accountService, new AccountProperties());
-    }
 
     @Autowired
     public ExpiringContractSettlementConsumer(ObjectMapper objectMapper,
-                                             AccountService accountService,
+                                             ExpiringContractSettlementFanoutService fanoutService,
                                              AccountProperties properties) {
         this.objectMapper = objectMapper;
-        this.accountService = accountService;
+        this.fanoutService = fanoutService;
         this.properties = properties;
     }
 
@@ -51,9 +47,9 @@ public class ExpiringContractSettlementConsumer {
             DeliverySettlementEvent event = objectMapper.readValue(record.value(), DeliverySettlementEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "delivery settlement");
             requireCurrentProductTopic(record.topic(), deliverySettlementsTopic(), "delivery settlement");
-            int settled = accountService.processDeliverySettlement(event);
-            log.info("Processed delivery settlement symbol={} version={} positions={}",
-                    event.symbol(), event.version(), settled);
+            int commands = requireFanoutService().fanout(event);
+            log.info("Enqueued delivery settlement symbol={} version={} userCommands={}",
+                    event.symbol(), event.version(), commands);
         } catch (Exception ex) {
             log.error("Failed to process delivery settlement: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to process delivery settlement", ex);
@@ -76,9 +72,9 @@ public class ExpiringContractSettlementConsumer {
             OptionExerciseEvent event = objectMapper.readValue(record.value(), OptionExerciseEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "option exercise");
             requireCurrentProductTopic(record.topic(), optionExercisesTopic(), "option exercise");
-            int settled = accountService.processOptionExercise(event);
-            log.info("Processed option exercise symbol={} version={} positions={}",
-                    event.symbol(), event.version(), settled);
+            int commands = requireFanoutService().fanout(event);
+            log.info("Enqueued option exercise symbol={} version={} userCommands={}",
+                    event.symbol(), event.version(), commands);
         } catch (Exception ex) {
             log.error("Failed to process option exercise: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to process option exercise", ex);
@@ -113,6 +109,13 @@ public class ExpiringContractSettlementConsumer {
             throw new ProductTopicMismatchException(eventName + " topic must match current product line: expected="
                     + expectedTopic + " actual=" + topic);
         }
+    }
+
+    private ExpiringContractSettlementFanoutService requireFanoutService() {
+        if (fanoutService == null) {
+            throw new IllegalStateException("expiring settlement fanout service is not configured");
+        }
+        return fanoutService;
     }
 
     private static final class ProductTopicMismatchException extends RuntimeException {

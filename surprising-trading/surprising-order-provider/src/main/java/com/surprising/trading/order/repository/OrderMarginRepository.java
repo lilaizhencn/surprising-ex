@@ -11,8 +11,6 @@ import com.surprising.trading.order.model.MarginRequirement;
 import com.surprising.trading.order.model.MarkPriceLookup;
 import com.surprising.trading.order.service.OrderMarginMath;
 import java.math.BigInteger;
-import java.sql.Timestamp;
-import java.time.Instant;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,10 +20,8 @@ import org.springframework.stereotype.Repository;
 public class OrderMarginRepository {
 
     private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);
-    private static final String USDT_PERPETUAL = "USDT_PERPETUAL";
 
     private final JdbcTemplate jdbcTemplate;
-    private final OrderRepository orderRepository;
     private final MarkPriceLookup markPriceLookup;
 
     public OrderMarginRepository(JdbcTemplate jdbcTemplate, OrderRepository orderRepository) {
@@ -37,7 +33,6 @@ public class OrderMarginRepository {
                                  OrderRepository orderRepository,
                                  MarkPriceLookup markPriceLookup) {
         this.jdbcTemplate = jdbcTemplate;
-        this.orderRepository = orderRepository;
         this.markPriceLookup = markPriceLookup;
     }
 
@@ -284,151 +279,8 @@ public class OrderMarginRepository {
         return Math.min(dynamicLimit, maxPositionNotionalUnits);
     }
 
-    public boolean reserve(long userId,
-                           String asset,
-                           long orderId,
-                           String symbol,
-                           MarginMode marginMode,
-                           long amountUnits,
-                           Instant now) {
-        return reserve(userId, USDT_PERPETUAL, asset, orderId, symbol, marginMode, PositionSide.NET, amountUnits, now);
-    }
-
-    public boolean reserve(long userId,
-                           String accountType,
-                           String asset,
-                           long orderId,
-                           String symbol,
-                           MarginMode marginMode,
-                           long amountUnits,
-                           Instant now) {
-        return reserve(userId, accountType, asset, orderId, symbol, marginMode, PositionSide.NET, amountUnits, now);
-    }
-
-    public boolean reserve(long userId,
-                           String accountType,
-                           String asset,
-                           long orderId,
-                           String symbol,
-                           MarginMode marginMode,
-                           PositionSide positionSide,
-                           long amountUnits,
-                           Instant now) {
-        if (amountUnits <= 0) {
-            return true;
-        }
-        String normalizedAccountType = normalizeMarginAccountType(accountType);
-        if (usesProductMarginBalance(normalizedAccountType)) {
-            return reserveProductMargin(userId, normalizedAccountType, asset, orderId, symbol, marginMode,
-                    positionSide, amountUnits, now);
-        }
-        return reserveLegacyMargin(userId, normalizedAccountType, asset, orderId, symbol, marginMode, positionSide, amountUnits,
-                now);
-    }
-
-    private boolean reserveLegacyMargin(long userId,
-                                        String accountType,
-                                        String asset,
-                                        long orderId,
-                                        String symbol,
-                                        MarginMode marginMode,
-                                        PositionSide positionSide,
-                                        long amountUnits,
-                                        Instant now) {
-        jdbcTemplate.update("""
-                INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
-                VALUES (?, ?, 0, 0, ?)
-                ON CONFLICT (user_id, asset) DO NOTHING
-                """, userId, asset, Timestamp.from(now));
-        int rows = jdbcTemplate.update("""
-                UPDATE account_balances
-                   SET available_units = available_units - ?,
-                       locked_units = locked_units + ?,
-                       updated_at = ?
-                 WHERE user_id = ? AND asset = ?
-                   AND available_units >= ?
-                """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
-        if (rows == 0) {
-            return false;
-        }
-        long reservationId = orderRepository.nextSequence("margin-reservation");
-        rows = jdbcTemplate.update("""
-                INSERT INTO account_margin_reservations (
-                    reservation_id, account_type, user_id, asset, order_id, symbol,
-                    margin_mode, position_side, reserved_units, released_units, status, reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
-                ON CONFLICT (order_id) DO NOTHING
-                """, reservationId, accountType, userId, asset, orderId, symbol,
-                MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name(), amountUnits,
-                Timestamp.from(now), Timestamp.from(now));
-        if (rows != 1) {
-            throw new IllegalStateException("failed to insert margin reservation for order " + orderId);
-        }
-        return true;
-    }
-
-    private boolean reserveProductMargin(long userId,
-                                         String accountType,
-                                         String asset,
-                                     long orderId,
-                                     String symbol,
-                                     MarginMode marginMode,
-                                     PositionSide positionSide,
-                                     long amountUnits,
-                                     Instant now) {
-        jdbcTemplate.update("""
-                INSERT INTO account_product_balances (
-                    account_type, user_id, asset, available_units, locked_units, updated_at
-                ) VALUES (?, ?, ?, 0, 0, ?)
-                ON CONFLICT (account_type, user_id, asset) DO NOTHING
-                """, accountType, userId, asset, Timestamp.from(now));
-        int rows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET available_units = available_units - ?,
-                       locked_units = locked_units + ?,
-                       updated_at = ?
-                 WHERE account_type = ?
-                   AND user_id = ?
-                   AND asset = ?
-                   AND available_units >= ?
-                """, amountUnits, amountUnits, Timestamp.from(now), accountType, userId, asset, amountUnits);
-        if (rows == 0) {
-            return false;
-        }
-        long reservationId = orderRepository.nextSequence("margin-reservation");
-        rows = jdbcTemplate.update("""
-                INSERT INTO account_margin_reservations (
-                    reservation_id, account_type, user_id, asset, order_id, symbol,
-                    margin_mode, position_side, reserved_units, released_units, status, reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
-                ON CONFLICT (order_id) DO NOTHING
-                """, reservationId, accountType, userId, asset, orderId, symbol,
-                MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name(), amountUnits,
-                Timestamp.from(now), Timestamp.from(now));
-        if (rows != 1) {
-            throw new IllegalStateException("failed to insert margin reservation for order " + orderId);
-        }
-        return true;
-    }
-
     private String accountType(ContractType contractType) {
         return contractType.productLine().accountTypeCode();
-    }
-
-    private String normalizeMarginAccountType(String accountType) {
-        if (accountType == null || accountType.isBlank()) {
-            return USDT_PERPETUAL;
-        }
-        String normalized = accountType.trim().toUpperCase();
-        ProductLine productLine = ProductLine.requireAccountTypeCode(normalized);
-        if (!productLine.isMarginProduct()) {
-            throw new IllegalArgumentException("invalid margin account type: " + accountType);
-        }
-        return normalized;
-    }
-
-    private boolean usesProductMarginBalance(String normalizedAccountType) {
-        return !USDT_PERPETUAL.equals(normalizedAccountType);
     }
 
     private Optional<RiskBracket> riskBracket(String symbol, long instrumentVersion, long notionalUnits) {

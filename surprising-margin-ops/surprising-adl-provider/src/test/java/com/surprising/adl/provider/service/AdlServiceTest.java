@@ -28,7 +28,6 @@ class AdlServiceTest {
         service.processResidualDeficits();
 
         assertThat(repository.claimCalls).isZero();
-        assertThat(repository.executions).isZero();
     }
 
     @Test
@@ -97,7 +96,6 @@ class AdlServiceTest {
 
     private static final class FakeAdlRepository extends AdlRepository {
         private int claimCalls;
-        private int executions;
         private int lastBatchSize;
         private Duration lastMinAge;
         private final List<AdlCandidate> queueRows = new ArrayList<>();
@@ -133,12 +131,6 @@ class AdlServiceTest {
         @Override
         public Optional<AdlCandidate> lockCandidate(long userId, String symbol, String asset, Duration maxMarkAge) {
             return Optional.empty();
-        }
-
-        @Override
-        public long executeAdl(DeficitRow deficit, AdlCandidate candidate, long remainingDeficitUnits) {
-            executions++;
-            return remainingDeficitUnits;
         }
 
         @Override
