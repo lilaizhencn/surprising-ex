@@ -54,6 +54,21 @@ class AdlRiskPositionConsumerTest {
     }
 
     @Test
+    void discardsMalformedRiskEventWithoutBlockingThePartition() throws Exception {
+        AdlProperties properties = new AdlProperties();
+        ObjectMapper objectMapper = mock(ObjectMapper.class);
+        RedisAdlCandidateIndex index = mock(RedisAdlCandidateIndex.class);
+        AdlRiskPositionConsumer consumer = new AdlRiskPositionConsumer(objectMapper, index, properties);
+        ConsumerRecord<String, String> record = new ConsumerRecord<>(consumer.topic(), 3, 91L, "BTC-USDT", "{bad");
+        when(objectMapper.readValue(anyString(), eq(RiskPositionUpdatedEvent.class)))
+                .thenThrow(new IllegalArgumentException("invalid risk publication"));
+
+        consumer.onRiskPosition(record);
+
+        verifyNoInteractions(index);
+    }
+
+    @Test
     void rejectsRecordsFromAnUnexpectedTopic() {
         AdlProperties properties = new AdlProperties();
         ObjectMapper objectMapper = mock(ObjectMapper.class);
