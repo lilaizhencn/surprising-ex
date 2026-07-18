@@ -814,11 +814,22 @@ seed_stress_prices() {
   # Price consumers reject out-of-order events.  Use wall-clock milliseconds
   # rather than the smoke run id so a fresh run always supersedes retained
   # Kafka records from an earlier run.
-  local price_sequence_base
+  local price_sequence_base producer_cmd topic
   price_sequence_base="$(current_epoch_millis)"
-  while IFS=$'\t' read -r symbol price_ticks sequence; do
-    publish_mark_price "${product_line}" "${symbol}" 10000000 "${sequence}" "${price_ticks}"
-  done < <(python3 - "${product_line}" "${STRESS_SYMBOL_COUNT}" "${price_sequence_base}" <<'PY'
+  topic="$(topic_name "${product_line}" "mark.price")"
+  producer_cmd="$(kafka_producer_cmd)"
+  # Starting a Kafka console producer for every symbol makes one refresh take
+  # longer than the refresh interval.  Emit the complete mark-price snapshot
+  # through one producer so every symbol stays inside the market-maker staleness
+  # window during high-cardinality stress runs.
+  python3 - "${product_line}" "${STRESS_SYMBOL_COUNT}" "${price_sequence_base}" <<'PY' | "${producer_cmd}" \
+    --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
+    --topic "${topic}" \
+    --property parse.key=true \
+    --property key.separator=: >/dev/null
+import datetime
+import decimal
+import json
 import sys
 
 product_line = sys.argv[1]
@@ -863,10 +874,30 @@ deduped = {}
 for symbol, ticks, sequence in price_rows:
     deduped[symbol] = (ticks, sequence)
 
+event_time = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+tick_units = 10_000_000
+scale = decimal.Decimal(100_000_000)
 for symbol, (ticks, sequence) in deduped.items():
-    print(f"{symbol}\t{ticks}\t{sequence}")
+    price = (decimal.Decimal(ticks * tick_units) / scale).quantize(decimal.Decimal("0.00000001"))
+    bid = (decimal.Decimal((ticks - 1) * tick_units) / scale).quantize(decimal.Decimal("0.00000001"))
+    ask = (decimal.Decimal((ticks + 1) * tick_units) / scale).quantize(decimal.Decimal("0.00000001"))
+    price_value = float(price)
+    payload = {
+        "result": {
+            "productLine": product_line, "symbol": symbol, "instrumentVersion": 1,
+            "markPriceUnits": ticks * tick_units, "markPriceTicks": ticks, "markPrice": price_value,
+            "indexPrice": price_value, "price1": price_value, "price2": price_value,
+            "lastTradePrice": price_value, "bestBidPrice": float(bid), "bestAskPrice": float(ask),
+            "fundingRate": 0, "nextFundingTime": event_time, "timeUntilFundingSeconds": 0,
+            "basisAverage": 0, "basisWindowSeconds": 60, "clampLow": price_value,
+            "clampHigh": price_value, "sequence": sequence, "status": "HEALTHY",
+            "eventTime": event_time, "publishedAt": event_time,
+        },
+        "indexInput": None, "bookInput": None, "tradeInput": None, "fundingInput": None,
+        "basisAverage": 0, "basisWindowSeconds": 60, "calculatedAt": event_time,
+    }
+    print(f"{symbol}:{json.dumps(payload, separators=(',', ':'))}")
 PY
-)
 }
 
 delete_surprising_topics() {
