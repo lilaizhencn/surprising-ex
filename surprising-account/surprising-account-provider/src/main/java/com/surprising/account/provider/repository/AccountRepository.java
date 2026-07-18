@@ -53,6 +53,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class AccountRepository {
 
     private static final long PPM = 1_000_000L;
+    private static final int OPEN_INTEREST_SHARDS = 64;
 
     private final JdbcTemplate jdbcTemplate;
     private final AccountSequenceRepository sequenceRepository;
@@ -818,15 +819,28 @@ public class AccountRepository {
                 SELECT EXISTS (
                     SELECT 1
                       FROM trading_match_trades mt
-                      LEFT JOIN account_trade_settlements ts
-                        ON ts.product_line = mt.product_line
-                       AND ts.symbol = mt.symbol
-                       AND ts.trade_id = mt.trade_id
-                     WHERE (mt.taker_user_id = ? OR mt.maker_user_id = ?)
-                       AND (ts.trade_id IS NULL OR ts.completed_at IS NULL)
-                       AND mt.product_line = ?
+                     WHERE mt.product_line = ?
+                       AND (
+                           (mt.taker_user_id = ? AND NOT EXISTS (
+                               SELECT 1
+                                 FROM account_trade_settlement_sides s
+                                WHERE s.product_line = mt.product_line
+                                  AND s.symbol = mt.symbol
+                                  AND s.trade_id = mt.trade_id
+                                  AND s.participant_role = 'TAKER'
+                           ))
+                           OR
+                           (mt.maker_user_id = ? AND NOT EXISTS (
+                               SELECT 1
+                                 FROM account_trade_settlement_sides s
+                                WHERE s.product_line = mt.product_line
+                                  AND s.symbol = mt.symbol
+                                  AND s.trade_id = mt.trade_id
+                                  AND s.participant_role = 'MAKER'
+                           ))
+                       )
                 )
-                """, Boolean.class, userId, userId, productLineName);
+                """, Boolean.class, productLineName, userId, userId);
         if (Boolean.TRUE.equals(hasUnsettledTrades)) {
             throw new IllegalStateException("position mode switch requires all matched trades to be settled");
         }
@@ -1202,18 +1216,37 @@ public class AccountRepository {
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
         Instant now = Instant.now();
-        int inserted = jdbcTemplate.update("""
+        List<PositionState> current = jdbcTemplate.query("""
+                SELECT instrument_version, signed_quantity_steps, entry_price_ticks, entry_value_ticks,
+                       realized_pnl_units
+                  FROM account_positions
+                 WHERE product_line = ?
+                   AND user_id = ?
+                   AND symbol = ?
+                   AND margin_mode = ?
+                   AND position_side = ?
+                 FOR UPDATE
+                """, (rs, rowNum) -> toPositionState(rs), resolvedProductLine.name(), userId, symbol,
+                normalizedMarginMode.name(), normalizedPositionSide.name());
+        if (!current.isEmpty()) {
+            return current.getFirst();
+        }
+        List<PositionState> inserted = jdbcTemplate.query("""
                 INSERT INTO account_positions (
                     product_line, user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
                     entry_price_ticks, entry_value_ticks, realized_pnl_units, updated_at
                 ) VALUES (?, ?, ?, ?, ?, NULL, 0, 0, 0, 0, ?)
                 ON CONFLICT (product_line, user_id, symbol, margin_mode, position_side) DO NOTHING
-                """, resolvedProductLine.name(), userId, symbol, normalizedMarginMode.name(),
-                normalizedPositionSide.name(), Timestamp.from(now));
-        if (inserted == 1) {
+                RETURNING instrument_version, signed_quantity_steps, entry_price_ticks, entry_value_ticks,
+                          realized_pnl_units
+                """, (rs, rowNum) -> toPositionState(rs), resolvedProductLine.name(), userId, symbol,
+                normalizedMarginMode.name(), normalizedPositionSide.name(), Timestamp.from(now));
+        if (!inserted.isEmpty()) {
             schedulePositionCacheProjection(resolvedProductLine, userId, symbol,
                     normalizedMarginMode, normalizedPositionSide);
+            return inserted.getFirst();
         }
+        // A non-command administrative writer may have inserted the same key after the first SELECT.
         return jdbcTemplate.queryForObject("""
                 SELECT instrument_version, signed_quantity_steps, entry_price_ticks, entry_value_ticks,
                        realized_pnl_units
@@ -1799,25 +1832,8 @@ public class AccountRepository {
         ProductLine resolvedProductLine = productLine(productLine);
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
-        int rows = jdbcTemplate.update("""
-                UPDATE account_positions
-                   SET signed_quantity_steps = ?,
-                       instrument_version = ?,
-                       entry_price_ticks = ?,
-                       entry_value_ticks = ?,
-                       realized_pnl_units = ?,
-                       updated_at = ?
-                 WHERE product_line = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                   AND margin_mode = ?
-                   AND position_side = ?
-                """, state.signedQuantitySteps(), nullableVersion(state.instrumentVersion()),
-                state.entryPriceTicks(), state.entryValueTicks(), state.realizedPnlUnits(),
-                Timestamp.from(now), resolvedProductLine.name(), userId, symbol, normalizedMarginMode.name(),
-                normalizedPositionSide.name());
-        requireSingleRow(rows, "account position update");
-        updateSymbolOpenInterest(resolvedProductLine, symbol, previousSignedQuantitySteps, state.signedQuantitySteps(), now);
+        updatePositionAndOpenInterest(resolvedProductLine, userId, symbol, normalizedMarginMode,
+                normalizedPositionSide, state, previousSignedQuantitySteps, now);
         schedulePositionCacheProjection(resolvedProductLine, userId, symbol,
                 normalizedMarginMode, normalizedPositionSide);
         return new PositionResponse(userId, symbol, state.instrumentVersion(), normalizedMarginMode,
@@ -1851,38 +1867,76 @@ public class AccountRepository {
                 .orElseThrow(() -> new IllegalStateException("position not found before update"));
     }
 
-    private void updateSymbolOpenInterest(ProductLine productLine,
-                                          String symbol,
-                                          long previousSignedQuantitySteps,
-                                          long nextSignedQuantitySteps,
-                                          Instant now) {
-        ProductLine resolvedProductLine = productLine(productLine);
-        long longDelta = Math.subtractExact(longQuantitySteps(nextSignedQuantitySteps),
+    private void updatePositionAndOpenInterest(ProductLine productLine,
+                                               long userId,
+                                               String symbol,
+                                               MarginMode marginMode,
+                                               PositionSide positionSide,
+                                               PositionState state,
+                                               long previousSignedQuantitySteps,
+                                               Instant now) {
+        long longDelta = Math.subtractExact(longQuantitySteps(state.signedQuantitySteps()),
                 longQuantitySteps(previousSignedQuantitySteps));
-        long shortDelta = Math.subtractExact(shortQuantitySteps(nextSignedQuantitySteps),
+        long shortDelta = Math.subtractExact(shortQuantitySteps(state.signedQuantitySteps()),
                 shortQuantitySteps(previousSignedQuantitySteps));
+        Timestamp updatedAt = Timestamp.from(now);
         if (longDelta == 0L && shortDelta == 0L) {
+            int rows = jdbcTemplate.update("""
+                    UPDATE account_positions
+                       SET signed_quantity_steps = ?,
+                           instrument_version = ?,
+                           entry_price_ticks = ?,
+                           entry_value_ticks = ?,
+                           realized_pnl_units = ?,
+                           updated_at = ?
+                     WHERE product_line = ?
+                       AND user_id = ?
+                       AND symbol = ?
+                       AND margin_mode = ?
+                       AND position_side = ?
+                    """, state.signedQuantitySteps(), nullableVersion(state.instrumentVersion()),
+                    state.entryPriceTicks(), state.entryValueTicks(), state.realizedPnlUnits(),
+                    updatedAt, productLine.name(), userId, symbol, marginMode.name(), positionSide.name());
+            requireSingleRow(rows, "account position update");
             return;
         }
-        jdbcTemplate.update("""
-                INSERT INTO trading_symbol_open_interest (
-                    product_line, symbol, long_quantity_steps, short_quantity_steps, open_quantity_steps, updated_at
-                ) VALUES (?, ?, 0, 0, 0, ?)
-                ON CONFLICT (product_line, symbol) DO NOTHING
-                """, resolvedProductLine.name(), symbol, Timestamp.from(now));
+        int shardId = Math.floorMod(userId, OPEN_INTEREST_SHARDS);
         int rows = jdbcTemplate.update("""
-                UPDATE trading_symbol_open_interest
-                   SET long_quantity_steps = long_quantity_steps + ?,
-                       short_quantity_steps = short_quantity_steps + ?,
-                       open_quantity_steps = GREATEST(long_quantity_steps + ?, short_quantity_steps + ?),
-                       updated_at = ?
-                 WHERE symbol = ?
-                   AND product_line = ?
-                   AND long_quantity_steps + ? >= 0
-                   AND short_quantity_steps + ? >= 0
-                """, longDelta, shortDelta, longDelta, shortDelta, Timestamp.from(now), symbol, resolvedProductLine.name(),
-                longDelta, shortDelta);
-        requireSingleRow(rows, "symbol open interest update");
+                WITH updated_position AS (
+                    UPDATE account_positions
+                       SET signed_quantity_steps = ?,
+                           instrument_version = ?,
+                           entry_price_ticks = ?,
+                           entry_value_ticks = ?,
+                           realized_pnl_units = ?,
+                           updated_at = ?
+                     WHERE product_line = ?
+                       AND user_id = ?
+                       AND symbol = ?
+                       AND margin_mode = ?
+                       AND position_side = ?
+                 RETURNING 1
+                )
+                INSERT INTO trading_symbol_open_interest_shards (
+                    product_line, symbol, shard_id, long_quantity_steps, short_quantity_steps, updated_at
+                )
+                SELECT ?, ?, ?, ?, ?, ?
+                  FROM updated_position
+                ON CONFLICT (product_line, symbol, shard_id) DO UPDATE
+                   SET long_quantity_steps =
+                           trading_symbol_open_interest_shards.long_quantity_steps + EXCLUDED.long_quantity_steps,
+                       short_quantity_steps =
+                           trading_symbol_open_interest_shards.short_quantity_steps + EXCLUDED.short_quantity_steps,
+                       updated_at = EXCLUDED.updated_at
+                 WHERE trading_symbol_open_interest_shards.long_quantity_steps
+                           + EXCLUDED.long_quantity_steps >= 0
+                   AND trading_symbol_open_interest_shards.short_quantity_steps
+                           + EXCLUDED.short_quantity_steps >= 0
+                """, state.signedQuantitySteps(), nullableVersion(state.instrumentVersion()),
+                state.entryPriceTicks(), state.entryValueTicks(), state.realizedPnlUnits(), updatedAt,
+                productLine.name(), userId, symbol, marginMode.name(), positionSide.name(),
+                productLine.name(), symbol, shardId, longDelta, shortDelta, updatedAt);
+        requireSingleRow(rows, "account position and open interest shard update");
     }
 
     private long longQuantitySteps(long signedQuantitySteps) {
@@ -2005,27 +2059,33 @@ public class AccountRepository {
                                   TradeParticipantRole role,
                                   String commandId,
                                   Instant now) {
-        String ownStatus = role == TradeParticipantRole.TAKER ? "taker_status" : "maker_status";
-        String ownCommand = role == TradeParticipantRole.TAKER ? "taker_command_id" : "maker_command_id";
-        String otherStatus = role == TradeParticipantRole.TAKER ? "maker_status" : "taker_status";
         int rows = jdbcTemplate.update("""
-                INSERT INTO account_trade_settlements AS settlement (
-                    product_line, symbol, trade_id, taker_user_id, maker_user_id,
-                    %s, %s, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 'APPLIED', ?, ?, ?)
-                ON CONFLICT (product_line, symbol, trade_id) DO UPDATE
-                   SET %s = 'APPLIED',
-                       %s = EXCLUDED.%s,
-                       completed_at = CASE WHEN settlement.%s = 'APPLIED'
-                                           THEN EXCLUDED.updated_at ELSE NULL END,
-                       updated_at = EXCLUDED.updated_at
-                 WHERE settlement.taker_user_id = EXCLUDED.taker_user_id
-                   AND settlement.maker_user_id = EXCLUDED.maker_user_id
-                   AND settlement.%s = 'PENDING'
-                """.formatted(ownStatus, ownCommand, ownStatus, ownCommand, ownCommand, otherStatus, ownStatus),
-                productLine.name(), trade.symbol(), trade.tradeId(), trade.takerUserId(), trade.makerUserId(),
-                commandId, Timestamp.from(now), Timestamp.from(now));
-        if (rows != 1) {
+                INSERT INTO account_trade_settlement_sides (
+                    product_line, symbol, trade_id, participant_role,
+                    taker_user_id, maker_user_id, command_id, applied_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (product_line, symbol, trade_id, participant_role) DO NOTHING
+                """,
+                productLine.name(), trade.symbol(), trade.tradeId(), role.name(), trade.takerUserId(),
+                trade.makerUserId(), commandId, Timestamp.from(now));
+        if (rows == 1) {
+            return;
+        }
+        Boolean identical = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM account_trade_settlement_sides
+                     WHERE product_line = ?
+                       AND symbol = ?
+                       AND trade_id = ?
+                       AND participant_role = ?
+                       AND taker_user_id = ?
+                       AND maker_user_id = ?
+                       AND command_id = ?
+                )
+                """, Boolean.class, productLine.name(), trade.symbol(), trade.tradeId(), role.name(),
+                trade.takerUserId(), trade.makerUserId(), commandId);
+        if (!Boolean.TRUE.equals(identical)) {
             throw new IllegalStateException("failed to complete trade side "
                     + productLine + ":" + trade.symbol() + ":" + trade.tradeId() + ":" + role);
         }
@@ -2058,6 +2118,13 @@ public class AccountRepository {
         AccountType normalizedType = requireAccountType(accountType);
         String referenceId = tradeId + ":" + orderId;
         if (isLegacyPerpetualAccount(normalizedType)) {
+            Optional<Long> fastSettlement = trySettleLegacyAvailableBalanceAndLedger(
+                    userId, asset, realizedPnlDeltaUnits, marginMode,
+                    "TRADE_PNL", referenceId, "REALIZED_PNL",
+                    null, null, null, null, now);
+            if (fastSettlement.isPresent()) {
+                return;
+            }
             int ledgerRows = jdbcTemplate.update("""
                     INSERT INTO account_ledger_entries (
                         entry_id, user_id, asset, amount_units, balance_after_units,
@@ -2212,6 +2279,13 @@ public class AccountRepository {
         AccountType normalizedType = requireAccountType(accountType);
         String referenceId = tradeId + ":" + orderId;
         if (isLegacyPerpetualAccount(normalizedType)) {
+            Optional<Long> fastSettlement = trySettleLegacyAvailableBalanceAndLedger(
+                    userId, asset, feeDeltaUnits, marginMode,
+                    "TRADE_FEE", referenceId, reason,
+                    tradeId, orderId, symbol, feeRatePpm, now);
+            if (fastSettlement.isPresent()) {
+                return;
+            }
             int ledgerRows = jdbcTemplate.update("""
                     INSERT INTO account_ledger_entries (
                         entry_id, user_id, asset, amount_units, balance_after_units,
@@ -3059,6 +3133,85 @@ public class AccountRepository {
         return rows == null ? Optional.empty() : rows.stream().findFirst();
     }
 
+    /**
+     * Collapses the overwhelmingly common perpetual cashflow path into one database round trip:
+     * update available balance and append the immutable ledger row with its final balance.
+     *
+     * <p>Negative cross-margin cashflows use this path only while available balance is sufficient.
+     * Positive cashflows use it only when there is no unsettled deficit. All other cases return empty
+     * without changing state and continue through the full locked-margin/deficit settlement algorithm.
+     */
+    private Optional<Long> trySettleLegacyAvailableBalanceAndLedger(long userId,
+                                                                    String asset,
+                                                                    long amountUnits,
+                                                                    MarginMode marginMode,
+                                                                    String referenceType,
+                                                                    String referenceId,
+                                                                    String reason,
+                                                                    Long tradeId,
+                                                                    Long orderId,
+                                                                    String symbol,
+                                                                    Long feeRatePpm,
+                                                                    Instant now) {
+        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        long entryId = sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY);
+        Timestamp timestamp = Timestamp.from(now);
+        List<Long> rows = jdbcTemplate.query("""
+                WITH updated_balance AS (
+                    UPDATE account_balances b
+                       SET available_units = b.available_units + ?,
+                           updated_at = ?
+                     WHERE b.user_id = ?
+                       AND b.asset = ?
+                       AND NOT EXISTS (
+                           SELECT 1
+                             FROM account_ledger_entries l
+                            WHERE l.reference_type = ?
+                              AND l.reference_id = ?
+                              AND l.user_id = ?
+                              AND l.asset = ?
+                       )
+                       AND (
+                           (? < 0 AND ? = 'CROSS' AND b.available_units + ? >= 0)
+                           OR
+                           (? > 0 AND COALESCE((
+                               SELECT d.deficit_units - d.reserved_units
+                                 FROM account_deficits d
+                                WHERE d.user_id = b.user_id
+                                  AND d.asset = b.asset
+                           ), 0) = 0)
+                       )
+                 RETURNING b.available_units + b.locked_units - COALESCE((
+                           SELECT d.deficit_units
+                             FROM account_deficits d
+                            WHERE d.user_id = b.user_id
+                              AND d.asset = b.asset
+                       ), 0) AS balance_after_units
+                ),
+                inserted_ledger AS (
+                    INSERT INTO account_ledger_entries (
+                        entry_id, user_id, asset, amount_units, balance_after_units,
+                        reference_type, reference_id, reason, trade_id, order_id, symbol,
+                        fee_rate_ppm, created_at
+                    )
+                    SELECT ?, ?, ?, ?, balance_after_units,
+                           ?, ?, ?, CAST(? AS BIGINT), CAST(? AS BIGINT), CAST(? AS TEXT),
+                           CAST(? AS BIGINT), ?
+                      FROM updated_balance
+                    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
+                    RETURNING balance_after_units
+                )
+                SELECT balance_after_units
+                  FROM inserted_ledger
+                """, (rs, rowNum) -> rs.getLong("balance_after_units"),
+                amountUnits, timestamp, userId, asset,
+                referenceType, referenceId, userId, asset,
+                amountUnits, normalizedMarginMode.name(), amountUnits, amountUnits,
+                entryId, userId, asset, amountUnits,
+                referenceType, referenceId, reason, tradeId, orderId, symbol, feeRatePpm, timestamp);
+        return rows == null ? Optional.empty() : rows.stream().findFirst();
+    }
+
     private Optional<Long> tryApplyProductAvailableDebitFastPath(AccountType accountType,
                                                                  long userId,
                                                                  String asset,
@@ -3742,6 +3895,15 @@ public class AccountRepository {
                 rs.getLong("entry_price_ticks"),
                 rs.getLong("realized_pnl_units"),
                 rs.getTimestamp("updated_at").toInstant());
+    }
+
+    private PositionState toPositionState(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new PositionState(
+                rs.getLong("signed_quantity_steps"),
+                longOrZero(rs, "instrument_version"),
+                rs.getLong("entry_price_ticks"),
+                rs.getLong("entry_value_ticks"),
+                rs.getLong("realized_pnl_units"));
     }
 
     private PositionSettlementState toPositionSettlementState(java.sql.ResultSet rs) throws java.sql.SQLException {

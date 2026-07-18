@@ -607,11 +607,15 @@ external order book snapshot is available:
   to reserving at that bracket's `initial_margin_rate_ppm`.
 - The effective initial-margin rate is `max(leverage-derived rate, risk-bracket initial margin rate)`.
 
-`trading_symbol_open_interest` stores the current platform open interest state per symbol:
+`trading_symbol_open_interest_shards` stores platform open interest in 64 user-derived shards per
+product line and symbol. `trading_symbol_open_interest` is the aggregate read view:
 
-- Account settlement updates this table in the same transaction as `account_positions` after a new trade changes a position.
+- Account settlement updates the position and its OI shard in one data-modifying CTE and one database
+  round trip. `shard_id=floorMod(userId, 64)` removes the single symbol-row write hotspot.
 - `long_quantity_steps` and `short_quantity_steps` track the absolute live long and short quantities. Direction flips apply both a negative delta on the old side and a positive delta on the new side.
-- `open_quantity_steps` is constrained to `GREATEST(long_quantity_steps, short_quantity_steps)`, which avoids double-counting both sides when order entry applies platform-OI-based user caps.
+- The aggregate view calculates `open_quantity_steps=GREATEST(SUM(long_quantity_steps),
+  SUM(short_quantity_steps))`, which avoids double-counting both sides when order entry applies
+  platform-OI-based user caps.
 - Order entry reads `open_quantity_steps`, converts it to notional with the current admission price and instrument formula, then applies the instrument's `user_open_interest_limit_*` settings.
 - Because this is derived state, production operations should periodically rebuild-check it from `account_positions`, especially after manual repairs, emergency imports, or disaster recovery.
 
@@ -697,15 +701,19 @@ so later position-margin releases cannot over-credit available balance.
 
 The account provider executes every maker/taker side through `account_commands`. The immutable
 command id and envelope SHA-256 provide execution idempotency, while
-`account_trade_settlements(product_line, symbol, trade_id)` records bilateral completion.
-Each participant writes its `APPLIED` state with a participant-validated atomic UPSERT at the end of
-the account transaction; identity conflicts or an already-applied side affect zero rows and roll back
-the whole participant transaction.
+`account_trade_settlement_sides(product_line, symbol, trade_id, participant_role)` records one
+immutable row per participant. Taker and maker never update a shared settlement row.
+`account_trade_settlement_completions` is the bilateral-completion read view. Identity conflicts roll
+back the whole participant transaction; the monitor uses `reconciled_at` and the pending-only partial
+index so normal health checks do not rescan completed history.
 All balance and margin transitions run inside one PostgreSQL transaction and lock the affected
 position/margin rows with `FOR UPDATE`. Position, balance, deficit, ledger, reservation, and
 position-margin writes are fail-fast when an expected row is not written.
-For `TRADE_PNL` and `TRADE_FEE`, both the ledger insert and the balance-after backfill must touch one
-row; command idempotency is checked before dispatch, and ledger conflicts are never silently skipped.
+For the common linear-perpetual cross-margin case, `TRADE_PNL` and `TRADE_FEE` each use one
+data-modifying CTE to update available balance and insert the ledger row with its final
+`balance_after_units`. Insufficient available balance, isolated margin, or an unsettled deficit falls
+through without mutation to the full locked-margin/deficit settlement algorithm. Command idempotency
+is checked before dispatch, and ledger conflicts are never silently skipped.
 `LIQUIDATION_FEE` uses `tradeId:orderId` as the reference id and is emitted to the insurance fund
 only after the balance debit succeeds.
 Manual isolated-margin transfers write `account_ledger_entries.reference_type = POSITION_MARGIN_ADJUSTMENT`

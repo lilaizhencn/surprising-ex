@@ -465,7 +465,8 @@ Do not point this script at a shared development database. Matching restores ope
 - Account closing fills may skip order-reservation release only for `reduce_only = TRUE` orders. Non-reduce-only close or flip fills must find the original reservation row; otherwise the account transaction fails.
 - Account `TRADE_PNL` ledger insert/backfill writes are fail-fast. Each maker/taker side is
   idempotent by its immutable `account_commands.command_id`; conflicting envelope hashes or ledger
-  conflicts indicate inconsistent state. `account_trade_settlements` must reach bilateral completion.
+  conflicts indicate inconsistent state. Every trade must have two `account_trade_settlement_sides`
+  rows and therefore appear in `account_trade_settlement_completions`.
 - Account maker/taker fees are settled from the required `taker_fee_rate_ppm` / `maker_fee_rate_ppm`
   values on `trading_match_trades` and written as `TRADE_FEE` with `trade_id`, `order_id`, `symbol`,
   and `fee_rate_ppm`. Positive ppm rates debit the user; negative ppm rates rebate. Fee ledger

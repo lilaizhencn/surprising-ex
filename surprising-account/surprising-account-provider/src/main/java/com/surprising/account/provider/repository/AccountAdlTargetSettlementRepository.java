@@ -15,6 +15,8 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class AccountAdlTargetSettlementRepository {
 
+    private static final int OPEN_INTEREST_SHARDS = 64;
+
     private final JdbcTemplate jdbcTemplate;
     private final AccountSequenceRepository sequenceRepository;
 
@@ -69,7 +71,6 @@ public class AccountAdlTargetSettlementRepository {
         long afterTransfer = debitAvailable(productLine, targetUserId, command.asset(), command.coveredUnits(), now);
         insertLedger(productLine, targetUserId, command.asset(), Math.negateExact(command.coveredUnits()),
                 afterTransfer, "ADL_TRANSFER", commandId, "ADL_DEFICIT_TRANSFER", now);
-        updateOpenInterest(productLine, command.symbol(), position.signedQuantitySteps(), nextSigned, now);
         return new AdlTargetSettlementResult(true, realizedProfit, command.coveredUnits(), nextSigned);
     }
 
@@ -108,21 +109,48 @@ public class AccountAdlTargetSettlementRepository {
         long nextEntryValue = nextSigned == 0 ? 0L : Math.subtractExact(position.entryValueTicks(),
                 proportional(position.entryValueTicks(), command.closeQuantitySteps(),
                         Math.absExact(position.signedQuantitySteps())));
+        long longDelta = Math.subtractExact(
+                Math.max(nextSigned, 0L), Math.max(position.signedQuantitySteps(), 0L));
+        long previousShort = position.signedQuantitySteps() < 0
+                ? Math.negateExact(position.signedQuantitySteps()) : 0L;
+        long nextShort = nextSigned < 0 ? Math.negateExact(nextSigned) : 0L;
+        long shortDelta = Math.subtractExact(nextShort, previousShort);
+        int shardId = Math.floorMod(userId, OPEN_INTEREST_SHARDS);
+        Timestamp updatedAt = Timestamp.from(now);
         int rows = jdbcTemplate.update("""
-                UPDATE account_positions
-                   SET signed_quantity_steps = ?,
-                       instrument_version = CASE WHEN ? = 0 THEN NULL ELSE instrument_version END,
-                       entry_price_ticks = CASE WHEN ? = 0 THEN 0 ELSE entry_price_ticks END,
-                       entry_value_ticks = ?,
-                       realized_pnl_units = realized_pnl_units + ?,
-                       updated_at = ?
-                 WHERE product_line = ? AND user_id = ? AND symbol = ?
-                   AND margin_mode = ? AND position_side = ?
-                   AND signed_quantity_steps = ? AND entry_price_ticks = ?
-                """, nextSigned, nextSigned, nextSigned, nextEntryValue, realizedProfit, Timestamp.from(now),
+                WITH updated_position AS (
+                    UPDATE account_positions
+                       SET signed_quantity_steps = ?,
+                           instrument_version = CASE WHEN ? = 0 THEN NULL ELSE instrument_version END,
+                           entry_price_ticks = CASE WHEN ? = 0 THEN 0 ELSE entry_price_ticks END,
+                           entry_value_ticks = ?,
+                           realized_pnl_units = realized_pnl_units + ?,
+                           updated_at = ?
+                     WHERE product_line = ? AND user_id = ? AND symbol = ?
+                       AND margin_mode = ? AND position_side = ?
+                       AND signed_quantity_steps = ? AND entry_price_ticks = ?
+                 RETURNING 1
+                )
+                INSERT INTO trading_symbol_open_interest_shards (
+                    product_line, symbol, shard_id, long_quantity_steps, short_quantity_steps, updated_at
+                )
+                SELECT ?, ?, ?, ?, ?, ?
+                  FROM updated_position
+                ON CONFLICT (product_line, symbol, shard_id) DO UPDATE
+                   SET long_quantity_steps =
+                           trading_symbol_open_interest_shards.long_quantity_steps + EXCLUDED.long_quantity_steps,
+                       short_quantity_steps =
+                           trading_symbol_open_interest_shards.short_quantity_steps + EXCLUDED.short_quantity_steps,
+                       updated_at = EXCLUDED.updated_at
+                 WHERE trading_symbol_open_interest_shards.long_quantity_steps
+                           + EXCLUDED.long_quantity_steps >= 0
+                   AND trading_symbol_open_interest_shards.short_quantity_steps
+                           + EXCLUDED.short_quantity_steps >= 0
+                """, nextSigned, nextSigned, nextSigned, nextEntryValue, realizedProfit, updatedAt,
                 productLine.name(), userId, command.symbol(), command.marginMode().name(),
-                command.positionSide().name(), position.signedQuantitySteps(), position.entryPriceTicks());
-        requireSingleRow(rows, "ADL target position update");
+                command.positionSide().name(), position.signedQuantitySteps(), position.entryPriceTicks(),
+                productLine.name(), command.symbol(), shardId, longDelta, shortDelta, updatedAt);
+        requireSingleRow(rows, "ADL target position and open interest shard update");
     }
 
     private void releasePositionMargin(ProductLine productLine,
@@ -289,35 +317,6 @@ public class AccountAdlTargetSettlementRepository {
                     userId, asset, amountUnits,
                     balanceAfter, referenceType, commandId, reason, Timestamp.from(now));
         requireSingleRow(rows, "ADL target ledger insert");
-    }
-
-    private void updateOpenInterest(ProductLine productLine,
-                                    String symbol,
-                                    long previousSigned,
-                                    long nextSigned,
-                                    Instant now) {
-        long longDelta = Math.subtractExact(Math.max(nextSigned, 0L), Math.max(previousSigned, 0L));
-        long previousShort = previousSigned < 0 ? Math.negateExact(previousSigned) : 0L;
-        long nextShort = nextSigned < 0 ? Math.negateExact(nextSigned) : 0L;
-        long shortDelta = Math.subtractExact(nextShort, previousShort);
-        jdbcTemplate.update("""
-                INSERT INTO trading_symbol_open_interest (
-                    product_line, symbol, long_quantity_steps, short_quantity_steps,
-                    open_quantity_steps, updated_at
-                ) VALUES (?, ?, 0, 0, 0, ?)
-                ON CONFLICT (product_line, symbol) DO NOTHING
-                """, productLine.name(), symbol, Timestamp.from(now));
-        int rows = jdbcTemplate.update("""
-                UPDATE trading_symbol_open_interest
-                   SET long_quantity_steps = long_quantity_steps + ?,
-                       short_quantity_steps = short_quantity_steps + ?,
-                       open_quantity_steps = GREATEST(long_quantity_steps + ?, short_quantity_steps + ?),
-                       updated_at = ?
-                 WHERE product_line = ? AND symbol = ?
-                   AND long_quantity_steps + ? >= 0 AND short_quantity_steps + ? >= 0
-                """, longDelta, shortDelta, longDelta, shortDelta, Timestamp.from(now),
-                productLine.name(), symbol, longDelta, shortDelta);
-        requireSingleRow(rows, "ADL open interest update");
     }
 
     private long proportional(long units, long numerator, long denominator) {

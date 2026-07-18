@@ -461,7 +461,7 @@
             <p>代码：<span class="mono">AccountUserCommandConsumer</span> -> <span class="mono">AccountUserCommandProcessor</span></p>
             <ul>
               <li><span class="mono">commandId + envelope hash</span> 幂等，key 为 <span class="mono">PRODUCT_LINE:userId</span></li>
-              <li>taker/maker 分别进入各自用户事务，双边完成写 <span class="mono">account_trade_settlements</span></li>
+              <li>taker/maker 分别进入各自用户事务，各写一条 <span class="mono">account_trade_settlement_sides</span></li>
               <li>锁定 <span class="mono">account_positions</span>，计算 closeSteps/openSteps</li>
               <li>平仓：结算 realized PnL、释放 position/order margin</li>
               <li>开仓：消费预占保证金到 position margin</li>

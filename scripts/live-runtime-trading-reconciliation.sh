@@ -446,7 +446,7 @@ run_linear_flow() {
   assert_account_ledger_matches_balance "${LINEAR_SHORT_USER}" "USDT"
   assert_account_ledger_matches_balance "${LINEAR_LONG_USER}" "USDT"
   wait_sql_equals "linear close settlement processed" \
-    "SELECT count(*) FROM account_trade_settlements s JOIN trading_match_trades t ON t.product_line = s.product_line AND t.symbol = s.symbol AND t.trade_id = s.trade_id WHERE s.completed_at IS NOT NULL AND t.symbol = '${LINEAR_SYMBOL}' AND t.maker_user_id = ${LINEAR_SHORT_USER} AND t.taker_user_id = ${LINEAR_LONG_USER}" \
+    "SELECT count(*) FROM account_trade_settlement_completions s JOIN trading_match_trades t ON t.product_line = s.product_line AND t.symbol = s.symbol AND t.trade_id = s.trade_id WHERE t.symbol = '${LINEAR_SYMBOL}' AND t.maker_user_id = ${LINEAR_SHORT_USER} AND t.taker_user_id = ${LINEAR_LONG_USER}" \
     "2"
   echo "linear entryTicks=${entry_ticks} exitTicks=${exit_ticks} short=${short_expected} long=${long_expected}"
 }
@@ -489,7 +489,7 @@ run_coin_flow() {
   assert_product_ledger_matches_balance "${COIN_SHORT_USER}" "COIN_PERPETUAL" "BTC"
   assert_product_ledger_matches_balance "${COIN_LONG_USER}" "COIN_PERPETUAL" "BTC"
   wait_sql_equals "coin trades processed by account settlement" \
-    "SELECT count(*) FROM account_trade_settlements s JOIN trading_match_trades t ON t.product_line = s.product_line AND t.symbol = s.symbol AND t.trade_id = s.trade_id WHERE s.completed_at IS NOT NULL AND t.symbol = '${COIN_SYMBOL}' AND t.maker_user_id = ${COIN_SHORT_USER} AND t.taker_user_id = ${COIN_LONG_USER}" \
+    "SELECT count(*) FROM account_trade_settlement_completions s JOIN trading_match_trades t ON t.product_line = s.product_line AND t.symbol = s.symbol AND t.trade_id = s.trade_id WHERE t.symbol = '${COIN_SYMBOL}' AND t.maker_user_id = ${COIN_SHORT_USER} AND t.taker_user_id = ${COIN_LONG_USER}" \
     "2"
   echo "coin short=${short_expected} long=${long_expected}"
 }
@@ -535,7 +535,7 @@ run_spot_flow() {
     "SELECT count(*) FROM account_positions WHERE symbol = '${SPOT_SYMBOL}' AND user_id IN (${SPOT_SELLER_USER}, ${SPOT_BUYER_USER})" \
     "0"
   wait_sql_equals "spot trade processed by account settlement" \
-    "SELECT count(*) FROM account_trade_settlements s JOIN trading_match_trades t ON t.product_line = s.product_line AND t.symbol = s.symbol AND t.trade_id = s.trade_id WHERE s.completed_at IS NOT NULL AND t.symbol = '${SPOT_SYMBOL}' AND t.maker_user_id = ${SPOT_SELLER_USER} AND t.taker_user_id = ${SPOT_BUYER_USER}" \
+    "SELECT count(*) FROM account_trade_settlement_completions s JOIN trading_match_trades t ON t.product_line = s.product_line AND t.symbol = s.symbol AND t.trade_id = s.trade_id WHERE t.symbol = '${SPOT_SYMBOL}' AND t.maker_user_id = ${SPOT_SELLER_USER} AND t.taker_user_id = ${SPOT_BUYER_USER}" \
     "1"
   echo "spot seller_btc=${seller_btc} seller_usdt=${seller_usdt} buyer_btc=${buyer_btc} buyer_usdt=${buyer_usdt}"
 }

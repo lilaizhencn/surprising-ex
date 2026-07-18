@@ -63,10 +63,11 @@ in that user's local database transaction and updates:
 - If settlement reduces the position to zero, account-provider also moves every exact-scope `PENDING` TP/SL/trailing trigger to `CANCELED` with `POSITION_CLOSED` in the same transaction. The position outbox event is emitted only after that update is part of the transaction, allowing trigger-provider to clean its Redis secondary index after commit.
 
 `account_commands.command_id` plus its immutable envelope hash is the execution idempotency key.
-`account_trade_settlements(product_line, symbol, trade_id)` tracks taker and maker completion.
-Each side records completion with one participant-validated atomic UPSERT at the end of its funds
-transaction. This avoids holding the shared `trade_id` unique key for the full transaction while
-preserving fail-fast rollback on identity conflicts. Stale
+`account_trade_settlement_sides(product_line, symbol, trade_id, participant_role)` stores one
+immutable participant record at the end of each taker/maker funds transaction. The two user
+partitions never update the same settlement row; identity conflicts fail the whole transaction.
+`account_trade_settlement_completions` exposes only trades with both roles present. The monitor
+reconciles completed pairs in bounded batches through the pending-only partial index, and a stale
 one-sided settlement makes the `accountTradeSettlement` health indicator `DOWN`.
 Command dependencies are persisted as `depends_on_command_id`, so correctness never depends on
 producer order or result-topic delivery order. See
@@ -160,7 +161,8 @@ Root [init.sql](../init.sql) creates:
 - `account_positions`
 - `account_commands`
 - `account_command_submissions`
-- `account_trade_settlements`
+- `account_trade_settlement_sides`
+- `account_trade_settlement_completions` (read view)
 
 Core indexes:
 
@@ -172,7 +174,7 @@ Core indexes:
 - `account_positions_user_idx`
 - `account_commands_processing_idx`
 - `account_commands_dependency_idx`
-- `account_trade_settlements_incomplete_idx`
+- `account_trade_settlement_sides_monitor_idx`
 - `account_outbox_pending_stream_idx`
 
 ## Configuration

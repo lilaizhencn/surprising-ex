@@ -1317,27 +1317,39 @@ CREATE TABLE IF NOT EXISTS trading_algo_order_children (
 CREATE INDEX IF NOT EXISTS trading_algo_order_children_order_idx
     ON trading_algo_order_children (order_id);
 
-CREATE TABLE IF NOT EXISTS trading_symbol_open_interest (
+CREATE TABLE IF NOT EXISTS trading_symbol_open_interest_shards (
     product_line            TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     symbol                  TEXT NOT NULL,
+    shard_id                SMALLINT NOT NULL,
     long_quantity_steps     BIGINT NOT NULL DEFAULT 0,
     short_quantity_steps    BIGINT NOT NULL DEFAULT 0,
-    open_quantity_steps     BIGINT NOT NULL DEFAULT 0,
     updated_at              TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (product_line, symbol),
-    CONSTRAINT trading_symbol_open_interest_symbol_fk
+    PRIMARY KEY (product_line, symbol, shard_id),
+    CONSTRAINT trading_symbol_open_interest_shards_symbol_fk
         FOREIGN KEY (symbol) REFERENCES instrument_current_versions(symbol),
-    CONSTRAINT trading_symbol_open_interest_product_line_check CHECK (
+    CONSTRAINT trading_symbol_open_interest_shards_product_line_check CHECK (
         product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
                          'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
     ),
-    CONSTRAINT trading_symbol_open_interest_non_negative CHECK (
+    CONSTRAINT trading_symbol_open_interest_shards_shard_check CHECK (shard_id >= 0 AND shard_id < 64),
+    CONSTRAINT trading_symbol_open_interest_shards_non_negative CHECK (
         long_quantity_steps >= 0
         AND short_quantity_steps >= 0
-        AND open_quantity_steps >= 0
-        AND open_quantity_steps = GREATEST(long_quantity_steps, short_quantity_steps)
     )
 );
+
+CREATE OR REPLACE VIEW trading_symbol_open_interest AS
+SELECT product_line,
+       symbol,
+       COALESCE(SUM(long_quantity_steps), 0)::BIGINT AS long_quantity_steps,
+       COALESCE(SUM(short_quantity_steps), 0)::BIGINT AS short_quantity_steps,
+       GREATEST(
+           COALESCE(SUM(long_quantity_steps), 0),
+           COALESCE(SUM(short_quantity_steps), 0)
+       )::BIGINT AS open_quantity_steps,
+       MAX(updated_at) AS updated_at
+  FROM trading_symbol_open_interest_shards
+ GROUP BY product_line, symbol;
 
 CREATE TABLE IF NOT EXISTS trading_trigger_orders (
     trigger_order_id           BIGINT PRIMARY KEY,
@@ -1697,39 +1709,6 @@ CREATE TABLE IF NOT EXISTS trading_match_results (
         order_status IN ('PENDING_RESERVE', 'ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED', 'CANCELED', 'PARTIALLY_FILLED', 'FILLED')
     )
 );
-
-ALTER TABLE trading_symbol_open_interest
-    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
-
-UPDATE trading_symbol_open_interest oi
-   SET product_line = CASE i.contract_type
-       WHEN 'SPOT' THEN 'SPOT'
-       WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-       WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-       WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-       WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-       WHEN 'VANILLA_OPTION' THEN 'OPTION'
-       ELSE oi.product_line
-   END
-  FROM instruments i
-  JOIN instrument_current_versions c
-    ON c.symbol = i.symbol AND c.version = i.version
- WHERE i.symbol = oi.symbol;
-
-ALTER TABLE trading_symbol_open_interest
-    DROP CONSTRAINT IF EXISTS trading_symbol_open_interest_pkey;
-
-ALTER TABLE trading_symbol_open_interest
-    DROP CONSTRAINT IF EXISTS trading_symbol_open_interest_product_line_check;
-
-ALTER TABLE trading_symbol_open_interest
-    ADD CONSTRAINT trading_symbol_open_interest_product_line_check CHECK (
-        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-    );
-
-ALTER TABLE trading_symbol_open_interest
-    ADD CONSTRAINT trading_symbol_open_interest_pkey PRIMARY KEY (product_line, symbol);
 
 ALTER TABLE trading_match_results
     ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
@@ -2499,36 +2478,44 @@ CREATE TABLE IF NOT EXISTS account_command_submissions (
 CREATE INDEX IF NOT EXISTS account_command_submissions_user_idx
     ON account_command_submissions (product_line, user_id, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS account_trade_settlements (
+CREATE TABLE IF NOT EXISTS account_trade_settlement_sides (
     product_line            TEXT NOT NULL,
     symbol                  TEXT NOT NULL,
     trade_id                BIGINT NOT NULL,
+    participant_role        TEXT NOT NULL,
     taker_user_id           BIGINT NOT NULL,
     maker_user_id           BIGINT NOT NULL,
-    taker_status            TEXT NOT NULL DEFAULT 'PENDING',
-    maker_status            TEXT NOT NULL DEFAULT 'PENDING',
-    taker_command_id        VARCHAR(160),
-    maker_command_id        VARCHAR(160),
-    created_at              TIMESTAMPTZ NOT NULL,
-    updated_at              TIMESTAMPTZ NOT NULL,
-    completed_at            TIMESTAMPTZ,
-    PRIMARY KEY (product_line, symbol, trade_id),
-    CONSTRAINT account_trade_settlements_product_line_check CHECK (
+    command_id              VARCHAR(160) NOT NULL,
+    applied_at              TIMESTAMPTZ NOT NULL,
+    reconciled_at           TIMESTAMPTZ,
+    PRIMARY KEY (product_line, symbol, trade_id, participant_role),
+    CONSTRAINT account_trade_settlement_sides_command_uk UNIQUE (product_line, command_id),
+    CONSTRAINT account_trade_settlement_sides_product_line_check CHECK (
         product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
                          'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
     ),
-    CONSTRAINT account_trade_settlements_users_positive CHECK (taker_user_id > 0 AND maker_user_id > 0),
-    CONSTRAINT account_trade_settlements_taker_status_check CHECK (taker_status IN ('PENDING', 'APPLIED')),
-    CONSTRAINT account_trade_settlements_maker_status_check CHECK (maker_status IN ('PENDING', 'APPLIED')),
-    CONSTRAINT account_trade_settlements_completion_check CHECK (
-        (taker_status = 'APPLIED' AND maker_status = 'APPLIED' AND completed_at IS NOT NULL)
-        OR ((taker_status <> 'APPLIED' OR maker_status <> 'APPLIED') AND completed_at IS NULL)
-    )
+    CONSTRAINT account_trade_settlement_sides_users_positive CHECK (
+        taker_user_id > 0 AND maker_user_id > 0
+    ),
+    CONSTRAINT account_trade_settlement_sides_role_check CHECK (participant_role IN ('TAKER', 'MAKER'))
 );
 
-CREATE INDEX IF NOT EXISTS account_trade_settlements_incomplete_idx
-    ON account_trade_settlements (product_line, created_at)
-    WHERE completed_at IS NULL;
+CREATE INDEX IF NOT EXISTS account_trade_settlement_sides_monitor_idx
+    ON account_trade_settlement_sides (product_line, applied_at, symbol, trade_id)
+    WHERE reconciled_at IS NULL;
+
+CREATE OR REPLACE VIEW account_trade_settlement_completions AS
+SELECT product_line,
+       symbol,
+       trade_id,
+       MAX(taker_user_id) AS taker_user_id,
+       MAX(maker_user_id) AS maker_user_id,
+       MIN(applied_at) AS first_applied_at,
+       MAX(applied_at) AS completed_at
+  FROM account_trade_settlement_sides
+ GROUP BY product_line, symbol, trade_id
+HAVING COUNT(*) = 2
+   AND COUNT(DISTINCT participant_role) = 2;
 
 CREATE TABLE IF NOT EXISTS account_outbox_events (
     id                  BIGINT PRIMARY KEY DEFAULT nextval('account_outbox_id_seq'),

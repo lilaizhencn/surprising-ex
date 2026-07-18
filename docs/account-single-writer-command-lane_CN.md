@@ -104,8 +104,9 @@ trading_orders.PENDING_RESERVE
 - taker 的 `TRADE_SIDE_SETTLE`
 - maker 的 `TRADE_SIDE_SETTLE`
 
-两条命令分别使用各自的用户 key、commandId 和数据库事务。`account_trade_settlements` 记录两侧
-`PENDING/APPLIED` 状态；只有两侧都完成才写 `completed_at`。任何一侧超过
+两条命令分别使用各自的用户 key、commandId 和数据库事务。每侧在
+`account_trade_settlement_sides` 写一条不可变记录，不共享更新行；只有两侧都存在时才会进入
+`account_trade_settlement_completions` 视图。任何一侧超过
 `trade-settlement.stale-after`（默认 1 分钟）仍未完成，Actuator
 `accountTradeSettlement` health 变为 `DOWN`。不能人工把另一侧标成成功，必须修复根因并重放原命令。
 
@@ -163,11 +164,12 @@ FROM account_commands
 WHERE status IN ('WAITING_DEPENDENCY', 'PROCESSING')
 GROUP BY product_line, status;
 
-SELECT product_line, COUNT(*), MIN(created_at) AS oldest
-FROM account_trade_settlements
-WHERE completed_at IS NULL
-  AND created_at < now() - interval '1 minute'
-GROUP BY product_line;
+SELECT product_line, COUNT(*), MIN(applied_at) AS oldest
+FROM account_trade_settlement_sides
+WHERE reconciled_at IS NULL
+  AND applied_at < now() - interval '1 minute'
+GROUP BY product_line, symbol, trade_id
+HAVING COUNT(*) < 2;
 
 SELECT product_line, topic, COUNT(*), MIN(created_at) AS oldest
 FROM account_outbox_events

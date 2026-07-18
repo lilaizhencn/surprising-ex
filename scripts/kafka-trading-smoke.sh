@@ -461,7 +461,7 @@ positions_sql="SELECT COALESCE(string_agg(user_id || ':' || signed_quantity_step
 expected_positions="${MAKER_USER}:-${QUANTITY_STEPS}:${PRICE_TICKS},${TAKER_USER}:${QUANTITY_STEPS}:${PRICE_TICKS}"
 wait_sql_equals "account positions after Kafka match" "${positions_sql}" "${expected_positions}"
 wait_sql_equals "match trade persistence" "SELECT count(*) FROM trading_match_trades WHERE symbol = '${SYMBOL}' AND taker_user_id = ${TAKER_USER} AND maker_user_id = ${MAKER_USER}" "1"
-wait_sql_equals "bilateral account settlement" "SELECT count(*) FROM account_trade_settlements WHERE product_line = 'LINEAR_PERPETUAL' AND symbol = '${SYMBOL}' AND completed_at IS NOT NULL" "1"
+wait_sql_equals "bilateral account settlement" "SELECT count(*) FROM account_trade_settlement_completions WHERE product_line = 'LINEAR_PERPETUAL' AND symbol = '${SYMBOL}'" "1"
 wait_consumer_group_lag_zero "surprising-linear-perp-account-user-command-v1" "surprising.linear-perp.account.user.commands.v1"
 
 before_positions="$(query_value "${positions_sql}")"

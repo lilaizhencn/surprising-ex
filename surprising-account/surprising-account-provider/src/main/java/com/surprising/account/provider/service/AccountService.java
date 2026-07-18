@@ -635,7 +635,8 @@ public class AccountService {
 
     /**
      * Applies exactly one participant of a match. Idempotency is owned by account_commands and the
-     * bilateral completion state is tracked in account_trade_settlements.
+     * participant completion is stored as an immutable account_trade_settlement_sides row, so taker
+     * and maker account partitions never update the same database row.
      */
     public void processTradeSide(ProductLine commandProductLine,
                                  String commandId,

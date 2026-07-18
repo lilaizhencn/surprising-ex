@@ -51,7 +51,7 @@ class AccountRepositoryTest {
     private AccountSequenceRepository sequenceRepository;
 
     @Test
-    void completeTradeSideUsesOneAtomicUpsertAtTransactionEnd() {
+    void completeTradeSideInsertsOneImmutableParticipantRow() {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         MatchTradeEvent trade = mock(MatchTradeEvent.class);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
@@ -60,24 +60,22 @@ class AccountRepositoryTest {
         when(trade.tradeId()).thenReturn(55L);
         when(trade.takerUserId()).thenReturn(1001L);
         when(trade.makerUserId()).thenReturn(2002L);
-        when(jdbcTemplate.update(contains("ON CONFLICT (product_line, symbol, trade_id) DO UPDATE"),
-                eq("LINEAR_PERPETUAL"), eq("BTC-USDT"), eq(55L), eq(1001L), eq(2002L),
-                eq("trade-command"), eq(timestamp), eq(timestamp))).thenReturn(1);
+        when(jdbcTemplate.update(contains(
+                        "ON CONFLICT (product_line, symbol, trade_id, participant_role) DO NOTHING"),
+                eq("LINEAR_PERPETUAL"), eq("BTC-USDT"), eq(55L), eq("TAKER"), eq(1001L), eq(2002L),
+                eq("trade-command"), eq(timestamp))).thenReturn(1);
 
         repository.completeTradeSide(ProductLine.LINEAR_PERPETUAL, trade,
                 TradeParticipantRole.TAKER, "trade-command", now);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).update(sql.capture(), eq("LINEAR_PERPETUAL"), eq("BTC-USDT"), eq(55L),
-                eq(1001L), eq(2002L), eq("trade-command"), eq(timestamp), eq(timestamp));
+                eq("TAKER"), eq(1001L), eq(2002L), eq("trade-command"), eq(timestamp));
         assertThat(sql.getValue())
-                .contains("INSERT INTO account_trade_settlements AS settlement")
-                .contains("taker_status, taker_command_id")
-                .contains("ON CONFLICT (product_line, symbol, trade_id) DO UPDATE")
-                .contains("settlement.maker_status = 'APPLIED'")
-                .contains("settlement.taker_status = 'PENDING'")
-                .contains("settlement.taker_user_id = EXCLUDED.taker_user_id")
-                .contains("settlement.maker_user_id = EXCLUDED.maker_user_id");
+                .contains("INSERT INTO account_trade_settlement_sides")
+                .contains("participant_role")
+                .contains("ON CONFLICT (product_line, symbol, trade_id, participant_role) DO NOTHING")
+                .doesNotContain("DO UPDATE");
     }
 
     @Test
@@ -277,7 +275,7 @@ class AccountRepositoryTest {
                         sql.contains("FROM trading_match_trades")
                                 && sql.contains("mt.product_line = ?")
                                 && !sql.contains("JOIN instruments")),
-                eq(Boolean.class), eq(1001L), eq(1001L), eq("INVERSE_DELIVERY"));
+                eq(Boolean.class), eq("INVERSE_DELIVERY"), eq(1001L), eq(1001L));
     }
 
     @Test
@@ -801,9 +799,7 @@ class AccountRepositoryTest {
                 });
         when(jdbcTemplate.update(contains("UPDATE account_positions"), any(Object[].class)))
                 .thenReturn(1);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_symbol_open_interest"), any(Object[].class)))
-                .thenReturn(1);
-        when(jdbcTemplate.update(contains("UPDATE trading_symbol_open_interest"), any(Object[].class)))
+        when(jdbcTemplate.update(contains("INSERT INTO trading_symbol_open_interest_shards"), any(Object[].class)))
                 .thenReturn(1);
         when(jdbcTemplate.query(contains("SELECT user_id, symbol, margin_mode"), anyRowMapper(),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"))).thenAnswer(invocation -> {
@@ -825,9 +821,7 @@ class AccountRepositoryTest {
                 new PositionState(-4L, 1L, 600_000L, 25L), now);
 
         assertThat(response.signedQuantitySteps()).isEqualTo(-4L);
-        verify(jdbcTemplate).update(contains("UPDATE trading_symbol_open_interest"),
-                eq(-10L), eq(4L), eq(-10L), eq(4L), any(Timestamp.class), eq("BTC-USDT"),
-                eq("LINEAR_PERPETUAL"), eq(-10L), eq(4L));
+        verify(jdbcTemplate).update(contains("WITH updated_position"), any(Object[].class));
     }
 
     @Test
@@ -836,9 +830,7 @@ class AccountRepositoryTest {
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         when(jdbcTemplate.update(contains("UPDATE account_positions"), any(Object[].class)))
                 .thenReturn(1);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_symbol_open_interest"), any(Object[].class)))
-                .thenReturn(1);
-        when(jdbcTemplate.update(contains("UPDATE trading_symbol_open_interest"), any(Object[].class)))
+        when(jdbcTemplate.update(contains("INSERT INTO trading_symbol_open_interest_shards"), any(Object[].class)))
                 .thenReturn(1);
 
         var response = repository.updatePosition(1001L, "BTC-USDT", MarginMode.CROSS,
@@ -848,9 +840,7 @@ class AccountRepositoryTest {
         assertThat(response.updatedAt()).isEqualTo(now);
         verify(jdbcTemplate, never()).query(contains("SELECT signed_quantity_steps"), anyRowMapper(),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET"));
-        verify(jdbcTemplate).update(contains("UPDATE trading_symbol_open_interest"),
-                eq(6L), eq(-4L), eq(6L), eq(-4L), any(Timestamp.class), eq("BTC-USDT"),
-                eq("LINEAR_PERPETUAL"), eq(6L), eq(-4L));
+        verify(jdbcTemplate).update(contains("WITH updated_position"), any(Object[].class));
     }
 
     @Test
@@ -899,21 +889,23 @@ class AccountRepositoryTest {
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
         when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY)).thenReturn(1L);
-        when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
-                .thenReturn(1);
-        when(jdbcTemplate.update(contains("UPDATE account_ledger_entries"), any(Object[].class)))
-                .thenReturn(1);
-        when(jdbcTemplate.query(contains("UPDATE account_balances b"), anyRowMapper(),
-                eq(-25L), any(Timestamp.class), eq(1001L), eq("USDT"), eq(-25L)))
+        when(jdbcTemplate.query(contains("WITH updated_balance AS"), anyRowMapper(), any(Object[].class)))
                 .thenAnswer(balanceAfterUnits(75L));
 
         repository.settleTradeFee(1001L, "USDT", 5001L, 9001L, -25L,
                 "TAKER_FEE", 500L, "BTC-USDT", MarginMode.CROSS, now);
 
-        verify(jdbcTemplate).query(contains("UPDATE account_balances b"), anyRowMapper(),
-                eq(-25L), any(Timestamp.class), eq(1001L), eq("USDT"), eq(-25L));
-        verify(jdbcTemplate).update(contains("UPDATE account_ledger_entries"),
-                eq(75L), eq("9001:5001"), eq(1001L), eq("USDT"));
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), any(Object[].class));
+        assertThat(sql.getValue())
+                .contains("WITH updated_balance AS")
+                .contains("UPDATE account_balances")
+                .contains("INSERT INTO account_ledger_entries")
+                .contains("RETURNING balance_after_units");
+        verify(jdbcTemplate, never()).update(contains("INSERT INTO account_ledger_entries"),
+                any(Object[].class));
+        verify(jdbcTemplate, never()).update(contains("UPDATE account_ledger_entries"),
+                any(Object[].class));
         verify(jdbcTemplate, never()).query(contains("FROM account_position_margins"), anyRowMapper(),
                 any(Object[].class));
         verify(jdbcTemplate, never()).queryForObject(contains("SELECT b.available_units"), anyRowMapper(),
@@ -1200,7 +1192,7 @@ class AccountRepositoryTest {
                 eq(1001L), eq(productLine.name())))
                 .thenReturn(hasActiveAlgoOrders);
         when(jdbcTemplate.queryForObject(contains("FROM trading_match_trades"), eq(Boolean.class),
-                eq(1001L), eq(1001L), eq(productLine.name())))
+                eq(productLine.name()), eq(1001L), eq(1001L)))
                 .thenReturn(hasUnsettledTrades);
         when(jdbcTemplate.queryForObject(contains("FROM account_margin_reservations"), eq(Boolean.class),
                 eq(1001L), eq(productLine.accountTypeCode()))).thenReturn(hasActiveReservations);
