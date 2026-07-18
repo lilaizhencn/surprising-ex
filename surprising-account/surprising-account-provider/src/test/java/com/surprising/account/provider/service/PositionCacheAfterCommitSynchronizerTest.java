@@ -30,11 +30,11 @@ class PositionCacheAfterCommitSynchronizerTest {
     }
 
     @Test
-    void enqueuesOneFinalSnapshotBeforeCommitAndAcceleratesOnlyAfterCommit() {
+    void capturesOneFinalSnapshotBeforeCommitAndUpdatesRedisOnlyAfterCommit() {
         PositionCacheProjectionRepository repository = mock(PositionCacheProjectionRepository.class);
         PositionCacheAccelerationWorker worker = mock(PositionCacheAccelerationWorker.class);
         PositionCacheEvent snapshot = snapshot();
-        when(repository.enqueueFinalSnapshot(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
+        when(repository.captureFinalSnapshot(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
                 PositionSide.NET)).thenReturn(snapshot);
         PositionCacheAfterCommitSynchronizer synchronizer =
                 new PositionCacheAfterCommitSynchronizer(repository, worker);
@@ -49,7 +49,7 @@ class PositionCacheAfterCommitSynchronizerTest {
         verifyNoInteractions(repository, worker);
         List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
         synchronizations.forEach(synchronization -> synchronization.beforeCommit(false));
-        verify(repository, times(1)).enqueueFinalSnapshot(
+        verify(repository, times(1)).captureFinalSnapshot(
                 ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
                 PositionSide.NET);
         verifyNoInteractions(worker);

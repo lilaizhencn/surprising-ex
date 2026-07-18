@@ -1,6 +1,7 @@
 package com.surprising.account.provider.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -15,33 +16,31 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
+import org.springframework.jdbc.core.RowMapper;
 
 class PositionCacheProjectionRepositoryTest {
 
     @Test
-    void capturesAndEnqueuesOneFinalSnapshotInOneDatabaseCall() throws Exception {
+    void capturesOneFinalSnapshotWithoutWritingOutbox() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        ObjectMapper objectMapper = JsonMapper.builder().build();
         PositionCacheEvent expected = event();
-        when(jdbcTemplate.queryForObject(
-                anyString(), eq(String.class), eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"),
-                eq("CROSS"), eq("NET"))).thenReturn(objectMapper.writeValueAsString(expected));
-        PositionCacheProjectionRepository repository =
-                new PositionCacheProjectionRepository(jdbcTemplate, objectMapper);
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class),
+                eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET")))
+                .thenReturn(java.util.List.of(expected));
+        PositionCacheProjectionRepository repository = new PositionCacheProjectionRepository(jdbcTemplate);
 
-        PositionCacheEvent actual = repository.enqueueFinalSnapshot(
+        PositionCacheEvent actual = repository.captureFinalSnapshot(
                 ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET);
 
         assertThat(actual).isEqualTo(expected);
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).queryForObject(
-                sql.capture(), eq(String.class), eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"),
+        verify(jdbcTemplate).query(
+                sql.capture(), any(RowMapper.class), eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"),
                 eq("CROSS"), eq("NET"));
         assertThat(sql.getValue())
-                .contains("account_enqueue_position_cache_event")
-                .contains("nextval('account_position_cache_revision_seq')");
+                .contains("GREATEST(p.cache_revision")
+                .contains("FROM account_positions")
+                .doesNotContain("account_outbox_events");
     }
 
     private PositionCacheEvent event() {

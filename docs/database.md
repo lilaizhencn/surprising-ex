@@ -748,15 +748,12 @@ Gateway admin alerting uses four tables:
 
 `account_outbox_events` stores account-side Kafka events written inside the same transaction as the
 account state change. It carries `POSITION_UPDATED` events for WebSocket private position pushes and
-`LIQUIDATION_FEE_SETTLED` events for insurance-fund credits. It also carries `POSITION_CACHE_PROJECTED`
-events. Account-provider collects changed position keys in the local transaction and captures exactly one final
-position/collateral snapshot per distinct key immediately before commit. Row-level position and margin updates no
-longer emit intermediate cache events:
+`LIQUIDATION_FEE_SETTLED` events for insurance-fund credits. Redis position snapshots are not business events and
+are deliberately excluded from this table:
 
 - `id`: database-allocated outbox id.
 - `topic`: Kafka destination, for example `surprising.account.position.events.v1` or
-  `surprising.account.liquidation-fee.events.v1`. Cache projection topics are always product-line scoped,
-  for example `surprising.linear-perp.account.position-cache.events.v1`.
+  `surprising.account.liquidation-fee.events.v1`.
 - `product_line`: outbox ownership and publisher scope. A provider only claims rows for its configured product line.
 - `event_key`: Kafka key. Position updates use the normalized symbol; liquidation-fee events use the
   settlement asset so insurance fund updates can be serialized by asset.
@@ -766,12 +763,10 @@ longer emit intermediate cache events:
   pushes can be correlated with the order and matching rows.
 - `LIQUIDATION_FEE_SETTLED` payloads carry `tradeId`, `orderId`, `liquidationOrderId`, `candidateId`,
   `asset`, collected `amountUnits`, `feeRatePpm`, and `traceId`.
-- `POSITION_CACHE_PROJECTED` payloads carry a complete position and collateral snapshot plus a globally increasing
-  `revision`; its Kafka key is `PRODUCT_LINE:userId`. Redis applies it with a compare-and-set Lua script, so
-  duplicate or out-of-order publishing cannot overwrite newer user-visible position state.
-- The exact committed snapshot is also offered to a bounded, coalescing, after-commit worker for low latency.
-  This worker performs no work on the Kafka command thread. Queue overflow or Redis failure only drops the
-  accelerator attempt; the durable outbox remains the recovery source.
+- Account-provider captures one complete position/collateral snapshot per distinct changed key before commit and
+  submits it to a bounded, coalescing Redis worker only after commit. This path does not insert an outbox row or
+  publish Kafka. Redis Lua CAS rejects older revisions. Queue overflow or Redis failure marks the product-line
+  projection unavailable, and the cache coordinator repairs it from PostgreSQL before reads resume.
 
 Indexes:
 

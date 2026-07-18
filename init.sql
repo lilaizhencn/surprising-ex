@@ -2620,102 +2620,15 @@ CREATE TRIGGER account_position_margins_cache_revision_trigger
 BEFORE UPDATE ON account_position_margins
 FOR EACH ROW EXECUTE FUNCTION account_set_position_cache_revision();
 
-CREATE OR REPLACE FUNCTION account_position_cache_topic(p_product_line TEXT)
-RETURNS TEXT AS $$
-DECLARE
-    v_segment TEXT;
-BEGIN
-    v_segment := CASE p_product_line
-        WHEN 'SPOT' THEN 'spot'
-        WHEN 'LINEAR_PERPETUAL' THEN 'linear-perp'
-        WHEN 'INVERSE_PERPETUAL' THEN 'inverse-perp'
-        WHEN 'LINEAR_DELIVERY' THEN 'linear-delivery'
-        WHEN 'INVERSE_DELIVERY' THEN 'inverse-delivery'
-        WHEN 'OPTION' THEN 'option'
-        ELSE NULL
-    END;
-    IF v_segment IS NULL THEN
-        RAISE EXCEPTION 'unsupported account position product line: %', p_product_line;
-    END IF;
-    RETURN 'surprising.' || v_segment || '.account.position-cache.events.v1';
-END;
-$$ LANGUAGE plpgsql IMMUTABLE STRICT;
-
--- Position mutations are collected by account-provider and flushed once per distinct position key
--- immediately before the local transaction commits. Remove the former row-level outbox triggers:
--- updating position collateral and then position quantity must not serialize two intermediate snapshots.
+-- Position mutations are collected by account-provider and captured once per distinct position key immediately
+-- before commit. After commit, the final snapshot is offered directly to the local Redis worker. Position cache
+-- snapshots are deliberately not durable business events and must never consume account outbox/Kafka capacity.
 DROP TRIGGER IF EXISTS account_positions_cache_outbox_trigger ON account_positions;
 DROP TRIGGER IF EXISTS account_position_margins_cache_outbox_trigger ON account_position_margins;
 DROP FUNCTION IF EXISTS account_emit_position_cache_from_position();
 DROP FUNCTION IF EXISTS account_emit_position_cache_from_margin();
 DROP FUNCTION IF EXISTS account_enqueue_position_cache_event(TEXT, BIGINT, TEXT, TEXT, TEXT, BIGINT);
-
-CREATE FUNCTION account_enqueue_position_cache_event(
-    p_product_line TEXT,
-    p_user_id BIGINT,
-    p_symbol TEXT,
-    p_margin_mode TEXT,
-    p_position_side TEXT,
-    p_revision BIGINT)
-RETURNS JSONB AS $$
-DECLARE
-    v_payload JSONB;
-BEGIN
-    SELECT jsonb_build_object(
-               'eventId', p_revision,
-               'productLine', p.product_line,
-               'userId', p.user_id,
-               'symbol', p.symbol,
-               'instrumentVersion', p.instrument_version,
-               'marginMode', p.margin_mode,
-               'positionSide', p.position_side,
-               'signedQuantitySteps', p.signed_quantity_steps,
-               'entryPriceTicks', p.entry_price_ticks,
-               'entryValueTicks', p.entry_value_ticks,
-               'realizedPnlUnits', p.realized_pnl_units,
-               'marginAsset', COALESCE(m.asset, i.settle_asset, ''),
-               'marginUnits', COALESCE(m.margin_units, 0),
-               'positionUpdatedAt', p.updated_at,
-               'marginUpdatedAt', COALESCE(m.updated_at, p.updated_at),
-               'revision', p_revision)
-      INTO v_payload
-      FROM account_positions p
-      LEFT JOIN instruments i
-        ON i.symbol = p.symbol
-       AND i.version = p.instrument_version
-      LEFT JOIN LATERAL (
-          SELECT MIN(pm.asset) AS asset,
-                 COALESCE(SUM(pm.margin_units), 0)::BIGINT AS margin_units,
-                 MAX(pm.updated_at) AS updated_at
-            FROM account_position_margins pm
-           WHERE pm.product_line = p.product_line
-             AND pm.user_id = p.user_id
-             AND pm.symbol = p.symbol
-             AND pm.margin_mode = p.margin_mode
-             AND pm.position_side = p.position_side
-      ) m ON TRUE
-     WHERE p.product_line = p_product_line
-       AND p.user_id = p_user_id
-       AND p.symbol = p_symbol
-       AND p.margin_mode = p_margin_mode
-       AND p.position_side = p_position_side;
-
-    IF v_payload IS NULL THEN
-        RAISE EXCEPTION 'position cache projection source is missing: line=% user=% symbol=% mode=% side=%',
-            p_product_line, p_user_id, p_symbol, p_margin_mode, p_position_side;
-    END IF;
-
-    INSERT INTO account_outbox_events (
-        product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
-        next_attempt_at, created_at, updated_at
-    ) VALUES (
-        p_product_line, 'POSITION_CACHE', p_revision, account_position_cache_topic(p_product_line),
-        p_product_line || ':' || p_user_id, 'POSITION_CACHE_PROJECTED', v_payload,
-        now(), now(), now()
-    );
-    RETURN v_payload;
-END;
-$$ LANGUAGE plpgsql;
+DROP FUNCTION IF EXISTS account_position_cache_topic(TEXT);
 
 CREATE TABLE IF NOT EXISTS risk_sequences (
     sequence_name       TEXT PRIMARY KEY,

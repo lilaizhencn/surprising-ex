@@ -16,9 +16,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 /**
  * Collects changed position keys for one account transaction.
  *
- * <p>Immediately before commit, each distinct key is captured once as a durable final-state outbox event.
- * After commit, that exact event is offered to a bounded asynchronous Redis accelerator. No database or
- * Redis I/O runs on the Kafka consumer thread after the transaction commits.</p>
+ * <p>Immediately before commit, each distinct key is captured once as a final-state snapshot. After commit,
+ * that exact snapshot is offered to a bounded asynchronous Redis worker. The cache path never writes an outbox
+ * row and never blocks the transaction on Redis I/O.</p>
  */
 @Component
 public class PositionCacheAfterCommitSynchronizer {
@@ -55,7 +55,7 @@ public class PositionCacheAfterCommitSynchronizer {
                         throw new IllegalStateException("position cache projection cannot run in a read-only transaction");
                     }
                     for (ProjectionKey changed : registeredState.keys) {
-                        registeredState.events.add(repository.enqueueFinalSnapshot(
+                        registeredState.events.add(repository.captureFinalSnapshot(
                                 changed.productLine(), changed.userId(), changed.symbol(),
                                 changed.marginMode(), changed.positionSide()));
                     }

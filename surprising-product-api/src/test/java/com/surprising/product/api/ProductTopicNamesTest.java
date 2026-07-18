@@ -23,8 +23,6 @@ class ProductTopicNamesTest {
         assertThat(linear.fundingRateTopic()).isEqualTo("surprising.linear-perp.funding.rate.v1");
         assertThat(linear.accountPositionEventsTopic())
                 .isEqualTo("surprising.linear-perp.account.position.events.v1");
-        assertThat(linear.accountPositionCacheEventsTopic())
-                .isEqualTo("surprising.linear-perp.account.position-cache.events.v1");
         assertThat(linear.accountLiquidationFeeEventsTopic())
                 .isEqualTo("surprising.linear-perp.account.liquidation-fee.events.v1");
         assertThat(linear.accountUserCommandsTopic())
