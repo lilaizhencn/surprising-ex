@@ -39,17 +39,19 @@ public class AccountOrderReservationRepository {
                         long userId,
                         long orderId,
                         boolean releaseAll,
+                        long quantitySteps,
+                        long remainingQuantitySteps,
                         String reason,
                         Instant now) {
         requireOrderIdentity(productLine, userId, orderId, null, null, null);
         Reservation derivative = lockDerivative(orderId);
         if (derivative != null) {
-            releaseDerivative(orderId, derivative, releaseAll, reason, now);
+            releaseDerivative(orderId, derivative, releaseAll, quantitySteps, remainingQuantitySteps, reason, now);
             return;
         }
         SpotReservation spot = lockSpot(orderId);
         if (spot != null) {
-            releaseSpot(orderId, spot, releaseAll, reason, now);
+            releaseSpot(orderId, spot, releaseAll, quantitySteps, remainingQuantitySteps, reason, now);
             return;
         }
         if (hasAnyReservation(orderId)) {
@@ -159,6 +161,8 @@ public class AccountOrderReservationRepository {
     private void releaseDerivative(long orderId,
                                    Reservation reservation,
                                    boolean releaseAll,
+                                   long quantitySteps,
+                                   long remainingQuantitySteps,
                                    String reason,
                                    Instant now) {
         long amountUnits;
@@ -166,9 +170,8 @@ public class AccountOrderReservationRepository {
             amountUnits = Math.subtractExact(reservation.reservedUnits(),
                     Math.addExact(reservation.releasedUnits(), reservation.consumedUnits()));
         } else {
-            long[] order = orderQuantity(orderId);
-            amountUnits = AccountMarginReleaseMath.releaseForRemaining(reservation.reservedUnits(),
-                    reservation.releasedUnits(), reservation.consumedUnits(), order[0], order[1]);
+            amountUnits = AccountMarginReleaseMath.releaseForExecuted(reservation.reservedUnits(),
+                    reservation.releasedUnits(), reservation.consumedUnits(), quantitySteps, remainingQuantitySteps);
         }
         if (amountUnits <= 0) {
             return;
@@ -194,6 +197,8 @@ public class AccountOrderReservationRepository {
     private void releaseSpot(long orderId,
                              SpotReservation reservation,
                              boolean releaseAll,
+                             long quantitySteps,
+                             long remainingQuantitySteps,
                              String reason,
                              Instant now) {
         long amountUnits;
@@ -201,9 +206,8 @@ public class AccountOrderReservationRepository {
             amountUnits = Math.subtractExact(reservation.reservedUnits(),
                     Math.addExact(reservation.releasedUnits(), reservation.settledUnits()));
         } else {
-            long[] order = orderQuantity(orderId);
-            amountUnits = AccountMarginReleaseMath.releaseForRemaining(reservation.reservedUnits(),
-                    reservation.releasedUnits(), reservation.settledUnits(), order[0], order[1]);
+            amountUnits = AccountMarginReleaseMath.releaseForExecuted(reservation.reservedUnits(),
+                    reservation.releasedUnits(), reservation.settledUnits(), quantitySteps, remainingQuantitySteps);
         }
         if (amountUnits <= 0) {
             return;
@@ -257,17 +261,6 @@ public class AccountOrderReservationRepository {
                 rs.getLong("user_id"), rs.getString("asset"), rs.getLong("reserved_units"),
                 rs.getLong("settled_units"), rs.getLong("released_units")),
                 orderId).stream().findFirst().orElse(null);
-    }
-
-    private long[] orderQuantity(long orderId) {
-        return jdbcTemplate.query("""
-                SELECT quantity_steps, remaining_quantity_steps
-                  FROM trading_orders
-                 WHERE order_id = ?
-                """, (rs, rowNum) -> new long[] {
-                rs.getLong("quantity_steps"), rs.getLong("remaining_quantity_steps")
-        }, orderId).stream().findFirst()
-                .orElseThrow(() -> new IllegalStateException("order not found for reservation release " + orderId));
     }
 
     private boolean hasAnyReservation(long orderId) {

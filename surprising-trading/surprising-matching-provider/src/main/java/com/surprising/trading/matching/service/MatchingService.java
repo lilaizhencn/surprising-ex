@@ -39,6 +39,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -108,37 +109,38 @@ public class MatchingService {
         MatchingSymbol symbol = exchangeCoreEngine.ensureSymbol(command.symbol())
                 .orElse(null);
         if (symbol == null) {
-            saveAndPublish(rejected(command, "UNKNOWN_SYMBOL", now));
+            saveAndPublish(rejected(command, "UNKNOWN_SYMBOL", now), command, Map.of());
             return;
         }
         long effectivePriceTicks = command.commandType() == OrderCommandType.PLACE
                 ? effectivePriceTicks(command)
                 : command.priceTicks();
         if (command.commandType() == OrderCommandType.PLACE && effectivePriceTicks <= 0) {
-            saveAndPublish(rejected(command, "MARK_PRICE_UNAVAILABLE", now));
+            saveAndPublish(rejected(command, "MARK_PRICE_UNAVAILABLE", now), command, Map.of());
             return;
         }
         if (command.commandType() == OrderCommandType.PLACE
                 && protectionRepository.hasOpenOrdersWithDifferentInstrumentVersion(command.symbol(),
                 command.instrumentVersion(), command.orderId())) {
-            saveAndPublish(rejected(command, "INSTRUMENT_VERSION_OPEN_BOOK_MISMATCH", now));
+            saveAndPublish(rejected(command, "INSTRUMENT_VERSION_OPEN_BOOK_MISMATCH", now), command, Map.of());
             return;
         }
         if (command.commandType() == OrderCommandType.PLACE
                 && exchangeCoreEngine.wouldTakeLiquidity(command, symbol, effectivePriceTicks)) {
-            saveAndPublish(rejected(command, "POST_ONLY_WOULD_TAKE", now));
+            saveAndPublish(rejected(command, "POST_ONLY_WOULD_TAKE", now), command, Map.of());
             return;
         }
         if (wouldSelfTrade(command, effectivePriceTicks)) {
-            saveAndPublish(rejected(command, "SELF_TRADE_PREVENTED", now));
+            saveAndPublish(rejected(command, "SELF_TRADE_PREVENTED", now), command, Map.of());
             return;
         }
 
         OrderCommand response = exchangeCoreEngine.submit(command, symbol, effectivePriceTicks);
         publishOrderBookDepth(symbol, response.resultCode, now);
         publishPublicTrades(command, response, now);
-        MatchResultEvent result = toResultEvent(command, response, now);
-        saveAndPublish(result);
+        Map<Long, OrderQuantitySnapshot> makerQuantitySnapshots = new HashMap<>();
+        MatchResultEvent result = toResultEvent(command, response, now, makerQuantitySnapshots);
+        saveAndPublish(result, command, makerQuantitySnapshots);
     }
 
     public OrderBookSnapshotResponse orderBookSnapshot(String symbol, int requestedDepth) {
@@ -172,15 +174,18 @@ public class MatchingService {
                 || !properties.getProtection().isSelfTradePreventionEnabled()) {
             return false;
         }
-        if (properties.getProtection().isSelfTradePreventionBypassed(command.userId())) {
+        if (properties.getProtection().isInternalMarketMaker(command.userId())) {
             return false;
         }
         return protectionRepository.wouldSelfTrade(command.userId(), command.symbol(), command.instrumentVersion(),
                 command.side(), effectivePriceTicks);
     }
 
-    private MatchResultEvent toResultEvent(OrderCommandEvent command, OrderCommand response, Instant now) {
-        List<MatchTradeEvent> trades = trades(command, response, now);
+    private MatchResultEvent toResultEvent(OrderCommandEvent command,
+                                           OrderCommand response,
+                                           Instant now,
+                                           Map<Long, OrderQuantitySnapshot> makerQuantitySnapshots) {
+        List<MatchTradeEvent> trades = trades(command, response, now, makerQuantitySnapshots);
         long filledQuantity = trades.stream().mapToLong(MatchTradeEvent::quantitySteps)
                 .reduce(0L, Math::addExact);
         OrderStatus status = status(command, response.resultCode, trades, filledQuantity);
@@ -199,26 +204,47 @@ public class MatchingService {
                 command.traceId());
     }
 
-    private List<MatchTradeEvent> trades(OrderCommandEvent command, OrderCommand response, Instant now) {
+    private List<MatchTradeEvent> trades(OrderCommandEvent command,
+                                         OrderCommand response,
+                                         Instant now,
+                                         Map<Long, OrderQuantitySnapshot> makerQuantitySnapshots) {
         List<MatchTradeEvent> trades = new ArrayList<>();
         Map<Long, MatchedOrderSnapshot> makerSnapshots = new HashMap<>();
+        Map<Long, Long> makerRemainingQuantities = new HashMap<>();
+        AtomicInteger matchIndex = new AtomicInteger();
         response.processMatcherEvents(event -> {
             if (event.eventType != MatcherEventType.TRADE) {
                 return;
             }
-            trades.add(toTrade(command, event, now, makerSnapshots));
+            int index = matchIndex.incrementAndGet();
+            trades.add(toTrade(command, event, index, now, makerSnapshots, makerRemainingQuantities,
+                    makerQuantitySnapshots));
         });
         return trades;
     }
 
     private MatchTradeEvent toTrade(OrderCommandEvent command,
                                     MatcherTradeEvent event,
+                                    int matchIndex,
                                     Instant now,
-                                    Map<Long, MatchedOrderSnapshot> makerSnapshots) {
+                                    Map<Long, MatchedOrderSnapshot> makerSnapshots,
+                                    Map<Long, Long> makerRemainingQuantities,
+                                    Map<Long, OrderQuantitySnapshot> makerQuantitySnapshots) {
         MatchedOrderSnapshot makerSnapshot = makerSnapshots.computeIfAbsent(event.matchedOrderId,
                 resultRepository::orderSnapshot);
-        return new MatchTradeEvent(
-                sequenceRepository.nextSequence("match-trade"),
+        long remainingBefore = makerRemainingQuantities.getOrDefault(
+                event.matchedOrderId, makerSnapshot.remainingQuantitySteps());
+        long remainingAfter = Math.subtractExact(remainingBefore, event.size);
+        if (remainingAfter < 0) {
+            throw new IllegalStateException("maker fill exceeds remaining quantity for order " + event.matchedOrderId);
+        }
+        makerRemainingQuantities.put(event.matchedOrderId, remainingAfter);
+        long tradeId = isInternalMarketMaker(command.userId())
+                && isInternalMarketMaker(event.matchedOrderUid)
+                ? internalSelfTradeId(command.commandId(), matchIndex)
+                : sequenceRepository.nextSequence("match-trade");
+        MatchTradeEvent trade = new MatchTradeEvent(
+                tradeId,
                 command.commandId(),
                 command.symbol(),
                 command.orderId(),
@@ -240,6 +266,9 @@ public class MatchingService {
                 event.matchedOrderCompleted,
                 now,
                 command.traceId());
+        makerQuantitySnapshots.put(tradeId,
+                new OrderQuantitySnapshot(makerSnapshot.quantitySteps(), remainingAfter));
+        return trade;
     }
 
     private MatchResultEvent rejected(OrderCommandEvent command, String reason, Instant now) {
@@ -288,20 +317,33 @@ public class MatchingService {
                 || command.timeInForce() == TimeInForce.FOK;
     }
 
-    private void saveAndPublish(MatchResultEvent result) {
+    private void saveAndPublish(MatchResultEvent result,
+                                OrderCommandEvent orderCommand,
+                                Map<Long, OrderQuantitySnapshot> makerQuantitySnapshots) {
         if (!resultRepository.saveResult(result)) {
             return;
         }
         resultRepository.applyActiveOrderStatus(result);
+        boolean containsInternalSelfTrade = false;
+        String lastTakerFinancialCommandId = null;
         for (MatchTradeEvent trade : result.trades()) {
+            if (isInternalSelfTrade(trade)) {
+                containsInternalSelfTrade = true;
+                resultRepository.applyMakerFill(trade);
+                enqueueInternalSelfTradeMakerRelease(trade, requireQuantitySnapshot(trade, makerQuantitySnapshots));
+                continue;
+            }
             if (!resultRepository.saveTrade(trade)) {
                 continue;
             }
+            lastTakerFinancialCommandId = tradeSideCommandId(
+                    trade, TradeParticipantRole.TAKER, trade.takerUserId());
             resultRepository.applyMakerFill(trade);
             enqueueAccountTradeSide(trade, TradeParticipantRole.TAKER);
             enqueueAccountTradeSide(trade, TradeParticipantRole.MAKER);
         }
-        enqueueAccountReleaseIfRequired(result);
+        enqueueActiveOrderReleaseIfRequired(result, orderCommand, containsInternalSelfTrade,
+                lastTakerFinancialCommandId);
         outboxRepository.enqueue("MATCH_RESULT", result.commandId(), properties.getKafka().getMatchResultsTopic(),
                 result.symbol(), result.commandType().name(), payload(result), result.eventTime());
     }
@@ -325,13 +367,13 @@ public class MatchingService {
         if (response.resultCode != CommandResultCode.SUCCESS) {
             return;
         }
-        int[] matchIndex = {0};
+        AtomicInteger matchIndex = new AtomicInteger();
         try {
             response.processMatcherEvents(event -> {
                 if (event.eventType != MatcherEventType.TRADE) {
                     return;
                 }
-                int index = Math.incrementExact(matchIndex[0]);
+                int index = matchIndex.incrementAndGet();
                 long sequence = Math.addExact(
                         Math.multiplyExact(command.commandId(), PUBLIC_TRADE_SEQUENCE_MULTIPLIER), index);
                 tradePublisher.offer(new PublicTradeEvent(
@@ -372,40 +414,97 @@ public class MatchingService {
                 command.commandType().name(), payload(command), trade.eventTime());
     }
 
-    private void enqueueAccountReleaseIfRequired(MatchResultEvent result) {
+    private void enqueueInternalSelfTradeMakerRelease(MatchTradeEvent trade,
+                                                      OrderQuantitySnapshot quantitySnapshot) {
+        String commandId = "ORDER_RELEASE:" + properties.getKafka().getProductLine().name()
+                + ":" + trade.makerOrderId() + ":INTERNAL_SELF_TRADE:" + trade.tradeId();
+        enqueueOrderRelease(commandId, trade.tradeId(), trade.makerUserId(), trade.makerOrderId(),
+                trade.makerOrderCompleted(), quantitySnapshot.quantitySteps(),
+                quantitySnapshot.remainingQuantitySteps(), "INTERNAL_MARKET_MAKER_SELF_TRADE", null,
+                trade.eventTime(), trade.traceId());
+    }
+
+    private void enqueueActiveOrderReleaseIfRequired(MatchResultEvent result,
+                                                     OrderCommandEvent orderCommand,
+                                                     boolean containsInternalSelfTrade,
+                                                     String dependencyCommandId) {
         boolean rejected = result.orderStatus() == OrderStatus.REJECTED;
         boolean canceled = result.orderStatus() == OrderStatus.CANCELED;
         boolean terminal = result.orderStatus() == OrderStatus.FILLED || canceled || rejected;
-        if (!terminal) {
+        if (!terminal && !containsInternalSelfTrade) {
             return;
         }
-        String reason = rejected ? "ORDER_REJECTED" : canceled ? "ORDER_CANCELED" : "ORDER_TERMINAL";
-        String dependency = result.trades().isEmpty() ? null
-                : tradeSideCommandId(result.trades().get(result.trades().size() - 1),
-                TradeParticipantRole.TAKER, result.userId());
+        String reason = rejected
+                ? "ORDER_REJECTED"
+                : canceled
+                        ? "ORDER_CANCELED"
+                        : terminal ? "ORDER_TERMINAL" : "INTERNAL_MARKET_MAKER_SELF_TRADE";
+        String commandId = "ORDER_RELEASE:" + properties.getKafka().getProductLine().name()
+                + ":" + result.orderId() + ":" + result.commandId();
+        long remainingQuantitySteps = terminal
+                ? 0L
+                : Math.subtractExact(orderCommand.quantitySteps(), result.filledQuantitySteps());
+        enqueueOrderRelease(commandId, result.commandId(), result.userId(), result.orderId(),
+                terminal, orderCommand.quantitySteps(), remainingQuantitySteps,
+                reason, dependencyCommandId, result.eventTime(), result.traceId());
+    }
+
+    private void enqueueOrderRelease(String commandId,
+                                     long aggregateId,
+                                     long userId,
+                                     long orderId,
+                                     boolean releaseAll,
+                                     long quantitySteps,
+                                     long remainingQuantitySteps,
+                                     String reason,
+                                     String dependencyCommandId,
+                                     Instant eventTime,
+                                     String traceId) {
         OrderReleaseAccountCommand release = new OrderReleaseAccountCommand(
-                result.orderId(), rejected, reason, result.eventTime());
+                orderId, releaseAll, quantitySteps, remainingQuantitySteps, reason, eventTime);
         AccountUserCommand command = new AccountUserCommand(
                 AccountUserCommand.CURRENT_SCHEMA_VERSION,
-                "ORDER_RELEASE:" + properties.getKafka().getProductLine().name() + ":" + result.orderId()
-                        + ":" + result.commandId(),
+                commandId,
                 properties.getKafka().getProductLine(),
-                result.userId(),
+                userId,
                 AccountUserCommandType.ORDER_RELEASE,
                 "MATCHING",
-                String.valueOf(result.orderId()),
-                dependency,
+                String.valueOf(orderId),
+                dependencyCommandId,
                 payload(release),
-                result.eventTime(),
-                result.traceId());
-        outboxRepository.enqueue("ACCOUNT_COMMAND", result.commandId(),
+                eventTime,
+                traceId);
+        outboxRepository.enqueue("ACCOUNT_COMMAND", aggregateId,
                 properties.getKafka().getAccountUserCommandsTopic(), command.partitionKey(),
-                command.commandType().name(), payload(command), result.eventTime());
+                command.commandType().name(), payload(command), eventTime);
     }
 
     private String tradeSideCommandId(MatchTradeEvent trade, TradeParticipantRole role, long userId) {
         return "TRADE:" + properties.getKafka().getProductLine().name() + ":" + trade.symbol()
                 + ":" + trade.tradeId() + ":" + role.name() + ":" + userId;
+    }
+
+    private boolean isInternalSelfTrade(MatchTradeEvent trade) {
+        return isInternalMarketMaker(trade.takerUserId())
+                && isInternalMarketMaker(trade.makerUserId());
+    }
+
+    private boolean isInternalMarketMaker(long userId) {
+        return properties.getProtection().isInternalMarketMaker(userId);
+    }
+
+    private long internalSelfTradeId(long commandId, int matchIndex) {
+        return Math.addExact(Math.multiplyExact(commandId, PUBLIC_TRADE_SEQUENCE_MULTIPLIER), matchIndex);
+    }
+
+    private OrderQuantitySnapshot requireQuantitySnapshot(
+            MatchTradeEvent trade,
+            Map<Long, OrderQuantitySnapshot> makerQuantitySnapshots) {
+        OrderQuantitySnapshot snapshot = makerQuantitySnapshots.get(trade.tradeId());
+        if (snapshot == null) {
+            throw new IllegalStateException("missing maker quantity snapshot for trade " + trade.tradeId());
+        }
+        return snapshot;
     }
 
     private OrderBookDepthEvent orderBookDepthSnapshot(MatchingSymbol symbol, Instant now) {
@@ -459,6 +558,15 @@ public class MatchingService {
 
     private record DepthSnapshot(Map<Long, OrderBookLevel> bids,
                                  Map<Long, OrderBookLevel> asks) {
+    }
+
+    private record OrderQuantitySnapshot(long quantitySteps, long remainingQuantitySteps) {
+
+        private OrderQuantitySnapshot {
+            if (quantitySteps <= 0 || remainingQuantitySteps < 0 || remainingQuantitySteps > quantitySteps) {
+                throw new IllegalArgumentException("invalid order quantity snapshot");
+            }
+        }
     }
 
     private static final class DepthState {

@@ -294,7 +294,7 @@ The trading Java module remains long-only.
 - `surprising.<product-segment>.orderbook.depth.v1`: lossy L2 order-book snapshots, key = `symbol`; only the latest pending snapshot per symbol is retained.
 - `surprising.<product-segment>.mark.price.v1`: mark-price stream consumed by trigger-provider, key = `symbol`.
 
-The public trade/depth path does not read or write the matching database and cannot block or roll back financial processing. Full `MatchTradeEvent` rows remain in `trading_match_trades` for audit and are embedded in the durable `MatchResultEvent`; maker/taker settlement is performed only from durable account commands.
+The public trade/depth path does not read or write the matching database and cannot block or roll back financial processing. Full economic `MatchTradeEvent` rows remain in `trading_match_trades` for audit and are embedded in the durable `MatchResultEvent`; maker/taker settlement is performed only from durable account commands. A match whose maker and taker are both configured internal market-maker users remains in the public trade/depth stream but skips the economic trade row and trade-side settlement commands.
 
 Legacy `surprising.perp.*` topics remain available for backward-compatible single-line perpetual startup.
 
@@ -398,6 +398,10 @@ Treat any matching process exit during command handling as a required DB-recover
 - SELL checks own open BUY orders with `priceTicks >= effectivePriceTicks`.
 - `CANCEL_REQUESTED` orders are included because they may still be live in exchange-core until the cancel command is processed.
 - The rejected match result uses `SELF_TRADE_PREVENTED` and releases any reserved margin through the normal rejection path.
+- `surprising.trading.matching.protection.internal-market-maker-user-ids` is the single internal-liquidity whitelist. Whitelisted takers bypass self-trade prevention so internal liquidity can maintain the public price path.
+- When both participants are whitelisted, matching still publishes the same `PublicTradeEvent`, order-book depth, match result, candlestick input, and WebSocket update. It does not insert `trading_match_trades` or enqueue `TRADE_SIDE_SETTLE`.
+- Internal-only fills still update both persisted order quantities and enqueue the existing `ORDER_RELEASE` command for each affected reservation. This prevents stale order-book recovery and locked margin without creating positions, fees, PnL, or account ledgers.
+- If either participant is not whitelisted, the fill follows the complete economic trade and account-settlement path. Mixed sweeps classify every matcher fill independently and make the active-order release depend on its last economic taker settlement.
 
 ## API
 

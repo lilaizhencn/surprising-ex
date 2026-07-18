@@ -291,7 +291,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `surprising.<product-segment>.orderbook.depth.v1`：可丢失的 L2 盘口快照，key = `symbol`；每个 symbol 只保留最新一份待发送快照。
 - `surprising.<product-segment>.mark.price.v1`：trigger-provider 消费的标记价格流，key = `symbol`。
 
-公共逐笔/盘口链路不读写 matching 数据库，也不能阻塞或回滚资金处理。完整 `MatchTradeEvent` 仍落在 `trading_match_trades` 用于审计，并包含在可靠的 `MatchResultEvent` 中；maker/taker 结算只通过可靠的账户命令执行。
+公共逐笔/盘口链路不读写 matching 数据库，也不能阻塞或回滚资金处理。真实经济成交的完整 `MatchTradeEvent` 仍落在 `trading_match_trades` 用于审计，并包含在可靠的 `MatchResultEvent` 中；maker/taker 结算只通过可靠的账户命令执行。maker 和 taker 都属于内部做市白名单时，成交仍进入公共逐笔和盘口链路，但跳过经济成交表与双方成交结算命令。
 
 legacy `surprising.perp.*` topic 仍保留，用于兼容单线永续启动。
 
@@ -395,6 +395,10 @@ matching consumer 使用 cooperative sticky assignment 和 `MatchingPartitionAss
 - SELL 检查自己的 BUY 挂单是否有 `priceTicks >= effectivePriceTicks`。
 - `CANCEL_REQUESTED` 订单也会计入，因为 cancel 命令真正处理前订单仍可能在 exchange-core 内有效。
 - 拒绝原因是 `SELF_TRADE_PREVENTED`，已冻结保证金会走正常拒单释放链路。
+- `surprising.trading.matching.protection.internal-market-maker-user-ids` 是唯一的内部流动性账号白名单。白名单 taker 绕过自成交防护，用于维持平台公共价格走势。
+- maker 和 taker 都在白名单时，撮合仍发布相同的 `PublicTradeEvent`、盘口深度、撮合结果、K 线输入和 WebSocket 推送，但不插入 `trading_match_trades`，也不发送 `TRADE_SIDE_SETTLE`。
+- 内部自成交仍更新双方订单的数据库剩余数量，并复用现有 `ORDER_RELEASE` 释放对应冻结保证金，防止撮合重启恢复出陈旧订单或资金长期冻结；不会形成持仓、手续费、盈亏和账户账本。
+- 任意一方不在白名单时，成交完整进入经济成交和账户结算链路。混合扫单按每一笔 matcher fill 独立分类，主动订单的最终释放依赖最后一笔真实 taker 结算命令。
 
 ## API
 

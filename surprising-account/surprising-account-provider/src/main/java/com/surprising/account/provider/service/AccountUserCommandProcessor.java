@@ -129,7 +129,8 @@ public class AccountUserCommandProcessor {
             case ORDER_RELEASE -> {
                 OrderReleaseAccountCommand release = readPayload(command, OrderReleaseAccountCommand.class);
                 orderReservationRepository.release(command.productLine(), command.userId(), release.orderId(),
-                        release.releaseAll(), release.reason(), release.effectiveAt());
+                        release.releaseAll(), release.quantitySteps(), release.remainingQuantitySteps(),
+                        release.reason(), release.effectiveAt());
                 Map<String, Object> result = new LinkedHashMap<>();
                 result.put("orderId", release.orderId());
                 result.put("released", true);
