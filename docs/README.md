@@ -6,6 +6,7 @@ stay under `/tmp` unless they are promoted into the current consolidated report.
 ## Current Docs
 
 - [Deployment](deployment.md): runtime topology, Kafka topics, provider startup, failover, and operations.
+- [LINEAR_PERPETUAL AWS Production Baseline](linear-perpetual-aws-production-deployment_CN.md): concise EC2, JVM, RDS, MSK, Valkey, sizing, and load-test baseline for the first perpetual product line.
 - [Database Design](database.md): PostgreSQL schema responsibilities and idempotency boundaries.
 - [Product-Line Split and Delivery/Options Implementation Plan](product-line-split-plan.md) / [简体中文](product-line-split-plan_CN.md): four product-line isolation model.
 - [Product-Line Testing and Funds Conservation Reconciliation](product-line-testing-and-funds-reconciliation.md) / [简体中文](product-line-testing-and-funds-reconciliation_CN.md): real API smoke and reconciliation rules.
