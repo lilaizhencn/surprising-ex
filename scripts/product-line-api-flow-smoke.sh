@@ -35,6 +35,7 @@ STRESS_MAKER_BATCH_SIZE="${STRESS_MAKER_BATCH_SIZE:-12}"
 STRESS_TAKER_QUANTITY_STEPS="${STRESS_TAKER_QUANTITY_STEPS:-1}"
 STRESS_WAIT_SECONDS="${STRESS_WAIT_SECONDS:-420}"
 STRESS_PRICE_WARMUP_SECONDS="${STRESS_PRICE_WARMUP_SECONDS:-35}"
+STRESS_PRICE_REFRESH_DELAY_SECONDS="${STRESS_PRICE_REFRESH_DELAY_SECONDS:-0}"
 STRESS_REPORT_FILE="${STRESS_REPORT_FILE:-${ROOT_DIR}/docs/product-line-multi-symbol-stress-report.md}"
 STRESS_MATCHING_KAFKA_CONCURRENCY="${STRESS_MATCHING_KAFKA_CONCURRENCY:-4}"
 STRESS_ACCOUNT_KAFKA_CONCURRENCY="${STRESS_ACCOUNT_KAFKA_CONCURRENCY:-4}"
@@ -1393,6 +1394,10 @@ start_providers_for_line() {
 start_price_refresher() {
   local product_line="$1"
   local log_file="${TMP_DIR}/${product_line}-price-refresher.log"
+  local refresh_delay_seconds=5
+  if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+    refresh_delay_seconds="${STRESS_PRICE_REFRESH_DELAY_SECONDS}"
+  fi
   echo "Starting ${product_line} synthetic mark-price refresher"
   (
     while true; do
@@ -1401,7 +1406,7 @@ start_price_refresher() {
       else
         seed_prices_for_line "${product_line}" >/dev/null 2>&1 || true
       fi
-      sleep 5
+      sleep "${refresh_delay_seconds}"
     done
   ) >"${log_file}" 2>&1 &
   register_provider_pid "price-refresher" "$!"
