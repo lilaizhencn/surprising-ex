@@ -792,7 +792,8 @@ trade id, or their own latest-position version rules. Insurance uses
 Published rows are transient delivery records. Every publisher owns a scheduled retention task: the shared
 trading table is partitioned logically by `aggregate_type`, the account table by `product_line`, and the risk
 publisher owns the risk table. Rows older than seven days are deleted once per minute in up to ten short
-10,000-row `FOR UPDATE SKIP LOCKED` batches. Pending or failed rows are never selected for deletion.
+10,000-row `FOR UPDATE SKIP LOCKED` batches. Pending or failed rows are never selected for deletion. The
+retention duration, cleanup delay, batch size, and maximum batches per run must all be positive.
 
 ## Liquidation Tables
 

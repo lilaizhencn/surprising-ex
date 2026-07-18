@@ -192,6 +192,9 @@ public class LiquidationProperties {
         }
 
         public void setRetention(Duration retention) {
+            if (retention == null || retention.isZero() || retention.isNegative()) {
+                throw new IllegalArgumentException("liquidation outbox retention must be positive");
+            }
             this.retention = retention;
         }
 
@@ -200,6 +203,9 @@ public class LiquidationProperties {
         }
 
         public void setCleanupDelayMs(long cleanupDelayMs) {
+            if (cleanupDelayMs <= 0) {
+                throw new IllegalArgumentException("liquidation outbox cleanupDelayMs must be positive");
+            }
             this.cleanupDelayMs = cleanupDelayMs;
         }
 
@@ -208,6 +214,9 @@ public class LiquidationProperties {
         }
 
         public void setCleanupBatchSize(int cleanupBatchSize) {
+            if (cleanupBatchSize <= 0) {
+                throw new IllegalArgumentException("liquidation outbox cleanupBatchSize must be positive");
+            }
             this.cleanupBatchSize = cleanupBatchSize;
         }
 
@@ -216,6 +225,9 @@ public class LiquidationProperties {
         }
 
         public void setCleanupMaxBatches(int cleanupMaxBatches) {
+            if (cleanupMaxBatches <= 0) {
+                throw new IllegalArgumentException("liquidation outbox cleanupMaxBatches must be positive");
+            }
             this.cleanupMaxBatches = cleanupMaxBatches;
         }
     }

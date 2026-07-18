@@ -344,6 +344,9 @@ public class AccountProperties {
         }
 
         public void setRetention(Duration retention) {
+            if (retention == null || retention.isZero() || retention.isNegative()) {
+                throw new IllegalArgumentException("account outbox retention must be positive");
+            }
             this.retention = retention;
         }
 
@@ -352,6 +355,9 @@ public class AccountProperties {
         }
 
         public void setCleanupDelayMs(long cleanupDelayMs) {
+            if (cleanupDelayMs <= 0) {
+                throw new IllegalArgumentException("account outbox cleanupDelayMs must be positive");
+            }
             this.cleanupDelayMs = cleanupDelayMs;
         }
 
@@ -360,6 +366,9 @@ public class AccountProperties {
         }
 
         public void setCleanupBatchSize(int cleanupBatchSize) {
+            if (cleanupBatchSize <= 0) {
+                throw new IllegalArgumentException("account outbox cleanupBatchSize must be positive");
+            }
             this.cleanupBatchSize = cleanupBatchSize;
         }
 
@@ -368,6 +377,9 @@ public class AccountProperties {
         }
 
         public void setCleanupMaxBatches(int cleanupMaxBatches) {
+            if (cleanupMaxBatches <= 0) {
+                throw new IllegalArgumentException("account outbox cleanupMaxBatches must be positive");
+            }
             this.cleanupMaxBatches = cleanupMaxBatches;
         }
     }

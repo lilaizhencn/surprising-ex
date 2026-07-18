@@ -185,6 +185,9 @@ public class TradingOrderProperties {
         }
 
         public void setRetention(Duration retention) {
+            if (retention == null || retention.isZero() || retention.isNegative()) {
+                throw new IllegalArgumentException("trading order outbox retention must be positive");
+            }
             this.retention = retention;
         }
 
@@ -193,6 +196,9 @@ public class TradingOrderProperties {
         }
 
         public void setCleanupDelayMs(long cleanupDelayMs) {
+            if (cleanupDelayMs <= 0) {
+                throw new IllegalArgumentException("trading order outbox cleanupDelayMs must be positive");
+            }
             this.cleanupDelayMs = cleanupDelayMs;
         }
 
@@ -201,6 +207,9 @@ public class TradingOrderProperties {
         }
 
         public void setCleanupBatchSize(int cleanupBatchSize) {
+            if (cleanupBatchSize <= 0) {
+                throw new IllegalArgumentException("trading order outbox cleanupBatchSize must be positive");
+            }
             this.cleanupBatchSize = cleanupBatchSize;
         }
 
@@ -209,6 +218,9 @@ public class TradingOrderProperties {
         }
 
         public void setCleanupMaxBatches(int cleanupMaxBatches) {
+            if (cleanupMaxBatches <= 0) {
+                throw new IllegalArgumentException("trading order outbox cleanupMaxBatches must be positive");
+            }
             this.cleanupMaxBatches = cleanupMaxBatches;
         }
     }

@@ -383,6 +383,9 @@ public class MatchingProperties {
         }
 
         public void setRetention(Duration retention) {
+            if (retention == null || retention.isZero() || retention.isNegative()) {
+                throw new IllegalArgumentException("matching outbox retention must be positive");
+            }
             this.retention = retention;
         }
 
@@ -391,6 +394,9 @@ public class MatchingProperties {
         }
 
         public void setCleanupDelayMs(long cleanupDelayMs) {
+            if (cleanupDelayMs <= 0) {
+                throw new IllegalArgumentException("matching outbox cleanupDelayMs must be positive");
+            }
             this.cleanupDelayMs = cleanupDelayMs;
         }
 
@@ -399,6 +405,9 @@ public class MatchingProperties {
         }
 
         public void setCleanupBatchSize(int cleanupBatchSize) {
+            if (cleanupBatchSize <= 0) {
+                throw new IllegalArgumentException("matching outbox cleanupBatchSize must be positive");
+            }
             this.cleanupBatchSize = cleanupBatchSize;
         }
 
@@ -407,6 +416,9 @@ public class MatchingProperties {
         }
 
         public void setCleanupMaxBatches(int cleanupMaxBatches) {
+            if (cleanupMaxBatches <= 0) {
+                throw new IllegalArgumentException("matching outbox cleanupMaxBatches must be positive");
+            }
             this.cleanupMaxBatches = cleanupMaxBatches;
         }
     }

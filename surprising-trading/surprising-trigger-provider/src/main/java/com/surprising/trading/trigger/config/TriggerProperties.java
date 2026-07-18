@@ -258,6 +258,9 @@ public class TriggerProperties {
         }
 
         public void setRetention(Duration retention) {
+            if (retention == null || retention.isZero() || retention.isNegative()) {
+                throw new IllegalArgumentException("trigger outbox retention must be positive");
+            }
             this.retention = retention;
         }
 
@@ -266,6 +269,9 @@ public class TriggerProperties {
         }
 
         public void setCleanupDelayMs(long cleanupDelayMs) {
+            if (cleanupDelayMs <= 0) {
+                throw new IllegalArgumentException("trigger outbox cleanupDelayMs must be positive");
+            }
             this.cleanupDelayMs = cleanupDelayMs;
         }
 
@@ -274,6 +280,9 @@ public class TriggerProperties {
         }
 
         public void setCleanupBatchSize(int cleanupBatchSize) {
+            if (cleanupBatchSize <= 0) {
+                throw new IllegalArgumentException("trigger outbox cleanupBatchSize must be positive");
+            }
             this.cleanupBatchSize = cleanupBatchSize;
         }
 
@@ -282,6 +291,9 @@ public class TriggerProperties {
         }
 
         public void setCleanupMaxBatches(int cleanupMaxBatches) {
+            if (cleanupMaxBatches <= 0) {
+                throw new IllegalArgumentException("trigger outbox cleanupMaxBatches must be positive");
+            }
             this.cleanupMaxBatches = cleanupMaxBatches;
         }
     }
