@@ -825,7 +825,7 @@ class AccountRepositoryTest {
     }
 
     @Test
-    void updatePositionWithKnownPreviousQuantitySkipsSecondPositionLock() {
+    void updatePositionWithNegativeOpenInterestDeltaUsesZeroSeedAndGuardedUpdate() {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         when(jdbcTemplate.update(contains("UPDATE account_positions"), any(Object[].class)))
@@ -840,6 +840,9 @@ class AccountRepositoryTest {
         assertThat(response.updatedAt()).isEqualTo(now);
         verify(jdbcTemplate, never()).query(contains("SELECT signed_quantity_steps"), anyRowMapper(),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET"));
+        verify(jdbcTemplate).update(contains("VALUES (?, ?, ?, 0, 0, ?)"), any(Object[].class));
+        verify(jdbcTemplate).update(contains("UPDATE trading_symbol_open_interest_shards AS shard"),
+                any(Object[].class));
         verify(jdbcTemplate).update(contains("WITH updated_position"), any(Object[].class));
     }
 

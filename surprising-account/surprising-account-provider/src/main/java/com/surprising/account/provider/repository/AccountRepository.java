@@ -1902,6 +1902,15 @@ public class AccountRepository {
         }
         int shardId = Math.floorMod(userId, OPEN_INTEREST_SHARDS);
         int rows = jdbcTemplate.update("""
+                INSERT INTO trading_symbol_open_interest_shards (
+                    product_line, symbol, shard_id, long_quantity_steps, short_quantity_steps, updated_at
+                ) VALUES (?, ?, ?, 0, 0, ?)
+                ON CONFLICT (product_line, symbol, shard_id) DO NOTHING
+                """, productLine.name(), symbol, shardId, updatedAt);
+        if (rows < 0 || rows > 1) {
+            throw new IllegalStateException("unexpected open interest shard seed rows: " + rows);
+        }
+        rows = jdbcTemplate.update("""
                 WITH updated_position AS (
                     UPDATE account_positions
                        SET signed_quantity_steps = ?,
@@ -1917,25 +1926,20 @@ public class AccountRepository {
                        AND position_side = ?
                  RETURNING 1
                 )
-                INSERT INTO trading_symbol_open_interest_shards (
-                    product_line, symbol, shard_id, long_quantity_steps, short_quantity_steps, updated_at
-                )
-                SELECT ?, ?, ?, ?, ?, ?
+                UPDATE trading_symbol_open_interest_shards AS shard
+                   SET long_quantity_steps = shard.long_quantity_steps + ?,
+                       short_quantity_steps = shard.short_quantity_steps + ?,
+                       updated_at = ?
                   FROM updated_position
-                ON CONFLICT (product_line, symbol, shard_id) DO UPDATE
-                   SET long_quantity_steps =
-                           trading_symbol_open_interest_shards.long_quantity_steps + EXCLUDED.long_quantity_steps,
-                       short_quantity_steps =
-                           trading_symbol_open_interest_shards.short_quantity_steps + EXCLUDED.short_quantity_steps,
-                       updated_at = EXCLUDED.updated_at
-                 WHERE trading_symbol_open_interest_shards.long_quantity_steps
-                           + EXCLUDED.long_quantity_steps >= 0
-                   AND trading_symbol_open_interest_shards.short_quantity_steps
-                           + EXCLUDED.short_quantity_steps >= 0
+                 WHERE shard.product_line = ?
+                   AND shard.symbol = ?
+                   AND shard.shard_id = ?
+                   AND shard.long_quantity_steps + ? >= 0
+                   AND shard.short_quantity_steps + ? >= 0
                 """, state.signedQuantitySteps(), nullableVersion(state.instrumentVersion()),
                 state.entryPriceTicks(), state.entryValueTicks(), state.realizedPnlUnits(), updatedAt,
                 productLine.name(), userId, symbol, marginMode.name(), positionSide.name(),
-                productLine.name(), symbol, shardId, longDelta, shortDelta, updatedAt);
+                longDelta, shortDelta, updatedAt, productLine.name(), symbol, shardId, longDelta, shortDelta);
         requireSingleRow(rows, "account position and open interest shard update");
     }
 

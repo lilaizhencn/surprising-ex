@@ -35,7 +35,7 @@ STRESS_MAKER_BATCH_SIZE="${STRESS_MAKER_BATCH_SIZE:-12}"
 STRESS_TAKER_QUANTITY_STEPS="${STRESS_TAKER_QUANTITY_STEPS:-1}"
 STRESS_WAIT_SECONDS="${STRESS_WAIT_SECONDS:-420}"
 STRESS_PRICE_WARMUP_SECONDS="${STRESS_PRICE_WARMUP_SECONDS:-35}"
-STRESS_PRICE_REFRESH_DELAY_SECONDS="${STRESS_PRICE_REFRESH_DELAY_SECONDS:-0}"
+STRESS_PRICE_REFRESH_DELAY_SECONDS="${STRESS_PRICE_REFRESH_DELAY_SECONDS:-1}"
 STRESS_REPORT_FILE="${STRESS_REPORT_FILE:-${ROOT_DIR}/docs/product-line-multi-symbol-stress-report.md}"
 STRESS_MATCHING_KAFKA_CONCURRENCY="${STRESS_MATCHING_KAFKA_CONCURRENCY:-4}"
 STRESS_ACCOUNT_KAFKA_CONCURRENCY="${STRESS_ACCOUNT_KAFKA_CONCURRENCY:-4}"
@@ -810,24 +810,14 @@ SELECT GREATEST(
    AND i.symbol = '${symbol}'"
 }
 
-seed_stress_prices() {
+emit_stress_price_payloads() {
   local product_line="$1"
   # Price consumers reject out-of-order events.  Use wall-clock milliseconds
   # rather than the smoke run id so a fresh run always supersedes retained
   # Kafka records from an earlier run.
-  local price_sequence_base producer_cmd topic
+  local price_sequence_base
   price_sequence_base="$(current_epoch_millis)"
-  topic="$(topic_name "${product_line}" "mark.price")"
-  producer_cmd="$(kafka_producer_cmd)"
-  # Starting a Kafka console producer for every symbol makes one refresh take
-  # longer than the refresh interval.  Emit the complete mark-price snapshot
-  # through one producer so every symbol stays inside the market-maker staleness
-  # window during high-cardinality stress runs.
-  python3 - "${product_line}" "${STRESS_SYMBOL_COUNT}" "${price_sequence_base}" <<'PY' | "${producer_cmd}" \
-    --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
-    --topic "${topic}" \
-    --property parse.key=true \
-    --property key.separator=: >/dev/null
+  python3 - "${product_line}" "${STRESS_SYMBOL_COUNT}" "${price_sequence_base}" <<'PY'
 import datetime
 import decimal
 import json
@@ -899,6 +889,18 @@ for symbol, (ticks, sequence) in deduped.items():
     }
     print(f"{symbol}:{json.dumps(payload, separators=(',', ':'))}")
 PY
+}
+
+seed_stress_prices() {
+  local product_line="$1"
+  local producer_cmd topic
+  topic="$(topic_name "${product_line}" "mark.price")"
+  producer_cmd="$(kafka_producer_cmd)"
+  emit_stress_price_payloads "${product_line}" | "${producer_cmd}" \
+    --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
+    --topic "${topic}" \
+    --property parse.key=true \
+    --property key.separator=: >/dev/null
 }
 
 delete_surprising_topics() {
@@ -1379,7 +1381,6 @@ start_provider() {
 start_providers_for_line() {
   local product_line="$1"
   start_provider instrument "${product_line}"
-  start_provider price "${product_line}"
   start_provider matching "${product_line}"
   start_provider account "${product_line}"
   if is_margin_product "${product_line}"; then
@@ -1388,6 +1389,9 @@ start_providers_for_line() {
   start_provider trading-entry "${product_line}"
   start_provider edge "${product_line}"
   start_provider market-maker "${product_line}"
+  # Start the combined index/mark-price provider after every downstream
+  # consumer so retained price events cannot age in an unconsumed backlog.
+  start_provider price "${product_line}"
 }
 
 start_price_refresher() {
@@ -1398,13 +1402,33 @@ start_price_refresher() {
     refresh_delay_seconds="${STRESS_PRICE_REFRESH_DELAY_SECONDS}"
   fi
   echo "Starting ${product_line} synthetic mark-price refresher"
+  if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+    local producer_cmd topic fifo
+    producer_cmd="$(kafka_producer_cmd)"
+    topic="$(topic_name "${product_line}" "mark.price")"
+    fifo="${TMP_DIR}/${product_line}-price-refresher.fifo"
+    mkfifo "${fifo}"
+    # Keep one Kafka producer alive for the whole stress run. Restarting the
+    # console producer for every snapshot can take longer than the 15-second
+    # limit-price freshness window when the host is under load.
+    "${producer_cmd}" \
+      --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
+      --topic "${topic}" \
+      --property parse.key=true \
+      --property key.separator=: <"${fifo}" >"${log_file}" 2>&1 &
+    register_provider_pid "price-refresher-producer" "$!"
+    (
+      while true; do
+        emit_stress_price_payloads "${product_line}" || true
+        sleep "${refresh_delay_seconds}"
+      done
+    ) >"${fifo}" &
+    register_provider_pid "price-refresher" "$!"
+    return
+  fi
   (
     while true; do
-      if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
-        seed_stress_prices "${product_line}" >/dev/null 2>&1 || true
-      else
-        seed_prices_for_line "${product_line}" >/dev/null 2>&1 || true
-      fi
+      seed_prices_for_line "${product_line}" >/dev/null 2>&1 || true
       sleep "${refresh_delay_seconds}"
     done
   ) >"${log_file}" 2>&1 &

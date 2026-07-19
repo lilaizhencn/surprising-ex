@@ -3,6 +3,8 @@ package com.surprising.trading.order.service;
 import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.trading.order.config.TradingOrderProperties;
+import java.util.ArrayList;
+import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
@@ -27,22 +29,32 @@ public class OrderAccountCommandResultConsumer {
             topics = "#{__listener.topic()}",
             groupId = "#{__listener.groupId()}",
             containerFactory = "orderOpenViewKafkaListenerContainerFactory")
-    public void onResult(ConsumerRecord<String, String> record) {
+    public void onResult(List<ConsumerRecord<String, String>> records) {
         try {
-            AccountCommandResultEvent result = objectMapper.readValue(record.value(), AccountCommandResultEvent.class);
-            if (!topic().equals(record.topic())) {
-                throw new IllegalArgumentException("unexpected account command result topic " + record.topic());
+            if (records == null || records.isEmpty()) {
+                return;
             }
-            String expectedKey = AccountUserCommand.partitionKey(result.productLine(), result.userId());
-            if (!expectedKey.equals(record.key())) {
-                throw new IllegalArgumentException("invalid account command result key");
+            List<AccountCommandResultEvent> results = new ArrayList<>(records.size());
+            for (ConsumerRecord<String, String> record : records) {
+                AccountCommandResultEvent result = objectMapper.readValue(
+                        record.value(), AccountCommandResultEvent.class);
+                if (!topic().equals(record.topic())) {
+                    throw new IllegalArgumentException("unexpected account command result topic " + record.topic());
+                }
+                String expectedKey = AccountUserCommand.partitionKey(result.productLine(), result.userId());
+                if (!expectedKey.equals(record.key())) {
+                    throw new IllegalArgumentException("invalid account command result key");
+                }
+                if (result.productLine() != properties.getKafka().getProductLine()) {
+                    throw new IllegalArgumentException("account command result product line mismatch");
+                }
+                results.add(result);
             }
-            if (result.productLine() != properties.getKafka().getProductLine()) {
-                throw new IllegalArgumentException("account command result product line mismatch");
+            for (AccountCommandResultEvent result : results) {
+                orderService.processAccountCommandResult(result);
             }
-            orderService.processAccountCommandResult(result);
         } catch (Exception ex) {
-            throw new IllegalStateException("failed to process order account command result", ex);
+            throw new IllegalStateException("failed to process order account command result batch", ex);
         }
     }
 

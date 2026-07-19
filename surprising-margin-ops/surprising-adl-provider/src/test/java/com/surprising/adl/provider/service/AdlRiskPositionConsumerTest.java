@@ -16,6 +16,7 @@ import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
+import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
@@ -33,7 +34,7 @@ class AdlRiskPositionConsumerTest {
         RiskPositionUpdatedEvent event = event(ProductLine.INVERSE_PERPETUAL);
         when(objectMapper.readValue(anyString(), eq(RiskPositionUpdatedEvent.class))).thenReturn(event);
 
-        consumer.onRiskPosition(record);
+        consumer.onRiskPosition(List.of(record));
 
         verify(index).synchronize(event);
     }
@@ -48,7 +49,7 @@ class AdlRiskPositionConsumerTest {
         when(objectMapper.readValue(anyString(), eq(RiskPositionUpdatedEvent.class)))
                 .thenReturn(event(ProductLine.INVERSE_PERPETUAL));
 
-        consumer.onRiskPosition(record);
+        consumer.onRiskPosition(List.of(record));
 
         verifyNoInteractions(index);
     }
@@ -60,12 +61,16 @@ class AdlRiskPositionConsumerTest {
         RedisAdlCandidateIndex index = mock(RedisAdlCandidateIndex.class);
         AdlRiskPositionConsumer consumer = new AdlRiskPositionConsumer(objectMapper, index, properties);
         ConsumerRecord<String, String> record = new ConsumerRecord<>(consumer.topic(), 3, 91L, "BTC-USDT", "{bad");
+        ConsumerRecord<String, String> validRecord =
+                new ConsumerRecord<>(consumer.topic(), 3, 92L, "BTC-USDT", "{}");
+        RiskPositionUpdatedEvent event = event(ProductLine.LINEAR_PERPETUAL);
         when(objectMapper.readValue(anyString(), eq(RiskPositionUpdatedEvent.class)))
-                .thenThrow(new IllegalArgumentException("invalid risk publication"));
+                .thenThrow(new IllegalArgumentException("invalid risk publication"))
+                .thenReturn(event);
 
-        consumer.onRiskPosition(record);
+        consumer.onRiskPosition(List.of(record, validRecord));
 
-        verifyNoInteractions(index);
+        verify(index).synchronize(event);
     }
 
     @Test
@@ -75,8 +80,8 @@ class AdlRiskPositionConsumerTest {
         RedisAdlCandidateIndex index = mock(RedisAdlCandidateIndex.class);
         AdlRiskPositionConsumer consumer = new AdlRiskPositionConsumer(objectMapper, index, properties);
 
-        assertThatThrownBy(() -> consumer.onRiskPosition(
-                new ConsumerRecord<>("surprising.other.risk.position.events.v1", 0, 0L, "BTC-USDT", "{}")))
+        assertThatThrownBy(() -> consumer.onRiskPosition(List.of(
+                new ConsumerRecord<>("surprising.other.risk.position.events.v1", 0, 0L, "BTC-USDT", "{}"))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("unexpected ADL risk event topic");
         verifyNoInteractions(objectMapper, index);

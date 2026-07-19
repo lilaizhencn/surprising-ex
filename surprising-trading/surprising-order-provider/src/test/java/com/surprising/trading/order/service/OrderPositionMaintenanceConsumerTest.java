@@ -11,6 +11,7 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import java.time.Instant;
+import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
@@ -28,8 +29,8 @@ class OrderPositionMaintenanceConsumerTest {
                 new OrderPositionMaintenanceConsumer(objectMapper, properties, orderService);
         PositionUpdatedEvent event = event();
 
-        consumer.onPositionUpdated(new ConsumerRecord<>(
-                consumer.topic(), 0, 1L, event.partitionKey(), objectMapper.writeValueAsString(event)));
+        consumer.onPositionUpdated(List.of(new ConsumerRecord<>(
+                consumer.topic(), 0, 1L, event.partitionKey(), objectMapper.writeValueAsString(event))));
 
         verify(orderService).onPositionUpdated(event);
     }
@@ -45,8 +46,8 @@ class OrderPositionMaintenanceConsumerTest {
                 new OrderPositionMaintenanceConsumer(objectMapper, properties, orderService);
         PositionUpdatedEvent event = event();
 
-        assertThatThrownBy(() -> consumer.onPositionUpdated(new ConsumerRecord<>(
-                consumer.topic(), 0, 1L, event.symbol(), objectMapper.writeValueAsString(event))))
+        assertThatThrownBy(() -> consumer.onPositionUpdated(List.of(new ConsumerRecord<>(
+                consumer.topic(), 0, 1L, event.symbol(), objectMapper.writeValueAsString(event)))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("failed to maintain reduce-only orders");
         verifyNoInteractions(orderService);
