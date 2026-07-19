@@ -10,6 +10,7 @@
 
 - `scripts/product-line-api-flow-smoke.sh`：按产品线启动必要 provider，执行用户下单、撮合、持仓、平仓、强平、生命周期事件和做市流程。
 - `scripts/product-line-funds-reconcile.sh`：独立 SQL 核对脚本，对余额表、流水表、资金费、强平费、交割/行权、保险基金和冻结预占逐项对平。
+- `scripts/run-linear-perpetual-stress-matrix.sh`：生成或执行永续合约撮合并行度、热点流量和目标 TPS 的对比矩阵。
 
 ## 一次只跑一条线
 
@@ -23,6 +24,60 @@ PRODUCT_LINES=SPOT BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LE
 ```
 
 钱包服务不参与本地 smoke。测试资金通过 account/admin 产品账户调整接口或脚本 fixture 注入，核对脚本会把这些调整作为期初之后的 `adjustment_units` 单独列出。
+
+## 永续多 Symbol 压测
+
+单轮压测示例：
+
+```bash
+PRODUCT_LINES=LINEAR_PERPETUAL \
+MULTI_SYMBOL_STRESS=true \
+RESET_KAFKA=true \
+CREATE_KAFKA_TOPICS=true \
+STRESS_MATCHING_KAFKA_CONCURRENCY=8 \
+STRESS_MATCHING_ENGINE_SHARDS=8 \
+STRESS_MATCHING_RISK_SHARDS=4 \
+STRESS_HOT_SYMBOL_COUNT=1 \
+STRESS_HOT_TRAFFIC_PERCENT=80 \
+STRESS_TARGET_TPS=80 \
+STRESS_RUN_LABEL=scale8-hot1-80tps \
+STRESS_REPORT_FILE=docs/scale8-hot1-80tps.md \
+./scripts/product-line-api-flow-smoke.sh
+```
+
+`STRESS_HOT_SYMBOL_COUNT=0` 表示所有 symbol 均匀分流；设置为 `1` 或 `3` 时，
+`STRESS_HOT_TRAFFIC_PERCENT` 比例的 taker 请求集中到前 1 或 3 个 symbol。`STRESS_TARGET_TPS=0`
+保持原来的不限速突发方式，正整数则控制 API 提交速率。
+
+矩阵脚本默认只打印将要执行的命令。确认环境和预计运行时间后显式执行：
+
+```bash
+MATRIX_DRY_RUN=false \
+MATRIX_PROFILES="baseline scale8 scale16" \
+MATRIX_TRAFFIC_MODES="uniform hot1 hot3" \
+MATRIX_TARGET_TPS_LIST="30 50 80 120" \
+MATRIX_REPEATS=3 \
+./scripts/run-linear-perpetual-stress-matrix.sh
+```
+
+预置 profile 分别是 `4/4/2`、`8/8/4`、`16/8/4`，依次对应
+Kafka listener concurrency、matching engines、risk engines。每个 case 会重建测试 topic、清理稳定
+consumer group 对应的旧 topic 状态、执行资金守恒核对，并生成独立报告。报告新增：
+
+- `order created → ACCEPTED → order command published → matching started → match result/account command published → 双边结算`
+  分段延迟；
+- 按 Outbox owner 和 topic 拆分的 p50/p95/p99/max；
+- matching engine shard 的 symbol 数、成交数和流量占比；
+- 仅当前压测 trace、taker 用户和 maker 用户的 Outbox 统计，不再混入其他 smoke 事件。
+- 检测到 `pg_stat_statements` 时，压测流量前重置统计并按总执行时间输出前 20 条 SQL。
+- matching、account、order result、position maintenance consumer group 的峰值与最终 Kafka lag。
+
+若需要慢 SQL 排名，PostgreSQL 必须提前在 `shared_preload_libraries` 中启用
+`pg_stat_statements` 并创建 extension；脚本不会修改数据库实例级参数。无法使用时报告会明确标记
+`N/A`，不会伪造慢 SQL 结果。
+
+内部做市白名单在多 symbol 压测中默认开启。白名单做市账号与真实用户成交仍走完整资金、持仓、
+手续费和盈亏结算；只有白名单账号之间的自成交才使用内部做市特殊路径。
 
 ## API 全流程覆盖
 

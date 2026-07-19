@@ -38,7 +38,10 @@ STRESS_PRICE_WARMUP_SECONDS="${STRESS_PRICE_WARMUP_SECONDS:-35}"
 STRESS_PRICE_REFRESH_DELAY_SECONDS="${STRESS_PRICE_REFRESH_DELAY_SECONDS:-1}"
 KAFKA_ASSIGNMENT_TIMEOUT_SECONDS="${KAFKA_ASSIGNMENT_TIMEOUT_SECONDS:-90}"
 STRESS_REPORT_FILE="${STRESS_REPORT_FILE:-${ROOT_DIR}/docs/product-line-multi-symbol-stress-report.md}"
+STRESS_RUN_LABEL="${STRESS_RUN_LABEL:-}"
 STRESS_MATCHING_KAFKA_CONCURRENCY="${STRESS_MATCHING_KAFKA_CONCURRENCY:-4}"
+STRESS_MATCHING_ENGINE_SHARDS="${STRESS_MATCHING_ENGINE_SHARDS:-4}"
+STRESS_MATCHING_RISK_SHARDS="${STRESS_MATCHING_RISK_SHARDS:-2}"
 STRESS_ACCOUNT_KAFKA_CONCURRENCY="${STRESS_ACCOUNT_KAFKA_CONCURRENCY:-4}"
 STRESS_ACCOUNT_OUTBOX_BATCH_SIZE="${STRESS_ACCOUNT_OUTBOX_BATCH_SIZE:-1000}"
 STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS="${STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS:-20}"
@@ -48,6 +51,17 @@ STRESS_RISK_KAFKA_CONCURRENCY="${STRESS_RISK_KAFKA_CONCURRENCY:-4}"
 STRESS_RISK_OUTBOX_BATCH_SIZE="${STRESS_RISK_OUTBOX_BATCH_SIZE:-1000}"
 STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS="${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS:-20}"
 STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY="${STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY:-32}"
+STRESS_TARGET_TPS="${STRESS_TARGET_TPS:-0}"
+STRESS_HOT_SYMBOL_COUNT="${STRESS_HOT_SYMBOL_COUNT:-0}"
+STRESS_HOT_TRAFFIC_PERCENT="${STRESS_HOT_TRAFFIC_PERCENT:-80}"
+STRESS_INTERNAL_MARKET_MAKER_WHITELIST="${STRESS_INTERNAL_MARKET_MAKER_WHITELIST:-true}"
+STRESS_RESET_PG_STAT_STATEMENTS="${STRESS_RESET_PG_STAT_STATEMENTS:-true}"
+STRESS_KAFKA_LAG_SAMPLE_SECONDS="${STRESS_KAFKA_LAG_SAMPLE_SECONDS:-2}"
+STRESS_PG_STAT_STATEMENTS_AVAILABLE=false
+STRESS_KAFKA_LAG_FILE=""
+STRESS_KAFKA_LAG_STOP_FILE=""
+STRESS_KAFKA_LAG_MONITOR_PID=""
+STRESS_PG_STAT_STATEMENTS_FILE=""
 
 BASE_USER=$((6000000000 + RUN_SEQ * 1000))
 MM_USER_A=$((BASE_USER + 1))
@@ -72,6 +86,7 @@ PROVIDER_NAMES=()
 PROVIDER_PIDS=()
 
 cleanup() {
+  stop_stress_kafka_lag_monitor || true
   local i
   for ((i = 0; i < ${#PROVIDER_PIDS[@]}; i++)); do
     local pid="${PROVIDER_PIDS[$i]}"
@@ -143,6 +158,14 @@ kafka_producer_cmd() {
     echo kafka-console-producer
   else
     echo kafka-console-producer.sh
+  fi
+}
+
+kafka_consumer_groups_cmd() {
+  if command -v kafka-consumer-groups >/dev/null 2>&1; then
+    echo kafka-consumer-groups
+  else
+    echo kafka-consumer-groups.sh
   fi
 }
 
@@ -943,10 +966,16 @@ delete_surprising_topics() {
 
 create_topics() {
   local product_line="$1"
-  local product_topic_line
+  local product_topic_line symbol_count=0 stream_threads=2
   product_topic_line="$(product_slug "${product_line}")"
+  if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+    symbol_count="${STRESS_SYMBOL_COUNT}"
+    stream_threads="${STRESS_MATCHING_KAFKA_CONCURRENCY}"
+  fi
   BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS}" \
     REPLICATION_FACTOR=1 \
+    SYMBOL_COUNT="${symbol_count}" \
+    STREAM_THREADS="${stream_threads}" \
     INCLUDE_SHARED_TOPICS="${KAFKA_INCLUDE_SHARED_TOPICS}" \
     INCLUDE_LEGACY_PERP_TOPICS="${KAFKA_INCLUDE_LEGACY_PERP_TOPICS}" \
     INCLUDE_PRODUCT_TOPICS=true \
@@ -1138,7 +1167,17 @@ product_provider_args() {
         "--surprising.trading.matching.kafka.group-id=product-smoke-${RUN_ID}-${slug}-matching" \
         "--surprising.trading.matching.kafka.client-id=product-smoke-${RUN_ID}-${slug}-matching" \
         "--surprising.trading.matching.kafka.concurrency=${matching_concurrency}" \
-        "--surprising.trading.matching.engine.exchange-id=product-smoke-${slug}"
+        "--surprising.trading.matching.engine.exchange-id=product-smoke-${slug}" \
+        "--surprising.trading.matching.engine.matching-engines=${STRESS_MATCHING_ENGINE_SHARDS}" \
+        "--surprising.trading.matching.engine.risk-engines=${STRESS_MATCHING_RISK_SHARDS}"
+      if [[ "${MULTI_SYMBOL_STRESS}" == "true"
+            && "${STRESS_INTERNAL_MARKET_MAKER_WHITELIST}" == "true" ]]; then
+        local maker_index
+        for ((maker_index = 0; maker_index < STRESS_SYMBOL_COUNT; maker_index++)); do
+          printf '%s\n' \
+            "--surprising.trading.matching.protection.internal-market-maker-user-ids[${maker_index}]=$((STRESS_MM_USER_START + maker_index))"
+        done
+      fi
       ;;
     account)
       local account_concurrency=1
@@ -2189,7 +2228,7 @@ emit_stress_taker_commands() {
   python3 - "${product_line}" "${phase}" "${RUN_ID}" "${STRESS_SYMBOL_COUNT}" "${STRESS_USER_COUNT}" \
     "${STRESS_TAKER_USER_START}" "${STRESS_TAKER_QUANTITY_STEPS}" \
     "$((STRESS_MAKER_DEPTH_LEVELS + STRESS_MAKER_REFRESH_CYCLES * STRESS_MAKER_REFRESH_LEVELS + 20))" \
-    "${rules_json}" <<'PY'
+    "${STRESS_HOT_SYMBOL_COUNT}" "${STRESS_HOT_TRAFFIC_PERCENT}" "${rules_json}" <<'PY'
 import json
 import sys
 
@@ -2201,7 +2240,9 @@ user_count = int(sys.argv[5])
 taker_user_start = int(sys.argv[6])
 quantity_steps = int(sys.argv[7])
 offset = int(sys.argv[8])
-rules = json.loads(sys.argv[9])
+hot_symbol_count = int(sys.argv[9])
+hot_traffic_percent = int(sys.argv[10])
+rules = json.loads(sys.argv[11])
 bases = [
     "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "TRX", "TON", "AVAX",
     "LINK", "BCH", "DOT", "LTC", "NEAR", "UNI", "AAVE", "ETC", "FIL", "OP",
@@ -2249,7 +2290,12 @@ def quantity_for(symbol, price_ticks):
 
 slug = slug_map[product_line]
 for i in range(user_count):
-    symbol_index = i % symbol_count
+    if hot_symbol_count <= 0 or hot_symbol_count >= symbol_count:
+        symbol_index = i % symbol_count
+    elif i % 100 < hot_traffic_percent:
+        symbol_index = i % hot_symbol_count
+    else:
+        symbol_index = hot_symbol_count + (i % (symbol_count - hot_symbol_count))
     symbol, base_price = symbol_and_price(symbol_index)
     user_id = taker_user_start + i
     close_price = max(1, base_price - offset)
@@ -2312,6 +2358,42 @@ run_with_concurrency() {
   RUN_FAILURES="${failures}"
 }
 
+run_with_concurrency_at_rate() {
+  local max_jobs="$1"
+  local target_tps="$2"
+  shift 2
+  if ((target_tps <= 0)); then
+    run_with_concurrency "${max_jobs}" "$@"
+    return
+  fi
+  local interval_seconds
+  interval_seconds="$(python3 - "${target_tps}" <<'PY'
+import sys
+print(f"{1 / int(sys.argv[1]):.9f}")
+PY
+)"
+  local active_pids=()
+  local failures=0
+  local command pid
+  for command in "$@"; do
+    bash -c "${command}" &
+    active_pids+=("$!")
+    if ((${#active_pids[@]} >= max_jobs)); then
+      if ! wait "${active_pids[0]}"; then
+        failures=$((failures + 1))
+      fi
+      active_pids=("${active_pids[@]:1}")
+    fi
+    sleep "${interval_seconds}"
+  done
+  for pid in "${active_pids[@]}"; do
+    if ! wait "${pid}"; then
+      failures=$((failures + 1))
+    fi
+  done
+  RUN_FAILURES="${failures}"
+}
+
 run_stress_maker_refresh_loop() {
   local product_line="$1"
   local phase="$2"
@@ -2348,11 +2430,105 @@ wait_stress_maker_phase_processed() {
     "${expected}" "${STRESS_WAIT_SECONDS}"
 }
 
+stress_expected_active_symbol_count() {
+  if ((STRESS_HOT_SYMBOL_COUNT > 0 && STRESS_HOT_TRAFFIC_PERCENT == 100)); then
+    echo "${STRESS_HOT_SYMBOL_COUNT}"
+  else
+    echo "${STRESS_SYMBOL_COUNT}"
+  fi
+}
+
+stress_kafka_lag_sample() {
+  local group="$1"
+  local topic="$2"
+  local output summary
+  output="$("$(kafka_consumer_groups_cmd)" \
+    --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
+    --timeout 5000 \
+    --describe \
+    --group "${group}" 2>/dev/null || true)"
+  summary="$(awk -v topic="${topic}" '
+    $2 == topic && $6 ~ /^[0-9]+$/ {
+      sum += $6
+      if ($6 > max) max = $6
+      found = 1
+    }
+    END {
+      if (found) print sum "\t" max
+    }
+  ' <<<"${output}")"
+  if [[ -n "${summary}" ]]; then
+    printf '%s\t%s\t%s\t%s\n' "$(date +%s)" "${group}" "${topic}" "${summary}" \
+      >>"${STRESS_KAFKA_LAG_FILE}"
+  fi
+}
+
+stress_kafka_lag_monitor() {
+  local product_line="$1"
+  local matching_group account_group order_result_group position_group
+  matching_group="$(consumer_group "${product_line}" "matching")"
+  account_group="$(consumer_group "${product_line}" "account-user-command")"
+  order_result_group="$(consumer_group "${product_line}" "order-account-results")"
+  position_group="$(consumer_group "${product_line}" "order-position-maintenance")"
+  while [[ ! -f "${STRESS_KAFKA_LAG_STOP_FILE}" ]]; do
+    stress_kafka_lag_sample "${matching_group}" "$(topic_name "${product_line}" "order.commands")"
+    stress_kafka_lag_sample "${account_group}" "$(topic_name "${product_line}" "account.user.commands")"
+    stress_kafka_lag_sample "${order_result_group}" "$(topic_name "${product_line}" "account.command.results")"
+    stress_kafka_lag_sample "${position_group}" "$(topic_name "${product_line}" "account.position.events")"
+    sleep "${STRESS_KAFKA_LAG_SAMPLE_SECONDS}"
+  done
+}
+
+start_stress_kafka_lag_monitor() {
+  local product_line="$1"
+  STRESS_KAFKA_LAG_FILE="${TMP_DIR}/${product_line}-kafka-lag.tsv"
+  STRESS_KAFKA_LAG_STOP_FILE="${TMP_DIR}/${product_line}-kafka-lag.stop"
+  rm -f "${STRESS_KAFKA_LAG_FILE}" "${STRESS_KAFKA_LAG_STOP_FILE}"
+  stress_kafka_lag_monitor "${product_line}" &
+  STRESS_KAFKA_LAG_MONITOR_PID="$!"
+}
+
+stop_stress_kafka_lag_monitor() {
+  if [[ -n "${STRESS_KAFKA_LAG_STOP_FILE}" ]]; then
+    touch "${STRESS_KAFKA_LAG_STOP_FILE}" 2>/dev/null || true
+  fi
+  if [[ -n "${STRESS_KAFKA_LAG_MONITOR_PID}"
+        && "${STRESS_KAFKA_LAG_MONITOR_PID}" =~ ^[0-9]+$ ]]; then
+    wait "${STRESS_KAFKA_LAG_MONITOR_PID}" >/dev/null 2>&1 || true
+  fi
+  STRESS_KAFKA_LAG_MONITOR_PID=""
+}
+
+stress_kafka_lag_rows() {
+  if [[ -z "${STRESS_KAFKA_LAG_FILE}" || ! -s "${STRESS_KAFKA_LAG_FILE}" ]]; then
+    echo "| N/A | N/A | 0 | N/A | N/A | N/A |"
+    return
+  fi
+  awk -F '\t' '
+    {
+      key = $2 SUBSEP $3
+      samples[key]++
+      if ($4 > peak_sum[key]) peak_sum[key] = $4
+      if ($5 > peak_partition[key]) peak_partition[key] = $5
+      final_sum[key] = $4
+      group[key] = $2
+      topic[key] = $3
+    }
+    END {
+      for (key in samples) {
+        printf "| %s | %s | %d | %d | %d | %d |\n",
+          group[key], topic[key], samples[key], peak_sum[key], peak_partition[key], final_sum[key]
+      }
+    }
+  ' "${STRESS_KAFKA_LAG_FILE}" | sort
+}
+
 wait_stress_phase_settled() {
   local product_line="$1"
   local phase="$2"
-  local slug
+  local slug expected_active_symbols
   slug="$(stress_product_slug "${product_line}")"
+  expected_active_symbols="$(stress_expected_active_symbol_count)"
   wait_sql_equals "${product_line} ${phase} orders filled" \
     "SELECT count(*) FROM trading_orders WHERE product_line = '${product_line}' AND client_order_id LIKE 'stress-user-${RUN_ID}-${slug}-${phase}-%' AND status = 'FILLED'" \
     "${STRESS_USER_COUNT}" "${STRESS_WAIT_SECONDS}"
@@ -2364,7 +2540,7 @@ wait_stress_phase_settled() {
     "${STRESS_USER_COUNT}" "${STRESS_WAIT_SECONDS}"
   wait_sql_equals "${product_line} ${phase} active symbols" \
     "SELECT count(DISTINCT symbol) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'" \
-    "${STRESS_SYMBOL_COUNT}" "${STRESS_WAIT_SECONDS}"
+    "${expected_active_symbols}" "${STRESS_WAIT_SECONDS}"
 }
 
 stress_latency_summary() {
@@ -2472,17 +2648,299 @@ SELECT event_count::bigint || ' ' ||
 
 stress_outbox_publish_summary() {
   local table_name="$1"
+  local product_line="$2"
+  local slug
+  slug="$(stress_product_slug "${product_line}")"
   query_value "
-WITH summary AS (
+WITH scoped AS (
+  SELECT created_at, published_at
+    FROM ${table_name}
+   WHERE payload ->> 'traceId' LIKE 'stress-${RUN_ID}-${slug}-%'
+      OR (
+           payload ->> 'userId' ~ '^[0-9]+$'
+           AND (
+             (payload ->> 'userId')::bigint BETWEEN ${STRESS_MM_USER_START}
+                                                    AND $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT - 1))
+             OR
+             (payload ->> 'userId')::bigint BETWEEN ${STRESS_TAKER_USER_START}
+                                                    AND $((STRESS_TAKER_USER_START + STRESS_USER_COUNT - 1))
+           )
+         )
+),
+published AS (
+  SELECT EXTRACT(EPOCH FROM (published_at - created_at)) * 1000 AS age_ms,
+         created_at,
+         published_at
+    FROM scoped
+   WHERE published_at IS NOT NULL
+),
+summary AS (
   SELECT count(*) FILTER (WHERE published_at IS NOT NULL)::numeric AS published_count,
          count(*) FILTER (WHERE published_at IS NULL)::bigint AS pending_count,
          COALESCE(EXTRACT(EPOCH FROM max(published_at) - min(created_at)), 0)::numeric AS duration_seconds
-    FROM ${table_name}
+    FROM scoped
 )
 SELECT published_count::bigint || ' ' || pending_count || ' ' ||
        round(duration_seconds, 3) || ' ' ||
-       round(published_count / GREATEST(duration_seconds, 0.001), 3)
+       round(published_count / GREATEST(duration_seconds, 0.001), 3) || ' ' ||
+       COALESCE((SELECT round(percentile_disc(0.50) WITHIN GROUP (ORDER BY age_ms)::numeric, 3)
+                   FROM published), 0) || ' ' ||
+       COALESCE((SELECT round(percentile_disc(0.95) WITHIN GROUP (ORDER BY age_ms)::numeric, 3)
+                   FROM published), 0) || ' ' ||
+       COALESCE((SELECT round(percentile_disc(0.99) WITHIN GROUP (ORDER BY age_ms)::numeric, 3)
+                   FROM published), 0) || ' ' ||
+       COALESCE((SELECT round(max(age_ms)::numeric, 3) FROM published), 0)
   FROM summary"
+}
+
+stress_outbox_detail_rows() {
+  local table_name="$1"
+  local product_line="$2"
+  local source_name="$3"
+  local slug
+  slug="$(stress_product_slug "${product_line}")"
+  psql_exec -At <<SQL
+WITH scoped AS (
+  SELECT aggregate_type,
+         topic,
+         created_at,
+         published_at,
+         EXTRACT(EPOCH FROM (published_at - created_at)) * 1000 AS age_ms
+    FROM ${table_name}
+   WHERE payload ->> 'traceId' LIKE 'stress-${RUN_ID}-${slug}-%'
+      OR (
+           payload ->> 'userId' ~ '^[0-9]+$'
+           AND (
+             (payload ->> 'userId')::bigint BETWEEN ${STRESS_MM_USER_START}
+                                                    AND $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT - 1))
+             OR
+             (payload ->> 'userId')::bigint BETWEEN ${STRESS_TAKER_USER_START}
+                                                    AND $((STRESS_TAKER_USER_START + STRESS_USER_COUNT - 1))
+           )
+         )
+),
+summary AS (
+  SELECT aggregate_type,
+         topic,
+         count(*) FILTER (WHERE published_at IS NOT NULL) AS published_count,
+         count(*) FILTER (WHERE published_at IS NULL) AS pending_count,
+         COALESCE(percentile_disc(0.50) WITHIN GROUP (ORDER BY age_ms)
+                    FILTER (WHERE published_at IS NOT NULL), 0) AS p50_ms,
+         COALESCE(percentile_disc(0.95) WITHIN GROUP (ORDER BY age_ms)
+                    FILTER (WHERE published_at IS NOT NULL), 0) AS p95_ms,
+         COALESCE(percentile_disc(0.99) WITHIN GROUP (ORDER BY age_ms)
+                    FILTER (WHERE published_at IS NOT NULL), 0) AS p99_ms,
+         COALESCE(max(age_ms) FILTER (WHERE published_at IS NOT NULL), 0) AS max_ms
+    FROM scoped
+   GROUP BY aggregate_type, topic
+)
+SELECT '| ${source_name} | ' || aggregate_type || ' | ' ||
+       replace(topic, 'surprising.', '') || ' | ' ||
+       published_count || ' | ' || pending_count || ' | ' ||
+       round(p50_ms::numeric, 3) || ' | ' ||
+       round(p95_ms::numeric, 3) || ' | ' ||
+       round(p99_ms::numeric, 3) || ' | ' ||
+       round(max_ms::numeric, 3) || ' |'
+  FROM summary
+ ORDER BY aggregate_type, topic;
+SQL
+}
+
+stress_pipeline_latency_rows() {
+  local product_line="$1"
+  local phase="$2"
+  local slug order_commands_topic
+  slug="$(stress_product_slug "${product_line}")"
+  order_commands_topic="$(topic_name "${product_line}" "order.commands")"
+  psql_exec -At <<SQL
+WITH taker_orders AS (
+  SELECT o.order_id,
+         o.created_at AS order_created_at,
+         e.event_time AS accepted_at
+    FROM trading_orders o
+    JOIN trading_order_events e
+      ON e.order_id = o.order_id
+     AND e.event_type = 'ACCEPTED'
+   WHERE o.product_line = '${product_line}'
+     AND o.client_order_id LIKE 'stress-user-${RUN_ID}-${slug}-${phase}-%'
+),
+order_commands AS (
+  SELECT aggregate_id AS order_id,
+         min(created_at) AS created_at,
+         max(published_at) AS published_at
+    FROM trading_outbox_events
+   WHERE aggregate_type = 'ORDER'
+     AND event_type = 'PLACE'
+     AND topic = '${order_commands_topic}'
+     AND payload ->> 'traceId' LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'
+   GROUP BY aggregate_id
+),
+matches AS (
+  SELECT r.order_id,
+         r.command_id,
+         r.event_time AS match_event_at
+    FROM trading_match_results r
+    JOIN taker_orders o ON o.order_id = r.order_id
+   WHERE r.product_line = '${product_line}'
+     AND r.command_type = 'PLACE'
+),
+match_results AS (
+  SELECT aggregate_id AS command_id,
+         max(published_at) AS published_at
+    FROM trading_outbox_events
+   WHERE aggregate_type = 'MATCH_RESULT'
+     AND event_type = 'PLACE'
+     AND payload ->> 'traceId' LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'
+   GROUP BY aggregate_id
+),
+trades AS (
+  SELECT t.trade_id,
+         t.taker_order_id AS order_id,
+         t.symbol,
+         t.event_time AS match_event_at
+    FROM trading_match_trades t
+   WHERE t.product_line = '${product_line}'
+     AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'
+),
+account_commands AS (
+  SELECT aggregate_id AS trade_id,
+         max(published_at) AS published_at
+    FROM trading_outbox_events
+   WHERE aggregate_type = 'ACCOUNT_COMMAND'
+     AND event_type = 'TRADE_SIDE_SETTLE'
+     AND payload ->> 'traceId' LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'
+   GROUP BY aggregate_id
+  HAVING count(*) = 2
+     AND count(published_at) = 2
+),
+settlements AS (
+  SELECT s.trade_id,
+         s.completed_at
+    FROM account_trade_settlement_completions s
+    JOIN trades t
+      ON t.trade_id = s.trade_id
+     AND s.product_line = '${product_line}'
+     AND s.symbol = t.symbol
+),
+samples(metric_order, metric, ms) AS (
+  SELECT 1, 'order created → ACCEPTED',
+         EXTRACT(EPOCH FROM (o.accepted_at - o.order_created_at)) * 1000
+    FROM taker_orders o
+  UNION ALL
+  SELECT 2, 'ACCEPTED → order command published',
+         EXTRACT(EPOCH FROM (c.published_at - o.accepted_at)) * 1000
+    FROM taker_orders o JOIN order_commands c USING (order_id)
+   WHERE c.published_at IS NOT NULL
+  UNION ALL
+  SELECT 3, 'order outbox created → published',
+         EXTRACT(EPOCH FROM (c.published_at - c.created_at)) * 1000
+    FROM order_commands c
+   WHERE c.published_at IS NOT NULL
+  UNION ALL
+  SELECT 4, 'order command published → matching started',
+         EXTRACT(EPOCH FROM (m.match_event_at - c.published_at)) * 1000
+    FROM matches m JOIN order_commands c USING (order_id)
+   WHERE c.published_at IS NOT NULL
+  UNION ALL
+  SELECT 5, 'matching started → match result published',
+         EXTRACT(EPOCH FROM (r.published_at - m.match_event_at)) * 1000
+    FROM matches m JOIN match_results r USING (command_id)
+   WHERE r.published_at IS NOT NULL
+  UNION ALL
+  SELECT 6, 'matching started → account commands published',
+         EXTRACT(EPOCH FROM (a.published_at - t.match_event_at)) * 1000
+    FROM trades t JOIN account_commands a USING (trade_id)
+  UNION ALL
+  SELECT 7, 'account commands published → bilateral settled',
+         EXTRACT(EPOCH FROM (s.completed_at - a.published_at)) * 1000
+    FROM account_commands a JOIN settlements s USING (trade_id)
+  UNION ALL
+  SELECT 8, 'ACCEPTED → bilateral settled',
+         EXTRACT(EPOCH FROM (s.completed_at - o.accepted_at)) * 1000
+    FROM taker_orders o
+    JOIN trades t USING (order_id)
+    JOIN settlements s USING (trade_id)
+)
+SELECT '| ' || metric || ' | ' || count(*) || ' | ' ||
+       round(min(ms)::numeric, 3) || ' | ' ||
+       round(percentile_disc(0.50) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' | ' ||
+       round(percentile_disc(0.95) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' | ' ||
+       round(percentile_disc(0.99) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' | ' ||
+       round(max(ms)::numeric, 3) || ' |'
+  FROM samples
+ GROUP BY metric_order, metric
+ ORDER BY metric_order;
+SQL
+}
+
+stress_matching_shard_rows() {
+  local product_line="$1"
+  local phase="$2"
+  local slug
+  slug="$(stress_product_slug "${product_line}")"
+  psql_exec -At <<SQL
+WITH trades AS (
+  SELECT symbol, count(*) AS trade_count
+    FROM trading_match_trades
+   WHERE product_line = '${product_line}'
+     AND trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'
+   GROUP BY symbol
+)
+SELECT '| ' || (s.symbol_id & (${STRESS_MATCHING_ENGINE_SHARDS} - 1)) || ' | ' ||
+       count(*) || ' | ' || sum(t.trade_count) || ' | ' ||
+       round((sum(t.trade_count)::numeric /
+             GREATEST((SELECT sum(trade_count) FROM trades), 1) * 100), 3) || '% |'
+  FROM trades t
+  JOIN trading_matching_symbols s
+    ON s.product_line = '${product_line}'
+   AND s.symbol = t.symbol
+ GROUP BY (s.symbol_id & (${STRESS_MATCHING_ENGINE_SHARDS} - 1))
+ ORDER BY (s.symbol_id & (${STRESS_MATCHING_ENGINE_SHARDS} - 1));
+SQL
+}
+
+prepare_pg_stat_statements() {
+  STRESS_PG_STAT_STATEMENTS_AVAILABLE=false
+  local installed
+  installed="$(query_value "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')")"
+  if [[ "${installed}" != "t" ]]; then
+    return
+  fi
+  if [[ "${STRESS_RESET_PG_STAT_STATEMENTS}" == "true" ]]; then
+    if ! query_value "SELECT pg_stat_statements_reset()" >/dev/null 2>&1; then
+      echo "pg_stat_statements is installed but reset failed; slow SQL report disabled" >&2
+      return
+    fi
+  fi
+  if ! query_value "SELECT count(*) FROM pg_stat_statements" >/dev/null 2>&1; then
+    echo "pg_stat_statements view is unavailable; check shared_preload_libraries" >&2
+    return
+  fi
+  STRESS_PG_STAT_STATEMENTS_AVAILABLE=true
+}
+
+stress_pg_stat_statement_rows() {
+  if [[ "${STRESS_PG_STAT_STATEMENTS_AVAILABLE}" != "true" ]]; then
+    echo "| N/A | N/A | N/A | N/A | pg_stat_statements 未安装、未 preload 或无 reset 权限 |"
+    return
+  fi
+  psql_exec -At <<'SQL'
+SELECT '| ' || calls || ' | ' ||
+       round(total_exec_time::numeric, 3) || ' | ' ||
+       round(mean_exec_time::numeric, 3) || ' | ' ||
+       rows || ' | ' ||
+       regexp_replace(left(query, 240), '[[:space:]|]+', ' ', 'g') || ' |'
+  FROM pg_stat_statements
+ WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+   AND query NOT ILIKE '%pg_stat_statements%'
+ ORDER BY total_exec_time DESC
+ LIMIT 20;
+SQL
+}
+
+capture_stress_pg_stat_statements() {
+  STRESS_PG_STAT_STATEMENTS_FILE="${TMP_DIR}/pg-stat-statements-top.tsv"
+  stress_pg_stat_statement_rows >"${STRESS_PG_STAT_STATEMENTS_FILE}"
 }
 
 collect_stress_funds_rows() {
@@ -2643,9 +3101,20 @@ run_multi_symbol_stress_flow() {
   local open_latency close_latency open_trades close_trades settled_open settled_close active_symbols maker_users
   local maker_orders maker_place_success open_accepted_tps open_matched_tps open_account_tps
   local close_accepted_tps close_matched_tps close_account_tps trading_outbox_tps account_outbox_tps risk_outbox_tps
-  local open_account_lag close_account_lag
+  local open_account_lag close_account_lag traffic_model target_rate expected_active_symbols
   slug="$(stress_product_slug "${product_line}")"
-  echo "Scenario ${product_line}: multi-symbol high-frequency stress symbols=${STRESS_SYMBOL_COUNT} users=${STRESS_USER_COUNT}"
+  expected_active_symbols="$(stress_expected_active_symbol_count)"
+  if ((STRESS_HOT_SYMBOL_COUNT > 0)); then
+    traffic_model="hotspot(${STRESS_HOT_SYMBOL_COUNT} symbols=${STRESS_HOT_TRAFFIC_PERCENT}%)"
+  else
+    traffic_model="uniform"
+  fi
+  if ((STRESS_TARGET_TPS > 0)); then
+    target_rate="${STRESS_TARGET_TPS} TPS"
+  else
+    target_rate="unbounded"
+  fi
+  echo "Scenario ${product_line}: multi-symbol high-frequency stress symbols=${STRESS_SYMBOL_COUNT} users=${STRESS_USER_COUNT} traffic=${traffic_model} target=${target_rate}"
   seed_stress_prices "${product_line}"
   fund_stress_accounts_for_line "${product_line}"
   wait_sql_equals "market-maker price coverage ${product_line}" \
@@ -2672,6 +3141,8 @@ run_multi_symbol_stress_flow() {
     exit 1
   fi
   wait_stress_maker_phase_processed "${product_line}" "initial" "${STRESS_MAKER_DEPTH_LEVELS}"
+  prepare_pg_stat_statements
+  start_stress_kafka_lag_monitor "${product_line}"
 
   echo "Running ${product_line} concurrent open phase"
   commands=()
@@ -2681,7 +3152,7 @@ run_multi_symbol_stress_flow() {
   open_start="$(date +%s%N)"
   run_stress_maker_refresh_loop "${product_line}" "open" &
   maker_pid="$!"
-  run_with_concurrency "${STRESS_LOAD_CONCURRENCY}" "${commands[@]}"
+  run_with_concurrency_at_rate "${STRESS_LOAD_CONCURRENCY}" "${STRESS_TARGET_TPS}" "${commands[@]}"
   if ((RUN_FAILURES > 0)); then
     echo "Open taker placement failed: ${RUN_FAILURES}" >&2
     exit 1
@@ -2698,7 +3169,7 @@ run_multi_symbol_stress_flow() {
   close_start="$(date +%s%N)"
   run_stress_maker_refresh_loop "${product_line}" "close" &
   maker_pid="$!"
-  run_with_concurrency "${STRESS_LOAD_CONCURRENCY}" "${commands[@]}"
+  run_with_concurrency_at_rate "${STRESS_LOAD_CONCURRENCY}" "${STRESS_TARGET_TPS}" "${commands[@]}"
   if ((RUN_FAILURES > 0)); then
     echo "Close taker placement failed: ${RUN_FAILURES}" >&2
     exit 1
@@ -2706,6 +3177,7 @@ run_multi_symbol_stress_flow() {
   wait "${maker_pid}"
   close_end="$(date +%s%N)"
   wait_stress_phase_settled "${product_line}" "close"
+  capture_stress_pg_stat_statements
   stop_provider_by_name market-maker
   stop_provider_by_name price-refresher
 
@@ -2741,24 +3213,77 @@ PY
   assert_stress_state "${product_line}"
   assert_no_negative_balances "${product_line}"
   assert_outbox_drained "${product_line}"
-  trading_outbox_tps="$(stress_outbox_publish_summary "trading_outbox_events")"
-  account_outbox_tps="$(stress_outbox_publish_summary "account_outbox_events")"
-  risk_outbox_tps="$(stress_outbox_publish_summary "risk_outbox_events")"
+  stop_stress_kafka_lag_monitor
+  trading_outbox_tps="$(stress_outbox_publish_summary "trading_outbox_events" "${product_line}")"
+  account_outbox_tps="$(stress_outbox_publish_summary "account_outbox_events" "${product_line}")"
+  risk_outbox_tps="$(stress_outbox_publish_summary "risk_outbox_events" "${product_line}")"
 
   STRESS_LAST_SUMMARY_FILE="${TMP_DIR}/${product_line}-stress-summary.md"
   {
     echo "## ${product_line}"
     echo
-    echo "- Symbols active：${active_symbols}/${STRESS_SYMBOL_COUNT}"
+    if [[ -n "${STRESS_RUN_LABEL}" ]]; then
+      echo "- Run label：${STRESS_RUN_LABEL}"
+    fi
+    echo "- Symbols active：${active_symbols}/${expected_active_symbols}（instrument universe=${STRESS_SYMBOL_COUNT}）"
     echo "- Maker accounts：${maker_users}/${STRESS_SYMBOL_COUNT}"
     echo "- Maker orders：orders=${maker_orders}, placeSuccess=${maker_place_success}, initialLevels=${STRESS_MAKER_DEPTH_LEVELS}, refreshCycles=${STRESS_MAKER_REFRESH_CYCLES}, refreshLevels=${STRESS_MAKER_REFRESH_LEVELS}, concurrency=${STRESS_MAKER_LOAD_CONCURRENCY}"
     echo "- Users：${STRESS_USER_COUNT}"
-    echo "- Open phase：orders=${STRESS_USER_COUNT}, trades=${open_trades}, settledOrders=${settled_open}, submitMs=${open_ms}, concurrency=${STRESS_LOAD_CONCURRENCY}"
-    echo "- Close/sell phase：orders=${STRESS_USER_COUNT}, trades=${close_trades}, settledOrders=${settled_close}, submitMs=${close_ms}, concurrency=${STRESS_LOAD_CONCURRENCY}"
+    echo "- Traffic：model=${traffic_model}, targetRate=${target_rate}"
+    echo "- Matching：kafkaConcurrency=${STRESS_MATCHING_KAFKA_CONCURRENCY}, matchingEngines=${STRESS_MATCHING_ENGINE_SHARDS}, riskEngines=${STRESS_MATCHING_RISK_SHARDS}"
+    echo "- Internal maker whitelist：${STRESS_INTERNAL_MARKET_MAKER_WHITELIST}"
+    echo "- Open phase：orders=${STRESS_USER_COUNT}, trades=${open_trades}, settledOrders=${settled_open}, submitMs=${open_ms}, concurrency=${STRESS_LOAD_CONCURRENCY}, targetTps=${STRESS_TARGET_TPS}"
+    echo "- Close/sell phase：orders=${STRESS_USER_COUNT}, trades=${close_trades}, settledOrders=${settled_close}, submitMs=${close_ms}, concurrency=${STRESS_LOAD_CONCURRENCY}, targetTps=${STRESS_TARGET_TPS}"
     echo "- Account settlement latency ms \`count min p50 p95 p99 max\`：open=${open_latency}; close=${close_latency}"
     echo "- Account consumer lag ms \`matchEventTime -> accountProcessedAt count min p50 p95 p99 max\`：open=${open_account_lag}; close=${close_account_lag}"
     echo "- Phase throughput \`count durationSeconds tps\`：openAccepted=${open_accepted_tps}; openMatched=${open_matched_tps}; openAccount=${open_account_tps}; closeAccepted=${close_accepted_tps}; closeMatched=${close_matched_tps}; closeAccount=${close_account_tps}"
-    echo "- Outbox end-to-end publish \`published pending eventToPublishedSpanSeconds effectiveTps\`：trading=${trading_outbox_tps}; account=${account_outbox_tps}; risk=${risk_outbox_tps}"
+    echo "- Scoped outbox publish \`published pending spanSeconds effectiveTps ageP50Ms ageP95Ms ageP99Ms ageMaxMs\`：trading=${trading_outbox_tps}; account=${account_outbox_tps}; risk=${risk_outbox_tps}"
+    echo
+    echo "### Open 链路分段延迟"
+    echo
+    echo "| 阶段 | 样本 | min ms | p50 ms | p95 ms | p99 ms | max ms |"
+    echo "|---|---:|---:|---:|---:|---:|---:|"
+    stress_pipeline_latency_rows "${product_line}" "open"
+    echo
+    echo "### Close 链路分段延迟"
+    echo
+    echo "| 阶段 | 样本 | min ms | p50 ms | p95 ms | p99 ms | max ms |"
+    echo "|---|---:|---:|---:|---:|---:|---:|"
+    stress_pipeline_latency_rows "${product_line}" "close"
+    echo
+    echo "### Outbox 分组发布延迟"
+    echo
+    echo "| 来源 | owner | topic | published | pending | p50 ms | p95 ms | p99 ms | max ms |"
+    echo "|---|---|---|---:|---:|---:|---:|---:|---:|"
+    stress_outbox_detail_rows "trading_outbox_events" "${product_line}" "trading"
+    stress_outbox_detail_rows "account_outbox_events" "${product_line}" "account"
+    stress_outbox_detail_rows "risk_outbox_events" "${product_line}" "risk"
+    echo
+    echo "### Kafka Consumer Lag"
+    echo
+    echo "| group | topic | samples | peak total lag | peak partition lag | final total lag |"
+    echo "|---|---|---:|---:|---:|---:|"
+    stress_kafka_lag_rows
+    echo
+    echo "### Matching shard 流量分布"
+    echo
+    echo "Open："
+    echo
+    echo "| shard | active symbols | trades | share |"
+    echo "|---:|---:|---:|---:|"
+    stress_matching_shard_rows "${product_line}" "open"
+    echo
+    echo "Close："
+    echo
+    echo "| shard | active symbols | trades | share |"
+    echo "|---:|---:|---:|---:|"
+    stress_matching_shard_rows "${product_line}" "close"
+    echo
+    echo "### PostgreSQL Top SQL"
+    echo
+    echo "| calls | total exec ms | mean exec ms | rows | query |"
+    echo "|---:|---:|---:|---:|---|"
+    cat "${STRESS_PG_STAT_STATEMENTS_FILE}"
     echo
     echo "| 产品线 | 资产 | 期初 | 充值/调整 | 成交/权利金净额 | 成交/权利金发生额 | 手续费 | 资金费净额/发生额 | 强平费 | 交割/行权净额/发生额 | 期末应有 | 期末实际 | 结果 |"
     echo "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"
@@ -3121,6 +3646,77 @@ run_spot_asset_flow() {
     "0"
 }
 
+is_power_of_two() {
+  local value="$1"
+  ((value > 0 && (value & (value - 1)) == 0))
+}
+
+require_non_negative_integer() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
+    echo "${name} must be a non-negative integer, actual=${value}" >&2
+    exit 1
+  fi
+}
+
+require_positive_integer() {
+  local name="$1"
+  local value="$2"
+  require_non_negative_integer "${name}" "${value}"
+  if ((value <= 0)); then
+    echo "${name} must be positive, actual=${value}" >&2
+    exit 1
+  fi
+}
+
+validate_multi_symbol_stress_config() {
+  require_positive_integer "STRESS_SYMBOL_COUNT" "${STRESS_SYMBOL_COUNT}"
+  require_positive_integer "STRESS_USER_COUNT" "${STRESS_USER_COUNT}"
+  require_positive_integer "STRESS_LOAD_CONCURRENCY" "${STRESS_LOAD_CONCURRENCY}"
+  require_positive_integer "STRESS_MATCHING_KAFKA_CONCURRENCY" "${STRESS_MATCHING_KAFKA_CONCURRENCY}"
+  require_positive_integer "STRESS_MATCHING_ENGINE_SHARDS" "${STRESS_MATCHING_ENGINE_SHARDS}"
+  require_positive_integer "STRESS_MATCHING_RISK_SHARDS" "${STRESS_MATCHING_RISK_SHARDS}"
+  require_positive_integer "STRESS_KAFKA_LAG_SAMPLE_SECONDS" "${STRESS_KAFKA_LAG_SAMPLE_SECONDS}"
+  require_non_negative_integer "STRESS_TARGET_TPS" "${STRESS_TARGET_TPS}"
+  require_non_negative_integer "STRESS_HOT_SYMBOL_COUNT" "${STRESS_HOT_SYMBOL_COUNT}"
+  require_positive_integer "STRESS_HOT_TRAFFIC_PERCENT" "${STRESS_HOT_TRAFFIC_PERCENT}"
+  if ((STRESS_SYMBOL_COUNT < 20)); then
+    echo "STRESS_SYMBOL_COUNT must be at least 20 for multi-symbol stress" >&2
+    exit 1
+  fi
+  if ((STRESS_HOT_SYMBOL_COUNT >= STRESS_SYMBOL_COUNT)); then
+    echo "STRESS_HOT_SYMBOL_COUNT must be less than STRESS_SYMBOL_COUNT; use 0 for uniform traffic" >&2
+    exit 1
+  fi
+  if ((STRESS_HOT_TRAFFIC_PERCENT < 1 || STRESS_HOT_TRAFFIC_PERCENT > 100)); then
+    echo "STRESS_HOT_TRAFFIC_PERCENT must be in [1, 100]" >&2
+    exit 1
+  fi
+  if ! is_power_of_two "${STRESS_MATCHING_ENGINE_SHARDS}"; then
+    echo "STRESS_MATCHING_ENGINE_SHARDS must be a power of two" >&2
+    exit 1
+  fi
+  if ! is_power_of_two "${STRESS_MATCHING_RISK_SHARDS}"; then
+    echo "STRESS_MATCHING_RISK_SHARDS must be a power of two" >&2
+    exit 1
+  fi
+  case "${STRESS_INTERNAL_MARKET_MAKER_WHITELIST}" in
+    true|false) ;;
+    *)
+      echo "STRESS_INTERNAL_MARKET_MAKER_WHITELIST must be true or false" >&2
+      exit 1
+      ;;
+  esac
+  case "${STRESS_RESET_PG_STAT_STATEMENTS}" in
+    true|false) ;;
+    *)
+      echo "STRESS_RESET_PG_STAT_STATEMENTS must be true or false" >&2
+      exit 1
+      ;;
+  esac
+}
+
 run_line() {
   local product_line="$1"
   echo "========== Product line ${product_line} =========="
@@ -3192,15 +3788,15 @@ main() {
   require_command curl
   require_command "$(kafka_topics_cmd)"
   require_command "$(kafka_producer_cmd)"
+  if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+    require_command "$(kafka_consumer_groups_cmd)"
+    validate_multi_symbol_stress_config
+  fi
   wait_until "PostgreSQL" 120 pg_isready -h localhost -p "${POSTGRES_PORT}" -U "${DB_USER}"
   wait_until "Kafka" 120 kafka_ready
   ensure_database
   package_services
   if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
-    if ((STRESS_SYMBOL_COUNT < 20)); then
-      echo "STRESS_SYMBOL_COUNT must be at least 20 for multi-symbol stress" >&2
-      exit 1
-    fi
     local product_line_count report_scope
     product_line_count="$(wc -w <<<"${PRODUCT_LINES}" | tr -d '[:space:]')"
     if ((product_line_count == 4)); then
@@ -3220,7 +3816,12 @@ main() {
       echo "- 每个产品线 active symbols：${STRESS_SYMBOL_COUNT}。"
       echo "- Maker accounts：${STRESS_SYMBOL_COUNT}，每个 symbol 一个 maker account；market-maker provider 同时配置 ${STRESS_SYMBOL_COUNT} 个 strategy。"
       echo "- Maker 高频：初始 ${STRESS_MAKER_DEPTH_LEVELS} 档，压测阶段每个 phase 刷新 ${STRESS_MAKER_REFRESH_CYCLES} 轮，每轮 ${STRESS_MAKER_REFRESH_LEVELS} 档。"
-      echo "- 用户：每个产品线 ${STRESS_USER_COUNT} 个 taker 用户，经 gateway 单笔真实下单；open 与 close/sell 两阶段均按并发 ${STRESS_LOAD_CONCURRENCY} 提交。"
+      echo "- 用户：每个产品线 ${STRESS_USER_COUNT} 个 taker 用户，经 gateway 单笔真实下单；open 与 close/sell 两阶段均按并发 ${STRESS_LOAD_CONCURRENCY} 提交，目标速率为 ${STRESS_TARGET_TPS} TPS（0 表示不限速）。"
+      echo "- 流量分布：hotSymbolCount=${STRESS_HOT_SYMBOL_COUNT}，hotTrafficPercent=${STRESS_HOT_TRAFFIC_PERCENT}；hotSymbolCount=0 表示均匀分布。"
+      echo "- 撮合：Kafka concurrency=${STRESS_MATCHING_KAFKA_CONCURRENCY}，matching engines=${STRESS_MATCHING_ENGINE_SHARDS}，risk engines=${STRESS_MATCHING_RISK_SHARDS}。"
+      echo "- 内部做市账号白名单：${STRESS_INTERNAL_MARKET_MAKER_WHITELIST}；真实用户与白名单做市成交仍执行完整资金结算。"
+      echo "- PostgreSQL 慢 SQL：检测到 pg_stat_statements 时 reset=${STRESS_RESET_PG_STAT_STATEMENTS}，报告按 total execution time 输出前 20 条。"
+      echo "- Kafka lag：每 ${STRESS_KAFKA_LAG_SAMPLE_SECONDS}s 采样 matching、account、order result 和 position maintenance consumer group。"
       echo "- Account outbox：batchSize=${STRESS_ACCOUNT_OUTBOX_BATCH_SIZE}，publishDelayMs=${STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS}，maxInFlight=${STRESS_ACCOUNT_OUTBOX_MAX_IN_FLIGHT}，maxRowsPerKey=${STRESS_ACCOUNT_OUTBOX_MAX_ROWS_PER_KEY}。"
       echo "- Risk outbox：batchSize=${STRESS_RISK_OUTBOX_BATCH_SIZE}，publishDelayMs=${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS}，maxRowsPerKey=${STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY}。"
       echo "- 资金准备：批量 fixture 写入 balance、ledger 和 admin adjustment；下单、撮合、Kafka、account 结算全部走真实 provider 链路。"

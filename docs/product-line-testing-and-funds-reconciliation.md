@@ -10,6 +10,7 @@ Current scripts:
 
 - `scripts/product-line-api-flow-smoke.sh`: starts the required providers for one product line and executes user orders, matching, position creation, self-close, liquidation, lifecycle events, and market-maker flow.
 - `scripts/product-line-funds-reconcile.sh`: independent SQL reconciliation for balances, ledgers, funding, liquidation fees, delivery/exercise, insurance fund credits, and reservations.
+- `scripts/run-linear-perpetual-stress-matrix.sh`: generates or executes a perpetual matching-concurrency, hotspot-traffic, and target-TPS comparison matrix.
 
 ## Run One Product Line at a Time
 
@@ -23,6 +24,61 @@ PRODUCT_LINES=SPOT BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LE
 ```
 
 Wallet services are not part of this local smoke. Test funds are injected through account/admin product balance adjustments or script fixtures, and the reconciliation script reports those as `adjustment_units`.
+
+## Perpetual Multi-Symbol Stress
+
+Example single run:
+
+```bash
+PRODUCT_LINES=LINEAR_PERPETUAL \
+MULTI_SYMBOL_STRESS=true \
+RESET_KAFKA=true \
+CREATE_KAFKA_TOPICS=true \
+STRESS_MATCHING_KAFKA_CONCURRENCY=8 \
+STRESS_MATCHING_ENGINE_SHARDS=8 \
+STRESS_MATCHING_RISK_SHARDS=4 \
+STRESS_HOT_SYMBOL_COUNT=1 \
+STRESS_HOT_TRAFFIC_PERCENT=80 \
+STRESS_TARGET_TPS=80 \
+STRESS_RUN_LABEL=scale8-hot1-80tps \
+STRESS_REPORT_FILE=docs/scale8-hot1-80tps.md \
+./scripts/product-line-api-flow-smoke.sh
+```
+
+`STRESS_HOT_SYMBOL_COUNT=0` distributes takers uniformly. Values such as `1` or `3` direct
+`STRESS_HOT_TRAFFIC_PERCENT` of taker requests to the first one or three symbols. `STRESS_TARGET_TPS=0`
+retains the original unbounded burst; a positive integer rate-limits API submission.
+
+The matrix script prints its cases by default. Execute it only after confirming the environment and expected duration:
+
+```bash
+MATRIX_DRY_RUN=false \
+MATRIX_PROFILES="baseline scale8 scale16" \
+MATRIX_TRAFFIC_MODES="uniform hot1 hot3" \
+MATRIX_TARGET_TPS_LIST="30 50 80 120" \
+MATRIX_REPEATS=3 \
+./scripts/run-linear-perpetual-stress-matrix.sh
+```
+
+The profiles are `4/4/2`, `8/8/4`, and `16/8/4` for Kafka listener concurrency, matching engines,
+and risk engines. Every case recreates the test topics, removes old topic state for the stable consumer
+groups, performs funds reconciliation, and writes a separate report. Reports now include:
+
+- segmented `order created → ACCEPTED → order command published → matching started → match/account command published
+  → bilateral settlement` latency;
+- p50/p95/p99/max grouped by Outbox owner and topic;
+- symbol and trade distribution across matching-engine shards;
+- Outbox statistics scoped to the current stress traces, taker users, and maker users.
+- the top 20 statements by total execution time when `pg_stat_statements` is available.
+- peak and final Kafka lag for matching, account, order-result, and position-maintenance consumer groups.
+
+For slow-SQL ranking, PostgreSQL must preload `pg_stat_statements` and have the extension created before
+the run. The script does not change instance-level database settings. It reports `N/A` instead of inventing
+slow-SQL data when the view cannot be used.
+
+The multi-symbol stress enables the internal market-maker whitelist by default. Trades between a
+whitelisted maker and a real user still perform full balance, position, fee, and PnL settlement; only
+self-trades where both sides are whitelisted use the internal-maker special path.
 
 ## API Flow Coverage
 
