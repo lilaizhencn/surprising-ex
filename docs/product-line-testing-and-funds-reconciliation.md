@@ -66,7 +66,11 @@ groups, performs funds reconciliation, and writes a separate report. Reports now
 
 - segmented `order created → ACCEPTED → order command published → matching started → match/account command published
   → bilateral settlement` latency;
-- p50/p95/p99/max grouped by Outbox owner and topic;
+- p50/p95/p99/max grouped by Outbox provider owner, aggregate type, topic, and event type;
+- separate open/close Trading Outbox publish latency, plus exact per-group peak pending rows, maximum pending
+  age, and final backlog reconstructed from `created_at/published_at` without polling SQL during the run;
+- shared Trading Outbox ownership mapped as `ORDER` to order-provider, `TRIGGER_ORDER` to trigger-provider,
+  and the remaining stress aggregates to matching-provider; events without an open/close trace appear as `other`;
 - symbol and trade distribution across matching-engine shards;
 - Outbox statistics scoped to the current stress traces, taker users, and maker users.
 - the top 20 statements by total execution time when `pg_stat_statements` is available.

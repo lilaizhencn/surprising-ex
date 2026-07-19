@@ -61,6 +61,7 @@ STRESS_PG_STAT_STATEMENTS_AVAILABLE=false
 STRESS_KAFKA_LAG_FILE=""
 STRESS_KAFKA_LAG_STOP_FILE=""
 STRESS_KAFKA_LAG_MONITOR_PID=""
+STRESS_OUTBOX_START_ID=0
 STRESS_PG_STAT_STATEMENTS_FILE=""
 
 BASE_USER=$((6000000000 + RUN_SEQ * 1000))
@@ -2523,6 +2524,152 @@ stress_kafka_lag_rows() {
   ' "${STRESS_KAFKA_LAG_FILE}" | sort
 }
 
+start_stress_outbox_observation() {
+  STRESS_OUTBOX_START_ID="$(query_value "SELECT COALESCE(max(id), 0) FROM trading_outbox_events")"
+}
+
+stress_outbox_backlog_rows() {
+  local product_line="$1"
+  local slug
+  slug="$(stress_product_slug "${product_line}")"
+  psql_exec -At <<SQL
+WITH scoped AS (
+  SELECT CASE
+           WHEN payload ->> 'traceId' LIKE 'stress-${RUN_ID}-${slug}-open-%' THEN 'open'
+           WHEN payload ->> 'traceId' LIKE 'stress-${RUN_ID}-${slug}-close-%' THEN 'close'
+           WHEN payload ->> 'traceId' LIKE 'stress-${RUN_ID}-${slug}-initial-%' THEN 'initial'
+           ELSE 'other'
+         END AS phase,
+         CASE aggregate_type
+           WHEN 'ORDER' THEN 'order-provider'
+           WHEN 'TRIGGER_ORDER' THEN 'trigger-provider'
+           ELSE 'matching-provider'
+         END AS provider_owner,
+         aggregate_type,
+         replace(topic, 'surprising.', '') AS topic,
+         event_type,
+         created_at,
+         published_at
+    FROM trading_outbox_events
+   WHERE id > ${STRESS_OUTBOX_START_ID}
+     AND (
+          payload ->> 'traceId' LIKE 'stress-${RUN_ID}-${slug}-%'
+          OR (
+           payload ->> 'userId' ~ '^[0-9]+$'
+           AND (
+             (payload ->> 'userId')::bigint BETWEEN ${STRESS_MM_USER_START}
+                                                    AND $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT - 1))
+             OR
+             (payload ->> 'userId')::bigint BETWEEN ${STRESS_TAKER_USER_START}
+                                                    AND $((STRESS_TAKER_USER_START + STRESS_USER_COUNT - 1))
+           )
+         )
+       )
+),
+expanded AS (
+  SELECT phase,
+         provider_owner,
+         aggregate_type,
+         topic,
+         event_type,
+         created_at,
+         published_at
+    FROM scoped
+  UNION ALL
+  SELECT 'all' AS phase,
+         provider_owner,
+         aggregate_type,
+         topic,
+         event_type,
+         created_at,
+         published_at
+    FROM scoped
+),
+timeline AS (
+  SELECT phase,
+         provider_owner,
+         aggregate_type,
+         topic,
+         event_type,
+         created_at AS event_time,
+         0 AS event_order,
+         1 AS delta
+    FROM expanded
+  UNION ALL
+  SELECT phase,
+         provider_owner,
+         aggregate_type,
+         topic,
+         event_type,
+         published_at AS event_time,
+         1 AS event_order,
+         -1 AS delta
+    FROM expanded
+   WHERE published_at IS NOT NULL
+),
+timeline_points AS (
+  SELECT phase,
+         provider_owner,
+         aggregate_type,
+         topic,
+         event_type,
+         event_time,
+         event_order,
+         sum(delta) AS delta
+    FROM timeline
+   GROUP BY phase, provider_owner, aggregate_type, topic, event_type, event_time, event_order
+),
+backlog AS (
+  SELECT phase,
+         provider_owner,
+         aggregate_type,
+         topic,
+         event_type,
+         sum(delta) OVER (
+           PARTITION BY phase, provider_owner, aggregate_type, topic, event_type
+           ORDER BY event_time, event_order
+           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+         ) AS pending_count
+    FROM timeline_points
+),
+backlog_summary AS (
+  SELECT phase,
+         provider_owner,
+         aggregate_type,
+         topic,
+         event_type,
+         max(pending_count) AS peak_pending
+    FROM backlog
+   GROUP BY phase, provider_owner, aggregate_type, topic, event_type
+),
+age_summary AS (
+  SELECT phase,
+         provider_owner,
+         aggregate_type,
+         topic,
+         event_type,
+         count(*) AS event_count,
+         max(EXTRACT(EPOCH FROM (COALESCE(published_at, clock_timestamp()) - created_at)) * 1000)
+           AS max_pending_age_ms,
+         count(*) FILTER (WHERE published_at IS NULL) AS final_pending
+    FROM expanded
+   GROUP BY phase, provider_owner, aggregate_type, topic, event_type
+)
+SELECT '| ' || a.phase || ' | ' || a.provider_owner || ' | ' ||
+       a.aggregate_type || ' | ' || a.topic || ' | ' || a.event_type || ' | ' ||
+       a.event_count || ' | ' || b.peak_pending || ' | ' ||
+       round(a.max_pending_age_ms::numeric, 3) || ' | ' || a.final_pending || ' |'
+  FROM age_summary a
+  JOIN backlog_summary b
+    ON b.phase = a.phase
+   AND b.provider_owner = a.provider_owner
+   AND b.aggregate_type = a.aggregate_type
+   AND b.topic = a.topic
+   AND b.event_type = a.event_type
+ ORDER BY a.phase, a.provider_owner, a.aggregate_type, a.topic, a.event_type;
+SQL
+}
+
 wait_stress_phase_settled() {
   local product_line="$1"
   local phase="$2"
@@ -2697,12 +2844,32 @@ stress_outbox_detail_rows() {
   local table_name="$1"
   local product_line="$2"
   local source_name="$3"
-  local slug
+  local slug owner_expression aggregate_expression
   slug="$(stress_product_slug "${product_line}")"
+  case "${table_name}" in
+    trading_outbox_events)
+      owner_expression="CASE aggregate_type WHEN 'ORDER' THEN 'order-provider' WHEN 'TRIGGER_ORDER' THEN 'trigger-provider' ELSE 'matching-provider' END"
+      aggregate_expression="aggregate_type"
+      ;;
+    account_outbox_events)
+      owner_expression="'account-provider'"
+      aggregate_expression="aggregate_type"
+      ;;
+    risk_outbox_events)
+      owner_expression="'risk-provider'"
+      aggregate_expression="'RISK_EVENT'"
+      ;;
+    *)
+      echo "unsupported outbox table ${table_name}" >&2
+      return 1
+      ;;
+  esac
   psql_exec -At <<SQL
 WITH scoped AS (
-  SELECT aggregate_type,
+  SELECT ${owner_expression} AS provider_owner,
+         ${aggregate_expression} AS aggregate_type,
          topic,
+         event_type,
          created_at,
          published_at,
          EXTRACT(EPOCH FROM (published_at - created_at)) * 1000 AS age_ms
@@ -2720,8 +2887,61 @@ WITH scoped AS (
          )
 ),
 summary AS (
-  SELECT aggregate_type,
+  SELECT provider_owner,
+         aggregate_type,
          topic,
+         event_type,
+         count(*) FILTER (WHERE published_at IS NOT NULL) AS published_count,
+         count(*) FILTER (WHERE published_at IS NULL) AS pending_count,
+         COALESCE(percentile_disc(0.50) WITHIN GROUP (ORDER BY age_ms)
+                    FILTER (WHERE published_at IS NOT NULL), 0) AS p50_ms,
+         COALESCE(percentile_disc(0.95) WITHIN GROUP (ORDER BY age_ms)
+                    FILTER (WHERE published_at IS NOT NULL), 0) AS p95_ms,
+         COALESCE(percentile_disc(0.99) WITHIN GROUP (ORDER BY age_ms)
+                    FILTER (WHERE published_at IS NOT NULL), 0) AS p99_ms,
+          COALESCE(max(age_ms) FILTER (WHERE published_at IS NOT NULL), 0) AS max_ms
+     FROM scoped
+    GROUP BY provider_owner, aggregate_type, topic, event_type
+)
+SELECT '| ${source_name} | ' || provider_owner || ' | ' ||
+       aggregate_type || ' | ' ||
+       replace(topic, 'surprising.', '') || ' | ' ||
+       event_type || ' | ' ||
+       published_count || ' | ' || pending_count || ' | ' ||
+       round(p50_ms::numeric, 3) || ' | ' ||
+       round(p95_ms::numeric, 3) || ' | ' ||
+       round(p99_ms::numeric, 3) || ' | ' ||
+       round(max_ms::numeric, 3) || ' |'
+  FROM summary
+ ORDER BY provider_owner, aggregate_type, topic, event_type;
+SQL
+}
+
+stress_trading_outbox_phase_rows() {
+  local product_line="$1"
+  local phase="$2"
+  local slug
+  slug="$(stress_product_slug "${product_line}")"
+  psql_exec -At <<SQL
+WITH scoped AS (
+  SELECT CASE aggregate_type
+           WHEN 'ORDER' THEN 'order-provider'
+           WHEN 'TRIGGER_ORDER' THEN 'trigger-provider'
+           ELSE 'matching-provider'
+         END AS provider_owner,
+         aggregate_type,
+         replace(topic, 'surprising.', '') AS topic,
+         event_type,
+         published_at,
+         EXTRACT(EPOCH FROM (published_at - created_at)) * 1000 AS age_ms
+    FROM trading_outbox_events
+   WHERE payload ->> 'traceId' LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'
+),
+summary AS (
+  SELECT provider_owner,
+         aggregate_type,
+         topic,
+         event_type,
          count(*) FILTER (WHERE published_at IS NOT NULL) AS published_count,
          count(*) FILTER (WHERE published_at IS NULL) AS pending_count,
          COALESCE(percentile_disc(0.50) WITHIN GROUP (ORDER BY age_ms)
@@ -2732,17 +2952,17 @@ summary AS (
                     FILTER (WHERE published_at IS NOT NULL), 0) AS p99_ms,
          COALESCE(max(age_ms) FILTER (WHERE published_at IS NOT NULL), 0) AS max_ms
     FROM scoped
-   GROUP BY aggregate_type, topic
+   GROUP BY provider_owner, aggregate_type, topic, event_type
 )
-SELECT '| ${source_name} | ' || aggregate_type || ' | ' ||
-       replace(topic, 'surprising.', '') || ' | ' ||
+SELECT '| ${phase} | ' || provider_owner || ' | ' ||
+       aggregate_type || ' | ' || topic || ' | ' || event_type || ' | ' ||
        published_count || ' | ' || pending_count || ' | ' ||
        round(p50_ms::numeric, 3) || ' | ' ||
        round(p95_ms::numeric, 3) || ' | ' ||
        round(p99_ms::numeric, 3) || ' | ' ||
        round(max_ms::numeric, 3) || ' |'
   FROM summary
- ORDER BY aggregate_type, topic;
+ ORDER BY provider_owner, aggregate_type, topic, event_type;
 SQL
 }
 
@@ -3143,6 +3363,7 @@ run_multi_symbol_stress_flow() {
   wait_stress_maker_phase_processed "${product_line}" "initial" "${STRESS_MAKER_DEPTH_LEVELS}"
   prepare_pg_stat_statements
   start_stress_kafka_lag_monitor "${product_line}"
+  start_stress_outbox_observation
 
   echo "Running ${product_line} concurrent open phase"
   commands=()
@@ -3238,6 +3459,7 @@ PY
     echo "- Account consumer lag ms \`matchEventTime -> accountProcessedAt count min p50 p95 p99 max\`：open=${open_account_lag}; close=${close_account_lag}"
     echo "- Phase throughput \`count durationSeconds tps\`：openAccepted=${open_accepted_tps}; openMatched=${open_matched_tps}; openAccount=${open_account_tps}; closeAccepted=${close_accepted_tps}; closeMatched=${close_matched_tps}; closeAccount=${close_account_tps}"
     echo "- Scoped outbox publish \`published pending spanSeconds effectiveTps ageP50Ms ageP95Ms ageP99Ms ageMaxMs\`：trading=${trading_outbox_tps}; account=${account_outbox_tps}; risk=${risk_outbox_tps}"
+    echo "- Trading Outbox observation：id>${STRESS_OUTBOX_START_ID}；ORDER=order-provider，TRIGGER_ORDER=trigger-provider，其余压测 aggregate=matching-provider；phase=other 表示事件未携带 open/close trace。"
     echo
     echo "### Open 链路分段延迟"
     echo
@@ -3253,11 +3475,24 @@ PY
     echo
     echo "### Outbox 分组发布延迟"
     echo
-    echo "| 来源 | owner | topic | published | pending | p50 ms | p95 ms | p99 ms | max ms |"
-    echo "|---|---|---|---:|---:|---:|---:|---:|---:|"
+    echo "| 来源 | provider owner | aggregate type | topic | event type | published | pending | p50 ms | p95 ms | p99 ms | max ms |"
+    echo "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|"
     stress_outbox_detail_rows "trading_outbox_events" "${product_line}" "trading"
     stress_outbox_detail_rows "account_outbox_events" "${product_line}" "account"
     stress_outbox_detail_rows "risk_outbox_events" "${product_line}" "risk"
+    echo
+    echo "### Trading Outbox Open/Close 发布延迟"
+    echo
+    echo "| phase | provider owner | aggregate type | topic | event type | published | pending | p50 ms | p95 ms | p99 ms | max ms |"
+    echo "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|"
+    stress_trading_outbox_phase_rows "${product_line}" "open"
+    stress_trading_outbox_phase_rows "${product_line}" "close"
+    echo
+    echo "### Trading Outbox 积压峰值"
+    echo
+    echo "| phase | provider owner | aggregate type | topic | event type | events | peak pending | max pending age ms | final pending |"
+    echo "|---|---|---|---|---|---:|---:|---:|---:|"
+    stress_outbox_backlog_rows "${product_line}"
     echo
     echo "### Kafka Consumer Lag"
     echo
@@ -3822,6 +4057,7 @@ main() {
       echo "- 内部做市账号白名单：${STRESS_INTERNAL_MARKET_MAKER_WHITELIST}；真实用户与白名单做市成交仍执行完整资金结算。"
       echo "- PostgreSQL 慢 SQL：检测到 pg_stat_statements 时 reset=${STRESS_RESET_PG_STAT_STATEMENTS}，报告按 total execution time 输出前 20 条。"
       echo "- Kafka lag：每 ${STRESS_KAFKA_LAG_SAMPLE_SECONDS}s 采样 matching、account、order result 和 position maintenance consumer group。"
+      echo "- Trading Outbox：按 phase、provider owner、aggregate type、topic、event type 精确还原 pending 峰值、最大未发布年龄和最终积压，不执行轮询 SQL。"
       echo "- Account outbox：batchSize=${STRESS_ACCOUNT_OUTBOX_BATCH_SIZE}，publishDelayMs=${STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS}，maxInFlight=${STRESS_ACCOUNT_OUTBOX_MAX_IN_FLIGHT}，maxRowsPerKey=${STRESS_ACCOUNT_OUTBOX_MAX_ROWS_PER_KEY}。"
       echo "- Risk outbox：batchSize=${STRESS_RISK_OUTBOX_BATCH_SIZE}，publishDelayMs=${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS}，maxRowsPerKey=${STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY}。"
       echo "- 资金准备：批量 fixture 写入 balance、ledger 和 admin adjustment；下单、撮合、Kafka、account 结算全部走真实 provider 链路。"
