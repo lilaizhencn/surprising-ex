@@ -49,12 +49,42 @@ public class LiquidationOrderRepository {
                                                          long quantitySteps,
                                                          Instant now,
                                                          java.util.function.Function<Object, String> serializer) {
-        long orderId = sequenceRepository.nextTradingSequence("order");
-        long eventId = sequenceRepository.nextTradingSequence("event");
-        long commandId = sequenceRepository.nextTradingSequence("command");
-        String clientOrderId = "LIQ-" + candidateId;
-        FeeSnapshot feeSnapshot = feeSnapshot(userId, symbol, instrumentVersion, now);
-        int orderRows = jdbcTemplate.update("""
+        return createReduceOnlyMarketOrders(List.of(new LiquidationOrderRequest(candidateId, userId, symbol,
+                marginMode, positionSide, instrumentVersion, side, quantitySteps, now)), serializer)
+                .getFirst().command();
+    }
+
+    public List<LiquidationOrderSubmission> createReduceOnlyMarketOrders(
+            List<LiquidationOrderRequest> requests,
+            java.util.function.Function<Object, String> serializer) {
+        if (requests == null || requests.isEmpty()) {
+            return List.of();
+        }
+        java.util.Map<Long, FeeSnapshot> feeSnapshots = feeSnapshots(requests);
+        List<PreparedLiquidationOrder> prepared = new ArrayList<>(requests.size());
+        for (LiquidationOrderRequest request : requests) {
+            long orderId = sequenceRepository.nextTradingSequence("order");
+            long eventId = sequenceRepository.nextTradingSequence("event");
+            long commandId = sequenceRepository.nextTradingSequence("command");
+            long acceptedOutboxId = sequenceRepository.nextTradingSequence("outbox");
+            long placeOutboxId = sequenceRepository.nextTradingSequence("outbox");
+            String clientOrderId = "LIQ-" + request.candidateId();
+            FeeSnapshot feeSnapshot = feeSnapshots.get(request.candidateId());
+            if (feeSnapshot == null) {
+                throw new IllegalStateException("fee schedule unavailable for liquidation candidate "
+                        + request.candidateId());
+            }
+            OrderEvent event = new OrderEvent(eventId, orderId, request.userId(), request.symbol(),
+                    OrderEventType.ACCEPTED, OrderStatus.ACCEPTED, "LIQUIDATION", request.now());
+            OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, commandId, orderId,
+                    request.userId(), clientOrderId, request.symbol(), request.instrumentVersion(), request.side(),
+                    OrderType.MARKET, TimeInForce.IOC, 0L, request.quantitySteps(),
+                    MarginMode.defaultIfNull(request.marginMode()), PositionSide.defaultIfNull(request.positionSide()),
+                    0L, 0L, true, false, request.now(), null);
+            prepared.add(new PreparedLiquidationOrder(request, orderId, clientOrderId, feeSnapshot, event, command,
+                    acceptedOutboxId, placeOutboxId, serializer.apply(event), serializer.apply(command)));
+        }
+        int[] orderRows = jdbcTemplate.batchUpdate("""
                 INSERT INTO trading_orders (
                     order_id, product_line, user_id, client_order_id, symbol, instrument_version, side, order_type, time_in_force,
                     price_ticks, quantity_steps, executed_quantity_steps, remaining_quantity_steps,
@@ -62,34 +92,52 @@ public class LiquidationOrderRepository {
                     reduce_only, post_only, status, reject_reason, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, 'MARKET', 'IOC', 0, ?, 0, ?, ?, ?, ?, ?,
                     TRUE, FALSE, 'ACCEPTED', NULL, ?, ?)
-                """, orderId, feeSnapshot.productLine().name(), userId, clientOrderId, symbol, instrumentVersion,
-                side.name(), quantitySteps, quantitySteps, MarginMode.defaultIfNull(marginMode).name(),
-                PositionSide.defaultIfNull(positionSide).name(), feeSnapshot.makerFeeRatePpm(),
-                feeSnapshot.takerFeeRatePpm(), Timestamp.from(now), Timestamp.from(now));
-        if (orderRows != 1) {
-            throw new IllegalStateException("failed to create liquidation trading order");
-        }
-        OrderEvent event = new OrderEvent(eventId, orderId, userId, symbol, OrderEventType.ACCEPTED,
-                OrderStatus.ACCEPTED, "LIQUIDATION", now);
-        int eventRows = jdbcTemplate.update("""
+                """, prepared.stream().map(row -> new Object[]{
+                row.orderId(), row.feeSnapshot().productLine().name(), row.request().userId(), row.clientOrderId(),
+                row.request().symbol(), row.request().instrumentVersion(), row.request().side().name(),
+                row.request().quantitySteps(), row.request().quantitySteps(),
+                MarginMode.defaultIfNull(row.request().marginMode()).name(),
+                PositionSide.defaultIfNull(row.request().positionSide()).name(),
+                row.feeSnapshot().makerFeeRatePpm(), row.feeSnapshot().takerFeeRatePpm(),
+                Timestamp.from(row.request().now()), Timestamp.from(row.request().now())
+        }).toList());
+        requireBatchRows(orderRows, prepared.size(), "liquidation trading orders");
+
+        int[] eventRows = jdbcTemplate.batchUpdate("""
                 INSERT INTO trading_order_events (
                     event_id, order_id, user_id, symbol, event_type, status, reason, event_time
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (event_id) DO NOTHING
-                """, event.eventId(), event.orderId(), event.userId(), event.symbol(), event.eventType().name(),
-                event.status().name(), event.reason(), Timestamp.from(event.eventTime()));
-        if (eventRows != 1) {
-            throw new IllegalStateException("failed to create liquidation order event");
+                """, prepared.stream().map(row -> new Object[]{
+                row.event().eventId(), row.event().orderId(), row.event().userId(), row.event().symbol(),
+                row.event().eventType().name(), row.event().status().name(), row.event().reason(),
+                Timestamp.from(row.event().eventTime())
+        }).toList());
+        requireBatchRows(eventRows, prepared.size(), "liquidation order events");
+
+        String orderEventsTopic = properties.getKafka().getOrderEventsTopic();
+        String orderCommandsTopic = properties.getKafka().getOrderCommandsTopic();
+        requireCurrentProductTopic(orderEventsTopic);
+        requireCurrentProductTopic(orderCommandsTopic);
+        List<Object[]> outboxArguments = new ArrayList<>(prepared.size() * 2);
+        for (PreparedLiquidationOrder row : prepared) {
+            Timestamp timestamp = Timestamp.from(row.request().now());
+            outboxArguments.add(new Object[]{row.acceptedOutboxId(), "LIQUIDATION_ORDER", row.orderId(),
+                    orderEventsTopic, row.request().symbol(), OrderEventType.ACCEPTED.name(), row.eventPayload(),
+                    timestamp, timestamp, timestamp});
+            outboxArguments.add(new Object[]{row.placeOutboxId(), "LIQUIDATION_ORDER", row.orderId(),
+                    orderCommandsTopic, row.request().symbol(), OrderCommandType.PLACE.name(), row.commandPayload(),
+                    timestamp, timestamp, timestamp});
         }
-        OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, commandId, orderId, userId,
-                clientOrderId, symbol, instrumentVersion, side, OrderType.MARKET, TimeInForce.IOC, 0L, quantitySteps,
-                MarginMode.defaultIfNull(marginMode), PositionSide.defaultIfNull(positionSide), 0L, 0L, true, false,
-                now, null);
-        enqueue("LIQUIDATION_ORDER", event.orderId(), properties.getKafka().getOrderEventsTopic(), symbol,
-                OrderEventType.ACCEPTED.name(), serializer.apply(event), now);
-        enqueue("LIQUIDATION_ORDER", orderId, properties.getKafka().getOrderCommandsTopic(), symbol,
-                OrderCommandType.PLACE.name(), serializer.apply(command), now);
-        return command;
+        int[] outboxRows = jdbcTemplate.batchUpdate("""
+                INSERT INTO trading_outbox_events (
+                    id, aggregate_type, aggregate_id, topic, event_key, event_type,
+                    payload, next_attempt_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                """, outboxArguments);
+        requireBatchRows(outboxRows, prepared.size() * 2, "liquidation outbox events");
+        return prepared.stream().map(row -> new LiquidationOrderSubmission(row.request().candidateId(),
+                row.command())).toList();
     }
 
     public OrderCommandEvent createReduceOnlyMarketOrder(long candidateId,
@@ -117,52 +165,75 @@ public class LiquidationOrderRepository {
                 instrumentVersion, side, quantitySteps, now, serializer);
     }
 
-    private FeeSnapshot feeSnapshot(long userId, String symbol, long instrumentVersion, Instant now) {
-        return jdbcTemplate.query("""
-                WITH instrument_fee AS (
-                    SELECT maker_fee_rate_ppm,
-                           taker_fee_rate_ppm,
-                           %s AS product_line
-                      FROM instruments
-                     WHERE symbol = ?
-                       AND version = ?
+    private java.util.Map<Long, FeeSnapshot> feeSnapshots(List<LiquidationOrderRequest> requests) {
+        String values = String.join(", ", Collections.nCopies(requests.size(),
+                "(?, ?, ?, ?, CAST(? AS timestamptz))"));
+        List<Object> args = new ArrayList<>(requests.size() * 5);
+        for (LiquidationOrderRequest request : requests) {
+            args.add(request.candidateId());
+            args.add(request.userId());
+            args.add(request.symbol());
+            args.add(request.instrumentVersion());
+            args.add(Timestamp.from(request.now()));
+        }
+        String sql = """
+                WITH requested(candidate_id, user_id, symbol, instrument_version, effective_time) AS (
+                    VALUES %s
                 ),
-                active_user_fee AS (
-                    SELECT maker_fee_rate_ppm,
-                           taker_fee_rate_ppm,
-                           CASE WHEN symbol = ? THEN 0 ELSE 1 END AS priority,
-                           CASE source_type
-                               WHEN 'RISK_OVERRIDE' THEN 0
-                               WHEN 'USER_OVERRIDE' THEN 1
-                               WHEN 'PROMOTION' THEN 2
-                               WHEN 'MARKET_MAKER' THEN 3
-                               WHEN 'VIP' THEN 4
-                               ELSE 5
-                           END AS source_priority,
-                           effective_time,
-                           fee_schedule_id
-                      FROM trading_fee_schedules
-                     WHERE user_id = ?
-                       AND product_line = (SELECT product_line FROM instrument_fee)
-                       AND status = 'ACTIVE'
-                       AND (symbol = ? OR symbol IS NULL)
-                       AND effective_time <= ?
-                       AND (expire_time IS NULL OR expire_time > ?)
-                     ORDER BY priority ASC, source_priority ASC, effective_time DESC, fee_schedule_id DESC
-                     LIMIT 1
+                instrument_fee AS (
+                    SELECT r.candidate_id,
+                           r.user_id,
+                           r.symbol,
+                           r.effective_time,
+                           i.maker_fee_rate_ppm,
+                           i.taker_fee_rate_ppm,
+                           %s AS product_line
+                      FROM requested r
+                      JOIN instruments i
+                        ON i.symbol = r.symbol
+                       AND i.version = r.instrument_version
                 )
-                SELECT COALESCE(u.maker_fee_rate_ppm, i.maker_fee_rate_ppm) AS maker_fee_rate_ppm,
+                SELECT i.candidate_id,
+                       COALESCE(u.maker_fee_rate_ppm, i.maker_fee_rate_ppm) AS maker_fee_rate_ppm,
                        COALESCE(u.taker_fee_rate_ppm, i.taker_fee_rate_ppm) AS taker_fee_rate_ppm,
                        i.product_line
                   FROM instrument_fee i
-             LEFT JOIN active_user_fee u ON TRUE
-                """.formatted(ProductLineSql.contractTypeProductLineCase("contract_type")),
-                (rs, rowNum) -> new FeeSnapshot(
-                ProductLine.valueOf(rs.getString("product_line")),
-                rs.getLong("maker_fee_rate_ppm"),
-                rs.getLong("taker_fee_rate_ppm")), symbol, instrumentVersion, symbol, userId, symbol,
-                Timestamp.from(now), Timestamp.from(now)).stream().findFirst()
-                .orElseThrow(() -> new IllegalStateException("fee schedule unavailable for liquidation order"));
+             LEFT JOIN LATERAL (
+                    SELECT f.maker_fee_rate_ppm,
+                           f.taker_fee_rate_ppm
+                      FROM trading_fee_schedules f
+                     WHERE f.user_id = i.user_id
+                       AND f.product_line = i.product_line
+                       AND f.status = 'ACTIVE'
+                       AND (f.symbol = i.symbol OR f.symbol IS NULL)
+                       AND f.effective_time <= i.effective_time
+                       AND (f.expire_time IS NULL OR f.expire_time > i.effective_time)
+                     ORDER BY CASE WHEN f.symbol = i.symbol THEN 0 ELSE 1 END,
+                              CASE f.source_type
+                                  WHEN 'RISK_OVERRIDE' THEN 0
+                                  WHEN 'USER_OVERRIDE' THEN 1
+                                  WHEN 'PROMOTION' THEN 2
+                                  WHEN 'MARKET_MAKER' THEN 3
+                                  WHEN 'VIP' THEN 4
+                                  ELSE 5
+                              END,
+                              f.effective_time DESC,
+                              f.fee_schedule_id DESC
+                     LIMIT 1
+                ) u ON TRUE
+                """.formatted(values, ProductLineSql.contractTypeProductLineCase("i.contract_type"));
+        java.util.Map<Long, FeeSnapshot> snapshots = new java.util.HashMap<>(requests.size());
+        List<FeeSnapshotRow> rows = jdbcTemplate.query(sql, (rs, rowNum) -> new FeeSnapshotRow(
+                rs.getLong("candidate_id"), new FeeSnapshot(ProductLine.valueOf(rs.getString("product_line")),
+                rs.getLong("maker_fee_rate_ppm"), rs.getLong("taker_fee_rate_ppm"))), args.toArray());
+        for (FeeSnapshotRow row : rows) {
+            snapshots.put(row.candidateId(), row.snapshot());
+        }
+        if (snapshots.size() != requests.size()) {
+            throw new IllegalStateException("fee schedule unavailable for liquidation batch: expected="
+                    + requests.size() + " actual=" + snapshots.size());
+        }
+        return snapshots;
     }
 
     public int cancelOpenReduceOnlyCloseOrders(long userId,
@@ -173,13 +244,21 @@ public class LiquidationOrderRepository {
                                                OrderSide closeSide,
                                                Instant now,
                                                java.util.function.Function<Object, String> serializer) {
-        List<OpenReduceOnlyOrder> orders = lockOpenReduceOnlyCloseOrders(userId, symbol, marginMode, positionSide,
-                instrumentVersion, closeSide);
+        return cancelOpenReduceOnlyCloseOrders(List.of(new LiquidationOrderRequest(0L, userId, symbol, marginMode,
+                positionSide, instrumentVersion, closeSide, 0L, now)), serializer);
+    }
+
+    public int cancelOpenReduceOnlyCloseOrders(List<LiquidationOrderRequest> requests,
+                                               java.util.function.Function<Object, String> serializer) {
+        if (requests == null || requests.isEmpty()) {
+            return 0;
+        }
+        List<OpenReduceOnlyOrder> orders = lockOpenReduceOnlyCloseOrders(requests);
         for (OpenReduceOnlyOrder order : orders) {
             if (order.status() != OrderStatus.CANCEL_REQUESTED) {
-                requestCancel(order, now, serializer);
+                requestCancel(order, order.preemptedAt(), serializer);
             }
-            enqueueCancelCommand(order, now, serializer);
+            enqueueCancelCommand(order, order.preemptedAt(), serializer);
         }
         return orders.size();
     }
@@ -205,30 +284,50 @@ public class LiquidationOrderRepository {
                 closeSide, now, serializer);
     }
 
-    private List<OpenReduceOnlyOrder> lockOpenReduceOnlyCloseOrders(long userId,
-                                                                    String symbol,
-                                                                    MarginMode marginMode,
-                                                                    PositionSide positionSide,
-                                                                    long instrumentVersion,
-                                                                    OrderSide closeSide) {
+    private List<OpenReduceOnlyOrder> lockOpenReduceOnlyCloseOrders(List<LiquidationOrderRequest> requests) {
+        String values = String.join(", ", Collections.nCopies(requests.size(),
+                "(?, ?, ?, ?, ?, ?, CAST(? AS timestamptz))"));
+        List<Object> args = new ArrayList<>(requests.size() * 7 + 1);
+        for (LiquidationOrderRequest request : requests) {
+            args.add(request.userId());
+            args.add(request.symbol());
+            args.add(request.marginMode().name());
+            args.add(request.positionSide().name());
+            args.add(request.instrumentVersion());
+            args.add(request.side().name());
+            args.add(Timestamp.from(request.now()));
+        }
+        args.add(currentProductLine().name());
         return jdbcTemplate.query("""
-                SELECT order_id, user_id, client_order_id, symbol, instrument_version, side, order_type,
-                       time_in_force, price_ticks, quantity_steps, remaining_quantity_steps, margin_mode,
-                       position_side, status, maker_fee_rate_ppm, taker_fee_rate_ppm, post_only
-                  FROM trading_orders
-                 WHERE user_id = ?
-                   AND product_line = ?
-                   AND symbol = ?
-                   AND margin_mode = ?
-                   AND position_side = ?
-                   AND instrument_version = ?
-                   AND side = ?
-                   AND reduce_only = TRUE
-                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
-                   AND remaining_quantity_steps > 0
-                 ORDER BY created_at ASC, order_id ASC
-                 FOR UPDATE
-                """, (rs, rowNum) -> new OpenReduceOnlyOrder(
+                WITH requested_input(user_id, symbol, margin_mode, position_side, instrument_version, side,
+                                     preempted_at) AS (
+                    VALUES %s
+                ),
+                requested AS (
+                    SELECT user_id, symbol, margin_mode, position_side, instrument_version, side,
+                           min(preempted_at) AS preempted_at
+                      FROM requested_input
+                     GROUP BY user_id, symbol, margin_mode, position_side, instrument_version, side
+                )
+                SELECT o.order_id, o.user_id, o.client_order_id, o.symbol, o.instrument_version, o.side,
+                       o.order_type, o.time_in_force, o.price_ticks, o.quantity_steps, o.remaining_quantity_steps,
+                       o.margin_mode, o.position_side, o.status, o.maker_fee_rate_ppm, o.taker_fee_rate_ppm,
+                       o.post_only, r.preempted_at
+                  FROM requested r
+                  JOIN trading_orders o
+                    ON o.user_id = r.user_id
+                   AND o.symbol = r.symbol
+                   AND o.margin_mode = r.margin_mode
+                   AND o.position_side = r.position_side
+                   AND o.instrument_version = r.instrument_version
+                   AND o.side = r.side
+                 WHERE o.product_line = ?
+                   AND o.reduce_only = TRUE
+                   AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                   AND o.remaining_quantity_steps > 0
+                 ORDER BY o.created_at ASC, o.order_id ASC
+                 FOR UPDATE OF o
+                """.formatted(values), (rs, rowNum) -> new OpenReduceOnlyOrder(
                 rs.getLong("order_id"),
                 rs.getLong("user_id"),
                 rs.getString("client_order_id"),
@@ -244,9 +343,8 @@ public class LiquidationOrderRepository {
                 OrderStatus.valueOf(rs.getString("status")),
                 rs.getLong("maker_fee_rate_ppm"),
                 rs.getLong("taker_fee_rate_ppm"),
-                rs.getBoolean("post_only")), userId, currentProductLine().name(), symbol,
-                MarginMode.defaultIfNull(marginMode).name(),
-                PositionSide.defaultIfNull(positionSide).name(), instrumentVersion, closeSide.name());
+                rs.getBoolean("post_only"),
+                rs.getTimestamp("preempted_at").toInstant()), args.toArray());
     }
 
     private void requestCancel(OpenReduceOnlyOrder order,
@@ -437,7 +535,8 @@ public class LiquidationOrderRepository {
             OrderStatus status,
             long makerFeeRatePpm,
             long takerFeeRatePpm,
-            boolean postOnly) {
+            boolean postOnly,
+            Instant preemptedAt) {
         private OpenReduceOnlyOrder {
             marginMode = MarginMode.defaultIfNull(marginMode);
             positionSide = PositionSide.defaultIfNull(positionSide);
@@ -445,6 +544,39 @@ public class LiquidationOrderRepository {
     }
 
     private record FeeSnapshot(ProductLine productLine, long makerFeeRatePpm, long takerFeeRatePpm) {
+    }
+
+    private record FeeSnapshotRow(long candidateId, FeeSnapshot snapshot) {
+    }
+
+    public record LiquidationOrderRequest(long candidateId,
+                                          long userId,
+                                          String symbol,
+                                          MarginMode marginMode,
+                                          PositionSide positionSide,
+                                          long instrumentVersion,
+                                          OrderSide side,
+                                          long quantitySteps,
+                                          Instant now) {
+        public LiquidationOrderRequest {
+            marginMode = MarginMode.defaultIfNull(marginMode);
+            positionSide = PositionSide.defaultIfNull(positionSide);
+        }
+    }
+
+    public record LiquidationOrderSubmission(long candidateId, OrderCommandEvent command) {
+    }
+
+    private record PreparedLiquidationOrder(LiquidationOrderRequest request,
+                                            long orderId,
+                                            String clientOrderId,
+                                            FeeSnapshot feeSnapshot,
+                                            OrderEvent event,
+                                            OrderCommandEvent command,
+                                            long acceptedOutboxId,
+                                            long placeOutboxId,
+                                            String eventPayload,
+                                            String commandPayload) {
     }
 
     private String truncate(String value) {
@@ -485,6 +617,18 @@ public class LiquidationOrderRepository {
     private void requireSingleRow(int rows, String operation) {
         if (rows != 1) {
             throw new IllegalStateException("failed to write " + operation);
+        }
+    }
+
+    private void requireBatchRows(int[] rows, int expected, String operation) {
+        if (rows.length != expected) {
+            throw new IllegalStateException("failed to batch write " + operation + ": expected=" + expected
+                    + " actual=" + rows.length);
+        }
+        for (int row : rows) {
+            if (row != 1 && row != java.sql.Statement.SUCCESS_NO_INFO) {
+                throw new IllegalStateException("failed to batch write " + operation + ": row result=" + row);
+            }
         }
     }
 }

@@ -66,7 +66,8 @@ public class LiquidationProperties {
         private String matchResultsTopic = "surprising.perp.match.results.v1";
         private String orderCommandsTopic = "surprising.perp.order.commands.v1";
         private String orderEventsTopic = "surprising.perp.order.events.v1";
-        private int concurrency = 8;
+        private int candidateConcurrency = 32;
+        private int matchResultConcurrency = 8;
         private int maxPollRecords = 500;
 
         public String getBootstrapServers() {
@@ -133,12 +134,26 @@ public class LiquidationProperties {
             this.orderEventsTopic = orderEventsTopic;
         }
 
-        public int getConcurrency() {
-            return concurrency;
+        public int getCandidateConcurrency() {
+            return candidateConcurrency;
         }
 
-        public void setConcurrency(int concurrency) {
-            this.concurrency = concurrency;
+        public void setCandidateConcurrency(int candidateConcurrency) {
+            if (candidateConcurrency <= 0) {
+                throw new IllegalArgumentException("liquidation candidateConcurrency must be positive");
+            }
+            this.candidateConcurrency = candidateConcurrency;
+        }
+
+        public int getMatchResultConcurrency() {
+            return matchResultConcurrency;
+        }
+
+        public void setMatchResultConcurrency(int matchResultConcurrency) {
+            if (matchResultConcurrency <= 0) {
+                throw new IllegalArgumentException("liquidation matchResultConcurrency must be positive");
+            }
+            this.matchResultConcurrency = matchResultConcurrency;
         }
 
         public int getMaxPollRecords() {
@@ -326,11 +341,40 @@ public class LiquidationProperties {
     }
 
     public static class RedisIndex {
-        private String keyPrefix = "surprising:liquidation:v1";
-        private int candidateBatchSize = 100;
+        private String keyPrefix = "surprising:liquidation:v2";
+        private int candidateBatchSize = 128;
+        private int workerCount = 16;
+        private Duration leaseDuration = Duration.ofSeconds(30);
+        private Duration retryDelay = Duration.ofMillis(500);
         public String getKeyPrefix() { return keyPrefix; }
         public void setKeyPrefix(String keyPrefix) { this.keyPrefix = keyPrefix; }
         public int getCandidateBatchSize() { return candidateBatchSize; }
-        public void setCandidateBatchSize(int candidateBatchSize) { this.candidateBatchSize = candidateBatchSize; }
+        public void setCandidateBatchSize(int candidateBatchSize) {
+            if (candidateBatchSize <= 0 || candidateBatchSize > 2_000) {
+                throw new IllegalArgumentException("liquidation candidateBatchSize must be between 1 and 2000");
+            }
+            this.candidateBatchSize = candidateBatchSize;
+        }
+        public int getWorkerCount() { return workerCount; }
+        public void setWorkerCount(int workerCount) {
+            if (workerCount <= 0) {
+                throw new IllegalArgumentException("liquidation workerCount must be positive");
+            }
+            this.workerCount = workerCount;
+        }
+        public Duration getLeaseDuration() { return leaseDuration; }
+        public void setLeaseDuration(Duration leaseDuration) {
+            if (leaseDuration == null || leaseDuration.isZero() || leaseDuration.isNegative()) {
+                throw new IllegalArgumentException("liquidation leaseDuration must be positive");
+            }
+            this.leaseDuration = leaseDuration;
+        }
+        public Duration getRetryDelay() { return retryDelay; }
+        public void setRetryDelay(Duration retryDelay) {
+            if (retryDelay == null || retryDelay.isZero() || retryDelay.isNegative()) {
+                throw new IllegalArgumentException("liquidation retryDelay must be positive");
+            }
+            this.retryDelay = retryDelay;
+        }
     }
 }

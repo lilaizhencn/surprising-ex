@@ -291,6 +291,8 @@ Risk-provider projects complete account risk groups from PostgreSQL into Redis a
 groups from Redis, require the exact pinned instrument version, and use cached immutable instrument/bracket
 metadata. Funding, liquidation, and ADL still revalidate their authoritative PostgreSQL state. All contract
 notional/PnL/margin amounts use shared exact-integer `PerpetualContractMath`; none reads the mark-price audit table.
+Position-risk Kafka batches retry indefinitely when a transient input such as the fresh mark cache is unavailable;
+they must never be committed or discarded merely because the periodic scanner can later repair the projection.
 
 Risk ids come from native PostgreSQL sequences. A write transaction allocates each required sequence in one
 batch, then batch-inserts account snapshots, position snapshots, liquidation candidates, and candidate Outbox rows.
@@ -320,6 +322,19 @@ candidate is `COMPLETED` or `CANCELED`, a later scan may create the next staged 
 Risk insertion should target only the partial active-candidate index for `DO NOTHING`; candidate-id
 or snapshot uniqueness conflicts are data-integrity issues and must fail rather than being treated
 as normal duplicate scans.
+
+The liquidation provider consumes candidate Kafka records in batches and offers them to five Redis keys sharing
+one Cluster hash tag: ready priority, delayed retry, in-flight lease, payload, and priority. Lua scripts perform
+atomic offer/deduplication, promote due retries, claim highest-priority candidates with a lease, acknowledge, and
+reschedule. A fixed worker set claims bounded batches; PostgreSQL remains the durable recovery source if Redis is
+empty or unavailable.
+
+For every claimed batch, PostgreSQL performs set-based candidate state claims, position/risk locks and validation,
+fee snapshot lookup, and reduce-only preemption. It reserves native sequence ranges and batch-inserts liquidation
+orders, order events, `ACCEPTED`/`PLACE` Outbox rows, and audit rows. The JDBC URL enables
+`reWriteBatchedInserts=true`; the partial `trading_orders_liquidation_preempt_idx` limits preemption locks to live
+reduce-only orders. A candidate remains `PROCESSING` after a fill until a newer risk projection proves that the
+position changed, closing the duplicate-liquidation window without trusting Redis as a correctness lock.
 
 `risk_admin_rule_overrides` stores admin-managed risk rule overrides:
 

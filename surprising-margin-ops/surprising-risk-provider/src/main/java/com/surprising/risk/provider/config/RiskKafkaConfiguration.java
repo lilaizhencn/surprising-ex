@@ -17,6 +17,8 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.util.backoff.FixedBackOff;
 
 @Configuration
 public class RiskKafkaConfiguration {
@@ -63,6 +65,9 @@ public class RiskKafkaConfiguration {
         factory.setConcurrency(properties.getKafka().getConcurrency());
         factory.setBatchListener(true);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
+        // A position event may temporarily outrun its mark-price cache update. Never recover by discarding a
+        // financial risk trigger; pause/retry the batch until the authoritative inputs are available.
+        factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
         return factory;
     }
 }

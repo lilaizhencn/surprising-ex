@@ -36,12 +36,24 @@ public class LiquidationKafkaConfiguration {
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, String> liquidationKafkaListenerContainerFactory(
+    public ConcurrentKafkaListenerContainerFactory<String, String> liquidationCandidateKafkaListenerContainerFactory(
             @Qualifier("liquidationConsumerFactory") ConsumerFactory<String, String> liquidationConsumerFactory,
             LiquidationProperties properties) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(liquidationConsumerFactory);
-        factory.setConcurrency(properties.getKafka().getConcurrency());
+        factory.setConcurrency(properties.getKafka().getCandidateConcurrency());
+        factory.setBatchListener(true);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, String> liquidationMatchResultKafkaListenerContainerFactory(
+            @Qualifier("liquidationConsumerFactory") ConsumerFactory<String, String> liquidationConsumerFactory,
+            LiquidationProperties properties) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(liquidationConsumerFactory);
+        factory.setConcurrency(properties.getKafka().getMatchResultConcurrency());
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
         return factory;
     }

@@ -98,7 +98,7 @@ public class MatchingService {
     @Transactional
     public void process(OrderCommandEvent command) {
         process(command, resultRepository.commandState(command.commandId(), command.orderId()),
-                ProtectionChecks.REQUIRED);
+                ProtectionChecks.REQUIRED, true);
     }
 
     @Transactional
@@ -121,13 +121,23 @@ public class MatchingService {
         uniqueCommands.forEach((commandId, command) -> commandOrderIds.put(commandId, command.orderId()));
         Map<Long, MatchingResultRepository.CommandState> states = resultRepository.commandStates(commandOrderIds);
         Map<Long, ProtectionChecks> protectionChecks = batchProtectionChecks(uniqueCommands.values(), states);
+        Map<String, DepthPublication> depthPublications = new LinkedHashMap<>();
         for (OrderCommandEvent command : uniqueCommands.values()) {
             MatchingResultRepository.CommandState state = states.get(command.commandId());
             if (state == null) {
                 throw new IllegalStateException("matching command state missing for commandId="
                         + command.commandId());
             }
-            process(command, state, protectionChecks.getOrDefault(command.commandId(), ProtectionChecks.REQUIRED));
+            MatchingSymbol changedSymbol = process(command, state,
+                    protectionChecks.getOrDefault(command.commandId(), ProtectionChecks.REQUIRED), false);
+            if (changedSymbol != null) {
+                depthPublications.put(changedSymbol.symbol(), new DepthPublication(changedSymbol, Instant.now()));
+            }
+        }
+        // Public depth is an explicitly lossy latest-only stream. Build one final snapshot per changed symbol
+        // instead of traversing the same exchange-core book once for every command in the Kafka batch.
+        for (DepthPublication publication : depthPublications.values()) {
+            publishOrderBookDepth(publication.symbol(), CommandResultCode.SUCCESS, publication.eventTime());
         }
     }
 
@@ -184,53 +194,57 @@ public class MatchingService {
         return Map.copyOf(checks);
     }
 
-    private void process(OrderCommandEvent command,
-                         MatchingResultRepository.CommandState commandState,
-                         ProtectionChecks protectionChecks) {
+    private MatchingSymbol process(OrderCommandEvent command,
+                                   MatchingResultRepository.CommandState commandState,
+                                   ProtectionChecks protectionChecks,
+                                   boolean publishDepth) {
         if (commandState.resultExists()) {
-            return;
+            return null;
         }
         if (!commandState.orderExists()) {
-            return;
+            return null;
         }
         Instant now = Instant.now();
         MatchingSymbol symbol = exchangeCoreEngine.ensureSymbol(command.symbol())
                 .orElse(null);
         if (symbol == null) {
             saveAndPublish(rejected(command, "UNKNOWN_SYMBOL", now), command, Map.of());
-            return;
+            return null;
         }
         long effectivePriceTicks = command.commandType() == OrderCommandType.PLACE
                 ? effectivePriceTicks(command)
                 : command.priceTicks();
         if (command.commandType() == OrderCommandType.PLACE && effectivePriceTicks <= 0) {
             saveAndPublish(rejected(command, "MARK_PRICE_UNAVAILABLE", now), command, Map.of());
-            return;
+            return null;
         }
         if (command.commandType() == OrderCommandType.PLACE
                 && !protectionChecks.skipVersionDatabaseCheck()
                 && protectionRepository.hasOpenOrdersWithDifferentInstrumentVersion(command.symbol(),
                 command.instrumentVersion(), command.orderId())) {
             saveAndPublish(rejected(command, "INSTRUMENT_VERSION_OPEN_BOOK_MISMATCH", now), command, Map.of());
-            return;
+            return null;
         }
         if (command.commandType() == OrderCommandType.PLACE
                 && exchangeCoreEngine.wouldTakeLiquidity(command, symbol, effectivePriceTicks)) {
             saveAndPublish(rejected(command, "POST_ONLY_WOULD_TAKE", now), command, Map.of());
-            return;
+            return null;
         }
         if (!protectionChecks.skipSelfTradeDatabaseCheck()
                 && wouldSelfTrade(command, effectivePriceTicks)) {
             saveAndPublish(rejected(command, "SELF_TRADE_PREVENTED", now), command, Map.of());
-            return;
+            return null;
         }
 
         OrderCommand response = exchangeCoreEngine.submit(command, symbol, effectivePriceTicks);
-        publishOrderBookDepth(symbol, response.resultCode, now);
+        if (publishDepth) {
+            publishOrderBookDepth(symbol, response.resultCode, now);
+        }
         publishPublicTrades(command, response, now);
         Map<Long, OrderQuantitySnapshot> makerQuantitySnapshots = new HashMap<>();
         MatchResultEvent result = toResultEvent(command, response, now, makerQuantitySnapshots);
         saveAndPublish(result, command, makerQuantitySnapshots);
+        return response.resultCode == CommandResultCode.SUCCESS ? symbol : null;
     }
 
     public OrderBookSnapshotResponse orderBookSnapshot(String symbol, int requestedDepth) {
@@ -702,6 +716,9 @@ public class MatchingService {
 
     private record DepthSnapshot(Map<Long, OrderBookLevel> bids,
                                  Map<Long, OrderBookLevel> asks) {
+    }
+
+    private record DepthPublication(MatchingSymbol symbol, Instant eventTime) {
     }
 
     private record RawTrade(

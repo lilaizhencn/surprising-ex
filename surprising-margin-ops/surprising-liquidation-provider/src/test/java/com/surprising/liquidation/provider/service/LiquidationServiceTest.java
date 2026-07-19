@@ -14,8 +14,11 @@ import com.surprising.liquidation.provider.model.LiquidationPricingInput;
 import com.surprising.liquidation.provider.model.LiquidationSizingInput;
 import com.surprising.liquidation.provider.repository.LiquidationOrderRepository;
 import com.surprising.liquidation.provider.repository.LiquidationRepository;
+import com.surprising.liquidation.provider.repository.LiquidationRepository.CandidateInputRequest;
+import com.surprising.liquidation.provider.repository.LiquidationRepository.CandidateInputs;
 import com.surprising.liquidation.provider.repository.LiquidationRepository.CanceledCandidate;
 import com.surprising.liquidation.provider.repository.LiquidationRepository.LiquidationAdminAction;
+import com.surprising.liquidation.provider.repository.LiquidationRepository.LiquidationOrderInsert;
 import com.surprising.liquidation.provider.repository.LiquidationRepository.LiquidationTimelineEvent;
 import com.surprising.liquidation.provider.repository.LiquidationSequenceRepository;
 import com.surprising.risk.api.model.LiquidationCandidateEvent;
@@ -51,9 +54,9 @@ class LiquidationServiceTest {
         LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
                 liquidationRepository, orderRepository, sequenceRepository, new LiquidationSizingPolicy(), new LiquidationPriceCalculator());
 
-        service.processCandidate(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
+        service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
                 "USDT", 10L, 590_000L, -200_000_000L, 88_500_000L, 1_100_000L,
-                Instant.parse("2026-07-01T00:00:00Z")));
+                Instant.parse("2026-07-01T00:00:00Z"))));
 
         assertThat(orderRepository.commands).hasSize(1);
         OrderCommandEvent command = orderRepository.commands.get(0);
@@ -94,9 +97,9 @@ class LiquidationServiceTest {
                 liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(),
                 new LiquidationPriceCalculator());
 
-        service.processCandidate(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
+        service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
                 "USDT", 10L, 590_000L, -200_000_000L, 88_500_000L, 1_100_000L,
-                Instant.parse("2026-07-01T00:00:00Z")));
+                Instant.parse("2026-07-01T00:00:00Z"))));
 
         assertThat(liquidationRepository.accountRiskChecks).isEqualTo(1);
         assertThat(orderRepository.commands).hasSize(1);
@@ -113,10 +116,10 @@ class LiquidationServiceTest {
                 liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(),
                 new LiquidationPriceCalculator());
 
-        service.processCandidate(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT",
+        service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT",
                 MarginMode.CROSS, PositionSide.SHORT, 8L, "USDT", -10L, 590_000L,
                 -200_000_000L, 88_500_000L, 1_100_000L,
-                Instant.parse("2026-07-01T00:00:00Z")));
+                Instant.parse("2026-07-01T00:00:00Z"))));
 
         assertThat(orderRepository.preemptions).containsExactly("2002:BTC-USDT:SHORT:8:BUY");
         assertThat(orderRepository.commands).singleElement().satisfies(command -> {
@@ -141,9 +144,9 @@ class LiquidationServiceTest {
         LiquidationService service = new LiquidationService(new ObjectMapper(), properties,
                 liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(), new LiquidationPriceCalculator());
 
-        assertThatThrownBy(() -> service.processCandidate(new LiquidationCandidateEvent(9401L, 9301L,
+        assertThatThrownBy(() -> service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L,
                 2002L, "BTC-USDT", 8L, "USDT", 10L, 590_000L, -200_000_000L,
-                88_500_000L, 1_100_000L, Instant.parse("2026-07-01T00:00:00Z"))))
+                88_500_000L, 1_100_000L, Instant.parse("2026-07-01T00:00:00Z")))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("liquidation execution is disabled");
 
@@ -164,9 +167,9 @@ class LiquidationServiceTest {
                 liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(),
                 new LiquidationPriceCalculator());
 
-        service.processCandidate(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
+        service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
                 "USDT", 10L, 590_000L, -200_000_000L, 88_500_000L, 1_100_000L,
-                Instant.parse("2026-07-01T00:00:00Z")));
+                Instant.parse("2026-07-01T00:00:00Z"))));
 
         assertThat(orderRepository.preemptions).containsExactly("2002:BTC-USDT:NET:8:SELL");
         assertThat(orderRepository.commands).hasSize(1);
@@ -188,9 +191,9 @@ class LiquidationServiceTest {
                 liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(),
                 new LiquidationPriceCalculator());
 
-        service.processCandidate(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
+        service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
                 "USDT", 10L, 590_000L, -200_000_000L, 88_500_000L, 1_100_000L,
-                Instant.parse("2026-07-01T00:00:00Z")));
+                Instant.parse("2026-07-01T00:00:00Z"))));
 
         assertThat(liquidationRepository.accountRiskChecks).isEqualTo(1);
         assertThat(liquidationRepository.positionRiskChecks).isZero();
@@ -206,9 +209,9 @@ class LiquidationServiceTest {
                 liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(),
                 new LiquidationPriceCalculator());
 
-        service.processCandidate(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
+        service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
                 "USDT", 10L, 590_000L, -200_000_000L, 88_500_000L, 1_100_000L,
-                Instant.parse("2026-07-01T00:00:00Z")));
+                Instant.parse("2026-07-01T00:00:00Z"))));
 
         assertThat(liquidationRepository.markedStatuses).containsExactly("CANCELED");
         assertThat(orderRepository.commands).isEmpty();
@@ -225,9 +228,9 @@ class LiquidationServiceTest {
                 liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(),
                 new LiquidationPriceCalculator());
 
-        assertThatThrownBy(() -> service.processCandidate(new LiquidationCandidateEvent(9401L, 9301L,
+        assertThatThrownBy(() -> service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L,
                 2002L, "BTC-USDT", 8L, "USDT", 10L, 590_000L, -200_000_000L,
-                88_500_000L, 1_100_000L, Instant.parse("2026-07-01T00:00:00Z"))))
+                88_500_000L, 1_100_000L, Instant.parse("2026-07-01T00:00:00Z")))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("liquidation order audit");
 
@@ -246,7 +249,7 @@ class LiquidationServiceTest {
                 Instant.parse("2026-07-01T00:00:01Z"), List.of(), "trace-liq"));
 
         assertThat(liquidationRepository.lifecycleUpdates)
-                .containsExactly("7001:FILLED:COMPLETED");
+                .containsExactly("7001:FILLED:PROCESSING");
     }
 
     @Test
@@ -402,11 +405,49 @@ class LiquidationServiceTest {
         }
 
         @Override
-        public Optional<ClaimedCandidate> claimCandidate(long candidateId) {
-            claimAttempts++;
-            return Optional.of(new ClaimedCandidate(candidateId, 9301L, 2002L, "BTC-USDT",
+        public List<ClaimedCandidate> claimCandidates(List<Long> candidateIds) {
+            claimAttempts += candidateIds.size();
+            return candidateIds.stream().map(candidateId -> new ClaimedCandidate(candidateId, 9301L, 2002L, "BTC-USDT",
                     MarginMode.CROSS, candidatePositionSide, 8L, candidateAccountType, "USDT", candidateSignedQuantitySteps,
-                    590_000L, 1_000L, 500L, 1_100_000L));
+                    590_000L, 1_000L, 500L, 1_100_000L)).toList();
+        }
+
+        @Override
+        public java.util.OptionalLong freshMarkPriceTicks(String symbol, long instrumentVersion) {
+            return java.util.OptionalLong.of(100L);
+        }
+
+        @Override
+        public Map<Long, LiquidationCloseState> lockCloseStates(List<ClaimedCandidate> candidates) {
+            Map<Long, LiquidationCloseState> states = new LinkedHashMap<>();
+            for (ClaimedCandidate candidate : candidates) {
+                lockCloseState(candidate.userId(), candidate.symbol(), candidate.marginMode(),
+                        candidate.positionSide(), candidate.instrumentVersion())
+                        .ifPresent(state -> states.put(candidate.candidateId(), state));
+            }
+            return states;
+        }
+
+        @Override
+        public Map<Long, CandidateInputs> candidateInputs(List<CandidateInputRequest> requests) {
+            Map<Long, CandidateInputs> inputs = new LinkedHashMap<>();
+            for (CandidateInputRequest request : requests) {
+                ClaimedCandidate candidate = request.candidate();
+                RiskStatus status = candidate.marginMode() == MarginMode.CROSS
+                        ? latestRiskStatus(candidate.userId(), candidate.accountType(), candidate.settleAsset(),
+                                candidate.snapshotId())
+                        : latestRiskStatus(candidate.userId(), candidate.symbol(), candidate.marginMode(),
+                                candidate.positionSide(), candidate.instrumentVersion(), candidate.snapshotId());
+                LiquidationCloseState closeState = new LiquidationCloseState(candidateSignedQuantitySteps);
+                LiquidationPricingInput pricing = pricingInput(candidate.snapshotId(), candidate.userId(),
+                        candidate.symbol(), candidate.marginMode(), candidate.positionSide(),
+                        candidate.instrumentVersion(), request.markPriceTicks()).orElseThrow();
+                LiquidationSizingInput sizing = sizingInput(candidate.userId(), candidate.symbol(),
+                        candidate.marginMode(), candidate.positionSide(), candidate.instrumentVersion(),
+                        Math.absExact(candidateSignedQuantitySteps), request.markPriceTicks()).orElseThrow();
+                inputs.put(candidate.candidateId(), new CandidateInputs(status, closeState, pricing, sizing));
+            }
+            return inputs;
         }
 
         @Override
@@ -519,6 +560,18 @@ class LiquidationServiceTest {
         public Optional<LiquidationSizingInput> sizingInput(long userId,
                                                            String symbol,
                                                            MarginMode marginMode,
+                                                           PositionSide positionSide,
+                                                           long instrumentVersion,
+                                                           long availableCloseSteps,
+                                                           long markPriceTicks) {
+            assertThat(markPriceTicks).isEqualTo(100L);
+            return sizingInput(userId, symbol, marginMode, positionSide, instrumentVersion, availableCloseSteps);
+        }
+
+        @Override
+        public Optional<LiquidationSizingInput> sizingInput(long userId,
+                                                           String symbol,
+                                                           MarginMode marginMode,
                                                            long instrumentVersion,
                                                            long availableCloseSteps) {
             return sizingInput(userId, symbol, marginMode, PositionSide.NET, instrumentVersion,
@@ -541,6 +594,18 @@ class LiquidationServiceTest {
             return Optional.of(new LiquidationPricingInput(
                     com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL,
                     pricingSignedQuantitySteps, 100L, 200L, 50L, 1L, 1L, 100_000_000L));
+        }
+
+        @Override
+        public Optional<LiquidationPricingInput> pricingInput(long snapshotId,
+                                                              long userId,
+                                                              String symbol,
+                                                              MarginMode marginMode,
+                                                              PositionSide positionSide,
+                                                              long instrumentVersion,
+                                                              long markPriceTicks) {
+            assertThat(markPriceTicks).isEqualTo(100L);
+            return pricingInput(snapshotId, userId, symbol, marginMode, positionSide, instrumentVersion);
         }
 
         @Override
@@ -573,6 +638,19 @@ class LiquidationServiceTest {
             lastOrdersSort = sort;
             return new AdminCursorPage.CursorPage<>(List.copyOf(orders), "next-orders", true,
                     "createdAt.desc", limit);
+        }
+
+        @Override
+        public void insertLiquidationOrders(List<LiquidationOrderInsert> inserts) {
+            for (LiquidationOrderInsert insert : inserts) {
+                boolean inserted = insertLiquidationOrder(insert.liquidationOrderId(), insert.candidateId(),
+                        insert.orderId(), insert.userId(), insert.symbol(), insert.marginMode(), insert.positionSide(),
+                        insert.side(), insert.quantitySteps(), insert.status(), insert.reason(), insert.pricing(),
+                        insert.now());
+                if (!inserted) {
+                    throw new IllegalStateException("failed to insert liquidation order audit");
+                }
+            }
         }
 
         @Override
@@ -658,6 +736,28 @@ class LiquidationServiceTest {
 
         private FakeLiquidationOrderRepository() {
             super(null, null, new LiquidationProperties());
+        }
+
+        @Override
+        public List<LiquidationOrderRepository.LiquidationOrderSubmission> createReduceOnlyMarketOrders(
+                List<LiquidationOrderRepository.LiquidationOrderRequest> requests,
+                Function<Object, String> serializer) {
+            return requests.stream().map(request -> new LiquidationOrderRepository.LiquidationOrderSubmission(
+                    request.candidateId(), createReduceOnlyMarketOrder(request.candidateId(), request.userId(),
+                    request.symbol(), request.marginMode(), request.positionSide(), request.instrumentVersion(),
+                    request.side(), request.quantitySteps(), request.now(), serializer))).toList();
+        }
+
+        @Override
+        public int cancelOpenReduceOnlyCloseOrders(
+                List<LiquidationOrderRepository.LiquidationOrderRequest> requests,
+                Function<Object, String> serializer) {
+            int canceled = 0;
+            for (LiquidationOrderRepository.LiquidationOrderRequest request : requests) {
+                canceled += cancelOpenReduceOnlyCloseOrders(request.userId(), request.symbol(), request.marginMode(),
+                        request.positionSide(), request.instrumentVersion(), request.side(), request.now(), serializer);
+            }
+            return canceled;
         }
 
         @Override

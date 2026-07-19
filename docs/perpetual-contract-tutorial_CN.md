@@ -262,6 +262,8 @@ Kafka 标记价更新
 通过 Redis 反向索引只计算受影响的组。Redis readiness 失效时停止候选生成，直到 keyset 重建完整
 风险组和反向索引。风险快照、candidate 和 candidate Outbox 在一个 PostgreSQL 事务内批量写入；
 最终强平仍重新校验并锁定 PostgreSQL 持仓和风险状态。
+如果 position 风险事件暂时拿不到新鲜标记价，Kafka batch 会无限重试而不是丢弃；定时扫描是补充校验，
+不能作为提交并跳过资金风险事件的理由。
 
 当前实现注意点：
 
@@ -278,13 +280,20 @@ risk-provider 只负责发现风险和生成候选，不直接下强平单。
 
 ```text
 surprising.linear-perp.liquidation.candidates.v1
-  -> liquidation-provider 消费候选
-  -> 抢占 candidate: NEW -> PROCESSING
-  -> 复核最新 risk snapshot
-  -> 先撤用户已有 reduce-only 平仓单
-  -> 创建 reduce-only MARKET IOC 强平单
+  -> 独立 batch listener 按 candidateId 写入 Redis 优先队列
+  -> Redis Lua 原子去重、优先级领取、lease 和延迟重试
+  -> 固定 worker 批量抢占 candidate: NEW -> PROCESSING
+  -> PostgreSQL 批量锁定持仓并复核最新 risk snapshot
+  -> 批量抢占用户已有 reduce-only 平仓单
+  -> 批量创建 reduce-only MARKET IOC 强平单、事件和 Outbox
   -> 进入 order/matching/account 正常链路
 ```
+
+Redis 负责调度效率，不负责判断用户是否真的应该被强平。ready/delayed/inflight/payload/priority 五个 key
+使用同一个 Redis Cluster hash-tag，Lua 在一个原子操作中完成领取或重试；Redis 队列丢失时从
+PostgreSQL 的 `NEW/PROCESSING` candidate 恢复。最终订单提交前仍以 PostgreSQL 行锁下的持仓、风险快照
+和订单状态为准。强平单成交后 candidate 暂时保持 `PROCESSING`，直到更新后的风险投影确认仓位已经变化，
+防止结算窗口内重复提交第二张强平单。
 
 强平单规则：
 

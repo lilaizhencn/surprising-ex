@@ -20,6 +20,9 @@ Production processes run one product line each with isolated topics, consumer gr
 - Risk-provider maintains complete Redis risk groups plus a `symbol + instrumentVersion -> group` reverse index.
   Mark-price updates calculate only affected groups, while PostgreSQL atomically batch-writes snapshots,
   liquidation candidates, and candidate outbox rows; liquidation still revalidates and locks PostgreSQL state.
+- Liquidation candidates enter a same-hash-tag Redis priority queue with atomic deduplication, leases, and delayed
+  retries. Workers batch-lock and revalidate PostgreSQL state, then batch-write orders, events, and Outbox rows;
+  Redis loss is recovered from PostgreSQL and never changes the financial authority boundary.
 - Account commands use `<PRODUCT_LINE>:<userId>` as their Kafka key and are serialized across 32 partitions.
 - Matching commands, trades, depth, and prices use `symbol` as their key. Commands for one symbol must stay ordered.
 - Internal market-maker self-matches still produce public trades, depth, candles, and WebSocket updates, but

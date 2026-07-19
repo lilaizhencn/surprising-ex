@@ -28,6 +28,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -100,6 +103,47 @@ public class LiquidationRepository {
                 rs.getLong("margin_ratio_ppm")), args.toArray()).stream().findFirst();
     }
 
+    public List<ClaimedCandidate> claimCandidates(List<Long> candidateIds) {
+        if (candidateIds == null || candidateIds.isEmpty()) {
+            return List.of();
+        }
+        List<Long> uniqueIds = candidateIds.stream().distinct().toList();
+        List<Object> args = new ArrayList<>(uniqueIds);
+        String placeholders = String.join(", ", java.util.Collections.nCopies(uniqueIds.size(), "?"));
+        StringBuilder sql = new StringBuilder("""
+                UPDATE risk_liquidation_candidates c
+                   SET status = 'PROCESSING',
+                       updated_at = now()
+                 WHERE c.status = 'NEW'
+                   AND c.candidate_id IN (%s)
+                """.formatted(placeholders));
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            sql.append(candidateProductLineFilter("c", args)).append('\n');
+        }
+        sql.append("""
+                RETURNING c.candidate_id, c.snapshot_id, c.user_id, c.symbol, c.margin_mode, c.position_side,
+                          c.account_type, c.settle_asset, c.instrument_version, c.signed_quantity_steps,
+                          c.mark_price_ticks, c.equity_units, c.maintenance_margin_units, c.margin_ratio_ppm
+                """);
+        Map<Long, ClaimedCandidate> claimed = jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new ClaimedCandidate(
+                rs.getLong("candidate_id"),
+                rs.getLong("snapshot_id"),
+                rs.getLong("user_id"),
+                rs.getString("symbol"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                PositionSide.fromNullableDbValue(rs.getString("position_side")),
+                rs.getLong("instrument_version"),
+                rs.getString("account_type"),
+                rs.getString("settle_asset"),
+                rs.getLong("signed_quantity_steps"),
+                rs.getLong("mark_price_ticks"),
+                rs.getLong("equity_units"),
+                rs.getLong("maintenance_margin_units"),
+                rs.getLong("margin_ratio_ppm")), args.toArray()).stream().collect(Collectors.toMap(
+                        ClaimedCandidate::candidateId, Function.identity()));
+        return uniqueIds.stream().map(claimed::get).filter(java.util.Objects::nonNull).toList();
+    }
+
     public List<LiquidationCandidateEvent> newCandidateEvents(int limit) {
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
@@ -119,6 +163,185 @@ public class LiquidationRepository {
                 rs.getString("settle_asset"), rs.getLong("signed_quantity_steps"), rs.getLong("mark_price_ticks"),
                 rs.getLong("equity_units"), rs.getLong("maintenance_margin_units"), rs.getLong("margin_ratio_ppm"),
                 rs.getTimestamp("event_time").toInstant()), args.toArray());
+    }
+
+    public Map<Long, LiquidationCloseState> lockCloseStates(List<ClaimedCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return Map.of();
+        }
+        String values = String.join(", ", java.util.Collections.nCopies(candidates.size(),
+                "(CAST(? AS bigint), CAST(? AS bigint), CAST(? AS text), CAST(? AS text), CAST(? AS text), "
+                        + "CAST(? AS bigint), CAST(? AS text))"));
+        List<Object> args = new ArrayList<>(candidates.size() * 7);
+        for (ClaimedCandidate candidate : candidates) {
+            args.add(candidate.candidateId());
+            args.add(candidate.userId());
+            args.add(candidate.symbol());
+            args.add(candidate.marginMode().name());
+            args.add(candidate.positionSide().name());
+            args.add(candidate.instrumentVersion());
+            args.add(currentProductLine().name());
+        }
+        return jdbcTemplate.query("""
+                WITH requested(candidate_id, user_id, symbol, margin_mode, position_side, instrument_version,
+                               product_line) AS (
+                    VALUES %s
+                )
+                SELECT r.candidate_id, p.signed_quantity_steps
+                  FROM requested r
+                  JOIN account_positions p
+                    ON p.user_id = r.user_id
+                   AND p.product_line = r.product_line
+                   AND p.symbol = r.symbol
+                   AND p.margin_mode = r.margin_mode
+                   AND p.position_side = r.position_side
+                   AND p.instrument_version = r.instrument_version
+                 ORDER BY r.candidate_id
+                 FOR UPDATE OF p
+                """.formatted(values), (rs, rowNum) -> Map.entry(rs.getLong("candidate_id"),
+                new LiquidationCloseState(rs.getLong("signed_quantity_steps"))), args.toArray()).stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+
+    public Map<Long, CandidateInputs> candidateInputs(List<CandidateInputRequest> requests) {
+        if (requests == null || requests.isEmpty()) {
+            return Map.of();
+        }
+        String values = String.join(", ", java.util.Collections.nCopies(requests.size(),
+                "(CAST(? AS bigint), CAST(? AS bigint), CAST(? AS bigint), CAST(? AS text), CAST(? AS text), "
+                        + "CAST(? AS text), CAST(? AS bigint), CAST(? AS text), CAST(? AS text), CAST(? AS text), "
+                        + "CAST(? AS bigint))"));
+        List<Object> args = new ArrayList<>(requests.size() * 11);
+        for (CandidateInputRequest request : requests) {
+            ClaimedCandidate candidate = request.candidate();
+            args.add(candidate.candidateId());
+            args.add(candidate.snapshotId());
+            args.add(candidate.userId());
+            args.add(candidate.symbol());
+            args.add(candidate.marginMode().name());
+            args.add(candidate.positionSide().name());
+            args.add(candidate.instrumentVersion());
+            args.add(normalizeAccountType(candidate.accountType()));
+            args.add(candidate.settleAsset());
+            args.add(currentProductLine().name());
+            args.add(request.markPriceTicks());
+        }
+        List<Map.Entry<Long, CandidateInputs>> rows = jdbcTemplate.query("""
+                WITH requested(candidate_id, snapshot_id, user_id, symbol, margin_mode, position_side,
+                               instrument_version, account_type, settle_asset, product_line, mark_price_ticks) AS (
+                    VALUES %s
+                )
+                SELECT r.candidate_id,
+                       COALESCE(latest_position.status, latest_account.status) AS latest_status,
+                       p.signed_quantity_steps AS current_signed_quantity_steps,
+                       ps.signed_quantity_steps AS snapshot_signed_quantity_steps,
+                       r.mark_price_ticks,
+                       CASE
+                           WHEN ps.margin_mode = 'ISOLATED'
+                               THEN ps.position_margin_units + ps.unrealized_pnl_units
+                           ELSE acc.equity_units
+                       END AS equity_units,
+                       ps.maintenance_margin_units,
+                       i.contract_type,
+                       i.notional_multiplier_units,
+                       i.price_tick_units,
+                       ss.scale_units AS settle_scale_units,
+                       COALESCE(bracket.floors, ARRAY[]::bigint[]) AS bracket_floors
+                  FROM requested r
+                  JOIN account_positions p
+                    ON p.user_id = r.user_id
+                   AND p.product_line = r.product_line
+                   AND p.symbol = r.symbol
+                   AND p.margin_mode = r.margin_mode
+                   AND p.position_side = r.position_side
+                   AND p.instrument_version = r.instrument_version
+                   AND p.signed_quantity_steps <> 0
+                  JOIN risk_position_snapshots ps
+                    ON ps.snapshot_id = r.snapshot_id
+                   AND ps.user_id = r.user_id
+                   AND ps.product_line = r.product_line
+                   AND ps.symbol = r.symbol
+                   AND ps.margin_mode = r.margin_mode
+                   AND ps.position_side = r.position_side
+                   AND ps.instrument_version = r.instrument_version
+                   AND ps.signed_quantity_steps <> 0
+                  JOIN risk_account_snapshots acc
+                    ON acc.snapshot_id = ps.snapshot_id
+                   AND acc.user_id = ps.user_id
+                   AND acc.product_line = ps.product_line
+                   AND acc.settle_asset = ps.settle_asset
+                  JOIN instruments i
+                    ON i.symbol = r.symbol
+                   AND i.version = r.instrument_version
+                  JOIN account_asset_scales ss
+                    ON ss.asset = i.settle_asset
+             LEFT JOIN LATERAL (
+                    SELECT s.status
+                      FROM risk_account_snapshots s
+                     WHERE r.margin_mode = 'CROSS'
+                       AND s.user_id = r.user_id
+                       AND s.product_line = r.product_line
+                       AND s.account_type = r.account_type
+                       AND s.settle_asset = r.settle_asset
+                       AND s.snapshot_id >= r.snapshot_id
+                     ORDER BY s.snapshot_id DESC
+                     LIMIT 1
+                ) latest_account ON TRUE
+             LEFT JOIN LATERAL (
+                    SELECT s.status
+                      FROM risk_position_snapshots s
+                     WHERE r.margin_mode <> 'CROSS'
+                       AND s.user_id = r.user_id
+                       AND s.product_line = r.product_line
+                       AND s.symbol = r.symbol
+                       AND s.margin_mode = r.margin_mode
+                       AND s.position_side = r.position_side
+                       AND s.instrument_version = r.instrument_version
+                       AND s.snapshot_id >= r.snapshot_id
+                     ORDER BY s.snapshot_id DESC
+                     LIMIT 1
+                ) latest_position ON TRUE
+             LEFT JOIN LATERAL (
+                    SELECT array_agg(b.notional_floor_units ORDER BY b.notional_floor_units) AS floors
+                      FROM instrument_risk_brackets b
+                     WHERE b.symbol = r.symbol
+                       AND b.version = r.instrument_version
+                ) bracket ON TRUE
+                """.formatted(values), (rs, rowNum) -> {
+            String latestStatus = rs.getString("latest_status");
+            if (latestStatus == null) {
+                throw new IllegalStateException("risk snapshot missing for liquidation candidate "
+                        + rs.getLong("candidate_id"));
+            }
+            ContractType contractType = ContractType.valueOf(rs.getString("contract_type"));
+            long currentSignedQuantity = rs.getLong("current_signed_quantity_steps");
+            long markPriceTicks = rs.getLong("mark_price_ticks");
+            long notionalMultiplierUnits = rs.getLong("notional_multiplier_units");
+            long priceTickUnits = rs.getLong("price_tick_units");
+            long settleScaleUnits = rs.getLong("settle_scale_units");
+            long notionalUnits = PerpetualContractMath.notionalUnits(contractType, currentSignedQuantity,
+                    markPriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
+            long notionalPerStepUnits = Math.max(1L, PerpetualContractMath.notionalPerStepUnits(contractType,
+                    markPriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits));
+            long bracketFloor = 0L;
+            Object[] floors = (Object[]) rs.getArray("bracket_floors").getArray();
+            for (Object floor : floors) {
+                long value = ((Number) floor).longValue();
+                if (value <= notionalUnits) {
+                    bracketFloor = Math.max(bracketFloor, value);
+                }
+            }
+            LiquidationPricingInput pricing = new LiquidationPricingInput(contractType,
+                    rs.getLong("snapshot_signed_quantity_steps"), markPriceTicks, rs.getLong("equity_units"),
+                    rs.getLong("maintenance_margin_units"), notionalMultiplierUnits, priceTickUnits,
+                    settleScaleUnits);
+            long positionAbsSteps = Math.absExact(currentSignedQuantity);
+            LiquidationSizingInput sizing = new LiquidationSizingInput(positionAbsSteps, positionAbsSteps,
+                    notionalUnits, notionalPerStepUnits, bracketFloor);
+            return Map.entry(rs.getLong("candidate_id"), new CandidateInputs(RiskStatus.valueOf(latestStatus),
+                    new LiquidationCloseState(currentSignedQuantity), pricing, sizing));
+        }, args.toArray());
+        return rows.stream().collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     public RiskStatus latestRiskStatus(long userId,
@@ -243,6 +466,17 @@ public class LiquidationRepository {
                                                         long instrumentVersion,
                                                         long availableCloseSteps) {
         long markPriceTicks = requireMarkPrice(symbol, instrumentVersion).markPriceTicks();
+        return sizingInput(userId, symbol, marginMode, positionSide, instrumentVersion, availableCloseSteps,
+                markPriceTicks);
+    }
+
+    public Optional<LiquidationSizingInput> sizingInput(long userId,
+                                                        String symbol,
+                                                        MarginMode marginMode,
+                                                        PositionSide positionSide,
+                                                        long instrumentVersion,
+                                                        long availableCloseSteps,
+                                                        long markPriceTicks) {
         String sql = """
                 SELECT p.symbol,
                        p.instrument_version AS version,
@@ -304,6 +538,16 @@ public class LiquidationRepository {
                                                           PositionSide positionSide,
                                                           long instrumentVersion) {
         long markPriceTicks = requireMarkPrice(symbol, instrumentVersion).markPriceTicks();
+        return pricingInput(snapshotId, userId, symbol, marginMode, positionSide, instrumentVersion, markPriceTicks);
+    }
+
+    public Optional<LiquidationPricingInput> pricingInput(long snapshotId,
+                                                          long userId,
+                                                          String symbol,
+                                                          MarginMode marginMode,
+                                                          PositionSide positionSide,
+                                                          long instrumentVersion,
+                                                          long markPriceTicks) {
         return jdbcTemplate.query("""
                 SELECT ps.signed_quantity_steps,
                        ?::BIGINT AS mark_price_ticks,
@@ -378,6 +622,66 @@ public class LiquidationRepository {
                     + ": expected=" + instrumentVersion + ", actual=" + markPrice.instrumentVersion());
         }
         return markPrice;
+    }
+
+    public OptionalLong freshMarkPriceTicks(String symbol, long instrumentVersion) {
+        try {
+            return OptionalLong.of(requireMarkPrice(symbol, instrumentVersion).markPriceTicks());
+        } catch (IllegalStateException ex) {
+            return OptionalLong.empty();
+        }
+    }
+
+    public int completeSettledCandidates(int limit) {
+        return jdbcTemplate.update("""
+                WITH settled AS (
+                    SELECT c.candidate_id
+                      FROM risk_liquidation_candidates c
+                      JOIN liquidation_orders lo
+                        ON lo.candidate_id = c.candidate_id
+                       AND lo.status = 'FILLED'
+                 LEFT JOIN account_positions p
+                        ON p.user_id = c.user_id
+                       AND p.product_line = c.product_line
+                       AND p.symbol = c.symbol
+                       AND p.margin_mode = c.margin_mode
+                       AND p.position_side = c.position_side
+                       AND p.instrument_version = c.instrument_version
+                     WHERE c.status = 'PROCESSING'
+                       AND (p.user_id IS NULL OR p.signed_quantity_steps <> c.signed_quantity_steps)
+                       AND (
+                            (c.margin_mode = 'CROSS' AND EXISTS (
+                                SELECT 1
+                                  FROM risk_account_snapshots next_acc
+                                 WHERE next_acc.user_id = c.user_id
+                                   AND next_acc.product_line = c.product_line
+                                   AND next_acc.account_type = c.account_type
+                                   AND next_acc.settle_asset = c.settle_asset
+                                   AND next_acc.snapshot_id > c.snapshot_id
+                            ))
+                            OR
+                            (c.margin_mode <> 'CROSS' AND EXISTS (
+                                SELECT 1
+                                  FROM risk_position_snapshots next_pos
+                                 WHERE next_pos.user_id = c.user_id
+                                   AND next_pos.product_line = c.product_line
+                                   AND next_pos.symbol = c.symbol
+                                   AND next_pos.margin_mode = c.margin_mode
+                                   AND next_pos.position_side = c.position_side
+                                   AND next_pos.instrument_version = c.instrument_version
+                                   AND next_pos.snapshot_id > c.snapshot_id
+                            ))
+                       )
+                     ORDER BY c.candidate_id
+                     LIMIT ?
+                     FOR UPDATE OF c SKIP LOCKED
+                )
+                UPDATE risk_liquidation_candidates c
+                   SET status = 'COMPLETED',
+                       updated_at = now()
+                  FROM settled s
+                 WHERE c.candidate_id = s.candidate_id
+                """, Math.max(1, limit));
     }
 
     public void markCandidate(long candidateId, String status) {
@@ -468,6 +772,39 @@ public class LiquidationRepository {
                 auditPricing.takeoverPriceTicks(), auditPricing.liquidationFeeRatePpm(),
                 auditPricing.liquidationFeeUnits(), Timestamp.from(now));
         return rows == 1;
+    }
+
+    public void insertLiquidationOrders(List<LiquidationOrderInsert> inserts) {
+        if (inserts == null || inserts.isEmpty()) {
+            return;
+        }
+        int[] rows = jdbcTemplate.batchUpdate("""
+                INSERT INTO liquidation_orders (
+                    liquidation_order_id, candidate_id, order_id, user_id, symbol,
+                    margin_mode, position_side, side, quantity_steps, status, reason,
+                    bankruptcy_price_ticks, takeover_price_ticks, liquidation_fee_rate_ppm,
+                    liquidation_fee_units, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (candidate_id) DO NOTHING
+                """, inserts.stream().map(insert -> {
+            LiquidationPricingDecision pricing = insert.pricing() == null
+                    ? LiquidationPricingDecision.empty() : insert.pricing();
+            return new Object[]{insert.liquidationOrderId(), insert.candidateId(), insert.orderId(), insert.userId(),
+                    insert.symbol(), MarginMode.defaultIfNull(insert.marginMode()).name(),
+                    PositionSide.defaultIfNull(insert.positionSide()).name(), insert.side().name(),
+                    insert.quantitySteps(), insert.status().name(), insert.reason(), pricing.bankruptcyPriceTicks(),
+                    pricing.takeoverPriceTicks(), pricing.liquidationFeeRatePpm(), pricing.liquidationFeeUnits(),
+                    Timestamp.from(insert.now())};
+        }).toList());
+        if (rows.length != inserts.size()) {
+            throw new IllegalStateException("failed to batch insert liquidation audit: expected=" + inserts.size()
+                    + " actual=" + rows.length);
+        }
+        for (int row : rows) {
+            if (row != 1 && row != java.sql.Statement.SUCCESS_NO_INFO) {
+                throw new IllegalStateException("failed to batch insert liquidation audit: row result=" + row);
+            }
+        }
     }
 
     public boolean insertLiquidationOrder(long liquidationOrderId,
@@ -820,6 +1157,30 @@ public class LiquidationRepository {
                                            String subject,
                                            String summary,
                                            Map<String, Object> data) {
+    }
+
+    public record LiquidationOrderInsert(long liquidationOrderId,
+                                         long candidateId,
+                                         long orderId,
+                                         long userId,
+                                         String symbol,
+                                         MarginMode marginMode,
+                                         PositionSide positionSide,
+                                         OrderSide side,
+                                         long quantitySteps,
+                                         LiquidationOrderStatus status,
+                                         String reason,
+                                         LiquidationPricingDecision pricing,
+                                         Instant now) {
+    }
+
+    public record CandidateInputRequest(ClaimedCandidate candidate, long markPriceTicks) {
+    }
+
+    public record CandidateInputs(RiskStatus latestRiskStatus,
+                                  LiquidationCloseState closeState,
+                                  LiquidationPricingInput pricingInput,
+                                  LiquidationSizingInput sizingInput) {
     }
 
     public record CanceledCandidate(long candidateId,

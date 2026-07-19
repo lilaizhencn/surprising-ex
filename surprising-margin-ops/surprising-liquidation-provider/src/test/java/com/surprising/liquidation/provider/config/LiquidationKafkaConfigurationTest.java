@@ -13,20 +13,26 @@ import org.junit.jupiter.api.Test;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class LiquidationKafkaConfigurationTest {
 
     @Test
-    void consumerUsesReplaySafeRecordAckSettings() {
+    void candidateConsumerUsesReplaySafeBatchAckSettings() {
         LiquidationProperties properties = new LiquidationProperties();
         properties.getKafka().setBootstrapServers("kafka-e:9092");
         properties.getKafka().setGroupId("liquidation-test-group");
+        properties.getKafka().setCandidateConcurrency(32);
+        properties.getKafka().setMatchResultConcurrency(8);
         properties.getKafka().setMaxPollRecords(333);
 
         LiquidationKafkaConfiguration configuration = new LiquidationKafkaConfiguration();
         var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
                 configuration.liquidationConsumerFactory(properties);
-        var listenerFactory = configuration.liquidationKafkaListenerContainerFactory(consumerFactory, properties);
+        var candidateFactory = configuration.liquidationCandidateKafkaListenerContainerFactory(consumerFactory,
+                properties);
+        var matchFactory = configuration.liquidationMatchResultKafkaListenerContainerFactory(consumerFactory,
+                properties);
 
         Map<String, Object> config = consumerFactory.getConfigurationProperties();
         assertThat(config).containsEntry(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka-e:9092");
@@ -39,7 +45,12 @@ class LiquidationKafkaConfigurationTest {
         assertThat(config).containsEntry(
                 ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
                 CooperativeStickyAssignor.class.getName());
-        assertThat(listenerFactory.getContainerProperties().getAckMode())
+        assertThat(ReflectionTestUtils.getField(candidateFactory, "concurrency")).isEqualTo(32);
+        assertThat(ReflectionTestUtils.getField(candidateFactory, "batchListener")).isEqualTo(true);
+        assertThat(candidateFactory.getContainerProperties().getAckMode())
+                .isEqualTo(ContainerProperties.AckMode.BATCH);
+        assertThat(ReflectionTestUtils.getField(matchFactory, "concurrency")).isEqualTo(8);
+        assertThat(matchFactory.getContainerProperties().getAckMode())
                 .isEqualTo(ContainerProperties.AckMode.RECORD);
     }
 

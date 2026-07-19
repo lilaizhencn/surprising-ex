@@ -20,7 +20,8 @@
   [Open-order Redis projection](open-order-redis-cache.md)
 
 PostgreSQL 始终是业务事实源。持仓读模型故障时用户查询返回 503；未完成订单投影故障时整页回退
-PostgreSQL。触发单和 ADL 的 Redis ZSET 只做候选过滤，最终状态必须由 PostgreSQL 复核和条件更新。
+PostgreSQL。触发单、ADL 和强平 candidate 的 Redis ZSET 只做候选过滤、排序、lease 和重试调度，
+最终状态必须由 PostgreSQL 复核和条件更新。
 
 ## 测试
 

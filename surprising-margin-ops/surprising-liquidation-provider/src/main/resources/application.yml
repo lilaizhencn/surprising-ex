@@ -13,12 +13,12 @@ spring:
         await-termination: true
         await-termination-period: 10s
   datasource:
-    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    url: jdbc:postgresql://localhost:5432/surprising_exchange?reWriteBatchedInserts=true
     username: surprising
     password: surprising
     hikari:
-      maximum-pool-size: 20
-      minimum-idle: 4
+      maximum-pool-size: 32
+      minimum-idle: 8
       connection-timeout: 3000
 management:
   endpoints:
@@ -48,7 +48,8 @@ surprising:
       match-results-topic: surprising.perp.match.results.v1
       order-commands-topic: surprising.perp.order.commands.v1
       order-events-topic: surprising.perp.order.events.v1
-      concurrency: 8
+      candidate-concurrency: 32
+      match-result-concurrency: 8
       max-poll-records: 500
     outbox:
       batch-size: 200
@@ -70,3 +71,9 @@ surprising:
     execution:
       enabled: true
       liquidation-fee-rate-ppm: 3000
+    redis-index:
+      key-prefix: surprising:liquidation:v2
+      candidate-batch-size: 128
+      worker-count: 16
+      lease-duration: 30s
+      retry-delay: 500ms

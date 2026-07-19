@@ -45,8 +45,7 @@ class LiquidationOrderRepositoryTest {
     @SuppressWarnings({"rawtypes", "unchecked"})
     void preemptsOpenReduceOnlyCloseOrdersBeforeLiquidationOrder() throws Exception {
         LiquidationOrderRepository repository = repository();
-        when(jdbcTemplate.query(contains("FROM trading_orders"), any(RowMapper.class), eq(2002L),
-                eq("LINEAR_PERPETUAL"), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(8L), eq("SELL")))
+        when(jdbcTemplate.query(contains("WITH requested_input"), any(RowMapper.class), any(Object[].class)))
                 .thenAnswer(invocation -> {
                     RowMapper mapper = invocation.getArgument(1);
                     return java.util.List.of(
@@ -85,8 +84,7 @@ class LiquidationOrderRepositoryTest {
         properties.getKafka().setProductTopicsEnabled(true);
         LiquidationOrderRepository repository = new LiquidationOrderRepository(jdbcTemplate, sequenceRepository,
                 properties);
-        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), eq(2002L),
-                eq("LINEAR_DELIVERY"), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(8L), eq("SELL")))
+        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
                 .thenReturn(java.util.List.of());
 
         int preempted = repository.cancelOpenReduceOnlyCloseOrders(2002L, "BTC-USDT", MarginMode.CROSS,
@@ -94,11 +92,13 @@ class LiquidationOrderRepositoryTest {
 
         assertThat(preempted).isZero();
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), eq(2002L),
-                eq("LINEAR_DELIVERY"), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(8L), eq("SELL"));
+        ArgumentCaptor<Object[]> queryArgs = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), queryArgs.capture());
         assertThat(sql.getValue())
-                .contains("product_line = ?")
-                .contains("FOR UPDATE");
+                .contains("o.product_line = ?")
+                .contains("FOR UPDATE OF o");
+        assertThat(queryArgs.getValue()).contains(2002L, "LINEAR_DELIVERY", "BTC-USDT", "CROSS", "NET", 8L,
+                "SELL");
     }
 
     @Test
@@ -108,7 +108,8 @@ class LiquidationOrderRepositoryTest {
         when(sequenceRepository.nextTradingSequence("order")).thenReturn(7001L);
         when(sequenceRepository.nextTradingSequence("event")).thenReturn(7002L);
         when(sequenceRepository.nextTradingSequence("command")).thenReturn(7003L);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_orders"), any(Object[].class))).thenReturn(0);
+        when(jdbcTemplate.batchUpdate(contains("INSERT INTO trading_orders"), any(List.class)))
+                .thenReturn(new int[]{0});
 
         assertThatThrownBy(() -> repository.createReduceOnlyMarketOrder(9401L, 2002L, "BTC-USDT",
                 8L, OrderSide.SELL, 3L, Instant.parse("2026-07-01T00:00:00Z"), Object::toString))
@@ -116,10 +117,10 @@ class LiquidationOrderRepositoryTest {
                 .hasMessageContaining("liquidation trading order");
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
+        verify(jdbcTemplate).batchUpdate(sql.capture(), any(List.class));
         assertThat(sql.getValue()).doesNotContain("ON CONFLICT");
-        verify(jdbcTemplate, never()).update(contains("INSERT INTO trading_order_events"), any(Object[].class));
-        verify(jdbcTemplate, never()).update(contains("INSERT INTO trading_outbox_events"), any(Object[].class));
+        verify(jdbcTemplate, never()).batchUpdate(contains("INSERT INTO trading_order_events"), any(List.class));
+        verify(jdbcTemplate, never()).batchUpdate(contains("INSERT INTO trading_outbox_events"), any(List.class));
     }
 
     @Test
@@ -130,22 +131,22 @@ class LiquidationOrderRepositoryTest {
         when(sequenceRepository.nextTradingSequence("event")).thenReturn(7002L);
         when(sequenceRepository.nextTradingSequence("command")).thenReturn(7003L);
         when(sequenceRepository.nextTradingSequence("outbox")).thenReturn(7004L, 7005L);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_orders"), any(Object[].class))).thenReturn(1);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_order_events"), any(Object[].class))).thenReturn(1);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_outbox_events"), any(Object[].class))).thenReturn(1);
+        givenSuccessfulBatchWrites();
 
         repository.createReduceOnlyMarketOrder(9401L, 2002L, "BTC-USDT", MarginMode.ISOLATED,
                 PositionSide.LONG, 8L, OrderSide.SELL, 3L, Instant.parse("2026-07-01T00:00:00Z"),
                 Object::toString);
 
-        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
-        verify(jdbcTemplate).update(contains("INSERT INTO trading_orders"), args.capture());
-        assertThat(args.getValue()).hasSize(15);
-        assertThat(args.getValue()[1]).isEqualTo("LINEAR_PERPETUAL");
-        assertThat(args.getValue()[9]).isEqualTo("ISOLATED");
-        assertThat(args.getValue()[10]).isEqualTo("LONG");
-        assertThat(args.getValue()[11]).isEqualTo(200L);
-        assertThat(args.getValue()[12]).isEqualTo(500L);
+        ArgumentCaptor<List<Object[]>> args = batchArgumentsCaptor();
+        verify(jdbcTemplate).batchUpdate(contains("INSERT INTO trading_orders"), args.capture());
+        assertThat(args.getValue()).singleElement().satisfies(row -> {
+            assertThat(row).hasSize(15);
+            assertThat(row[1]).isEqualTo("LINEAR_PERPETUAL");
+            assertThat(row[9]).isEqualTo("ISOLATED");
+            assertThat(row[10]).isEqualTo("LONG");
+            assertThat(row[11]).isEqualTo(200L);
+            assertThat(row[12]).isEqualTo(500L);
+        });
     }
 
     @Test
@@ -156,25 +157,22 @@ class LiquidationOrderRepositoryTest {
         when(sequenceRepository.nextTradingSequence("event")).thenReturn(7002L);
         when(sequenceRepository.nextTradingSequence("command")).thenReturn(7003L);
         when(sequenceRepository.nextTradingSequence("outbox")).thenReturn(7004L, 7005L);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_orders"), any(Object[].class))).thenReturn(1);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_order_events"), any(Object[].class))).thenReturn(1);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_outbox_events"), any(Object[].class))).thenReturn(1);
+        givenSuccessfulBatchWrites();
 
         repository.createReduceOnlyMarketOrder(9401L, 2002L, "BTC-USDT-260925-70000-C", MarginMode.CROSS,
                 PositionSide.SHORT, 8L, OrderSide.BUY, 3L, Instant.parse("2026-07-01T00:00:00Z"),
                 Object::toString);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), eq("BTC-USDT-260925-70000-C"), eq(8L),
-                eq("BTC-USDT-260925-70000-C"), eq(2002L), eq("BTC-USDT-260925-70000-C"), any(), any());
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), any(Object[].class));
         assertThat(sql.getValue())
                 .contains("WHEN 'VANILLA_OPTION' THEN 'OPTION'")
-                .contains("AND product_line = (SELECT product_line FROM instrument_fee)")
-                .contains("source_priority")
-                .contains("ORDER BY priority ASC, source_priority ASC");
-        ArgumentCaptor<Object[]> orderArgs = ArgumentCaptor.forClass(Object[].class);
-        verify(jdbcTemplate).update(contains("INSERT INTO trading_orders"), orderArgs.capture());
-        assertThat(orderArgs.getValue()[1]).isEqualTo("OPTION");
+                .contains("f.product_line = i.product_line")
+                .contains("LEFT JOIN LATERAL")
+                .contains("WHEN 'RISK_OVERRIDE' THEN 0");
+        ArgumentCaptor<List<Object[]>> orderArgs = batchArgumentsCaptor();
+        verify(jdbcTemplate).batchUpdate(contains("INSERT INTO trading_orders"), orderArgs.capture());
+        assertThat(orderArgs.getValue().getFirst()[1]).isEqualTo("OPTION");
     }
 
     @Test
@@ -184,15 +182,17 @@ class LiquidationOrderRepositoryTest {
         when(sequenceRepository.nextTradingSequence("order")).thenReturn(7001L);
         when(sequenceRepository.nextTradingSequence("event")).thenReturn(7002L);
         when(sequenceRepository.nextTradingSequence("command")).thenReturn(7003L);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_orders"), any(Object[].class))).thenReturn(1);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_order_events"), any(Object[].class))).thenReturn(0);
+        when(jdbcTemplate.batchUpdate(contains("INSERT INTO trading_orders"), any(List.class)))
+                .thenReturn(new int[]{1});
+        when(jdbcTemplate.batchUpdate(contains("INSERT INTO trading_order_events"), any(List.class)))
+                .thenReturn(new int[]{0});
 
         assertThatThrownBy(() -> repository.createReduceOnlyMarketOrder(9401L, 2002L, "BTC-USDT",
                 8L, OrderSide.SELL, 3L, Instant.parse("2026-07-01T00:00:00Z"), Object::toString))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("liquidation order event");
 
-        verify(jdbcTemplate, never()).update(contains("INSERT INTO trading_outbox_events"), any(Object[].class));
+        verify(jdbcTemplate, never()).batchUpdate(contains("INSERT INTO trading_outbox_events"), any(List.class));
     }
 
     @Test
@@ -203,14 +203,17 @@ class LiquidationOrderRepositoryTest {
         when(sequenceRepository.nextTradingSequence("event")).thenReturn(7002L);
         when(sequenceRepository.nextTradingSequence("command")).thenReturn(7003L);
         when(sequenceRepository.nextTradingSequence("outbox")).thenReturn(7004L);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_orders"), any(Object[].class))).thenReturn(1);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_order_events"), any(Object[].class))).thenReturn(1);
-        when(jdbcTemplate.update(contains("INSERT INTO trading_outbox_events"), any(Object[].class))).thenReturn(0);
+        when(jdbcTemplate.batchUpdate(contains("INSERT INTO trading_orders"), any(List.class)))
+                .thenReturn(new int[]{1});
+        when(jdbcTemplate.batchUpdate(contains("INSERT INTO trading_order_events"), any(List.class)))
+                .thenReturn(new int[]{1});
+        when(jdbcTemplate.batchUpdate(contains("INSERT INTO trading_outbox_events"), any(List.class)))
+                .thenReturn(new int[]{0, 0});
 
         assertThatThrownBy(() -> repository.createReduceOnlyMarketOrder(9401L, 2002L, "BTC-USDT",
                 8L, OrderSide.SELL, 3L, Instant.parse("2026-07-01T00:00:00Z"), Object::toString))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("liquidation outbox enqueue");
+                .hasMessageContaining("liquidation outbox events");
     }
 
     @Test
@@ -353,6 +356,21 @@ class LiquidationOrderRepositoryTest {
         return new LiquidationOrderRepository(jdbcTemplate, sequenceRepository, new LiquidationProperties());
     }
 
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void givenSuccessfulBatchWrites() {
+        when(jdbcTemplate.batchUpdate(contains("INSERT INTO trading_orders"), any(List.class)))
+                .thenReturn(new int[]{1});
+        when(jdbcTemplate.batchUpdate(contains("INSERT INTO trading_order_events"), any(List.class)))
+                .thenReturn(new int[]{1});
+        when(jdbcTemplate.batchUpdate(contains("INSERT INTO trading_outbox_events"), any(List.class)))
+                .thenReturn(new int[]{1, 1});
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private ArgumentCaptor<List<Object[]>> batchArgumentsCaptor() {
+        return (ArgumentCaptor) ArgumentCaptor.forClass(List.class);
+    }
+
     private void invokeEnqueue(LiquidationOrderRepository repository, String topic) throws Exception {
         Method enqueue = LiquidationOrderRepository.class.getDeclaredMethod("enqueue", String.class, long.class,
                 String.class, String.class, String.class, String.class, Instant.class);
@@ -381,11 +399,11 @@ class LiquidationOrderRepositoryTest {
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private void givenFeeSnapshot(ProductLine productLine) {
-        when(jdbcTemplate.query(contains("WITH instrument_fee"), any(RowMapper.class),
-                any(String.class), eq(8L), any(String.class), eq(2002L), any(String.class), any(), any()))
+        when(jdbcTemplate.query(contains("WITH requested"), any(RowMapper.class), any(Object[].class)))
                 .thenAnswer(invocation -> {
                     RowMapper mapper = invocation.getArgument(1);
                     ResultSet rs = org.mockito.Mockito.mock(ResultSet.class);
+                    when(rs.getLong("candidate_id")).thenReturn(9401L);
                     when(rs.getString("product_line")).thenReturn(productLine.name());
                     when(rs.getLong("maker_fee_rate_ppm")).thenReturn(200L);
                     when(rs.getLong("taker_fee_rate_ppm")).thenReturn(500L);
@@ -408,6 +426,8 @@ class LiquidationOrderRepositoryTest {
         when(rs.getString("margin_mode")).thenReturn("CROSS");
         when(rs.getString("status")).thenReturn(status);
         when(rs.getBoolean("post_only")).thenReturn(false);
+        when(rs.getTimestamp("preempted_at")).thenReturn(java.sql.Timestamp.from(
+                Instant.parse("2026-07-01T00:00:00Z")));
         return rs;
     }
 }

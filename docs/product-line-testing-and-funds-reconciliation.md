@@ -71,6 +71,9 @@ The scenario requires uniform symbol assignment because pre-funding is calculate
 Its report adds liquidation discovery, submission, and completion latency, completed TPS, candidate/order states,
 Risk and liquidation consumer lag, and paired user liquidation-fee/insurance-fund entries.
 
+Interpret completed-candidate TPS separately from order-submission throughput: final completion waits for a newer
+risk projection after account settlement.
+
 The matrix script prints its cases by default. Execute it only after confirming the environment and expected duration:
 
 ```bash

@@ -3,10 +3,11 @@ package com.surprising.liquidation.provider.service;
 import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.risk.api.model.LiquidationCandidateEvent;
 import com.surprising.trading.api.KafkaSymbolKeyValidator;
+import java.util.ArrayList;
+import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -17,27 +18,13 @@ public class LiquidationCandidateConsumer {
     private static final Logger log = LoggerFactory.getLogger(LiquidationCandidateConsumer.class);
 
     private final ObjectMapper objectMapper;
-    private final LiquidationService liquidationService;
     private final LiquidationCandidateQueueProcessor queueProcessor;
     private final LiquidationProperties properties;
 
-    public LiquidationCandidateConsumer(ObjectMapper objectMapper, LiquidationService liquidationService) {
-        this(objectMapper, liquidationService, null, new LiquidationProperties());
-    }
-
     public LiquidationCandidateConsumer(ObjectMapper objectMapper,
-                                        LiquidationService liquidationService,
-                                        LiquidationProperties properties) {
-        this(objectMapper, liquidationService, null, properties);
-    }
-
-    @Autowired
-    public LiquidationCandidateConsumer(ObjectMapper objectMapper,
-                                        LiquidationService liquidationService,
                                         LiquidationCandidateQueueProcessor queueProcessor,
                                         LiquidationProperties properties) {
         this.objectMapper = objectMapper;
-        this.liquidationService = liquidationService;
         this.queueProcessor = queueProcessor;
         this.properties = properties;
     }
@@ -45,16 +32,20 @@ public class LiquidationCandidateConsumer {
     @KafkaListener(
             topics = "#{__listener.liquidationCandidatesTopic()}",
             groupId = "#{__listener.groupId()}",
-            containerFactory = "liquidationKafkaListenerContainerFactory")
-    public void onCandidate(ConsumerRecord<String, String> record) {
+            containerFactory = "liquidationCandidateKafkaListenerContainerFactory")
+    public void onCandidates(List<ConsumerRecord<String, String>> records) {
         try {
-            LiquidationCandidateEvent event = objectMapper.readValue(record.value(), LiquidationCandidateEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "liquidation candidate");
-            requireCurrentProductTopic(record.topic());
-            if (queueProcessor == null) liquidationService.processCandidate(event); else queueProcessor.enqueueAndDrain(event);
+            List<LiquidationCandidateEvent> events = new ArrayList<>(records.size());
+            for (ConsumerRecord<String, String> record : records) {
+                LiquidationCandidateEvent event = objectMapper.readValue(record.value(), LiquidationCandidateEvent.class);
+                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "liquidation candidate");
+                requireCurrentProductTopic(record.topic());
+                events.add(event);
+            }
+            queueProcessor.enqueue(events);
         } catch (Exception ex) {
-            log.error("Failed to process liquidation candidate: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to process liquidation candidate", ex);
+            log.error("Failed to enqueue liquidation candidate batch: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to enqueue liquidation candidate batch", ex);
         }
     }
 

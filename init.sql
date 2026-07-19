@@ -1124,6 +1124,16 @@ CREATE INDEX IF NOT EXISTS trading_orders_stp_open_idx
     WHERE status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
       AND remaining_quantity_steps > 0;
 
+-- Liquidation preemption probes only live reduce-only orders and locks them in creation order.
+CREATE INDEX IF NOT EXISTS trading_orders_liquidation_preempt_idx
+    ON trading_orders (
+        product_line, user_id, symbol, margin_mode, position_side,
+        instrument_version, side, created_at, order_id
+    )
+    WHERE reduce_only = TRUE
+      AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+      AND remaining_quantity_steps > 0;
+
 CREATE INDEX IF NOT EXISTS trading_orders_recovery_idx
     ON trading_orders (created_at ASC, order_id ASC)
     WHERE status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
@@ -2910,12 +2920,7 @@ CREATE INDEX IF NOT EXISTS risk_outbox_published_cleanup_idx
     ON risk_outbox_events (published_at, id)
     WHERE published_at IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS liquidation_sequences (
-    sequence_name       TEXT PRIMARY KEY,
-    sequence_value      BIGINT NOT NULL,
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT liquidation_sequences_positive CHECK (sequence_value > 0)
-);
+CREATE SEQUENCE IF NOT EXISTS liquidation_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 
 CREATE TABLE IF NOT EXISTS liquidation_orders (
     liquidation_order_id    BIGINT PRIMARY KEY,

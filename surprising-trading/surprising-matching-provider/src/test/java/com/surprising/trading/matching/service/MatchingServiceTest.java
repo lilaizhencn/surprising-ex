@@ -139,11 +139,11 @@ class MatchingServiceTest {
                 assertThat(publicTrade.quantitySteps()).isEqualTo(3L);
                 assertThat(publicTrade.traceId()).isEqualTo("trace-taker-502");
             });
-            assertThat(depthPublisher.events).hasSize(2);
-            OrderBookDepthEvent depth = depthPublisher.events.get(1);
+            assertThat(depthPublisher.events).hasSize(1);
+            OrderBookDepthEvent depth = depthPublisher.events.get(0);
             assertThat(depth.symbol()).isEqualTo("BTC-USDT");
-            assertThat(depth.sequence()).isEqualTo(2L);
-            assertThat(depth.previousSequence()).isEqualTo(1L);
+            assertThat(depth.sequence()).isEqualTo(1L);
+            assertThat(depth.previousSequence()).isEqualTo(0L);
             assertThat(depth.updateType().name()).isEqualTo("SNAPSHOT");
             assertThat(depth.bids()).isEmpty();
             assertThat(depth.asks()).singleElement().satisfies(level -> {
@@ -154,7 +154,7 @@ class MatchingServiceTest {
 
             OrderBookSnapshotResponse snapshot = service.orderBookSnapshot("BTC-USDT", 10);
             assertThat(snapshot.symbol()).isEqualTo("BTC-USDT");
-            assertThat(snapshot.sequence()).isEqualTo(2L);
+            assertThat(snapshot.sequence()).isEqualTo(1L);
             assertThat(snapshot.depth()).isEqualTo(10);
             assertThat(snapshot.bids()).isEmpty();
             assertThat(snapshot.asks()).singleElement().satisfies(level -> {

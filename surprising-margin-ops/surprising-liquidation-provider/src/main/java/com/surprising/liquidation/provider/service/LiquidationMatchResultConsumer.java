@@ -36,7 +36,7 @@ public class LiquidationMatchResultConsumer {
     @KafkaListener(
             topics = "#{__listener.matchResultsTopic()}",
             groupId = "#{__listener.groupId()}",
-            containerFactory = "liquidationKafkaListenerContainerFactory")
+            containerFactory = "liquidationMatchResultKafkaListenerContainerFactory")
     public void onMatchResult(ConsumerRecord<String, String> record) {
         try {
             MatchResultEvent event = objectMapper.readValue(record.value(), MatchResultEvent.class);

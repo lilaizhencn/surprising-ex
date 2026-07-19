@@ -3,6 +3,8 @@ package com.surprising.liquidation.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.product.api.ProductLine;
@@ -35,55 +37,57 @@ class LiquidationCandidateConsumerTest {
     @Test
     void processesCandidateWhenKafkaKeyMatchesPayloadSymbol() {
         ObjectMapper objectMapper = new ObjectMapper();
-        RecordingLiquidationService liquidationService = new RecordingLiquidationService();
-        LiquidationCandidateConsumer consumer = new LiquidationCandidateConsumer(objectMapper, liquidationService);
+        LiquidationCandidateQueueProcessor queueProcessor = mock(LiquidationCandidateQueueProcessor.class);
+        LiquidationCandidateConsumer consumer = new LiquidationCandidateConsumer(objectMapper, queueProcessor,
+                new LiquidationProperties());
 
-        consumer.onCandidate(new ConsumerRecord<>("surprising.perp.liquidation.candidates.v1", 1, 10L,
-                "BTC-USDT", objectMapper.writeValueAsString(CANDIDATE)));
+        consumer.onCandidates(List.of(new ConsumerRecord<>("surprising.perp.liquidation.candidates.v1", 1, 10L,
+                "BTC-USDT", objectMapper.writeValueAsString(CANDIDATE))));
 
-        assertThat(liquidationService.processed).isEqualTo(CANDIDATE);
+        verify(queueProcessor).enqueue(List.of(CANDIDATE));
     }
 
     @Test
     void rejectsCandidateWhenKafkaKeyDoesNotMatchPayloadSymbol() {
         ObjectMapper objectMapper = new ObjectMapper();
-        RecordingLiquidationService liquidationService = new RecordingLiquidationService();
-        LiquidationCandidateConsumer consumer = new LiquidationCandidateConsumer(objectMapper, liquidationService);
+        LiquidationCandidateQueueProcessor queueProcessor = mock(LiquidationCandidateQueueProcessor.class);
+        LiquidationCandidateConsumer consumer = new LiquidationCandidateConsumer(objectMapper, queueProcessor,
+                new LiquidationProperties());
 
-        assertThatThrownBy(() -> consumer.onCandidate(new ConsumerRecord<>(
+        assertThatThrownBy(() -> consumer.onCandidates(List.of(new ConsumerRecord<>(
                 "surprising.perp.liquidation.candidates.v1",
                 1,
                 10L,
                 "ETH-USDT",
-                objectMapper.writeValueAsString(CANDIDATE))))
+                objectMapper.writeValueAsString(CANDIDATE)))))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("failed to process liquidation candidate")
+                .hasMessageContaining("failed to enqueue liquidation candidate batch")
                 .satisfies(ex -> assertThat(ex.getCause())
                         .hasMessageContaining("liquidation candidate Kafka key must match payload symbol"));
 
-        assertThat(liquidationService.processed).isNull();
+        verify(queueProcessor, never()).enqueue(org.mockito.ArgumentMatchers.anyList());
     }
 
     @Test
     void rejectsCandidateFromOtherProductTopicBeforeProcessing() {
         ObjectMapper objectMapper = new ObjectMapper();
-        RecordingLiquidationService liquidationService = new RecordingLiquidationService();
+        LiquidationCandidateQueueProcessor queueProcessor = mock(LiquidationCandidateQueueProcessor.class);
         LiquidationProperties properties = new LiquidationProperties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
         properties.getKafka().setProductTopicsEnabled(true);
-        LiquidationCandidateConsumer consumer = new LiquidationCandidateConsumer(objectMapper, liquidationService,
+        LiquidationCandidateConsumer consumer = new LiquidationCandidateConsumer(objectMapper, queueProcessor,
                 properties);
 
-        assertThatThrownBy(() -> consumer.onCandidate(new ConsumerRecord<>(
+        assertThatThrownBy(() -> consumer.onCandidates(List.of(new ConsumerRecord<>(
                 "surprising.linear-delivery.liquidation.candidates.v1", 1, 10L, "BTC-USDT",
-                objectMapper.writeValueAsString(CANDIDATE))))
+                objectMapper.writeValueAsString(CANDIDATE)))))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("failed to process liquidation candidate")
+                .hasMessageContaining("failed to enqueue liquidation candidate batch")
                 .satisfies(ex -> assertThat(ex.getCause())
                         .hasMessageContaining("liquidation candidate topic must match current product line")
                         .hasMessageContaining("surprising.option.liquidation.candidates.v1"));
 
-        assertThat(liquidationService.processed).isNull();
+        verify(queueProcessor, never()).enqueue(org.mockito.ArgumentMatchers.anyList());
     }
 
     @Test
@@ -117,7 +121,7 @@ class LiquidationCandidateConsumerTest {
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
         LiquidationCandidateConsumer consumer = new LiquidationCandidateConsumer(new ObjectMapper(),
-                mock(LiquidationService.class), properties);
+                mock(LiquidationCandidateQueueProcessor.class), properties);
 
         assertThat(consumer.liquidationCandidatesTopic())
                 .isEqualTo("surprising.linear-delivery.liquidation.candidates.v1");
@@ -137,16 +141,10 @@ class LiquidationCandidateConsumerTest {
     }
 
     private static final class RecordingLiquidationService extends LiquidationService {
-        private LiquidationCandidateEvent processed;
         private MatchResultEvent matchResult;
 
         private RecordingLiquidationService() {
             super(null, null, null, null, null, null, null);
-        }
-
-        @Override
-        public void processCandidate(LiquidationCandidateEvent event) {
-            processed = event;
         }
 
         @Override

@@ -6,7 +6,7 @@ DB_USER="${DB_USER:-surprising}"
 DB_PASSWORD="${DB_PASSWORD:-surprising}"
 DB_NAME="${DB_NAME:-surprising_product_line_smoke}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
-SPRING_DATASOURCE_URL="${SPRING_DATASOURCE_URL:-jdbc:postgresql://localhost:${POSTGRES_PORT}/${DB_NAME}}"
+SPRING_DATASOURCE_URL="${SPRING_DATASOURCE_URL:-jdbc:postgresql://localhost:${POSTGRES_PORT}/${DB_NAME}?reWriteBatchedInserts=true}"
 KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
 PRODUCT_LINES="${PRODUCT_LINES:-LINEAR_PERPETUAL LINEAR_DELIVERY OPTION SPOT}"
 BUILD_SERVICES="${BUILD_SERVICES:-true}"
@@ -41,8 +41,8 @@ KAFKA_ASSIGNMENT_TIMEOUT_SECONDS="${KAFKA_ASSIGNMENT_TIMEOUT_SECONDS:-90}"
 KAFKA_TOPIC_RESET_TIMEOUT_SECONDS="${KAFKA_TOPIC_RESET_TIMEOUT_SECONDS:-60}"
 STRESS_REPORT_FILE="${STRESS_REPORT_FILE:-${TMP_DIR}/stress-report.md}"
 STRESS_RUN_LABEL="${STRESS_RUN_LABEL:-}"
-STRESS_MATCHING_KAFKA_CONCURRENCY="${STRESS_MATCHING_KAFKA_CONCURRENCY:-4}"
-STRESS_MATCHING_MAX_POLL_RECORDS="${STRESS_MATCHING_MAX_POLL_RECORDS:-16}"
+STRESS_MATCHING_KAFKA_CONCURRENCY="${STRESS_MATCHING_KAFKA_CONCURRENCY:-32}"
+STRESS_MATCHING_MAX_POLL_RECORDS="${STRESS_MATCHING_MAX_POLL_RECORDS:-128}"
 STRESS_MATCHING_ENGINE_SHARDS="${STRESS_MATCHING_ENGINE_SHARDS:-4}"
 STRESS_MATCHING_RISK_SHARDS="${STRESS_MATCHING_RISK_SHARDS:-2}"
 STRESS_MATCHING_OUTBOX_BATCH_SIZE="${STRESS_MATCHING_OUTBOX_BATCH_SIZE:-1000}"
@@ -53,7 +53,7 @@ STRESS_ORDER_OUTBOX_BATCH_SIZE="${STRESS_ORDER_OUTBOX_BATCH_SIZE:-1000}"
 STRESS_ORDER_OUTBOX_PUBLISH_DELAY_MS="${STRESS_ORDER_OUTBOX_PUBLISH_DELAY_MS:-20}"
 STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT="${STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT:-64}"
 STRESS_ORDER_OUTBOX_MAX_ROWS_PER_KEY="${STRESS_ORDER_OUTBOX_MAX_ROWS_PER_KEY:-32}"
-STRESS_ACCOUNT_KAFKA_CONCURRENCY="${STRESS_ACCOUNT_KAFKA_CONCURRENCY:-4}"
+STRESS_ACCOUNT_KAFKA_CONCURRENCY="${STRESS_ACCOUNT_KAFKA_CONCURRENCY:-32}"
 STRESS_ACCOUNT_OUTBOX_BATCH_SIZE="${STRESS_ACCOUNT_OUTBOX_BATCH_SIZE:-1000}"
 STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS="${STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS:-20}"
 STRESS_ACCOUNT_OUTBOX_MAX_IN_FLIGHT="${STRESS_ACCOUNT_OUTBOX_MAX_IN_FLIGHT:-32}"
@@ -62,7 +62,7 @@ STRESS_RISK_KAFKA_CONCURRENCY="${STRESS_RISK_KAFKA_CONCURRENCY:-4}"
 STRESS_RISK_OUTBOX_BATCH_SIZE="${STRESS_RISK_OUTBOX_BATCH_SIZE:-1000}"
 STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS="${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS:-20}"
 STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY="${STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY:-32}"
-STRESS_LIQUIDATION_KAFKA_CONCURRENCY="${STRESS_LIQUIDATION_KAFKA_CONCURRENCY:-8}"
+STRESS_LIQUIDATION_KAFKA_CONCURRENCY="${STRESS_LIQUIDATION_KAFKA_CONCURRENCY:-32}"
 STRESS_LIQUIDATION_WAIT_SECONDS="${STRESS_LIQUIDATION_WAIT_SECONDS:-900}"
 STRESS_LIQUIDATION_MARK_FACTOR_PPM="${STRESS_LIQUIDATION_MARK_FACTOR_PPM:-800000}"
 STRESS_LIQUIDATION_WALLET_RATE_PPM="${STRESS_LIQUIDATION_WALLET_RATE_PPM:-120000}"
@@ -1224,6 +1224,7 @@ product_provider_args() {
         "--surprising.trading.matching.kafka.client-id=product-smoke-${RUN_ID}-${slug}-matching" \
         "--surprising.trading.matching.kafka.concurrency=${matching_concurrency}" \
         "--surprising.trading.matching.kafka.max-poll-records=${STRESS_MATCHING_MAX_POLL_RECORDS}" \
+        "--surprising.trading.matching.protection.market-max-mark-age-ms=30000" \
         "--surprising.trading.matching.outbox.batch-size=${STRESS_MATCHING_OUTBOX_BATCH_SIZE}" \
         "--surprising.trading.matching.outbox.publish-delay-ms=${STRESS_MATCHING_OUTBOX_PUBLISH_DELAY_MS}" \
         "--surprising.trading.matching.outbox.max-in-flight=${STRESS_MATCHING_OUTBOX_MAX_IN_FLIGHT}" \
@@ -1290,7 +1291,7 @@ product_provider_args() {
         "--surprising.liquidation.kafka.product-line=${product_line}" \
         "--surprising.liquidation.kafka.product-topics-enabled=true" \
         "--surprising.liquidation.kafka.group-id=product-smoke-${RUN_ID}-${slug}-liquidation" \
-        "--surprising.liquidation.kafka.concurrency=1"
+        "--surprising.liquidation.kafka.candidate-concurrency=1"
       ;;
     insurance)
       printf '%s\n' \
@@ -1347,7 +1348,7 @@ product_provider_args() {
         "--surprising.liquidation.kafka.product-line=${product_line}" \
         "--surprising.liquidation.kafka.product-topics-enabled=true" \
         "--surprising.liquidation.kafka.group-id=product-smoke-${RUN_ID}-${slug}-liquidation" \
-        "--surprising.liquidation.kafka.concurrency=${STRESS_LIQUIDATION_KAFKA_CONCURRENCY}" \
+        "--surprising.liquidation.kafka.candidate-concurrency=${STRESS_LIQUIDATION_KAFKA_CONCURRENCY}" \
         "--surprising.funding.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.funding.kafka.product-line=${product_line}" \
         "--surprising.funding.kafka.product-topics-enabled=true" \
@@ -3473,7 +3474,7 @@ run_multi_symbol_liquidation_stress_flow() {
   local candidate_latency submit_latency complete_latency liquidation_tps
   local candidate_status order_status remaining_positions liquidation_fees insurance_fees
   slug="$(stress_product_slug "${product_line}")"
-  echo "Scenario ${product_line}: 5000-user simultaneous liquidation stress symbols=${STRESS_SYMBOL_COUNT} users=${STRESS_USER_COUNT}"
+  echo "Scenario ${product_line}: simultaneous liquidation stress symbols=${STRESS_SYMBOL_COUNT} users=${STRESS_USER_COUNT}"
   seed_stress_prices "${product_line}"
   fund_stress_accounts_for_line "${product_line}"
   wait_sql_equals "market-maker price coverage ${product_line}" \
@@ -3533,6 +3534,9 @@ run_multi_symbol_liquidation_stress_flow() {
   wait_sql_equals "positions closed by liquidation ${product_line}" \
     "SELECT count(*) FROM account_positions WHERE product_line = '${product_line}' AND user_id >= ${STRESS_TAKER_USER_START} AND user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT)) AND signed_quantity_steps <> 0" \
     "0" "${STRESS_LIQUIDATION_WAIT_SECONDS}"
+  wait_sql_equals "no duplicate filled liquidations per one-step position ${product_line}" \
+    "SELECT count(*) FROM (SELECT lo.user_id FROM liquidation_orders lo JOIN risk_liquidation_candidates c ON c.candidate_id = lo.candidate_id WHERE c.product_line = '${product_line}' AND lo.user_id >= ${STRESS_TAKER_USER_START} AND lo.user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT)) AND c.event_time >= '${STRESS_LIQUIDATION_TRIGGERED_AT}'::timestamptz AND lo.status = 'FILLED' GROUP BY lo.user_id HAVING count(*) > 1) duplicate_users" \
+    "0" "${STRESS_LIQUIDATION_WAIT_SECONDS}"
   assert_outbox_drained "${product_line}"
   capture_stress_pg_stat_statements
 
@@ -3550,6 +3554,7 @@ PY
   liquidation_tps="$(query_value "SELECT count(*) || ' ' || round(EXTRACT(EPOCH FROM (max(c.updated_at) - '${STRESS_LIQUIDATION_TRIGGERED_AT}'::timestamptz))::numeric, 3) || ' ' || round((count(*) / NULLIF(EXTRACT(EPOCH FROM (max(c.updated_at) - '${STRESS_LIQUIDATION_TRIGGERED_AT}'::timestamptz)), 0))::numeric, 3) FROM risk_liquidation_candidates c WHERE c.product_line = '${product_line}' AND c.user_id >= ${STRESS_TAKER_USER_START} AND c.user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT)) AND c.event_time >= '${STRESS_LIQUIDATION_TRIGGERED_AT}'::timestamptz AND c.status = 'COMPLETED'")"
   candidate_status="$(query_value "SELECT string_agg(status || '=' || count, ', ' ORDER BY status) FROM (SELECT status, count(*) FROM risk_liquidation_candidates WHERE product_line = '${product_line}' AND user_id >= ${STRESS_TAKER_USER_START} AND user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT)) AND event_time >= '${STRESS_LIQUIDATION_TRIGGERED_AT}'::timestamptz GROUP BY status) s")"
   order_status="$(query_value "SELECT string_agg(status || '=' || count, ', ' ORDER BY status) FROM (SELECT lo.status, count(*) FROM liquidation_orders lo JOIN risk_liquidation_candidates c ON c.candidate_id = lo.candidate_id WHERE c.product_line = '${product_line}' AND lo.user_id >= ${STRESS_TAKER_USER_START} AND lo.user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT)) AND c.event_time >= '${STRESS_LIQUIDATION_TRIGGERED_AT}'::timestamptz GROUP BY lo.status) s")"
+  duplicate_filled_users="$(query_value "SELECT count(*) FROM (SELECT lo.user_id FROM liquidation_orders lo JOIN risk_liquidation_candidates c ON c.candidate_id = lo.candidate_id WHERE c.product_line = '${product_line}' AND lo.user_id >= ${STRESS_TAKER_USER_START} AND lo.user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT)) AND c.event_time >= '${STRESS_LIQUIDATION_TRIGGERED_AT}'::timestamptz AND lo.status = 'FILLED' GROUP BY lo.user_id HAVING count(*) > 1) duplicate_users")"
   remaining_positions="$(query_value "SELECT count(*) FROM account_positions WHERE product_line = '${product_line}' AND user_id >= ${STRESS_TAKER_USER_START} AND user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT)) AND signed_quantity_steps <> 0")"
   liquidation_fees="$(query_value "SELECT count(*) || ' ' || COALESCE(sum(amount_units), 0) FROM account_ledger_entries WHERE user_id >= ${STRESS_TAKER_USER_START} AND user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT)) AND reference_type = 'LIQUIDATION_FEE'")"
   insurance_fees="$(query_value "SELECT count(*) || ' ' || COALESCE(sum(amount_units), 0) FROM insurance_fund_ledger WHERE reference_type = 'LIQUIDATION_FEE'")"
@@ -3559,7 +3564,7 @@ PY
 
   STRESS_LAST_SUMMARY_FILE="${TMP_DIR}/${product_line}-stress-summary.md"
   {
-    echo "## ${product_line} 5000-user simultaneous liquidation"
+    echo "## ${product_line} ${STRESS_USER_COUNT}-user simultaneous liquidation"
     echo
     echo "- Run label：${STRESS_RUN_LABEL}"
     echo "- Trigger：20 symbols receive the same sustained mark-price shock; factor=${STRESS_LIQUIDATION_MARK_FACTOR_PPM} ppm"
@@ -3568,6 +3573,7 @@ PY
     echo "- Liquidation consumer concurrency：${STRESS_LIQUIDATION_KAFKA_CONCURRENCY}"
     echo "- Candidate status：${candidate_status}"
     echo "- Liquidation order status：${order_status}"
+    echo "- Users with duplicate FILLED liquidation orders：${duplicate_filled_users}"
     echo "- Remaining user positions：${remaining_positions}"
     echo "- Completed liquidation throughput \`count durationSeconds tps\`：${liquidation_tps}"
     echo "- Trigger -> candidate latency ms \`count min p50 p95 p99 max\`：${candidate_latency}"
