@@ -37,9 +37,11 @@ STRESS_WAIT_SECONDS="${STRESS_WAIT_SECONDS:-420}"
 STRESS_PRICE_WARMUP_SECONDS="${STRESS_PRICE_WARMUP_SECONDS:-35}"
 STRESS_PRICE_REFRESH_DELAY_SECONDS="${STRESS_PRICE_REFRESH_DELAY_SECONDS:-1}"
 KAFKA_ASSIGNMENT_TIMEOUT_SECONDS="${KAFKA_ASSIGNMENT_TIMEOUT_SECONDS:-90}"
+KAFKA_TOPIC_RESET_TIMEOUT_SECONDS="${KAFKA_TOPIC_RESET_TIMEOUT_SECONDS:-60}"
 STRESS_REPORT_FILE="${STRESS_REPORT_FILE:-${TMP_DIR}/stress-report.md}"
 STRESS_RUN_LABEL="${STRESS_RUN_LABEL:-}"
 STRESS_MATCHING_KAFKA_CONCURRENCY="${STRESS_MATCHING_KAFKA_CONCURRENCY:-4}"
+STRESS_MATCHING_MAX_POLL_RECORDS="${STRESS_MATCHING_MAX_POLL_RECORDS:-16}"
 STRESS_MATCHING_ENGINE_SHARDS="${STRESS_MATCHING_ENGINE_SHARDS:-4}"
 STRESS_MATCHING_RISK_SHARDS="${STRESS_MATCHING_RISK_SHARDS:-2}"
 STRESS_MATCHING_OUTBOX_BATCH_SIZE="${STRESS_MATCHING_OUTBOX_BATCH_SIZE:-1000}"
@@ -971,6 +973,27 @@ delete_surprising_topics() {
     [[ -n "${topic}" ]] || continue
     "${topics_cmd}" --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" --delete --if-exists --topic "${topic}" >/dev/null 2>&1 || true
   done <<<"${topics}"
+
+  local deadline=$((SECONDS + KAFKA_TOPIC_RESET_TIMEOUT_SECONDS))
+  while true; do
+    local current_topics remaining=false topic
+    current_topics="$("${topics_cmd}" --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" --list 2>/dev/null || true)"
+    while IFS= read -r topic; do
+      [[ -n "${topic}" ]] || continue
+      if grep -Fqx -- "${topic}" <<<"${current_topics}"; then
+        remaining=true
+        break
+      fi
+    done <<<"${topics}"
+    if [[ "${remaining}" == "false" ]]; then
+      return
+    fi
+    if (( SECONDS >= deadline )); then
+      echo "Timed out waiting for Kafka topics to be deleted before recreation" >&2
+      return 1
+    fi
+    sleep 1
+  done
 }
 
 create_topics() {
@@ -996,7 +1019,6 @@ reset_kafka_topics() {
   local product_line="$1"
   if [[ "${RESET_KAFKA}" == "true" ]]; then
     delete_surprising_topics "${product_line}"
-    sleep 2
   fi
   if [[ "${CREATE_KAFKA_TOPICS}" == "true" ]]; then
     create_topics "${product_line}"
@@ -1190,6 +1212,7 @@ product_provider_args() {
         "--surprising.trading.matching.kafka.group-id=product-smoke-${RUN_ID}-${slug}-matching" \
         "--surprising.trading.matching.kafka.client-id=product-smoke-${RUN_ID}-${slug}-matching" \
         "--surprising.trading.matching.kafka.concurrency=${matching_concurrency}" \
+        "--surprising.trading.matching.kafka.max-poll-records=${STRESS_MATCHING_MAX_POLL_RECORDS}" \
         "--surprising.trading.matching.outbox.batch-size=${STRESS_MATCHING_OUTBOX_BATCH_SIZE}" \
         "--surprising.trading.matching.outbox.publish-delay-ms=${STRESS_MATCHING_OUTBOX_PUBLISH_DELAY_MS}" \
         "--surprising.trading.matching.outbox.max-in-flight=${STRESS_MATCHING_OUTBOX_MAX_IN_FLIGHT}" \
@@ -3501,7 +3524,7 @@ PY
     echo "- Maker orders：orders=${maker_orders}, placeSuccess=${maker_place_success}, initialLevels=${STRESS_MAKER_DEPTH_LEVELS}, refreshCycles=${STRESS_MAKER_REFRESH_CYCLES}, refreshLevels=${STRESS_MAKER_REFRESH_LEVELS}, concurrency=${STRESS_MAKER_LOAD_CONCURRENCY}"
     echo "- Users：${STRESS_USER_COUNT}"
     echo "- Traffic：model=${traffic_model}, targetRate=${target_rate}"
-    echo "- Matching：kafkaConcurrency=${STRESS_MATCHING_KAFKA_CONCURRENCY}, matchingEngines=${STRESS_MATCHING_ENGINE_SHARDS}, riskEngines=${STRESS_MATCHING_RISK_SHARDS}"
+    echo "- Matching：kafkaConcurrency=${STRESS_MATCHING_KAFKA_CONCURRENCY}, maxPollRecords=${STRESS_MATCHING_MAX_POLL_RECORDS}, matchingEngines=${STRESS_MATCHING_ENGINE_SHARDS}, riskEngines=${STRESS_MATCHING_RISK_SHARDS}"
     echo "- Internal maker whitelist：${STRESS_INTERNAL_MARKET_MAKER_WHITELIST}"
     echo "- Open phase：orders=${STRESS_USER_COUNT}, trades=${open_trades}, settledOrders=${settled_open}, submitMs=${open_ms}, concurrency=${STRESS_LOAD_CONCURRENCY}, targetTps=${STRESS_TARGET_TPS}"
     echo "- Close/sell phase：orders=${STRESS_USER_COUNT}, trades=${close_trades}, settledOrders=${settled_close}, submitMs=${close_ms}, concurrency=${STRESS_LOAD_CONCURRENCY}, targetTps=${STRESS_TARGET_TPS}"
@@ -3960,6 +3983,7 @@ validate_multi_symbol_stress_config() {
   require_positive_integer "STRESS_USER_COUNT" "${STRESS_USER_COUNT}"
   require_positive_integer "STRESS_LOAD_CONCURRENCY" "${STRESS_LOAD_CONCURRENCY}"
   require_positive_integer "STRESS_MATCHING_KAFKA_CONCURRENCY" "${STRESS_MATCHING_KAFKA_CONCURRENCY}"
+  require_positive_integer "STRESS_MATCHING_MAX_POLL_RECORDS" "${STRESS_MATCHING_MAX_POLL_RECORDS}"
   require_positive_integer "STRESS_MATCHING_ENGINE_SHARDS" "${STRESS_MATCHING_ENGINE_SHARDS}"
   require_positive_integer "STRESS_MATCHING_RISK_SHARDS" "${STRESS_MATCHING_RISK_SHARDS}"
   require_positive_integer "STRESS_KAFKA_LAG_SAMPLE_SECONDS" "${STRESS_KAFKA_LAG_SAMPLE_SECONDS}"
@@ -4103,12 +4127,13 @@ main() {
       echo "- Maker 高频：初始 ${STRESS_MAKER_DEPTH_LEVELS} 档，压测阶段每个 phase 刷新 ${STRESS_MAKER_REFRESH_CYCLES} 轮，每轮 ${STRESS_MAKER_REFRESH_LEVELS} 档。"
       echo "- 用户：每个产品线 ${STRESS_USER_COUNT} 个 taker 用户，经 gateway 单笔真实下单；open 与 close/sell 两阶段均按并发 ${STRESS_LOAD_CONCURRENCY} 提交，目标速率为 ${STRESS_TARGET_TPS} TPS（0 表示不限速）。"
       echo "- 流量分布：hotSymbolCount=${STRESS_HOT_SYMBOL_COUNT}，hotTrafficPercent=${STRESS_HOT_TRAFFIC_PERCENT}；hotSymbolCount=0 表示均匀分布。"
-      echo "- 撮合：Kafka concurrency=${STRESS_MATCHING_KAFKA_CONCURRENCY}，matching engines=${STRESS_MATCHING_ENGINE_SHARDS}，risk engines=${STRESS_MATCHING_RISK_SHARDS}。"
+      echo "- 撮合：Kafka concurrency=${STRESS_MATCHING_KAFKA_CONCURRENCY}，maxPollRecords=${STRESS_MATCHING_MAX_POLL_RECORDS}，matching engines=${STRESS_MATCHING_ENGINE_SHARDS}，risk engines=${STRESS_MATCHING_RISK_SHARDS}。"
       echo "- 内部做市账号白名单：${STRESS_INTERNAL_MARKET_MAKER_WHITELIST}；真实用户与白名单做市成交仍执行完整资金结算。"
       echo "- PostgreSQL 慢 SQL：检测到 pg_stat_statements 时 reset=${STRESS_RESET_PG_STAT_STATEMENTS}，报告按 total execution time 输出前 20 条。"
       echo "- Kafka lag：每 ${STRESS_KAFKA_LAG_SAMPLE_SECONDS}s 采样 matching、account、order result 和 position maintenance consumer group。"
       echo "- Trading Outbox：按 phase、provider owner、aggregate type、topic、event type 精确还原 pending 峰值、最大未发布年龄和最终积压，不执行轮询 SQL。"
       echo "- Account outbox：batchSize=${STRESS_ACCOUNT_OUTBOX_BATCH_SIZE}，publishDelayMs=${STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS}，maxInFlight=${STRESS_ACCOUNT_OUTBOX_MAX_IN_FLIGHT}，maxRowsPerKey=${STRESS_ACCOUNT_OUTBOX_MAX_ROWS_PER_KEY}。"
+      echo "- Trading outbox：batchSize=${STRESS_ORDER_OUTBOX_BATCH_SIZE}，publishDelayMs=${STRESS_ORDER_OUTBOX_PUBLISH_DELAY_MS}，maxInFlight=${STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT}，maxRowsPerKey=${STRESS_ORDER_OUTBOX_MAX_ROWS_PER_KEY}；财务指令优先 claim。"
       echo "- Risk outbox：batchSize=${STRESS_RISK_OUTBOX_BATCH_SIZE}，publishDelayMs=${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS}，maxRowsPerKey=${STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY}。"
       echo "- 资金准备：批量 fixture 写入 balance、ledger 和 admin adjustment；下单、撮合、Kafka、account 结算全部走真实 provider 链路。"
       echo "- 临时日志目录：\`${TMP_DIR}\`"

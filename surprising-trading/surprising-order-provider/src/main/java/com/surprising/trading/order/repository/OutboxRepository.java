@@ -118,6 +118,7 @@ public class OutboxRepository {
                            event.aggregate_type,
                            event.topic,
                            event.event_key,
+                           event.event_type,
                            event.next_attempt_at,
                            row_number() OVER (
                                PARTITION BY event.aggregate_type, event.topic, event.event_key
@@ -126,7 +127,11 @@ public class OutboxRepository {
                            first_value(event.next_attempt_at) OVER (
                                PARTITION BY event.aggregate_type, event.topic, event.event_key
                                ORDER BY event.id
-                           ) AS head_next_attempt_at
+                           ) AS head_next_attempt_at,
+                           first_value(event.event_type) OVER (
+                               PARTITION BY event.aggregate_type, event.topic, event.event_key
+                               ORDER BY event.id
+                           ) AS head_event_type
                       FROM trading_outbox_events event
                      WHERE event.published_at IS NULL
                        AND event.aggregate_type = 'ORDER'
@@ -140,7 +145,12 @@ public class OutboxRepository {
                      WHERE key_rank <= ?
                        AND head_next_attempt_at <= ?
                        AND next_attempt_at <= ?
-                     ORDER BY next_attempt_at, id
+                     ORDER BY CASE
+                                  WHEN head_event_type IN ('ORDER_RESERVE', 'PLACE', 'CANCEL') THEN 0
+                                  ELSE 1
+                              END,
+                              next_attempt_at,
+                              id
                      LIMIT ?
                 )
                 UPDATE trading_outbox_events e

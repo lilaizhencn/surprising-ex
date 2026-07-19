@@ -112,8 +112,9 @@ class MatchingKafkaConfigurationTest {
         assertThat(config).containsEntry(
                 ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
                 CooperativeStickyAssignor.class.getName());
+        assertThat(listenerFactory.isBatchListener()).isTrue();
         assertThat(listenerFactory.getContainerProperties().getAckMode())
-                .isEqualTo(ContainerProperties.AckMode.RECORD);
+                .isEqualTo(ContainerProperties.AckMode.BATCH);
         assertThat(ReflectionTestUtils.getField(listenerFactory, "concurrency")).isEqualTo(4);
         assertThat(listenerFactory.getContainerProperties().getConsumerRebalanceListener())
                 .isInstanceOf(MatchingPartitionAssignmentGuard.class);
@@ -133,6 +134,7 @@ class MatchingKafkaConfigurationTest {
         assertThat(properties.getKafka().getOrderBookDepthTopic())
                 .isEqualTo("surprising.perp.orderbook.depth.v1");
         assertThat(properties.getKafka().getConcurrency()).isEqualTo(4);
+        assertThat(properties.getKafka().getMaxPollRecords()).isEqualTo(16);
         assertThat(properties.getEngine().getMatchingEngines()).isEqualTo(4);
         assertThat(properties.getEngine().getRiskEngines()).isEqualTo(2);
     }

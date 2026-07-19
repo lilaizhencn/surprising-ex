@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Set;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
@@ -78,9 +79,7 @@ class MatchingServiceTest {
                     100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z"),
                     "trace-taker-502");
 
-            service.process(maker);
-            service.process(taker);
-            service.process(taker);
+            service.processBatch(List.of(maker, taker, taker));
 
             assertThat(resultRepository.results).hasSize(2);
             assertThat(resultRepository.results.get(0).orderStatus()).isEqualTo(OrderStatus.ACCEPTED);
@@ -780,6 +779,19 @@ class MatchingServiceTest {
         public boolean hasOpenOrdersWithDifferentInstrumentVersion(String symbol, long instrumentVersion, long orderId) {
             return false;
         }
+
+        @Override
+        public Set<Long> commandsThatWouldSelfTrade(List<OrderCommandEvent> commands) {
+            if (!wouldSelfTrade) {
+                return Set.of();
+            }
+            return commands.stream().map(OrderCommandEvent::commandId).collect(java.util.stream.Collectors.toSet());
+        }
+
+        @Override
+        public Set<Long> commandsWithOpenOrdersAtDifferentInstrumentVersion(List<OrderCommandEvent> commands) {
+            return Set.of();
+        }
     }
 
     private static final class FakeResultRepository extends MatchingResultRepository {
@@ -805,6 +817,14 @@ class MatchingServiceTest {
             return new CommandState(
                     results.stream().anyMatch(result -> result.commandId() == commandId),
                     !missingOrderIds.contains(orderId));
+        }
+
+        @Override
+        public Map<Long, CommandState> commandStates(Map<Long, Long> commandOrderIds) {
+            Map<Long, CommandState> states = new HashMap<>();
+            commandOrderIds.forEach((commandId, orderId) -> states.put(
+                    commandId, commandState(commandId, orderId)));
+            return states;
         }
 
         @Override

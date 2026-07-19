@@ -77,7 +77,7 @@ public class MatchingProperties {
         private String matchTradesTopic = "surprising.perp.match.trades.v1";
         private String orderBookDepthTopic = "surprising.perp.orderbook.depth.v1";
         private int concurrency = 4;
-        private int maxPollRecords = 500;
+        private int maxPollRecords = 16;
         private boolean restartOnPartitionReassignment = true;
         private long partitionAssignmentStartupGraceMs = 30000L;
 

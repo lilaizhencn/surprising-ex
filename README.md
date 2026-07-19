@@ -92,6 +92,9 @@ Before deployment:
 - isolate topics, groups, client ids, coordinator node ids, and gateway routes by product line;
 - run the order-provider account-command-result listener at the 32-partition ceiling; records remain ordered by
   `productLine:userId`, while each poll applies order transitions and ACCEPTED/PLACE Outbox writes in batches;
+- process matching commands in bounded transactional polls, batch-read idempotency and protection state while
+  conservatively rechecking same-user/symbol conflicts, preserve symbol-partition order, and prioritize
+  financial ORDER_RESERVE/PLACE/CANCEL Outbox rows over notification-only order events during backlog;
 - use persistent `noeviction` Redis/Valkey compatible with same-hash-tag Lua operations;
 - retain PostgreSQL durability and monitor Kafka lag, Outbox backlog/age, database locks and slow SQL,
   Redis readiness, JVM GC, failover behavior, and zero-difference funds reconciliation.

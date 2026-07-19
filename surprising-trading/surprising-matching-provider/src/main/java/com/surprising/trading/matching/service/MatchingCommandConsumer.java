@@ -4,6 +4,8 @@ import com.surprising.trading.api.KafkaSymbolKeyValidator;
 import com.surprising.trading.api.KafkaSymbolKeyValidator.SymbolKeyMismatchException;
 import com.surprising.trading.api.model.OrderCommandEvent;
 import com.surprising.trading.matching.config.MatchingProperties;
+import java.util.ArrayList;
+import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,35 +45,46 @@ public class MatchingCommandConsumer {
             topics = "#{__listener.orderCommandsTopic()}",
             groupId = "#{__listener.groupId()}",
             containerFactory = "matchingKafkaListenerContainerFactory")
-    public void onCommand(ConsumerRecord<String, String> record) {
-        OrderCommandEvent command = null;
+    public void onCommands(List<ConsumerRecord<String, String>> records) {
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        List<OrderCommandEvent> commands = new ArrayList<>(records.size());
+        boolean processingStarted = false;
         try {
-            String payload = record.value();
-            command = objectMapper.readValue(payload, OrderCommandEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), command.symbol(), "order command");
-            requireCurrentProductTopic(record.topic());
-            partitionAssignmentGuard.recordProcessedCommand(record.topic(), record.partition());
-            // The symbol is the validated Kafka key, so all commands for one book are in one partition.
-            // A Kafka partition is processed serially by exactly one listener thread; process() returns only
-            // after its transactional proxy commits. A local striped lock would only serialize unrelated
-            // symbols that collide in the stripe and cannot improve cross-node ordering.
-            matchingService.process(command);
+            for (ConsumerRecord<String, String> record : records) {
+                OrderCommandEvent command = objectMapper.readValue(record.value(), OrderCommandEvent.class);
+                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), command.symbol(), "order command");
+                requireCurrentProductTopic(record.topic());
+                commands.add(command);
+            }
+            for (ConsumerRecord<String, String> record : records) {
+                partitionAssignmentGuard.recordProcessedCommand(record.topic(), record.partition());
+            }
+            // Kafka preserves record order inside every symbol-keyed partition. The bounded poll is committed only
+            // after one database transaction persists all matching results, order transitions, trades and Outbox rows.
+            processingStarted = true;
+            matchingService.processBatch(commands);
         } catch (SymbolKeyMismatchException ex) {
             log.error("Rejected matching command with invalid Kafka key: {}", ex.getMessage());
-            throw new IllegalStateException("failed to process matching command", ex);
+            throw new IllegalStateException("failed to process matching command batch", ex);
         } catch (ProductTopicMismatchException ex) {
             log.error("Rejected matching command from invalid product topic: {}", ex.getMessage());
-            throw new IllegalStateException("failed to process matching command", ex);
+            throw new IllegalStateException("failed to process matching command batch", ex);
         } catch (Exception ex) {
-            log.error("Failed to process matching command: {}", ex.getMessage(), ex);
-            if (command != null) {
-                partitionAssignmentGuard.requestRestart("matching command failed after payload decode; "
+            log.error("Failed to process matching command batch: {}", ex.getMessage(), ex);
+            if (processingStarted) {
+                OrderCommandEvent first = commands.get(0);
+                OrderCommandEvent last = commands.get(commands.size() - 1);
+                partitionAssignmentGuard.requestRestart("matching command batch failed after processing started; "
                         + "restart is required before Kafka replay to avoid using a mutated exchange-core book. "
-                        + "commandId=" + command.commandId()
-                        + " orderId=" + command.orderId()
-                        + " symbol=" + command.symbol());
+                        + "batchSize=" + commands.size()
+                        + " firstCommandId=" + first.commandId()
+                        + " firstOrderId=" + first.orderId()
+                        + " firstSymbol=" + first.symbol()
+                        + " lastCommandId=" + last.commandId());
             }
-            throw new IllegalStateException("failed to process matching command", ex);
+            throw new IllegalStateException("failed to process matching command batch", ex);
         }
     }
 

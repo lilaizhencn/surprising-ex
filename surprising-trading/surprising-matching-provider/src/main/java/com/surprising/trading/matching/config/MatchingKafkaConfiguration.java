@@ -121,7 +121,8 @@ public class MatchingKafkaConfiguration {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(matchingConsumerFactory);
         factory.setConcurrency(properties.getKafka().getConcurrency());
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.setBatchListener(true);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
         factory.getContainerProperties().setConsumerRebalanceListener(partitionAssignmentGuard);
         return factory;
     }

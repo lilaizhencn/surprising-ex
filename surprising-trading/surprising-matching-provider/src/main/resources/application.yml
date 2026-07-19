@@ -51,7 +51,7 @@ surprising:
         match-trades-topic: surprising.perp.match.trades.v1
         order-book-depth-topic: surprising.perp.orderbook.depth.v1
         concurrency: ${MATCHING_KAFKA_CONCURRENCY:4}
-        max-poll-records: 500
+        max-poll-records: ${MATCHING_MAX_POLL_RECORDS:16}
         restart-on-partition-reassignment: true
         partition-assignment-startup-grace-ms: 30000
       engine:

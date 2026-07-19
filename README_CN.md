@@ -101,6 +101,9 @@ RECONCILE_FUNDS=true \
 - 为每条产品线配置独立 Topic、消费组、client id、协调 node id 和 gateway route；
 - Order Provider 的账户指令结果 listener 并发度对齐 32 个分区；同一 `productLine:userId` 保序，
   每个 poll 批量完成订单状态迁移及 ACCEPTED/PLACE Outbox 入库；
+- 撮合指令使用有界 poll 批量事务，批量读取幂等及保护状态；同批同用户/标的的潜在冲突仍逐条复查，
+  保持 symbol 分区顺序；Outbox 积压时优先发布
+  `ORDER_RESERVE/PLACE/CANCEL` 财务指令，再发布通知型订单事件；
 - Redis/Valkey 使用持久化、`noeviction` 和同 hash-tag Lua 兼容的部署；
 - 保持 PostgreSQL durability，监控 Kafka lag、Outbox pending/最老年龄、数据库锁与慢 SQL、Redis
   readiness、JVM GC，并在上线前完成故障切换和资金零差异核对。

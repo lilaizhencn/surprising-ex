@@ -35,9 +35,11 @@ import java.time.Instant;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
@@ -95,8 +97,96 @@ public class MatchingService {
 
     @Transactional
     public void process(OrderCommandEvent command) {
-        MatchingResultRepository.CommandState commandState =
-                resultRepository.commandState(command.commandId(), command.orderId());
+        process(command, resultRepository.commandState(command.commandId(), command.orderId()),
+                ProtectionChecks.REQUIRED);
+    }
+
+    @Transactional
+    public void processBatch(List<OrderCommandEvent> commands) {
+        if (commands == null || commands.isEmpty()) {
+            return;
+        }
+        LinkedHashMap<Long, OrderCommandEvent> uniqueCommands = new LinkedHashMap<>(commands.size());
+        for (OrderCommandEvent command : commands) {
+            if (command == null) {
+                throw new IllegalArgumentException("matching command batch contains null");
+            }
+            OrderCommandEvent duplicate = uniqueCommands.putIfAbsent(command.commandId(), command);
+            if (duplicate != null && !duplicate.equals(command)) {
+                throw new IllegalArgumentException("conflicting matching commands for commandId="
+                        + command.commandId());
+            }
+        }
+        LinkedHashMap<Long, Long> commandOrderIds = new LinkedHashMap<>(uniqueCommands.size());
+        uniqueCommands.forEach((commandId, command) -> commandOrderIds.put(commandId, command.orderId()));
+        Map<Long, MatchingResultRepository.CommandState> states = resultRepository.commandStates(commandOrderIds);
+        Map<Long, ProtectionChecks> protectionChecks = batchProtectionChecks(uniqueCommands.values(), states);
+        for (OrderCommandEvent command : uniqueCommands.values()) {
+            MatchingResultRepository.CommandState state = states.get(command.commandId());
+            if (state == null) {
+                throw new IllegalStateException("matching command state missing for commandId="
+                        + command.commandId());
+            }
+            process(command, state, protectionChecks.getOrDefault(command.commandId(), ProtectionChecks.REQUIRED));
+        }
+    }
+
+    private Map<Long, ProtectionChecks> batchProtectionChecks(
+            Iterable<OrderCommandEvent> commands,
+            Map<Long, MatchingResultRepository.CommandState> states) {
+        List<OrderCommandEvent> placements = new ArrayList<>();
+        Map<String, Long> symbolVersions = new HashMap<>();
+        Set<String> symbolsWithMultipleVersions = new HashSet<>();
+        Map<UserSymbolKey, Integer> userSymbolCounts = new HashMap<>();
+        for (OrderCommandEvent command : commands) {
+            MatchingResultRepository.CommandState state = states.get(command.commandId());
+            if (state == null || state.resultExists() || !state.orderExists()
+                    || command.commandType() != OrderCommandType.PLACE) {
+                continue;
+            }
+            placements.add(command);
+            Long previousVersion = symbolVersions.putIfAbsent(command.symbol(), command.instrumentVersion());
+            if (previousVersion != null && previousVersion.longValue() != command.instrumentVersion()) {
+                symbolsWithMultipleVersions.add(command.symbol());
+            }
+            if (!properties.getProtection().isInternalMarketMaker(command.userId())) {
+                userSymbolCounts.merge(new UserSymbolKey(command.userId(), command.symbol()), 1, Integer::sum);
+            }
+        }
+        if (placements.isEmpty()) {
+            return Map.of();
+        }
+
+        Set<Long> versionConflicts = protectionRepository
+                .commandsWithOpenOrdersAtDifferentInstrumentVersion(placements);
+        List<OrderCommandEvent> stableSelfTradeChecks = placements.stream()
+                .filter(command -> command.orderType() == OrderType.LIMIT)
+                .filter(command -> !properties.getProtection().isInternalMarketMaker(command.userId()))
+                .filter(command -> userSymbolCounts.getOrDefault(
+                        new UserSymbolKey(command.userId(), command.symbol()), 0) == 1)
+                .toList();
+        Set<Long> selfTradeConflicts = properties.getProtection().isSelfTradePreventionEnabled()
+                ? protectionRepository.commandsThatWouldSelfTrade(stableSelfTradeChecks)
+                : Set.of();
+
+        Map<Long, ProtectionChecks> checks = new HashMap<>(placements.size());
+        for (OrderCommandEvent command : placements) {
+            boolean stableVersionMiss = !symbolsWithMultipleVersions.contains(command.symbol())
+                    && !versionConflicts.contains(command.commandId());
+            boolean stableSelfTradeMiss = properties.getProtection().isSelfTradePreventionEnabled()
+                    && command.orderType() == OrderType.LIMIT
+                    && !properties.getProtection().isInternalMarketMaker(command.userId())
+                    && userSymbolCounts.getOrDefault(
+                            new UserSymbolKey(command.userId(), command.symbol()), 0) == 1
+                    && !selfTradeConflicts.contains(command.commandId());
+            checks.put(command.commandId(), new ProtectionChecks(stableVersionMiss, stableSelfTradeMiss));
+        }
+        return Map.copyOf(checks);
+    }
+
+    private void process(OrderCommandEvent command,
+                         MatchingResultRepository.CommandState commandState,
+                         ProtectionChecks protectionChecks) {
         if (commandState.resultExists()) {
             return;
         }
@@ -118,6 +208,7 @@ public class MatchingService {
             return;
         }
         if (command.commandType() == OrderCommandType.PLACE
+                && !protectionChecks.skipVersionDatabaseCheck()
                 && protectionRepository.hasOpenOrdersWithDifferentInstrumentVersion(command.symbol(),
                 command.instrumentVersion(), command.orderId())) {
             saveAndPublish(rejected(command, "INSTRUMENT_VERSION_OPEN_BOOK_MISMATCH", now), command, Map.of());
@@ -128,7 +219,8 @@ public class MatchingService {
             saveAndPublish(rejected(command, "POST_ONLY_WOULD_TAKE", now), command, Map.of());
             return;
         }
-        if (wouldSelfTrade(command, effectivePriceTicks)) {
+        if (!protectionChecks.skipSelfTradeDatabaseCheck()
+                && wouldSelfTrade(command, effectivePriceTicks)) {
             saveAndPublish(rejected(command, "SELF_TRADE_PREVENTED", now), command, Map.of());
             return;
         }
@@ -631,6 +723,16 @@ public class MatchingService {
                 throw new IllegalArgumentException("invalid order quantity snapshot");
             }
         }
+    }
+
+    private record UserSymbolKey(long userId, String symbol) {
+    }
+
+    private record ProtectionChecks(
+            boolean skipVersionDatabaseCheck,
+            boolean skipSelfTradeDatabaseCheck) {
+
+        private static final ProtectionChecks REQUIRED = new ProtectionChecks(false, false);
     }
 
     private static final class DepthState {

@@ -26,6 +26,28 @@ class MatchingResultRepositoryTest {
     private final MatchingResultRepository repository = new MatchingResultRepository(jdbcTemplate);
 
     @Test
+    void commandStatesAreReadForTheWholePollInOneQuery() throws Exception {
+        doAnswer(invocation -> {
+            RowCallbackHandler handler = invocation.getArgument(1);
+            handler.processRow(commandStateRow(7001L, false, true));
+            handler.processRow(commandStateRow(7002L, true, true));
+            return null;
+        }).when(jdbcTemplate).query(anyString(), any(RowCallbackHandler.class), any(Object[].class));
+
+        var states = repository.commandStates(java.util.Map.of(7001L, 8001L, 7002L, 8002L));
+
+        assertThat(states).hasSize(2);
+        assertThat(states.get(7001L).orderExists()).isTrue();
+        assertThat(states.get(7002L).resultExists()).isTrue();
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowCallbackHandler.class), any(Object[].class));
+        assertThat(sql.getValue())
+                .contains("WITH input(command_id, order_id)")
+                .contains("LEFT JOIN trading_match_results")
+                .contains("LEFT JOIN trading_orders");
+    }
+
+    @Test
     void makerSnapshotsAreDeduplicatedIntoOneDatabaseRead() throws Exception {
         doAnswer(invocation -> {
             RowCallbackHandler handler = invocation.getArgument(1);
@@ -98,6 +120,14 @@ class MatchingResultRepositoryTest {
         when(rs.getLong("quantity_steps")).thenReturn(quantitySteps);
         when(rs.getLong("remaining_quantity_steps")).thenReturn(remainingQuantitySteps);
         when(rs.getBoolean("reduce_only")).thenReturn(reduceOnly);
+        return rs;
+    }
+
+    private ResultSet commandStateRow(long commandId, boolean resultExists, boolean orderExists) throws Exception {
+        ResultSet rs = mock(ResultSet.class);
+        when(rs.getLong("command_id")).thenReturn(commandId);
+        when(rs.getBoolean("result_exists")).thenReturn(resultExists);
+        when(rs.getBoolean("order_exists")).thenReturn(orderExists);
         return rs;
     }
 

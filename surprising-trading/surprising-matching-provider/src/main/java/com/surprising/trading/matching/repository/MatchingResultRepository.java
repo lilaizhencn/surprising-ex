@@ -22,6 +22,7 @@ import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -51,6 +52,41 @@ public class MatchingResultRepository {
                        ) AS order_exists
                 """, (rs, rowNum) -> new CommandState(
                 rs.getBoolean("result_exists"), rs.getBoolean("order_exists")), commandId, orderId);
+    }
+
+    public Map<Long, CommandState> commandStates(Map<Long, Long> commandOrderIds) {
+        if (commandOrderIds == null || commandOrderIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Map.Entry<Long, Long>> identities = List.copyOf(commandOrderIds.entrySet());
+        String values = String.join(", ", Collections.nCopies(identities.size(), "(?::bigint, ?::bigint)"));
+        List<Object> args = new ArrayList<>(identities.size() * 2);
+        for (Map.Entry<Long, Long> identity : identities) {
+            args.add(identity.getKey());
+            args.add(identity.getValue());
+        }
+        Map<Long, CommandState> states = new LinkedHashMap<>(identities.size());
+        jdbcTemplate.query("""
+                WITH input(command_id, order_id) AS (
+                    VALUES %s
+                )
+                SELECT input.command_id,
+                       result.command_id IS NOT NULL AS result_exists,
+                       orders.order_id IS NOT NULL AS order_exists
+                  FROM input
+                  LEFT JOIN trading_match_results result
+                    ON result.command_id = input.command_id
+                  LEFT JOIN trading_orders orders
+                    ON orders.order_id = input.order_id
+                 ORDER BY input.command_id
+                """.formatted(values), (RowCallbackHandler) rs -> states.put(
+                rs.getLong("command_id"),
+                new CommandState(rs.getBoolean("result_exists"), rs.getBoolean("order_exists"))),
+                args.toArray());
+        if (states.size() != identities.size()) {
+            throw new IllegalStateException("failed to read all matching command states");
+        }
+        return Map.copyOf(states);
     }
 
     public long orderInstrumentVersion(long orderId) {

@@ -11,6 +11,7 @@ import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
+import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
@@ -27,17 +28,17 @@ class MatchingCommandConsumerTest {
                 "cli-9001", "BTC-USDT", 3L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
                 100L, 2L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z"));
 
-        assertThatThrownBy(() -> consumer.onCommand(new ConsumerRecord<>("surprising.perp.order.commands.v1",
-                5, 42L, "BTC-USDT", objectMapper.writeValueAsString(command))))
+        assertThatThrownBy(() -> consumer.onCommands(List.of(new ConsumerRecord<>("surprising.perp.order.commands.v1",
+                5, 42L, "BTC-USDT", objectMapper.writeValueAsString(command)))))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("failed to process matching command");
+                .hasMessageContaining("failed to process matching command batch");
 
         assertThat(matchingService.processed).isEqualTo(command);
         assertThat(guard.processedPartition).isEqualTo(5);
         assertThat(guard.restartReason)
-                .contains("commandId=7001")
-                .contains("orderId=8001")
-                .contains("symbol=BTC-USDT");
+                .contains("firstCommandId=7001")
+                .contains("firstOrderId=8001")
+                .contains("firstSymbol=BTC-USDT");
     }
 
     @Test
@@ -46,10 +47,10 @@ class MatchingCommandConsumerTest {
         MatchingCommandConsumer consumer = new MatchingCommandConsumer(new ObjectMapper(),
                 new FailingMatchingService(), guard);
 
-        assertThatThrownBy(() -> consumer.onCommand(new ConsumerRecord<>("surprising.perp.order.commands.v1",
-                5, 42L, "BTC-USDT", "{bad json")))
+        assertThatThrownBy(() -> consumer.onCommands(List.of(new ConsumerRecord<>("surprising.perp.order.commands.v1",
+                5, 42L, "BTC-USDT", "{bad json"))))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("failed to process matching command");
+                .hasMessageContaining("failed to process matching command batch");
 
         assertThat(guard.processedPartition).isEqualTo(-1);
         assertThat(guard.restartReason).isNull();
@@ -65,10 +66,10 @@ class MatchingCommandConsumerTest {
                 "cli-9001", "BTC-USDT", 3L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
                 100L, 2L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z"));
 
-        assertThatThrownBy(() -> consumer.onCommand(new ConsumerRecord<>("surprising.perp.order.commands.v1",
-                5, 42L, "ETH-USDT", objectMapper.writeValueAsString(command))))
+        assertThatThrownBy(() -> consumer.onCommands(List.of(new ConsumerRecord<>("surprising.perp.order.commands.v1",
+                5, 42L, "ETH-USDT", objectMapper.writeValueAsString(command)))))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("failed to process matching command")
+                .hasMessageContaining("failed to process matching command batch")
                 .satisfies(ex -> assertThat(ex.getCause())
                         .hasMessageContaining("order command Kafka key must match payload symbol"));
 
@@ -91,10 +92,10 @@ class MatchingCommandConsumerTest {
                 "cli-9001", "BTC-USDT-260925", 3L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
                 100L, 2L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z"));
 
-        assertThatThrownBy(() -> consumer.onCommand(new ConsumerRecord<>("surprising.inverse-delivery.order.commands.v1",
-                5, 42L, "BTC-USDT-260925", objectMapper.writeValueAsString(command))))
+        assertThatThrownBy(() -> consumer.onCommands(List.of(new ConsumerRecord<>("surprising.inverse-delivery.order.commands.v1",
+                5, 42L, "BTC-USDT-260925", objectMapper.writeValueAsString(command)))))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("failed to process matching command")
+                .hasMessageContaining("failed to process matching command batch")
                 .satisfies(ex -> assertThat(ex.getCause())
                         .hasMessageContaining("order command topic must match current product line")
                         .hasMessageContaining("surprising.linear-delivery.order.commands.v1"));
@@ -124,8 +125,8 @@ class MatchingCommandConsumerTest {
         }
 
         @Override
-        public void process(OrderCommandEvent command) {
-            processed = command;
+        public void processBatch(List<OrderCommandEvent> commands) {
+            processed = commands.get(0);
             throw new IllegalStateException("simulated db failure after exchange-core submit");
         }
     }

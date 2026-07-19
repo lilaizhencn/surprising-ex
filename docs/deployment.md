@@ -111,11 +111,18 @@ Keep the matching provider on JDK 21 unless exchange-core and Chronicle are reva
 - Matching restores open order books from PostgreSQL on startup. If a running matcher receives a new partition after processing commands, it closes the Spring context and should be restarted by systemd/EC2 Auto Scaling.
 - Instrument, order, matching, price, risk, liquidation, and funding Kafka producers use `acks=all`, `enable.idempotence=true`, `compression.type=zstd`, and `max.in.flight.requests.per.connection=5`.
 - Matching, account, risk, liquidation, and insurance Kafka consumers use `enable.auto.commit=false`,
-  `auto.offset.reset=earliest`, and cooperative-sticky assignment. Risk position events and account command windows use
-  batch listeners with `AckMode.BATCH`; single-record state transitions use `AckMode.RECORD`.
+  `auto.offset.reset=earliest`, and cooperative-sticky assignment. Matching commands use a bounded batch listener
+  (`MATCHING_MAX_POLL_RECORDS=16`) and `AckMode.BATCH`: one transaction batch-reads idempotency, instrument-version,
+  and self-trade protection state, then persists matching results, order transitions, trades, and Outbox rows while
+  preserving per-symbol partition order. A same-user/symbol batch or an initial protection hit is rechecked at the
+  command boundary so an earlier command in that transaction cannot bypass protection. Risk
+  position events and account command windows also use batch listeners; remaining single-record transitions use
+  `AckMode.RECORD`.
 - Tune `surprising.*.kafka.max-poll-records` with consumer lag, processing latency, and database transaction time. Defaults are intentionally conservative for local development.
 - Keep `surprising.trading.matching.kafka.restart-on-partition-reassignment=true` in production. Disable it only for local debugging.
 - Keep `surprising.trading.matching.kafka.partition-assignment-startup-grace-ms` large enough for concurrent listener containers to finish initial assignment; default is `30000`.
+- Trading Order Outbox keeps order inside each `(topic,eventKey)` stream but claims financial `ORDER_RESERVE`,
+  `PLACE`, and `CANCEL` rows ahead of notification-only order events when backlog exists.
 - Avoid high-frequency autoscaling of matching providers. Partition movement causes restart-and-recover by design.
 - Account position pushes use `account_outbox_events` and `surprising.linear-perp.account.position.events.v1`; account nodes publish with `acks=all` and idempotent producers, and WebSocket consumers must handle at-least-once delivery.
 - Actual liquidation-fee collection also uses `account_outbox_events`; events are published to `surprising.linear-perp.account.liquidation-fee.events.v1` keyed by settlement asset. Insurance-provider consumers must be in one shared group and rely on `insurance_fund_ledger(reference_type, reference_id, asset)` for idempotency.
