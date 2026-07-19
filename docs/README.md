@@ -1,33 +1,41 @@
-# Surprising-EX Docs
+# Surprising-EX 文档索引
 
-This directory keeps long-lived exchange backend documentation. One-off local run reports should
-stay under `/tmp` unless they are promoted into the current consolidated report.
+本目录只保留需要长期维护的架构、数据、测试和部署说明。单次任务记录、提交清单、失败轮报告和
+带日期的压测输出不进入仓库；压测脚本默认把报告写到 `/tmp`。
 
-## Current Docs
+## 架构与数据
 
-- [Deployment](deployment.md): runtime topology, Kafka topics, provider startup, failover, and operations.
-- [LINEAR_PERPETUAL AWS Production Baseline](linear-perpetual-aws-production-deployment_CN.md): concise EC2, JVM, RDS, MSK, Valkey, sizing, and load-test baseline for the first perpetual product line.
-- [Database Design](database.md): PostgreSQL schema responsibilities and idempotency boundaries.
-- [Product-Line Split and Delivery/Options Implementation Plan](product-line-split-plan.md) / [简体中文](product-line-split-plan_CN.md): four product-line isolation model.
-- [Product-Line Testing and Funds Conservation Reconciliation](product-line-testing-and-funds-reconciliation.md) / [简体中文](product-line-testing-and-funds-reconciliation_CN.md): real API smoke and reconciliation rules.
-- [Full-Chain Test Checklist](full-chain-test-plan_CN.md): current product-line acceptance checklist.
-- [Four Product-Line Funds and Performance Report](full-chain-funds-performance-report.md): consolidated latest high-concurrency report.
-- [Perpetual Backend Performance and Architecture Optimization Report](performance-architecture-optimization-report_CN.md): completed eight-part hot-path and ownership refactor, verification evidence, and production load-test acceptance criteria.
-- [Matching Symbol Sharding and Capacity Notes](matching-symbol-sharding-and-capacity_CN.md): exchange-core Disruptor and symbol shard behavior.
-- [Perpetual Contract Tutorial and Implementation Notes](perpetual-contract-tutorial_CN.md): user-facing perpetual concepts mapped to this codebase.
-- [Local Homebrew Middleware](local-homebrew-infra.md): local PostgreSQL/Kafka setup.
-- [Trading System Architecture Diagram](trading-system-architecture-fullscreen_CN.html): fullscreen architecture walkthrough.
+- [产品线架构（中文）](product-line-architecture_CN.md) /
+  [Product-line architecture](product-line-architecture.md)
+- [账户资金单写者与单用户串行](account-single-writer-command-lane_CN.md)
+- [Database design](database.md)
+- [Matching symbol 分片与容量](matching-symbol-sharding-and-capacity_CN.md)
+- [永续合约业务与实现说明](perpetual-contract-tutorial_CN.md)
 
-## Current Runtime Shape
+## Redis 读模型与索引
 
-- `surprising-price-provider` is the development/small-deployment combined jar for index price and mark price. The mark-price logic still consumes index-price events through Kafka/PostgreSQL boundaries and does not read index-provider in-memory state.
-- `surprising-trading-entry-provider` is the development/small-deployment combined jar for order entry and trigger orders. `surprising-matching-provider` remains separate.
-- `surprising-margin-ops-provider` is the combined jar for risk, liquidation, funding, insurance, and ADL. The modules still coordinate through PostgreSQL, Kafka, outbox rows, idempotency keys, leases, and sequences.
-- `surprising-edge-provider` combines REST gateway and WebSocket fanout for development/small deployments. Gateway and WebSocket providers remain independently deployable for production scaling.
-- Exchange backend tests do not start wallet services. Test funds are injected through account fixtures/admin adjustments and reconciled as adjustment units.
+- [持仓 Redis 读模型（中文）](position-redis-cache_CN.md) /
+  [Position Redis read model](position-redis-cache.md)
+- [未完成订单 Redis 投影（中文）](open-order-redis-cache_CN.md) /
+  [Open-order Redis projection](open-order-redis-cache.md)
 
-## Cleanup Policy
+PostgreSQL 始终是业务事实源。持仓读模型故障时用户查询返回 503；未完成订单投影故障时整页回退
+PostgreSQL。触发单和 ADL 的 Redis ZSET 只做候选过滤，最终状态必须由 PostgreSQL 复核和条件更新。
 
-- Historical order, market-maker, and stress reports are consolidated into [full-chain-funds-performance-report.md](full-chain-funds-performance-report.md).
-- If a test run becomes the new evidence baseline, update the consolidated report and this index instead of adding many timestamped report files.
-- If a module is merged for deployment but remains split by package/business logic, document the deployable jar and the durable boundary. Do not describe it as shared in-memory state.
+## 测试
+
+- [产品线测试与资金守恒（中文）](product-line-testing-and-funds-reconciliation_CN.md) /
+  [Product-line testing and reconciliation](product-line-testing-and-funds-reconciliation.md)
+- [本地 Homebrew 中间件](local-homebrew-infra.md)
+
+真实运行报告应保存在 CI 制品、对象存储或临时目录。若结论需要长期保留，应把稳定参数、阈值或
+操作规则整理进对应主题文档，不要提交原始报告。
+
+## 部署
+
+- [通用部署、Topic 和运行约束](deployment.md)
+- [LINEAR_PERPETUAL AWS 生产基线](linear-perpetual-aws-production-deployment_CN.md)
+
+生产永续首发使用产品线 Topic、32 分区、RF=3 和 `min.insync.replicas=2`。账户命令、DLT 和结果
+Topic 固定 32 分区；已有 symbol-keyed Topic 不允许直接增加分区。精确 Topic 清单和校验命令以
+[deployment.md](deployment.md) 为准。

@@ -163,7 +163,7 @@ Do not expose internal provider ports directly to the internet. Public clients s
 
 - The gateway is stateless and can run behind any L4/L7 load balancer.
 - Deploy at least two gateway instances.
-- Use Kubernetes Services, service discovery, or config management to set backend `base-url` values per environment.
+- Use internal load balancers, DNS, service discovery, or config management to set backend `base-url` values per environment.
 - Gateway nodes do not need sticky sessions for REST.
 - Keep timeouts and retry policy conservative for order and account routes; duplicate POST retries should be driven by client idempotency keys, not blind gateway retries.
 - The built-in HTTP client has explicit connect/read timeouts so a down backend cannot hang gateway worker threads indefinitely.

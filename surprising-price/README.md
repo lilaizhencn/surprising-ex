@@ -16,9 +16,9 @@ Perpetual index price and mark price module for Surprising Exchange.
 ```text
 External spot venues
   -> surprising-index-price-provider
-  -> surprising.perp.index.price.v1
+  -> surprising.linear-perp.index.price.v1
   -> surprising-mark-price-provider
-  -> surprising.perp.mark.price.v1
+  -> surprising.linear-perp.mark.price.v1
   -> risk / liquidation / account / websocket
 
 Fiat FX source + USDT/USD stable-coin ticker
@@ -85,7 +85,7 @@ Outlier handling:
 - Default `outlier-threshold` is `0.01`, or 1%.
 - Default minimum valid sources is `3`.
 
-The single `surprising.perp.index.price.v1` event carries the calculated result and every source
+The single `surprising.linear-perp.index.price.v1` event carries the calculated result and every source
 component snapshot. It is the real-time input for mark price and the only audit stream: an independent
 consumer group batches the same events into `price_index_ticks` and `price_index_components`. The producer
 never synchronously writes those audit tables. Unusable snapshots are also published, so local consumers
@@ -155,16 +155,16 @@ curl 'http://localhost:9082/api/v1/price/fx/convert?amount=100&fromCurrency=USDT
 The mark price provider consumes:
 
 ```text
-surprising.perp.index.price.v1
-surprising.perp.book.ticker.v1
-surprising.perp.trade.events.v1
-surprising.perp.funding.rate.v1
+surprising.linear-perp.index.price.v1
+surprising.linear-perp.book.ticker.v1
+surprising.linear-perp.trade.events.v1
+surprising.linear-perp.funding.rate.v1
 ```
 
 It publishes one complete event:
 
 ```text
-surprising.perp.mark.price.v1
+surprising.linear-perp.mark.price.v1
 ```
 
 The event contains a compact `result` used by real-time consumers plus the exact index, book,
@@ -203,7 +203,7 @@ Production recommendations:
 
 - Run at least two instances of each provider.
 - All nodes must share the same PostgreSQL database.
-- Set `coordination.node-id` explicitly to pod name, hostname, or instance id in containers.
+- Set `coordination.node-id` explicitly to a hostname or instance id in production.
 - Keep `lease-duration` greater than the normal publish period, typically 5-20x `poll-delay-ms` or `publish-interval-ms`.
 - If PostgreSQL is unavailable, price providers should not continue publishing because sequence and symbol ownership cannot be guaranteed.
 
@@ -260,8 +260,8 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
 - Run at least two instances of each provider.
 - Use Kafka key `symbol` for all price input and output topics.
 - Strongly prefer one shared topic with enough partitions over one topic per symbol.
-- Risk and liquidation services must consume `surprising.perp.mark.price.v1`; they should not calculate mark price independently.
-- The one `surprising.perp.mark.price.v1` record includes the complete audit envelope. The idempotent
+- Risk and liquidation services must consume `surprising.linear-perp.mark.price.v1`; they should not calculate mark price independently.
+- The one `surprising.linear-perp.mark.price.v1` record includes the complete audit envelope. The idempotent
   audit consumer retries database failures by `symbol + sequence` without affecting other consumer groups.
 - `price_mark_ticks` is an ordinary, non-partitioned table. Bounded minute-level deletes and a compact
   BRIN time index retain only three days.

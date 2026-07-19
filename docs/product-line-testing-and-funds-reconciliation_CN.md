@@ -174,15 +174,3 @@ DB_NAME=surprising_product_line_smoke \
 | `PRODUCT_LINES` | `LINEAR_PERPETUAL LINEAR_DELIVERY OPTION SPOT` | 需要核对的产品线 |
 | `STRICT_ZERO_OPENING` | `true` | 是否要求测试用户期初为 0 |
 | `MAX_REPORT_ROWS` | `200` | 失败明细最大输出行数 |
-
-## 最新验证记录
-
-最近一次验证中，四条线逐线通过：
-
-- `LINEAR_PERPETUAL`：API 下单、撮合、持仓、主动平仓、强平、资金费、保险基金入账、资金核对通过。
-- `LINEAR_DELIVERY`：API 下单、撮合、持仓、主动平仓、强平、交割事件、持仓归零、资金核对通过。
-- `OPTION`：API 下单、撮合、持仓、主动平仓、强平、行权事件、持仓归零、资金核对通过。
-- `SPOT`：API 下单、撮合、资产互换、冻结释放、无衍生品持仓、资金核对通过。
-
-所有已跑场景的资金核对 violations 为 0。当前高并发基线已合并到
-[四产品线资金与性能压测报告](full-chain-funds-performance-report.md)。

@@ -175,15 +175,3 @@ Common variables:
 | `PRODUCT_LINES` | `LINEAR_PERPETUAL LINEAR_DELIVERY OPTION SPOT` | Product lines to reconcile |
 | `STRICT_ZERO_OPENING` | `true` | Require test-user opening balance to be zero |
 | `MAX_REPORT_ROWS` | `200` | Maximum violation detail rows |
-
-## Latest Verification
-
-The latest per-line run passed:
-
-- `LINEAR_PERPETUAL`: API order flow, matching, position creation, self-close, liquidation, funding, insurance credit, and reconciliation.
-- `LINEAR_DELIVERY`: API order flow, matching, position creation, self-close, liquidation, delivery event, position closeout, and reconciliation.
-- `OPTION`: API order flow, matching, position creation, self-close, liquidation, exercise event, position closeout, and reconciliation.
-- `SPOT`: API order flow, matching, asset exchange, reservation release, no derivative positions, and reconciliation.
-
-All covered scenarios ended with 0 reconciliation violations. The current high-concurrency baseline
-is consolidated in [full-chain-funds-performance-report.md](full-chain-funds-performance-report.md).

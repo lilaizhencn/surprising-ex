@@ -53,18 +53,18 @@ Private channels require an authenticated user id. In production the ingress/aut
 
 | Channel | Public | Required fields | Source topic |
 | --- | --- | --- | --- |
-| `candles` | yes | `symbol`, `period` | `surprising.perp.candle.events.v1` |
-| `trades` | yes | `symbol` | `surprising.perp.trade.events.v1`, `surprising.perp.match.trades.v1` |
-| `depth` | yes | `symbol` | `surprising.perp.orderbook.depth.v1` |
-| `index` | yes | `symbol` | `surprising.perp.index.price.v1` |
-| `mark` | yes | `symbol` | `surprising.perp.mark.price.v1` |
-| `funding` | yes | `symbol` | `surprising.perp.funding.rate.v1` |
-| `orders` | no | optional `symbol` | `surprising.perp.order.events.v1` |
-| `triggerOrders` | no | optional `symbol` | `surprising.perp.trigger-order.events.v1` |
-| `matches` | no | optional `symbol` | `surprising.perp.match.results.v1` |
-| `positions` | no | optional `symbol` | `surprising.account.position.events.v1` |
-| `positionRisk` | no | optional `symbol` | `surprising.risk.position.events.v1` |
-| `accountRisk` | no | optional `symbol` ignored as wildcard | `surprising.risk.account.events.v1` |
+| `candles` | yes | `symbol`, `period` | `surprising.linear-perp.candle.events.v1` |
+| `trades` | yes | `symbol` | `surprising.linear-perp.trade.events.v1`, `surprising.linear-perp.match.trades.v1` |
+| `depth` | yes | `symbol` | `surprising.linear-perp.orderbook.depth.v1` |
+| `index` | yes | `symbol` | `surprising.linear-perp.index.price.v1` |
+| `mark` | yes | `symbol` | `surprising.linear-perp.mark.price.v1` |
+| `funding` | yes | `symbol` | `surprising.linear-perp.funding.rate.v1` |
+| `orders` | no | optional `symbol` | `surprising.linear-perp.order.events.v1` |
+| `triggerOrders` | no | optional `symbol` | `surprising.linear-perp.trigger-order.events.v1` |
+| `matches` | no | optional `symbol` | `surprising.linear-perp.match.results.v1` |
+| `positions` | no | optional `symbol` | `surprising.linear-perp.account.position.events.v1` |
+| `positionRisk` | no | optional `symbol` | `surprising.linear-perp.risk.position.events.v1` |
+| `accountRisk` | no | optional `symbol` ignored as wildcard | `surprising.linear-perp.risk.account.events.v1` |
 
 Private subscriptions without `symbol` use wildcard symbol `*` and receive all events for the authenticated user.
 
@@ -80,7 +80,7 @@ Depth is produced by matching from the live exchange-core L2 book:
 order command
   -> exchange-core mutates the book
   -> matching offers the latest full L2 snapshot to the per-symbol market-data publisher
-  -> the dedicated Kafka producer publishes surprising.perp.orderbook.depth.v1
+  -> the dedicated Kafka producer publishes surprising.linear-perp.orderbook.depth.v1
   -> websocket node consumes the event and pushes channel=depth
 ```
 
@@ -103,7 +103,7 @@ matching trade
   -> account consumes match trade
   -> account updates balances, margin, PnL, fees, and positions in one DB transaction
   -> account writes account_outbox_events row for POSITION_UPDATED
-  -> account outbox publisher sends surprising.account.position.events.v1
+  -> account outbox publisher sends surprising.linear-perp.account.position.events.v1
   -> websocket node consumes event and sends it to matching private subscriptions
 ```
 
@@ -146,8 +146,8 @@ If the same user is connected on two devices through two different nodes, both n
 - Keep `surprising-websocket-provider` separate in production when long-lived WebSocket connections need independent scaling.
 - Deploy at least two WebSocket nodes.
 - Every WebSocket node must use a unique Kafka consumer group id, for example the default `surprising-websocket-${HOSTNAME:${random.uuid}}`.
-- Do not share one group id across all WebSocket pods. A shared group would deliver each Kafka record to only one pod, and clients connected to other pods would miss public market updates.
-- Prefer an explicit stable pod/node value such as `surprising-websocket-${POD_NAME}` in production. A pure random group id on every restart leaves stale consumer groups in Kafka and makes lag dashboards noisy.
+- Do not share one group id across all WebSocket processes. A shared group would deliver each Kafka record to only one node, and clients connected to other nodes would miss public market updates.
+- Prefer an explicit stable node value such as `surprising-websocket-${HOSTNAME}` in production. A pure random group id on every restart leaves stale consumer groups in Kafka and makes lag dashboards noisy.
 - No cross-node session state is required. Each node keeps only local WebSocket sessions and local subscription maps.
 - A load balancer can distribute new connections across nodes. Existing WebSocket TCP connections are naturally tied to one node; on reconnect the client must resubscribe.
 - Public market events are consumed by every node and filtered by local subscriptions.
@@ -165,10 +165,10 @@ surprising:
       group-id: surprising-websocket-${HOSTNAME:${random.uuid}}
       concurrency: 2
       max-poll-records: 1000
-      order-book-depth-topic: surprising.perp.orderbook.depth.v1
-      position-events-topic: surprising.account.position.events.v1
-      account-risk-events-topic: surprising.risk.account.events.v1
-      position-risk-events-topic: surprising.risk.position.events.v1
+      order-book-depth-topic: surprising.linear-perp.orderbook.depth.v1
+      position-events-topic: surprising.linear-perp.account.position.events.v1
+      account-risk-events-topic: surprising.linear-perp.risk.account.events.v1
+      position-risk-events-topic: surprising.linear-perp.risk.position.events.v1
     session:
       max-subscriptions: 200
       outbound-queue-capacity: 1000
@@ -184,7 +184,7 @@ surprising:
 
 The default `allowed-origins: ["*"]` is convenient for local development. Production should use exact HTTPS origins.
 
-For very large public fanout, add an internal pub/sub layer such as NATS or a dedicated market-data fanout tier later. The current design is intentionally simple and correct for horizontal WebSocket pods because Kafka already carries the authoritative event stream.
+For very large public fanout, add an internal pub/sub layer such as NATS or a dedicated market-data fanout tier later. The current design is intentionally simple and correct for horizontal WebSocket processes because Kafka already carries the authoritative event stream.
 
 ## Operations
 

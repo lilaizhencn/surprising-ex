@@ -63,7 +63,7 @@ client / internal gateway
   -> normal order / matching / account / WebSocket flow
 ```
 
-The order provider does not match orders and does not own WebSocket fanout. Order-state push should be a separate service consuming product-line order and match topics. Legacy `surprising.perp.*` topics remain available when product-topic routing is disabled.
+The order provider does not match orders and does not own WebSocket fanout. Order-state push is performed by a separate service consuming the current product-line order and match topics.
 
 ## Margin Mode
 
@@ -296,9 +296,7 @@ The trading Java module remains long-only.
 
 The public trade/depth path does not read or write the matching database and cannot block or roll back financial processing. Full economic `MatchTradeEvent` rows remain in `trading_match_trades` for audit and are embedded in the durable `MatchResultEvent`; maker/taker settlement is performed only from durable account commands. A match whose maker and taker are both configured internal market-maker users remains in the public trade/depth stream but skips the economic trade row and trade-side settlement commands.
 
-Legacy `surprising.perp.*` topics remain available for backward-compatible single-line perpetual startup.
-
-Partitions should continue to scale by symbol. All commands for the same symbol must route to the same matching shard/order book.
+Production product topics are fixed at `32` partitions and keyed by symbol. All commands for the same symbol must route to the same matching shard/order book. Do not increase partitions on a live topic; capacity beyond 32 partitions requires a versioned topic, a coordinated cutover, matching recovery, and state rebuild.
 `surprising.trading.matching.kafka.max-poll-records` defaults to `500`; tune it with Kafka lag and command processing latency instead of changing code.
 
 ## exchange-core Matching
@@ -380,16 +378,16 @@ The product-line order command topic must be keyed by `symbol`. Kafka assigns ea
 The matching consumer uses cooperative sticky assignment and `MatchingPartitionAssignmentGuard`:
 
 - At process start, the node restores open books from DB before consuming commands.
-- If a running matcher that has already processed commands receives a new partition, it closes the Spring context. Kubernetes/systemd should restart it, and the fresh process restores current books from DB before consuming.
+- If a running matcher that has already processed commands receives a new partition, it closes the Spring context. systemd/EC2 Auto Scaling should restart it, and the fresh process restores current books from DB before consuming.
 - This avoids an unsafe case where a long-running process receives a symbol whose local exchange-core book is stale.
 - If command processing fails after the payload has been decoded, the matcher also closes the Spring context. This avoids retrying a Kafka command against an exchange-core book that may already have been mutated before PostgreSQL/outbox persistence failed.
 - This covers fail-fast write failures for match results, trades, order status updates, margin release, and matching outbox rows. Check sequences, unique-index conflicts, missing order rows, and transaction errors first.
 - Keep `surprising.trading.matching.kafka.restart-on-partition-reassignment=true` in production.
 - `surprising.trading.matching.kafka.partition-assignment-startup-grace-ms` defaults to `30000` so concurrent listener containers can finish their initial assignment before the guard starts treating new partitions as unsafe runtime movement.
 - The command-failure restart is unconditional; the partition-reassignment flag only controls restart behavior for partition movement.
-- Set `surprising.trading.matching.kafka.client-id` to a stable unique value per matching pod. This keeps Kafka consumer-group output usable for mapping a `symbol` partition to the exact node that owns the local exchange-core order book.
+- Set `surprising.trading.matching.kafka.client-id` to a stable unique value per matching process. This keeps Kafka consumer-group output usable for mapping a `symbol` partition to the exact node that owns the local exchange-core order book.
 
-Scaling rule: increase topic partitions and matching instances deliberately. Avoid frequent autoscaling of matching pods because every partition movement may require restart-and-recover.
+Scaling rule: first tune matching instances and listener concurrency within the existing 32-partition map. Do not increase partitions on the live topic. Capacity beyond 32 partitions requires a versioned-topic migration and a planned restart-and-recover. Avoid frequent autoscaling of matching processes because every partition movement may require restart-and-recover.
 Treat any matching process exit during command handling as a required DB-recovery restart, not as an in-place consumer retry.
 
 ## Self-Trade Prevention
@@ -521,7 +519,7 @@ Port:
 - `surprising-trading-entry-provider` is the default deployable entry process for order and trigger traffic.
 - `surprising-order-provider` and `surprising-trigger-provider` remain available for split deployment. Both can run multiple instances, sharing the same PostgreSQL and Kafka clusters. Scale trigger by Kafka partitions and database claim batches; do not create one worker per symbol.
 - Keep `surprising-matching-provider` independent from trading-entry; it owns exchange-core order books and should be scaled/restarted separately.
-- Run the matching provider on JDK 21. Chronicle/OpenHFT dependencies used by exchange-core require explicit Java module opens/exports; set the same `JAVA_TOOL_OPTIONS` shown in local run for production pods.
+- Run the matching provider on JDK 21. Chronicle/OpenHFT dependencies used by exchange-core require explicit Java module opens/exports; set the same `JAVA_TOOL_OPTIONS` shown in local run for production processes.
 - A new symbol must first be enabled in instrument, Kafka partitions must be checked, and only then should order entry be opened.
 - MARKET orders require fresh mark price at order entry and matching. Order entry enforces min/max notional with the configured mark-derived execution band before publishing a matching command; linear max-notional and initial-margin checks use the upper bound to avoid under-collateralized market SELL opens. Tune `surprising.trading.*.market-max-slippage-ppm` per product liquidity.
 - LIMIT order price-band protection is enabled in the default application configuration with `limit-price-band-ppm: 50000` (5%). Tune this per instrument liquidity before exposing high-frequency users or market-maker quoting.

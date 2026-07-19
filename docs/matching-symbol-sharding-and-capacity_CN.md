@@ -78,7 +78,8 @@ surprising:
         risk-engines: 2
 ```
 
-入口最多由 4 个 Kafka partition 并行消费，exchange-core 使用 4 个 matching shard 和 2 个 risk shard。
+永续生产的 `order.commands` Topic 固定为 32 分区；默认由 4 个 listener 线程并行消费这些分区，
+exchange-core 使用 4 个 matching shard 和 2 个 risk shard。
 同一 symbol 仍固定在一个 Kafka partition 和一个 matching shard 内串行处理。
 
 ## 上线影响判断
@@ -119,10 +120,13 @@ surprising:
 注意事项：
 
 - `matching-engines` 和 `risk-engines` 在 `exchange-core2` 中要求是 2 的幂。
-- Kafka listener concurrency 需要配合 topic partition 数，否则提高 concurrency 不会带来有效并行。
+- 永续首发 Topic 固定 32 分区，因此可以在不改变分区映射的情况下逐步把 listener concurrency
+  从 4 调到 8、16，最大有效并行不超过 32；每次调整都必须重新压测。
 - 增加 `matching-engines` 后，要检查热点 symbol 的 `symbolId` 是否分散到不同 shard。路由取决于 `symbolId & (matchingEnginesNum - 1)`。
 - 如果 BTC-USDT、ETH-USDT 等热点 symbol 落到同一个 shard，热点仍然会互相排队。
-- 不要在运行中随意调整 Kafka partition 数。对以 symbol 为 key 的状态链路，partition 数变化可能改变 symbol 到 partition 的映射，需要按产品线做重放或维护窗口方案。
+- 不要在运行中调整 Kafka partition 数。对以 symbol 为 key 的状态链路，partition 数变化会改变
+  symbol 映射。超过 32 分区的扩容必须创建版本化 Topic，并安排生产者/消费者切换、matching
+  重启恢复和 Kafka Streams 状态重建。
 - Kafka partition reassignment 后，matching provider 会要求重启恢复，避免 running JVM 中 exchange-core order book 与 Kafka replay 状态不一致。
 
 ## 压测建议

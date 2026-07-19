@@ -16,9 +16,9 @@ Surprising Exchange 合约指数价格和标记价格模块。
 ```text
 外部现货交易所
   -> surprising-index-price-provider
-  -> surprising.perp.index.price.v1
+  -> surprising.linear-perp.index.price.v1
   -> surprising-mark-price-provider
-  -> surprising.perp.mark.price.v1
+  -> surprising.linear-perp.mark.price.v1
   -> risk / liquidation / account / websocket
 
 法币汇率源 + USDT/USD 稳定币行情
@@ -73,7 +73,7 @@ indexPrice = Σ(sourceMid_i * normalizedWeight_i)
 - 默认 `outlier-threshold` 是 `0.01`，也就是 1%。
 - 默认至少需要 `3` 个有效源。
 
-唯一的 `surprising.perp.index.price.v1` 消息同时携带计算结果和全部外部源 component 快照。它既是
+唯一的 `surprising.linear-perp.index.price.v1` 消息同时携带计算结果和全部外部源 component 快照。它既是
 标记价格的实时输入，也是唯一审计流：独立 consumer group 批量把同一条消息写入
 `price_index_ticks` 和 `price_index_components`。生产端不会同步写这些审计表。不可用快照也会发布，
 这样本地消费者会立即让旧的可用指数价格失效，而不会静默继续使用旧价。
@@ -133,16 +133,16 @@ curl 'http://localhost:9082/api/v1/price/fx/convert?amount=100&fromCurrency=USDT
 标记价格服务消费：
 
 ```text
-surprising.perp.index.price.v1
-surprising.perp.book.ticker.v1
-surprising.perp.trade.events.v1
-surprising.perp.funding.rate.v1
+surprising.linear-perp.index.price.v1
+surprising.linear-perp.book.ticker.v1
+surprising.linear-perp.trade.events.v1
+surprising.linear-perp.funding.rate.v1
 ```
 
 只发布一个完整事件：
 
 ```text
-surprising.perp.mark.price.v1
+surprising.linear-perp.mark.price.v1
 ```
 
 消息中的 `result` 供实时消费者使用，同时携带本次计算实际使用的指数、盘口、成交、资金费和 basis
@@ -179,7 +179,7 @@ markPrice = clamp(rawMark, indexPrice * (1 - clampRatio), indexPrice * (1 + clam
 
 - 每个 provider 至少 2 个实例。
 - 多节点共享同一个 PostgreSQL，不要每个节点使用独立数据库。
-- `coordination.node-id` 在容器环境建议显式设置为 pod name、hostname 或 instance id。
+- `coordination.node-id` 在生产环境建议显式设置为 hostname 或 instance id。
 - `lease-duration` 要大于正常发布周期，通常为 `poll-delay-ms` 或 `publish-interval-ms` 的 5-20 倍。
 - 如果 PostgreSQL 不可用，价格服务不应继续发布，因为无法保证 sequence 和 symbol 所有权。
 
@@ -236,8 +236,8 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
 - 每个 provider 至少部署 2 个实例。
 - 所有价格输入和输出 topic 都用 `symbol` 作为 Kafka key。
 - 优先使用一个共享 topic + 足够多 partition，不要按每个 symbol 建 topic。
-- 风控和强平服务必须消费 `surprising.perp.mark.price.v1`，不要各节点自己计算标记价格。
-- 唯一的 `surprising.perp.mark.price.v1` 消息已经包含完整审计信封；审计 consumer 按
+- 风控和强平服务必须消费 `surprising.linear-perp.mark.price.v1`，不要各节点自己计算标记价格。
+- 唯一的 `surprising.linear-perp.mark.price.v1` 消息已经包含完整审计信封；审计 consumer 按
   `symbol + sequence` 幂等重试数据库失败，不影响其它 consumer group。
 - `price_mark_ticks` 使用普通非分区表和紧凑的时间 BRIN 索引，每分钟分批删除，只保留 3 天。
 - 指数价格和标记价格 producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.connection=5`。

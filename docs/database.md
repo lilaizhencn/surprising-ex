@@ -762,8 +762,8 @@ account state change. It carries `POSITION_UPDATED` events for WebSocket private
 are deliberately excluded from this table:
 
 - `id`: database-allocated outbox id.
-- `topic`: Kafka destination, for example `surprising.account.position.events.v1` or
-  `surprising.account.liquidation-fee.events.v1`.
+- `topic`: Kafka destination, for example `surprising.linear-perp.account.position.events.v1` or
+  `surprising.linear-perp.account.liquidation-fee.events.v1`.
 - `product_line`: outbox ownership and publisher scope. A provider only claims rows for its configured product line.
 - `event_key`: Kafka key. Position updates use `<PRODUCT_LINE>:<userId>` so all position revisions for one
   account remain ordered; liquidation-fee events use the settlement asset so insurance fund updates can be
@@ -775,10 +775,11 @@ are deliberately excluded from this table:
   and WebSocket/private-account pushes.
 - `LIQUIDATION_FEE_SETTLED` payloads carry `tradeId`, `orderId`, `liquidationOrderId`, `candidateId`,
   `asset`, collected `amountUnits`, `feeRatePpm`, and `traceId`.
-- Account-provider captures one complete position/collateral snapshot per distinct changed key before commit and
-  submits it to a bounded, coalescing Redis worker only after commit. This path does not insert an outbox row or
-  publish Kafka. Redis Lua CAS rejects older revisions. Queue overflow or Redis failure marks the product-line
-  projection unavailable, and the cache coordinator repairs it from PostgreSQL before reads resume.
+- Account-provider captures one complete position/collateral snapshot per distinct changed key and inserts it into
+  `account_outbox_events` in the same transaction as the account mutation. After commit, the identical snapshot is
+  also submitted to a bounded, coalescing Redis worker for low latency. A dedicated Kafka consumer provides durable
+  replay. Redis Lua CAS rejects older revisions; queue overflow, malformed events, or Redis failure marks the
+  product-line projection unavailable until Kafka replay or PostgreSQL reconciliation repairs it.
 
 Indexes:
 

@@ -176,8 +176,8 @@ Binance 还会把资金费率、合约价、买一卖一、指数价放进保护
 
 本项目里：
 
-- index-price provider 生成 `surprising.perp.index.price.v1`。
-- mark-price provider 消费指数价、合约盘口最优价、资金费率，生成 `surprising.perp.mark.price.v1`。它只接受新鲜且状态为 `HEALTHY/DEGRADED` 的指数价；指数源不足、过期或无价格时停止发布新的标记价。
+- index-price provider 生成 `surprising.linear-perp.index.price.v1`。
+- mark-price provider 消费指数价、合约盘口最优价、资金费率，生成 `surprising.linear-perp.mark.price.v1`。它只接受新鲜且状态为 `HEALTHY/DEGRADED` 的指数价；指数源不足、过期或无价格时停止发布新的标记价。
 - risk-provider 使用最新标记价计算未实现盈亏、维持保证金和强平状态。
 
 当标记价停止刷新后，普通下单会按 fail-closed 处理：市价单和默认启用价格带保护的限价单会被拒绝，止盈止损也不会因为旧价格被误触发。
@@ -251,7 +251,7 @@ account_positions
   -> risk_account_snapshots
   -> risk_position_snapshots
   -> risk_liquidation_candidates
-  -> surprising.perp.liquidation.candidates.v1
+  -> surprising.linear-perp.liquidation.candidates.v1
 ```
 
 标记价不从审计表读取。每轮风险扫描先截取一份不可变的本机 Kafka 缓存快照；任一持仓缺少新鲜、同
@@ -273,7 +273,7 @@ risk-provider 只负责发现风险和生成候选，不直接下强平单。
 强平由 `surprising-liquidation-provider` 执行：
 
 ```text
-surprising.perp.liquidation.candidates.v1
+surprising.linear-perp.liquidation.candidates.v1
   -> liquidation-provider 消费候选
   -> 抢占 candidate: NEW -> PROCESSING
   -> 复核最新 risk snapshot
@@ -318,7 +318,7 @@ surprising.perp.liquidation.candidates.v1
 
 本项目里：
 
-- funding provider 计算并发布 `surprising.perp.funding.rate.v1`。
+- funding provider 计算并发布 `surprising.linear-perp.funding.rate.v1`。
 - mark-price provider 会使用 funding rate 参与标记价计算。
 - funding settlement 会按持仓 notional 在账户侧扣收或发放。
 
@@ -630,7 +630,7 @@ userId + settleAsset
 
 - 逐仓/全仓已经在账户、风控、资金费和强平链路按 `marginMode` 分开，用户杠杆设置也已经接入下单保证金和风险档位校验；手动逐仓保证金调整、空仓切换 `ONE_WAY/HEDGE`、`positionSide` 贯穿订单/条件单/账户/风控/强平/资金费/ADL/WebSocket 已接入。生产前仍需要更长时间、多用户、多 symbol、多故障窗口的 HEDGE 链路压测。
 - 组合保证金、跨币种抵押折扣、统一账户风险抵扣还没有完整实现。
-- 破产价、接管价和预估强平费已经在 `liquidation_orders` 审计行中固化；强平费按实际成交和可收 collateral 收取，并通过 `surprising.account.liquidation-fee.events.v1` 进入保险基金。后续还需要继续细化不同产品/用户等级下的保险基金收入规则。
+- 破产价、接管价和预估强平费已经在 `liquidation_orders` 审计行中固化；强平费按实际成交和可收 collateral 收取，并通过 `surprising.linear-perp.account.liquidation-fee.events.v1` 进入保险基金。后续还需要继续细化不同产品/用户等级下的保险基金收入规则。
 - 强平撮合后的剩余亏损分摊链路已经有 insurance/ADL 模块，但还需要更大规模极端行情测试。
 - 风险扫描目前是定时扫描，默认 1 秒；主流交易所通常会结合 mark price 事件驱动、账户变更事件和高频风控队列。
 - 标记价异常保护、指数源异常暂停强平、reduce-only-only market mode 等保护模式还需要继续做得更细。

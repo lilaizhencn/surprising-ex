@@ -8,7 +8,7 @@ MATRIX_TARGET_TPS_LIST="${MATRIX_TARGET_TPS_LIST:-30 50 80 120}"
 MATRIX_REPEATS="${MATRIX_REPEATS:-3}"
 MATRIX_DRY_RUN="${MATRIX_DRY_RUN:-true}"
 MATRIX_CONTINUE_ON_FAILURE="${MATRIX_CONTINUE_ON_FAILURE:-false}"
-MATRIX_OUTPUT_DIR="${MATRIX_OUTPUT_DIR:-${ROOT_DIR}/docs/stress-matrix-$(date -u +%Y%m%dT%H%M%SZ)}"
+MATRIX_OUTPUT_DIR="${MATRIX_OUTPUT_DIR:-/tmp/surprising-stress-matrix-$(date -u +%Y%m%dT%H%M%SZ)}"
 
 require_positive_integer() {
   local name="$1"

@@ -13,14 +13,14 @@ Perpetual candlestick service for Surprising Exchange.
 
 The candlestick service is designed for multi-node deployment and follows a partitioned market-data pipeline:
 
-- The matching service produces lightweight `PublicTradeEvent` JSON directly from exchange-core to Kafka topic `surprising.perp.match.trades.v1`, without a database or outbox dependency.
+- The matching service produces lightweight `PublicTradeEvent` JSON directly from exchange-core to the product topic `surprising.linear-perp.match.trades.v1`, without a database or outbox dependency.
 - Matching keeps an independent bounded FIFO per symbol and flushes every 50 ms. This public market-data stream is intentionally lossy under overflow or Kafka failure; financial settlement uses a separate durable account-command path.
 - Kafka record key must be the normalized symbol, for example `BTC-USDT`.
 - Kafka partitions distribute symbols across service nodes. There is no one-thread-per-symbol model.
 - Kafka Streams uses RocksDB state stores for hot candle state, trade idempotency, dirty snapshots, and latest sequence per symbol.
 - PostgreSQL receives periodic full-snapshot upserts. The service never reads a candle row for every trade.
-- Perpetual candle update events are emitted to `surprising.perp.candle.events.v1`; websocket/push services should consume that topic separately.
-- Enabled symbols are read from the current `surprising-instrument` snapshot by default. Set `surprising.candlestick.symbols.source=CANDLESTICK_SYMBOLS` to use the legacy `candlestick_symbols` table.
+- Perpetual candle update events are emitted to `surprising.linear-perp.candle.events.v1`; websocket/push services should consume that topic separately.
+- Enabled symbols are read from the current `surprising-instrument` snapshot.
 
 ## Multi-Node Mechanism
 
@@ -105,14 +105,25 @@ Tuning rules:
 
 ## Kafka Partition Planning
 
-This project uses one perpetual trade topic with many partitions:
+Each product line uses one 32-partition trade topic for all symbols:
 
-- Input topic: `surprising.perp.match.trades.v1`
-- Output topic: `surprising.perp.candle.events.v1`
+- Input topic: `surprising.<product-segment>.match.trades.v1`
+- Output topic: `surprising.<product-segment>.candle.events.v1`
 
-Do not create one topic per symbol. Create enough partitions on the shared topic.
+Do not create one topic per symbol. The initial perpetual deployment pins both topics to 32 partitions:
 
-Recommended sizing formula:
+```bash
+PRODUCT_LINES=LINEAR_PERPETUAL \
+PARTITIONS=32 \
+ACCOUNT_COMMAND_PARTITIONS=32 \
+REPLICATION_FACTOR=3 \
+./scripts/create-topics.sh
+```
+
+Do not add partitions in place after traffic starts; that changes symbol-to-partition mapping and Kafka Streams
+state ownership. A future capacity increase must use a versioned topic/application id and replay trades.
+
+`create-topics.sh` retains this sizing formula for a new topic that has not launched:
 
 ```text
 partitions = roundUp(
@@ -127,31 +138,15 @@ partitions = roundUp(
 
 Default script values:
 
-- `MIN_PARTITIONS=24`
+- `MIN_PARTITIONS=32`
 - `TARGET_SYMBOLS_PER_PARTITION=10`
 - `STREAM_THREADS=2`
 - `PROVIDER_INSTANCES=1`
 - `PARTITION_STEP=12`
 - `MAX_PARTITIONS=384`
 
-Create topics manually:
-
-```bash
-PARTITIONS=48 REPLICATION_FACTOR=3 ./scripts/create-topics.sh
-```
-
-Create topics by symbol count and deployment size:
-
-```bash
-SYMBOL_COUNT=500 PROVIDER_INSTANCES=4 STREAM_THREADS=4 REPLICATION_FACTOR=3 ./scripts/create-topics.sh
-```
-
-The script calculates `partitions=60` for the example above:
-
-- `ceil(500 / 10) = 50`
-- `4 * 4 * 2 = 32`
-- `max(24, 50, 32) = 50`
-- rounded up by step `12` gives `60`
+Without `PARTITIONS`, the default calculation rounds 32 up to 36 by the step of 12. Production must therefore
+set `PARTITIONS=32` explicitly instead of relying on the calculated default.
 
 Runtime processing is configured here:
 
@@ -159,8 +154,8 @@ Runtime processing is configured here:
 surprising:
   candlestick:
     kafka:
-      trade-topic: surprising.perp.match.trades.v1
-      candle-topic: surprising.perp.candle.events.v1
+      trade-topic: surprising.linear-perp.match.trades.v1
+      candle-topic: surprising.linear-perp.candle.events.v1
       application-id: surprising-candlestick-v1
     stream:
       threads: 2
@@ -177,7 +172,7 @@ lets a dedicated WebSocket/fanout service push them to clients.
 WebSocket service input:
 
 ```text
-surprising.perp.candle.events.v1
+surprising.linear-perp.candle.events.v1
 ```
 
 Recommended routing key for client subscriptions:

@@ -208,8 +208,7 @@ surprising:
 ```
 
 Set `product-line` to `SPOT`, `LINEAR_PERPETUAL`, `LINEAR_DELIVERY`, or `OPTION` when running
-isolated product-line instances. Account command, DLT, and result topics are always product scoped;
-there is no shared legacy fallback for financial commands.
+isolated product-line instances. Account command, DLT, and result topics are always product scoped.
 
 The local cache is intentionally limited to immutable read snapshots:
 
@@ -230,7 +229,7 @@ outbox event. Order reservations and funding settlements still emit result event
 The default account command concurrency is 32 and the default Hikari pool is 40, leaving eight connections
 for outbox, scheduled reconciliation, and request traffic. Override them together with
 `ACCOUNT_USER_COMMAND_CONCURRENCY` and `ACCOUNT_DB_MAX_POOL_SIZE`; use a transaction-pooling proxy and a
-database-wide connection budget when running multiple product-line pods.
+database-wide connection budget when running multiple product-line processes.
 
 Account command metrics are exposed through Actuator/Prometheus:
 
@@ -242,7 +241,7 @@ Account command metrics are exposed through Actuator/Prometheus:
 Use these metrics with Kafka lag, DLT count, PostgreSQL latency, waiting dependencies, and outbox age.
 A technical failure deliberately retries without skipping the record and blocks that partition. Poison
 envelopes go to the same-numbered DLT partition. Set `surprising.account.kafka.client-id` to a stable
-unique value per account-provider pod and keep the product-line consumer group identical across replicas.
+unique value per account-provider process and keep the product-line consumer group identical across replicas.
 
 ## Local Run
 
@@ -284,7 +283,7 @@ Port:
 - Never infer a dependency from cross-topic arrival order. Persist `dependsOnCommandId`; result topics
   are only latency/observability hints and reconciliation reads `account_commands`.
 - Liquidation-fee debits intentionally do not create new `account_deficits`. The insurance fund receives only amounts that account-provider actually collected from user collateral. This prevents the fund from being credited from an unpaid penalty.
-- `surprising.account.liquidation-fee.events.v1` is at-least-once. Downstream insurance consumers must use `(reference_type, reference_id, asset)` with `reference_id = tradeId:orderId` as the idempotency key.
+- `surprising.linear-perp.account.liquidation-fee.events.v1` is at-least-once. Downstream insurance consumers must use `(reference_type, reference_id, asset)` with `reference_id = tradeId:orderId` as the idempotency key.
 - `contract_type` controls realized PnL: `LINEAR_PERPETUAL` settles `signedQty * (exitTicks - entryTicks) * notional_multiplier_units`; `INVERSE_PERPETUAL` settles `signedQty * faceValueUnits * settleScaleUnits * (exitTicks - entryTicks) / (entryTicks * exitTicks * price_tick_units)`.
 - Maintenance margin and unrealized PnL are calculated by risk. Funding, insurance, and ADL modules
   own their orchestration state, but all resulting account mutations execute only in this provider.

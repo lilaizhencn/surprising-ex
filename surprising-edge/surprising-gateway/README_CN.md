@@ -130,7 +130,7 @@ TraceId 查询接口位于 `/api/v1/admin/traces/{traceId}`，使用 `admin.trac
 
 - Gateway 是无状态服务，可以挂在任意 L4/L7 负载均衡器后面。
 - Gateway 至少部署 2 个实例。
-- 不同环境通过 Kubernetes Service、服务发现或配置中心设置后端 `base-url`。
+- 不同环境通过内网负载均衡、DNS、服务发现或配置中心设置后端 `base-url`。
 - REST 不需要 sticky session。
 - 订单和账户路由的超时与重试策略要保守；重复 POST 应依赖客户端幂等键，而不是 gateway 盲目重试。
 - 内置 HTTP client 有明确的连接/读取超时，避免后端故障时无限占用 gateway 工作线程。

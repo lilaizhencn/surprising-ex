@@ -1,12 +1,12 @@
-# 产品线拆分与交割/期权落地方案
+# 产品线架构与业务边界
 
-[English](product-line-split-plan.md) | 简体中文
+[English](product-line-architecture.md) | 简体中文
 
 ## 当前状态
 
 `surprising-ex` 已从单一永续链路推进到按产品线隔离运行的交易系统。当前共享同一套 Java 模块和数据库 schema，但通过 `ProductLine`、账户类型、Kafka topic、consumer group、provider 启动参数和 gateway 路由把业务逻辑隔离到不同产品线。
 
-本轮已完成并验证的四条线：
+当前主要运行和测试覆盖的四条线：
 
 | 产品线 | `ProductLine` | 账户类型 | 合约类型 | Topic 命名空间 | 当前状态 |
 | --- | --- | --- | --- | --- | --- |
@@ -86,11 +86,20 @@ OPTION:
 ```text
 surprising.<product-segment>.order.commands.v1
 surprising.<product-segment>.order.events.v1
+surprising.<product-segment>.trigger-order.events.v1
 surprising.<product-segment>.match.results.v1
 surprising.<product-segment>.match.trades.v1
 surprising.<product-segment>.orderbook.depth.v1
+surprising.<product-segment>.trade.events.v1
+surprising.<product-segment>.candle.events.v1
+surprising.<product-segment>.index.price.v1
+surprising.<product-segment>.book.ticker.v1
+surprising.<product-segment>.mark.price.v1
 surprising.<product-segment>.account.position.events.v1
 surprising.<product-segment>.account.liquidation-fee.events.v1
+surprising.<product-segment>.account.user.commands.v1
+surprising.<product-segment>.account.user.commands.dlt.v1
+surprising.<product-segment>.account.command.results.v1
 surprising.<product-segment>.risk.account.events.v1
 surprising.<product-segment>.risk.position.events.v1
 surprising.<product-segment>.liquidation.candidates.v1
@@ -98,6 +107,9 @@ surprising.<product-segment>.funding.rate.v1
 surprising.<product-segment>.delivery.settlements.v1
 surprising.<product-segment>.option.exercises.v1
 ```
+
+不同产品线只创建适用的 Topic。永续生产的精确清单和 32 分区约束见
+[部署文档](deployment.md)。
 
 本地创建 topic：
 
@@ -130,7 +142,7 @@ PRODUCT_LINES=SPOT BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LE
 
 资金核对详见 [产品线资金守恒与账账核对](product-line-testing-and-funds-reconciliation_CN.md)。
 
-## 剩余风险与后续工作
+## 能力边界
 
 - 币本位永续和币本位交割的产品线枚举已存在，但还需要补齐同等级真实流程 smoke。
 - 期权当前是单腿欧式现金结算模型，组合保证金、希腊值、波动率曲面、风险限额和更复杂的做市报价仍是后续增强。

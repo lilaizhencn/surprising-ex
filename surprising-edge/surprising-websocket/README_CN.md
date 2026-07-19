@@ -53,18 +53,18 @@
 
 | 频道 | 公共频道 | 必填字段 | 来源 topic |
 | --- | --- | --- | --- |
-| `candles` | 是 | `symbol`, `period` | `surprising.perp.candle.events.v1` |
-| `trades` | 是 | `symbol` | `surprising.perp.trade.events.v1`, `surprising.perp.match.trades.v1` |
-| `depth` | 是 | `symbol` | `surprising.perp.orderbook.depth.v1` |
-| `index` | 是 | `symbol` | `surprising.perp.index.price.v1` |
-| `mark` | 是 | `symbol` | `surprising.perp.mark.price.v1` |
-| `funding` | 是 | `symbol` | `surprising.perp.funding.rate.v1` |
-| `orders` | 否 | 可选 `symbol` | `surprising.perp.order.events.v1` |
-| `triggerOrders` | 否 | 可选 `symbol` | `surprising.perp.trigger-order.events.v1` |
-| `matches` | 否 | 可选 `symbol` | `surprising.perp.match.results.v1` |
-| `positions` | 否 | 可选 `symbol` | `surprising.account.position.events.v1` |
-| `positionRisk` | 否 | 可选 `symbol` | `surprising.risk.position.events.v1` |
-| `accountRisk` | 否 | 可选 `symbol` 会按通配符处理 | `surprising.risk.account.events.v1` |
+| `candles` | 是 | `symbol`, `period` | `surprising.linear-perp.candle.events.v1` |
+| `trades` | 是 | `symbol` | `surprising.linear-perp.trade.events.v1`, `surprising.linear-perp.match.trades.v1` |
+| `depth` | 是 | `symbol` | `surprising.linear-perp.orderbook.depth.v1` |
+| `index` | 是 | `symbol` | `surprising.linear-perp.index.price.v1` |
+| `mark` | 是 | `symbol` | `surprising.linear-perp.mark.price.v1` |
+| `funding` | 是 | `symbol` | `surprising.linear-perp.funding.rate.v1` |
+| `orders` | 否 | 可选 `symbol` | `surprising.linear-perp.order.events.v1` |
+| `triggerOrders` | 否 | 可选 `symbol` | `surprising.linear-perp.trigger-order.events.v1` |
+| `matches` | 否 | 可选 `symbol` | `surprising.linear-perp.match.results.v1` |
+| `positions` | 否 | 可选 `symbol` | `surprising.linear-perp.account.position.events.v1` |
+| `positionRisk` | 否 | 可选 `symbol` | `surprising.linear-perp.risk.position.events.v1` |
+| `accountRisk` | 否 | 可选 `symbol` 会按通配符处理 | `surprising.linear-perp.risk.account.events.v1` |
 
 私有订阅不传 `symbol` 时使用通配符 `*`，表示接收该认证用户的所有相关事件。
 
@@ -80,7 +80,7 @@
 order command
   -> exchange-core 修改订单簿
   -> matching 把最新全量 L2 快照交给按 symbol 隔离的行情 publisher
-  -> 独立 Kafka producer 发布 surprising.perp.orderbook.depth.v1
+  -> 独立 Kafka producer 发布 surprising.linear-perp.orderbook.depth.v1
   -> websocket 节点消费事件，并推送 channel=depth
 ```
 
@@ -103,7 +103,7 @@ matching trade
   -> account 消费撮合成交
   -> account 在一个 DB 事务里更新余额、保证金、PnL、手续费和持仓
   -> account 写 account_outbox_events 的 POSITION_UPDATED 行
-  -> account outbox publisher 发送 surprising.account.position.events.v1
+  -> account outbox publisher 发送 surprising.linear-perp.account.position.events.v1
   -> websocket 节点消费事件，并推给匹配的私有订阅
 ```
 
@@ -146,8 +146,8 @@ position event on Kafka
 - 生产环境如果长连接很多，继续单独部署 `surprising-websocket-provider`，让 WebSocket 独立扩容。
 - WebSocket 节点至少部署 2 个。
 - 每个 WebSocket 节点必须使用唯一 Kafka consumer group，例如默认值 `surprising-websocket-${HOSTNAME:${random.uuid}}`。
-- 不要让所有 WebSocket pod 共用一个 group。共用 group 会导致每条 Kafka 记录只被一个 pod 收到，连接在其他 pod 上的客户端会漏掉公共行情。
-- 生产环境建议显式配置稳定的 pod/node 值，例如 `surprising-websocket-${POD_NAME}`。每次重启都使用纯随机 group 会在 Kafka 里留下过期 group，让 consumer lag 看板变得很吵。
+- 不要让所有 WebSocket 进程共用一个 group。共用 group 会导致每条 Kafka 记录只被一个节点收到，连接在其他节点上的客户端会漏掉公共行情。
+- 生产环境建议显式配置稳定的 node 值，例如 `surprising-websocket-${HOSTNAME}`。每次重启都使用纯随机 group 会在 Kafka 里留下过期 group，让 consumer lag 看板变得很吵。
 - 不需要跨节点 session 状态。每个节点只维护本机 WebSocket session 和订阅表。
 - 负载均衡器可以把新连接分散到不同节点。已经建立的 WebSocket TCP 连接自然固定在一个节点；断线重连后客户端必须重新订阅。
 - 公共行情事件会被每个节点消费，然后按本地订阅过滤。
@@ -165,10 +165,10 @@ surprising:
       group-id: surprising-websocket-${HOSTNAME:${random.uuid}}
       concurrency: 2
       max-poll-records: 1000
-      order-book-depth-topic: surprising.perp.orderbook.depth.v1
-      position-events-topic: surprising.account.position.events.v1
-      account-risk-events-topic: surprising.risk.account.events.v1
-      position-risk-events-topic: surprising.risk.position.events.v1
+      order-book-depth-topic: surprising.linear-perp.orderbook.depth.v1
+      position-events-topic: surprising.linear-perp.account.position.events.v1
+      account-risk-events-topic: surprising.linear-perp.risk.account.events.v1
+      position-risk-events-topic: surprising.linear-perp.risk.position.events.v1
     session:
       max-subscriptions: 200
       outbound-queue-capacity: 1000

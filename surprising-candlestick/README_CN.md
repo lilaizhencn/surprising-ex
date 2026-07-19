@@ -13,14 +13,14 @@ Surprising Exchange 合约 K 线服务。
 
 K 线服务按多节点部署设计，采用分区化行情数据流水线：
 
-- 撮合模块直接从 exchange-core 生成轻量 `PublicTradeEvent` JSON，写入 Kafka topic：`surprising.perp.match.trades.v1`，不依赖数据库或 outbox。
+- 撮合模块直接从 exchange-core 生成轻量 `PublicTradeEvent` JSON，写入产品线 Kafka Topic：`surprising.linear-perp.match.trades.v1`，不依赖数据库或 outbox。
 - matching 按 symbol 使用独立有界 FIFO，每 50ms 刷新一次。公共行情流在队列溢出或 Kafka 故障时允许少量丢失；资金结算走另一条可靠的账户命令链路。
 - Kafka record key 必须是标准化后的交易对，例如 `BTC-USDT`。
 - Kafka partition 在多个服务节点之间分配 symbol，不采用“一个合约一个线程”的模型。
 - Kafka Streams 使用 RocksDB state store 保存热 K 线状态、成交幂等状态、待落库 dirty snapshot、每个 symbol 的最新 sequence。
 - PostgreSQL 只接收周期性的完整快照 upsert。服务不会在每笔成交时读取数据库 K 线行。
-- 合约 K 线变更事件发送到 `surprising.perp.candle.events.v1`，websocket/行情推送服务应独立消费这个 topic。
-- 默认从 `surprising-instrument` 的 `instruments` 当前版本读取启用交易对。设置 `surprising.candlestick.symbols.source=CANDLESTICK_SYMBOLS` 后，才使用旧的 `candlestick_symbols` 表。
+- 合约 K 线变更事件发送到 `surprising.linear-perp.candle.events.v1`，websocket/行情推送服务应独立消费这个 Topic。
+- 启用交易对从 `surprising-instrument` 的 `instruments` 当前版本读取。
 
 ## 多节点核心机制
 
@@ -104,14 +104,25 @@ surprising.candlestick.rocksdb.write-buffer-manager-size=512MB
 
 ## Kafka Partition 规划
 
-本项目使用一个合约成交 topic 承载所有 symbol，通过多 partition 扩展：
+每条产品线使用一个固定为 32 分区的成交 Topic 承载全部 symbol：
 
-- 输入 topic：`surprising.perp.match.trades.v1`
-- 输出 topic：`surprising.perp.candle.events.v1`
+- 输入 Topic：`surprising.<product-segment>.match.trades.v1`
+- 输出 Topic：`surprising.<product-segment>.candle.events.v1`
 
-不要按每个 symbol 创建一个 topic。应该在共享 topic 上创建足够多的 partition。
+不要按每个 symbol 创建 Topic。永续首发部署中输入和输出 Topic 都固定为 32 分区：
 
-推荐计算公式：
+```bash
+PRODUCT_LINES=LINEAR_PERPETUAL \
+PARTITIONS=32 \
+ACCOUNT_COMMAND_PARTITIONS=32 \
+REPLICATION_FACTOR=3 \
+./scripts/create-topics.sh
+```
+
+生产流量开始后不能原地增加分区，否则 symbol 到 partition 的映射和 Kafka Streams 状态归属都会改变。
+未来容量需要超过 32 分区时，应创建新版本 Topic/application-id 并从成交记录重放状态。
+
+`create-topics.sh` 保留下面的动态公式，供尚未上线的新 Topic 做容量预估：
 
 ```text
 partitions = roundUp(
@@ -126,31 +137,15 @@ partitions = roundUp(
 
 脚本默认值：
 
-- `MIN_PARTITIONS=24`
+- `MIN_PARTITIONS=32`
 - `TARGET_SYMBOLS_PER_PARTITION=10`
 - `STREAM_THREADS=2`
 - `PROVIDER_INSTANCES=1`
 - `PARTITION_STEP=12`
 - `MAX_PARTITIONS=384`
 
-手动指定 partition：
-
-```bash
-PARTITIONS=48 REPLICATION_FACTOR=3 ./scripts/create-topics.sh
-```
-
-按 symbol 数和部署规模自动计算：
-
-```bash
-SYMBOL_COUNT=500 PROVIDER_INSTANCES=4 STREAM_THREADS=4 REPLICATION_FACTOR=3 ./scripts/create-topics.sh
-```
-
-上面的例子会计算出 `partitions=60`：
-
-- `ceil(500 / 10) = 50`
-- `4 * 4 * 2 = 32`
-- `max(24, 50, 32) = 50`
-- 按步长 `12` 向上取整得到 `60`
+不传 `PARTITIONS` 时默认会把 32 按步长 12 向上取整为 36，因此生产必须显式传
+`PARTITIONS=32`，不能依赖默认计算。
 
 运行时消费配置在这里：
 
@@ -158,8 +153,8 @@ SYMBOL_COUNT=500 PROVIDER_INSTANCES=4 STREAM_THREADS=4 REPLICATION_FACTOR=3 ./sc
 surprising:
   candlestick:
     kafka:
-      trade-topic: surprising.perp.match.trades.v1
-      candle-topic: surprising.perp.candle.events.v1
+      trade-topic: surprising.linear-perp.match.trades.v1
+      candle-topic: surprising.linear-perp.candle.events.v1
       application-id: surprising-candlestick-v1
     stream:
       threads: 2
@@ -175,7 +170,7 @@ surprising:
 WebSocket 服务监听的 topic：
 
 ```text
-surprising.perp.candle.events.v1
+surprising.linear-perp.candle.events.v1
 ```
 
 推荐的客户端订阅路由 key：
