@@ -49,6 +49,28 @@ STRESS_REPORT_FILE=docs/scale8-hot1-80tps.md \
 `STRESS_HOT_TRAFFIC_PERCENT` of taker requests to the first one or three symbols. `STRESS_TARGET_TPS=0`
 retains the original unbounded burst; a positive integer rate-limits API submission.
 
+Use the dedicated scenario for 5,000 simultaneous liquidations. It opens every position through the real API,
+waits until all latest risk snapshots are `NORMAL`, applies the same 20% mark-price drop to 20 symbols, and then
+waits for filled liquidation orders, zero open positions, drained Outboxes, and funds reconciliation:
+
+```bash
+PRODUCT_LINES=LINEAR_PERPETUAL \
+MULTI_SYMBOL_STRESS=true \
+STRESS_SCENARIO=liquidation \
+STRESS_SYMBOL_COUNT=20 \
+STRESS_USER_COUNT=5000 \
+STRESS_HOT_SYMBOL_COUNT=0 \
+STRESS_LIQUIDATION_MARK_FACTOR_PPM=800000 \
+STRESS_LIQUIDATION_WALLET_RATE_PPM=120000 \
+STRESS_RUN_LABEL=linear-perp-liquidation-5000 \
+STRESS_REPORT_FILE=/tmp/linear-perp-liquidation-5000.md \
+./scripts/product-line-api-flow-smoke.sh
+```
+
+The scenario requires uniform symbol assignment because pre-funding is calculated from that same assignment.
+Its report adds liquidation discovery, submission, and completion latency, completed TPS, candidate/order states,
+Risk and liquidation consumer lag, and paired user liquidation-fee/insurance-fund entries.
+
 The matrix script prints its cases by default. Execute it only after confirming the environment and expected duration:
 
 ```bash
@@ -74,7 +96,7 @@ groups, performs funds reconciliation, and writes a separate report. Reports now
 - symbol and trade distribution across matching-engine shards;
 - Outbox statistics scoped to the current stress traces, taker users, and maker users.
 - the top 20 statements by total execution time when `pg_stat_statements` is available.
-- peak and final Kafka lag for matching, account, order-result, and position-maintenance consumer groups.
+- peak and final Kafka lag for matching, account, order-result, position-maintenance, Risk, and liquidation consumer groups.
 
 For slow-SQL ranking, PostgreSQL must preload `pg_stat_statements` and have the extension created before
 the run. The script does not change instance-level database settings. It reports `N/A` instead of inventing
