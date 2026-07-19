@@ -14,7 +14,10 @@ import static org.mockito.Mockito.when;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.account.api.model.AccountCommandResultEvent;
+import com.surprising.account.api.model.AccountCommandStatus;
 import com.surprising.account.api.model.AccountUserCommand;
+import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
@@ -52,6 +55,7 @@ import com.surprising.trading.order.repository.OutboxRepository;
 import com.surprising.trading.order.repository.SpotOrderReservationRepository;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -216,6 +220,48 @@ class OrderServiceTest {
         verify(outboxRepository).enqueue(eq("ORDER"), eq(9002L), anyString(),
                 eq("LINEAR_PERPETUAL:1001"), eq("ORDER_RESERVE"), anyString(), any());
         verify(orderRepository, never()).nextSequence("command");
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void accountReservationResultsUseOneBatchAndOrderConsumptionTime() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL);
+        OrderRecord firstPending = order(9001L, "reserve-1", OrderStatus.PENDING_RESERVE, null);
+        OrderRecord secondPending = order(9002L, "reserve-2", OrderStatus.PENDING_RESERVE, null);
+        OrderRecord firstAccepted = order(9001L, "reserve-1", OrderStatus.ACCEPTED, null);
+        OrderRecord secondRejected = order(9002L, "reserve-2", OrderStatus.REJECTED, "insufficient");
+        when(orderRepository.findByOrderIds(any()))
+                .thenReturn(Map.of(9001L, firstPending, 9002L, secondPending));
+        when(orderRepository.orderMatchesContractType(anyLong(), eq("LINEAR_PERPETUAL"))).thenReturn(true);
+        when(orderRepository.completeReservations(any()))
+                .thenReturn(Map.of(9001L, firstAccepted, 9002L, secondRejected));
+        when(orderRepository.nextSequenceBatch("event", 2)).thenReturn(List.of(9101L, 9102L));
+        when(orderRepository.nextSequenceBatch("command", 1)).thenReturn(List.of(9201L));
+        Instant accountCompletedAt = Instant.parse("2026-07-19T00:00:00Z");
+        Instant beforeConsume = Instant.now();
+        AccountCommandResultEvent accepted = reservationResult(
+                9001L, AccountCommandStatus.APPLIED, null, accountCompletedAt, "trace-reserve-1");
+        AccountCommandResultEvent rejected = reservationResult(
+                9002L, AccountCommandStatus.REJECTED, "insufficient", accountCompletedAt, "trace-reserve-2");
+
+        service.processAccountCommandResults(List.of(accepted, rejected));
+
+        ArgumentCaptor<List<OrderRepository.ReservationCompletion>> completionCaptor =
+                ArgumentCaptor.forClass(List.class);
+        verify(orderRepository).completeReservations(completionCaptor.capture());
+        assertThat(completionCaptor.getValue()).hasSize(2);
+        assertThat(completionCaptor.getValue())
+                .allSatisfy(completion -> assertThat(completion.completedAt()).isAfterOrEqualTo(beforeConsume));
+        ArgumentCaptor<List<OrderEvent>> eventsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(orderRepository).insertEvents(eventsCaptor.capture());
+        assertThat(eventsCaptor.getValue()).extracting(OrderEvent::eventType)
+                .containsExactly(OrderEventType.ACCEPTED, OrderEventType.REJECTED);
+        ArgumentCaptor<List<OutboxRepository.OrderOutboxWrite>> outboxCaptor = ArgumentCaptor.forClass(List.class);
+        verify(outboxRepository).enqueueBatch(outboxCaptor.capture());
+        assertThat(outboxCaptor.getValue()).extracting(OutboxRepository.OrderOutboxWrite::eventType)
+                .containsExactly("ACCEPTED", "PLACE", "REJECTED");
+        assertThat(outboxCaptor.getValue())
+                .allSatisfy(write -> assertThat(write.createdAt()).isAfterOrEqualTo(beforeConsume));
     }
 
     @Test
@@ -977,5 +1023,26 @@ class OrderServiceTest {
                 side, OrderType.LIMIT, TimeInForce.GTC, 65_000L, remainingQuantitySteps,
                 0L, remainingQuantitySteps, MarginMode.CROSS, PositionSide.NET,
                 200L, 500L, true, false, status, null, now, now, 1L);
+    }
+
+    private AccountCommandResultEvent reservationResult(long orderId,
+                                                         AccountCommandStatus status,
+                                                         String errorMessage,
+                                                         Instant completedAt,
+                                                         String traceId) {
+        return new AccountCommandResultEvent(
+                orderId,
+                "ORDER_RESERVE:LINEAR_PERPETUAL:" + orderId,
+                ProductLine.LINEAR_PERPETUAL,
+                1001L,
+                AccountUserCommandType.ORDER_RESERVE,
+                status,
+                "ORDER",
+                Long.toString(orderId),
+                null,
+                status == AccountCommandStatus.REJECTED ? "INSUFFICIENT_AVAILABLE_BALANCE" : null,
+                errorMessage,
+                completedAt,
+                traceId);
     }
 }

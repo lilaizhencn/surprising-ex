@@ -2,6 +2,8 @@ package com.surprising.trading.order.repository;
 
 import com.surprising.trading.order.model.OutboxRecord;
 import com.surprising.trading.order.config.TradingOrderProperties;
+import java.sql.PreparedStatement;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -11,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -54,6 +57,54 @@ public class OutboxRepository {
             throw new IllegalStateException("failed to enqueue trading outbox event " + outboxId);
         }
         return outboxId;
+    }
+
+    public void enqueueBatch(List<OrderOutboxWrite> writes) {
+        if (writes == null || writes.isEmpty()) {
+            return;
+        }
+        for (OrderOutboxWrite write : writes) {
+            if (write == null || write.createdAt() == null) {
+                throw new IllegalArgumentException("order outbox write and createdAt are required");
+            }
+            requireCurrentProductTopic(write.aggregateType(), write.topic());
+        }
+        List<Long> ids = jdbcTemplate.query("""
+                SELECT nextval('trading_outbox_seq') AS id
+                  FROM generate_series(1, ?) AS n
+                 ORDER BY n
+                """, (rs, rowNum) -> rs.getLong("id"), writes.size());
+        if (ids.size() != writes.size()) {
+            throw new IllegalStateException("failed to allocate order outbox ids");
+        }
+        int[] rows = jdbcTemplate.batchUpdate("""
+                INSERT INTO trading_outbox_events (
+                    id, aggregate_type, aggregate_id, topic, event_key, event_type,
+                    payload, next_attempt_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                """, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(PreparedStatement statement, int index) throws java.sql.SQLException {
+                OrderOutboxWrite write = writes.get(index);
+                Timestamp createdAt = Timestamp.from(write.createdAt());
+                statement.setLong(1, ids.get(index));
+                statement.setString(2, write.aggregateType());
+                statement.setLong(3, write.aggregateId());
+                statement.setString(4, write.topic());
+                statement.setString(5, write.eventKey());
+                statement.setString(6, write.eventType());
+                statement.setString(7, write.payload());
+                statement.setTimestamp(8, createdAt);
+                statement.setTimestamp(9, createdAt);
+                statement.setTimestamp(10, createdAt);
+            }
+
+            @Override
+            public int getBatchSize() {
+                return writes.size();
+            }
+        });
+        requireCompleteBatch(rows, writes.size(), "order outbox enqueue");
     }
 
     public List<OutboxStreamBatch> claimPendingBatches(int limit, Instant leaseUntil, Instant now) {
@@ -259,6 +310,27 @@ public class OutboxRepository {
                     + orderEventsTopic + ", " + orderCommandsTopic + ", " + accountUserCommandsTopic
                     + "] actual=" + topic);
         }
+    }
+
+    private void requireCompleteBatch(int[] rows, int expected, String operation) {
+        if (rows == null || rows.length != expected) {
+            throw new IllegalStateException("failed to write " + operation);
+        }
+        for (int row : rows) {
+            if (row != 1 && row != Statement.SUCCESS_NO_INFO) {
+                throw new IllegalStateException("failed to write " + operation);
+            }
+        }
+    }
+
+    public record OrderOutboxWrite(
+            String aggregateType,
+            long aggregateId,
+            String topic,
+            String eventKey,
+            String eventType,
+            String payload,
+            Instant createdAt) {
     }
 
     private record OutboxStreamKey(String topic, String eventKey) {

@@ -3021,6 +3021,21 @@ order_commands AS (
      AND payload ->> 'traceId' LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'
    GROUP BY aggregate_id
 ),
+reservation_results AS (
+  SELECT c.source_reference::bigint AS order_id,
+         c.completed_at AS account_completed_at,
+         max(a.published_at) AS result_published_at
+    FROM account_commands c
+    JOIN account_outbox_events a
+      ON a.aggregate_type = 'ACCOUNT_COMMAND_RESULT'
+     AND a.payload ->> 'commandId' = c.command_id
+    JOIN taker_orders o
+      ON o.order_id = c.source_reference::bigint
+   WHERE c.product_line = '${product_line}'
+     AND c.command_type = 'ORDER_RESERVE'
+     AND c.source = 'ORDER'
+   GROUP BY c.source_reference, c.completed_at
+),
 matches AS (
   SELECT r.order_id,
          r.command_id,
@@ -3050,6 +3065,7 @@ trades AS (
 ),
 account_commands AS (
   SELECT aggregate_id AS trade_id,
+         max(created_at) AS created_at,
          max(published_at) AS published_at
     FROM trading_outbox_events
    WHERE aggregate_type = 'ACCOUNT_COMMAND'
@@ -3073,35 +3089,43 @@ samples(metric_order, metric, ms) AS (
          EXTRACT(EPOCH FROM (o.accepted_at - o.order_created_at)) * 1000
     FROM taker_orders o
   UNION ALL
-  SELECT 2, 'ACCEPTED → order command published',
+  SELECT 2, 'account reservation completed → result published',
+         EXTRACT(EPOCH FROM (r.result_published_at - r.account_completed_at)) * 1000
+    FROM reservation_results r
+   WHERE r.result_published_at IS NOT NULL
+  UNION ALL
+  SELECT 3, 'account result created → ACCEPTED',
+         EXTRACT(EPOCH FROM (o.accepted_at - r.account_completed_at)) * 1000
+    FROM taker_orders o JOIN reservation_results r USING (order_id)
+  UNION ALL
+  SELECT 4, 'ACCEPTED → order command published',
          EXTRACT(EPOCH FROM (c.published_at - o.accepted_at)) * 1000
     FROM taker_orders o JOIN order_commands c USING (order_id)
    WHERE c.published_at IS NOT NULL
   UNION ALL
-  SELECT 3, 'order outbox created → published',
+  SELECT 5, 'order outbox created → published',
          EXTRACT(EPOCH FROM (c.published_at - c.created_at)) * 1000
     FROM order_commands c
    WHERE c.published_at IS NOT NULL
   UNION ALL
-  SELECT 4, 'order command published → matching started',
-         EXTRACT(EPOCH FROM (m.match_event_at - c.published_at)) * 1000
+  SELECT 6, 'order command created → matching started',
+         EXTRACT(EPOCH FROM (m.match_event_at - c.created_at)) * 1000
     FROM matches m JOIN order_commands c USING (order_id)
-   WHERE c.published_at IS NOT NULL
   UNION ALL
-  SELECT 5, 'matching started → match result published',
+  SELECT 7, 'matching started → match result published',
          EXTRACT(EPOCH FROM (r.published_at - m.match_event_at)) * 1000
     FROM matches m JOIN match_results r USING (command_id)
    WHERE r.published_at IS NOT NULL
   UNION ALL
-  SELECT 6, 'matching started → account commands published',
+  SELECT 8, 'matching started → account commands published',
          EXTRACT(EPOCH FROM (a.published_at - t.match_event_at)) * 1000
     FROM trades t JOIN account_commands a USING (trade_id)
   UNION ALL
-  SELECT 7, 'account commands published → bilateral settled',
-         EXTRACT(EPOCH FROM (s.completed_at - a.published_at)) * 1000
+  SELECT 9, 'account commands created → bilateral settled',
+         EXTRACT(EPOCH FROM (s.completed_at - a.created_at)) * 1000
     FROM account_commands a JOIN settlements s USING (trade_id)
   UNION ALL
-  SELECT 8, 'ACCEPTED → bilateral settled',
+  SELECT 10, 'ACCEPTED → bilateral settled',
          EXTRACT(EPOCH FROM (s.completed_at - o.accepted_at)) * 1000
     FROM taker_orders o
     JOIN trades t USING (order_id)

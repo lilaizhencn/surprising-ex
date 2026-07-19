@@ -31,8 +31,7 @@ class OrderAccountCommandResultConsumerTest {
 
         consumer.onResult(List.of(record(consumer, objectMapper, first), record(consumer, objectMapper, second)));
 
-        verify(orderService).processAccountCommandResult(first);
-        verify(orderService).processAccountCommandResult(second);
+        verify(orderService).processAccountCommandResults(List.of(first, second));
     }
 
     private ConsumerRecord<String, String> record(OrderAccountCommandResultConsumer consumer,

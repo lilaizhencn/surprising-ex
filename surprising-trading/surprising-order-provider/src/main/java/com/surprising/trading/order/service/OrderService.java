@@ -64,7 +64,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -977,47 +979,122 @@ public class OrderService {
     }
 
     @Transactional
-    public void processAccountCommandResult(AccountCommandResultEvent result) {
-        if (result == null
-                || result.commandType() != AccountUserCommandType.ORDER_RESERVE
-                || !"ORDER".equals(result.source())) {
+    public void processAccountCommandResults(List<AccountCommandResultEvent> results) {
+        if (results == null || results.isEmpty()) {
             return;
         }
-        long orderId;
-        try {
-            orderId = Long.parseLong(result.sourceReference());
-        } catch (NumberFormatException ex) {
-            throw new IllegalArgumentException("invalid order account command source reference", ex);
-        }
-        OrderRecord current = orderRepository.findByOrderId(orderId)
-                .orElseThrow(() -> new IllegalStateException("order not found for account command result " + orderId));
-        requireOrderCurrentProductLine(current);
-        if (current.productLine() != result.productLine() || current.userId() != result.userId()) {
-            throw new IllegalStateException("account command result does not match order identity " + orderId);
-        }
-        String expectedCommandId = reservationCommandId(current.productLine(), current.orderId());
-        if (!expectedCommandId.equals(result.commandId())) {
-            throw new IllegalStateException("account command result id does not match order " + orderId);
-        }
-        boolean accepted = result.status() == AccountCommandStatus.APPLIED;
-        String rejectReason = accepted ? null
-                : result.errorMessage() == null || result.errorMessage().isBlank()
-                ? result.errorCode() : result.errorMessage();
-        Instant now = result.completedAt() == null ? Instant.now() : result.completedAt();
-        if (!orderRepository.completeReservation(orderId, accepted, rejectReason, now)) {
-            OrderRecord existing = orderRepository.findByOrderId(orderId).orElseThrow();
-            if (existing.status() == OrderStatus.PENDING_RESERVE) {
-                throw new IllegalStateException("failed to complete order reservation " + orderId);
+        LinkedHashMap<Long, AccountCommandResultEvent> byOrderId = new LinkedHashMap<>();
+        for (AccountCommandResultEvent result : results) {
+            if (result == null
+                    || result.commandType() != AccountUserCommandType.ORDER_RESERVE
+                    || !"ORDER".equals(result.source())) {
+                continue;
             }
+            long orderId;
+            try {
+                orderId = Long.parseLong(result.sourceReference());
+            } catch (NumberFormatException ex) {
+                throw new IllegalArgumentException("invalid order account command source reference", ex);
+            }
+            AccountCommandResultEvent duplicate = byOrderId.putIfAbsent(orderId, result);
+            if (duplicate != null
+                    && (!duplicate.commandId().equals(result.commandId())
+                    || duplicate.status() != result.status()
+                    || duplicate.userId() != result.userId()
+                    || duplicate.productLine() != result.productLine())) {
+                throw new IllegalArgumentException("conflicting account command results for order " + orderId);
+            }
+        }
+        if (byOrderId.isEmpty()) {
             return;
         }
-        OrderRecord updated = orderRepository.findByOrderId(orderId)
-                .orElseThrow(() -> new IllegalStateException("updated order not found " + orderId));
-        enqueueOrderEvent(updated, accepted ? OrderEventType.ACCEPTED : OrderEventType.REJECTED,
-                rejectReason, now, result.traceId());
-        if (accepted) {
-            enqueueCommand(updated, OrderCommandType.PLACE, now, result.traceId());
+
+        Map<Long, OrderRecord> currentOrders = orderRepository.findByOrderIds(byOrderId.keySet());
+        List<OrderRepository.ReservationCompletion> completions = new ArrayList<>(byOrderId.size());
+        Instant consumedAt = Instant.now();
+        for (Map.Entry<Long, AccountCommandResultEvent> entry : byOrderId.entrySet()) {
+            long orderId = entry.getKey();
+            AccountCommandResultEvent result = entry.getValue();
+            OrderRecord current = currentOrders.get(orderId);
+            if (current == null) {
+                throw new IllegalStateException("order not found for account command result " + orderId);
+            }
+            requireOrderCurrentProductLine(current);
+            if (current.productLine() != result.productLine() || current.userId() != result.userId()) {
+                throw new IllegalStateException("account command result does not match order identity " + orderId);
+            }
+            String expectedCommandId = reservationCommandId(current.productLine(), current.orderId());
+            if (!expectedCommandId.equals(result.commandId())) {
+                throw new IllegalStateException("account command result id does not match order " + orderId);
+            }
+            if (current.status() != OrderStatus.PENDING_RESERVE) {
+                continue;
+            }
+            boolean accepted = result.status() == AccountCommandStatus.APPLIED;
+            String rejectReason = accepted ? null
+                    : result.errorMessage() == null || result.errorMessage().isBlank()
+                    ? result.errorCode() : result.errorMessage();
+            completions.add(new OrderRepository.ReservationCompletion(
+                    orderId, accepted, rejectReason, consumedAt));
         }
+        if (completions.isEmpty()) {
+            return;
+        }
+
+        Map<Long, OrderRecord> updatedOrders = orderRepository.completeReservations(completions);
+        if (updatedOrders.size() != completions.size()) {
+            List<Long> missingOrderIds = completions.stream()
+                    .map(OrderRepository.ReservationCompletion::orderId)
+                    .filter(orderId -> !updatedOrders.containsKey(orderId))
+                    .toList();
+            Map<Long, OrderRecord> concurrent = orderRepository.findByOrderIds(missingOrderIds);
+            for (long orderId : missingOrderIds) {
+                OrderRecord order = concurrent.get(orderId);
+                if (order == null || order.status() == OrderStatus.PENDING_RESERVE) {
+                    throw new IllegalStateException("failed to complete order reservation " + orderId);
+                }
+            }
+        }
+
+        List<OrderRepository.ReservationCompletion> appliedCompletions = completions.stream()
+                .filter(completion -> updatedOrders.containsKey(completion.orderId()))
+                .toList();
+        if (appliedCompletions.isEmpty()) {
+            return;
+        }
+        List<Long> eventIds = orderRepository.nextSequenceBatch("event", appliedCompletions.size());
+        int acceptedCount = (int) appliedCompletions.stream()
+                .filter(OrderRepository.ReservationCompletion::accepted).count();
+        List<Long> commandIds = orderRepository.nextSequenceBatch("command", acceptedCount);
+        List<OrderEvent> orderEvents = new ArrayList<>(appliedCompletions.size());
+        List<OutboxRepository.OrderOutboxWrite> outboxWrites =
+                new ArrayList<>(appliedCompletions.size() + acceptedCount);
+        int commandIndex = 0;
+        for (int index = 0; index < appliedCompletions.size(); index++) {
+            OrderRepository.ReservationCompletion completion = appliedCompletions.get(index);
+            AccountCommandResultEvent result = byOrderId.get(completion.orderId());
+            OrderRecord updated = updatedOrders.get(completion.orderId());
+            if (updated == null) {
+                throw new IllegalStateException("updated order not found " + completion.orderId());
+            }
+            OrderEventType eventType = completion.accepted()
+                    ? OrderEventType.ACCEPTED : OrderEventType.REJECTED;
+            OrderEvent event = orderEvent(updated, eventType, completion.rejectReason(), consumedAt,
+                    result.traceId(), eventIds.get(index));
+            orderEvents.add(event);
+            outboxWrites.add(new OutboxRepository.OrderOutboxWrite(
+                    "ORDER", updated.orderId(), properties.getKafka().getOrderEventsTopic(), updated.symbol(),
+                    eventType.name(), payload(event), consumedAt));
+            if (completion.accepted()) {
+                OrderCommandEvent command = orderCommand(updated, OrderCommandType.PLACE, consumedAt,
+                        result.traceId(), commandIds.get(commandIndex++));
+                outboxWrites.add(new OutboxRepository.OrderOutboxWrite(
+                        "ORDER", updated.orderId(), properties.getKafka().getOrderCommandsTopic(), updated.symbol(),
+                        OrderCommandType.PLACE.name(), payload(command), consumedAt));
+            }
+        }
+        orderRepository.insertEvents(orderEvents);
+        outboxRepository.enqueueBatch(outboxWrites);
     }
 
     private void enqueueAccountReservation(OrderRecord order,
@@ -1051,8 +1128,18 @@ public class OrderService {
 
     private void enqueueCommand(OrderRecord order, OrderCommandType commandType, Instant now, String traceId) {
         long commandId = orderRepository.nextSequence("command");
+        OrderCommandEvent command = orderCommand(order, commandType, now, traceId, commandId);
+        outboxRepository.enqueue("ORDER", order.orderId(), properties.getKafka().getOrderCommandsTopic(),
+                order.symbol(), commandType.name(), payload(command), now);
+    }
+
+    private OrderCommandEvent orderCommand(OrderRecord order,
+                                           OrderCommandType commandType,
+                                           Instant now,
+                                           String traceId,
+                                           long commandId) {
         // The future exchange-core matching provider should treat commandId/orderId as its idempotency keys.
-        OrderCommandEvent command = new OrderCommandEvent(
+        return new OrderCommandEvent(
                 commandType,
                 commandId,
                 order.orderId(),
@@ -1073,8 +1160,6 @@ public class OrderService {
                 order.postOnly(),
                 now,
                 traceId);
-        outboxRepository.enqueue("ORDER", order.orderId(), properties.getKafka().getOrderCommandsTopic(),
-                order.symbol(), commandType.name(), payload(command), now);
     }
 
     private OrderRecord rejectOrder(OrderRecord order, String rejectReason, Instant now) {
@@ -1111,7 +1196,19 @@ public class OrderService {
                                    Instant now,
                                    String traceId) {
         long eventId = orderRepository.nextSequence("event");
-        OrderEvent event = new OrderEvent(
+        OrderEvent event = orderEvent(order, eventType, reason, now, traceId, eventId);
+        orderRepository.insertEvent(event);
+        outboxRepository.enqueue("ORDER", order.orderId(), properties.getKafka().getOrderEventsTopic(),
+                order.symbol(), eventType.name(), payload(event), now);
+    }
+
+    private OrderEvent orderEvent(OrderRecord order,
+                                  OrderEventType eventType,
+                                  String reason,
+                                  Instant now,
+                                  String traceId,
+                                  long eventId) {
+        return new OrderEvent(
                 eventId,
                 order.orderId(),
                 order.userId(),
@@ -1121,9 +1218,6 @@ public class OrderService {
                 reason,
                 now,
                 traceId);
-        orderRepository.insertEvent(event);
-        outboxRepository.enqueue("ORDER", order.orderId(), properties.getKafka().getOrderEventsTopic(),
-                order.symbol(), eventType.name(), payload(event), now);
     }
 
     private String payload(Object value) {

@@ -50,7 +50,13 @@ has exactly 32 partitions, so the line has 800 logical partitions and 2,400 repl
 The three account-command topics are explicitly pinned by `ACCOUNT_COMMAND_PARTITIONS=32`. Their partition
 counts must match, and the DLT record must retain the original partition number. `ACCOUNT_USER_COMMAND_CONCURRENCY`
 across all account-provider instances has no useful parallelism above 32; the two-node AWS baseline uses 16 per
-node.
+node. The order-provider consumes `account.command.results.v1` through a dedicated batch listener. Set
+`ORDER_ACCOUNT_COMMAND_RESULTS_CONCURRENCY=32` for one order-provider instance, or divide the same global ceiling
+across replicas. Kafka keying by `<PRODUCT_LINE>:<userId>` preserves each user's result order; a poll is committed
+only after the batch order transition, audit-event insert, and ACCEPTED/PLACE Outbox insert commit together.
+For cross-provider latency monitoring, use the producer event/Outbox `created_at` as the start and the consumer's
+local processing timestamp as the end. An Outbox `published_at` value is persisted only after the Kafka send is
+acknowledged, so it can be later than the consumer timestamp and must be used only for Outbox publish latency.
 
 All other production topics are pinned by `PARTITIONS=32`. Do not rely on the script's symbol-based dynamic
 calculation in production, and do not increase partitions in place after symbol-keyed traffic has started:
@@ -249,6 +255,10 @@ Web and mobile derivative clients also subscribe to the authenticated `triggerOr
 - For account settlement latency, monitor `surprising.account.command.processing` and `surprising.account.command.event_lag` with `outcome=processed|duplicate|failed`.
 - Monitor `surprising.account.command.events{outcome=duplicate}` separately. A rising duplicate rate usually means Kafka replay, rebalance, or a downstream failure caused at-least-once redelivery; financial commands remain idempotent.
 - Correlate account settlement metrics with Kafka consumer lag on `surprising.<product-segment>.account.user.commands.v1`, PostgreSQL query latency, Hikari pool usage, and `account_outbox_events` publish lag. The public `match.trades.v1` lag is a market-data health signal only and must not be used as a settlement signal.
+- Treat `AccountCommandResultEvent.completedAt` as the account-side completion timestamp. Order ACCEPTED event time
+  and `trading_outbox_events.created_at` are stamped when order-provider consumes and commits the result. Report
+  `account reservation completed -> result published`, `account result created -> ACCEPTED`, and
+  `order outbox created -> published` separately; do not attribute the first two intervals to Trading Outbox.
 
 ## PostgreSQL
 

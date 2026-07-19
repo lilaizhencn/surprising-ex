@@ -15,6 +15,7 @@ import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.model.OrderRecord;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -107,6 +108,32 @@ class OrderRepositoryTest {
                 .contains("order_id IN (?, ?)")
                 .doesNotContain("ORDER BY");
         assertThat(args.getValue()).containsExactly(9001L, 9002L);
+    }
+
+    @Test
+    void completeReservationsUsesOneConditionalBatchUpdate() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OrderRepository repository = new OrderRepository(jdbcTemplate);
+        Instant completedAt = Instant.parse("2026-07-19T00:00:10Z");
+
+        repository.completeReservations(List.of(
+                new OrderRepository.ReservationCompletion(9001L, true, null, completedAt),
+                new OrderRepository.ReservationCompletion(9002L, false, "insufficient", completedAt)));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowCallbackHandler.class), args.capture());
+        assertThat(sql.getValue())
+                .contains("WITH input(order_id, accepted, reject_reason, completed_at)")
+                .contains("locked AS MATERIALIZED")
+                .contains("ORDER BY o.order_id")
+                .contains("FOR UPDATE OF o")
+                .contains("UPDATE trading_orders o")
+                .contains("o.status = 'PENDING_RESERVE'")
+                .contains("RETURNING o.*");
+        assertThat(args.getValue()).containsExactly(
+                9001L, true, null, Timestamp.from(completedAt),
+                9002L, false, "insufficient", Timestamp.from(completedAt));
     }
 
     @Test

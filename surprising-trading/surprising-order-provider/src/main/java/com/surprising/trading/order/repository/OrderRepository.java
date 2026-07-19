@@ -17,6 +17,8 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
+import java.sql.PreparedStatement;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -27,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -56,6 +59,21 @@ public class OrderRepository {
             throw new IllegalStateException("Failed to allocate sequence " + sequenceName);
         }
         return value;
+    }
+
+    public List<Long> nextSequenceBatch(String sequenceName, int count) {
+        if (count <= 0) {
+            return List.of();
+        }
+        List<Long> values = jdbcTemplate.query("""
+                SELECT nextval(CAST(? AS regclass)) AS id
+                  FROM generate_series(1, ?) AS n
+                 ORDER BY n
+                """, (rs, rowNum) -> rs.getLong("id"), tradingSequenceIdentifier(sequenceName), count);
+        if (values.size() != count) {
+            throw new IllegalStateException("Failed to allocate " + count + " sequence values for " + sequenceName);
+        }
+        return List.copyOf(values);
     }
 
     public boolean insert(OrderRecord order) {
@@ -207,6 +225,74 @@ public class OrderRepository {
         return rows == 1;
     }
 
+    public Map<Long, OrderRecord> completeReservations(List<ReservationCompletion> completions) {
+        if (completions == null || completions.isEmpty()) {
+            return Map.of();
+        }
+        List<ReservationCompletion> unique = completions.stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        ReservationCompletion::orderId,
+                        completion -> completion,
+                        (first, duplicate) -> {
+                            if (!first.equals(duplicate)) {
+                                throw new IllegalArgumentException(
+                                        "conflicting reservation completions for order " + first.orderId());
+                            }
+                            return first;
+                        },
+                        LinkedHashMap::new))
+                .values().stream().toList();
+        Map<Long, OrderRecord> updated = new LinkedHashMap<>(unique.size());
+        for (int offset = 0; offset < unique.size(); offset += 1_000) {
+            List<ReservationCompletion> batch = unique.subList(offset, Math.min(offset + 1_000, unique.size()));
+            String values = String.join(", ", Collections.nCopies(batch.size(),
+                    "(?::bigint, ?::boolean, ?::text, ?::timestamptz)"));
+            List<Object> args = new ArrayList<>(batch.size() * 4);
+            for (ReservationCompletion completion : batch) {
+                if (completion.completedAt() == null) {
+                    throw new IllegalArgumentException("reservation completion timestamp is required");
+                }
+                args.add(completion.orderId());
+                args.add(completion.accepted());
+                args.add(completion.accepted() ? null : completion.rejectReason());
+                args.add(Timestamp.from(completion.completedAt()));
+            }
+            String sql = """
+                    WITH input(order_id, accepted, reject_reason, completed_at) AS (
+                        VALUES %s
+                    ),
+                    locked AS MATERIALIZED (
+                        SELECT o.order_id
+                          FROM trading_orders o
+                          JOIN input ON input.order_id = o.order_id
+                         WHERE o.status = 'PENDING_RESERVE'
+                           AND o.executed_quantity_steps = 0
+                         ORDER BY o.order_id
+                           FOR UPDATE OF o
+                    )
+                    UPDATE trading_orders o
+                       SET status = CASE WHEN input.accepted THEN 'ACCEPTED' ELSE 'REJECTED' END,
+                           reject_reason = CASE WHEN input.accepted THEN NULL ELSE input.reject_reason END,
+                           remaining_quantity_steps = CASE
+                               WHEN input.accepted THEN o.remaining_quantity_steps ELSE 0
+                           END,
+                           updated_at = input.completed_at,
+                           revision = o.revision + 1
+                      FROM input
+                      JOIN locked ON locked.order_id = input.order_id
+                     WHERE o.order_id = input.order_id
+                       AND o.status = 'PENDING_RESERVE'
+                       AND o.executed_quantity_steps = 0
+                 RETURNING o.*
+                    """.formatted(values);
+            jdbcTemplate.query(sql, rs -> {
+                OrderRecord order = toRecord(rs);
+                updated.put(order.orderId(), order);
+            }, args.toArray());
+        }
+        return Map.copyOf(updated);
+    }
+
     public void insertEvent(OrderEvent event) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO trading_order_events (
@@ -219,6 +305,38 @@ public class OrderRepository {
         if (rows != 1) {
             throw new IllegalStateException("failed to insert order event " + event.eventId());
         }
+    }
+
+    public void insertEvents(List<OrderEvent> events) {
+        if (events == null || events.isEmpty()) {
+            return;
+        }
+        int[] rows = jdbcTemplate.batchUpdate("""
+                INSERT INTO trading_order_events (
+                    event_id, order_id, user_id, symbol, event_type, status, reason, trace_id, event_time
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (event_id) DO NOTHING
+                """, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(PreparedStatement statement, int index) throws java.sql.SQLException {
+                OrderEvent event = events.get(index);
+                statement.setLong(1, event.eventId());
+                statement.setLong(2, event.orderId());
+                statement.setLong(3, event.userId());
+                statement.setString(4, event.symbol());
+                statement.setString(5, event.eventType().name());
+                statement.setString(6, event.status().name());
+                statement.setString(7, event.reason());
+                statement.setString(8, event.traceId());
+                statement.setTimestamp(9, Timestamp.from(event.eventTime()));
+            }
+
+            @Override
+            public int getBatchSize() {
+                return events.size();
+            }
+        });
+        requireCompleteBatch(rows, events.size(), "order events");
     }
 
     public Optional<OrderRecord> findByOrderId(long orderId) {
@@ -698,6 +816,24 @@ public class OrderRepository {
             throw new IllegalArgumentException("invalid trading sequence name: " + sequenceName);
         }
         return "public.trading_" + sequenceName.toLowerCase().replace('-', '_') + "_seq";
+    }
+
+    private void requireCompleteBatch(int[] rows, int expected, String operation) {
+        if (rows == null || rows.length != expected) {
+            throw new IllegalStateException("failed to write " + operation);
+        }
+        for (int row : rows) {
+            if (row != 1 && row != Statement.SUCCESS_NO_INFO) {
+                throw new IllegalStateException("failed to write " + operation);
+            }
+        }
+    }
+
+    public record ReservationCompletion(
+            long orderId,
+            boolean accepted,
+            String rejectReason,
+            Instant completedAt) {
     }
 
     public record CancelableOrderImpact(

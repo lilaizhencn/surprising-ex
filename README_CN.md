@@ -99,6 +99,8 @@ RECONCILE_FUNDS=true \
 - 永续首发把普通 Topic 和账户指令 Topic 都固定为 32 分区，RF=3、`min.insync.replicas=2`；
 - 不在已有 symbol-keyed Topic 上直接增加分区；扩容需要新版本 Topic、维护窗口和状态重建方案；
 - 为每条产品线配置独立 Topic、消费组、client id、协调 node id 和 gateway route；
+- Order Provider 的账户指令结果 listener 并发度对齐 32 个分区；同一 `productLine:userId` 保序，
+  每个 poll 批量完成订单状态迁移及 ACCEPTED/PLACE Outbox 入库；
 - Redis/Valkey 使用持久化、`noeviction` 和同 hash-tag Lua 兼容的部署；
 - 保持 PostgreSQL durability，监控 Kafka lag、Outbox pending/最老年龄、数据库锁与慢 SQL、Redis
   readiness、JVM GC，并在上线前完成故障切换和资金零差异核对。

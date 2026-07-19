@@ -62,4 +62,20 @@ public class TradingOrderKafkaConfiguration {
         factory.getContainerProperties().setAckMode(org.springframework.kafka.listener.ContainerProperties.AckMode.BATCH);
         return factory;
     }
+
+    /**
+     * Reservation results are keyed by productLine:userId. One consumer per topic partition lets different users
+     * progress concurrently while Kafka continues to serialize every command result for the same user.
+     */
+    @Bean(name = "orderAccountCommandResultKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String> orderAccountCommandResultKafkaListenerContainerFactory(
+            @Qualifier("orderOpenViewConsumerFactory") ConsumerFactory<String, String> consumerFactory,
+            TradingOrderProperties properties) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory);
+        factory.setConcurrency(properties.getKafka().getAccountCommandResultsConcurrency());
+        factory.setBatchListener(true);
+        factory.getContainerProperties().setAckMode(org.springframework.kafka.listener.ContainerProperties.AckMode.BATCH);
+        return factory;
+    }
 }

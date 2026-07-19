@@ -3,6 +3,7 @@ package com.surprising.trading.order.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
@@ -16,6 +17,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.RowMapper;
 
 class OutboxRepositoryTest {
@@ -57,6 +59,32 @@ class OutboxRepositoryTest {
 
         verify(orderRepository, never()).nextSequence("outbox");
         verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
+    }
+
+    @Test
+    void enqueueBatchAllocatesAndWritesAllRowsTogether() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OrderRepository orderRepository = org.mockito.Mockito.mock(OrderRepository.class);
+        OutboxRepository repository = new OutboxRepository(jdbcTemplate, orderRepository);
+        Instant createdAt = Instant.parse("2026-07-19T00:00:10Z");
+        when(jdbcTemplate.query(contains("nextval('trading_outbox_seq')"), any(RowMapper.class), eq(2)))
+                .thenReturn(List.of(1001L, 1002L));
+        when(jdbcTemplate.batchUpdate(any(String.class), any(BatchPreparedStatementSetter.class)))
+                .thenReturn(new int[]{1, 1});
+
+        repository.enqueueBatch(List.of(
+                new OutboxRepository.OrderOutboxWrite(
+                        "ORDER", 9001L, "surprising.perp.order.events.v1", "BTC-USDT",
+                        "ACCEPTED", "{}", createdAt),
+                new OutboxRepository.OrderOutboxWrite(
+                        "ORDER", 9001L, "surprising.perp.order.commands.v1", "BTC-USDT",
+                        "PLACE", "{}", createdAt)));
+
+        ArgumentCaptor<BatchPreparedStatementSetter> batch =
+                ArgumentCaptor.forClass(BatchPreparedStatementSetter.class);
+        verify(jdbcTemplate).batchUpdate(contains("INSERT INTO trading_outbox_events"), batch.capture());
+        assertThat(batch.getValue().getBatchSize()).isEqualTo(2);
+        verify(orderRepository, never()).nextSequence("outbox");
     }
 
     @Test

@@ -69,6 +69,7 @@ public class TradingOrderProperties {
         private String positionEventsTopic = "surprising.account.position.events.v1";
         private String openOrderViewGroupId = "surprising-order-open-view-v1";
         private String positionMaintenanceGroupId = "surprising-order-position-maintenance-v1";
+        private int accountCommandResultsConcurrency = 32;
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -119,6 +120,10 @@ public class TradingOrderProperties {
         }
         public String getAccountCommandResultsGroupId() {
             return productTopics().consumerGroup("order-account-results");
+        }
+        public int getAccountCommandResultsConcurrency() { return accountCommandResultsConcurrency; }
+        public void setAccountCommandResultsConcurrency(int accountCommandResultsConcurrency) {
+            this.accountCommandResultsConcurrency = Math.max(1, accountCommandResultsConcurrency);
         }
         public String getPositionEventsTopic() {
             return productTopicsEnabled ? productTopics().accountPositionEventsTopic() : positionEventsTopic;

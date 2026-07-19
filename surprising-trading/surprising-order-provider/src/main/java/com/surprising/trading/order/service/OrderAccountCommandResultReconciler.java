@@ -22,9 +22,7 @@ public class OrderAccountCommandResultReconciler {
 
     @Scheduled(fixedDelayString = "${surprising.trading.order.account-result-reconcile-delay-ms:1000}")
     public void reconcile() {
-        for (var result : repository.terminalPendingOrderReservations(
-                properties.getKafka().getProductLine(), 500)) {
-            orderService.processAccountCommandResult(result);
-        }
+        orderService.processAccountCommandResults(repository.terminalPendingOrderReservations(
+                properties.getKafka().getProductLine(), 500));
     }
 }

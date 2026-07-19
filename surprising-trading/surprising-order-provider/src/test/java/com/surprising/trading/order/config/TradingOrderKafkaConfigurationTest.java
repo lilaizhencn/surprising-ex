@@ -47,6 +47,23 @@ class TradingOrderKafkaConfigurationTest {
     }
 
     @Test
+    void accountCommandResultsUseDedicatedPartitionParallelBatchListener() {
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setAccountCommandResultsConcurrency(32);
+        TradingOrderKafkaConfiguration configuration = new TradingOrderKafkaConfiguration();
+        var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
+                configuration.orderOpenViewConsumerFactory(properties);
+        var listenerFactory = configuration.orderAccountCommandResultKafkaListenerContainerFactory(
+                consumerFactory, properties);
+        var container = listenerFactory.createContainer("surprising.linear-perp.account.command.results.v1");
+
+        assertThat(listenerFactory.isBatchListener()).isTrue();
+        assertThat(container.getConcurrency()).isEqualTo(32);
+        assertThat(listenerFactory.getContainerProperties().getAckMode())
+                .isEqualTo(ContainerProperties.AckMode.BATCH);
+    }
+
+    @Test
     void defaultsToLegacyPerpTopicsUntilProductTopicsAreEnabled() {
         TradingOrderProperties properties = new TradingOrderProperties();
 

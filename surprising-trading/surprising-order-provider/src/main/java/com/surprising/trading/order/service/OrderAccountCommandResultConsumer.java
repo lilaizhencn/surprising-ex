@@ -28,7 +28,7 @@ public class OrderAccountCommandResultConsumer {
     @KafkaListener(
             topics = "#{__listener.topic()}",
             groupId = "#{__listener.groupId()}",
-            containerFactory = "orderOpenViewKafkaListenerContainerFactory")
+            containerFactory = "orderAccountCommandResultKafkaListenerContainerFactory")
     public void onResult(List<ConsumerRecord<String, String>> records) {
         try {
             if (records == null || records.isEmpty()) {
@@ -50,9 +50,7 @@ public class OrderAccountCommandResultConsumer {
                 }
                 results.add(result);
             }
-            for (AccountCommandResultEvent result : results) {
-                orderService.processAccountCommandResult(result);
-            }
+            orderService.processAccountCommandResults(results);
         } catch (Exception ex) {
             throw new IllegalStateException("failed to process order account command result batch", ex);
         }

@@ -47,6 +47,7 @@ surprising:
         bootstrap-servers: localhost:9092
         product-line: LINEAR_PERPETUAL
         product-topics-enabled: false
+        account-command-results-concurrency: ${ORDER_ACCOUNT_COMMAND_RESULTS_CONCURRENCY:32}
         order-commands-topic: surprising.perp.order.commands.v1
         order-events-topic: surprising.perp.order.events.v1
       redis-index:
