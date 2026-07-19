@@ -42,6 +42,14 @@ STRESS_RUN_LABEL="${STRESS_RUN_LABEL:-}"
 STRESS_MATCHING_KAFKA_CONCURRENCY="${STRESS_MATCHING_KAFKA_CONCURRENCY:-4}"
 STRESS_MATCHING_ENGINE_SHARDS="${STRESS_MATCHING_ENGINE_SHARDS:-4}"
 STRESS_MATCHING_RISK_SHARDS="${STRESS_MATCHING_RISK_SHARDS:-2}"
+STRESS_MATCHING_OUTBOX_BATCH_SIZE="${STRESS_MATCHING_OUTBOX_BATCH_SIZE:-1000}"
+STRESS_MATCHING_OUTBOX_PUBLISH_DELAY_MS="${STRESS_MATCHING_OUTBOX_PUBLISH_DELAY_MS:-20}"
+STRESS_MATCHING_OUTBOX_MAX_IN_FLIGHT="${STRESS_MATCHING_OUTBOX_MAX_IN_FLIGHT:-64}"
+STRESS_MATCHING_OUTBOX_MAX_ROWS_PER_KEY="${STRESS_MATCHING_OUTBOX_MAX_ROWS_PER_KEY:-32}"
+STRESS_ORDER_OUTBOX_BATCH_SIZE="${STRESS_ORDER_OUTBOX_BATCH_SIZE:-1000}"
+STRESS_ORDER_OUTBOX_PUBLISH_DELAY_MS="${STRESS_ORDER_OUTBOX_PUBLISH_DELAY_MS:-20}"
+STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT="${STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT:-64}"
+STRESS_ORDER_OUTBOX_MAX_ROWS_PER_KEY="${STRESS_ORDER_OUTBOX_MAX_ROWS_PER_KEY:-32}"
 STRESS_ACCOUNT_KAFKA_CONCURRENCY="${STRESS_ACCOUNT_KAFKA_CONCURRENCY:-4}"
 STRESS_ACCOUNT_OUTBOX_BATCH_SIZE="${STRESS_ACCOUNT_OUTBOX_BATCH_SIZE:-1000}"
 STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS="${STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS:-20}"
@@ -1075,18 +1083,24 @@ package_services() {
     return
   fi
   local missing=()
+  local stale=false
   local name
   for name in instrument price trading-entry matching account margin-ops edge market-maker; do
-    if ! boot_jar "$(provider_module "${name}")" "$(provider_artifact "${name}")" >/dev/null 2>&1; then
+    local jar
+    jar="$(boot_jar "$(provider_module "${name}")" "$(provider_artifact "${name}")" 2>/dev/null || true)"
+    if [[ -z "${jar}" ]]; then
       missing+=(":$(provider_artifact "${name}")")
+    elif find "${ROOT_DIR}" -type f \( -path '*/src/main/*' -o -name 'pom.xml' \) \
+        -newer "${jar}" -print -quit | grep -q .; then
+      stale=true
     fi
   done
-  if [[ "${BUILD_SERVICES}" == "auto" && ${#missing[@]} -eq 0 ]]; then
-    echo "Provider jars found; skipping Maven package (BUILD_SERVICES=auto)"
+  if [[ "${BUILD_SERVICES}" == "auto" && ${#missing[@]} -eq 0 && "${stale}" == "false" ]]; then
+    echo "Provider jars are current; skipping Maven package (BUILD_SERVICES=auto)"
     return
   fi
   local selectors
-  if [[ "${BUILD_SERVICES}" == "true" ]]; then
+  if [[ "${BUILD_SERVICES}" == "true" || "${stale}" == "true" ]]; then
     selectors=":surprising-instrument-provider,:surprising-price-provider,:surprising-trading-entry-provider,:surprising-matching-provider,:surprising-account-provider,:surprising-margin-ops-provider,:surprising-edge-provider,:surprising-market-maker-provider"
   else
     local IFS=,
@@ -1143,6 +1157,10 @@ product_provider_args() {
         "--surprising.trading.order.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.trading.order.kafka.product-line=${product_line}" \
         "--surprising.trading.order.kafka.product-topics-enabled=true" \
+        "--surprising.trading.order.outbox.batch-size=${STRESS_ORDER_OUTBOX_BATCH_SIZE}" \
+        "--surprising.trading.order.outbox.publish-delay-ms=${STRESS_ORDER_OUTBOX_PUBLISH_DELAY_MS}" \
+        "--surprising.trading.order.outbox.max-in-flight=${STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT}" \
+        "--surprising.trading.order.outbox.max-rows-per-key=${STRESS_ORDER_OUTBOX_MAX_ROWS_PER_KEY}" \
         "--surprising.trading.order.risk.market-max-mark-age-ms=30000" \
         "--surprising.trading.trigger.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.trading.trigger.kafka.product-line=${product_line}" \
@@ -1154,6 +1172,10 @@ product_provider_args() {
         "--surprising.trading.order.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.trading.order.kafka.product-line=${product_line}" \
         "--surprising.trading.order.kafka.product-topics-enabled=true" \
+        "--surprising.trading.order.outbox.batch-size=${STRESS_ORDER_OUTBOX_BATCH_SIZE}" \
+        "--surprising.trading.order.outbox.publish-delay-ms=${STRESS_ORDER_OUTBOX_PUBLISH_DELAY_MS}" \
+        "--surprising.trading.order.outbox.max-in-flight=${STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT}" \
+        "--surprising.trading.order.outbox.max-rows-per-key=${STRESS_ORDER_OUTBOX_MAX_ROWS_PER_KEY}" \
         "--surprising.trading.order.risk.market-max-mark-age-ms=30000"
       ;;
     matching)
@@ -1168,6 +1190,10 @@ product_provider_args() {
         "--surprising.trading.matching.kafka.group-id=product-smoke-${RUN_ID}-${slug}-matching" \
         "--surprising.trading.matching.kafka.client-id=product-smoke-${RUN_ID}-${slug}-matching" \
         "--surprising.trading.matching.kafka.concurrency=${matching_concurrency}" \
+        "--surprising.trading.matching.outbox.batch-size=${STRESS_MATCHING_OUTBOX_BATCH_SIZE}" \
+        "--surprising.trading.matching.outbox.publish-delay-ms=${STRESS_MATCHING_OUTBOX_PUBLISH_DELAY_MS}" \
+        "--surprising.trading.matching.outbox.max-in-flight=${STRESS_MATCHING_OUTBOX_MAX_IN_FLIGHT}" \
+        "--surprising.trading.matching.outbox.max-rows-per-key=${STRESS_MATCHING_OUTBOX_MAX_ROWS_PER_KEY}" \
         "--surprising.trading.matching.engine.exchange-id=product-smoke-${slug}" \
         "--surprising.trading.matching.engine.matching-engines=${STRESS_MATCHING_ENGINE_SHARDS}" \
         "--surprising.trading.matching.engine.risk-engines=${STRESS_MATCHING_RISK_SHARDS}"

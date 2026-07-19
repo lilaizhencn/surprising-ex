@@ -28,8 +28,9 @@ public class TradingOrderKafkaConfiguration {
         config.put(ProducerConfig.ACKS_CONFIG, "all");
         config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         config.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
-        config.put(ProducerConfig.LINGER_MS_CONFIG, 5);
-        config.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);
+        config.put(ProducerConfig.LINGER_MS_CONFIG, 2);
+        config.put(ProducerConfig.BATCH_SIZE_CONFIG, 65_536);
+        config.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
         return new DefaultKafkaProducerFactory<>(config);
     }
 

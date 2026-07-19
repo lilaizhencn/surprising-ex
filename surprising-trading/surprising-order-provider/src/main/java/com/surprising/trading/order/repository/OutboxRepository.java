@@ -6,7 +6,10 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -53,51 +56,64 @@ public class OutboxRepository {
         return outboxId;
     }
 
-    public List<OutboxRecord> claimPending(int limit, Instant leaseUntil, Instant now) {
-        // The earliest unpublished row still blocks later rows for the same topic+key, preserving stream order.
+    public List<OutboxStreamBatch> claimPendingBatches(int limit, Instant leaseUntil, Instant now) {
+        int effectiveLimit = Math.max(1, limit);
+        int perKeyLimit = Math.max(1, Math.min(properties.getOutbox().getMaxRowsPerKey(), effectiveLimit));
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
-                WITH earliest AS MATERIALIZED (
-                    SELECT DISTINCT ON (topic, event_key)
-                           id
-                      FROM trading_outbox_events
-                     WHERE published_at IS NULL
-                       AND aggregate_type = 'ORDER'
-                     ORDER BY topic, event_key, id
+                WITH pending_ranked AS MATERIALIZED (
+                    SELECT event.id,
+                           event.xmin::text::bigint AS row_version,
+                           event.aggregate_type,
+                           event.topic,
+                           event.event_key,
+                           event.next_attempt_at,
+                           row_number() OVER (
+                               PARTITION BY event.aggregate_type, event.topic, event.event_key
+                               ORDER BY event.id
+                           ) AS key_rank,
+                           first_value(event.next_attempt_at) OVER (
+                               PARTITION BY event.aggregate_type, event.topic, event.event_key
+                               ORDER BY event.id
+                           ) AS head_next_attempt_at
+                      FROM trading_outbox_events event
+                     WHERE event.published_at IS NULL
+                       AND event.aggregate_type = 'ORDER'
+                """);
+        appendTopicScope(sql, "event", args);
+        sql.append("""
                 ),
                 candidates AS MATERIALIZED (
-                    SELECT e.id
-                      FROM trading_outbox_events e
-                     WHERE e.published_at IS NULL
-                       AND e.aggregate_type = 'ORDER'
-                       AND e.id = ANY (ARRAY(SELECT id FROM earliest))
-                    """);
-        appendTopicScope(sql, "e", args);
-        sql.append("""
-                       AND e.next_attempt_at <= ?
-                       AND pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))
-                     ORDER BY e.topic, e.event_key, e.id
+                    SELECT id, row_version
+                      FROM pending_ranked
+                     WHERE key_rank <= ?
+                       AND head_next_attempt_at <= ?
+                       AND next_attempt_at <= ?
+                     ORDER BY next_attempt_at, id
                      LIMIT ?
-                     FOR UPDATE OF e SKIP LOCKED
                 )
                 UPDATE trading_outbox_events e
                    SET next_attempt_at = ?,
                        updated_at = ?
-                  FROM candidates c
-                 WHERE e.id = c.id
+                 WHERE (e.id, e.xmin::text::bigint) IN (
+                           SELECT id, row_version FROM candidates
+                       )
              RETURNING e.id, e.topic, e.event_key, e.payload::text AS payload, e.next_attempt_at
                 """);
+        args.add(perKeyLimit);
         args.add(Timestamp.from(now));
-        args.add(Math.max(1, limit));
+        args.add(Timestamp.from(now));
+        args.add(effectiveLimit);
         args.add(Timestamp.from(leaseUntil));
         args.add(Timestamp.from(now));
-        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new OutboxRecord(
+        List<OutboxRecord> rows = jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new OutboxRecord(
                 rs.getLong("id"),
                 rs.getString("topic"),
                 rs.getString("event_key"),
                 rs.getString("payload"),
                 rs.getTimestamp("next_attempt_at").toInstant()),
                 args.toArray());
+        return toStreamBatches(rows);
     }
 
     public void markPublished(long id, Instant now) {
@@ -153,6 +169,31 @@ public class OutboxRepository {
         }
     }
 
+    public void releasePending(List<Long> ids, Instant now) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        List<Long> uniqueIds = ids.stream().distinct().toList();
+        Timestamp timestamp = Timestamp.from(now);
+        String placeholders = String.join(", ", Collections.nCopies(uniqueIds.size(), "?"));
+        String sql = """
+                UPDATE trading_outbox_events
+                   SET next_attempt_at = ?,
+                       updated_at = ?
+                 WHERE published_at IS NULL
+                   AND id IN (%s)
+                """.formatted(placeholders);
+        List<Object> args = new ArrayList<>(uniqueIds.size() + 2);
+        args.add(timestamp);
+        args.add(timestamp);
+        args.addAll(uniqueIds);
+        int rows = jdbcTemplate.update(sql, args.toArray());
+        if (rows != uniqueIds.size()) {
+            throw new IllegalStateException("failed to release all trading outbox event leases: expected="
+                    + uniqueIds.size() + " actual=" + rows);
+        }
+    }
+
     public int deletePublishedBefore(Instant cutoff, int limit) {
         return jdbcTemplate.update("""
                 WITH candidates AS (
@@ -175,6 +216,21 @@ public class OutboxRepository {
             return null;
         }
         return value.length() <= 1000 ? value : value.substring(0, 1000);
+    }
+
+    private List<OutboxStreamBatch> toStreamBatches(List<OutboxRecord> rows) {
+        Map<OutboxStreamKey, List<OutboxRecord>> grouped = new LinkedHashMap<>();
+        rows.stream()
+                .sorted(Comparator.comparing(OutboxRecord::topic)
+                        .thenComparing(OutboxRecord::eventKey)
+                        .thenComparingLong(OutboxRecord::id))
+                .forEach(row -> grouped.computeIfAbsent(
+                                new OutboxStreamKey(row.topic(), row.eventKey()), ignored -> new ArrayList<>())
+                        .add(row));
+        return grouped.entrySet().stream()
+                .map(entry -> new OutboxStreamBatch(
+                        entry.getKey().topic(), entry.getKey().eventKey(), List.copyOf(entry.getValue())))
+                .toList();
     }
 
     private void appendTopicScope(StringBuilder sql, String alias, List<Object> args) {
@@ -202,6 +258,16 @@ public class OutboxRepository {
             throw new IllegalStateException("trading outbox topic must match current product line: expected one of ["
                     + orderEventsTopic + ", " + orderCommandsTopic + ", " + accountUserCommandsTopic
                     + "] actual=" + topic);
+        }
+    }
+
+    private record OutboxStreamKey(String topic, String eventKey) {
+    }
+
+    public record OutboxStreamBatch(String topic, String eventKey, List<OutboxRecord> rows) {
+
+        public OutboxStreamBatch {
+            rows = List.copyOf(rows);
         }
     }
 }

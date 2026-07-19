@@ -465,6 +465,7 @@ public class MatchingProperties {
         private Duration sendTimeout = Duration.ofSeconds(3);
         private boolean asyncEnabled = true;
         private int maxInFlight = 64;
+        private int maxRowsPerKey = 32;
         private Duration retention = Duration.ofDays(7);
         private long cleanupDelayMs = 60_000L;
         private int cleanupBatchSize = 10_000;
@@ -508,6 +509,17 @@ public class MatchingProperties {
 
         public void setMaxInFlight(int maxInFlight) {
             this.maxInFlight = maxInFlight;
+        }
+
+        public int getMaxRowsPerKey() {
+            return maxRowsPerKey;
+        }
+
+        public void setMaxRowsPerKey(int maxRowsPerKey) {
+            if (maxRowsPerKey <= 0) {
+                throw new IllegalArgumentException("matching outbox maxRowsPerKey must be positive");
+            }
+            this.maxRowsPerKey = maxRowsPerKey;
         }
 
         public Duration getRetention() {

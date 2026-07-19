@@ -63,25 +63,30 @@ class OutboxRepositoryTest {
     void claimPendingLeasesUnpublishedDueRowsForPublishOutsideTransaction() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         OutboxRepository repository = new OutboxRepository(jdbcTemplate, org.mockito.Mockito.mock(OrderRepository.class));
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Timestamp.class), eq(100),
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(32),
+                any(Timestamp.class), any(Timestamp.class), eq(100),
                 any(Timestamp.class), any(Timestamp.class))).thenReturn(List.of());
 
-        repository.claimPending(100, Instant.parse("2026-07-01T00:00:30Z"),
+        repository.claimPendingBatches(100, Instant.parse("2026-07-01T00:00:30Z"),
                 Instant.parse("2026-07-01T00:00:00Z"));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), any(Timestamp.class), eq(100),
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(32),
+                any(Timestamp.class), any(Timestamp.class), eq(100),
                 any(Timestamp.class), any(Timestamp.class));
         assertThat(sql.getValue())
-                .contains("DISTINCT ON (topic, event_key)")
-                .contains("earliest AS MATERIALIZED")
+                .contains("pending_ranked AS MATERIALIZED")
+                .contains("first_value(event.next_attempt_at)")
+                .contains("head_next_attempt_at <= ?")
                 .contains("candidates AS MATERIALIZED")
-                .contains("e.id = ANY (ARRAY(SELECT id FROM earliest))")
-                .doesNotContain("JOIN earliest")
+                .contains("PARTITION BY event.aggregate_type, event.topic, event.event_key")
+                .contains("next_attempt_at <= ?")
+                .contains("event.xmin::text::bigint AS row_version")
+                .contains("LIMIT ?")
                 .contains("UPDATE trading_outbox_events")
                 .contains("SET next_attempt_at = ?")
                 .contains("RETURNING e.id")
-                .contains("FOR UPDATE OF e SKIP LOCKED");
+                .contains("(e.id, e.xmin::text::bigint) IN");
     }
 
     @Test
@@ -96,10 +101,11 @@ class OutboxRepositoryTest {
                 eq("surprising.option.order.events.v1"),
                 eq("surprising.option.order.commands.v1"),
                 eq("surprising.option.account.user.commands.v1"),
-                any(Timestamp.class), eq(100), any(Timestamp.class), any(Timestamp.class)))
+                eq(32), any(Timestamp.class), any(Timestamp.class), eq(100),
+                any(Timestamp.class), any(Timestamp.class)))
                 .thenReturn(List.of());
 
-        repository.claimPending(100, Instant.parse("2026-07-01T00:00:30Z"),
+        repository.claimPendingBatches(100, Instant.parse("2026-07-01T00:00:30Z"),
                 Instant.parse("2026-07-01T00:00:00Z"));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
@@ -107,9 +113,10 @@ class OutboxRepositoryTest {
                 eq("surprising.option.order.events.v1"),
                 eq("surprising.option.order.commands.v1"),
                 eq("surprising.option.account.user.commands.v1"),
-                any(Timestamp.class), eq(100), any(Timestamp.class), any(Timestamp.class));
+                eq(32), any(Timestamp.class), any(Timestamp.class), eq(100),
+                any(Timestamp.class), any(Timestamp.class));
         assertThat(sql.getValue())
-                .contains("e.topic IN (?, ?, ?)")
+                .contains("event.topic IN (?, ?, ?)")
                 .contains("UPDATE trading_outbox_events")
                 .contains("RETURNING e.id");
     }
@@ -133,6 +140,24 @@ class OutboxRepositoryTest {
                 .contains("next_attempt_at");
         assertThat((String) args.getValue()[0]).hasSize(1000);
         assertThat(args.getValue()[3]).isEqualTo(901L);
+    }
+
+    @Test
+    void releasePendingBatchClearsOnlyLeases() {
+        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
+        OutboxRepository repository = new OutboxRepository(
+                jdbcTemplate, org.mockito.Mockito.mock(OrderRepository.class));
+        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(2);
+
+        repository.releasePending(List.of(902L, 903L), Instant.parse("2026-07-01T00:00:00Z"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
+        assertThat(sql.getValue())
+                .contains("SET next_attempt_at = ?")
+                .contains("WHERE published_at IS NULL")
+                .contains("id IN (?, ?)")
+                .doesNotContain("attempts = attempts + 1");
     }
 
     @Test

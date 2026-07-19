@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.OutboxRecord;
 import com.surprising.trading.order.repository.OutboxRepository;
+import com.surprising.trading.order.repository.OutboxRepository.OutboxStreamBatch;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -48,8 +49,8 @@ class OutboxPublisherTest {
         List<OutboxRecord> rows = List.of(
                 record(1L, "key-a", "payload-1"),
                 record(2L, "key-a", "payload-2"));
-        when(outboxRepository.claimPending(anyInt(), any(Instant.class), any(Instant.class)))
-                .thenReturn(rows)
+        when(outboxRepository.claimPendingBatches(anyInt(), any(Instant.class), any(Instant.class)))
+                .thenReturn(List.of(batch(rows)))
                 .thenReturn(List.of());
         when(kafkaTemplate.send(eq("topic"), eq("key-a"), eq("payload-1")))
                 .thenReturn(success());
@@ -66,25 +67,28 @@ class OutboxPublisherTest {
     }
 
     @Test
-    void asyncPublisherStopsSameKeyGroupAfterFailure() {
+    void asyncPublisherPipelinesSameKeyBatchAndRetriesFromFirstFailedRow() {
         publisher = new OutboxPublisher(properties(), outboxRepository, kafkaTemplate);
         List<OutboxRecord> rows = List.of(
                 record(1L, "key-a", "payload-1"),
                 record(2L, "key-a", "payload-2"),
                 record(3L, "key-a", "payload-3"));
-        when(outboxRepository.claimPending(anyInt(), any(Instant.class), any(Instant.class)))
-                .thenReturn(rows)
+        when(outboxRepository.claimPendingBatches(anyInt(), any(Instant.class), any(Instant.class)))
+                .thenReturn(List.of(batch(rows)))
                 .thenReturn(List.of());
         when(kafkaTemplate.send(eq("topic"), eq("key-a"), eq("payload-1")))
                 .thenReturn(success());
         when(kafkaTemplate.send(eq("topic"), eq("key-a"), eq("payload-2")))
                 .thenReturn(failure());
+        when(kafkaTemplate.send(eq("topic"), eq("key-a"), eq("payload-3")))
+                .thenReturn(success());
 
         publisher.publishPending();
 
-        verify(kafkaTemplate, never()).send("topic", "key-a", "payload-3");
+        verify(kafkaTemplate).send("topic", "key-a", "payload-3");
         verify(outboxRepository).markPublished(eq(List.of(1L)), any(Instant.class));
         verify(outboxRepository).markFailed(eq(2L), any(), any(Instant.class));
+        verify(outboxRepository).releasePending(eq(List.of(3L)), any(Instant.class));
     }
 
     private TradingOrderProperties properties() {
@@ -97,6 +101,10 @@ class OutboxPublisherTest {
 
     private OutboxRecord record(long id, String key, String payload) {
         return new OutboxRecord(id, "topic", key, payload, Instant.parse("2026-07-01T00:00:00Z"));
+    }
+
+    private OutboxStreamBatch batch(List<OutboxRecord> rows) {
+        return new OutboxStreamBatch("topic", "key-a", rows);
     }
 
     private CompletableFuture<SendResult<String, String>> success() {

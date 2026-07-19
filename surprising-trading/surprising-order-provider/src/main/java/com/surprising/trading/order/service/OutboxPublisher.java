@@ -3,22 +3,23 @@ package com.surprising.trading.order.service;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.OutboxRecord;
 import com.surprising.trading.order.repository.OutboxRepository;
+import com.surprising.trading.order.repository.OutboxRepository.OutboxStreamBatch;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -50,7 +51,7 @@ public class OutboxPublisher {
         this.publishExecutor = Executors.newFixedThreadPool(this.maxInFlight, threadFactory());
     }
 
-    @Scheduled(fixedDelayString = "${surprising.trading.order.outbox.publish-delay-ms:200}")
+    @Scheduled(fixedDelayString = "${surprising.trading.order.outbox.publish-delay-ms:20}")
     public void publishPending() {
         if (!publishing.compareAndSet(false, true)) {
             return;
@@ -59,21 +60,17 @@ public class OutboxPublisher {
             int remaining = properties.getOutbox().getBatchSize();
             while (remaining > 0) {
                 Instant now = Instant.now();
-                var rows = outboxRepository.claimPending(remaining, now.plus(claimLease(remaining)), now)
-                        .stream()
-                        .sorted(Comparator.comparing(OutboxRecord::topic)
-                                .thenComparing(OutboxRecord::eventKey)
-                                .thenComparingLong(OutboxRecord::id))
-                        .toList();
-                if (rows.isEmpty()) {
+                var batches = outboxRepository.claimPendingBatches(
+                        remaining, now.plus(claimLease(remaining)), now);
+                if (batches.isEmpty()) {
                     return;
                 }
                 if (properties.getOutbox().isAsyncEnabled()) {
-                    publishConcurrent(rows);
+                    publishConcurrent(batches);
                 } else {
-                    publishSequential(rows);
+                    publishSequential(batches);
                 }
-                remaining -= rows.size();
+                remaining -= batches.stream().mapToInt(batch -> batch.rows().size()).sum();
             }
         } finally {
             publishing.set(false);
@@ -102,71 +99,48 @@ public class OutboxPublisher {
         publishExecutor.shutdownNow();
     }
 
-    private void publishSequential(List<OutboxRecord> rows) {
-        for (var row : rows) {
-            Exception failure = publishToKafka(row);
-            if (failure == null) {
-                outboxRepository.markPublished(row.id(), Instant.now());
-            } else {
-                markFailed(row, failure);
-            }
+    private void publishSequential(List<OutboxStreamBatch> batches) {
+        List<GroupPublishResult> results = new ArrayList<>(batches.size());
+        for (OutboxStreamBatch batch : batches) {
+            results.add(publishGroup(batch));
         }
+        completePublish(results);
     }
 
     private Duration claimLease(int claimedLimit) {
-        int batchSize = Math.max(1, claimedLimit);
-        int sendRounds = properties.getOutbox().isAsyncEnabled()
-                ? (batchSize + maxInFlight - 1) / maxInFlight
-                : batchSize;
-        Duration budget = properties.getOutbox().getSendTimeout().multipliedBy(sendRounds)
-                .plus(CLAIM_LEASE_BUFFER);
+        Duration budget = properties.getOutbox().isAsyncEnabled()
+                ? properties.getOutbox().getSendTimeout().plus(CLAIM_LEASE_BUFFER)
+                : properties.getOutbox().getSendTimeout().multipliedBy(Math.max(1, claimedLimit))
+                        .plus(CLAIM_LEASE_BUFFER);
         return budget.compareTo(MINIMUM_CLAIM_LEASE) < 0 ? MINIMUM_CLAIM_LEASE : budget;
     }
 
-    private void publishConcurrent(List<OutboxRecord> rows) {
-        Map<OutboxKey, List<OutboxRecord>> groups = groupByTopicKey(rows);
-        ExecutorCompletionService<GroupPublishResult> completionService =
+    private void publishConcurrent(List<OutboxStreamBatch> batches) {
+        ExecutorCompletionService<QueuedGroup> completionService =
                 new ExecutorCompletionService<>(publishExecutor);
-        var iterator = groups.values().iterator();
-        int submitted = 0;
-        int completed = 0;
-        while (submitted < maxInFlight && iterator.hasNext()) {
-            List<OutboxRecord> group = iterator.next();
-            completionService.submit(() -> publishGroup(group));
-            submitted++;
+        for (OutboxStreamBatch batch : batches) {
+            completionService.submit(() -> queueGroup(batch));
         }
 
-        List<Long> publishedIds = new ArrayList<>(rows.size());
-        List<FailedPublish> failures = new ArrayList<>();
-        while (completed < submitted) {
-            GroupPublishResult result;
+        List<QueuedGroup> queuedGroups = new ArrayList<>(batches.size());
+        for (int completed = 0; completed < batches.size(); completed++) {
             try {
-                Future<GroupPublishResult> future = completionService.take();
-                result = future.get();
+                queuedGroups.add(completionService.take().get());
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
                 log.warn("Interrupted while publishing trading outbox batch");
                 return;
             } catch (Exception ex) {
                 log.error("Unexpected trading outbox publish task failure: {}", ex.getMessage(), ex);
-                completed++;
-                if (iterator.hasNext()) {
-                    List<OutboxRecord> group = iterator.next();
-                    completionService.submit(() -> publishGroup(group));
-                    submitted++;
-                }
-                continue;
-            }
-            publishedIds.addAll(result.publishedIds());
-            failures.addAll(result.failures());
-            completed++;
-            if (iterator.hasNext()) {
-                List<OutboxRecord> group = iterator.next();
-                completionService.submit(() -> publishGroup(group));
-                submitted++;
             }
         }
+        awaitBatch(queuedGroups.stream().flatMap(group -> group.sends().stream()).toList());
+        List<GroupPublishResult> results = queuedGroups.stream().map(this::inspectGroup).toList();
+        completePublish(results);
+    }
 
+    private void completePublish(List<GroupPublishResult> results) {
+        List<Long> publishedIds = results.stream().flatMap(result -> result.publishedIds().stream()).toList();
         if (!publishedIds.isEmpty()) {
             try {
                 outboxRepository.markPublished(publishedIds, Instant.now());
@@ -176,33 +150,100 @@ public class OutboxPublisher {
                 return;
             }
         }
+        List<FailedPublish> failures = results.stream().flatMap(result -> result.failures().stream()).toList();
         for (FailedPublish failure : failures) {
             markFailed(failure.row(), failure.error());
         }
+        List<Long> pendingTailIds = results.stream().flatMap(result -> result.pendingTailIds().stream()).toList();
+        if (!pendingTailIds.isEmpty()) {
+            try {
+                outboxRepository.releasePending(pendingTailIds, Instant.now());
+            } catch (Exception ex) {
+                log.error("Failed to release {} unattempted trading outbox event leases: {}",
+                        pendingTailIds.size(), ex.getMessage(), ex);
+            }
+        }
     }
 
-    private GroupPublishResult publishGroup(List<OutboxRecord> group) {
-        List<Long> publishedIds = new ArrayList<>(group.size());
-        List<FailedPublish> failures = new ArrayList<>(1);
-        for (OutboxRecord row : group) {
-            Exception failure = publishToKafka(row);
-            if (failure == null) {
-                publishedIds.add(row.id());
-            } else {
-                failures.add(new FailedPublish(row, failure));
+    private GroupPublishResult publishGroup(OutboxStreamBatch batch) {
+        QueuedGroup group = queueGroup(batch);
+        awaitBatch(group.sends());
+        return inspectGroup(group);
+    }
+
+    private QueuedGroup queueGroup(OutboxStreamBatch batch) {
+        List<OutboxRecord> rows = batch.rows();
+        List<CompletableFuture<?>> sends = new ArrayList<>(rows.size());
+        Exception synchronousFailure = null;
+        for (int index = 0; index < rows.size(); index++) {
+            OutboxRecord row = rows.get(index);
+            try {
+                sends.add(kafkaTemplate.send(row.topic(), row.eventKey(), row.payload()));
+            } catch (Exception ex) {
+                synchronousFailure = ex;
                 break;
             }
         }
-        return new GroupPublishResult(publishedIds, failures);
+        return new QueuedGroup(rows, sends, synchronousFailure);
     }
 
-    private Exception publishToKafka(OutboxRecord row) {
-        // Delivery is at least once; downstream consumers must dedupe by commandId/orderId or eventId.
+    private GroupPublishResult inspectGroup(QueuedGroup group) {
+        List<OutboxRecord> rows = group.rows();
+        List<CompletableFuture<?>> sends = group.sends();
+        Exception synchronousFailure = group.synchronousFailure();
+
+        int firstFailure = -1;
+        Exception failure = null;
+        for (int index = 0; index < sends.size(); index++) {
+            Exception sendFailure = completionFailure(sends.get(index));
+            if (sendFailure != null) {
+                firstFailure = index;
+                failure = sendFailure;
+                break;
+            }
+        }
+        if (firstFailure < 0 && synchronousFailure != null) {
+            firstFailure = sends.size();
+            failure = synchronousFailure;
+        }
+        if (firstFailure < 0) {
+            return new GroupPublishResult(rows.stream().map(OutboxRecord::id).toList(), List.of(), List.of());
+        }
+
+        List<Long> publishedIds = rows.subList(0, firstFailure).stream().map(OutboxRecord::id).toList();
+        List<Long> pendingTailIds = rows.subList(firstFailure + 1, rows.size()).stream()
+                .map(OutboxRecord::id)
+                .toList();
+        return new GroupPublishResult(
+                publishedIds,
+                List.of(new FailedPublish(rows.get(firstFailure), failure)),
+                pendingTailIds);
+    }
+
+    private void awaitBatch(List<CompletableFuture<?>> sends) {
+        if (sends.isEmpty()) {
+            return;
+        }
         try {
-            kafkaTemplate.send(row.topic(), row.eventKey(), row.payload())
+            CompletableFuture.allOf(sends.toArray(CompletableFuture[]::new))
                     .get(properties.getOutbox().getSendTimeout().toMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        } catch (Exception ignored) {
+            // Inspect every future below so the first failed stream row remains the retry boundary.
+        }
+    }
+
+    private Exception completionFailure(CompletableFuture<?> send) {
+        if (!send.isDone()) {
+            return new TimeoutException("Kafka outbox batch send timed out");
+        }
+        try {
+            send.join();
             return null;
-        } catch (Exception ex) {
+        } catch (CompletionException ex) {
+            return ex.getCause() instanceof Exception cause ? cause : ex;
+        } catch (CancellationException ex) {
             return ex;
         }
     }
@@ -218,15 +259,6 @@ public class OutboxPublisher {
         }
     }
 
-    private Map<OutboxKey, List<OutboxRecord>> groupByTopicKey(List<OutboxRecord> rows) {
-        Map<OutboxKey, List<OutboxRecord>> groups = new LinkedHashMap<>();
-        for (OutboxRecord row : rows) {
-            groups.computeIfAbsent(new OutboxKey(row.topic(), row.eventKey()), ignored -> new ArrayList<>())
-                    .add(row);
-        }
-        return groups;
-    }
-
     private ThreadFactory threadFactory() {
         AtomicInteger counter = new AtomicInteger();
         return task -> {
@@ -236,10 +268,16 @@ public class OutboxPublisher {
         };
     }
 
-    private record OutboxKey(String topic, String eventKey) {
+    private record GroupPublishResult(
+            List<Long> publishedIds,
+            List<FailedPublish> failures,
+            List<Long> pendingTailIds) {
     }
 
-    private record GroupPublishResult(List<Long> publishedIds, List<FailedPublish> failures) {
+    private record QueuedGroup(
+            List<OutboxRecord> rows,
+            List<CompletableFuture<?>> sends,
+            Exception synchronousFailure) {
     }
 
     private record FailedPublish(OutboxRecord row, Exception error) {

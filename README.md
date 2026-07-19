@@ -13,6 +13,8 @@ Production processes run one product line each with isolated topics, consumer gr
   user-partitioned account commands.
 - Cross-service consistency uses local transactions, transactional outbox, at-least-once Kafka delivery,
   and idempotent consumers. It does not use XA.
+- Trading order and matching outboxes claim a capped contiguous prefix per `topic + eventKey` with one
+  pending-row window scan and MVCC compare-and-set, pipeline independent streams concurrently, and batch-mark Kafka acknowledgements.
 - User positions are read only from a Redis Hash projection. Open-order reads prefer a Redis ZSET/Hash
   projection. Redis never authorizes fills, cancellations, funds movements, or liquidation.
 - Account commands use `<PRODUCT_LINE>:<userId>` as their Kafka key and are serialized across 32 partitions.
