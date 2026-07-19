@@ -286,29 +286,15 @@ that symbol. In that flat snapshot, `entry_price_ticks` and `mark_price_ticks` a
 zero unrealized PnL and zero maintenance margin. This prevents `latestPositions` from showing stale nonzero exposure
 after a full close.
 
-Risk, funding, liquidation, and ADL take one fresh immutable snapshot from their local Kafka mark-price
-cache, require the event's exact instrument version, and combine it with PostgreSQL account/instrument
-state. They calculate contract notional/PnL/margin amounts through shared Java `PerpetualContractMath`
-long formulas with exact integer intermediates; none reads the mark-price audit table.
+Risk-provider projects complete account risk groups from PostgreSQL into Redis and maintains a
+`symbol + instrument_version -> group_id` reverse index. Mark-price Kafka updates read only affected
+groups from Redis, require the exact pinned instrument version, and use cached immutable instrument/bracket
+metadata. Funding, liquidation, and ADL still revalidate their authoritative PostgreSQL state. All contract
+notional/PnL/margin amounts use shared exact-integer `PerpetualContractMath`; none reads the mark-price audit table.
 
-`risk_scan_leases` coordinates active-active risk providers by `user_id + settle_asset`:
-
-- `owner_id`: current scanner node for the account asset group.
-- `lease_until`: when another node may take over if the owner stops renewing.
-- `updated_at`: local lease update time.
-
-Primary key:
-
-```sql
-PRIMARY KEY (user_id, settle_asset)
-```
-
-The expiry index keeps stale-owner cleanup and operational inspection cheap:
-
-```sql
-CREATE INDEX risk_scan_leases_expiry_idx
-    ON risk_scan_leases (lease_until);
-```
+Risk ids come from native PostgreSQL sequences. A write transaction allocates each required sequence in one
+batch, then batch-inserts account snapshots, position snapshots, liquidation candidates, and candidate Outbox rows.
+Native sequences may contain gaps after rollback; they must never move backwards.
 
 `risk_liquidation_candidates` stores liquidation inputs. A candidate is not execution proof; the
 liquidation provider must re-check latest risk before submitting a reduce-only close order.
@@ -317,19 +303,19 @@ Core indexes:
 
 ```sql
 CREATE UNIQUE INDEX risk_liquidation_candidates_snapshot_uidx
-    ON risk_liquidation_candidates (snapshot_id, user_id, symbol, margin_mode);
+    ON risk_liquidation_candidates (product_line, snapshot_id, user_id, symbol, margin_mode, position_side);
 
 CREATE UNIQUE INDEX risk_liquidation_candidates_active_uidx
-    ON risk_liquidation_candidates (user_id, symbol, margin_mode)
+    ON risk_liquidation_candidates (product_line, user_id, symbol, margin_mode, position_side)
     WHERE status IN ('NEW', 'PROCESSING');
 
 CREATE INDEX risk_liquidation_candidates_status_idx
-    ON risk_liquidation_candidates (status, event_time ASC);
+    ON risk_liquidation_candidates (product_line, status, event_time ASC);
 ```
 
-`risk_scan_leases` prevents live nodes from concurrently writing snapshots for the same `user_id + settle_asset`.
-The active candidate unique index is the second guard: it prevents duplicate live liquidation
-candidates for the same account position even after lease failover or replay. Once the prior
+Redis projection readiness is fail-closed and a rebuild clears the product-line projection before repopulating it.
+The active candidate unique index prevents duplicate live liquidation candidates for the same account position
+during concurrent mark updates or Kafka replay. Once the prior
 candidate is `COMPLETED` or `CANCELED`, a later scan may create the next staged liquidation candidate if the account is still unsafe.
 Risk insertion should target only the partial active-candidate index for `DO NOTHING`; candidate-id
 or snapshot uniqueness conflicts are data-integrity issues and must fail rather than being treated

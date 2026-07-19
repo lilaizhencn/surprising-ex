@@ -154,14 +154,16 @@ public class AccountUserCommandProcessor {
                         readPayload(command, FundingSettlementAccountCommand.class);
                 long balanceAfter = fundingSettlementRepository.apply(command.productLine(), command.userId(),
                         command.commandId(), funding, Instant.now());
-                if (funding.amountUnits() < 0) {
-                    accountRepository.positions(command.productLine(), command.userId(), funding.positionSide())
-                            .stream()
-                            .filter(position -> position.marginMode() == funding.marginMode())
-                            .forEach(position -> positionCacheSynchronizer.schedule(
-                                    command.productLine(), command.userId(), position.symbol(),
-                                    position.marginMode(), position.positionSide()));
-                }
+                accountRepository.positions(command.productLine(), command.userId(), funding.positionSide())
+                        .stream()
+                        .filter(position -> position.symbol().equals(funding.symbol()))
+                        .filter(position -> position.marginMode() == funding.marginMode())
+                        .forEach(position -> {
+                            var event = outboxRepository.enqueuePositionUpdated(
+                                    properties.getKafka().getPositionEventsTopic(), funding.paymentId(), position,
+                                    Instant.now(), command.traceId());
+                            positionCacheSynchronizer.schedule(event.cacheEvent());
+                        });
                 Map<String, Object> result = new LinkedHashMap<>();
                 result.put("settlementId", funding.settlementId());
                 result.put("paymentId", funding.paymentId());

@@ -69,9 +69,6 @@ public class RiskController {
         if (request.calculationEnabled() != null) {
             properties.getCalculation().setEnabled(request.calculationEnabled());
         }
-        if (request.coordinationEnabled() != null) {
-            properties.getCoordination().setEnabled(request.coordinationEnabled());
-        }
         if (request.scanDelayMs() != null) {
             properties.getCalculation().setScanDelayMs(nonNegative(request.scanDelayMs(), "scanDelayMs"));
         }
@@ -96,15 +93,9 @@ public class RiskController {
         calculation.put("maxMarkAge", properties.getCalculation().getMaxMarkAge().toString());
         calculation.put("scanBatchSize", properties.getCalculation().getScanBatchSize());
 
-        Map<String, Object> coordination = new LinkedHashMap<>();
-        coordination.put("enabled", properties.getCoordination().isEnabled());
-        coordination.put("nodeId", properties.getCoordination().getNodeId());
-        coordination.put("leaseDuration", properties.getCoordination().getLeaseDuration().toString());
-
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("scope", "runtime");
         response.put("calculation", calculation);
-        response.put("coordination", coordination);
         return response;
     }
 
@@ -124,7 +115,6 @@ public class RiskController {
 
     public record RuntimeConfigUpdate(
             Boolean calculationEnabled,
-            Boolean coordinationEnabled,
             Long scanDelayMs,
             Long warningMarginRatioPpm,
             Long liquidationMarginRatioPpm,

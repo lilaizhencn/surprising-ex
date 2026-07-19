@@ -87,9 +87,8 @@ public class LiquidationService {
                     LiquidationOrderStatus.CANCELED, "NO_OPEN_POSITION");
             return;
         }
-        var pricingInput = liquidationRepository.latestPricingInput(candidate.userId(), candidate.symbol(),
-                candidate.marginMode(), candidate.positionSide(), candidate.instrumentVersion(),
-                properties.getRisk().getMaxSnapshotAge())
+        var pricingInput = liquidationRepository.pricingInput(candidate.snapshotId(), candidate.userId(), candidate.symbol(),
+                candidate.marginMode(), candidate.positionSide(), candidate.instrumentVersion())
                 .orElseThrow(() -> new IllegalStateException("fresh liquidation pricing input not found"));
         if (pricingInput.signedQuantitySteps() != closeState.get().signedQuantitySteps()) {
             liquidationRepository.markCandidate(candidate.candidateId(), "CANCELED");
@@ -237,11 +236,11 @@ public class LiquidationService {
     private RiskStatus latestRiskStatus(com.surprising.liquidation.provider.model.ClaimedCandidate candidate) {
         if (candidate.marginMode() == MarginMode.CROSS) {
             return liquidationRepository.latestRiskStatus(candidate.userId(), candidate.accountType(),
-                    candidate.settleAsset(), properties.getRisk().getMaxSnapshotAge());
+                    candidate.settleAsset(), candidate.snapshotId());
         }
         return liquidationRepository.latestRiskStatus(candidate.userId(), candidate.symbol(),
                 candidate.marginMode(), candidate.positionSide(), candidate.instrumentVersion(),
-                properties.getRisk().getMaxSnapshotAge());
+                candidate.snapshotId());
     }
 
     private LifecycleUpdate lifecycleUpdate(MatchResultEvent event) {

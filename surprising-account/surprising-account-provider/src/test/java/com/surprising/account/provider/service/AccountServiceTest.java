@@ -220,7 +220,7 @@ class AccountServiceTest {
 
         assertThat(settled).isEqualTo(1);
         assertThat(repository.positionState(2002L, symbol))
-                .isEqualTo(new PositionState(0L, 0L, 0L, 300_000L));
+                .isEqualTo(new PositionState(0L, 4L, 0L, 300_000L));
         assertThat(repository.lifecyclePnlByUser).containsEntry(2002L, 300_000L);
         assertThat(repository.lifecycleAccountTypes).containsExactly(AccountType.USDT_DELIVERY);
         assertThat(repository.lifecycleReferences).containsExactly(
@@ -253,7 +253,7 @@ class AccountServiceTest {
 
         assertThat(settled).isEqualTo(1);
         assertThat(repository.positionState(2002L, symbol))
-                .isEqualTo(new PositionState(0L, 0L, 0L, 300_000L));
+                .isEqualTo(new PositionState(0L, 4L, 0L, 300_000L));
         assertThat(repository.lifecycleReferences).containsExactly(
                 "DELIVERY_SETTLEMENT:BTC-USDT-DELIVERY:4:2002:CROSS:NET");
     }
@@ -298,7 +298,7 @@ class AccountServiceTest {
 
         assertThat(settled).isEqualTo(1);
         assertThat(repository.positionState(2002L, symbol))
-                .isEqualTo(new PositionState(0L, 0L, 0L, 60L));
+                .isEqualTo(new PositionState(0L, 6L, 0L, 60L));
         assertThat(repository.lifecyclePnlByUser).containsEntry(2002L, 100L);
         assertThat(repository.lifecycleAccountTypes).containsExactly(AccountType.OPTION);
         assertThat(repository.lifecycleReferences).containsExactly(
@@ -329,7 +329,7 @@ class AccountServiceTest {
 
         assertThat(settled).isEqualTo(1);
         assertThat(repository.positionState(2002L, symbol))
-                .isEqualTo(new PositionState(0L, 0L, 0L, 60L));
+                .isEqualTo(new PositionState(0L, 6L, 0L, 60L));
         assertThat(repository.lifecycleReferences).containsExactly(
                 "OPTION_EXERCISE:BTC-USDT-260925-70000-C:6:2002:CROSS:NET");
     }
@@ -354,9 +354,9 @@ class AccountServiceTest {
 
         assertThat(settled).isEqualTo(2);
         assertThat(repository.positionState(1001L, symbol))
-                .isEqualTo(new PositionState(0L, 0L, 0L, 66L));
+                .isEqualTo(new PositionState(0L, 6L, 0L, 66L));
         assertThat(repository.positionState(2002L, symbol))
-                .isEqualTo(new PositionState(0L, 0L, 0L, -66L));
+                .isEqualTo(new PositionState(0L, 6L, 0L, -66L));
         assertThat(repository.lifecyclePnlByUser).containsEntry(1001L, 90L).containsEntry(2002L, -90L);
         assertThat(repository.lifecycleAccountTypes).containsExactly(AccountType.OPTION, AccountType.OPTION);
         assertThat(repository.releasedPositionMargin)
@@ -388,9 +388,9 @@ class AccountServiceTest {
 
         assertThat(settled).isEqualTo(2);
         assertThat(repository.positionState(1001L, symbol))
-                .isEqualTo(new PositionState(0L, 0L, 0L, -10L));
+                .isEqualTo(new PositionState(0L, 6L, 0L, -10L));
         assertThat(repository.positionState(2002L, symbol))
-                .isEqualTo(new PositionState(0L, 0L, 0L, 10L));
+                .isEqualTo(new PositionState(0L, 6L, 0L, 10L));
         assertThat(repository.lifecyclePnlByUser).containsEntry(1001L, 0L).containsEntry(2002L, 0L);
         assertThat(repository.releasedPositionMargin)
                 .containsEntry(new PositionKey(1001L, symbol, MarginMode.CROSS), 2L)

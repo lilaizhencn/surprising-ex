@@ -315,8 +315,8 @@ The root `init.sql` creates:
 - `account_margin_reservations`: initial margin reserved by order entry.
 - `account_position_margins`: margin migrated into live positions after fills.
 - `account_outbox_events`: account-side Kafka outbox rows, used for position update events and actual liquidation-fee settlement events.
-- `risk_sequences`: database-allocated risk snapshot and candidate ids.
-- `risk_scan_leases`: active risk scanner ownership keyed by `(user_id, settle_asset)`.
+- `risk_snapshot_id_seq`, `risk_event_id_seq`, `risk_liquidation_candidate_id_seq`, and
+  `risk_outbox_id_seq`: native PostgreSQL sequences allocated once per risk write batch.
 - `risk_account_snapshots`: account-level margin snapshots keyed by `snapshot_id`.
 - `risk_position_snapshots`: position-level risk snapshots keyed by `(snapshot_id, symbol)`.
 - `risk_liquidation_candidates`: liquidation inputs with one live `NEW/PROCESSING` candidate per `(user_id, symbol)`.
@@ -382,19 +382,21 @@ Recommended production settings:
 - The default configs set dedicated thread-name prefixes per provider, for example `order-scheduler-`, `matching-scheduler-`, `risk-scheduler-`, and larger pools for combined providers such as `trading-entry`, `price`, and `margin-ops`.
 - In production, tune `SPRING_TASK_SCHEDULING_POOL_SIZE` per process when scheduled work becomes heavier. Do not use one undersized shared scheduler for outbox publishing, risk scans, funding settlement, and market-maker refresh loops.
 
-## Risk Provider Coordination
+## Risk Redis Projection
 
-- Keep `surprising.risk.coordination.enabled=true` when more than one risk-provider instance is running.
-- Set `surprising.risk.coordination.node-id` to a stable hostname or instance id. The default config uses `HOSTNAME`; if it is empty, the process generates a local random id.
-- Keep `surprising.risk.coordination.lease-duration` longer than the scan interval and shorter than your tolerated failover delay. The default is `15s` with a `1s` scan delay.
 - Risk consumes `surprising.linear-perp.account.position.events.v1` in durable Kafka batches. Before touching PostgreSQL it derives
   `userId + accountType + settleAsset` directly from the complete event, coalesces every exact
-  `symbol + marginMode + positionSide` to its highest revision, and scans each affected group once. It does not query
-  instruments merely to resolve an event target. A failed batch leaves its offsets uncommitted for Kafka retry.
-  Keyset-paginated scheduled scans remain the authoritative fallback, and both paths claim `risk_scan_leases` before
-  calculating and writing a group.
+  `symbol + marginMode + positionSide` to its highest revision, reloads each affected authoritative account group once,
+  and replaces the complete Redis group. A failed batch removes readiness and leaves its offsets uncommitted for retry.
+- Redis stores complete group state and a `symbol + instrumentVersion -> groupId` reverse index. Mark-price updates read
+  only indexed groups and calculate fixed-point risk from Redis plus cached immutable instrument/bracket metadata. A
+  keyset PostgreSQL projection rebuild runs at startup and periodically reconciles Redis; there is no scan-lease or
+  PostgreSQL risk-calculation fallback path.
+- Each affected group is evaluated in memory before opening the write transaction. One batch allocation is made from
+  each native PostgreSQL sequence, followed by batch inserts for account snapshots, position snapshots, liquidation
+  candidates, and candidate Outbox rows. The active-candidate partial unique index remains the duplicate guard.
 - Keep `surprising.risk.kafka.group-id` identical across risk-provider nodes. Scale provider nodes and listener concurrency within the fixed 32 partitions; capacity beyond that requires a versioned-topic migration. Do not create per-symbol consumers.
-- Do not let risk-provider write snapshots when PostgreSQL is unavailable. Lease, snapshot id, candidate uniqueness, and outbox guarantees all depend on PostgreSQL.
+- Do not let risk-provider write snapshots when PostgreSQL is unavailable. Snapshot ids, candidate uniqueness, and outbox guarantees all depend on PostgreSQL.
 
 ## Kafka Client Identity
 
@@ -519,8 +521,8 @@ Do not point this script at a shared development database. Matching restores ope
 - Index and mark providers use `price_symbol_leases` so only one live node publishes a given `module + symbol`.
 - Index and mark providers use `price_symbol_sequences` so a failover cannot reset sequence numbers.
 - Funding providers also use `price_symbol_leases` and `price_symbol_sequences`; settlement is additionally guarded by `funding_settlements(symbol, funding_time)`.
-- Risk providers use `risk_scan_leases` so only one live node writes snapshots and candidates for a given
-  `userId + accountType + settleAsset`; lease expiry allows another node to take over after the owner dies.
+- Risk-provider Redis readiness is fail-closed. A startup rebuild clears the product-line projection first, rebuilds
+  complete groups and reverse indexes, and publishes readiness only after reaching the end of the keyset scan.
 - Market-maker providers use `market_maker_strategy_leases` so only one live node quotes a given `strategyId + symbol`. If the owner dies, lease expiry allows another node to continue. The module places normal `LIMIT + GTX + postOnly` orders through order-provider and never writes matching state directly.
 - Funding-rate prediction is published directly to `surprising.linear-perp.funding.rate.v1` and cached by symbol; it performs no rate-table or outbox write. At the funding boundary, the owner freezes the cached prediction into one idempotent `FINAL` rate row before settlement. If no current prediction is available, settlement fails closed for that symbol.
 - Funding settlement never holds one transaction across all symbol positions. It scans the partial
@@ -573,18 +575,25 @@ Do not point this script at a shared development database. Matching restores ope
 - The account position-cache consumer retries projection failures without skipping records. Any projection failure removes the product-line Redis readiness marker, so user reads fail closed until Kafka replay or PostgreSQL reconciliation repairs the cache.
 - Trigger-provider consumes account position events. A zero-position event atomically cancels exact-scope, pre-event `PENDING` triggers and enqueues their status events, then removes Redis members after commit. Monitor position-topic lag for the trigger group.
 - Order-provider also consumes account position events in the `order-position-maintenance` group. It serializes each user key, locks that position scope's open reduce-only orders, and emits conditional cancel commands for wrong-side, stale-version, or excess-capacity rows. Account-provider never writes trading order tables.
-- Risk consumes account position events only as scan triggers. It does not trust the event as accounting state; it re-reads positions, balances, deficits, and instruments inside the risk transaction, while mark prices come from one fresh immutable local Kafka-cache snapshot. Missing, stale, or version-mismatched marks skip the whole account risk group.
+- Risk consumes account position events as authoritative projection triggers. It does not trust event accounting values;
+  it reloads the complete position/balance/deficit group from PostgreSQL before replacing Redis. Mark-price updates then
+  use the reverse index and Redis group without rescanning PostgreSQL positions.
 - Funding settlement account ledger, balance, deficit, payment, and incremental settlement completion updates are
   fail-fast. A payment row and its account-command outbox row commit in the same bounded page transaction.
-- Risk snapshot writes, liquidation-candidate outbox enqueue, and outbox publish/failure markers are fail-fast. Only the partial active-candidate `NEW/PROCESSING user_id + symbol + margin_mode` uniqueness conflict may skip a candidate write; candidate-id or snapshot uniqueness conflicts must fail. A successfully inserted candidate must always be readable and enqueued before the transaction commits.
-- Risk scan leases are best-effort ownership, not accounting state. A node may take over only when the prior row is owned by itself or `lease_until <= updated_at`; clock synchronization matters for predictable failover.
+- Batched risk snapshot writes, liquidation-candidate Outbox enqueue, and outbox publish/failure markers are fail-fast.
+  Only the partial active-candidate `NEW/PROCESSING user_id + symbol + margin_mode + position_side` uniqueness conflict
+  may skip a candidate row; every successfully inserted candidate is serialized directly from the same immutable batch
+  input and enqueued before the transaction commits.
 - Risk scans can be paused with `surprising.risk.calculation.enabled=false`; both the scheduled scanner and position-event trigger return before reading positions or opening a transaction.
 - Insurance providers split `account_deficits` rows with `FOR UPDATE SKIP LOCKED` and lock the fund balance row before every deduction.
 - Insurance coverage can be paused with `surprising.insurance.coverage.enabled=false`; deficits remain explicit and unchanged.
 - If the insurance fund is empty, deficits remain in `account_deficits` and will be retried after the fund is topped up.
 - Liquidation providers lock live positions, preempt existing same-side reduce-only close orders, then submit a staged close order sized from the live position.
 - Liquidation execution can be paused with `surprising.liquidation.execution.enabled=false`; the service fails before claiming the candidate so Kafka replay or a later risk scan can retry after the pause is lifted.
-- Liquidation risk re-checks require a fresh `risk_position_snapshots` row for the candidate `user_id + symbol + margin_mode + instrument_version`. If the latest snapshot is older than `surprising.liquidation.risk.max-snapshot-age` or missing, the candidate is canceled rather than executed.
+- Liquidation risk re-checks require a `risk_position_snapshots` row for the candidate
+  `user_id + symbol + margin_mode + position_side + instrument_version` whose `snapshot_id` is not older than the
+  candidate snapshot. A missing row or recovered status cancels the candidate. Pricing separately requires a fresh
+  mark event within `surprising.liquidation.risk.max-mark-age`.
 - Liquidation pre-cancel commands and the liquidation place command must keep the same symbol Kafka key so the matching provider receives them in partition order. `CANCEL_REQUESTED` orders are re-canceled because they may still be live in exchange-core.
 - Liquidation order creation is an atomic outbox write. `trading_orders` uniqueness conflicts are not suppressed; if a `trading_orders`, `trading_order_events`, `trading_outbox_events`, or `liquidation_orders` audit write fails or is skipped, the provider fails the transaction instead of marking the candidate completed.
 - Liquidation candidate status updates and liquidation outbox publish/failure markers are fail-fast; a missing row means state has diverged and should be investigated before replay continues. The liquidation publisher first leases only `LIQUIDATION_ORDER` rows, then waits for Kafka outside the database transaction; ordinary `ORDER` rows, including liquidation-requested cancels, remain owned by order-provider.
@@ -601,7 +610,8 @@ Do not point this script at a shared development database. Matching restores ope
 ## Troubleshooting
 
 - `price_symbol_leases` owner does not move after a node dies: wait until `lease_until`; if it is far in the future, verify node clock synchronization.
-- `risk_scan_leases` owner does not move after a risk node dies: wait until `lease_until`, confirm all nodes have synchronized clocks, and verify `surprising.risk.coordination.node-id` is unique per live instance.
+- Risk candidates stop after a node restart: check the product-line Redis readiness marker, group registry, and reverse
+  indexes; readiness must remain false until the PostgreSQL keyset rebuild completes.
 - Price sequence has gaps: expected after failed attempts. Investigate only if a sequence moves backwards, which should not happen.
 - Index price unavailable: inspect the latest index-topic snapshot status, then `price_index_components` for
   `STALE`, `OUTLIER`, `ERROR`, or conversion failure reasons.

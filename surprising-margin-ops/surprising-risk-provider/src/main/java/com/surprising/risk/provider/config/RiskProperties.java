@@ -10,8 +10,8 @@ public class RiskProperties {
 
     private Kafka kafka = new Kafka();
     private Calculation calculation = new Calculation();
-    private Coordination coordination = new Coordination();
     private Outbox outbox = new Outbox();
+    private RedisState redisState = new RedisState();
 
     public Kafka getKafka() {
         return kafka;
@@ -29,20 +29,20 @@ public class RiskProperties {
         this.calculation = calculation;
     }
 
-    public Coordination getCoordination() {
-        return coordination;
-    }
-
-    public void setCoordination(Coordination coordination) {
-        this.coordination = coordination;
-    }
-
     public Outbox getOutbox() {
         return outbox;
     }
 
     public void setOutbox(Outbox outbox) {
         this.outbox = outbox;
+    }
+
+    public RedisState getRedisState() {
+        return redisState;
+    }
+
+    public void setRedisState(RedisState redisState) {
+        this.redisState = redisState;
     }
 
     public static class Kafka {
@@ -304,33 +304,61 @@ public class RiskProperties {
         }
     }
 
-    public static class Coordination {
-        private boolean enabled = true;
-        private String nodeId;
-        private Duration leaseDuration = Duration.ofSeconds(15);
+    public static class RedisState {
+        private String keyPrefix = "surprising:risk-state:v2";
+        private Duration stateTtl = Duration.ofMinutes(10);
+        private Duration readyTtl = Duration.ofSeconds(30);
+        private Duration unchangedTriggerInterval = Duration.ofSeconds(30);
+        private int triggerBatchSize = 250;
+        private int triggerConcurrency = 4;
 
-        public boolean isEnabled() {
-            return enabled;
+        public String getKeyPrefix() {
+            return keyPrefix;
         }
 
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
+        public void setKeyPrefix(String keyPrefix) {
+            this.keyPrefix = keyPrefix;
         }
 
-        public String getNodeId() {
-            return nodeId;
+        public Duration getStateTtl() {
+            return stateTtl;
         }
 
-        public void setNodeId(String nodeId) {
-            this.nodeId = nodeId;
+        public void setStateTtl(Duration stateTtl) {
+            this.stateTtl = stateTtl;
         }
 
-        public Duration getLeaseDuration() {
-            return leaseDuration;
+        public Duration getReadyTtl() {
+            return readyTtl;
         }
 
-        public void setLeaseDuration(Duration leaseDuration) {
-            this.leaseDuration = leaseDuration;
+        public void setReadyTtl(Duration readyTtl) {
+            this.readyTtl = readyTtl;
+        }
+
+        public Duration getUnchangedTriggerInterval() {
+            return unchangedTriggerInterval;
+        }
+
+        public void setUnchangedTriggerInterval(Duration unchangedTriggerInterval) {
+            this.unchangedTriggerInterval = unchangedTriggerInterval;
+        }
+
+        public int getTriggerBatchSize() {
+            return triggerBatchSize;
+        }
+
+        public void setTriggerBatchSize(int triggerBatchSize) {
+            this.triggerBatchSize = triggerBatchSize;
+        }
+
+        public int getTriggerConcurrency() {
+            return triggerConcurrency;
+        }
+
+        public void setTriggerConcurrency(int triggerConcurrency) {
+            this.triggerConcurrency = triggerConcurrency;
         }
     }
+
 }

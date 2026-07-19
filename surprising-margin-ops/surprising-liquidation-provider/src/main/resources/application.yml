@@ -48,7 +48,7 @@ surprising:
       match-results-topic: surprising.perp.match.results.v1
       order-commands-topic: surprising.perp.order.commands.v1
       order-events-topic: surprising.perp.order.events.v1
-      concurrency: 2
+      concurrency: 8
       max-poll-records: 500
     outbox:
       batch-size: 200
@@ -66,7 +66,7 @@ surprising:
       full-close-margin-ratio-ppm: 3000000
       min-close-steps: 1
     risk:
-      max-snapshot-age: 5s
+      max-mark-age: 5s
     execution:
       enabled: true
       liquidation-fee-rate-ppm: 3000

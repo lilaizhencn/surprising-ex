@@ -42,33 +42,36 @@ class LiquidationRepositoryTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    void latestRiskStatusRequiresFreshSnapshot() {
+    void latestRiskStatusRequiresCandidateOrNewerSnapshot() {
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("LINEAR_PERPETUAL"),
                 eq("USDT_PERPETUAL"),
-                eq("USDT"), eq(7000L)))
+                eq("USDT"), eq(7101L)))
                 .thenReturn(List.of(RiskStatus.LIQUIDATION));
 
-        RiskStatus status = repository.latestRiskStatus(1001L, "USDT", Duration.ofSeconds(7));
+        RiskStatus status = repository.latestRiskStatus(1001L, "USDT_PERPETUAL", "USDT", 7101L);
 
         assertThat(status).isEqualTo(RiskStatus.LIQUIDATION);
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(1001L), eq("LINEAR_PERPETUAL"), eq("USDT_PERPETUAL"),
-                eq("USDT"), eq(7000L));
+                eq("USDT"), eq(7101L));
         assertThat(sql.getValue())
                 .contains("product_line = ?")
-                .contains("event_time >= now() - (? * INTERVAL '1 millisecond')");
+                .contains("snapshot_id >= ?")
+                .contains("ORDER BY snapshot_id DESC")
+                .doesNotContain("event_time >=");
     }
 
     @Test
-    void staleOrMissingRiskSnapshotIsTreatedAsNormal() {
+    void missingCandidateRiskSnapshotFailsClosed() {
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(), eq(1001L), eq("LINEAR_PERPETUAL"), eq("USDT_PERPETUAL"),
-                eq("USDT"), eq(5000L)))
+                eq("USDT"), eq(7101L)))
                 .thenReturn(List.of());
 
-        assertThat(repository.latestRiskStatus(1001L, "USDT", Duration.ofSeconds(5)))
-                .isEqualTo(RiskStatus.NORMAL);
+        assertThatThrownBy(() -> repository.latestRiskStatus(1001L, "USDT_PERPETUAL", "USDT", 7101L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("snapshot missing");
     }
 
     @Test
@@ -78,7 +81,7 @@ class LiquidationRepositoryTest {
                 eq("USDT"), eq(5000L)))
                 .thenReturn(List.of(RiskStatus.WARNING));
 
-        RiskStatus status = repository.latestRiskStatus(1001L, "USDT_DELIVERY", "USDT", Duration.ofSeconds(5));
+        RiskStatus status = repository.latestRiskStatus(1001L, "USDT_DELIVERY", "USDT", 5000L);
 
         assertThat(status).isEqualTo(RiskStatus.WARNING);
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
@@ -288,7 +291,7 @@ class LiquidationRepositoryTest {
     }
 
     @Test
-    void latestPricingInputUsesFreshRiskPositionAndAccountSnapshot() throws Exception {
+    void pricingInputUsesExactCandidateRiskSnapshot() throws Exception {
         LatestMarkPriceCache markPriceCache = mock(LatestMarkPriceCache.class);
         MarkPriceEvent markPrice = mock(MarkPriceEvent.class);
         LiquidationRepository repository = new LiquidationRepository(jdbcTemplate,
@@ -297,8 +300,8 @@ class LiquidationRepositoryTest {
         when(markPrice.instrumentVersion()).thenReturn(8L);
         when(markPrice.markPriceTicks()).thenReturn(100L);
         when(jdbcTemplate.query(contains("FROM risk_position_snapshots ps"), anyRowMapper(),
-                eq(100L), eq(2002L), eq("LINEAR_PERPETUAL"), eq("BTC-USDT"), eq("ISOLATED"), eq("NET"), eq(8L),
-                eq(5000L))).thenAnswer(invocation -> {
+                eq(100L), eq(2002L), eq("LINEAR_PERPETUAL"), eq(7301L), eq("BTC-USDT"), eq("ISOLATED"), eq("NET"),
+                eq(8L))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
                     when(rs.getString("contract_type")).thenReturn("LINEAR_PERPETUAL");
@@ -312,18 +315,19 @@ class LiquidationRepositoryTest {
                     return List.of(mapper.mapRow(rs, 0));
                 });
 
-        LiquidationPricingInput input = repository.latestPricingInput(2002L, "BTC-USDT", MarginMode.ISOLATED,
-                8L, Duration.ofSeconds(5)).orElseThrow();
+        LiquidationPricingInput input = repository.pricingInput(7301L, 2002L, "BTC-USDT", MarginMode.ISOLATED,
+                com.surprising.trading.api.model.PositionSide.NET, 8L).orElseThrow();
 
         assertThat(input).isEqualTo(new LiquidationPricingInput(ContractType.LINEAR_PERPETUAL,
                 10L, 100L, 200L, 50L, 1L, 1L, 100_000_000L));
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(100L), eq(2002L), eq("LINEAR_PERPETUAL"), eq("BTC-USDT"),
-                eq("ISOLATED"), eq("NET"), eq(8L), eq(5000L));
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), eq(100L), eq(2002L), eq("LINEAR_PERPETUAL"),
+                eq(7301L), eq("BTC-USDT"), eq("ISOLATED"), eq("NET"), eq(8L));
         assertThat(sql.getValue())
                 .contains("ps.product_line = ?")
                 .contains("acc.product_line = ps.product_line")
-                .contains("ps.event_time >= now() - (? * INTERVAL '1 millisecond')")
+                .contains("ps.snapshot_id = ?")
+                .doesNotContain("ps.event_time >=")
                 .contains("ps.position_margin_units + ps.unrealized_pnl_units")
                 .contains("acc.equity_units");
     }

@@ -1,6 +1,7 @@
 package com.surprising.risk.provider.service;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.risk.api.model.AdminCursorPage;
 import com.surprising.risk.api.model.LiquidationCandidateEvent;
 import com.surprising.risk.api.model.LiquidationCandidateQueryResponse;
@@ -14,11 +15,15 @@ import com.surprising.risk.api.model.RiskPositionUpdatedEvent;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.model.CalculatedPositionRisk;
+import com.surprising.risk.provider.model.CachedRiskGroup;
 import com.surprising.risk.provider.model.PositionRiskTarget;
 import com.surprising.risk.provider.model.RiskGroupKey;
 import com.surprising.risk.provider.repository.RiskOutboxRepository;
+import com.surprising.risk.provider.repository.RiskOutboxRepository.PendingRiskOutboxEvent;
 import com.surprising.risk.provider.repository.RiskRepository;
 import com.surprising.risk.provider.repository.RiskRepository.HighRiskAccount;
+import com.surprising.risk.provider.repository.RiskRepository.LiquidationCandidateWrite;
+import com.surprising.risk.provider.repository.RiskRepository.PositionSnapshotWrite;
 import com.surprising.risk.provider.repository.RiskRepository.RiskRuleOverride;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
 import com.surprising.product.api.ProductLine;
@@ -29,7 +34,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,7 +59,11 @@ public class RiskService {
     private final RiskOutboxRepository outboxRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final TransactionTemplate transactionTemplate;
-    private final String nodeId;
+    private final RedisRiskStateStore stateStore;
+    private final RedisRiskCalculator redisCalculator;
+    private RiskGroupKey reconcileAfter;
+    private boolean initialProjectionComplete;
+    private boolean projectionStarted;
 
     @Autowired
     public RiskService(ObjectMapper objectMapper,
@@ -63,7 +72,9 @@ public class RiskService {
                        RiskSequenceRepository sequenceRepository,
                        RiskOutboxRepository outboxRepository,
                        @Qualifier("riskKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate,
-                       PlatformTransactionManager transactionManager) {
+                       PlatformTransactionManager transactionManager,
+                       RedisRiskStateStore stateStore,
+                       RedisRiskCalculator redisCalculator) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.riskRepository = riskRepository;
@@ -71,7 +82,19 @@ public class RiskService {
         this.outboxRepository = outboxRepository;
         this.kafkaTemplate = kafkaTemplate;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
-        this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
+        this.stateStore = stateStore;
+        this.redisCalculator = redisCalculator;
+    }
+
+    RiskService(ObjectMapper objectMapper,
+                RiskProperties properties,
+                RiskRepository riskRepository,
+                RiskSequenceRepository sequenceRepository,
+                RiskOutboxRepository outboxRepository,
+                KafkaTemplate<String, String> kafkaTemplate,
+                PlatformTransactionManager transactionManager) {
+        this(objectMapper, properties, riskRepository, sequenceRepository, outboxRepository, kafkaTemplate,
+                transactionManager, null, null);
     }
 
     RiskService(ObjectMapper objectMapper,
@@ -80,38 +103,56 @@ public class RiskService {
                 RiskSequenceRepository sequenceRepository,
                 RiskOutboxRepository outboxRepository,
                 PlatformTransactionManager transactionManager) {
-        this(objectMapper, properties, riskRepository, sequenceRepository, outboxRepository, null, transactionManager);
+        this(objectMapper, properties, riskRepository, sequenceRepository, outboxRepository, null,
+                transactionManager, null, null);
     }
 
     @Scheduled(fixedDelayString = "${surprising.risk.calculation.scan-delay-ms:1000}")
-    public void scan() {
+    public synchronized void scan() {
         if (!properties.getCalculation().isEnabled()) {
             return;
         }
+        requireRedisState();
+        ProductLine productLine = properties.getKafka().getProductLine();
+        if (!projectionStarted) {
+            stateStore.clear(productLine);
+            projectionStarted = true;
+        }
         int batchSize = Math.max(1, properties.getCalculation().getScanBatchSize());
-        RiskGroupKey after = null;
-        while (true) {
-            List<RiskGroupKey> groups = riskRepository.riskGroups(properties.getCalculation().getMaxMarkAge(),
-                    after, batchSize);
-            if (groups.isEmpty()) {
-                return;
-            }
-            for (RiskGroupKey key : groups) {
-                after = key;
-                try {
-                    scanRiskGroup(key);
-                } catch (Exception ex) {
-                    log.error("Failed to scan risk group userId={} accountType={} settleAsset={}: {}",
-                            key.userId(), key.accountType(), key.settleAsset(), ex.getMessage(), ex);
+        List<RiskGroupKey> groups = riskRepository.riskGroups(reconcileAfter, batchSize);
+        if (groups.isEmpty()) {
+            reconcileAfter = null;
+            initialProjectionComplete = true;
+            stateStore.markReady(productLine);
+            return;
+        }
+        List<CachedRiskGroup> states = new ArrayList<>(groups.size());
+        List<CachedRiskGroup> changedStates = new ArrayList<>(groups.size());
+        for (RiskGroupKey key : groups) {
+            try {
+                ProjectionUpdate update = refreshState(productLine, key);
+                states.add(update.state());
+                if (update.changed()) {
+                    changedStates.add(update.state());
                 }
+                reconcileAfter = key;
+            } catch (RuntimeException ex) {
+                invalidateProjection();
+                throw ex;
             }
+        }
+        List<CachedRiskGroup> evaluationStates = initialProjectionComplete ? changedStates : states;
+        if (!evaluationStates.isEmpty()) {
+            evaluateBatch(evaluationStates, Map.of());
+        }
+        if (initialProjectionComplete) {
+            stateStore.markReady(productLine);
         }
     }
 
     /**
      * Event-driven fast path. A Kafka poll can contain many fills for one user, so events are reduced to the latest
-     * revision per exact position and every user/account/settle group is scanned only once. The complete account event
-     * is sufficient to derive the risk group; this path intentionally performs no target-resolution query.
+     * revision per exact position and every user/account/settle group is projected and evaluated only once.
      */
     public void scanPositionUpdates(List<PositionUpdatedEvent> events) {
         if (!properties.getCalculation().isEnabled()) {
@@ -127,36 +168,123 @@ public class RiskService {
             groups.computeIfAbsent(target.riskGroupKey(), ignored -> new PositionEventGroup())
                     .merge(event.revision(), target, event.traceId());
         }
-        for (Map.Entry<RiskGroupKey, PositionEventGroup> entry : groups.entrySet()) {
-            scanRiskGroup(entry.getKey(), entry.getValue().targets(), entry.getValue().traceId());
+        requireRedisState();
+        ProductLine productLine = properties.getKafka().getProductLine();
+        List<CachedRiskGroup> states = new ArrayList<>(groups.size());
+        try {
+            for (RiskGroupKey key : groups.keySet()) {
+                states.add(refreshState(productLine, key).state());
+            }
+        } catch (RuntimeException ex) {
+            invalidateProjection();
+            throw ex;
+        }
+        evaluateBatch(states, groups);
+        if (initialProjectionComplete) {
+            stateStore.markReady(productLine);
         }
     }
 
-    private boolean ownsRiskGroup(RiskGroupKey key) {
-        if (!properties.getCoordination().isEnabled()) {
-            return true;
+    public void scanMarkPrice(MarkPriceEvent markPrice) {
+        requireRedisState();
+        ProductLine productLine = properties.getKafka().getProductLine();
+        if (!stateStore.ready(productLine)) {
+            throw new IllegalStateException("Redis risk state is not ready for " + productLine);
         }
-        return riskRepository.acquireScanLease(key, nodeId, properties.getCoordination().getLeaseDuration());
+        List<String> groupIds = stateStore.groupIds(productLine, markPrice.symbol(), markPrice.instrumentVersion());
+        int batchSize = Math.max(1, properties.getRedisState().getTriggerBatchSize());
+        for (int start = 0; start < groupIds.size(); start += batchSize) {
+            int end = Math.min(groupIds.size(), start + batchSize);
+            List<CachedRiskGroup> states = stateStore.groups(productLine, groupIds.subList(start, end));
+            if (states.size() != end - start) {
+                stateStore.markNotReady(productLine);
+                throw new IllegalStateException("Redis risk reverse index references missing group state");
+            }
+            evaluateBatch(states, Map.of());
+        }
     }
 
-    private void scanRiskGroup(RiskGroupKey key) {
-        scanRiskGroup(key, List.of(), null);
+    private ProjectionUpdate refreshState(ProductLine productLine, RiskGroupKey key) {
+        CachedRiskGroup state = riskRepository.cachedRiskGroup(key);
+        return new ProjectionUpdate(state, stateStore.replace(productLine, state));
     }
 
-    private void scanRiskGroup(RiskGroupKey key, List<PositionRiskTarget> eventTargets, String traceId) {
-        if (!ownsRiskGroup(key)) {
-            return;
+    private void evaluateBatch(List<CachedRiskGroup> states,
+                               Map<RiskGroupKey, PositionEventGroup> eventGroups) {
+        Instant now = Instant.now();
+        List<GroupEvaluation> evaluations = new ArrayList<>(states.size());
+        int positionWriteCount = 0;
+        int candidateCount = 0;
+        for (CachedRiskGroup state : states) {
+            PositionEventGroup eventGroup = eventGroups.get(state.key());
+            GroupEvaluation evaluation = evaluateGroup(state.key(), state.walletBalanceUnits(),
+                    redisCalculator.calculate(state), eventGroup == null ? List.of() : eventGroup.targets(),
+                    now, eventGroup == null ? null : eventGroup.traceId());
+            evaluations.add(evaluation);
+            positionWriteCount += evaluation.positions().size() + evaluation.flatPositions().size();
+            candidateCount += evaluation.candidateCount();
         }
+
+        int totalPositionWrites = positionWriteCount;
+        int totalCandidates = candidateCount;
         List<RealtimeRiskEvent> realtimeEvents = new ArrayList<>();
         transactionTemplate.executeWithoutResult(status -> {
-            List<CalculatedPositionRisk> positions = riskRepository.calculatePositions(key,
-                    properties.getCalculation().getMaxMarkAge());
-            if (positions.isEmpty() && riskRepository.hasOpenPositions(key)) {
-                return;
+            List<Long> snapshotIds = sequenceRepository.nextSequences("risk-snapshot", evaluations.size());
+            List<Long> eventIds = sequenceRepository.nextSequences("risk-event",
+                    evaluations.size() + totalPositionWrites);
+            List<Long> candidateIds = sequenceRepository.nextSequences("liquidation-candidate", totalCandidates);
+            int eventIndex = 0;
+            int candidateIndex = 0;
+            List<RiskAccountSnapshotResponse> accounts = new ArrayList<>(evaluations.size());
+            List<PositionSnapshotWrite> positions = new ArrayList<>(totalPositionWrites);
+            List<LiquidationCandidateWrite> candidates = new ArrayList<>(totalCandidates);
+
+            for (int groupIndex = 0; groupIndex < evaluations.size(); groupIndex++) {
+                GroupEvaluation evaluation = evaluations.get(groupIndex);
+                RiskAccountSnapshotResponse account = evaluation.account(snapshotIds.get(groupIndex));
+                accounts.add(account);
+                stageAccountRisk(eventIds.get(eventIndex++), account, evaluation.traceId(), realtimeEvents);
+                for (EvaluatedPosition evaluatedPosition : evaluation.positions()) {
+                    CalculatedPositionRisk position = evaluatedPosition.position();
+                    positions.add(new PositionSnapshotWrite(account.snapshotId(), position,
+                            evaluatedPosition.marginRatioPpm(), evaluatedPosition.status(), evaluation.eventTime()));
+                    stagePositionRisk(eventIds.get(eventIndex++), account.snapshotId(), position,
+                            evaluatedPosition.marginRatioPpm(), evaluatedPosition.status(), evaluation.eventTime(),
+                            evaluation.traceId(), realtimeEvents);
+                    if (evaluatedPosition.liquidation()) {
+                        candidates.add(new LiquidationCandidateWrite(candidateIds.get(candidateIndex++), account,
+                                position, evaluatedPosition.marginRatioPpm(), evaluatedPosition.equityUnits(),
+                                evaluation.eventTime()));
+                    }
+                }
+                for (CalculatedPositionRisk flatPosition : evaluation.flatPositions()) {
+                    positions.add(new PositionSnapshotWrite(account.snapshotId(), flatPosition, 0L,
+                            RiskStatus.NORMAL, evaluation.eventTime()));
+                    stagePositionRisk(eventIds.get(eventIndex++), account.snapshotId(), flatPosition, 0L,
+                            RiskStatus.NORMAL, evaluation.eventTime(), evaluation.traceId(), realtimeEvents);
+                }
             }
-            scanGroup(key, positions, eventTargets, Instant.now(), traceId, realtimeEvents);
+
+            riskRepository.saveAccountSnapshots(accounts);
+            riskRepository.savePositionSnapshots(positions);
+            Set<Long> insertedCandidateIds = riskRepository.createLiquidationCandidates(candidates);
+            outboxRepository.enqueue(candidateOutboxEvents(candidates, insertedCandidateIds));
         });
         publishRealtimeEvents(realtimeEvents);
+    }
+
+    private void requireRedisState() {
+        if (stateStore == null || redisCalculator == null) {
+            throw new IllegalStateException("Redis risk state components are required");
+        }
+    }
+
+    synchronized void invalidateProjection() {
+        ProductLine productLine = properties.getKafka().getProductLine();
+        stateStore.markNotReady(productLine);
+        reconcileAfter = null;
+        initialProjectionComplete = false;
+        projectionStarted = false;
     }
 
     public RiskAccountSnapshotResponse latestAccount(long userId, String settleAsset) {
@@ -310,13 +438,12 @@ public class RiskService {
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
-    private void scanGroup(RiskGroupKey key,
-                           List<CalculatedPositionRisk> positions,
-                           List<PositionRiskTarget> eventTargets,
-                           Instant now,
-                           String traceId,
-                           List<RealtimeRiskEvent> realtimeEvents) {
-        long walletBalance = riskRepository.walletBalanceUnits(key.userId(), key.accountType(), key.settleAsset());
+    private GroupEvaluation evaluateGroup(RiskGroupKey key,
+                                          long walletBalance,
+                                          List<CalculatedPositionRisk> positions,
+                                          List<PositionRiskTarget> eventTargets,
+                                          Instant now,
+                                          String traceId) {
         List<CalculatedPositionRisk> crossPositions = positions.stream()
                 .filter(position -> position.marginMode() == MarginMode.CROSS)
                 .toList();
@@ -327,13 +454,8 @@ public class RiskService {
         RiskStatus accountStatus = RiskMath.status(marginRatio,
                 properties.getCalculation().getWarningMarginRatioPpm(),
                 properties.getCalculation().getLiquidationMarginRatioPpm());
-        long snapshotId = sequenceRepository.nextSequence("risk-snapshot");
-        RiskAccountSnapshotResponse account = new RiskAccountSnapshotResponse(snapshotId, key.userId(),
-                key.accountType(), key.settleAsset(), walletBalance, unrealizedPnl, equity, maintenanceMargin, marginRatio,
-                accountStatus, now);
-        riskRepository.saveAccountSnapshot(account);
-        stageAccountRisk(account, traceId, realtimeEvents);
-
+        List<EvaluatedPosition> evaluatedPositions = new ArrayList<>(positions.size());
+        int candidateCount = 0;
         for (CalculatedPositionRisk position : positions) {
             long positionEquity = position.marginMode() == MarginMode.ISOLATED
                     ? RiskMath.equity(position.positionMarginUnits(), position.unrealizedPnlUnits())
@@ -342,13 +464,17 @@ public class RiskService {
             RiskStatus positionStatus = RiskMath.status(positionMarginRatio,
                     properties.getCalculation().getWarningMarginRatioPpm(),
                     properties.getCalculation().getLiquidationMarginRatioPpm());
-            riskRepository.savePositionSnapshot(snapshotId, position, positionMarginRatio, positionStatus, now);
-            stagePositionRisk(snapshotId, position, positionMarginRatio, positionStatus, now, traceId, realtimeEvents);
-            if ((position.marginMode() == MarginMode.CROSS && accountStatus == RiskStatus.LIQUIDATION)
-                    || (position.marginMode() == MarginMode.ISOLATED && positionStatus == RiskStatus.LIQUIDATION)) {
-                createCandidate(account, position, positionMarginRatio, positionEquity, now);
+            boolean liquidation = (position.marginMode() == MarginMode.CROSS
+                    && accountStatus == RiskStatus.LIQUIDATION)
+                    || (position.marginMode() == MarginMode.ISOLATED
+                    && positionStatus == RiskStatus.LIQUIDATION);
+            if (liquidation) {
+                candidateCount++;
             }
+            evaluatedPositions.add(new EvaluatedPosition(position, positionMarginRatio, positionStatus,
+                    positionEquity, liquidation));
         }
+        List<CalculatedPositionRisk> flatPositions = new ArrayList<>();
         for (PositionRiskTarget eventTarget : eventTargets) {
             boolean positionStillOpen = positions.stream()
                     .anyMatch(position -> position.symbol().equals(eventTarget.symbol())
@@ -358,23 +484,25 @@ public class RiskService {
                 CalculatedPositionRisk flatPosition = new CalculatedPositionRisk(eventTarget.userId(),
                         eventTarget.symbol(), eventTarget.marginMode(), eventTarget.positionSide(),
                         eventTarget.instrumentVersion(), eventTarget.settleAsset(), 0L, 0L, 0L, 0L, 0L, 0L, 0L);
-                riskRepository.savePositionSnapshot(snapshotId, flatPosition, 0L, RiskStatus.NORMAL, now);
-                stagePositionRisk(snapshotId, flatPosition, 0L, RiskStatus.NORMAL, now, traceId, realtimeEvents);
+                flatPositions.add(flatPosition);
             }
         }
+        return new GroupEvaluation(key, walletBalance, unrealizedPnl, equity, maintenanceMargin, marginRatio,
+                accountStatus, evaluatedPositions, flatPositions, candidateCount, now, traceId);
     }
 
-    private void stageAccountRisk(RiskAccountSnapshotResponse account,
+    private void stageAccountRisk(long eventId,
+                                  RiskAccountSnapshotResponse account,
                                   String traceId,
                                   List<RealtimeRiskEvent> realtimeEvents) {
-        RiskAccountUpdatedEvent event = RiskAccountUpdatedEvent.from(sequenceRepository.nextSequence("risk-event"),
-                account, traceId);
+        RiskAccountUpdatedEvent event = RiskAccountUpdatedEvent.from(eventId, account, traceId);
         realtimeEvents.add(new RealtimeRiskEvent(properties.getKafka().getAccountRiskEventsTopic(),
                 account.userId() + ":" + account.accountType() + ":" + account.settleAsset(),
                 "RISK_ACCOUNT_UPDATED", payload(event)));
     }
 
-    private void stagePositionRisk(long snapshotId,
+    private void stagePositionRisk(long eventId,
+                                   long snapshotId,
                                    CalculatedPositionRisk position,
                                    long marginRatioPpm,
                                    RiskStatus status,
@@ -382,7 +510,7 @@ public class RiskService {
                                    String traceId,
                                    List<RealtimeRiskEvent> realtimeEvents) {
         RiskPositionUpdatedEvent event = new RiskPositionUpdatedEvent(
-                sequenceRepository.nextSequence("risk-event"),
+                eventId,
                 properties.getKafka().getProductLine(),
                 snapshotId,
                 position.userId(),
@@ -420,37 +548,25 @@ public class RiskService {
         }
     }
 
-    private void createCandidate(RiskAccountSnapshotResponse account,
-                                 CalculatedPositionRisk position,
-                                 long positionMarginRatio,
-                                 long equityUnits,
-                                 Instant now) {
-        long candidateId = sequenceRepository.nextSequence("liquidation-candidate");
-        long insertedId = riskRepository.createLiquidationCandidate(account, position, RiskStatus.LIQUIDATION,
-                positionMarginRatio, equityUnits, candidateId, now);
-        if (insertedId == 0L) {
-            return;
+    private List<PendingRiskOutboxEvent> candidateOutboxEvents(List<LiquidationCandidateWrite> candidates,
+                                                               Set<Long> insertedCandidateIds) {
+        List<PendingRiskOutboxEvent> events = new ArrayList<>(insertedCandidateIds.size());
+        for (LiquidationCandidateWrite candidate : candidates) {
+            if (!insertedCandidateIds.contains(candidate.candidateId())) {
+                continue;
+            }
+            RiskAccountSnapshotResponse account = candidate.account();
+            CalculatedPositionRisk position = candidate.position();
+            LiquidationCandidateEvent event = new LiquidationCandidateEvent(
+                    candidate.candidateId(), account.snapshotId(), position.userId(), position.symbol(),
+                    position.marginMode(), position.positionSide(), position.instrumentVersion(),
+                    position.settleAsset(), position.signedQuantitySteps(), position.markPriceTicks(),
+                    candidate.equityUnits(), position.maintenanceMarginUnits(),
+                    Math.max(account.marginRatioPpm(), candidate.positionMarginRatioPpm()), candidate.eventTime());
+            events.add(new PendingRiskOutboxEvent(properties.getKafka().getLiquidationCandidatesTopic(),
+                    position.symbol(), "LIQUIDATION_CANDIDATE", payload(event), candidate.eventTime()));
         }
-        LiquidationCandidateResponse candidate = riskRepository.liquidationCandidate(insertedId)
-                .orElseThrow(() -> new IllegalStateException("liquidation candidate not found after insert "
-                        + insertedId));
-        LiquidationCandidateEvent event = new LiquidationCandidateEvent(
-                candidate.candidateId(),
-                candidate.snapshotId(),
-                candidate.userId(),
-                candidate.symbol(),
-                candidate.marginMode(),
-                candidate.positionSide(),
-                candidate.instrumentVersion(),
-                candidate.settleAsset(),
-                candidate.signedQuantitySteps(),
-                candidate.markPriceTicks(),
-                candidate.equityUnits(),
-                candidate.maintenanceMarginUnits(),
-                candidate.marginRatioPpm(),
-                candidate.eventTime());
-        outboxRepository.enqueue(properties.getKafka().getLiquidationCandidatesTopic(), candidate.symbol(),
-                "LIQUIDATION_CANDIDATE", payload(event), now);
+        return events;
     }
 
     private long sumUnrealizedPnl(List<CalculatedPositionRisk> positions) {
@@ -630,6 +746,36 @@ public class RiskService {
     private record RealtimeRiskEvent(String topic, String eventKey, String eventType, String payload) {
     }
 
+    private record EvaluatedPosition(CalculatedPositionRisk position,
+                                     long marginRatioPpm,
+                                     RiskStatus status,
+                                     long equityUnits,
+                                     boolean liquidation) {
+    }
+
+    private record GroupEvaluation(RiskGroupKey key,
+                                   long walletBalanceUnits,
+                                   long unrealizedPnlUnits,
+                                   long equityUnits,
+                                   long maintenanceMarginUnits,
+                                   long marginRatioPpm,
+                                   RiskStatus status,
+                                   List<EvaluatedPosition> positions,
+                                   List<CalculatedPositionRisk> flatPositions,
+                                   int candidateCount,
+                                   Instant eventTime,
+                                   String traceId) {
+
+        private RiskAccountSnapshotResponse account(long snapshotId) {
+            return new RiskAccountSnapshotResponse(snapshotId, key.userId(), key.accountType(), key.settleAsset(),
+                    walletBalanceUnits, unrealizedPnlUnits, equityUnits, maintenanceMarginUnits, marginRatioPpm,
+                    status, eventTime);
+        }
+    }
+
+    private record ProjectionUpdate(CachedRiskGroup state, boolean changed) {
+    }
+
     private record PositionScope(String symbol, MarginMode marginMode, PositionSide positionSide) {
     }
 
@@ -662,13 +808,6 @@ public class RiskService {
         private String traceId() {
             return traceId;
         }
-    }
-
-    private String resolveNodeId(String configured) {
-        if (configured != null && !configured.isBlank()) {
-            return configured.trim();
-        }
-        return "risk-" + UUID.randomUUID();
     }
 
     public record RiskRulesResponse(int ruleCount,

@@ -83,7 +83,7 @@ public class LiquidationController {
         sizing.put("minCloseSteps", properties.getSizing().getMinCloseSteps());
 
         Map<String, Object> risk = new LinkedHashMap<>();
-        risk.put("maxSnapshotAge", properties.getRisk().getMaxSnapshotAge().toString());
+        risk.put("maxMarkAge", properties.getRisk().getMaxMarkAge().toString());
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("scope", "runtime");

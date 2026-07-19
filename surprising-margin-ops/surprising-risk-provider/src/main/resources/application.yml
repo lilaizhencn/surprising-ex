@@ -56,10 +56,13 @@ surprising:
       liquidation-margin-ratio-ppm: 1000000
       max-mark-age: 10s
       scan-batch-size: 500
-    coordination:
-      enabled: true
-      node-id:
-      lease-duration: 15s
+    redis-state:
+      key-prefix: surprising:risk-state:v2
+      state-ttl: 10m
+      ready-ttl: 30s
+      unchanged-trigger-interval: 30s
+      trigger-batch-size: 250
+      trigger-concurrency: 4
     outbox:
       batch-size: 1000
       publish-delay-ms: 20

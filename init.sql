@@ -2313,9 +2313,9 @@ CREATE TABLE IF NOT EXISTS account_positions (
         FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT account_positions_entry_price_check CHECK (
         (signed_quantity_steps = 0 AND entry_price_ticks = 0 AND entry_value_ticks = 0
-            AND instrument_version IS NULL)
+            AND (instrument_version IS NULL OR instrument_version > 0))
         OR (signed_quantity_steps <> 0 AND entry_price_ticks > 0 AND entry_value_ticks > 0
-            AND instrument_version IS NOT NULL)
+            AND instrument_version > 0)
     )
 );
 
@@ -2348,9 +2348,9 @@ BEGIN
         ALTER TABLE account_positions
             ADD CONSTRAINT account_positions_entry_price_check CHECK (
                 (signed_quantity_steps = 0 AND entry_price_ticks = 0 AND entry_value_ticks = 0
-                    AND instrument_version IS NULL)
+                    AND (instrument_version IS NULL OR instrument_version > 0))
                 OR (signed_quantity_steps <> 0 AND entry_price_ticks > 0 AND entry_value_ticks > 0
-                    AND instrument_version IS NOT NULL)
+                    AND instrument_version > 0)
             );
         ALTER TABLE account_positions DROP CONSTRAINT IF EXISTS account_positions_product_line_check;
         ALTER TABLE account_positions
@@ -2633,63 +2633,12 @@ DROP FUNCTION IF EXISTS account_emit_position_cache_from_margin();
 DROP FUNCTION IF EXISTS account_enqueue_position_cache_event(TEXT, BIGINT, TEXT, TEXT, TEXT, BIGINT);
 DROP FUNCTION IF EXISTS account_position_cache_topic(TEXT);
 
-CREATE TABLE IF NOT EXISTS risk_sequences (
-    sequence_name       TEXT PRIMARY KEY,
-    sequence_value      BIGINT NOT NULL,
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT risk_sequences_positive CHECK (sequence_value > 0)
-);
+DROP TABLE IF EXISTS risk_sequences;
 
-CREATE TABLE IF NOT EXISTS risk_scan_leases (
-    product_line        TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
-    user_id             BIGINT NOT NULL,
-    account_type        TEXT NOT NULL DEFAULT 'USDT_PERPETUAL',
-    settle_asset        TEXT NOT NULL,
-    owner_id            TEXT NOT NULL,
-    lease_until         TIMESTAMPTZ NOT NULL,
-    updated_at          TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (product_line, user_id, account_type, settle_asset),
-    CONSTRAINT risk_scan_leases_product_line_check CHECK (
-        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL', 'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-    ),
-    CONSTRAINT risk_scan_leases_user_positive CHECK (user_id > 0),
-    CONSTRAINT risk_scan_leases_account_type_format CHECK (account_type ~ '^[A-Z0-9_]{2,32}$'),
-    CONSTRAINT risk_scan_leases_asset_format CHECK (settle_asset ~ '^[A-Z0-9]{2,20}$')
-);
-
-ALTER TABLE risk_scan_leases
-    ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'USDT_PERPETUAL',
-    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
-
-UPDATE risk_scan_leases
-   SET product_line = CASE account_type
-       WHEN 'SPOT' THEN 'SPOT'
-       WHEN 'USDT_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-       WHEN 'COIN_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-       WHEN 'USDT_DELIVERY' THEN 'LINEAR_DELIVERY'
-       WHEN 'COIN_DELIVERY' THEN 'INVERSE_DELIVERY'
-       WHEN 'OPTION' THEN 'OPTION'
-       ELSE product_line
-   END;
-
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1
-          FROM pg_constraint
-         WHERE conrelid = 'risk_scan_leases'::regclass
-           AND conname = 'risk_scan_leases_pkey'
-    ) THEN
-        ALTER TABLE risk_scan_leases DROP CONSTRAINT risk_scan_leases_pkey;
-    END IF;
-    ALTER TABLE risk_scan_leases
-        ADD CONSTRAINT risk_scan_leases_pkey PRIMARY KEY (product_line, user_id, account_type, settle_asset);
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
-END $$;
-
-CREATE INDEX IF NOT EXISTS risk_scan_leases_expiry_idx
-    ON risk_scan_leases (lease_until);
+CREATE SEQUENCE IF NOT EXISTS risk_snapshot_id_seq AS BIGINT START WITH 1;
+CREATE SEQUENCE IF NOT EXISTS risk_event_id_seq AS BIGINT START WITH 1;
+CREATE SEQUENCE IF NOT EXISTS risk_liquidation_candidate_id_seq AS BIGINT START WITH 1;
+CREATE SEQUENCE IF NOT EXISTS risk_outbox_id_seq AS BIGINT START WITH 1;
 
 CREATE TABLE IF NOT EXISTS risk_account_snapshots (
     snapshot_id                 BIGINT PRIMARY KEY,

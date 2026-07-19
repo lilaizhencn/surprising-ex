@@ -71,7 +71,9 @@ public class PositionCalculator {
         if (newQty == 0L) {
             newEntryPrice = 0L;
             newEntryValueTicks = 0L;
-            newInstrumentVersion = 0L;
+            // A flat position is a tombstone for the last concrete contract version. Downstream
+            // Redis/risk projections need that version to remove the exact reverse-index entry.
+            newInstrumentVersion = current.instrumentVersion();
         } else if (Long.signum(newQty) == Long.signum(currentQty)) {
             newInstrumentVersion = current.instrumentVersion();
             if (positionSpec.contractType().isLinear()) {
@@ -110,7 +112,7 @@ public class PositionCalculator {
         long releasedEntryValueTicks = contractSpec.contractType().isLinear() ? current.entryValueTicks() : 0L;
         long pnlDelta = realizedPnlUnits(current.signedQuantitySteps(), current.entryPriceTicks(),
                 settlementPriceTicks, closeQty, contractSpec, releasedEntryValueTicks);
-        return new PositionChange(new PositionState(0L, 0L, 0L, 0L,
+        return new PositionChange(new PositionState(0L, current.instrumentVersion(), 0L, 0L,
                 Math.addExact(current.realizedPnlUnits(), pnlDelta)), pnlDelta);
     }
 

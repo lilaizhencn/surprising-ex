@@ -3,6 +3,7 @@ package com.surprising.risk.provider.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -11,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.risk.provider.config.RiskProperties;
+import com.surprising.risk.provider.repository.RiskOutboxRepository.PendingRiskOutboxEvent;
 import java.sql.Statement;
 import java.time.Instant;
 import java.util.List;
@@ -38,15 +40,17 @@ class RiskOutboxRepositoryTest {
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
         RiskOutboxRepository repository = new RiskOutboxRepository(jdbcTemplate, sequenceRepository, properties);
-        when(sequenceRepository.nextSequence("risk-outbox")).thenReturn(901L);
-        when(jdbcTemplate.update(contains("INSERT INTO risk_outbox_events"), any(Object[].class)))
-                .thenReturn(1);
+        when(sequenceRepository.nextSequences("risk-outbox", 1)).thenReturn(List.of(901L));
+        when(jdbcTemplate.batchUpdate(contains("INSERT INTO risk_outbox_events"),
+                any(BatchPreparedStatementSetter.class))).thenReturn(new int[]{1});
 
-        repository.enqueue("surprising.linear-delivery.liquidation.candidates.v1",
-                "BTC-USDT-260925", "LIQUIDATION_CANDIDATE", "{}", Instant.parse("2026-07-01T00:00:00Z"));
+        repository.enqueue(List.of(new PendingRiskOutboxEvent(
+                "surprising.linear-delivery.liquidation.candidates.v1", "BTC-USDT-260925",
+                "LIQUIDATION_CANDIDATE", "{}", Instant.parse("2026-07-01T00:00:00Z"))));
 
-        verify(sequenceRepository).nextSequence("risk-outbox");
-        verify(jdbcTemplate).update(contains("INSERT INTO risk_outbox_events"), any(Object[].class));
+        verify(sequenceRepository).nextSequences("risk-outbox", 1);
+        verify(jdbcTemplate).batchUpdate(contains("INSERT INTO risk_outbox_events"),
+                any(BatchPreparedStatementSetter.class));
     }
 
     @Test
@@ -56,26 +60,27 @@ class RiskOutboxRepositoryTest {
         properties.getKafka().setProductTopicsEnabled(true);
         RiskOutboxRepository repository = new RiskOutboxRepository(jdbcTemplate, sequenceRepository, properties);
 
-        assertThatThrownBy(() -> repository.enqueue("surprising.linear-delivery.risk.position.events.v1",
-                "BTC-USDT-260925-70000-C", "POSITION_RISK_UPDATED", "{}",
-                Instant.parse("2026-07-01T00:00:00Z")))
+        assertThatThrownBy(() -> repository.enqueue(List.of(new PendingRiskOutboxEvent(
+                "surprising.linear-delivery.risk.position.events.v1", "BTC-USDT-260925-70000-C",
+                "POSITION_RISK_UPDATED", "{}", Instant.parse("2026-07-01T00:00:00Z")))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("risk outbox topic must match current product line")
                 .hasMessageContaining("surprising.option.liquidation.candidates.v1");
 
-        verify(sequenceRepository, never()).nextSequence("risk-outbox");
-        verify(jdbcTemplate, never()).update(any(String.class), any(Object[].class));
+        verify(sequenceRepository, never()).nextSequences(any(String.class), anyInt());
+        verify(jdbcTemplate, never()).batchUpdate(any(String.class), any(BatchPreparedStatementSetter.class));
     }
 
     @Test
     void enqueueFailsWhenOutboxInsertIsSkipped() {
         RiskOutboxRepository repository = new RiskOutboxRepository(jdbcTemplate, sequenceRepository);
-        when(sequenceRepository.nextSequence("risk-outbox")).thenReturn(901L);
-        when(jdbcTemplate.update(contains("INSERT INTO risk_outbox_events"), any(Object[].class)))
-                .thenReturn(0);
+        when(sequenceRepository.nextSequences("risk-outbox", 1)).thenReturn(List.of(901L));
+        when(jdbcTemplate.batchUpdate(contains("INSERT INTO risk_outbox_events"),
+                any(BatchPreparedStatementSetter.class))).thenReturn(new int[]{0});
 
-        assertThatThrownBy(() -> repository.enqueue("risk-topic", "BTC-USDT", "LIQUIDATION_CANDIDATE",
-                "{}", Instant.parse("2026-07-01T00:00:00Z")))
+        assertThatThrownBy(() -> repository.enqueue(List.of(new PendingRiskOutboxEvent(
+                "risk-topic", "BTC-USDT", "LIQUIDATION_CANDIDATE", "{}",
+                Instant.parse("2026-07-01T00:00:00Z")))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("risk outbox enqueue");
     }

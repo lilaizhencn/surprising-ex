@@ -81,7 +81,7 @@ public class AccountOutboxRepository {
                 snapshot.revision(),
                 snapshot.userId(),
                 snapshot.symbol(),
-                snapshot.instrumentVersion() == null ? 0L : snapshot.instrumentVersion(),
+                snapshot.instrumentVersion(),
                 snapshot.marginMode(),
                 snapshot.positionSide(),
                 snapshot.signedQuantitySteps(),

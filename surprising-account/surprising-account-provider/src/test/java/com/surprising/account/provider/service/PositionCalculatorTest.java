@@ -45,7 +45,7 @@ class PositionCalculatorTest {
         assertThat(firstClose.realizedPnlDeltaUnits()).isZero();
         assertThat(firstClose.next()).isEqualTo(new PositionState(2L, 1L, 101L, 202L, 0L));
         assertThat(secondClose.realizedPnlDeltaUnits()).isZero();
-        assertThat(secondClose.next()).isEqualTo(new PositionState(0L, 0L, 0L, 0L, 0L));
+        assertThat(secondClose.next()).isEqualTo(new PositionState(0L, 1L, 0L, 0L, 0L));
         assertThat(firstClose.realizedPnlDeltaUnits() + secondClose.realizedPnlDeltaUnits()).isZero();
     }
 
@@ -72,7 +72,7 @@ class PositionCalculatorTest {
         var change = calculator.apply(new PositionState(-10L, 1L, 100L, 0L), OrderSide.BUY, 80L, 10L,
                 linear(), linear());
 
-        assertThat(change.next()).isEqualTo(new PositionState(0L, 0L, 0L, 200L));
+        assertThat(change.next()).isEqualTo(new PositionState(0L, 1L, 0L, 200L));
         assertThat(change.realizedPnlDeltaUnits()).isEqualTo(200L);
     }
 
@@ -89,7 +89,7 @@ class PositionCalculatorTest {
         var change = calculator.apply(new PositionState(1L, 2L, 50_000L, 0L),
                 OrderSide.SELL, 60_000L, 1L, inverse(), inverse());
 
-        assertThat(change.next()).isEqualTo(new PositionState(0L, 0L, 0L, 33_333L));
+        assertThat(change.next()).isEqualTo(new PositionState(0L, 2L, 0L, 33_333L));
         assertThat(change.realizedPnlDeltaUnits()).isEqualTo(33_333L);
     }
 
@@ -121,7 +121,7 @@ class PositionCalculatorTest {
         var change = calculator.closeAtSettlement(new PositionState(10L, 4L, 100L, 0L),
                 130L, linearDelivery());
 
-        assertThat(change.next()).isEqualTo(new PositionState(0L, 0L, 0L, 300L));
+        assertThat(change.next()).isEqualTo(new PositionState(0L, 4L, 0L, 300L));
         assertThat(change.realizedPnlDeltaUnits()).isEqualTo(300L);
     }
 
@@ -130,7 +130,7 @@ class PositionCalculatorTest {
         var change = calculator.closeAtSettlement(new PositionState(3L, 4L, 100L, 302L, 0L),
                 101L, linearDelivery());
 
-        assertThat(change.next()).isEqualTo(new PositionState(0L, 0L, 0L, 0L, 1L));
+        assertThat(change.next()).isEqualTo(new PositionState(0L, 4L, 0L, 0L, 1L));
         assertThat(change.realizedPnlDeltaUnits()).isEqualTo(1L);
     }
 
@@ -142,7 +142,7 @@ class PositionCalculatorTest {
         var change = calculator.closeAtSettlement(new PositionState(2L, 4L, 120L, 0L),
                 0L, option);
 
-        assertThat(change.next()).isEqualTo(new PositionState(0L, 0L, 0L, -240L));
+        assertThat(change.next()).isEqualTo(new PositionState(0L, 4L, 0L, -240L));
         assertThat(change.realizedPnlDeltaUnits()).isEqualTo(-240L);
     }
 

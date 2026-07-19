@@ -42,6 +42,9 @@ public record PositionCacheEvent(
         if (symbol == null || symbol.isBlank()) {
             throw new IllegalArgumentException("symbol is required");
         }
+        if (instrumentVersion == null || instrumentVersion <= 0L) {
+            throw new IllegalArgumentException("instrumentVersion must be positive");
+        }
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
         marginAsset = marginAsset == null ? "" : marginAsset;

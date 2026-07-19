@@ -3,6 +3,7 @@ package com.surprising.risk.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
@@ -20,19 +21,21 @@ import com.surprising.risk.api.model.RiskAccountSnapshotResponse;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.model.CalculatedPositionRisk;
+import com.surprising.risk.provider.model.CachedRiskGroup;
 import com.surprising.risk.provider.repository.RiskOutboxRepository;
+import com.surprising.risk.provider.repository.RiskOutboxRepository.PendingRiskOutboxEvent;
 import com.surprising.risk.provider.repository.RiskRepository;
 import com.surprising.risk.provider.repository.RiskRepository.HighRiskAccount;
+import com.surprising.risk.provider.repository.RiskRepository.LiquidationCandidateWrite;
+import com.surprising.risk.provider.repository.RiskRepository.PositionSnapshotWrite;
 import com.surprising.risk.provider.repository.RiskRepository.RiskRuleOverride;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
 import com.surprising.risk.provider.model.RiskGroupKey;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.util.Comparator;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,14 +53,17 @@ class RiskServiceTest {
     @Test
     void scanRollsBackFailedRiskGroupBeforeOutbox() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
+        riskRepository.failCandidateBatch = true;
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
         @SuppressWarnings("unchecked")
         KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
-        RiskService service = new RiskService(new ObjectMapper(), new RiskProperties(), riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, kafka, transactionManager);
+        RiskService service = redisRiskService(new RiskProperties(), riskRepository, outboxRepository, kafka,
+                transactionManager);
 
-        service.scan();
+        assertThatThrownBy(service::scan)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("candidate batch failed");
 
         assertThat(riskRepository.savedAccounts).isEqualTo(1);
         assertThat(riskRepository.savedPositions).isEqualTo(1);
@@ -74,8 +80,8 @@ class RiskServiceTest {
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
         RiskProperties properties = new RiskProperties();
         properties.getCalculation().setEnabled(false);
-        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+        RiskService service = redisRiskService(properties, riskRepository, outboxRepository, null,
+                transactionManager);
 
         service.scan();
 
@@ -94,15 +100,14 @@ class RiskServiceTest {
         riskRepository.positions = List.of();
         riskRepository.walletBalanceUnits = 1_000_000L;
         RiskProperties properties = new RiskProperties();
-        properties.getCoordination().setEnabled(false);
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
         @SuppressWarnings("unchecked")
         KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
         when(kafka.send(anyString(), anyString(), anyString()))
                 .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
-        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, kafka, transactionManager);
+        RiskService service = redisRiskService(properties, riskRepository, outboxRepository, kafka,
+                transactionManager);
 
         service.scanPositionUpdates(List.of(
                 positionEvent(31L, 2002L, "btc-usdt", 7L, "USDT", "trace-old"),
@@ -133,11 +138,10 @@ class RiskServiceTest {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
         riskRepository.positions = List.of();
         RiskProperties properties = new RiskProperties();
-        properties.getCoordination().setEnabled(false);
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
-        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+        RiskService service = redisRiskService(properties, riskRepository, outboxRepository, null,
+                transactionManager);
 
         service.scanPositionUpdates(List.of(
                 positionEvent(31L, 1001L, "BTC-USDT", 7L, "USDT", "trace-usdt"),
@@ -147,7 +151,7 @@ class RiskServiceTest {
         assertThat(riskRepository.savedAccounts).isEqualTo(2);
         assertThat(riskRepository.savedPositions).isEqualTo(2);
         assertThat(outboxRepository.enqueued).isZero();
-        assertThat(transactionManager.commits).isEqualTo(2);
+        assertThat(transactionManager.commits).isEqualTo(1);
     }
 
     @Test
@@ -170,46 +174,41 @@ class RiskServiceTest {
     }
 
     @Test
-    void positionEventBatchRespectsRiskGroupLease() {
+    void positionEventBatchUsesRedisProjectionWithoutDatabaseLease() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
-        riskRepository.scanLeaseAcquired = false;
+        riskRepository.positions = List.of();
         RiskProperties properties = new RiskProperties();
-        properties.getCoordination().setNodeId("risk-node-b");
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
-        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+        RiskService service = redisRiskService(properties, riskRepository, outboxRepository, null,
+                transactionManager);
 
         service.scanPositionUpdates(List.of(
                 positionEvent(31L, 1001L, "BTC-USDT", 7L, "USDT", "trace-1")));
 
-        assertThat(riskRepository.scanLeaseAttempts).isEqualTo(1);
-        assertThat(riskRepository.lastOwnerId).isEqualTo("risk-node-b");
-        assertThat(riskRepository.calculateCalls).isZero();
-        assertThat(riskRepository.savedAccounts).isZero();
+        assertThat(riskRepository.scanLeaseAttempts).isZero();
+        assertThat(riskRepository.calculateCalls).isEqualTo(1);
+        assertThat(riskRepository.savedAccounts).isEqualTo(1);
         assertThat(outboxRepository.enqueued).isZero();
-        assertThat(transactionManager.commits).isZero();
+        assertThat(transactionManager.commits).isEqualTo(1);
     }
 
     @Test
-    void positionEventBatchDoesNotWriteFlatSnapshotWhenOpenPositionsRemainButMarksAreStale() {
+    void positionEventBatchWritesFlatTombstoneFromCompleteRedisProjection() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
         riskRepository.positions = List.of();
-        riskRepository.openPositionsExist = true;
         RiskProperties properties = new RiskProperties();
-        properties.getCoordination().setEnabled(false);
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
-        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+        RiskService service = redisRiskService(properties, riskRepository, outboxRepository, null,
+                transactionManager);
 
         service.scanPositionUpdates(List.of(
                 positionEvent(31L, 1001L, "BTC-USDT", 7L, "USDT", "trace-1")));
 
         assertThat(riskRepository.calculateCalls).isEqualTo(1);
-        assertThat(riskRepository.hasOpenPositionsCalls).isEqualTo(1);
-        assertThat(riskRepository.savedAccounts).isZero();
-        assertThat(riskRepository.savedPositions).isZero();
+        assertThat(riskRepository.savedAccounts).isEqualTo(1);
+        assertThat(riskRepository.savedPositions).isEqualTo(1);
         assertThat(outboxRepository.enqueued).isZero();
         assertThat(transactionManager.commits).isEqualTo(1);
         assertThat(transactionManager.rollbacks).isZero();
@@ -268,8 +267,8 @@ class RiskServiceTest {
         riskRepository.returnInsertedCandidate = true;
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
-        RiskService service = new RiskService(new ObjectMapper(), new RiskProperties(), riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+        RiskService service = redisRiskService(new RiskProperties(), riskRepository, outboxRepository, null,
+                transactionManager);
 
         service.scan();
 
@@ -284,26 +283,24 @@ class RiskServiceTest {
     }
 
     @Test
-    void scanSkipsRiskGroupWhenAnotherNodeOwnsTheLease() {
+    void scanProjectsAndEvaluatesWithoutDatabaseLease() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
-        riskRepository.scanLeaseAcquired = false;
+        riskRepository.walletBalanceUnits = 1_000_000L;
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
         RiskProperties properties = new RiskProperties();
-        properties.getCoordination().setNodeId("risk-node-a");
-        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+        RiskService service = redisRiskService(properties, riskRepository, outboxRepository, null,
+                transactionManager);
 
         service.scan();
 
-        assertThat(riskRepository.riskGroupCalls).isEqualTo(2);
-        assertThat(riskRepository.calculateCalls).isZero();
-        assertThat(riskRepository.scanLeaseAttempts).isEqualTo(1);
-        assertThat(riskRepository.lastOwnerId).isEqualTo("risk-node-a");
-        assertThat(riskRepository.savedAccounts).isZero();
-        assertThat(riskRepository.savedPositions).isZero();
+        assertThat(riskRepository.riskGroupCalls).isEqualTo(1);
+        assertThat(riskRepository.calculateCalls).isEqualTo(1);
+        assertThat(riskRepository.scanLeaseAttempts).isZero();
+        assertThat(riskRepository.savedAccounts).isEqualTo(1);
+        assertThat(riskRepository.savedPositions).isEqualTo(1);
         assertThat(outboxRepository.enqueued).isZero();
-        assertThat(transactionManager.commits).isZero();
+        assertThat(transactionManager.commits).isEqualTo(1);
         assertThat(transactionManager.rollbacks).isZero();
     }
 
@@ -314,9 +311,8 @@ class RiskServiceTest {
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
         RiskProperties properties = new RiskProperties();
-        properties.getCoordination().setEnabled(false);
-        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+        RiskService service = redisRiskService(properties, riskRepository, outboxRepository, null,
+                transactionManager);
 
         service.scan();
 
@@ -327,7 +323,7 @@ class RiskServiceTest {
     }
 
     @Test
-    void scanContinuesWithOtherRiskGroupsWhenOneGroupFails() {
+    void scanFailsClosedWhenOneRedisBatchGroupFails() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
         riskRepository.positions = List.of(
                 new CalculatedPositionRisk(1001L, "BTC-USDT", 7L, "USDT",
@@ -335,23 +331,25 @@ class RiskServiceTest {
                 new CalculatedPositionRisk(2002L, "ETH-USDT", 7L, "USDT",
                         10L, 3_500L, 3_000L, 30_000L, -100L, 100L));
         riskRepository.returnInsertedCandidate = true;
-        riskRepository.unreadableCandidateSymbols = Set.of("BTC-USDT");
+        riskRepository.failedCandidateSymbols = Set.of("BTC-USDT");
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
-        RiskService service = new RiskService(new ObjectMapper(), new RiskProperties(), riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+        RiskService service = redisRiskService(new RiskProperties(), riskRepository, outboxRepository, null,
+                transactionManager);
 
-        service.scan();
+        assertThatThrownBy(service::scan)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("candidate batch failed");
 
         assertThat(riskRepository.savedAccounts).isEqualTo(2);
         assertThat(riskRepository.savedPositions).isEqualTo(2);
-        assertThat(outboxRepository.candidateEventKeys()).containsExactly("ETH-USDT");
-        assertThat(transactionManager.commits).isEqualTo(1);
+        assertThat(outboxRepository.candidateEventKeys()).isEmpty();
+        assertThat(transactionManager.commits).isZero();
         assertThat(transactionManager.rollbacks).isEqualTo(1);
     }
 
     @Test
-    void scanRollsBackRiskGroupWhenMaintenanceAggregateOverflows() {
+    void scanRejectsMaintenanceAggregateOverflowBeforeStartingTransaction() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
         riskRepository.positions = List.of(
                 new CalculatedPositionRisk(1001L, "BTC-USDT", 7L, "USDT",
@@ -360,16 +358,16 @@ class RiskServiceTest {
                         10L, 3_500L, 3_000L, 30_000L, 0L, 1L));
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
-        RiskService service = new RiskService(new ObjectMapper(), new RiskProperties(), riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+        RiskService service = redisRiskService(new RiskProperties(), riskRepository, outboxRepository, null,
+                transactionManager);
 
-        service.scan();
+        assertThatThrownBy(service::scan).isInstanceOf(ArithmeticException.class);
 
         assertThat(riskRepository.savedAccounts).isZero();
         assertThat(riskRepository.savedPositions).isZero();
         assertThat(outboxRepository.enqueued).isZero();
         assertThat(transactionManager.commits).isZero();
-        assertThat(transactionManager.rollbacks).isEqualTo(1);
+        assertThat(transactionManager.rollbacks).isZero();
     }
 
     @Test
@@ -383,12 +381,13 @@ class RiskServiceTest {
         riskRepository.returnInsertedCandidate = true;
         RiskProperties properties = new RiskProperties();
         properties.getCalculation().setScanBatchSize(1);
-        properties.getCoordination().setEnabled(false);
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
-        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+        RiskService service = redisRiskService(properties, riskRepository, outboxRepository, null,
+                transactionManager);
 
+        service.scan();
+        service.scan();
         service.scan();
 
         assertThat(riskRepository.riskGroupCalls).isEqualTo(3);
@@ -479,6 +478,27 @@ class RiskServiceTest {
         assertThat(accounts.limit()).isEqualTo(25);
     }
 
+    private RiskService redisRiskService(RiskProperties properties,
+                                         FakeRiskRepository riskRepository,
+                                         FakeRiskOutboxRepository outboxRepository,
+                                         KafkaTemplate<String, String> kafka,
+                                         TrackingTransactionManager transactionManager) {
+        RedisRiskStateStore stateStore = mock(RedisRiskStateStore.class);
+        RedisRiskCalculator calculator = mock(RedisRiskCalculator.class);
+        when(stateStore.ready(any(ProductLine.class))).thenReturn(true);
+        when(calculator.calculate(any(CachedRiskGroup.class))).thenAnswer(invocation -> {
+            CachedRiskGroup state = invocation.getArgument(0);
+            riskRepository.calculateCalls++;
+            return riskRepository.positions.stream()
+                    .filter(position -> position.userId() == state.key().userId()
+                            && position.settleAsset().equals(state.key().settleAsset()))
+                    .toList();
+        });
+        return new RiskService(new ObjectMapper(), properties, riskRepository,
+                new FakeRiskSequenceRepository(), outboxRepository, kafka, transactionManager, stateStore,
+                calculator);
+    }
+
     private PositionUpdatedEvent positionEvent(long revision,
                                                long userId,
                                                String symbol,
@@ -512,22 +532,18 @@ class RiskServiceTest {
     private static final class FakeRiskRepository extends RiskRepository {
         private List<CalculatedPositionRisk> positions = List.of(new CalculatedPositionRisk(1001L,
                 "BTC-USDT", 7L, "USDT", 10L, 65_000L, 60_000L, 600_000L, -100L, 100L));
-        private Set<String> unreadableCandidateSymbols = Set.of();
-        private final Map<Long, CalculatedPositionRisk> candidatePositions = new HashMap<>();
+        private Set<String> failedCandidateSymbols = Set.of();
         private final List<CalculatedPositionRisk> savedPositionSnapshots = new ArrayList<>();
         private RiskAccountSnapshotResponse lastAccountSnapshot;
         private int savedAccounts;
         private int savedPositions;
         private boolean returnInsertedCandidate;
+        private boolean failCandidateBatch;
         private int calculateCalls;
         private int riskGroupCalls;
         private final List<Integer> riskGroupLimits = new ArrayList<>();
         private long walletBalanceUnits;
-        private boolean openPositionsExist;
-        private int hasOpenPositionsCalls;
-        private boolean scanLeaseAcquired = true;
         private int scanLeaseAttempts;
-        private String lastOwnerId;
         private final List<RiskRuleOverride> ruleOverrides = new ArrayList<>();
         private List<HighRiskAccount> highRiskRows = List.of();
         private List<LiquidationCandidateResponse> candidateRows = List.of();
@@ -547,7 +563,7 @@ class RiskServiceTest {
         }
 
         @Override
-        public List<RiskGroupKey> riskGroups(Duration maxMarkAge, RiskGroupKey after, int limit) {
+        public List<RiskGroupKey> riskGroups(RiskGroupKey after, int limit) {
             riskGroupCalls++;
             riskGroupLimits.add(limit);
             return positions.stream()
@@ -567,29 +583,8 @@ class RiskServiceTest {
         }
 
         @Override
-        public List<CalculatedPositionRisk> calculatePositions(RiskGroupKey key, Duration maxMarkAge) {
-            calculateCalls++;
-            return positions.stream()
-                    .filter(position -> position.userId() == key.userId()
-                            && position.settleAsset().equals(key.settleAsset()))
-                    .toList();
-        }
-
-        @Override
-        public boolean hasOpenPositions(RiskGroupKey key) {
-            hasOpenPositionsCalls++;
-            return openPositionsExist || positions.stream()
-                    .anyMatch(position -> position.userId() == key.userId()
-                            && position.settleAsset().equals(key.settleAsset()));
-        }
-
-        @Override
-        public boolean acquireScanLease(com.surprising.risk.provider.model.RiskGroupKey key,
-                                        String ownerId,
-                                        Duration leaseDuration) {
-            scanLeaseAttempts++;
-            lastOwnerId = ownerId;
-            return scanLeaseAcquired;
+        public CachedRiskGroup cachedRiskGroup(RiskGroupKey key) {
+            return new CachedRiskGroup(key, walletBalanceUnits, List.of(), Instant.now());
         }
 
         @Override
@@ -612,57 +607,29 @@ class RiskServiceTest {
         }
 
         @Override
-        public void saveAccountSnapshot(RiskAccountSnapshotResponse snapshot) {
-            savedAccounts++;
-            lastAccountSnapshot = snapshot;
-        }
-
-        @Override
-        public void savePositionSnapshot(long snapshotId,
-                                         CalculatedPositionRisk position,
-                                         long marginRatioPpm,
-                                         RiskStatus status,
-                                         Instant now) {
-            savedPositions++;
-            savedPositionSnapshots.add(position);
-        }
-
-        @Override
-        public long createLiquidationCandidate(RiskAccountSnapshotResponse account,
-                                               CalculatedPositionRisk position,
-                                               RiskStatus positionStatus,
-                                               long positionMarginRatioPpm,
-                                               long equityUnits,
-                                               long candidateId,
-                                               Instant now) {
-            candidatePositions.put(candidateId, position);
-            return candidateId;
-        }
-
-        @Override
-        public long createLiquidationCandidate(RiskAccountSnapshotResponse account,
-                                               CalculatedPositionRisk position,
-                                               RiskStatus positionStatus,
-                                               long positionMarginRatioPpm,
-                                               long candidateId,
-                                               Instant now) {
-            return createLiquidationCandidate(account, position, positionStatus, positionMarginRatioPpm,
-                    account.equityUnits(), candidateId, now);
-        }
-
-        @Override
-        public Optional<LiquidationCandidateResponse> liquidationCandidate(long candidateId) {
-            CalculatedPositionRisk position = candidatePositions.get(candidateId);
-            if (!returnInsertedCandidate || position == null
-                    || unreadableCandidateSymbols.contains(position.symbol())) {
-                return Optional.empty();
+        public void saveAccountSnapshots(List<RiskAccountSnapshotResponse> snapshots) {
+            savedAccounts += snapshots.size();
+            if (!snapshots.isEmpty()) {
+                lastAccountSnapshot = snapshots.getLast();
             }
-            return Optional.of(new LiquidationCandidateResponse(candidateId, 101L, position.userId(), position.symbol(),
-                    position.marginMode(), position.positionSide(), position.instrumentVersion(),
-                    position.settleAsset(), position.signedQuantitySteps(), position.markPriceTicks(), -100L,
-                    position.maintenanceMarginUnits(),
-                    RiskMath.INFINITE_MARGIN_RATIO, LiquidationCandidateStatus.NEW,
-                    Instant.parse("2026-07-01T00:00:00Z")));
+        }
+
+        @Override
+        public void savePositionSnapshots(List<PositionSnapshotWrite> snapshots) {
+            savedPositions += snapshots.size();
+            savedPositionSnapshots.addAll(snapshots.stream().map(PositionSnapshotWrite::position).toList());
+        }
+
+        @Override
+        public Set<Long> createLiquidationCandidates(List<LiquidationCandidateWrite> candidates) {
+            if (failCandidateBatch || candidates.stream()
+                    .anyMatch(candidate -> failedCandidateSymbols.contains(candidate.position().symbol()))) {
+                throw new IllegalStateException("candidate batch failed");
+            }
+            return returnInsertedCandidate
+                    ? candidates.stream().map(LiquidationCandidateWrite::candidateId)
+                    .collect(java.util.stream.Collectors.toSet())
+                    : Set.of();
         }
 
         @Override
@@ -735,13 +702,17 @@ class RiskServiceTest {
         }
 
         @Override
-        public long nextSequence(String sequenceName) {
-            return switch (sequenceName) {
-                case "risk-snapshot" -> ++snapshot;
-                case "liquidation-candidate" -> ++candidate;
-                case "risk-event" -> ++riskEvent;
-                default -> throw new IllegalArgumentException(sequenceName);
-            };
+        public List<Long> nextSequences(String sequenceName, int count) {
+            List<Long> values = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) {
+                values.add(switch (sequenceName) {
+                    case "risk-snapshot" -> ++snapshot;
+                    case "liquidation-candidate" -> ++candidate;
+                    case "risk-event" -> ++riskEvent;
+                    default -> throw new IllegalArgumentException(sequenceName);
+                });
+            }
+            return values;
         }
     }
 
@@ -759,14 +730,16 @@ class RiskServiceTest {
         }
 
         @Override
-        public void enqueue(String topic, String eventKey, String eventType, String payload, Instant now) {
-            this.enqueued++;
-            this.topic = topic;
-            this.eventKey = eventKey;
-            this.eventType = eventType;
-            this.eventKeys.add(eventKey);
-            this.eventTypes.add(eventType);
-            this.payloads.add(payload);
+        public void enqueue(List<PendingRiskOutboxEvent> events) {
+            for (PendingRiskOutboxEvent event : events) {
+                this.enqueued++;
+                this.topic = event.topic();
+                this.eventKey = event.eventKey();
+                this.eventType = event.eventType();
+                this.eventKeys.add(event.eventKey());
+                this.eventTypes.add(event.eventType());
+                this.payloads.add(event.payload());
+            }
         }
 
         private List<String> candidateEventKeys() {

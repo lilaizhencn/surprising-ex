@@ -413,12 +413,12 @@ class LiquidationServiceTest {
         public RiskStatus latestRiskStatus(long userId,
                                            String accountType,
                                            String settleAsset,
-                                           Duration maxSnapshotAge) {
+                                           long minimumSnapshotId) {
             accountRiskChecks++;
             assertThat(userId).isEqualTo(2002L);
             assertThat(accountType).isEqualTo(candidateAccountType);
             assertThat(settleAsset).isEqualTo("USDT");
-            assertThat(maxSnapshotAge).isEqualTo(Duration.ofSeconds(5));
+            assertThat(minimumSnapshotId).isEqualTo(9301L);
             return accountRiskStatus;
         }
 
@@ -428,24 +428,14 @@ class LiquidationServiceTest {
                                            MarginMode marginMode,
                                            PositionSide positionSide,
                                            long instrumentVersion,
-                                           Duration maxSnapshotAge) {
+                                           long minimumSnapshotId) {
             positionRiskChecks++;
-            assertThat(maxSnapshotAge).isEqualTo(Duration.ofSeconds(5));
+            assertThat(minimumSnapshotId).isEqualTo(9301L);
             assertThat(symbol).isEqualTo("BTC-USDT");
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
             assertThat(positionSide).isEqualTo(candidatePositionSide);
             assertThat(instrumentVersion).isEqualTo(8L);
             return positionRiskStatus;
-        }
-
-        @Override
-        public RiskStatus latestRiskStatus(long userId,
-                                           String symbol,
-                                           MarginMode marginMode,
-                                           long instrumentVersion,
-                                           Duration maxSnapshotAge) {
-            return latestRiskStatus(userId, symbol, marginMode, PositionSide.NET, instrumentVersion,
-                    maxSnapshotAge);
         }
 
         @Override
@@ -536,12 +526,13 @@ class LiquidationServiceTest {
         }
 
         @Override
-        public Optional<LiquidationPricingInput> latestPricingInput(long userId,
-                                                                    String symbol,
-                                                                    MarginMode marginMode,
-                                                                    PositionSide positionSide,
-                                                                    long instrumentVersion,
-                                                                    Duration maxSnapshotAge) {
+        public Optional<LiquidationPricingInput> pricingInput(long snapshotId,
+                                                              long userId,
+                                                              String symbol,
+                                                              MarginMode marginMode,
+                                                              PositionSide positionSide,
+                                                              long instrumentVersion) {
+            assertThat(snapshotId).isEqualTo(9301L);
             assertThat(userId).isEqualTo(2002L);
             assertThat(symbol).isEqualTo("BTC-USDT");
             assertThat(marginMode).isEqualTo(MarginMode.CROSS);
@@ -550,16 +541,6 @@ class LiquidationServiceTest {
             return Optional.of(new LiquidationPricingInput(
                     com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL,
                     pricingSignedQuantitySteps, 100L, 200L, 50L, 1L, 1L, 100_000_000L));
-        }
-
-        @Override
-        public Optional<LiquidationPricingInput> latestPricingInput(long userId,
-                                                                    String symbol,
-                                                                    MarginMode marginMode,
-                                                                    long instrumentVersion,
-                                                                    Duration maxSnapshotAge) {
-            return latestPricingInput(userId, symbol, marginMode, PositionSide.NET, instrumentVersion,
-                    maxSnapshotAge);
         }
 
         @Override

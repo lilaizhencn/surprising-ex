@@ -17,6 +17,9 @@ Production processes run one product line each with isolated topics, consumer gr
   pending-row window scan and MVCC compare-and-set, pipeline independent streams concurrently, and batch-mark Kafka acknowledgements.
 - User positions are read only from a Redis Hash projection. Open-order reads prefer a Redis ZSET/Hash
   projection. Redis never authorizes fills, cancellations, funds movements, or liquidation.
+- Risk-provider maintains complete Redis risk groups plus a `symbol + instrumentVersion -> group` reverse index.
+  Mark-price updates calculate only affected groups, while PostgreSQL atomically batch-writes snapshots,
+  liquidation candidates, and candidate outbox rows; liquidation still revalidates and locks PostgreSQL state.
 - Account commands use `<PRODUCT_LINE>:<userId>` as their Kafka key and are serialized across 32 partitions.
 - Matching commands, trades, depth, and prices use `symbol` as their key. Commands for one symbol must stay ordered.
 - Internal market-maker self-matches still produce public trades, depth, candles, and WebSocket updates, but

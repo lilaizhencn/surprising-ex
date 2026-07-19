@@ -93,7 +93,7 @@ surprising:
       full-close-margin-ratio-ppm: 3000000
       min-close-steps: 1
     risk:
-      max-snapshot-age: 5s
+      max-mark-age: 5s
     execution:
       enabled: true
       liquidation-fee-rate-ppm: 3000

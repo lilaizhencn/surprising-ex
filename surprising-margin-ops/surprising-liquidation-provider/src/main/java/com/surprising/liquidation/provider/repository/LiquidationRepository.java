@@ -126,7 +126,7 @@ public class LiquidationRepository {
                                        MarginMode marginMode,
                                        PositionSide positionSide,
                                        long instrumentVersion,
-                                       Duration maxSnapshotAge) {
+                                       long minimumSnapshotId) {
         return jdbcTemplate.query("""
                 SELECT status
                  FROM risk_position_snapshots
@@ -136,34 +136,21 @@ public class LiquidationRepository {
                    AND margin_mode = ?
                    AND position_side = ?
                    AND instrument_version = ?
-                   AND event_time >= now() - (? * INTERVAL '1 millisecond')
-                 ORDER BY event_time DESC
+                   AND snapshot_id >= ?
+                 ORDER BY snapshot_id DESC
                  LIMIT 1
                 """, (rs, rowNum) -> RiskStatus.valueOf(rs.getString("status")),
                 userId, currentProductLine().name(), symbol, MarginMode.defaultIfNull(marginMode).name(),
-                PositionSide.defaultIfNull(positionSide).name(), instrumentVersion,
-                Math.max(1L, maxSnapshotAge.toMillis()))
+                PositionSide.defaultIfNull(positionSide).name(), instrumentVersion, minimumSnapshotId)
                 .stream()
                 .findFirst()
-                .orElse(RiskStatus.NORMAL);
-    }
-
-    public RiskStatus latestRiskStatus(long userId,
-                                       String symbol,
-                                       MarginMode marginMode,
-                                       long instrumentVersion,
-                                       Duration maxSnapshotAge) {
-        return latestRiskStatus(userId, symbol, marginMode, PositionSide.NET, instrumentVersion, maxSnapshotAge);
-    }
-
-    public RiskStatus latestRiskStatus(long userId, String settleAsset, Duration maxSnapshotAge) {
-        return latestRiskStatus(userId, DEFAULT_ACCOUNT_TYPE, settleAsset, maxSnapshotAge);
+                .orElseThrow(() -> new IllegalStateException("risk position snapshot missing for candidate"));
     }
 
     public RiskStatus latestRiskStatus(long userId,
                                        String accountType,
                                        String settleAsset,
-                                       Duration maxSnapshotAge) {
+                                       long minimumSnapshotId) {
         return jdbcTemplate.query("""
                 SELECT status
                  FROM risk_account_snapshots
@@ -171,15 +158,15 @@ public class LiquidationRepository {
                    AND product_line = ?
                    AND account_type = ?
                    AND settle_asset = ?
-                   AND event_time >= now() - (? * INTERVAL '1 millisecond')
-                 ORDER BY event_time DESC
+                   AND snapshot_id >= ?
+                 ORDER BY snapshot_id DESC
                  LIMIT 1
                 """, (rs, rowNum) -> RiskStatus.valueOf(rs.getString("status")),
                 userId, productLineForAccountType(accountType).name(), normalizeAccountType(accountType),
-                settleAsset, Math.max(1L, maxSnapshotAge.toMillis()))
+                settleAsset, minimumSnapshotId)
                 .stream()
                 .findFirst()
-                .orElse(RiskStatus.NORMAL);
+                .orElseThrow(() -> new IllegalStateException("risk account snapshot missing for candidate"));
     }
 
     public Optional<LiquidationCloseState> lockCloseState(long userId,
@@ -310,12 +297,12 @@ public class LiquidationRepository {
         return sizingInput(userId, symbol, marginMode, PositionSide.NET, instrumentVersion, availableCloseSteps);
     }
 
-    public Optional<LiquidationPricingInput> latestPricingInput(long userId,
-                                                                String symbol,
-                                                                MarginMode marginMode,
-                                                                PositionSide positionSide,
-                                                                long instrumentVersion,
-                                                                Duration maxSnapshotAge) {
+    public Optional<LiquidationPricingInput> pricingInput(long snapshotId,
+                                                          long userId,
+                                                          String symbol,
+                                                          MarginMode marginMode,
+                                                          PositionSide positionSide,
+                                                          long instrumentVersion) {
         long markPriceTicks = requireMarkPrice(symbol, instrumentVersion).markPriceTicks();
         return jdbcTemplate.query("""
                 SELECT ps.signed_quantity_steps,
@@ -343,14 +330,12 @@ public class LiquidationRepository {
                     ON ss.asset = i.settle_asset
                  WHERE ps.user_id = ?
                    AND ps.product_line = ?
+                   AND ps.snapshot_id = ?
                    AND ps.symbol = ?
                    AND ps.margin_mode = ?
                    AND ps.position_side = ?
                    AND ps.instrument_version = ?
-                   AND ps.event_time >= now() - (? * INTERVAL '1 millisecond')
                    AND ps.signed_quantity_steps <> 0
-                 ORDER BY ps.event_time DESC
-                 LIMIT 1
                 """, (rs, rowNum) -> new LiquidationPricingInput(
                 ContractType.valueOf(rs.getString("contract_type")),
                 rs.getLong("signed_quantity_steps"),
@@ -359,18 +344,9 @@ public class LiquidationRepository {
                 rs.getLong("maintenance_margin_units"),
                 rs.getLong("notional_multiplier_units"),
                 rs.getLong("price_tick_units"),
-                rs.getLong("settle_scale_units")), markPriceTicks, userId, currentProductLine().name(), symbol,
+                rs.getLong("settle_scale_units")), markPriceTicks, userId, currentProductLine().name(), snapshotId, symbol,
                 MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name(),
-                instrumentVersion,
-                Math.max(1L, maxSnapshotAge.toMillis())).stream().findFirst();
-    }
-
-    public Optional<LiquidationPricingInput> latestPricingInput(long userId,
-                                                                String symbol,
-                                                                MarginMode marginMode,
-                                                                long instrumentVersion,
-                                                                Duration maxSnapshotAge) {
-        return latestPricingInput(userId, symbol, marginMode, PositionSide.NET, instrumentVersion, maxSnapshotAge);
+                instrumentVersion).stream().findFirst();
     }
 
     public Optional<LiquidationSizingInput> sizingInput(long userId,
@@ -395,7 +371,7 @@ public class LiquidationRepository {
         if (markPriceCache == null) {
             throw new IllegalStateException("mark price cache is not configured");
         }
-        MarkPriceEvent markPrice = markPriceCache.fresh(symbol, properties.getRisk().getMaxSnapshotAge())
+        MarkPriceEvent markPrice = markPriceCache.fresh(symbol, properties.getRisk().getMaxMarkAge())
                 .orElseThrow(() -> new IllegalStateException("fresh mark price not found for " + symbol));
         if (markPrice.instrumentVersion() != instrumentVersion) {
             throw new IllegalStateException("mark price instrument version mismatch for " + symbol

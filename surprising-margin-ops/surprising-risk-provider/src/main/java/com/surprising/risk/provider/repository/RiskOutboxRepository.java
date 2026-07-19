@@ -32,17 +32,40 @@ public class RiskOutboxRepository {
         this.properties = properties == null ? new RiskProperties() : properties;
     }
 
-    public void enqueue(String topic, String eventKey, String eventType, String payload, Instant now) {
-        requireCurrentProductTopic(topic);
-        long id = sequenceRepository.nextSequence("risk-outbox");
-        int rows = jdbcTemplate.update("""
+    public void enqueue(List<PendingRiskOutboxEvent> events) {
+        if (events == null || events.isEmpty()) {
+            return;
+        }
+        for (PendingRiskOutboxEvent event : events) {
+            requireCurrentProductTopic(event.topic());
+        }
+        List<Long> ids = sequenceRepository.nextSequences("risk-outbox", events.size());
+        int[] rows = jdbcTemplate.batchUpdate("""
                 INSERT INTO risk_outbox_events (
                     id, topic, event_key, event_type, payload,
                     next_attempt_at, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?)
-                """, id, topic, eventKey, eventType, payload, Timestamp.from(now), Timestamp.from(now),
-                Timestamp.from(now));
-        requireSingleRow(rows, "risk outbox enqueue");
+                """, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(java.sql.PreparedStatement ps, int i) throws java.sql.SQLException {
+                PendingRiskOutboxEvent event = events.get(i);
+                Timestamp timestamp = Timestamp.from(event.eventTime());
+                ps.setLong(1, ids.get(i));
+                ps.setString(2, event.topic());
+                ps.setString(3, event.eventKey());
+                ps.setString(4, event.eventType());
+                ps.setString(5, event.payload());
+                ps.setTimestamp(6, timestamp);
+                ps.setTimestamp(7, timestamp);
+                ps.setTimestamp(8, timestamp);
+            }
+
+            @Override
+            public int getBatchSize() {
+                return events.size();
+            }
+        });
+        requireBatch(rows, events.size(), "risk outbox enqueue");
     }
 
     public List<RiskOutboxRecord> claimPending(int limit, Instant leaseUntil, Instant now) {
@@ -240,5 +263,23 @@ public class RiskOutboxRepository {
         if (rows != 1) {
             throw new IllegalStateException("failed to write " + operation);
         }
+    }
+
+    private void requireBatch(int[] rows, int expectedSize, String operation) {
+        if (rows.length != expectedSize) {
+            throw new IllegalStateException("failed to write " + operation + " batch");
+        }
+        for (int row : rows) {
+            if (row != 1 && row != Statement.SUCCESS_NO_INFO) {
+                throw new IllegalStateException("failed to write " + operation);
+            }
+        }
+    }
+
+    public record PendingRiskOutboxEvent(String topic,
+                                         String eventKey,
+                                         String eventType,
+                                         String payload,
+                                         Instant eventTime) {
     }
 }

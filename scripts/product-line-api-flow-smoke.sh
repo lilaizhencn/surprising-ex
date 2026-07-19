@@ -62,7 +62,7 @@ STRESS_RISK_KAFKA_CONCURRENCY="${STRESS_RISK_KAFKA_CONCURRENCY:-4}"
 STRESS_RISK_OUTBOX_BATCH_SIZE="${STRESS_RISK_OUTBOX_BATCH_SIZE:-1000}"
 STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS="${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS:-20}"
 STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY="${STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY:-32}"
-STRESS_LIQUIDATION_KAFKA_CONCURRENCY="${STRESS_LIQUIDATION_KAFKA_CONCURRENCY:-2}"
+STRESS_LIQUIDATION_KAFKA_CONCURRENCY="${STRESS_LIQUIDATION_KAFKA_CONCURRENCY:-8}"
 STRESS_LIQUIDATION_WAIT_SECONDS="${STRESS_LIQUIDATION_WAIT_SECONDS:-900}"
 STRESS_LIQUIDATION_MARK_FACTOR_PPM="${STRESS_LIQUIDATION_MARK_FACTOR_PPM:-800000}"
 STRESS_LIQUIDATION_WALLET_RATE_PPM="${STRESS_LIQUIDATION_WALLET_RATE_PPM:-120000}"
@@ -1279,7 +1279,6 @@ product_provider_args() {
         "--surprising.risk.kafka.product-topics-enabled=true" \
         "--surprising.risk.kafka.group-id=product-smoke-${RUN_ID}-${slug}-risk" \
         "--surprising.risk.kafka.concurrency=${risk_concurrency}" \
-        "--surprising.risk.coordination.node-id=product-smoke-${RUN_ID}-${slug}-risk" \
         "--surprising.risk.calculation.scan-delay-ms=500" \
         "--surprising.risk.outbox.batch-size=${risk_outbox_batch_size}" \
         "--surprising.risk.outbox.publish-delay-ms=${risk_outbox_publish_delay_ms}" \
@@ -1340,7 +1339,6 @@ product_provider_args() {
         "--surprising.risk.kafka.product-topics-enabled=true" \
         "--surprising.risk.kafka.group-id=product-smoke-${RUN_ID}-${slug}-risk" \
         "--surprising.risk.kafka.concurrency=${risk_concurrency}" \
-        "--surprising.risk.coordination.node-id=product-smoke-${RUN_ID}-${slug}-risk" \
         "--surprising.risk.calculation.scan-delay-ms=500" \
         "--surprising.risk.outbox.batch-size=${risk_outbox_batch_size}" \
         "--surprising.risk.outbox.publish-delay-ms=${risk_outbox_publish_delay_ms}" \
@@ -3443,14 +3441,22 @@ assert_stress_state() {
 liquidation_latency_summary() {
   local expression="$1"
   query_value "
-WITH lat AS (
-  SELECT EXTRACT(EPOCH FROM (${expression})) * 1000 AS ms
+WITH successful AS (
+  SELECT DISTINCT ON (c.user_id)
+         c.*,
+         lo.created_at AS liquidation_order_created_at
     FROM risk_liquidation_candidates c
     JOIN liquidation_orders lo ON lo.candidate_id = c.candidate_id
    WHERE c.product_line = 'LINEAR_PERPETUAL'
      AND c.user_id >= ${STRESS_TAKER_USER_START}
      AND c.user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT))
      AND c.event_time >= '${STRESS_LIQUIDATION_TRIGGERED_AT}'::timestamptz
+     AND c.status = 'COMPLETED'
+     AND lo.status = 'FILLED'
+   ORDER BY c.user_id, c.updated_at ASC, c.candidate_id ASC
+), lat AS (
+  SELECT EXTRACT(EPOCH FROM (${expression})) * 1000 AS ms
+    FROM successful c
 )
 SELECT count(*) || ' ' || round(min(ms)::numeric, 3) || ' ' ||
        round(percentile_disc(0.50) WITHIN GROUP (ORDER BY ms)::numeric, 3) || ' ' ||
@@ -3494,6 +3500,7 @@ run_multi_symbol_liquidation_stress_flow() {
   commands=()
   while IFS= read -r command; do commands+=("${command}"); done \
     < <(emit_stress_taker_commands "${product_line}" "open")
+  STRESS_LIQUIDATION_CAPITALIZED_AT="$(query_value "SELECT clock_timestamp()")"
   open_start="$(date +%s%N)"
   run_with_concurrency_at_rate "${STRESS_LOAD_CONCURRENCY}" "${STRESS_TARGET_TPS}" "${commands[@]}"
   if ((RUN_FAILURES > 0)); then
@@ -3504,7 +3511,6 @@ run_multi_symbol_liquidation_stress_flow() {
   wait_stress_phase_settled "${product_line}" "open"
 
   echo "Verifying pre-funded users at ${STRESS_LIQUIDATION_WALLET_RATE_PPM} ppm of entry notional"
-  STRESS_LIQUIDATION_CAPITALIZED_AT="$(query_value "SELECT clock_timestamp()")"
   wait_sql_equals "fresh safe risk snapshots before shock ${product_line}" \
     "WITH latest AS (SELECT DISTINCT ON (user_id) user_id, status, event_time FROM risk_account_snapshots WHERE product_line = '${product_line}' AND user_id >= ${STRESS_TAKER_USER_START} AND user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT)) ORDER BY user_id, event_time DESC, snapshot_id DESC) SELECT count(*) FROM latest WHERE status = 'NORMAL' AND event_time >= '${STRESS_LIQUIDATION_CAPITALIZED_AT}'::timestamptz" \
     "${STRESS_USER_COUNT}" "${STRESS_LIQUIDATION_WAIT_SECONDS}"
@@ -3539,7 +3545,7 @@ PY
   open_trades="$(query_value "SELECT count(*) FROM trading_match_trades WHERE product_line = '${product_line}' AND trace_id LIKE 'stress-${RUN_ID}-${slug}-open-%'")"
   settled_open="$(query_value "SELECT count(DISTINCT t.taker_order_id) FROM account_trade_settlement_completions s JOIN trading_match_trades t ON t.product_line = s.product_line AND t.symbol = s.symbol AND t.trade_id = s.trade_id WHERE t.product_line = '${product_line}' AND t.trace_id LIKE 'stress-${RUN_ID}-${slug}-open-%'")"
   candidate_latency="$(liquidation_latency_summary "c.event_time - '${STRESS_LIQUIDATION_TRIGGERED_AT}'::timestamptz")"
-  submit_latency="$(liquidation_latency_summary "lo.created_at - c.event_time")"
+  submit_latency="$(liquidation_latency_summary "c.liquidation_order_created_at - c.event_time")"
   complete_latency="$(liquidation_latency_summary "c.updated_at - '${STRESS_LIQUIDATION_TRIGGERED_AT}'::timestamptz")"
   liquidation_tps="$(query_value "SELECT count(*) || ' ' || round(EXTRACT(EPOCH FROM (max(c.updated_at) - '${STRESS_LIQUIDATION_TRIGGERED_AT}'::timestamptz))::numeric, 3) || ' ' || round((count(*) / NULLIF(EXTRACT(EPOCH FROM (max(c.updated_at) - '${STRESS_LIQUIDATION_TRIGGERED_AT}'::timestamptz)), 0))::numeric, 3) FROM risk_liquidation_candidates c WHERE c.product_line = '${product_line}' AND c.user_id >= ${STRESS_TAKER_USER_START} AND c.user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT)) AND c.event_time >= '${STRESS_LIQUIDATION_TRIGGERED_AT}'::timestamptz AND c.status = 'COMPLETED'")"
   candidate_status="$(query_value "SELECT string_agg(status || '=' || count, ', ' ORDER BY status) FROM (SELECT status, count(*) FROM risk_liquidation_candidates WHERE product_line = '${product_line}' AND user_id >= ${STRESS_TAKER_USER_START} AND user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT)) AND event_time >= '${STRESS_LIQUIDATION_TRIGGERED_AT}'::timestamptz GROUP BY status) s")"
@@ -3558,7 +3564,7 @@ PY
     echo "- Run label：${STRESS_RUN_LABEL}"
     echo "- Trigger：20 symbols receive the same sustained mark-price shock; factor=${STRESS_LIQUIDATION_MARK_FACTOR_PPM} ppm"
     echo "- Users：${STRESS_USER_COUNT}; open trades=${open_trades}; settled open orders=${settled_open}; submitMs=${open_ms}"
-    echo "- Pre-shock funding：wallet=${STRESS_LIQUIDATION_WALLET_RATE_PPM} ppm of entry notional after the opening fee; all ${STRESS_USER_COUNT} latest snapshots NORMAL; full safe rescanMs=${safe_scan_ms}"
+    echo "- Pre-shock funding：wallet=${STRESS_LIQUIDATION_WALLET_RATE_PPM} ppm of entry notional after the opening fee; all ${STRESS_USER_COUNT} latest snapshots NORMAL; safe projection catch-up ms=${safe_scan_ms}"
     echo "- Liquidation consumer concurrency：${STRESS_LIQUIDATION_KAFKA_CONCURRENCY}"
     echo "- Candidate status：${candidate_status}"
     echo "- Liquidation order status：${order_status}"

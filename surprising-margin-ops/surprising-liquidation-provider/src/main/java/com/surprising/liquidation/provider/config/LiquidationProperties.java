@@ -66,7 +66,7 @@ public class LiquidationProperties {
         private String matchResultsTopic = "surprising.perp.match.results.v1";
         private String orderCommandsTopic = "surprising.perp.order.commands.v1";
         private String orderEventsTopic = "surprising.perp.order.events.v1";
-        private int concurrency = 2;
+        private int concurrency = 8;
         private int maxPollRecords = 500;
 
         public String getBootstrapServers() {
@@ -293,14 +293,14 @@ public class LiquidationProperties {
     }
 
     public static class Risk {
-        private Duration maxSnapshotAge = Duration.ofSeconds(5);
+        private Duration maxMarkAge = Duration.ofSeconds(5);
 
-        public Duration getMaxSnapshotAge() {
-            return maxSnapshotAge;
+        public Duration getMaxMarkAge() {
+            return maxMarkAge;
         }
 
-        public void setMaxSnapshotAge(Duration maxSnapshotAge) {
-            this.maxSnapshotAge = maxSnapshotAge;
+        public void setMaxMarkAge(Duration maxMarkAge) {
+            this.maxMarkAge = maxMarkAge;
         }
     }
 
