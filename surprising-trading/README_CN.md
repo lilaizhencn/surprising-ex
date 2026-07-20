@@ -215,12 +215,12 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symb
 
 - 从 instrument 当前版本读取 `contract_type`、`initial_margin_rate_ppm`、`notional_multiplier_units`、`price_tick_units`、`settle_asset` 和资产 scale。
 - 在 Java `OrderMarginMath` 中换算 `initialMarginUnits`：输入和输出都是 long ticks/steps/asset units，中间乘除使用精确整数计算，溢出会拒绝而不是回绕。
-- 下单事务会先插入 `trading_orders`，确认没有命中 `clientOrderId` 幂等冲突后，再把 `account_balances.available_units` 转入 `locked_units`，并写入 `account_margin_reservations`。
-- `account_margin_reservations.order_id` 有外键指向 `trading_orders.order_id`，防止出现没有订单的幽灵冻结。
+- 下单事务会先插入 `trading_orders`，确认没有命中 `clientOrderId` 幂等冲突后，再把 `account_balances.available_units` 转入 `locked_units`。
+- 账户类型、结算资产和初始冻结量作为不可变快照保存在 `trading_orders` 并随 `OrderCommandEvent` 传递；永续不再维护独立的保证金预占记录。
 - 如果订单已插入但保证金不足，订单会在同一事务内改为 `REJECTED`，只发布拒单事件，不发布撮合命令。
 
 `reduceOnly=true` 的平仓和强平订单不冻结新增保证金。
-matching 保证金释放只允许 `reduceOnly=true` 订单缺失 reservation。非 reduce-only 订单缺少 `account_margin_reservations` 是会计不变量错误，必须失败，不能静默继续。
+matching 保证金释放只允许 `reduceOnly=true` 订单没有预占快照。非 reduce-only 订单缺少 `reservedUnits` 快照是会计不变量错误，必须失败，不能静默继续。
 
 用户主动平仓订单在发布撮合前会做 reduce-only 安全校验：
 
@@ -463,7 +463,6 @@ curl 'http://localhost:9084/api/v1/trading/orders/open?userId=1001&symbol=BTC-US
 - `trading_order_events`
 - `trading_trigger_orders`
 - `trading_outbox_events`
-- `account_margin_reservations`
 - `account_position_margins`
 - `trading_matching_assets`
 - `trading_matching_symbols`

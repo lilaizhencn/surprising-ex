@@ -70,11 +70,11 @@ class MatchingServiceTest {
         try {
             engine.start();
 
-            OrderCommandEvent maker = new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 1001L,
+            OrderCommandEvent maker = perpetualCommand(OrderCommandType.PLACE, 501L, 101L, 1001L,
                     "maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
                     100L, 10L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z"),
                     "trace-maker-501");
-            OrderCommandEvent taker = new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 2002L,
+            OrderCommandEvent taker = perpetualCommand(OrderCommandType.PLACE, 502L, 202L, 2002L,
                     "taker-202", "BTC-USDT", 7L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
                     100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z"),
                     "trace-taker-502");
@@ -190,10 +190,10 @@ class MatchingServiceTest {
         try {
             engine.start();
 
-            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 900001L,
+            service.process(perpetualCommand(OrderCommandType.PLACE, 501L, 101L, 900001L,
                     "mm-maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
                     100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
-            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 900002L,
+            service.process(perpetualCommand(OrderCommandType.PLACE, 502L, 202L, 900002L,
                     "mm-taker-202", "BTC-USDT", 5L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
                     100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z")));
 
@@ -255,10 +255,10 @@ class MatchingServiceTest {
         try {
             engine.start();
 
-            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 900001L,
+            service.process(perpetualCommand(OrderCommandType.PLACE, 501L, 101L, 900001L,
                     "mm-maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
                     100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
-            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 900002L,
+            service.process(perpetualCommand(OrderCommandType.PLACE, 502L, 202L, 900002L,
                     "mm-taker-202", "BTC-USDT", 5L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
                     100L, 5L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z")));
 
@@ -301,10 +301,10 @@ class MatchingServiceTest {
         try {
             engine.start();
 
-            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 900001L,
+            service.process(perpetualCommand(OrderCommandType.PLACE, 501L, 101L, 900001L,
                     "mm-maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
                     100L, 5L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
-            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 900002L,
+            service.process(perpetualCommand(OrderCommandType.PLACE, 502L, 202L, 900002L,
                     "mm-taker-202", "BTC-USDT", 5L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
                     100L, 2L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z")));
 
@@ -341,10 +341,10 @@ class MatchingServiceTest {
         try {
             engine.start();
 
-            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 900001L,
+            service.process(perpetualCommand(OrderCommandType.PLACE, 501L, 101L, 900001L,
                     "mm-maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
                     100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
-            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 2002L,
+            service.process(perpetualCommand(OrderCommandType.PLACE, 502L, 202L, 2002L,
                     "real-taker-202", "BTC-USDT", 5L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
                     100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z")));
 
@@ -386,13 +386,13 @@ class MatchingServiceTest {
         try {
             engine.start();
 
-            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 900002L,
+            service.process(perpetualCommand(OrderCommandType.PLACE, 501L, 101L, 900002L,
                     "mm-maker-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
                     100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
-            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 502L, 102L, 1001L,
+            service.process(perpetualCommand(OrderCommandType.PLACE, 502L, 102L, 1001L,
                     "real-maker-102", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
                     101L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z")));
-            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 503L, 203L, 900001L,
+            service.process(perpetualCommand(OrderCommandType.PLACE, 503L, 203L, 900001L,
                     "mm-taker-203", "BTC-USDT", 5L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
                     101L, 6L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:02Z")));
 
@@ -418,9 +418,13 @@ class MatchingServiceTest {
                             AccountUserCommandType.ORDER_RELEASE,
                             AccountUserCommandType.TRADE_SIDE_SETTLE,
                             AccountUserCommandType.TRADE_SIDE_SETTLE,
+                            AccountUserCommandType.ORDER_RELEASE,
                             AccountUserCommandType.ORDER_RELEASE);
-            AccountUserCommand activeOrderRelease = accountCommands.get(3);
+            AccountUserCommand completedMakerRelease = accountCommands.get(3);
+            AccountUserCommand activeOrderRelease = accountCommands.get(4);
             AccountUserCommand takerSettlement = accountCommands.get(1);
+            assertThat(completedMakerRelease.userId()).isEqualTo(1001L);
+            assertThat(releaseCommand(completedMakerRelease).reason()).isEqualTo("ORDER_TERMINAL");
             assertThat(takerSettlement.userId()).isEqualTo(900001L);
             assertThat(activeOrderRelease.userId()).isEqualTo(900001L);
             assertThat(activeOrderRelease.dependsOnCommandId()).isEqualTo(takerSettlement.commandId());
@@ -475,11 +479,11 @@ class MatchingServiceTest {
         try {
             engine.start();
 
-            OrderCommandEvent maker = new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 1001L,
+            OrderCommandEvent maker = perpetualCommand(OrderCommandType.PLACE, 501L, 101L, 1001L,
                     "maker-short-101", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
                     100L, 10L, MarginMode.CROSS, PositionSide.SHORT, 2L, 5L, false, false,
                     Instant.parse("2026-07-01T00:00:00Z"), "trace-maker-short");
-            OrderCommandEvent taker = new OrderCommandEvent(OrderCommandType.PLACE, 502L, 202L, 2002L,
+            OrderCommandEvent taker = perpetualCommand(OrderCommandType.PLACE, 502L, 202L, 2002L,
                     "taker-long-202", "BTC-USDT", 7L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
                     100L, 3L, MarginMode.CROSS, PositionSide.LONG, 2L, 5L, false, false,
                     Instant.parse("2026-07-01T00:00:01Z"), "trace-taker-long");
@@ -517,7 +521,7 @@ class MatchingServiceTest {
         try {
             engine.start();
 
-            service.process(new OrderCommandEvent(OrderCommandType.PLACE, 501L, 101L, 1001L,
+            service.process(perpetualCommand(OrderCommandType.PLACE, 501L, 101L, 1001L,
                     "market-101", "BTC-USDT", 5L, OrderSide.BUY, OrderType.MARKET, TimeInForce.IOC,
                     0L, 1L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
 
@@ -698,6 +702,80 @@ class MatchingServiceTest {
         return new ObjectMapper().readValue(command.payload(), OrderReleaseAccountCommand.class);
     }
 
+    private static OrderCommandEvent perpetualCommand(OrderCommandType commandType,
+                                                       long commandId,
+                                                       long orderId,
+                                                       long userId,
+                                                       String clientOrderId,
+                                                       String symbol,
+                                                       long instrumentVersion,
+                                                       OrderSide side,
+                                                       OrderType orderType,
+                                                       TimeInForce timeInForce,
+                                                       long priceTicks,
+                                                       long quantitySteps,
+                                                       long makerFeeRatePpm,
+                                                       long takerFeeRatePpm,
+                                                       boolean reduceOnly,
+                                                       boolean postOnly,
+                                                       Instant commandTime) {
+        return perpetualCommand(commandType, commandId, orderId, userId, clientOrderId, symbol,
+                instrumentVersion, side, orderType, timeInForce, priceTicks, quantitySteps,
+                makerFeeRatePpm, takerFeeRatePpm, reduceOnly, postOnly, commandTime, null);
+    }
+
+    private static OrderCommandEvent perpetualCommand(OrderCommandType commandType,
+                                                       long commandId,
+                                                       long orderId,
+                                                       long userId,
+                                                       String clientOrderId,
+                                                       String symbol,
+                                                       long instrumentVersion,
+                                                       OrderSide side,
+                                                       OrderType orderType,
+                                                       TimeInForce timeInForce,
+                                                       long priceTicks,
+                                                       long quantitySteps,
+                                                       long makerFeeRatePpm,
+                                                       long takerFeeRatePpm,
+                                                       boolean reduceOnly,
+                                                       boolean postOnly,
+                                                       Instant commandTime,
+                                                       String traceId) {
+        return perpetualCommand(commandType, commandId, orderId, userId, clientOrderId, symbol,
+                instrumentVersion, side, orderType, timeInForce, priceTicks, quantitySteps,
+                MarginMode.CROSS, PositionSide.NET, makerFeeRatePpm, takerFeeRatePpm, reduceOnly,
+                postOnly, commandTime, traceId);
+    }
+
+    private static OrderCommandEvent perpetualCommand(OrderCommandType commandType,
+                                                       long commandId,
+                                                       long orderId,
+                                                       long userId,
+                                                       String clientOrderId,
+                                                       String symbol,
+                                                       long instrumentVersion,
+                                                       OrderSide side,
+                                                       OrderType orderType,
+                                                       TimeInForce timeInForce,
+                                                       long priceTicks,
+                                                       long quantitySteps,
+                                                       MarginMode marginMode,
+                                                       PositionSide positionSide,
+                                                       long makerFeeRatePpm,
+                                                       long takerFeeRatePpm,
+                                                       boolean reduceOnly,
+                                                       boolean postOnly,
+                                                       Instant commandTime,
+                                                       String traceId) {
+        long reservedUnits = reduceOnly ? 0L : Math.multiplyExact(quantitySteps, 1_000L);
+        return new OrderCommandEvent(commandType, commandId, orderId, userId, clientOrderId, symbol,
+                instrumentVersion, side, orderType, timeInForce, priceTicks, quantitySteps, marginMode,
+                positionSide, makerFeeRatePpm, takerFeeRatePpm, reduceOnly, postOnly,
+                reduceOnly ? null : "USDT_PERPETUAL", reduceOnly ? null : "USDT", reservedUnits,
+                commandTime, traceId);
+    }
+
     private static final class FakeMatchingSymbolRepository extends MatchingSymbolRepository {
         private final InstrumentSymbol instrument;
         private final MatchingSymbol matchingSymbol;
@@ -852,7 +930,7 @@ class MatchingServiceTest {
                     orderPositionSide(orderId), 2L, 5L,
                     orderQuantitySteps.getOrDefault(orderId, 10L),
                     orderRemainingQuantitySteps.getOrDefault(orderId, 10L),
-                    false);
+                    false, "USDT_PERPETUAL", "USDT", 1_000L);
         }
 
         @Override

@@ -185,6 +185,7 @@ public class OrderService {
         OrderStatus status = !validation.accepted()
                 ? OrderStatus.REJECTED
                 : reservationPlan.command() == null ? OrderStatus.ACCEPTED : OrderStatus.PENDING_RESERVE;
+        OrderReserveAccountCommand reservation = reservationPlan.command();
         OrderRecord order = new OrderRecord(
                 orderId,
                 productLine,
@@ -205,6 +206,9 @@ public class OrderService {
                 feeSnapshot.takerFeeRatePpm(),
                 normalized.reduceOnly(),
                 normalized.postOnly(),
+                reservation == null ? null : reservation.accountType().name(),
+                reservation == null ? null : reservation.asset(),
+                reservation == null ? 0L : reservation.reservedUnits(),
                 status,
                 validation.rejectReason(),
                 now,
@@ -1158,6 +1162,9 @@ public class OrderService {
                 order.takerFeeRatePpm(),
                 order.reduceOnly(),
                 order.postOnly(),
+                order.reservationAccountType(),
+                order.reservationAsset(),
+                order.reservedUnits(),
                 now,
                 traceId);
     }
@@ -1183,6 +1190,9 @@ public class OrderService {
                 order.takerFeeRatePpm(),
                 order.reduceOnly(),
                 order.postOnly(),
+                order.reservationAccountType(),
+                order.reservationAsset(),
+                order.reservedUnits(),
                 OrderStatus.REJECTED,
                 rejectReason,
                 order.createdAt(),

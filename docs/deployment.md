@@ -312,7 +312,7 @@ The root `init.sql` creates:
 - `trading_outbox_events`: order command/event outbox rows.
 - `trading_matching_assets` and `trading_matching_symbols`: stable exchange-core asset and symbol ids.
 - `trading_match_results` and `trading_match_trades`: idempotent matching output; trades are keyed by `(symbol, trade_id)`.
-- `account_margin_reservations`: initial margin reserved by order entry.
+- `trading_orders` reservation snapshot columns: immutable account type, asset, and initial locked units.
 - `account_position_margins`: margin migrated into live positions after fills.
 - `account_outbox_events`: account-side Kafka outbox rows, used for position update events and actual liquidation-fee settlement events.
 - `risk_snapshot_id_seq`, `risk_event_id_seq`, `risk_liquidation_candidate_id_seq`, and
@@ -558,10 +558,10 @@ Do not point this script at a shared development database. Matching restores ope
 - Matching fill persistence is guarded by open order status, `remaining_quantity_steps >= fillQty`, and `quantity_steps = executed_quantity_steps + remaining_quantity_steps`. Do not clamp overfills with `LEAST/GREATEST`; a mismatch means DB state and the exchange-core event stream have diverged.
 - `surprising.trading.matching.kafka.restart-on-partition-reassignment` only controls partition-movement restarts. Command-failure restart is always enabled.
 - Matching margin release is a guarded balance transition. The update requires `account_balances.locked_units >= releaseUnits`; if that invariant is broken, the matching transaction fails and should be investigated instead of masking the inconsistency by crediting available balance.
-- Matching margin release allows a missing `account_margin_reservations` row only for `reduce_only = TRUE` orders. Non-reduce-only orders must have a reservation; missing reservations fail the transaction.
-- Order entry inserts `trading_orders` before reserving margin. Only the partial `(user_id, client_order_id)` uniqueness conflict is idempotent; a duplicate `clientOrderId` must return the original order without writing `account_margin_reservations` or changing `account_balances`.
-- Account opening fills require an existing non-reduce-only `account_margin_reservations` row. Missing reservations or skipped account margin updates must fail the trade transaction rather than creating uncollateralized positions.
-- Account closing fills may skip order-reservation release only for `reduce_only = TRUE` orders. Non-reduce-only close or flip fills must find the original reservation row; otherwise the account transaction fails.
+- Matching allows a missing reservation snapshot only for `reduce_only = TRUE` orders. Non-reduce-only orders must carry positive `reserved_units` plus account type and asset metadata.
+- Order entry inserts `trading_orders` before moving balance from available to locked. Only the partial `(user_id, client_order_id)` uniqueness conflict is idempotent; a duplicate must return the original order without changing `account_balances`.
+- Account opening fills consume the immutable order snapshot from locked balance and audit consumed/released units in `account_trade_settlement_sides`. Missing snapshots or skipped updates fail the transaction.
+- Terminal order release subtracts all audited trade-side consumption/releases from the original snapshot and releases only the residual, preventing double release without a separate reservation row.
 - Account `TRADE_PNL` ledger insert/backfill writes are fail-fast. Each maker/taker side is
   idempotent by its immutable `account_commands.command_id`; conflicting envelope hashes or ledger
   conflicts indicate inconsistent state. Every trade must have two `account_trade_settlement_sides`

@@ -640,6 +640,7 @@ public class AccountService {
             throw new IllegalArgumentException("trade side user does not match participant role");
         }
         Instant effectiveAt = trade.eventTime() == null ? Instant.now() : trade.eventTime();
+        AccountRepository.OrderMarginApplication marginApplication = AccountRepository.OrderMarginApplication.NONE;
         if (takerInstrumentType == InstrumentType.SPOT) {
             if (role == TradeParticipantRole.TAKER) {
                 applySpotTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
@@ -652,19 +653,22 @@ public class AccountService {
                         effectiveAt);
             }
         } else if (role == TradeParticipantRole.TAKER) {
-            applyTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
+            marginApplication = applyTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
                     trade.takerInstrumentVersion(), trade.takerSide(), trade.takerMarginMode(),
                     trade.takerPositionSide(), trade.priceTicks(), trade.quantitySteps(),
                     sideCommand.orderQuantitySteps(), sideCommand.reduceOnly(),
+                    sideCommand.reservationAccountType(), sideCommand.reservationAsset(), sideCommand.reservedUnits(),
                     trade.takerOrderCompleted(), trade.takerFeeRatePpm(), "TAKER_FEE", effectiveAt, trade.traceId());
         } else {
-            applyTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
+            marginApplication = applyTradeSide(trade.tradeId(), trade.makerOrderId(), trade.makerUserId(), trade.symbol(),
                     trade.makerInstrumentVersion(), opposite(trade.takerSide()), trade.makerMarginMode(),
                     trade.makerPositionSide(), trade.priceTicks(), trade.quantitySteps(),
                     sideCommand.orderQuantitySteps(), sideCommand.reduceOnly(),
+                    sideCommand.reservationAccountType(), sideCommand.reservationAsset(), sideCommand.reservedUnits(),
                     trade.makerOrderCompleted(), trade.makerFeeRatePpm(), "MAKER_FEE", effectiveAt, trade.traceId());
         }
-        accountRepository.completeTradeSide(actualProductLine, trade, role, commandId, Instant.now());
+        accountRepository.completeTradeSide(actualProductLine, trade, role, commandId,
+                marginApplication.consumedUnits(), marginApplication.releasedUnits(), Instant.now());
     }
 
     private long optionIntrinsicPriceTicks(OptionExerciseEvent event, ContractSpec spec, long underlyingPriceUnits) {
@@ -832,7 +836,7 @@ public class AccountService {
                 quantitySteps, spec, feeRatePpm, feeReason, orderCompleted, eventTime);
     }
 
-    private PositionResponse applyTradeSide(long tradeId,
+    private AccountRepository.OrderMarginApplication applyTradeSide(long tradeId,
                                             long orderId,
                                             long userId,
                                             String symbol,
@@ -844,6 +848,9 @@ public class AccountService {
                                             long quantitySteps,
                                             long orderQuantitySteps,
                                             boolean reduceOnly,
+                                            AccountType reservationAccountType,
+                                            String reservationAsset,
+                                            long reservedUnits,
                                             boolean orderCompleted,
                                             long feeRatePpm,
                                             String feeReason,
@@ -860,13 +867,15 @@ public class AccountService {
                 : contractSpec(symbol, current.instrumentVersion());
         long closeSteps = MarginTransferMath.closeSteps(current.signedQuantitySteps(), side, quantitySteps);
         long openSteps = Math.subtractExact(quantitySteps, closeSteps);
+        AccountRepository.OrderMarginApplication marginApplication = AccountRepository.OrderMarginApplication.NONE;
         PositionChange change = positionCalculator.apply(current, side, priceTicks, quantitySteps,
                 positionSpec, fillSpec);
         if (fillSpec.contractType().isOption()) {
-            accountRepository.settleOptionPremium(derivativeAccountType(fillSpec), side, userId,
+            marginApplication = accountRepository.settleOptionPremium(derivativeAccountType(fillSpec), side, userId,
                     fillSpec.settleAsset(), orderId, tradeId, symbol, normalizedMarginMode,
-                    MarginTransferMath.optionPremiumUnits(fillSpec, priceTicks, quantitySteps), orderCompleted,
-                    eventTime);
+                    MarginTransferMath.optionPremiumUnits(fillSpec, priceTicks, quantitySteps),
+                    reservationAccountType, reservationAsset, reservedUnits,
+                    orderQuantitySteps, quantitySteps, eventTime);
         }
         if (closeSteps > 0 && !positionSpec.contractType().isOption()) {
             accountRepository.settleRealizedPnl(derivativeAccountType(positionSpec), userId,
@@ -879,12 +888,12 @@ public class AccountService {
             accountRepository.releasePositionMargin(productLine, userId, symbol, normalizedMarginMode, closeSteps,
                     normalizedPositionSide, Math.absExact(current.signedQuantitySteps()), eventTime);
         }
-        if (openSteps > 0) {
-            if (!fillSpec.contractType().isOption() || side == OrderSide.SELL) {
-                long actualMarginUnits = MarginTransferMath.openingInitialMarginUnits(fillSpec, priceTicks, openSteps);
-                accountRepository.consumeOrderMargin(productLine, orderId, userId, symbol, normalizedMarginMode, openSteps,
-                        actualMarginUnits, orderQuantitySteps, reduceOnly, orderCompleted, eventTime);
-            }
+        if (!fillSpec.contractType().isOption() || side == OrderSide.SELL) {
+            long actualMarginUnits = openSteps == 0L ? 0L
+                    : MarginTransferMath.openingInitialMarginUnits(fillSpec, priceTicks, openSteps);
+            marginApplication = accountRepository.applyOrderMargin(productLine, orderId, reservationAccountType,
+                    userId, symbol, normalizedMarginMode, normalizedPositionSide, reservationAsset, reservedUnits,
+                    orderQuantitySteps, quantitySteps, openSteps, actualMarginUnits, reduceOnly, eventTime);
         }
         long feeDeltaUnits = TradeFeeMath.feeDeltaUnits(fillSpec, priceTicks, quantitySteps, feeRatePpm);
         accountRepository.settleTradeFee(derivativeAccountType(fillSpec), userId, fillSpec.settleAsset(),
@@ -893,10 +902,6 @@ public class AccountService {
         if (closeSteps > 0) {
             settleLiquidationFeeIfNeeded(tradeId, orderId, userId, symbol, normalizedMarginMode, fillSpec,
                     priceTicks, quantitySteps, eventTime, traceId);
-        }
-        if (closeSteps > 0) {
-            accountRepository.releaseOrderMargin(orderId, userId, symbol, closeSteps,
-                    orderQuantitySteps, reduceOnly, orderCompleted && openSteps == 0, eventTime);
         }
         PositionResponse updated = accountRepository.updatePosition(productLine, userId, symbol, normalizedMarginMode,
                 normalizedPositionSide,
@@ -908,7 +913,7 @@ public class AccountService {
         } else {
             schedulePositionCacheSync(productLine, userId, symbol, normalizedMarginMode, normalizedPositionSide);
         }
-        return updated;
+        return marginApplication;
     }
 
     private void schedulePositionCacheSync(com.surprising.account.api.model.PositionCacheEvent snapshot) {

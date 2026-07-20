@@ -41,6 +41,8 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -843,18 +845,6 @@ public class AccountRepository {
                 """, Boolean.class, productLineName, userId, userId);
         if (Boolean.TRUE.equals(hasUnsettledTrades)) {
             throw new IllegalStateException("position mode switch requires all matched trades to be settled");
-        }
-        Boolean hasActiveReservations = jdbcTemplate.queryForObject("""
-                SELECT EXISTS (
-                    SELECT 1
-                      FROM account_margin_reservations
-                     WHERE user_id = ?
-                       AND account_type = ?
-                       AND status NOT IN ('RELEASED', 'CONSUMED')
-                )
-                """, Boolean.class, userId, productLine(productLine).accountTypeCode());
-        if (Boolean.TRUE.equals(hasActiveReservations)) {
-            throw new IllegalStateException("position mode switch requires no active margin reservations");
         }
     }
 
@@ -1841,6 +1831,67 @@ public class AccountRepository {
                 state.signedQuantitySteps(), state.entryPriceTicks(), state.realizedPnlUnits(), now);
     }
 
+    public void lockOpenInterestShards(List<OpenInterestLockRequest> requests, Instant now) {
+        if (requests == null || requests.isEmpty()) {
+            return;
+        }
+        List<OpenInterestShard> shards = requests.stream()
+                .map(request -> new OpenInterestShard(productLine(request.productLine()), request.symbol(),
+                        Math.floorMod(request.userId(), OPEN_INTEREST_SHARDS)))
+                .distinct()
+                .sorted(Comparator.comparing((OpenInterestShard shard) -> shard.productLine().name())
+                        .thenComparing(OpenInterestShard::symbol)
+                        .thenComparingInt(OpenInterestShard::shardId))
+                .toList();
+        String values = String.join(", ", Collections.nCopies(shards.size(),
+                "(?::text, ?::text, ?::integer, ?::timestamptz)"));
+        List<Object> seedArgs = new ArrayList<>(shards.size() * 4);
+        Timestamp lockedAt = Timestamp.from(now == null ? Instant.now() : now);
+        for (OpenInterestShard shard : shards) {
+            seedArgs.add(shard.productLine().name());
+            seedArgs.add(shard.symbol());
+            seedArgs.add(shard.shardId());
+            seedArgs.add(lockedAt);
+        }
+        int inserted = jdbcTemplate.update("""
+                WITH input(product_line, symbol, shard_id, locked_at) AS (
+                    VALUES %s
+                )
+                INSERT INTO trading_symbol_open_interest_shards (
+                    product_line, symbol, shard_id, long_quantity_steps, short_quantity_steps, updated_at
+                )
+                SELECT product_line, symbol, shard_id, 0, 0, locked_at
+                  FROM input
+                 ORDER BY product_line, symbol, shard_id
+                ON CONFLICT (product_line, symbol, shard_id) DO NOTHING
+                """.formatted(values), seedArgs.toArray());
+        if (inserted < 0 || inserted > shards.size()) {
+            throw new IllegalStateException("unexpected open interest batch seed rows: " + inserted);
+        }
+
+        String lockValues = String.join(", ", Collections.nCopies(shards.size(),
+                "(?::text, ?::text, ?::integer)"));
+        List<Object> lockArgs = new ArrayList<>(shards.size() * 3);
+        for (OpenInterestShard shard : shards) {
+            lockArgs.add(shard.productLine().name());
+            lockArgs.add(shard.symbol());
+            lockArgs.add(shard.shardId());
+        }
+        List<Integer> locked = jdbcTemplate.query("""
+                WITH input(product_line, symbol, shard_id) AS (
+                    VALUES %s
+                )
+                SELECT 1
+                  FROM trading_symbol_open_interest_shards shard
+                  JOIN input USING (product_line, symbol, shard_id)
+                 ORDER BY shard.product_line, shard.symbol, shard.shard_id
+                   FOR UPDATE OF shard
+                """.formatted(lockValues), (rs, rowNum) -> 1, lockArgs.toArray());
+        if (locked.size() != shards.size()) {
+            throw new IllegalStateException("failed to lock all open interest shards");
+        }
+    }
+
     private long lockCurrentPositionQuantity(long userId, String symbol, MarginMode marginMode) {
         return lockCurrentPositionQuantity(userId, symbol, marginMode, PositionSide.NET);
     }
@@ -2062,16 +2113,21 @@ public class AccountRepository {
                                   MatchTradeEvent trade,
                                   TradeParticipantRole role,
                                   String commandId,
+                                  long orderMarginConsumedUnits,
+                                  long orderMarginReleasedUnits,
                                   Instant now) {
+        long orderId = role == TradeParticipantRole.TAKER ? trade.takerOrderId() : trade.makerOrderId();
         int rows = jdbcTemplate.update("""
                 INSERT INTO account_trade_settlement_sides (
                     product_line, symbol, trade_id, participant_role,
-                    taker_user_id, maker_user_id, command_id, applied_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    taker_user_id, maker_user_id, command_id, order_id,
+                    order_margin_consumed_units, order_margin_released_units, applied_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (product_line, symbol, trade_id, participant_role) DO NOTHING
                 """,
                 productLine.name(), trade.symbol(), trade.tradeId(), role.name(), trade.takerUserId(),
-                trade.makerUserId(), commandId, Timestamp.from(now));
+                trade.makerUserId(), commandId, orderId, orderMarginConsumedUnits,
+                orderMarginReleasedUnits, Timestamp.from(now));
         if (rows == 1) {
             return;
         }
@@ -2086,9 +2142,13 @@ public class AccountRepository {
                        AND taker_user_id = ?
                        AND maker_user_id = ?
                        AND command_id = ?
+                       AND order_id = ?
+                       AND order_margin_consumed_units = ?
+                       AND order_margin_released_units = ?
                 )
                 """, Boolean.class, productLine.name(), trade.symbol(), trade.tradeId(), role.name(),
-                trade.takerUserId(), trade.makerUserId(), commandId);
+                trade.takerUserId(), trade.makerUserId(), commandId, orderId,
+                orderMarginConsumedUnits, orderMarginReleasedUnits);
         if (!Boolean.TRUE.equals(identical)) {
             throw new IllegalStateException("failed to complete trade side "
                     + productLine + ":" + trade.symbol() + ":" + trade.tradeId() + ":" + role);
@@ -2211,7 +2271,7 @@ public class AccountRepository {
         return true;
     }
 
-    public void settleOptionPremium(AccountType accountType,
+    public OrderMarginApplication settleOptionPremium(AccountType accountType,
                                     OrderSide side,
                                     long userId,
                                     String asset,
@@ -2220,10 +2280,14 @@ public class AccountRepository {
                                     String symbol,
                                     MarginMode marginMode,
                                     long premiumUnits,
-                                    boolean orderCompleted,
+                                    AccountType reservationAccountType,
+                                    String reservationAsset,
+                                    long reservedUnits,
+                                    long orderQuantitySteps,
+                                    long fillQuantitySteps,
                                     Instant now) {
         if (premiumUnits <= 0) {
-            return;
+            return OrderMarginApplication.NONE;
         }
         AccountType normalizedType = requireAccountType(accountType);
         if (normalizedType != AccountType.OPTION) {
@@ -2231,16 +2295,29 @@ public class AccountRepository {
         }
         String referenceId = tradeId + ":" + orderId + ":" + side.name();
         if (side == OrderSide.BUY) {
-            long balanceAfterUnits = debitOptionPremium(normalizedType, userId, asset, orderId, symbol, marginMode,
-                    premiumUnits, orderCompleted, now);
+            if (reservationAccountType != AccountType.OPTION || !asset.equals(reservationAsset)
+                    || reservedUnits < premiumUnits) {
+                throw new IllegalStateException("option premium reservation snapshot is insufficient");
+            }
+            long allocatedUnits = Math.multiplyExact(reservedUnits, fillQuantitySteps) / orderQuantitySteps;
+            if (premiumUnits > allocatedUnits) {
+                throw new IllegalStateException("option premium exceeds allocated order reservation");
+            }
+            debitBalanceLock(normalizedType, userId, asset, premiumUnits, now);
+            long releasedUnits = Math.max(0L, Math.subtractExact(allocatedUnits, premiumUnits));
+            if (releasedUnits > 0L) {
+                releaseBalanceLock(normalizedType, userId, asset, releasedUnits, now);
+            }
+            long balanceAfterUnits = productEquity(normalizedType, userId, asset);
             insertProductSettlementLedger(userId, normalizedType, asset, Math.negateExact(premiumUnits),
                     balanceAfterUnits, "OPTION_PREMIUM", referenceId, "OPTION_PREMIUM_PAID", now);
-            return;
+            return new OrderMarginApplication(premiumUnits, releasedUnits);
         }
         long balanceAfterUnits = applyAmountToBalance(normalizedType, userId, asset, symbol, marginMode,
                 premiumUnits, now);
         insertProductSettlementLedger(userId, normalizedType, asset, premiumUnits, balanceAfterUnits,
                 "OPTION_PREMIUM", referenceId, "OPTION_PREMIUM_RECEIVED", now);
+        return OrderMarginApplication.NONE;
     }
 
     public void settleRealizedPnl(long userId,
@@ -2445,74 +2522,43 @@ public class AccountRepository {
                 debit.debitedUnits(), context.feeRatePpm()));
     }
 
-    public void releaseOrderMargin(long orderId,
-                                   long userId,
-                                   String symbol,
-                                   long closeSteps,
-                                   long orderQuantitySteps,
-                                   boolean reduceOnly,
-                                   boolean sweepRemainder,
-                                   Instant now) {
-        OrderMarginReservation reservation = lockOrderMarginReservation(orderId, userId, symbol);
-        if (reservation == null) {
-            if (!reduceOnly) {
-                throw new IllegalStateException("missing order margin reservation for closing fill " + orderId);
+    public OrderMarginApplication applyOrderMargin(ProductLine productLine,
+                                                   long orderId,
+                                                   AccountType accountType,
+                                                   long userId,
+                                                   String symbol,
+                                                   MarginMode marginMode,
+                                                   PositionSide positionSide,
+                                                   String asset,
+                                                   long reservedUnits,
+                                                   long orderQuantitySteps,
+                                                   long fillQuantitySteps,
+                                                   long openSteps,
+                                                   long actualMarginUnits,
+                                                   boolean reduceOnly,
+                                                   Instant now) {
+        if (reservedUnits == 0L) {
+            if (openSteps > 0L) {
+                throw new IllegalStateException("opening fill requires an order margin reservation snapshot");
             }
-            return;
-        }
-        requireReservationSnapshot(reservation, orderQuantitySteps, reduceOnly, orderId);
-        long amountUnits = MarginTransferMath.orderMarginReleaseAmount(reservation.reservedUnits(),
-                reservation.releasedUnits(), reservation.positionMarginUnits(), reservation.orderQuantitySteps(),
-                closeSteps, sweepRemainder);
-        releaseReservedMargin(orderId, reservation.accountType(), reservation.userId(), reservation.asset(), amountUnits,
-                "POSITION_REDUCED", now);
-    }
-
-    public void consumeOrderMargin(ProductLine productLine,
-                                   long orderId,
-                                   long userId,
-                                   String symbol,
-                                   MarginMode marginMode,
-                                   long openSteps,
-                                   long actualMarginUnits,
-                                   long orderQuantitySteps,
-                                   boolean reduceOnly,
-                                   boolean sweepRemainder,
-                                   Instant now) {
-        if (openSteps <= 0) {
-            return;
+            return OrderMarginApplication.NONE;
         }
         ProductLine resolvedProductLine = productLine(productLine);
-        OrderMarginReservation reservation = lockOrderMarginReservation(orderId, userId, symbol);
-        if (reservation == null) {
-            throw new IllegalStateException("missing order margin reservation for opening fill " + orderId);
+        if (accountType == null || accountType.productLine().orElse(null) != resolvedProductLine
+                || asset == null || asset.isBlank()) {
+            throw new IllegalStateException("order margin reservation scope does not match fill");
         }
-        requireReservationSnapshot(reservation, orderQuantitySteps, reduceOnly, orderId);
-        if (reservation.reduceOnly()) {
-            throw new IllegalStateException("reduce-only order cannot consume opening margin " + orderId);
+        if (reduceOnly && openSteps > 0L) {
+            throw new IllegalStateException("reduce-only order cannot consume opening margin");
         }
-        long allocatedUnits = MarginTransferMath.orderMarginConsumeAmount(reservation.reservedUnits(),
-                reservation.releasedUnits(), reservation.positionMarginUnits(), reservation.orderQuantitySteps(),
-                openSteps, sweepRemainder);
-        long excessUnits = MarginTransferMath.excessOrderMarginUnits(allocatedUnits, actualMarginUnits);
-        if (actualMarginUnits <= 0 && excessUnits <= 0) {
-            return;
+        long allocatedUnits = Math.multiplyExact(reservedUnits, fillQuantitySteps) / orderQuantitySteps;
+        if (actualMarginUnits > allocatedUnits) {
+            throw new IllegalStateException("opening margin exceeds allocated order reservation");
         }
-        if (actualMarginUnits > 0) {
+        long releasedUnits = Math.max(0L, Math.subtractExact(allocatedUnits, actualMarginUnits));
+        if (actualMarginUnits > 0L) {
             MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
-            int reservationRows = jdbcTemplate.update("""
-                    UPDATE account_margin_reservations
-                       SET position_margin_units = position_margin_units + ?,
-                           status = CASE
-                               WHEN released_units + position_margin_units + ? >= reserved_units THEN 'CONSUMED'
-                               ELSE 'PARTIALLY_CONSUMED'
-                           END,
-                           reason = 'POSITION_OPENED',
-                           updated_at = ?
-                     WHERE order_id = ?
-                       AND released_units + position_margin_units + ? <= reserved_units
-                    """, actualMarginUnits, actualMarginUnits, Timestamp.from(now), orderId, actualMarginUnits);
-            requireSingleRow(reservationRows, "order margin consumption");
+            PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
             int positionMarginRows = jdbcTemplate.update("""
                     INSERT INTO account_position_margins (
                         product_line, user_id, symbol, asset, margin_mode, position_side, margin_units, updated_at
@@ -2520,15 +2566,16 @@ public class AccountRepository {
                     ON CONFLICT (product_line, user_id, symbol, asset, margin_mode, position_side) DO UPDATE
                        SET margin_units = account_position_margins.margin_units + EXCLUDED.margin_units,
                            updated_at = EXCLUDED.updated_at
-                    """, resolvedProductLine.name(), userId, symbol, reservation.asset(), normalizedMarginMode.name(),
-                    reservation.positionSide().name(), actualMarginUnits,
-                    Timestamp.from(now));
+                    """, resolvedProductLine.name(), userId, symbol, asset, normalizedMarginMode.name(),
+                    normalizedPositionSide.name(), actualMarginUnits, Timestamp.from(now));
             requireSingleRow(positionMarginRows, "position margin upsert");
             schedulePositionCacheProjection(resolvedProductLine, userId, symbol,
-                    normalizedMarginMode, reservation.positionSide());
+                    normalizedMarginMode, normalizedPositionSide);
         }
-        releaseReservedMargin(orderId, reservation.accountType(), reservation.userId(), reservation.asset(), excessUnits,
-                "ORDER_PRICE_IMPROVEMENT", now);
+        if (releasedUnits > 0L) {
+            releaseBalanceLock(accountType, userId, asset, releasedUnits, now);
+        }
+        return new OrderMarginApplication(actualMarginUnits, releasedUnits);
     }
 
     public void releasePositionMargin(long userId,
@@ -2612,68 +2659,6 @@ public class AccountRepository {
         }
     }
 
-    private OrderMarginReservation lockOrderMarginReservation(long orderId, long userId, String symbol) {
-        return jdbcTemplate.query("""
-                SELECT r.account_type, r.user_id, r.asset, r.reserved_units, r.released_units,
-                       r.position_margin_units, r.margin_mode, r.position_side,
-                       r.order_quantity_steps, r.reduce_only
-                  FROM account_margin_reservations r
-                 WHERE r.order_id = ?
-                   AND r.user_id = ?
-                   AND r.symbol = ?
-                 FOR UPDATE OF r
-                """, (rs, rowNum) -> new OrderMarginReservation(
-                accountTypeFromNullableDbValue(rs.getString("account_type")),
-                rs.getLong("user_id"),
-                rs.getString("asset"),
-                rs.getLong("reserved_units"),
-                rs.getLong("released_units"),
-                rs.getLong("position_margin_units"),
-                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                PositionSide.fromNullableDbValue(rs.getString("position_side")),
-                rs.getLong("order_quantity_steps"),
-                rs.getBoolean("reduce_only")), orderId, userId, symbol).stream().findFirst().orElse(null);
-    }
-
-    private void requireReservationSnapshot(OrderMarginReservation reservation,
-                                            long orderQuantitySteps,
-                                            boolean reduceOnly,
-                                            long orderId) {
-        if (reservation.orderQuantitySteps() != orderQuantitySteps) {
-            throw new IllegalStateException("order quantity does not match account reservation " + orderId);
-        }
-        if (reservation.reduceOnly() != reduceOnly) {
-            throw new IllegalStateException("reduce-only flag does not match account reservation " + orderId);
-        }
-    }
-
-    private void releaseReservedMargin(long orderId,
-                                       AccountType accountType,
-                                       long userId,
-                                       String asset,
-                                       long amountUnits,
-                                       String reason,
-                                       Instant now) {
-        if (amountUnits <= 0) {
-            return;
-        }
-        releaseBalanceLock(accountType, userId, asset, amountUnits, now);
-        int reservationRows = jdbcTemplate.update("""
-                UPDATE account_margin_reservations
-                   SET released_units = released_units + ?,
-                       status = CASE
-                           WHEN released_units + ? >= reserved_units AND position_margin_units = 0 THEN 'RELEASED'
-                           WHEN released_units + ? + position_margin_units >= reserved_units THEN 'CONSUMED'
-                           WHEN position_margin_units > 0 THEN 'PARTIALLY_CONSUMED'
-                           ELSE 'PARTIALLY_RELEASED'
-                       END,
-                       reason = ?,
-                       updated_at = ?
-                 WHERE order_id = ?
-                """, amountUnits, amountUnits, amountUnits, reason, Timestamp.from(now), orderId);
-        requireSingleRow(reservationRows, "reserved margin release");
-    }
-
     private void releaseBalanceLock(AccountType accountType, long userId, String asset, long amountUnits, Instant now) {
         if (isLegacyPerpetualAccount(accountType)) {
             releaseLegacyBalanceLock(userId, asset, amountUnits, now);
@@ -2692,50 +2677,6 @@ public class AccountRepository {
         if (rows != 1) {
             throw new IllegalStateException("insufficient locked product balance for margin release");
         }
-    }
-
-    private long debitOptionPremium(AccountType accountType,
-                                    long userId,
-                                    String asset,
-                                    long orderId,
-                                    String symbol,
-                                    MarginMode marginMode,
-                                    long premiumUnits,
-                                    boolean orderCompleted,
-                                    Instant now) {
-        OrderMarginReservation reservation = lockOrderMarginReservation(orderId, userId, symbol);
-        if (reservation == null) {
-            return applyAmountToBalance(accountType, userId, asset, symbol, marginMode,
-                    Math.negateExact(premiumUnits), now);
-        }
-        long spendableUnits = Math.subtractExact(reservation.reservedUnits(),
-                Math.addExact(reservation.releasedUnits(), reservation.positionMarginUnits()));
-        if (spendableUnits < premiumUnits) {
-            throw new IllegalStateException("reserved option premium is smaller than filled amount for order "
-                    + orderId);
-        }
-        debitBalanceLock(accountType, userId, asset, premiumUnits, now);
-        int reservationRows = jdbcTemplate.update("""
-                UPDATE account_margin_reservations
-                   SET released_units = released_units + ?,
-                       status = CASE
-                           WHEN released_units + ? >= reserved_units AND position_margin_units = 0 THEN 'RELEASED'
-                           WHEN released_units + ? + position_margin_units >= reserved_units THEN 'CONSUMED'
-                           WHEN position_margin_units > 0 THEN 'PARTIALLY_CONSUMED'
-                           ELSE 'PARTIALLY_RELEASED'
-                       END,
-                       reason = 'OPTION_PREMIUM_PAID',
-                       updated_at = ?
-                 WHERE order_id = ?
-                   AND released_units + position_margin_units + ? <= reserved_units
-                """, premiumUnits, premiumUnits, premiumUnits, Timestamp.from(now), orderId, premiumUnits);
-        requireSingleRow(reservationRows, "option premium reservation debit");
-        if (orderCompleted) {
-            long remainingUnits = Math.subtractExact(spendableUnits, premiumUnits);
-            releaseReservedMargin(orderId, reservation.accountType(), reservation.userId(), reservation.asset(),
-                    remainingUnits, "OPTION_PREMIUM_REMAINDER", now);
-        }
-        return productEquity(accountType, userId, asset);
     }
 
     private void debitBalanceLock(AccountType accountType, long userId, String asset, long amountUnits, Instant now) {
@@ -3912,17 +3853,19 @@ public class AccountRepository {
                 rs.getTimestamp("updated_at").toInstant());
     }
 
-    private record OrderMarginReservation(
-            AccountType accountType,
-            long userId,
-            String asset,
-            long reservedUnits,
-            long releasedUnits,
-            long positionMarginUnits,
-            MarginMode marginMode,
-            PositionSide positionSide,
-            long orderQuantitySteps,
-            boolean reduceOnly) {
+    public record OrderMarginApplication(long consumedUnits, long releasedUnits) {
+        public static final OrderMarginApplication NONE = new OrderMarginApplication(0L, 0L);
+    }
+
+    public record OpenInterestLockRequest(ProductLine productLine, long userId, String symbol) {
+        public OpenInterestLockRequest {
+            if (productLine == null || userId <= 0L || symbol == null || symbol.isBlank()) {
+                throw new IllegalArgumentException("invalid open interest lock request");
+            }
+        }
+    }
+
+    private record OpenInterestShard(ProductLine productLine, String symbol, int shardId) {
     }
 
     private record PositionMargin(String symbol,

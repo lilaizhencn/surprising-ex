@@ -8,6 +8,9 @@ public record OrderReleaseAccountCommand(
         long quantitySteps,
         long remainingQuantitySteps,
         boolean reservationExpected,
+        AccountType reservationAccountType,
+        String reservationAsset,
+        long reservedUnits,
         String reason,
         Instant effectiveAt) {
 
@@ -20,6 +23,15 @@ public record OrderReleaseAccountCommand(
         }
         if (!releaseAll && remainingQuantitySteps == quantitySteps) {
             throw new IllegalArgumentException("partial release requires executed quantity");
+        }
+        if (reservedUnits < 0L
+                || (reservedUnits == 0L && (reservationAccountType != null || reservationAsset != null))
+                || (reservedUnits > 0L && (reservationAccountType == null
+                || reservationAsset == null || reservationAsset.isBlank()))) {
+            throw new IllegalArgumentException("invalid order release reservation snapshot");
+        }
+        if (reservationExpected && reservedUnits <= 0L) {
+            throw new IllegalArgumentException("expected reservation snapshot is required");
         }
         if (reason == null || reason.isBlank()) {
             throw new IllegalArgumentException("reason is required");

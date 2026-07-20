@@ -988,7 +988,7 @@ class AccountServiceTest {
         assertThat(repository.consumedOrderMarginUnits).containsEntry(9005L, 3L)
                 .containsEntry(9006L, 8L);
         assertThat(repository.releaseSweepByOrder).containsEntry(9005L, false);
-        assertThat(repository.consumeSweepByOrder).containsEntry(9005L, true).containsEntry(9006L, true);
+        assertThat(repository.consumeSweepByOrder).containsEntry(9005L, false).containsEntry(9006L, true);
         assertThat(repository.pnlByUser).containsEntry(2002L, -50L);
         assertThat(repository.positionUpdates).isEqualTo(2);
     }
@@ -1000,12 +1000,17 @@ class AccountServiceTest {
     private static void settleTrade(AccountService service,
                                     MatchTradeEvent trade,
                                     ProductLine productLine) {
+        AccountType accountType = AccountType.valueOf(productLine.accountTypeCode());
+        String reservationAsset = accountType == AccountType.COIN_PERPETUAL
+                || accountType == AccountType.COIN_DELIVERY ? "BTC" : "USDT";
         service.processTradeSide(productLine, "test:taker:" + trade.tradeId(),
                 new TradeSideSettlementCommand(
-                        trade, TradeParticipantRole.TAKER, trade.quantitySteps(), false));
+                        trade, TradeParticipantRole.TAKER, trade.quantitySteps(), false,
+                        accountType, reservationAsset, 10_000L));
         service.processTradeSide(productLine, "test:maker:" + trade.tradeId(),
                 new TradeSideSettlementCommand(
-                        trade, TradeParticipantRole.MAKER, trade.quantitySteps(), false));
+                        trade, TradeParticipantRole.MAKER, trade.quantitySteps(), false,
+                        accountType, reservationAsset, 10_000L));
     }
 
     private static int settleDelivery(AccountService service, DeliverySettlementEvent event) {
@@ -1154,6 +1159,8 @@ class AccountServiceTest {
                                       MatchTradeEvent trade,
                                       TradeParticipantRole role,
                                       String commandId,
+                                      long orderMarginConsumedUnits,
+                                      long orderMarginReleasedUnits,
                                       Instant now) {
             // Command idempotency and bilateral persistence are covered by repository integration tests.
         }
@@ -1332,36 +1339,34 @@ class AccountServiceTest {
         }
 
         @Override
-        public void consumeOrderMargin(ProductLine productLine,
-                                       long orderId,
-                                       long userId,
-                                       String symbol,
-                                       MarginMode marginMode,
-                                       long openSteps,
-                                       long actualMarginUnits,
-                                       long orderQuantitySteps,
-                                       boolean reduceOnly,
-                                       boolean sweepRemainder,
-                                       Instant now) {
-            assertThat(orderQuantitySteps).isGreaterThanOrEqualTo(openSteps);
-            consumedOrderMargin.merge(orderId, openSteps, Long::sum);
-            consumedOrderMarginUnits.merge(orderId, actualMarginUnits, Long::sum);
-            consumeSweepByOrder.put(orderId, sweepRemainder);
-            marginOperationOrder.add("consume:" + orderId);
-        }
-
-        @Override
-        public void releaseOrderMargin(long orderId,
-                                       long userId,
-                                       String symbol,
-                                       long closeSteps,
-                                       long orderQuantitySteps,
-                                       boolean reduceOnly,
-                                       boolean sweepRemainder,
-                                       Instant now) {
-            assertThat(orderQuantitySteps).isGreaterThanOrEqualTo(closeSteps);
-            releasedOrderMargin.merge(orderId, closeSteps, Long::sum);
-            releaseSweepByOrder.put(orderId, sweepRemainder);
+        public OrderMarginApplication applyOrderMargin(ProductLine productLine,
+                                                       long orderId,
+                                                       AccountType accountType,
+                                                       long userId,
+                                                       String symbol,
+                                                       MarginMode marginMode,
+                                                       PositionSide positionSide,
+                                                       String asset,
+                                                       long reservedUnits,
+                                                       long orderQuantitySteps,
+                                                       long fillQuantitySteps,
+                                                       long openSteps,
+                                                       long actualMarginUnits,
+                                                       boolean reduceOnly,
+                                                       Instant now) {
+            assertThat(orderQuantitySteps).isGreaterThanOrEqualTo(fillQuantitySteps);
+            if (openSteps > 0L) {
+                consumedOrderMargin.merge(orderId, openSteps, Long::sum);
+                consumedOrderMarginUnits.merge(orderId, actualMarginUnits, Long::sum);
+                consumeSweepByOrder.put(orderId, openSteps == fillQuantitySteps);
+                marginOperationOrder.add("consume:" + orderId);
+            }
+            long closeSteps = fillQuantitySteps - openSteps;
+            if (closeSteps > 0L) {
+                releasedOrderMargin.merge(orderId, closeSteps, Long::sum);
+                releaseSweepByOrder.put(orderId, openSteps == 0L);
+            }
+            return new OrderMarginApplication(actualMarginUnits, 0L);
         }
 
         @Override
@@ -1454,7 +1459,7 @@ class AccountServiceTest {
         }
 
         @Override
-        public void settleOptionPremium(AccountType accountType,
+        public OrderMarginApplication settleOptionPremium(AccountType accountType,
                                         OrderSide side,
                                         long userId,
                                         String asset,
@@ -1463,7 +1468,11 @@ class AccountServiceTest {
                                         String symbol,
                                         MarginMode marginMode,
                                         long premiumUnits,
-                                        boolean orderCompleted,
+                                        AccountType reservationAccountType,
+                                        String reservationAsset,
+                                        long reservedUnits,
+                                        long orderQuantitySteps,
+                                        long fillQuantitySteps,
                                         Instant now) {
             assertThat(accountType).isEqualTo(AccountType.OPTION);
             assertThat(asset).isEqualTo("USDT");
@@ -1472,6 +1481,9 @@ class AccountServiceTest {
             optionPremiumAccountTypes.add(accountType);
             optionPremiumByUser.merge(userId, side == OrderSide.BUY ? Math.negateExact(premiumUnits) : premiumUnits,
                     Long::sum);
+            return side == OrderSide.BUY
+                    ? new OrderMarginApplication(premiumUnits, 0L)
+                    : OrderMarginApplication.NONE;
         }
 
         @Override

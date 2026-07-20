@@ -40,8 +40,9 @@ public class OrderRepository {
                 order_id, product_line, user_id, client_order_id, symbol, instrument_version, side, order_type, time_in_force,
                 price_ticks, quantity_steps, executed_quantity_steps, remaining_quantity_steps,
                 margin_mode, position_side, maker_fee_rate_ppm, taker_fee_rate_ppm,
-                reduce_only, post_only, status, reject_reason, created_at, updated_at, revision
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                reduce_only, post_only, reservation_account_type, reservation_asset, reserved_units,
+                status, reject_reason, created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (product_line, user_id, client_order_id) WHERE client_order_id IS NOT NULL DO NOTHING
             """;
 
@@ -83,7 +84,8 @@ public class OrderRepository {
                 order.timeInForce().name(),
                 order.priceTicks(), order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
                 order.marginMode().name(), order.positionSide().name(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
-                order.reduceOnly(), order.postOnly(), order.status().name(), order.rejectReason(),
+                order.reduceOnly(), order.postOnly(), order.reservationAccountType(), order.reservationAsset(),
+                order.reservedUnits(), order.status().name(), order.rejectReason(),
                 Timestamp.from(order.createdAt()), Timestamp.from(order.updatedAt()), order.revision());
         return rows == 1;
     }
@@ -784,6 +786,9 @@ public class OrderRepository {
                 rs.getLong("taker_fee_rate_ppm"),
                 rs.getBoolean("reduce_only"),
                 rs.getBoolean("post_only"),
+                rs.getString("reservation_account_type"),
+                rs.getString("reservation_asset"),
+                rs.getLong("reserved_units"),
                 OrderStatus.valueOf(rs.getString("status")),
                 rs.getString("reject_reason"),
                 rs.getTimestamp("created_at").toInstant(),

@@ -745,7 +745,6 @@ CREATE SEQUENCE IF NOT EXISTS trading_order_seq AS BIGINT START WITH 1 INCREMENT
 CREATE SEQUENCE IF NOT EXISTS trading_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_command_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_outbox_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
-CREATE SEQUENCE IF NOT EXISTS trading_margin_reservation_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_spot_reservation_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_fee_schedule_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 CREATE SEQUENCE IF NOT EXISTS trading_matching_symbol_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
@@ -1020,6 +1019,9 @@ CREATE TABLE IF NOT EXISTS trading_orders (
     taker_fee_rate_ppm          BIGINT NOT NULL DEFAULT 0,
     reduce_only                 BOOLEAN NOT NULL DEFAULT FALSE,
     post_only                   BOOLEAN NOT NULL DEFAULT FALSE,
+    reservation_account_type    TEXT,
+    reservation_asset           TEXT,
+    reserved_units              BIGINT NOT NULL DEFAULT 0,
     status                      TEXT NOT NULL,
     reject_reason               TEXT,
     created_at                  TIMESTAMPTZ NOT NULL,
@@ -1057,6 +1059,11 @@ CREATE TABLE IF NOT EXISTS trading_orders (
     CONSTRAINT trading_orders_market_price_zero CHECK (
         order_type <> 'MARKET' OR price_ticks = 0
     ),
+    CONSTRAINT trading_orders_reservation_check CHECK (
+        reserved_units >= 0
+        AND ((reserved_units = 0 AND reservation_account_type IS NULL AND reservation_asset IS NULL)
+             OR (reserved_units > 0 AND reservation_account_type IS NOT NULL AND reservation_asset IS NOT NULL))
+    ),
     CONSTRAINT trading_orders_instrument_version_check CHECK (
         status = 'REJECTED' OR instrument_version IS NOT NULL
     )
@@ -1068,6 +1075,20 @@ BEGIN
         ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
     ALTER TABLE trading_orders
         ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 1;
+    ALTER TABLE trading_orders
+        ADD COLUMN IF NOT EXISTS reservation_account_type TEXT;
+    ALTER TABLE trading_orders
+        ADD COLUMN IF NOT EXISTS reservation_asset TEXT;
+    ALTER TABLE trading_orders
+        ADD COLUMN IF NOT EXISTS reserved_units BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE trading_orders
+        DROP CONSTRAINT IF EXISTS trading_orders_reservation_check;
+    ALTER TABLE trading_orders
+        ADD CONSTRAINT trading_orders_reservation_check CHECK (
+            reserved_units >= 0
+            AND ((reserved_units = 0 AND reservation_account_type IS NULL AND reservation_asset IS NULL)
+                 OR (reserved_units > 0 AND reservation_account_type IS NOT NULL AND reservation_asset IS NOT NULL))
+        );
     UPDATE trading_orders SET revision = 1 WHERE revision < 1;
     ALTER TABLE trading_orders
         DROP CONSTRAINT IF EXISTS trading_orders_revision_positive;
@@ -1871,7 +1892,6 @@ CREATE INDEX IF NOT EXISTS trading_match_trades_trace_idx
 CREATE SEQUENCE IF NOT EXISTS account_ledger_entry_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_product_ledger_entry_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_product_transfer_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
-CREATE SEQUENCE IF NOT EXISTS account_margin_reservation_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_spot_reservation_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_position_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_liquidation_fee_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
@@ -2125,51 +2145,8 @@ CREATE INDEX IF NOT EXISTS account_admin_adjustments_admin_time_idx
 CREATE INDEX IF NOT EXISTS account_admin_adjustments_user_time_idx
     ON account_admin_balance_adjustments (user_id, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS account_margin_reservations (
-    reservation_id      BIGINT PRIMARY KEY,
-    account_type        TEXT NOT NULL DEFAULT 'USDT_PERPETUAL',
-    user_id             BIGINT NOT NULL,
-    asset               TEXT NOT NULL,
-    order_id            BIGINT NOT NULL UNIQUE,
-    symbol              TEXT NOT NULL,
-    margin_mode         TEXT NOT NULL DEFAULT 'CROSS',
-    position_side       TEXT NOT NULL DEFAULT 'NET',
-    order_quantity_steps BIGINT NOT NULL,
-    reduce_only         BOOLEAN NOT NULL,
-    reserved_units      BIGINT NOT NULL,
-    released_units      BIGINT NOT NULL DEFAULT 0,
-    position_margin_units BIGINT NOT NULL DEFAULT 0,
-    status              TEXT NOT NULL,
-    reason              TEXT,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT account_margin_reservations_type_check CHECK (
-        account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL', 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
-    ),
-    CONSTRAINT account_margin_reservations_user_positive CHECK (user_id > 0),
-    CONSTRAINT account_margin_reservations_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
-    CONSTRAINT account_margin_reservations_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
-    CONSTRAINT account_margin_reservations_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
-    CONSTRAINT account_margin_reservations_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
-    CONSTRAINT account_margin_reservations_non_negative CHECK (
-        order_quantity_steps > 0
-        AND reserved_units >= 0
-        AND released_units >= 0
-        AND position_margin_units >= 0
-        AND released_units + position_margin_units <= reserved_units
-    ),
-    CONSTRAINT account_margin_reservations_status_check CHECK (
-        status IN ('ACTIVE', 'PARTIALLY_RELEASED', 'PARTIALLY_CONSUMED', 'CONSUMED', 'RELEASED')
-    ),
-    CONSTRAINT account_margin_reservations_order_fk
-        FOREIGN KEY (order_id) REFERENCES trading_orders(order_id)
-);
-
-CREATE INDEX IF NOT EXISTS account_margin_reservations_user_idx
-    ON account_margin_reservations (user_id, status, updated_at DESC);
-
-CREATE INDEX IF NOT EXISTS account_margin_reservations_symbol_idx
-    ON account_margin_reservations (symbol, status, updated_at DESC);
+DROP TABLE IF EXISTS account_margin_reservations;
+DROP SEQUENCE IF EXISTS trading_margin_reservation_seq;
 
 DO $$
 BEGIN
@@ -2221,14 +2198,6 @@ BEGIN
             );
     END IF;
 
-    IF to_regclass('public.account_margin_reservations') IS NOT NULL THEN
-        ALTER TABLE account_margin_reservations DROP CONSTRAINT IF EXISTS account_margin_reservations_type_check;
-        ALTER TABLE account_margin_reservations
-            ADD CONSTRAINT account_margin_reservations_type_check CHECK (
-                account_type IN ('USDT_PERPETUAL', 'COIN_PERPETUAL',
-                                 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
-            );
-    END IF;
 END $$;
 
 CREATE TABLE IF NOT EXISTS account_spot_order_reservations (
@@ -2512,6 +2481,9 @@ CREATE TABLE IF NOT EXISTS account_trade_settlement_sides (
     taker_user_id           BIGINT NOT NULL,
     maker_user_id           BIGINT NOT NULL,
     command_id              VARCHAR(160) NOT NULL,
+    order_id                BIGINT NOT NULL,
+    order_margin_consumed_units BIGINT NOT NULL DEFAULT 0,
+    order_margin_released_units BIGINT NOT NULL DEFAULT 0,
     applied_at              TIMESTAMPTZ NOT NULL,
     reconciled_at           TIMESTAMPTZ,
     PRIMARY KEY (product_line, symbol, trade_id, participant_role),
@@ -2523,8 +2495,18 @@ CREATE TABLE IF NOT EXISTS account_trade_settlement_sides (
     CONSTRAINT account_trade_settlement_sides_users_positive CHECK (
         taker_user_id > 0 AND maker_user_id > 0
     ),
+    CONSTRAINT account_trade_settlement_sides_margin_non_negative CHECK (
+        order_id > 0 AND order_margin_consumed_units >= 0 AND order_margin_released_units >= 0
+    ),
     CONSTRAINT account_trade_settlement_sides_role_check CHECK (participant_role IN ('TAKER', 'MAKER'))
 );
+
+ALTER TABLE account_trade_settlement_sides
+    ADD COLUMN IF NOT EXISTS order_id BIGINT;
+ALTER TABLE account_trade_settlement_sides
+    ADD COLUMN IF NOT EXISTS order_margin_consumed_units BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE account_trade_settlement_sides
+    ADD COLUMN IF NOT EXISTS order_margin_released_units BIGINT NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS account_trade_settlement_sides_monitor_idx
     ON account_trade_settlement_sides (product_line, applied_at, symbol, trade_id)

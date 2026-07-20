@@ -41,35 +41,51 @@ public class AccountOrderReservationRepository {
         return reserveDerivative(userId, command, now);
     }
 
-    public void release(ProductLine productLine,
+    public long release(ProductLine productLine,
                         long userId,
                         long orderId,
                         boolean releaseAll,
                         long quantitySteps,
                         long remainingQuantitySteps,
                         boolean reservationExpected,
+                        AccountType reservationAccountType,
+                        String reservationAsset,
+                        long reservedUnits,
                         String reason,
                         Instant now) {
-        Reservation derivative = lockDerivative(orderId);
-        if (derivative != null) {
-            requireReservationScope(productLine, userId, derivative.userId(), derivative.accountType(), orderId);
-            releaseDerivative(orderId, derivative, releaseAll, quantitySteps, remainingQuantitySteps, reason, now);
-            return;
+        if (reservationAccountType == AccountType.SPOT) {
+            SpotReservation spot = lockSpot(orderId);
+            if (spot == null) {
+                if (reservationExpected) {
+                    throw new IllegalStateException("missing spot reservation for order " + orderId);
+                }
+                return 0L;
+            }
+            requireReservationScope(productLine, userId, spot.userId(), AccountType.SPOT, orderId);
+            return releaseSpot(orderId, spot, releaseAll, quantitySteps, remainingQuantitySteps, reason, now);
         }
-        SpotReservation spot = lockSpot(orderId);
-        if (spot != null) {
-            requireReservationScope(productLine, userId, spot.userId(), "SPOT", orderId);
-            releaseSpot(orderId, spot, releaseAll, quantitySteps, remainingQuantitySteps, reason, now);
-            return;
+        if (reservationAccountType == null || reservationAsset == null || reservationAsset.isBlank()
+                || reservedUnits <= 0L) {
+            if (reservationExpected) {
+                throw new IllegalStateException("missing derivative reservation snapshot for order " + orderId);
+            }
+            return 0L;
         }
-        ReservationIdentity existing = anyReservation(orderId);
-        if (existing != null) {
-            requireReservationScope(productLine, userId, existing.userId(), existing.accountType(), orderId);
-            return;
+        requireReservationScope(productLine, userId, userId, reservationAccountType, orderId);
+        MarginUsage usage = marginUsage(orderId);
+        long unavailable = Math.addExact(usage.consumedUnits(), usage.releasedUnits());
+        if (unavailable > reservedUnits) {
+            throw new IllegalStateException("order margin usage exceeds reservation for order " + orderId);
         }
-        if (reservationExpected) {
-            throw new IllegalStateException("missing account reservation for non-reduce-only order " + orderId);
+        long amountUnits = releaseAll
+                ? Math.subtractExact(reservedUnits, unavailable)
+                : AccountMarginReleaseMath.releaseForExecuted(reservedUnits, usage.releasedUnits(),
+                usage.consumedUnits(), quantitySteps, remainingQuantitySteps);
+        if (amountUnits <= 0L) {
+            return 0L;
         }
+        releaseBalance(reservationAccountType.name(), userId, reservationAsset, amountUnits, now);
+        return amountUnits;
     }
 
     private boolean reserveDerivative(long userId, OrderReserveAccountCommand command, Instant now) {
@@ -81,7 +97,7 @@ public class AccountOrderReservationRepository {
                     ) VALUES (?, ?, ?, 0, 0, ?)
                     ON CONFLICT (account_type, user_id, asset) DO NOTHING
                     """, accountType, userId, command.asset(), Timestamp.from(now));
-            int balanceRows = jdbcTemplate.update("""
+            return jdbcTemplate.update("""
                     UPDATE account_product_balances
                        SET available_units = available_units - ?,
                            locked_units = locked_units + ?,
@@ -89,44 +105,22 @@ public class AccountOrderReservationRepository {
                      WHERE account_type = ? AND user_id = ? AND asset = ?
                        AND available_units >= ?
                     """, command.reservedUnits(), command.reservedUnits(), Timestamp.from(now),
-                    accountType, userId, command.asset(), command.reservedUnits());
-            if (balanceRows == 0) {
-                return false;
-            }
-        } else {
-            jdbcTemplate.update("""
-                    INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
-                    VALUES (?, ?, 0, 0, ?)
-                    ON CONFLICT (user_id, asset) DO NOTHING
-                    """, userId, command.asset(), Timestamp.from(now));
-            int balanceRows = jdbcTemplate.update("""
-                    UPDATE account_balances
-                       SET available_units = available_units - ?,
-                           locked_units = locked_units + ?,
-                           updated_at = ?
-                     WHERE user_id = ? AND asset = ?
-                       AND available_units >= ?
-                    """, command.reservedUnits(), command.reservedUnits(), Timestamp.from(now),
-                    userId, command.asset(), command.reservedUnits());
-            if (balanceRows == 0) {
-                return false;
-            }
+                    accountType, userId, command.asset(), command.reservedUnits()) == 1;
         }
-        int rows = jdbcTemplate.update("""
-                INSERT INTO account_margin_reservations (
-                    reservation_id, account_type, user_id, asset, order_id, symbol,
-                    margin_mode, position_side, order_quantity_steps, reduce_only,
-                    reserved_units, released_units, status, reason,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'ACTIVE', 'ORDER_INITIAL_MARGIN', ?, ?)
-                ON CONFLICT (order_id) DO NOTHING
-                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.MARGIN_RESERVATION),
-                accountType, userId, command.asset(),
-                command.orderId(), command.symbol(), command.marginMode().name(), command.positionSide().name(),
-                command.orderQuantitySteps(), command.reduceOnly(),
-                command.reservedUnits(), Timestamp.from(now), Timestamp.from(now));
-        requireSingleRow(rows, "account margin reservation insert");
-        return true;
+        jdbcTemplate.update("""
+                INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
+                VALUES (?, ?, 0, 0, ?)
+                ON CONFLICT (user_id, asset) DO NOTHING
+                """, userId, command.asset(), Timestamp.from(now));
+        return jdbcTemplate.update("""
+                UPDATE account_balances
+                   SET available_units = available_units - ?,
+                       locked_units = locked_units + ?,
+                       updated_at = ?
+                 WHERE user_id = ? AND asset = ?
+                   AND available_units >= ?
+                """, command.reservedUnits(), command.reservedUnits(), Timestamp.from(now),
+                userId, command.asset(), command.reservedUnits()) == 1;
     }
 
     private boolean reserveSpot(long userId, OrderReserveAccountCommand command, Instant now) {
@@ -155,66 +149,26 @@ public class AccountOrderReservationRepository {
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'ACTIVE', 'SPOT_ORDER_LOCK', ?, ?)
                 ON CONFLICT (order_id) DO NOTHING
                 """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.SPOT_RESERVATION),
-                command.orderId(), userId,
-                command.symbol(), command.side().name(), command.asset(), command.reservedUnits(),
-                Timestamp.from(now), Timestamp.from(now));
+                command.orderId(), userId, command.symbol(), command.side().name(), command.asset(),
+                command.reservedUnits(), Timestamp.from(now), Timestamp.from(now));
         requireSingleRow(rows, "account spot reservation insert");
         return true;
     }
 
-    private void releaseDerivative(long orderId,
-                                   Reservation reservation,
-                                   boolean releaseAll,
-                                   long quantitySteps,
-                                   long remainingQuantitySteps,
-                                   String reason,
-                                   Instant now) {
-        long amountUnits;
-        if (releaseAll) {
-            amountUnits = Math.subtractExact(reservation.reservedUnits(),
-                    Math.addExact(reservation.releasedUnits(), reservation.consumedUnits()));
-        } else {
-            amountUnits = AccountMarginReleaseMath.releaseForExecuted(reservation.reservedUnits(),
-                    reservation.releasedUnits(), reservation.consumedUnits(), quantitySteps, remainingQuantitySteps);
-        }
-        if (amountUnits <= 0) {
-            return;
-        }
-        releaseBalance(reservation.accountType(), reservation.userId(), reservation.asset(), amountUnits, now);
-        int rows = jdbcTemplate.update("""
-                UPDATE account_margin_reservations
-                   SET released_units = released_units + ?,
-                       status = CASE
-                           WHEN released_units + ? >= reserved_units AND position_margin_units = 0 THEN 'RELEASED'
-                           WHEN released_units + ? + position_margin_units >= reserved_units THEN 'CONSUMED'
-                           WHEN position_margin_units > 0 THEN 'PARTIALLY_CONSUMED'
-                           ELSE 'PARTIALLY_RELEASED'
-                       END,
-                       reason = ?,
-                       updated_at = ?
-                 WHERE order_id = ?
-                   AND released_units + position_margin_units + ? <= reserved_units
-                """, amountUnits, amountUnits, amountUnits, reason, Timestamp.from(now), orderId, amountUnits);
-        requireSingleRow(rows, "account margin reservation release");
-    }
-
-    private void releaseSpot(long orderId,
+    private long releaseSpot(long orderId,
                              SpotReservation reservation,
                              boolean releaseAll,
                              long quantitySteps,
                              long remainingQuantitySteps,
                              String reason,
                              Instant now) {
-        long amountUnits;
-        if (releaseAll) {
-            amountUnits = Math.subtractExact(reservation.reservedUnits(),
-                    Math.addExact(reservation.releasedUnits(), reservation.settledUnits()));
-        } else {
-            amountUnits = AccountMarginReleaseMath.releaseForExecuted(reservation.reservedUnits(),
-                    reservation.releasedUnits(), reservation.settledUnits(), quantitySteps, remainingQuantitySteps);
-        }
-        if (amountUnits <= 0) {
-            return;
+        long amountUnits = releaseAll
+                ? Math.subtractExact(reservation.reservedUnits(),
+                Math.addExact(reservation.releasedUnits(), reservation.settledUnits()))
+                : AccountMarginReleaseMath.releaseForExecuted(reservation.reservedUnits(),
+                reservation.releasedUnits(), reservation.settledUnits(), quantitySteps, remainingQuantitySteps);
+        if (amountUnits <= 0L) {
+            return 0L;
         }
         int balanceRows = jdbcTemplate.update("""
                 UPDATE account_product_balances
@@ -241,18 +195,27 @@ public class AccountOrderReservationRepository {
                    AND released_units + settled_units + ? <= reserved_units
                 """, amountUnits, amountUnits, amountUnits, reason, Timestamp.from(now), orderId, amountUnits);
         requireSingleRow(rows, "account spot reservation release");
+        return amountUnits;
     }
 
-    private Reservation lockDerivative(long orderId) {
-        return jdbcTemplate.query("""
-                SELECT account_type, user_id, asset, reserved_units, released_units, position_margin_units
-                  FROM account_margin_reservations
-                 WHERE order_id = ? AND status NOT IN ('RELEASED', 'CONSUMED')
-                 FOR UPDATE
-                """, (rs, rowNum) -> new Reservation(
-                normalizeMarginAccountType(rs.getString("account_type")), rs.getLong("user_id"),
-                rs.getString("asset"), rs.getLong("reserved_units"), rs.getLong("released_units"),
-                rs.getLong("position_margin_units")), orderId).stream().findFirst().orElse(null);
+    private MarginUsage marginUsage(long orderId) {
+        MarginUsage tradeUsage = jdbcTemplate.query("""
+                SELECT COALESCE(SUM(order_margin_consumed_units), 0) AS consumed_units,
+                       COALESCE(SUM(order_margin_released_units), 0) AS released_units
+                  FROM account_trade_settlement_sides
+                 WHERE order_id = ?
+                """, (rs, rowNum) -> new MarginUsage(
+                rs.getLong("consumed_units"), rs.getLong("released_units")), orderId).getFirst();
+        Long commandReleased = jdbcTemplate.queryForObject("""
+                SELECT COALESCE(SUM((result_payload ->> 'releasedUnits')::bigint), 0)
+                  FROM account_commands
+                 WHERE command_type = 'ORDER_RELEASE'
+                   AND source_reference = ?
+                   AND status = 'APPLIED'
+                   AND result_payload ->> 'releasedUnits' IS NOT NULL
+                """, Long.class, String.valueOf(orderId));
+        return new MarginUsage(tradeUsage.consumedUnits(),
+                Math.addExact(tradeUsage.releasedUnits(), commandReleased == null ? 0L : commandReleased));
     }
 
     private SpotReservation lockSpot(long orderId) {
@@ -263,27 +226,11 @@ public class AccountOrderReservationRepository {
                  FOR UPDATE
                 """, (rs, rowNum) -> new SpotReservation(
                 rs.getLong("user_id"), rs.getString("asset"), rs.getLong("reserved_units"),
-                rs.getLong("settled_units"), rs.getLong("released_units")),
-                orderId).stream().findFirst().orElse(null);
+                rs.getLong("settled_units"), rs.getLong("released_units")), orderId)
+                .stream().findFirst().orElse(null);
     }
 
-    private ReservationIdentity anyReservation(long orderId) {
-        return jdbcTemplate.query("""
-                SELECT user_id, account_type
-                  FROM account_margin_reservations
-                 WHERE order_id = ?
-                UNION ALL
-                SELECT user_id, 'SPOT' AS account_type
-                  FROM account_spot_order_reservations
-                 WHERE order_id = ?
-                 LIMIT 1
-                """, (rs, rowNum) -> new ReservationIdentity(
-                rs.getLong("user_id"), rs.getString("account_type")),
-                orderId, orderId).stream().findFirst().orElse(null);
-    }
-
-    private void requireAccountScope(ProductLine productLine,
-                                     AccountType accountType) {
+    private void requireAccountScope(ProductLine productLine, AccountType accountType) {
         ProductLine expected = accountType.productLine()
                 .orElseThrow(() -> new IllegalStateException("order reservation requires a product account"));
         if (productLine != expected) {
@@ -294,18 +241,12 @@ public class AccountOrderReservationRepository {
     private void requireReservationScope(ProductLine productLine,
                                          long commandUserId,
                                          long reservationUserId,
-                                         String accountType,
+                                         AccountType accountType,
                                          long orderId) {
         if (reservationUserId != commandUserId) {
             throw new IllegalStateException("account reservation user mismatch " + orderId);
         }
-        AccountType type;
-        try {
-            type = AccountType.valueOf(accountType);
-        } catch (IllegalArgumentException ex) {
-            throw new IllegalStateException("invalid account reservation type " + accountType, ex);
-        }
-        requireAccountScope(productLine, type);
+        requireAccountScope(productLine, accountType);
     }
 
     private void releaseBalance(String accountType,
@@ -317,33 +258,17 @@ public class AccountOrderReservationRepository {
         if (usesProductBalance(accountType)) {
             rows = jdbcTemplate.update("""
                     UPDATE account_product_balances
-                       SET locked_units = locked_units - ?,
-                           available_units = available_units + ?,
-                           updated_at = ?
-                     WHERE account_type = ? AND user_id = ? AND asset = ?
-                       AND locked_units >= ?
+                       SET locked_units = locked_units - ?, available_units = available_units + ?, updated_at = ?
+                     WHERE account_type = ? AND user_id = ? AND asset = ? AND locked_units >= ?
                     """, amountUnits, amountUnits, Timestamp.from(now), accountType, userId, asset, amountUnits);
         } else {
             rows = jdbcTemplate.update("""
                     UPDATE account_balances
-                       SET locked_units = locked_units - ?,
-                           available_units = available_units + ?,
-                           updated_at = ?
-                     WHERE user_id = ? AND asset = ?
-                       AND locked_units >= ?
+                       SET locked_units = locked_units - ?, available_units = available_units + ?, updated_at = ?
+                     WHERE user_id = ? AND asset = ? AND locked_units >= ?
                     """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
         }
         requireSingleRow(rows, "account locked balance release");
-    }
-
-    private String normalizeMarginAccountType(String accountType) {
-        String normalized = accountType == null || accountType.isBlank() ? USDT_PERPETUAL
-                : accountType.trim().toUpperCase();
-        ProductLine productLine = ProductLine.requireAccountTypeCode(normalized);
-        if (!productLine.isMarginProduct()) {
-            throw new IllegalStateException("invalid margin reservation account type " + accountType);
-        }
-        return normalized;
     }
 
     private boolean usesProductBalance(String accountType) {
@@ -356,13 +281,7 @@ public class AccountOrderReservationRepository {
         }
     }
 
-    private record Reservation(
-            String accountType,
-            long userId,
-            String asset,
-            long reservedUnits,
-            long releasedUnits,
-            long consumedUnits) {
+    private record MarginUsage(long consumedUnits, long releasedUnits) {
     }
 
     private record SpotReservation(
@@ -371,8 +290,5 @@ public class AccountOrderReservationRepository {
             long reservedUnits,
             long settledUnits,
             long releasedUnits) {
-    }
-
-    private record ReservationIdentity(long userId, String accountType) {
     }
 }

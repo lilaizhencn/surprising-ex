@@ -38,7 +38,8 @@ surprising.<product-segment>.account.user.commands.v1
 ```
 
 The Kafka key is `<PRODUCT_LINE>:<userId>`. The command, DLT, and result topics have 32 partitions,
-and account-provider uses record acknowledgement and 32 listener lanes. This serializes one user's
+and account-provider uses a dedicated batch listener factory, batch acknowledgement, and 32 listener lanes.
+Each poll processes at most 500 commands in one database transaction. This serializes one user's
 commands within a product line without application locks while allowing unrelated users to run in
 parallel. Order, matching, funding, ADL, insurance, delivery/exercise, and HTTP mutations emit
 commands and never directly update mutable account tables.
@@ -56,8 +57,8 @@ in that user's local database transaction and updates:
 - Successful liquidation-fee collection writes an account transactional outbox event to `surprising.<product-segment>.account.liquidation-fee.events.v1` keyed by settlement asset. Insurance-provider consumes this event and credits `insurance_fund_ledger(reference_type = LIQUIDATION_FEE)` idempotently by `tradeId:orderId`.
 - Flip trades close old exposure first, then treat the remaining fill as new exposure.
 - If a trade flips a position, realized PnL uses the old position version and the new remainder adopts the fill's `instrumentVersion`.
-- Opening fills must find the matching `account_margin_reservations` row and migrate order margin successfully. Missing reservations, reduce-only orders producing opening quantity, or skipped migration writes fail and roll back the whole trade.
-- Closing fills may skip order-margin release only for `reduceOnly=true` orders. A non-reduce-only order that closes exposure must still have its original reservation row.
+- Opening fills must carry the immutable reservation snapshot accepted with the order and move actual fill margin from `account_balances.locked_units` into `account_position_margins`. Missing snapshots or a reduce-only order producing opening quantity fail and roll back the trade.
+- `account_trade_settlement_sides` audits order margin consumed/released by each trade side. Terminal `ORDER_RELEASE` uses those values to release residual locked balance without a reservation table lookup.
 - Position updates, balance updates, changed deficit updates, PnL/fee ledger inserts/backfills, order-margin release, and position-margin changes must each affect one row. Unexpected skipped writes are not ignored.
 - After position quantity or version changes, account-provider emits the durable full position snapshot only. Order-provider consumes that user-keyed event and, in its own transaction, marks wrong-side, stale-version, or excess pre-event open reduce-only orders `CANCEL_REQUESTED` and emits cancel commands through its order-command outbox.
 - If settlement reduces the position to zero, trigger-provider consumes the same event and cancels exact-scope `PENDING` TP/SL/trailing triggers created no later than the close event. The trigger rows and their status outbox events commit together; Redis cleanup runs after commit. Account-provider never writes order or trigger-order tables.
@@ -151,12 +152,11 @@ admin APIs must only be callable by deposit, settlement, or controlled back-offi
 Root [init.sql](../init.sql) creates:
 
 - native PostgreSQL account ID sequences with fixed 10,000-ID Hi/Lo allocation for ledger entries,
-  transfers, order reservations, position/liquidation events, and account-command outbox/result/retry events
+  transfers, position/liquidation events, and account-command outbox/result/retry events
 - `account_balances`
 - `account_deficits`
 - `account_ledger_entries`
 - `account_admin_balance_adjustments`
-- `account_margin_reservations`
 - `account_position_margins`
 - `account_positions`
 - `account_commands`
@@ -169,7 +169,6 @@ Core indexes:
 - `account_ledger_reference_uidx`
 - `account_ledger_liquidation_fee_order_idx`
 - `account_deficits_user_idx`
-- `account_margin_reservations_user_idx`
 - `account_position_margins_user_idx`
 - `account_positions_user_idx`
 - `account_commands_processing_idx`
@@ -267,13 +266,12 @@ Port:
 - An HTTP timeout is an unknown result, not a failure. Retry with the same `referenceId`; a new
   reference creates a new financial intent.
 - Order entry reserves initial margin before publishing to matching. Account provider consumes match trades, calculates opening collateral from the actual fill price, migrates that amount into position margin, and releases any order-price or market-protection excess.
-- `account_positions`, `account_position_margins`, and `account_margin_reservations` persist `margin_mode`. Do not drop this field from events or queries; later isolated-margin risk depends on it.
+- `account_positions`, `account_position_margins`, and the immutable `trading_orders` reservation snapshot retain the margin/account scope required by isolated-margin risk.
 - User isolated margin adjustments are idempotent by `referenceId` and write `account_ledger_entries.reference_type = POSITION_MARGIN_ADJUSTMENT`. A positive adjustment only moves available balance into position collateral; a negative adjustment only releases position collateral after checking the latest isolated risk snapshot.
 - Closing trades release position margin proportionally by closed quantity. This is long-only accounting and must stay consistent with exchange-core ticks/steps.
 - Reduce-only pruning is not a matching-engine or account-table feature. Order-provider consumes user-keyed position events, locks the affected orders in its own transaction, and publishes symbol-keyed cancel commands. Multi-node deployments must share the same PostgreSQL state and Kafka consumer group.
 - Reduce-only pruning must fail fast on impossible signed quantities such as `Long.MIN_VALUE`; do not let capacity math wrap and cancel or retain orders based on a negative absolute value.
-- If `missing order margin reservation for opening fill` appears, inspect order-provider reservation writes, matching processing of invalid orders, and any manual database changes to reservations.
-- If `missing order margin reservation for closing fill` appears, check whether a non-reduce-only close/flip order was accepted without the order-provider reservation transaction.
+- If an order reservation snapshot is missing or order-margin accounting does not reconcile, inspect `trading_orders.reserved_units`, matching snapshot propagation, and consumed/released audit values in `account_trade_settlement_sides`.
 - Realized losses may consume `availableUnits` and position-margin-backed `lockedUnits`, but they must not consume open-order reservation locks. If position-backed locked collateral is debited, `account_position_margins` is reduced in the same transaction.
 - Trade-fee debits use the same balance/deficit safety path as realized losses. Fee rebates first clear deficits, then increase available balance. Matching copies the accepted order's immutable fee rate into `MatchTradeEvent`; account settlement uses that command snapshot and does not query `trading_orders` or recompute rates from the user's current tier.
 - Balance settlement locks `account_deficits` for equity correctness, but skips the `UPDATE account_deficits` statement when `deficit_units` is unchanged. Do not reintroduce unconditional zero-delta deficit writes on the hot trade path; when a deficit is created or cleared, the changed row must still be written and checked.

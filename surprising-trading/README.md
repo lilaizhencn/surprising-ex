@@ -218,12 +218,12 @@ Regular opening/resting orders reserve initial margin inside `surprising-order-p
 
 - Read `contract_type`, `initial_margin_rate_ppm`, `notional_multiplier_units`, `price_tick_units`, `settle_asset`, and asset scales from the current instrument version.
 - Convert the requirement to `initialMarginUnits` in Java `OrderMarginMath`: inputs and outputs are long ticks/steps/asset units, while multiplication/division uses exact integer intermediates to reject overflow instead of wrapping.
-- Insert `trading_orders` first, confirm there is no `clientOrderId` idempotency conflict, then move `account_balances.available_units` to `locked_units` and insert `account_margin_reservations`.
-- `account_margin_reservations.order_id` has a foreign key to `trading_orders.order_id`, preventing margin reservations without an order.
+- Insert `trading_orders` first, confirm there is no `clientOrderId` idempotency conflict, then move `account_balances.available_units` to `locked_units`.
+- Persist account type, settlement asset, and reserved units as an immutable `trading_orders` snapshot and propagate it in `OrderCommandEvent`; perpetual products no longer maintain a separate margin-reservation record.
 - If the order row was inserted but margin is insufficient, the order is changed to `REJECTED` in the same transaction; only a rejection event is published and no matching command is emitted.
 
 `reduceOnly=true` close and liquidation orders do not reserve additional margin.
-Matching margin release treats missing reservations as valid only for `reduceOnly=true` orders. A non-reduce-only order without `account_margin_reservations` is an accounting invariant failure and must fail instead of silently continuing.
+Matching treats a missing reservation snapshot as valid only for `reduceOnly=true` orders. A non-reduce-only order without `reservedUnits` metadata is an accounting invariant failure and must fail instead of silently continuing.
 
 For user close orders, order entry validates reduce-only safety before publishing to matching:
 
@@ -466,7 +466,6 @@ Root [init.sql](../init.sql) creates:
 - `trading_order_events`
 - `trading_trigger_orders`
 - `trading_outbox_events`
-- `account_margin_reservations`
 - `account_position_margins`
 - `trading_matching_assets`
 - `trading_matching_symbols`

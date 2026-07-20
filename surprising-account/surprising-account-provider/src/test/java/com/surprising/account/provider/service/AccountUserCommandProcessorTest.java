@@ -77,7 +77,7 @@ class AccountUserCommandProcessorTest {
         when(commandRepository.register(eq(command), any(), any()))
                 .thenReturn(AccountCommandRegistration.ALREADY_TERMINAL);
 
-        var outcome = processor.process(command, objectMapper.writeValueAsString(command));
+        var outcome = process(command);
 
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.DUPLICATE);
         verifyNoInteractions(reservationRepository, outboxRepository);
@@ -91,7 +91,7 @@ class AccountUserCommandProcessorTest {
         when(commandRepository.register(eq(command), any(), any()))
                 .thenReturn(AccountCommandRegistration.WAITING_DEPENDENCY);
 
-        var outcome = processor.process(command, objectMapper.writeValueAsString(command));
+        var outcome = process(command);
 
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.WAITING_DEPENDENCY);
         verifyNoInteractions(reservationRepository, outboxRepository);
@@ -106,7 +106,7 @@ class AccountUserCommandProcessorTest {
                 .thenReturn(AccountCommandRegistration.DEPENDENCY_REJECTED);
         when(commandRepository.waitingDependents(command.commandId())).thenReturn(List.of(child));
 
-        var outcome = processor.process(command, objectMapper.writeValueAsString(command));
+        var outcome = process(command);
 
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.REJECTED);
         verifyNoInteractions(reservationRepository);
@@ -131,7 +131,7 @@ class AccountUserCommandProcessorTest {
                 .thenReturn(true);
         when(commandRepository.waitingDependents(command.commandId())).thenReturn(List.of(child));
 
-        var outcome = processor.process(command, objectMapper.writeValueAsString(command));
+        var outcome = process(command);
 
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.APPLIED);
         verify(reservationRepository).reserve(
@@ -154,7 +154,7 @@ class AccountUserCommandProcessorTest {
                 .thenReturn(false);
         when(commandRepository.waitingDependents(command.commandId())).thenReturn(List.of());
 
-        var outcome = processor.process(command, objectMapper.writeValueAsString(command));
+        var outcome = process(command);
 
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.REJECTED);
         verify(commandRepository).markRejected(eq(command.commandId()), eq(null),
@@ -173,7 +173,7 @@ class AccountUserCommandProcessorTest {
                 .thenReturn(AccountCommandRegistration.READY);
         when(commandRepository.waitingDependents(command.commandId())).thenReturn(List.of());
 
-        var outcome = processor.process(command, objectMapper.writeValueAsString(command));
+        var outcome = process(command);
 
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.APPLIED);
         verify(accountService).processTradeSide(
@@ -186,7 +186,9 @@ class AccountUserCommandProcessorTest {
     @Test
     void partialOrderReleaseUsesTheMatchingQuantitySnapshot() {
         OrderReleaseAccountCommand payload = new OrderReleaseAccountCommand(
-                9007L, false, 10L, 4L, true, "INTERNAL_MARKET_MAKER_SELF_TRADE", OCCURRED_AT);
+                9007L, false, 10L, 4L, true,
+                AccountType.USDT_PERPETUAL, "USDT", 500L,
+                "INTERNAL_MARKET_MAKER_SELF_TRADE", OCCURRED_AT);
         AccountUserCommand command = new AccountUserCommand(
                 AccountUserCommand.CURRENT_SCHEMA_VERSION,
                 "order-release:9007",
@@ -203,12 +205,13 @@ class AccountUserCommandProcessorTest {
                 .thenReturn(AccountCommandRegistration.READY);
         when(commandRepository.waitingDependents(command.commandId())).thenReturn(List.of());
 
-        var outcome = processor.process(command, objectMapper.writeValueAsString(command));
+        var outcome = process(command);
 
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.APPLIED);
         verify(reservationRepository).release(
                 ProductLine.LINEAR_PERPETUAL, 1001L, 9007L, false, 10L, 4L,
-                true, "INTERNAL_MARKET_MAKER_SELF_TRADE", OCCURRED_AT);
+                true, AccountType.USDT_PERPETUAL, "USDT", 500L,
+                "INTERNAL_MARKET_MAKER_SELF_TRADE", OCCURRED_AT);
     }
 
     @Test
@@ -228,12 +231,17 @@ class AccountUserCommandProcessorTest {
         when(commandRepository.register(eq(command), any(), any()))
                 .thenReturn(AccountCommandRegistration.READY);
 
-        assertThatThrownBy(() -> processor.process(command, objectMapper.writeValueAsString(command)))
+        assertThatThrownBy(() -> process(command))
                 .isInstanceOf(AccountCommandPoisonPillException.class);
 
         verifyNoInteractions(reservationRepository, outboxRepository);
         verify(commandRepository, never()).markApplied(any(), any(), any());
         verify(commandRepository, never()).markRejected(any(), any(), any(), any(), any());
+    }
+
+    private AccountUserCommandProcessor.ProcessingOutcome process(AccountUserCommand command) {
+        return processor.processBatch(List.of(new AccountUserCommandProcessor.CommandEnvelope(
+                command, objectMapper.writeValueAsString(command)))).getFirst();
     }
 
     private AccountUserCommand reserveCommand(String commandId, String dependency) {
@@ -271,7 +279,8 @@ class AccountUserCommandProcessorTest {
                 100L, 50L, 60_000L, 10L,
                 false, false, OCCURRED_AT, "trace-trade-8001");
         TradeSideSettlementCommand payload =
-                new TradeSideSettlementCommand(trade, TradeParticipantRole.TAKER, 100L, false);
+                new TradeSideSettlementCommand(trade, TradeParticipantRole.TAKER, 100L, false,
+                        AccountType.USDT_PERPETUAL, "USDT", 500L);
         return new AccountUserCommand(
                 AccountUserCommand.CURRENT_SCHEMA_VERSION,
                 "TRADE_SIDE_SETTLE:LINEAR_PERPETUAL:8001:TAKER:1001",

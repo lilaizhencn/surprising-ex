@@ -2,6 +2,7 @@ package com.surprising.trading.matching.service;
 
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
+import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.OrderReleaseAccountCommand;
 import com.surprising.account.api.model.TradeParticipantRole;
 import com.surprising.account.api.model.TradeSideSettlementCommand;
@@ -384,7 +385,9 @@ public class MatchingService {
                 command.traceId());
         makerQuantitySnapshots.put(tradeId,
                 new OrderQuantitySnapshot(
-                        makerSnapshot.quantitySteps(), remainingAfter, makerSnapshot.reduceOnly()));
+                        makerSnapshot.quantitySteps(), remainingAfter, makerSnapshot.reduceOnly(),
+                        makerSnapshot.reservationAccountType(), makerSnapshot.reservationAsset(),
+                        makerSnapshot.reservedUnits()));
         return trade;
     }
 
@@ -460,6 +463,10 @@ public class MatchingService {
                     orderCommand, makerQuantitySnapshots);
             enqueueAccountTradeSide(outboxWrites, trade, TradeParticipantRole.MAKER,
                     orderCommand, makerQuantitySnapshots);
+            if (trade.makerOrderCompleted()) {
+                enqueueCompletedMakerRelease(outboxWrites, trade,
+                        requireQuantitySnapshot(trade, makerQuantitySnapshots));
+            }
         }
         resultRepository.saveTrades(externalTrades);
         resultRepository.applyMakerFills(result.trades());
@@ -532,10 +539,15 @@ public class MatchingService {
                 ? new OrderQuantitySnapshot(
                         orderCommand.quantitySteps(),
                         Math.subtractExact(orderCommand.quantitySteps(), trade.quantitySteps()),
-                        orderCommand.reduceOnly())
+                        orderCommand.reduceOnly(),
+                        orderCommand.reservationAccountType(),
+                        orderCommand.reservationAsset(),
+                        orderCommand.reservedUnits())
                 : requireQuantitySnapshot(trade, makerQuantitySnapshots);
         TradeSideSettlementCommand side = new TradeSideSettlementCommand(
-                trade, role, quantitySnapshot.quantitySteps(), quantitySnapshot.reduceOnly());
+                trade, role, quantitySnapshot.quantitySteps(), quantitySnapshot.reduceOnly(),
+                accountType(quantitySnapshot.reservationAccountType()), quantitySnapshot.reservationAsset(),
+                quantitySnapshot.reservedUnits());
         AccountUserCommand command = new AccountUserCommand(
                 AccountUserCommand.CURRENT_SCHEMA_VERSION,
                 commandId,
@@ -566,7 +578,23 @@ public class MatchingService {
         enqueueOrderRelease(writes, commandId, trade.tradeId(), trade.makerUserId(), trade.makerOrderId(),
                 trade.makerOrderCompleted(), quantitySnapshot.quantitySteps(),
                 quantitySnapshot.remainingQuantitySteps(), !quantitySnapshot.reduceOnly(),
+                quantitySnapshot.reservationAccountType(), quantitySnapshot.reservationAsset(),
+                quantitySnapshot.reservedUnits(),
                 "INTERNAL_MARKET_MAKER_SELF_TRADE", null,
+                trade.eventTime(), trade.traceId());
+    }
+
+    private void enqueueCompletedMakerRelease(List<MatchingOutboxWrite> writes,
+                                              MatchTradeEvent trade,
+                                              OrderQuantitySnapshot quantitySnapshot) {
+        String settlementCommandId = tradeSideCommandId(
+                trade, TradeParticipantRole.MAKER, trade.makerUserId());
+        String commandId = "ORDER_RELEASE:" + properties.getKafka().getProductLine().name()
+                + ":" + trade.makerOrderId() + ":ORDER_TERMINAL:" + trade.tradeId();
+        enqueueOrderRelease(writes, commandId, trade.tradeId(), trade.makerUserId(), trade.makerOrderId(),
+                true, quantitySnapshot.quantitySteps(), 0L, !quantitySnapshot.reduceOnly(),
+                quantitySnapshot.reservationAccountType(), quantitySnapshot.reservationAsset(),
+                quantitySnapshot.reservedUnits(), "ORDER_TERMINAL", settlementCommandId,
                 trade.eventTime(), trade.traceId());
     }
 
@@ -593,7 +621,9 @@ public class MatchingService {
                 : Math.subtractExact(orderCommand.quantitySteps(), result.filledQuantitySteps());
         enqueueOrderRelease(writes, commandId, result.commandId(), result.userId(), result.orderId(),
                 terminal, orderCommand.quantitySteps(), remainingQuantitySteps,
-                !orderCommand.reduceOnly(), reason, dependencyCommandId, result.eventTime(), result.traceId());
+                !orderCommand.reduceOnly(), orderCommand.reservationAccountType(),
+                orderCommand.reservationAsset(), orderCommand.reservedUnits(),
+                reason, dependencyCommandId, result.eventTime(), result.traceId());
     }
 
     private void enqueueOrderRelease(List<MatchingOutboxWrite> writes,
@@ -605,13 +635,17 @@ public class MatchingService {
                                      long quantitySteps,
                                      long remainingQuantitySteps,
                                      boolean reservationExpected,
+                                     String reservationAccountType,
+                                     String reservationAsset,
+                                     long reservedUnits,
                                      String reason,
                                      String dependencyCommandId,
                                      Instant eventTime,
                                      String traceId) {
         OrderReleaseAccountCommand release = new OrderReleaseAccountCommand(
                 orderId, releaseAll, quantitySteps, remainingQuantitySteps,
-                reservationExpected, reason, eventTime);
+                reservationExpected, accountType(reservationAccountType),
+                reservationAsset, reservedUnits, reason, eventTime);
         AccountUserCommand command = new AccountUserCommand(
                 AccountUserCommand.CURRENT_SCHEMA_VERSION,
                 commandId,
@@ -637,6 +671,10 @@ public class MatchingService {
     private String tradeSideCommandId(MatchTradeEvent trade, TradeParticipantRole role, long userId) {
         return "TRADE:" + properties.getKafka().getProductLine().name() + ":" + trade.symbol()
                 + ":" + trade.tradeId() + ":" + role.name() + ":" + userId;
+    }
+
+    private AccountType accountType(String value) {
+        return value == null || value.isBlank() ? null : AccountType.valueOf(value);
     }
 
     private boolean isInternalSelfTrade(MatchTradeEvent trade) {
@@ -733,11 +771,19 @@ public class MatchingService {
     private record OrderQuantitySnapshot(
             long quantitySteps,
             long remainingQuantitySteps,
-            boolean reduceOnly) {
+            boolean reduceOnly,
+            String reservationAccountType,
+            String reservationAsset,
+            long reservedUnits) {
 
         private OrderQuantitySnapshot {
             if (quantitySteps <= 0 || remainingQuantitySteps < 0 || remainingQuantitySteps > quantitySteps) {
                 throw new IllegalArgumentException("invalid order quantity snapshot");
+            }
+            if (reservedUnits < 0L || (reservedUnits > 0L
+                    && (reservationAccountType == null || reservationAccountType.isBlank()
+                    || reservationAsset == null || reservationAsset.isBlank()))) {
+                throw new IllegalArgumentException("invalid order reservation snapshot");
             }
         }
     }

@@ -151,7 +151,10 @@ public class MatchingResultRepository {
                            taker_fee_rate_ppm,
                            quantity_steps,
                            remaining_quantity_steps,
-                           reduce_only
+                           reduce_only,
+                           reservation_account_type,
+                           reservation_asset,
+                           reserved_units
                       FROM trading_orders
                      WHERE order_id IN (%s)
                     """.formatted(placeholders), rs -> {
@@ -163,7 +166,10 @@ public class MatchingResultRepository {
                         rs.getLong("taker_fee_rate_ppm"),
                         rs.getLong("quantity_steps"),
                         rs.getLong("remaining_quantity_steps"),
-                        rs.getBoolean("reduce_only")));
+                        rs.getBoolean("reduce_only"),
+                        rs.getString("reservation_account_type"),
+                        rs.getString("reservation_asset"),
+                        rs.getLong("reserved_units")));
             }, batch.toArray());
         }
         if (snapshots.size() != uniqueIds.size()) {

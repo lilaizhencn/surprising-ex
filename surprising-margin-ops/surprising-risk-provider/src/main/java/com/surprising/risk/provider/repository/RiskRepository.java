@@ -196,15 +196,18 @@ public class RiskRepository {
                        AND %s = ctx.account_type
                 ),
                 isolated_order_locks AS (
-                    SELECT COALESCE(SUM(GREATEST(r.reserved_units - r.released_units - r.position_margin_units, 0)), 0)
-                           AS units
-                      FROM account_margin_reservations r
-                      CROSS JOIN account_context ctx
-                     WHERE r.user_id = ?
-                       AND r.asset = ?
-                       AND r.account_type = ctx.account_type
-                       AND r.margin_mode = 'ISOLATED'
-                       AND r.status IN ('ACTIVE', 'PARTIALLY_RELEASED', 'PARTIALLY_CONSUMED')
+                    SELECT COALESCE(SUM(
+                               CASE WHEN o.quantity_steps = 0 THEN 0
+                                    ELSE o.reserved_units * o.remaining_quantity_steps / o.quantity_steps END
+                           ), 0) AS units
+                      FROM trading_orders o
+                     CROSS JOIN account_context ctx
+                     WHERE o.user_id = ?
+                       AND o.reservation_asset = ?
+                       AND o.reservation_account_type = ctx.account_type
+                       AND o.margin_mode = 'ISOLATED'
+                       AND o.status IN ('PENDING_RESERVE', 'ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                       AND o.remaining_quantity_steps > 0
                 )
                 SELECT CASE
                            WHEN ctx.account_type = 'USDT_PERPETUAL' THEN COALESCE(

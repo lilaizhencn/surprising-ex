@@ -649,28 +649,23 @@ and p50/p95/p99 system latency metrics.
 The same side-specific versions are used for contract math, while maker/taker fee ppm comes from the
 required fee fields stored on `trading_match_trades`.
 
-`account_margin_reservations` tracks initial margin reserved by order entry:
-
-- `margin_mode`: order margin mode. `CROSS` and `ISOLATED` are executable. The value is copied from
-  order entry to matching, account settlement, risk, funding, and liquidation so collateral, reduce-only
-  checks, and forced closes stay scoped to the same margin bucket.
-- `reserved_units`: total order margin moved from `available_units` to `locked_units`.
-- `released_units`: order margin returned to `available_units` after rejection, cancel, terminal immediate order, or close-only fill.
-- `position_margin_units`: order margin already moved into position collateral after an opening fill.
-- `released_units + position_margin_units <= reserved_units` prevents double release or double consumption.
-- `order_id` references `trading_orders(order_id)`, so a reservation cannot exist without an order row.
-- Order entry inserts the order before reserving margin; a duplicate `clientOrderId` therefore returns the existing order without locking funds again. The insert conflict target is only the partial `(user_id, client_order_id)` index, so `order_id` or unrelated uniqueness conflicts fail.
+Derivative order entry moves initial margin directly from `account_balances.available_units` to
+`locked_units`. `trading_orders.reservation_account_type`, `reservation_asset`, and `reserved_units`
+form the immutable reservation snapshot propagated through matching and account commands. A duplicate
+`clientOrderId` returns the existing order without locking funds again. Each
+`account_trade_settlement_sides` row audits margin consumed into a position and excess released by that
+trade side; terminal order release subtracts those audited values from the original snapshot.
 
 `account_position_margins` tracks current position collateral by `user_id + symbol + asset + margin_mode`.
-Opening fills increase this table by consuming order reservation. Closing fills release the remaining
+Opening fills increase this table by consuming locked order margin. Closing fills release the remaining
 collateral proportionally back to `account_balances.available_units`.
 User-initiated isolated-margin adjustments also mutate this table: positive adjustments move
 `account_balances.available_units` into locked position collateral, while negative adjustments release
 position collateral back to available balance only after the latest `risk_position_snapshots` row proves
 the position remains above maintenance margin plus the configured removal buffer.
-Opening fills are required to consume an existing non-reduce-only order reservation. Missing
-reservation rows or skipped margin migration updates fail the account trade transaction instead
-of creating an uncollateralized position.
+Opening fills require a positive immutable reservation snapshot on non-reduce-only orders. Missing
+snapshots or skipped margin migration updates fail the account transaction instead of creating an
+uncollateralized position.
 
 `account_deficits` tracks bankruptcy deficits without allowing negative `account_balances` columns.
 Realized profits first clear deficits, then increase `available_units`. Cross-margin realized losses

@@ -349,8 +349,8 @@ assert_global_accounting_invariants() {
   wait_sql_equals "no negative product balances" \
     "SELECT count(*) FROM account_product_balances WHERE available_units < 0 OR locked_units < 0" \
     "0"
-  wait_sql_equals "no over-released margin reservations" \
-    "SELECT count(*) FROM account_margin_reservations WHERE released_units + position_margin_units > reserved_units" \
+  wait_sql_equals "valid derivative reservation snapshots" \
+    "SELECT count(*) FROM trading_orders WHERE reserved_units < 0 OR (reserved_units = 0 AND (reservation_account_type IS NOT NULL OR reservation_asset IS NOT NULL)) OR (reserved_units > 0 AND (reservation_account_type IS NULL OR reservation_asset IS NULL))" \
     "0"
   wait_sql_equals "no over-released spot reservations" \
     "SELECT count(*) FROM account_spot_order_reservations WHERE settled_units + released_units > reserved_units" \

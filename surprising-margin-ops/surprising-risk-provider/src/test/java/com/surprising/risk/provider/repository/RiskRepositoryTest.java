@@ -248,7 +248,7 @@ class RiskRepositoryTest {
                 .contains("SELECT ? AS account_type")
                 .contains("WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'")
                 .contains("WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'")
-                .contains("r.account_type = ctx.account_type")
+                .contains("o.reservation_account_type = ctx.account_type")
                 .contains("WHEN ctx.account_type = 'USDT_PERPETUAL'")
                 .contains("LEFT JOIN account_product_balances pb")
                 .contains("LEFT JOIN account_product_deficits pd");

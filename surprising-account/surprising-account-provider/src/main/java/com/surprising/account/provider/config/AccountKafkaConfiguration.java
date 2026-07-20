@@ -81,8 +81,8 @@ public class AccountKafkaConfiguration {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(accountConsumerFactory);
         factory.setConcurrency(properties.getKafka().getUserCommandConcurrency());
-        factory.setBatchListener(false);
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.setBatchListener(true);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
                 accountKafkaTemplate,
                 (record, ex) -> new TopicPartition(properties.getKafka().getUserCommandsDltTopic(),

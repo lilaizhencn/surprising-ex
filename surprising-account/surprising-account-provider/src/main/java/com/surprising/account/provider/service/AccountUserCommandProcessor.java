@@ -24,7 +24,9 @@ import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountOrderReservationRepository;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -70,7 +72,46 @@ public class AccountUserCommandProcessor {
     }
 
     @Transactional
-    public ProcessingOutcome process(AccountUserCommand command, String serializedEnvelope) {
+    public List<ProcessingOutcome> processBatch(List<CommandEnvelope> envelopes) {
+        if (envelopes == null || envelopes.isEmpty()) {
+            return List.of();
+        }
+        accountRepository.lockOpenInterestShards(openInterestLockRequests(envelopes), Instant.now());
+        List<ProcessingOutcome> outcomes = new ArrayList<>(envelopes.size());
+        for (CommandEnvelope envelope : envelopes) {
+            if (envelope == null || envelope.command() == null
+                    || envelope.serializedEnvelope() == null || envelope.serializedEnvelope().isBlank()) {
+                throw new AccountCommandPoisonPillException("invalid account command batch envelope");
+            }
+            outcomes.add(processOne(envelope.command(), envelope.serializedEnvelope()));
+        }
+        return List.copyOf(outcomes);
+    }
+
+    private List<AccountRepository.OpenInterestLockRequest> openInterestLockRequests(
+            List<CommandEnvelope> envelopes) {
+        List<AccountRepository.OpenInterestLockRequest> requests = new ArrayList<>();
+        for (CommandEnvelope envelope : envelopes) {
+            if (envelope == null || envelope.command() == null) {
+                continue;
+            }
+            AccountUserCommand command = envelope.command();
+            String symbol = switch (command.commandType()) {
+                case TRADE_SIDE_SETTLE -> readPayload(command, TradeSideSettlementCommand.class).trade().symbol();
+                case ADL_TARGET_SETTLE -> readPayload(command, AdlTargetSettlementAccountCommand.class).symbol();
+                case DELIVERY_SETTLE, OPTION_EXERCISE ->
+                        readPayload(command, ExpiringPositionSettlementAccountCommand.class).symbol();
+                default -> null;
+            };
+            if (symbol != null) {
+                requests.add(new AccountRepository.OpenInterestLockRequest(
+                        command.productLine(), command.userId(), symbol));
+            }
+        }
+        return requests;
+    }
+
+    private ProcessingOutcome processOne(AccountUserCommand command, String serializedEnvelope) {
         Instant now = Instant.now();
         AccountCommandRegistration registration = commandRepository.register(command, serializedEnvelope, now);
         if (registration == AccountCommandRegistration.ALREADY_TERMINAL) {
@@ -128,12 +169,15 @@ public class AccountUserCommandProcessor {
             }
             case ORDER_RELEASE -> {
                 OrderReleaseAccountCommand release = readPayload(command, OrderReleaseAccountCommand.class);
-                orderReservationRepository.release(command.productLine(), command.userId(), release.orderId(),
+                long releasedUnits = orderReservationRepository.release(
+                        command.productLine(), command.userId(), release.orderId(),
                         release.releaseAll(), release.quantitySteps(), release.remainingQuantitySteps(),
-                        release.reservationExpected(), release.reason(), release.effectiveAt());
+                        release.reservationExpected(), release.reservationAccountType(), release.reservationAsset(),
+                        release.reservedUnits(), release.reason(), release.effectiveAt());
                 Map<String, Object> result = new LinkedHashMap<>();
                 result.put("orderId", release.orderId());
                 result.put("released", true);
+                result.put("releasedUnits", releasedUnits);
                 yield objectMapper.writeValueAsString(result);
             }
             case TRADE_SIDE_SETTLE -> {
@@ -359,5 +403,8 @@ public class AccountUserCommandProcessor {
         REJECTED,
         WAITING_DEPENDENCY,
         DUPLICATE
+    }
+
+    public record CommandEnvelope(AccountUserCommand command, String serializedEnvelope) {
     }
 }

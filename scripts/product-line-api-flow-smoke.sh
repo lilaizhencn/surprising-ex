@@ -472,7 +472,6 @@ ALTER SEQUENCE IF EXISTS trading_order_seq RESTART WITH ${RUN_SEQUENCE_BASE};
 ALTER SEQUENCE IF EXISTS trading_command_seq RESTART WITH ${RUN_SEQUENCE_BASE};
 ALTER SEQUENCE IF EXISTS trading_event_seq RESTART WITH ${RUN_SEQUENCE_BASE};
 ALTER SEQUENCE IF EXISTS trading_outbox_seq RESTART WITH ${RUN_SEQUENCE_BASE};
-ALTER SEQUENCE IF EXISTS trading_margin_reservation_seq RESTART WITH ${RUN_SEQUENCE_BASE};
 ALTER SEQUENCE IF EXISTS trading_spot_reservation_seq RESTART WITH ${RUN_SEQUENCE_BASE};
 ALTER SEQUENCE IF EXISTS trading_match_trade_seq RESTART WITH ${RUN_SEQUENCE_BASE};
 ALTER SEQUENCE IF EXISTS trading_orderbook_depth_seq RESTART WITH ${RUN_SEQUENCE_BASE};
@@ -3428,8 +3427,8 @@ assert_stress_state() {
   wait_sql_equals "stress no negative position margins ${product_line}" \
     "SELECT count(*) FROM account_position_margins WHERE product_line = '${product_line}' AND margin_units < 0" \
     "0" 60
-  wait_sql_equals "stress no over-released margin reservations ${product_line}" \
-    "SELECT count(*) FROM account_margin_reservations WHERE account_type = '${type}' AND ${scope} AND released_units + position_margin_units > reserved_units" \
+  wait_sql_equals "stress valid order reservation snapshots ${product_line}" \
+    "SELECT count(*) FROM trading_orders WHERE product_line = '${product_line}' AND reserved_units < 0 OR (product_line = '${product_line}' AND reserved_units = 0 AND (reservation_account_type IS NOT NULL OR reservation_asset IS NOT NULL)) OR (product_line = '${product_line}' AND reserved_units > 0 AND (reservation_account_type IS NULL OR reservation_asset IS NULL))" \
     "0" 60
   wait_sql_equals "stress no over-released spot reservations ${product_line}" \
     "SELECT count(*) FROM account_spot_order_reservations WHERE ${scope} AND settled_units + released_units > reserved_units" \

@@ -1010,19 +1010,6 @@ SELECT 'locked_less_than_position_margin',
  WHERE COALESCE(b.locked_units, 0) < m.margin_units;
 
 INSERT INTO reconcile_violations(area, detail)
-SELECT 'margin_reservation_invalid',
-       format('account_type=%s user=%s order=%s symbol=%s asset=%s reserved=%s released=%s position_margin=%s status=%s',
-              r.account_type, r.user_id, r.order_id, r.symbol, r.asset, r.reserved_units, r.released_units,
-              r.position_margin_units, r.status)
-  FROM account_margin_reservations r
-  JOIN target_product_lines t
-    ON t.account_type = r.account_type
- WHERE r.reserved_units < 0
-    OR r.released_units < 0
-    OR r.position_margin_units < 0
-    OR r.released_units + r.position_margin_units > r.reserved_units;
-
-INSERT INTO reconcile_violations(area, detail)
 SELECT 'spot_reservation_invalid',
        format('user=%s order=%s symbol=%s asset=%s reserved=%s settled=%s released=%s status=%s',
               r.user_id, r.order_id, r.symbol, r.asset, r.reserved_units, r.settled_units, r.released_units, r.status)

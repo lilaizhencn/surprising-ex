@@ -8,7 +8,6 @@
 - `account_product_balances`
 - `account_positions`
 - `account_position_margins`
-- `account_margin_reservations`
 - `account_deficits`
 - `account_ledger_entries` 与产品账户流水
 
@@ -30,8 +29,8 @@ surprising.<product-segment>.account.command.results.v1
 <PRODUCT_LINE>:<userId>
 ```
 
-三个 Topic 都创建 32 个分区，account-provider 的 `user-command-concurrency` 默认也是 32。
-同一产品线、同一用户的所有指令进入同一分区并逐条处理；不同用户可并行。总消费者并发超过 32
+三个 Topic 都创建 32 个分区，account-provider 的独立 user-command batch listener 并发度默认也是 32，
+每次 poll 最多 500 条并在一个数据库事务内处理。同一产品线、同一用户的所有指令进入同一分区并保持顺序；不同用户可并行。总消费者并发超过 32
 不会增加该产品线吞吐。某个技术故障会阻塞所在分区，系统不会为了可用性跳过资金指令。
 
 产品线 Topic 和消费组始终隔离，不再提供共享/legacy 账户指令 Topic。跨产品线共享钱包行仍由

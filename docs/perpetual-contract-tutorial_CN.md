@@ -425,7 +425,8 @@ outbox_events
 
 ```text
 order-provider 校验余额和风险
-  -> 锁定 initial margin 到 account_margin_reservations
+  -> account_balances.available_units 转入 locked_units
+  -> trading_orders 保存不可变预占快照
   -> 订单命令进入 Kafka
   -> matching-provider / exchange-core 撮合
   -> account-provider 消费成交

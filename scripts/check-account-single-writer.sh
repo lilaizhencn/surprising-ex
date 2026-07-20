@@ -9,7 +9,7 @@ if ! command -v rg >/dev/null 2>&1; then
   exit 2
 fi
 
-TABLE_PATTERN='(account_balances|account_product_balances|account_positions|account_position_margins|account_margin_reservations|account_deficits|account_ledger_entries|account_product_ledger_entries)'
+TABLE_PATTERN='(account_balances|account_product_balances|account_positions|account_position_margins|account_deficits|account_ledger_entries|account_product_ledger_entries)'
 
 violations="$(
   rg -n -i \
