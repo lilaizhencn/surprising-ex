@@ -17,8 +17,6 @@ import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountCommandRegistration;
 import com.surprising.account.provider.repository.AccountCommandRepository;
-import com.surprising.account.provider.repository.AccountRepository;
-import com.surprising.account.provider.repository.AccountOutboxRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -34,11 +32,11 @@ public class AccountUserCommandProcessor {
     private final ObjectMapper objectMapper;
     private final AccountProperties properties;
     private final AccountCommandRepository commandRepository;
-    private final AccountOutboxRepository outboxRepository;
+    private final AccountOutboxService outboxService;
     private final AdlTargetSettlementService adlTargetSettlementService;
     private final DeficitSettlementService deficitSettlementService;
     private final FundingSettlementService fundingSettlementService;
-    private final AccountRepository accountRepository;
+    private final AccountSettlementService accountSettlementService;
     private final AccountOrderReservationService orderReservationService;
     private final AccountService accountService;
     private final PositionCacheAfterCommitSynchronizer positionCacheSynchronizer;
@@ -46,22 +44,22 @@ public class AccountUserCommandProcessor {
     public AccountUserCommandProcessor(ObjectMapper objectMapper,
                                        AccountProperties properties,
                                        AccountCommandRepository commandRepository,
-                                       AccountOutboxRepository outboxRepository,
+                                       AccountOutboxService outboxService,
                                        AdlTargetSettlementService adlTargetSettlementService,
                                        DeficitSettlementService deficitSettlementService,
                                        FundingSettlementService fundingSettlementService,
-                                       AccountRepository accountRepository,
+                                       AccountSettlementService accountSettlementService,
                                        AccountOrderReservationService orderReservationService,
                                        AccountService accountService,
                                        PositionCacheAfterCommitSynchronizer positionCacheSynchronizer) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.commandRepository = commandRepository;
-        this.outboxRepository = outboxRepository;
+        this.outboxService = outboxService;
         this.adlTargetSettlementService = adlTargetSettlementService;
         this.deficitSettlementService = deficitSettlementService;
         this.fundingSettlementService = fundingSettlementService;
-        this.accountRepository = accountRepository;
+        this.accountSettlementService = accountSettlementService;
         this.orderReservationService = orderReservationService;
         this.accountService = accountService;
         this.positionCacheSynchronizer = positionCacheSynchronizer;
@@ -72,7 +70,7 @@ public class AccountUserCommandProcessor {
         if (envelopes == null || envelopes.isEmpty()) {
             return List.of();
         }
-        accountRepository.lockOpenInterestShards(openInterestLockRequests(envelopes), Instant.now());
+        accountSettlementService.lockOpenInterestShards(openInterestLockRequests(envelopes), Instant.now());
         List<ProcessingOutcome> outcomes = new ArrayList<>(envelopes.size());
         for (CommandEnvelope envelope : envelopes) {
             if (envelope == null || envelope.command() == null
@@ -84,9 +82,9 @@ public class AccountUserCommandProcessor {
         return List.copyOf(outcomes);
     }
 
-    private List<AccountRepository.OpenInterestLockRequest> openInterestLockRequests(
+    private List<AccountSettlementService.OpenInterestLockRequest> openInterestLockRequests(
             List<CommandEnvelope> envelopes) {
-        List<AccountRepository.OpenInterestLockRequest> requests = new ArrayList<>();
+        List<AccountSettlementService.OpenInterestLockRequest> requests = new ArrayList<>();
         for (CommandEnvelope envelope : envelopes) {
             if (envelope == null || envelope.command() == null) {
                 continue;
@@ -100,7 +98,7 @@ public class AccountUserCommandProcessor {
                 default -> null;
             };
             if (symbol != null) {
-                requests.add(new AccountRepository.OpenInterestLockRequest(
+                requests.add(new AccountSettlementService.OpenInterestLockRequest(
                         command.productLine(), command.userId(), symbol));
             }
         }
@@ -194,12 +192,12 @@ public class AccountUserCommandProcessor {
                         readPayload(command, FundingSettlementAccountCommand.class);
                 long balanceAfter = fundingSettlementService.apply(command.productLine(), command.userId(),
                         command.commandId(), funding, Instant.now());
-                accountRepository.positions(command.productLine(), command.userId(), funding.positionSide())
+                accountSettlementService.positions(command.productLine(), command.userId(), funding.positionSide())
                         .stream()
                         .filter(position -> position.symbol().equals(funding.symbol()))
                         .filter(position -> position.marginMode() == funding.marginMode())
                         .forEach(position -> {
-                            var event = outboxRepository.enqueuePositionUpdated(
+                            var event = outboxService.enqueuePositionUpdated(
                                     properties.getKafka().getPositionEventsTopic(), funding.paymentId(), position,
                                     Instant.now(), command.traceId());
                             positionCacheSynchronizer.schedule(event.cacheEvent());
@@ -260,10 +258,10 @@ public class AccountUserCommandProcessor {
                     throw new AccountCommandRejectedException(
                             "STALE_ADL_TARGET", "ADL target position changed before settlement");
                 }
-                accountRepository.position(command.productLine(), command.userId(), adl.symbol(),
+                accountSettlementService.position(command.productLine(), command.userId(), adl.symbol(),
                                 adl.marginMode(), adl.positionSide())
                         .ifPresent(position -> {
-                            var event = outboxRepository.enqueuePositionUpdated(
+                            var event = outboxService.enqueuePositionUpdated(
                                     properties.getKafka().getPositionEventsTopic(), adl.executionId(), position,
                                     Instant.now(), command.traceId());
                             positionCacheSynchronizer.schedule(event.cacheEvent());
@@ -375,7 +373,7 @@ public class AccountUserCommandProcessor {
 
     private void requeueWaitingDependents(String completedCommandId, Instant now) {
         for (var dependent : commandRepository.waitingDependents(completedCommandId)) {
-            outboxRepository.enqueueUserCommandRetry(properties.getKafka().getUserCommandsTopic(),
+            outboxService.enqueueUserCommandRetry(properties.getKafka().getUserCommandsTopic(),
                     dependent.partitionKey(), dependent.serializedEnvelope(), now);
         }
     }
@@ -390,7 +388,7 @@ public class AccountUserCommandProcessor {
                 == com.surprising.account.api.model.AccountUserCommandType.TRADE_SIDE_SETTLE) {
             return;
         }
-        outboxRepository.enqueueCommandResult(properties.getKafka().getCommandResultsTopic(), command,
+        outboxService.enqueueCommandResult(properties.getKafka().getCommandResultsTopic(), command,
                 status, resultPayload, errorCode, errorMessage, completedAt);
     }
 

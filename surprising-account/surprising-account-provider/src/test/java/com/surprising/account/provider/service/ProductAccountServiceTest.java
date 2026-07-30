@@ -13,7 +13,6 @@ import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferRecordResponse;
 import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.provider.config.AccountProperties;
-import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -28,7 +27,7 @@ class ProductAccountServiceTest {
 
     @Test
     void missingProductBalanceReturnsZeroWithoutCreatingLegacyBalance() {
-        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        FakeProductAccountSettlementService repository = new FakeProductAccountSettlementService();
         AccountService service = new AccountService(repository, new PositionCalculator());
 
         ProductBalanceResponse response = service.productBalance(1001L, AccountType.SPOT, "usdt");
@@ -44,7 +43,7 @@ class ProductAccountServiceTest {
 
     @Test
     void productBalanceAdjustmentNormalizesAssetAndReference() {
-        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        FakeProductAccountSettlementService repository = new FakeProductAccountSettlementService();
         AccountService service = new AccountService(repository, new PositionCalculator());
 
         ProductBalanceResponse response = service.adjustProductBalance(new ProductBalanceAdjustmentRequest(
@@ -58,7 +57,7 @@ class ProductAccountServiceTest {
 
     @Test
     void productBalanceAdjustmentRejectsOtherAccountsWhenProviderIsProductScoped() {
-        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        FakeProductAccountSettlementService repository = new FakeProductAccountSettlementService();
         AccountService service = productScopedService(repository, ProductLine.LINEAR_DELIVERY);
 
         assertThatThrownBy(() -> service.adjustProductBalance(new ProductBalanceAdjustmentRequest(
@@ -70,7 +69,7 @@ class ProductAccountServiceTest {
 
     @Test
     void adminProductBalanceAdjustmentRecordsGatewayIdentity() {
-        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        FakeProductAccountSettlementService repository = new FakeProductAccountSettlementService();
         AccountService service = new AccountService(repository, new PositionCalculator());
 
         ProductBalanceResponse response = service.adminAdjustProductBalance(" 42 ", " risk-admin ",
@@ -94,7 +93,7 @@ class ProductAccountServiceTest {
 
     @Test
     void productBalancesDefaultToProviderProductAccountWhenProductTopicsAreEnabled() {
-        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        FakeProductAccountSettlementService repository = new FakeProductAccountSettlementService();
         repository.put(1001L, AccountType.USDT_DELIVERY, "USDT", 1_000L);
         repository.put(1001L, AccountType.OPTION, "USDT", 2_000L);
         AccountService service = productScopedService(repository, ProductLine.LINEAR_DELIVERY);
@@ -112,7 +111,7 @@ class ProductAccountServiceTest {
 
     @Test
     void productBalanceRejectsOtherProductLineWhenProviderIsProductScoped() {
-        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        FakeProductAccountSettlementService repository = new FakeProductAccountSettlementService();
         AccountService service = productScopedService(repository, ProductLine.LINEAR_DELIVERY);
 
         assertThatThrownBy(() -> service.productBalance(1001L, AccountType.OPTION, "USDT"))
@@ -122,7 +121,7 @@ class ProductAccountServiceTest {
 
     @Test
     void transferMovesAvailableUnitsBetweenIsolatedProductAccounts() {
-        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        FakeProductAccountSettlementService repository = new FakeProductAccountSettlementService();
         repository.put(1001L, AccountType.FUNDING, "USDT", 2_000L);
         AccountService service = new AccountService(repository, new PositionCalculator());
 
@@ -140,7 +139,7 @@ class ProductAccountServiceTest {
 
     @Test
     void productScopedTransferAllowsFundingToCurrentProductAccount() {
-        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        FakeProductAccountSettlementService repository = new FakeProductAccountSettlementService();
         repository.put(1001L, AccountType.FUNDING, "USDT", 2_000L);
         AccountService service = productScopedService(repository, ProductLine.LINEAR_DELIVERY);
 
@@ -155,7 +154,7 @@ class ProductAccountServiceTest {
 
     @Test
     void productScopedTransferRejectsOtherProductLineAccount() {
-        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        FakeProductAccountSettlementService repository = new FakeProductAccountSettlementService();
         repository.put(1001L, AccountType.FUNDING, "USDT", 2_000L);
         AccountService service = productScopedService(repository, ProductLine.LINEAR_DELIVERY);
 
@@ -169,7 +168,7 @@ class ProductAccountServiceTest {
 
     @Test
     void transferRejectsSameProductAccountBeforeRepositoryMutation() {
-        FakeProductAccountRepository repository = new FakeProductAccountRepository();
+        FakeProductAccountSettlementService repository = new FakeProductAccountSettlementService();
         AccountService service = new AccountService(repository, new PositionCalculator());
 
         assertThatThrownBy(() -> service.transfer(new ProductTransferRequest(
@@ -179,14 +178,14 @@ class ProductAccountServiceTest {
         assertThat(repository.transferReferences).isEmpty();
     }
 
-    private AccountService productScopedService(FakeProductAccountRepository repository, ProductLine productLine) {
+    private AccountService productScopedService(FakeProductAccountSettlementService repository, ProductLine productLine) {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(productLine);
         return new AccountService(repository, new PositionCalculator(), properties, null);
     }
 
-    private static final class FakeProductAccountRepository extends AccountRepository {
+    private static final class FakeProductAccountSettlementService extends AccountSettlementService {
         private final Map<Long, EnumMap<AccountType, Map<String, ProductBalanceResponse>>> balances = new HashMap<>();
         private final List<String> adjustmentReferences = new ArrayList<>();
         private final List<AdminBalanceAdjustmentRecord> adminAdjustments = new ArrayList<>();
@@ -196,7 +195,7 @@ class ProductAccountServiceTest {
         private final List<AccountType> productTransferPageAccountTypes = new ArrayList<>();
         private long transferId;
 
-        private FakeProductAccountRepository() {
+        private FakeProductAccountSettlementService() {
             super(null, null);
         }
 

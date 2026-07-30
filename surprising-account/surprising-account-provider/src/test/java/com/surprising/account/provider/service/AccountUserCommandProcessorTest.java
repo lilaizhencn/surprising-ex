@@ -23,8 +23,6 @@ import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountCommandRegistration;
 import com.surprising.account.provider.model.PendingAccountCommand;
 import com.surprising.account.provider.repository.AccountCommandRepository;
-import com.surprising.account.provider.repository.AccountOutboxRepository;
-import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.MatchTradeEvent;
@@ -43,14 +41,14 @@ class AccountUserCommandProcessorTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AccountProperties properties = new AccountProperties();
     private final AccountCommandRepository commandRepository = mock(AccountCommandRepository.class);
-    private final AccountOutboxRepository outboxRepository = mock(AccountOutboxRepository.class);
+    private final AccountOutboxService outboxService = mock(AccountOutboxService.class);
     private final AdlTargetSettlementService adlService =
             mock(AdlTargetSettlementService.class);
     private final DeficitSettlementService deficitService =
             mock(DeficitSettlementService.class);
     private final FundingSettlementService fundingService =
             mock(FundingSettlementService.class);
-    private final AccountRepository accountRepository = mock(AccountRepository.class);
+    private final AccountSettlementService accountRepository = mock(AccountSettlementService.class);
     private final AccountOrderReservationService reservationService =
             mock(AccountOrderReservationService.class);
     private final AccountService accountService = mock(AccountService.class);
@@ -62,7 +60,7 @@ class AccountUserCommandProcessorTest {
     void setUp() {
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         processor = new AccountUserCommandProcessor(
-                objectMapper, properties, commandRepository, outboxRepository, adlService,
+                objectMapper, properties, commandRepository, outboxService, adlService,
                 deficitService, fundingService, accountRepository, reservationService,
                 accountService, cacheSynchronizer);
     }
@@ -76,7 +74,7 @@ class AccountUserCommandProcessorTest {
         var outcome = process(command);
 
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.DUPLICATE);
-        verifyNoInteractions(reservationService, outboxRepository);
+        verifyNoInteractions(reservationService, outboxService);
         verify(commandRepository, never()).markApplied(any(), any(), any());
         verify(commandRepository, never()).markRejected(any(), any(), any(), any(), any());
     }
@@ -90,7 +88,7 @@ class AccountUserCommandProcessorTest {
         var outcome = process(command);
 
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.WAITING_DEPENDENCY);
-        verifyNoInteractions(reservationService, outboxRepository);
+        verifyNoInteractions(reservationService, outboxService);
     }
 
     @Test
@@ -108,10 +106,10 @@ class AccountUserCommandProcessorTest {
         verifyNoInteractions(reservationService);
         verify(commandRepository).markRejected(eq(command.commandId()), eq(null),
                 eq("DEPENDENCY_REJECTED"), any(), any());
-        verify(outboxRepository).enqueueCommandResult(
+        verify(outboxService).enqueueCommandResult(
                 eq(properties.getKafka().getCommandResultsTopic()), eq(command),
                 eq(AccountCommandStatus.REJECTED), eq(null), eq("DEPENDENCY_REJECTED"), any(), any());
-        verify(outboxRepository).enqueueUserCommandRetry(
+        verify(outboxService).enqueueUserCommandRetry(
                 eq(properties.getKafka().getUserCommandsTopic()), eq(child.partitionKey()),
                 eq(child.serializedEnvelope()), any());
     }
@@ -133,10 +131,10 @@ class AccountUserCommandProcessorTest {
         verify(reservationService).reserve(
                 eq(ProductLine.LINEAR_PERPETUAL), eq(1001L), any(), any());
         verify(commandRepository).markApplied(eq(command.commandId()), any(), any());
-        verify(outboxRepository).enqueueCommandResult(
+        verify(outboxService).enqueueCommandResult(
                 eq(properties.getKafka().getCommandResultsTopic()), eq(command),
                 eq(AccountCommandStatus.APPLIED), any(), eq(null), eq(null), any());
-        verify(outboxRepository).enqueueUserCommandRetry(
+        verify(outboxService).enqueueUserCommandRetry(
                 eq(properties.getKafka().getUserCommandsTopic()), eq(child.partitionKey()),
                 eq(child.serializedEnvelope()), any());
     }
@@ -155,7 +153,7 @@ class AccountUserCommandProcessorTest {
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.REJECTED);
         verify(commandRepository).markRejected(eq(command.commandId()), eq(null),
                 eq("INSUFFICIENT_AVAILABLE_BALANCE"), any(), any());
-        verify(outboxRepository).enqueueCommandResult(
+        verify(outboxService).enqueueCommandResult(
                 eq(properties.getKafka().getCommandResultsTopic()), eq(command),
                 eq(AccountCommandStatus.REJECTED), eq(null),
                 eq("INSUFFICIENT_AVAILABLE_BALANCE"), any(), any());
@@ -175,7 +173,7 @@ class AccountUserCommandProcessorTest {
         verify(accountService).processTradeSide(
                 eq(ProductLine.LINEAR_PERPETUAL), eq(command.commandId()), any(TradeSideSettlementCommand.class));
         verify(commandRepository).markApplied(eq(command.commandId()), any(), any());
-        verify(outboxRepository, never()).enqueueCommandResult(
+        verify(outboxService, never()).enqueueCommandResult(
                 any(), any(), any(), any(), any(), any(), any());
     }
 
@@ -230,7 +228,7 @@ class AccountUserCommandProcessorTest {
         assertThatThrownBy(() -> process(command))
                 .isInstanceOf(AccountCommandPoisonPillException.class);
 
-        verifyNoInteractions(reservationService, outboxRepository);
+        verifyNoInteractions(reservationService, outboxService);
         verify(commandRepository, never()).markApplied(any(), any(), any());
         verify(commandRepository, never()).markRejected(any(), any(), any(), any(), any());
     }

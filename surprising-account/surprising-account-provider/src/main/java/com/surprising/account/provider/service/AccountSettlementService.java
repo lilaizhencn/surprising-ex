@@ -1,4 +1,4 @@
-package com.surprising.account.provider.repository;
+package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.TradeParticipantRole;
@@ -22,16 +22,22 @@ import com.surprising.account.provider.model.LiquidationFeeSettlement;
 import com.surprising.account.provider.model.PositionSettlementState;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
-import com.surprising.account.provider.service.AccountBalanceCommandService;
-import com.surprising.account.provider.service.AccountQueryService;
-import com.surprising.account.provider.service.MarginTransferMath;
-import com.surprising.account.provider.service.PnlSettlementMath;
-import com.surprising.account.provider.service.PositionCacheAfterCommitSynchronizer;
-import com.surprising.account.provider.service.PositionModeCommandService;
-import com.surprising.account.provider.service.PositionModeSwitchGuard;
-import com.surprising.account.provider.service.PositionOpenInterestService;
-import com.surprising.account.provider.service.PositionQueryService;
-import com.surprising.account.provider.service.SpotTradeSettlementService;
+import com.surprising.account.provider.repository.AccountBalanceRepository;
+import com.surprising.account.provider.repository.AccountDeficitRepository;
+import com.surprising.account.provider.repository.AccountInstrumentRepository;
+import com.surprising.account.provider.repository.AccountLedgerRepository;
+import com.surprising.account.provider.repository.AccountSequenceRepository;
+import com.surprising.account.provider.repository.AdminBalanceAdjustmentRepository;
+import com.surprising.account.provider.repository.OpenInterestShardRepository;
+import com.surprising.account.provider.repository.PositionMarginRepository;
+import com.surprising.account.provider.repository.PositionModeRepository;
+import com.surprising.account.provider.repository.PositionRepository;
+import com.surprising.account.provider.repository.ProductBalanceRepository;
+import com.surprising.account.provider.repository.ProductDeficitRepository;
+import com.surprising.account.provider.repository.ProductLedgerRepository;
+import com.surprising.account.provider.repository.ProductTransferRepository;
+import com.surprising.account.provider.repository.SpotOrderReservationRepository;
+import com.surprising.account.provider.repository.TradeSettlementSideRepository;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.price.api.model.MarkPriceEvent;
@@ -53,11 +59,17 @@ import java.util.Objects;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Repository;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-@Repository
-public class AccountRepository {
+/**
+ * 账户兼容结算编排服务。
+ *
+ * <p>该类保留迁移期间的原有调用入口和资金事务语义，跨表操作在这里编排，
+ * 单表读写逐步委托给对应的 Repository。</p>
+ */
+@Service
+public class AccountSettlementService {
 
     private static final long PPM = 1_000_000L;
     private final JdbcTemplate jdbcTemplate;
@@ -84,17 +96,17 @@ public class AccountRepository {
     private final PositionOpenInterestService positionOpenInterestService;
     private final SpotTradeSettlementService spotTradeSettlementService;
 
-    public AccountRepository(JdbcTemplate jdbcTemplate, AccountSequenceRepository sequenceRepository) {
+    public AccountSettlementService(JdbcTemplate jdbcTemplate, AccountSequenceRepository sequenceRepository) {
         this(jdbcTemplate, sequenceRepository, null, null);
     }
 
-    public AccountRepository(JdbcTemplate jdbcTemplate,
+    public AccountSettlementService(JdbcTemplate jdbcTemplate,
                              AccountSequenceRepository sequenceRepository,
                              LatestMarkPriceCache markPriceCache) {
         this(jdbcTemplate, sequenceRepository, markPriceCache, null);
     }
 
-    public AccountRepository(JdbcTemplate jdbcTemplate,
+    public AccountSettlementService(JdbcTemplate jdbcTemplate,
                              AccountSequenceRepository sequenceRepository,
                              LatestMarkPriceCache markPriceCache,
                              PositionCacheAfterCommitSynchronizer positionCacheSynchronizer) {
@@ -121,7 +133,7 @@ public class AccountRepository {
     }
 
     @Autowired
-    public AccountRepository(JdbcTemplate jdbcTemplate,
+    public AccountSettlementService(JdbcTemplate jdbcTemplate,
                              AccountSequenceRepository sequenceRepository,
                              LatestMarkPriceCache markPriceCache,
                              PositionCacheAfterCommitSynchronizer positionCacheSynchronizer,
@@ -911,7 +923,7 @@ public class AccountRepository {
                     reference_type, reference_id, reason, symbol, created_at
                 ) VALUES (?, ?, ?, ?, 0, 'POSITION_MARGIN_ADJUSTMENT', ?, ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
+                """, sequenceRepository.nextLedgerEntryId(),
                 userId, asset, amountUnits,
                 referenceId, reason, symbol, Timestamp.from(Instant.now()));
     }
@@ -929,7 +941,7 @@ public class AccountRepository {
                     reference_type, reference_id, reason, symbol, created_at
                 ) VALUES (?, ?, ?, ?, ?, 0, 'POSITION_MARGIN_ADJUSTMENT', ?, ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
+                """, sequenceRepository.nextProductLedgerEntryId(),
                 userId, accountType.name(), asset,
                 amountUnits, referenceId, reason, symbol, Timestamp.from(Instant.now()));
     }
@@ -1302,7 +1314,7 @@ public class AccountRepository {
                         reference_type, reference_id, reason, created_at
                     ) VALUES (?, ?, ?, ?, 0, 'TRADE_PNL', ?, 'REALIZED_PNL', ?)
                     ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
+                    """, sequenceRepository.nextLedgerEntryId(),
                     userId, asset, realizedPnlDeltaUnits,
                     referenceId, Timestamp.from(now));
             requireSingleRow(ledgerRows, "trade pnl ledger insert");
@@ -1348,7 +1360,7 @@ public class AccountRepository {
                         reference_type, reference_id, reason, symbol, created_at
                     ) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
                     ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
+                    """, sequenceRepository.nextLedgerEntryId(),
                     userId, asset, realizedPnlDeltaUnits,
                     referenceType, referenceId, reason, symbol, Timestamp.from(now));
             if (ledgerRows == 0) {
@@ -1480,7 +1492,7 @@ public class AccountRepository {
                         reference_type, reference_id, reason, trade_id, order_id, symbol, fee_rate_ppm, created_at
                     ) VALUES (?, ?, ?, ?, 0, 'TRADE_FEE', ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
+                    """, sequenceRepository.nextLedgerEntryId(),
                     userId, asset, feeDeltaUnits, referenceId,
                     reason, tradeId, orderId, symbol, feeRatePpm, Timestamp.from(now));
             requireSingleRow(ledgerRows, "trade fee ledger insert");
@@ -1580,7 +1592,7 @@ public class AccountRepository {
                         reference_type, reference_id, reason, trade_id, order_id, symbol, fee_rate_ppm, created_at
                     ) VALUES (?, ?, ?, ?, ?, 'LIQUIDATION_FEE', ?, 'COLLECT_LIQUIDATION_FEE', ?, ?, ?, ?, ?)
                     ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY), userId, asset,
+                    """, sequenceRepository.nextLedgerEntryId(), userId, asset,
                     Math.negateExact(debit.debitedUnits()), debit.balanceAfterUnits(), referenceId, tradeId,
                     orderId, symbol, context.feeRatePpm(), Timestamp.from(now));
             requireSingleRow(ledgerRows, "liquidation fee ledger insert");
@@ -2108,12 +2120,11 @@ public class AccountRepository {
     }
 
     /**
-     * Collapses the overwhelmingly common perpetual cashflow path into one database round trip:
-     * update available balance and append the immutable ledger row with its final balance.
+     * 将最常见的永续资金变动合并为一次数据库往返：
+     * 更新可用余额，并写入包含最终余额的不可变流水。
      *
-     * <p>Negative cross-margin cashflows use this path only while available balance is sufficient.
-     * Positive cashflows use it only when there is no unsettled deficit. All other cases return empty
-     * without changing state and continue through the full locked-margin/deficit settlement algorithm.
+     * <p>全仓负向资金变动仅在可用余额充足时使用该路径；正向资金变动仅在没有待处理亏空时使用。
+     * 其他情况不修改状态并返回空值，随后进入完整的锁定保证金与亏空结算算法。</p>
      */
     private Optional<Long> trySettleLegacyAvailableBalanceAndLedger(long userId,
                                                                     String asset,
@@ -2128,7 +2139,7 @@ public class AccountRepository {
                                                                     Long feeRatePpm,
                                                                     Instant now) {
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
-        long entryId = sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY);
+        long entryId = sequenceRepository.nextLedgerEntryId();
         Timestamp timestamp = Timestamp.from(now);
         List<Long> rows = jdbcTemplate.query("""
                 WITH updated_balance AS (
@@ -2293,7 +2304,7 @@ public class AccountRepository {
                     reference_type, reference_id, reason, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
+                """, sequenceRepository.nextProductLedgerEntryId(),
                 userId, accountType.name(), asset,
                 amountUnits, balanceAfterUnits, referenceType, referenceId, reason, Timestamp.from(now));
         requireSingleRow(rows, referenceType.toLowerCase().replace('_', ' ') + " product ledger insert");
@@ -2314,7 +2325,7 @@ public class AccountRepository {
                     reference_type, reference_id, reason, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
+                """, sequenceRepository.nextProductLedgerEntryId(),
                 userId, accountType.name(), asset,
                 amountUnits, balanceAfterUnits, referenceType, referenceId, reason, Timestamp.from(now));
         return rows == 1;

@@ -29,10 +29,11 @@ Surprising Exchange account and product settlement module. The current implement
 - `AdlTargetSettlementService`, `DeficitSettlementService`, and `FundingSettlementService`
   own the atomic cross-table workflows for ADL, deficit recovery, and funding settlement.
 - `PositionCacheProjectionService` aggregates positions, margins, and instrument metadata into the
-  final snapshot written to Redis after commit; `AccountOutboxRepository` persists only the account
-  outbox table.
+  final snapshot written to Redis after commit. `AccountOutboxService` orchestrates event creation,
+  sequence allocation, and outbox writes; `AccountOutboxRepository` persists only the account outbox
+  table.
 - Services own transaction boundaries, idempotency, lock order, and cross-table writes. The
-  existing `AccountRepository` remains as a compatibility facade during the incremental migration,
+  existing `AccountSettlementService` remains as a compatibility facade during the incremental migration,
   preserving public entry points and funds-transaction semantics.
 - Financial reconciliation, order timelines, operations reports, and aggregate admin queries must
   not grow new trading-primary queries. They belong in the compile-only, non-running

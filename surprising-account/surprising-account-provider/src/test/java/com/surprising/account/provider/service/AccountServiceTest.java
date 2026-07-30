@@ -20,8 +20,6 @@ import com.surprising.account.provider.model.LiquidationFeeSettlement;
 import com.surprising.account.provider.model.PositionSettlementState;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
-import com.surprising.account.provider.repository.AccountOutboxRepository;
-import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.instrument.api.model.ContractSettlementMethod;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
@@ -53,7 +51,7 @@ class AccountServiceTest {
 
     @Test
     void processesBothTradeSides() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 5L));
         repository.feeSnapshots.put(9001L, new OrderFeeSnapshot(2L, 5L));
         AccountService service = new AccountService(repository, new PositionCalculator());
@@ -92,7 +90,7 @@ class AccountServiceTest {
 
     @Test
     void tradeFeesUseOrderSnapshotRatesInsteadOfInstrumentDefaults() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 1_000L));
         repository.feeSnapshots.put(9001L, new OrderFeeSnapshot(-100L, 5L));
         AccountService service = new AccountService(repository, new PositionCalculator());
@@ -124,7 +122,7 @@ class AccountServiceTest {
     @Test
     void deliveryTradeSettlesFeesAndRealizedPnlToDeliveryAccount() {
         String symbol = "BTC-USDT-DELIVERY";
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.contractSpecs.put(symbol + ":4", new ContractSpec(4L, ContractType.LINEAR_DELIVERY,
                 "USDT", 1L, 100_000_000L, 100_000_000L, 10_000L, 2L, 5L));
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
@@ -162,7 +160,7 @@ class AccountServiceTest {
     @Test
     void optionTradeTransfersPremiumWithoutApplyingClosePnlToBalance() {
         String symbol = "BTC-USDT-260925-70000-C";
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
                 "USDT", 1L, 100_000_000L, 100_000_000L, 10_000L, 2L, 5L));
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
@@ -204,14 +202,14 @@ class AccountServiceTest {
     @Test
     void deliverySettlementClosesOpenPositionsAtSettlementWindowMark() {
         String symbol = "BTC-USDT-DELIVERY";
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.contractSpecs.put(symbol + ":4", new ContractSpec(4L, ContractType.LINEAR_DELIVERY,
                 "USDT", 1L, 100_000_000L, 100_000_000L, 10_000L, 2L, 5L));
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
                 new PositionState(3L, 4L, 500_000L, 0L));
         repository.latestMarkPriceTicks.put(symbol + ":4", 600_000L);
         AccountService service = new AccountService(repository, new PositionCalculator(),
-                new AccountProperties(), new FakeOutboxRepository());
+                new AccountProperties(), new FakeOutboxService());
 
         int settled = settleDelivery(service, new DeliverySettlementEvent(
                 symbol, 4L, ContractType.LINEAR_DELIVERY, EVENT_TIME, EVENT_TIME,
@@ -236,7 +234,7 @@ class AccountServiceTest {
     @Test
     void deliverySettlementEventVersionClosesOlderTradingVersionPositions() {
         String symbol = "BTC-USDT-DELIVERY";
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.contractSpecs.put(symbol + ":4", new ContractSpec(4L, ContractType.LINEAR_DELIVERY,
                 "USDT", 1L, 100_000_000L, 100_000_000L, 10_000L, 2L, 5L));
         repository.contractSpecs.put(symbol + ":5", new ContractSpec(5L, ContractType.LINEAR_DELIVERY,
@@ -261,7 +259,7 @@ class AccountServiceTest {
     @Test
     void deliverySettlementRequiresInstrumentSnapshotBeforeFundsAreSettled() {
         String symbol = "BTC-USDT-DELIVERY";
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.contractSpecs.put(symbol + ":4", new ContractSpec(4L, ContractType.LINEAR_DELIVERY,
                 "USDT", 1L, 100_000_000L, 100_000_000L, 10_000L, 2L, 5L));
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
@@ -283,7 +281,7 @@ class AccountServiceTest {
     @Test
     void optionExerciseClosesOpenPositionsAtIntrinsicValue() {
         String symbol = "BTC-USDT-260925-70000-C";
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
                 "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
@@ -312,7 +310,7 @@ class AccountServiceTest {
     @Test
     void optionExerciseEventVersionClosesOlderTradingVersionPositions() {
         String symbol = "BTC-USDT-260925-70000-C";
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
                 "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
         repository.contractSpecs.put(symbol + ":7", new ContractSpec(7L, ContractType.VANILLA_OPTION,
@@ -337,7 +335,7 @@ class AccountServiceTest {
     @Test
     void putOptionExercisePaysIntrinsicValueToLongAndDebitsShort() {
         String symbol = "BTC-USDT-260925-70000-P";
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
                 "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
         repository.positions.put(new PositionKey(1001L, symbol, MarginMode.CROSS, PositionSide.NET),
@@ -371,7 +369,7 @@ class AccountServiceTest {
     @Test
     void outOfMoneyOptionExerciseClosesPositionsWithoutCashPayoff() {
         String symbol = "BTC-USDT-260925-70000-C";
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
                 "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
         repository.positions.put(new PositionKey(1001L, symbol, MarginMode.CROSS, PositionSide.NET),
@@ -400,7 +398,7 @@ class AccountServiceTest {
     @Test
     void optionExerciseDoesNotSettleClosedPositionsTwice() {
         String symbol = "BTC-USDT-260925-70000-C";
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
                 "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
         repository.positions.put(new PositionKey(1001L, symbol, MarginMode.CROSS, PositionSide.NET),
@@ -425,7 +423,7 @@ class AccountServiceTest {
     @Test
     void optionExerciseRequiresInstrumentSnapshotBeforeFundsAreSettled() {
         String symbol = "BTC-USDT-260925-70000-C";
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
                 "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
@@ -447,7 +445,7 @@ class AccountServiceTest {
     @Test
     void optionExerciseRejectsMismatchedInstrumentTermsBeforeFundsAreSettled() {
         String symbol = "BTC-USDT-260925-70000-C";
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.contractSpecs.put(symbol + ":6", new ContractSpec(6L, ContractType.VANILLA_OPTION,
                 "USDT", 1L, 1L, 1L, 10_000L, 2L, 5L));
         repository.positions.put(new PositionKey(2002L, symbol, MarginMode.CROSS, PositionSide.NET),
@@ -469,15 +467,15 @@ class AccountServiceTest {
 
     @Test
     void spotTradeSettlesProductAccountsWithoutPerpetualPositionUpdates() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.instrumentTypes.put("BTC-USDT-SPOT:3", InstrumentType.SPOT);
         repository.spotSpecs.put("BTC-USDT-SPOT:3",
                 new SpotInstrumentSpec(3L, "BTC", "USDT", 100_000L, 1L));
         repository.feeSnapshots.put(9102L, new OrderFeeSnapshot(-100L, 800L));
         repository.feeSnapshots.put(9101L, new OrderFeeSnapshot(-200L, 900L));
-        FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
+        FakeOutboxService outboxService = new FakeOutboxService();
         AccountService service = new AccountService(repository, new PositionCalculator(),
-                new AccountProperties(), outboxRepository);
+                new AccountProperties(), outboxService);
 
         MatchTradeEvent trade = new MatchTradeEvent(
                 9501L,
@@ -519,14 +517,14 @@ class AccountServiceTest {
         assertThat(repository.releasedOrderMargin).isEmpty();
         assertThat(repository.pnlByUser).isEmpty();
         assertThat(repository.feeByUser).isEmpty();
-        assertThat(outboxRepository.calls).isEmpty();
+        assertThat(outboxService.calls).isEmpty();
         assertThat(repository.instrumentTypeLoads).containsEntry("BTC-USDT-SPOT:3", 1);
         assertThat(repository.spotSpecLoads).containsEntry("BTC-USDT-SPOT:3", 1);
     }
 
     @Test
     void cachesImmutableInstrumentMetadataAcrossTradesAndUsesEventFeeRates() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.feeSnapshots.put(9001L, new OrderFeeSnapshot(2L, 5L));
         repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 5L));
         repository.feeSnapshots.put(9003L, new OrderFeeSnapshot(2L, 5L));
@@ -578,7 +576,7 @@ class AccountServiceTest {
 
     @Test
     void positionQuerySupportsNetAndHedgePositionSides() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.positions.put(new PositionKey(1001L, "BTC-USDT", MarginMode.CROSS),
                 new PositionState(3L, 1L, 600_000L, 0L));
         repository.positions.put(new PositionKey(1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.LONG),
@@ -596,7 +594,7 @@ class AccountServiceTest {
 
     @Test
     void positionsQueryFiltersByHedgePositionSide() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.positions.put(new PositionKey(1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.LONG),
                 new PositionState(2L, 1L, 610_000L, 0L));
         repository.positions.put(new PositionKey(1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.SHORT),
@@ -614,7 +612,7 @@ class AccountServiceTest {
 
     @Test
     void positionQueriesUseProviderProductLineWhenProductTopicsAreEnabled() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.positions.put(new PositionKey(1001L, "BTC-USDT-260925", MarginMode.CROSS, PositionSide.SHORT),
                 new PositionState(-1L, 4L, 620_000L, 0L));
         AccountProperties properties = new AccountProperties();
@@ -636,7 +634,7 @@ class AccountServiceTest {
 
     @Test
     void sameTradeIdFromDifferentSymbolsIsProcessedIndependently() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.feeSnapshots.put(9002L, new OrderFeeSnapshot(2L, 5L));
         repository.feeSnapshots.put(9001L, new OrderFeeSnapshot(2L, 5L));
         repository.feeSnapshots.put(9003L, new OrderFeeSnapshot(2L, 5L));
@@ -696,7 +694,7 @@ class AccountServiceTest {
 
     @Test
     void positionMarginAdjustmentOnlySupportsIsolatedMarginMode() {
-        AccountService service = new AccountService(new FakeAccountRepository(), new PositionCalculator());
+        AccountService service = new AccountService(new FakeAccountSettlementService(), new PositionCalculator());
 
         assertThatThrownBy(() -> service.adjustPositionMargin(new PositionMarginAdjustmentRequest(
                 1001L, "BTC-USDT", MarginMode.CROSS, 100L, "cross-margin-ref", null)))
@@ -706,21 +704,21 @@ class AccountServiceTest {
 
     @Test
     void positionMarginAdjustmentEnqueuesPositionUpdateTrigger() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.positions.put(new PositionKey(1001L, "BTC-USDT", MarginMode.ISOLATED),
                 new PositionState(3L, 1L, 600_000L, 0L));
-        FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
+        FakeOutboxService outboxService = new FakeOutboxService();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setPositionEventsTopic("surprising.account.position.events.v1");
         AccountService service = new AccountService(repository, new PositionCalculator(),
-                properties, outboxRepository);
+                properties, outboxService);
 
         PositionMarginAdjustmentResponse response = service.adjustPositionMargin(new PositionMarginAdjustmentRequest(
                 1001L, "BTC-USDT", MarginMode.ISOLATED, 500L, "margin-add-1", null));
 
         assertThat(response.positionMarginUnits()).isEqualTo(1_500L);
         assertThat(repository.positionMarginAdjustmentCalls).isEqualTo(1);
-        assertThat(outboxRepository.calls).singleElement().satisfies(call -> {
+        assertThat(outboxService.calls).singleElement().satisfies(call -> {
             assertThat(call.topic()).isEqualTo("surprising.account.position.events.v1");
             assertThat(call.tradeId()).isZero();
             assertThat(call.position().userId()).isEqualTo(1001L);
@@ -733,7 +731,7 @@ class AccountServiceTest {
 
     @Test
     void positionMarginAdjustmentUsesProviderProductLineWhenProductTopicsAreEnabled() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
@@ -748,14 +746,14 @@ class AccountServiceTest {
 
     @Test
     void enqueuesPositionUpdateEventsAfterBothSidesAreSettled() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.feeSnapshots.put(9007L, new OrderFeeSnapshot(2L, 5L));
         repository.feeSnapshots.put(9008L, new OrderFeeSnapshot(2L, 5L));
-        FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
+        FakeOutboxService outboxService = new FakeOutboxService();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setPositionEventsTopic("surprising.account.position.events.v1");
         AccountService service = new AccountService(repository, new PositionCalculator(),
-                properties, outboxRepository);
+                properties, outboxService);
 
         MatchTradeEvent trade = new MatchTradeEvent(
                 9401L,
@@ -779,17 +777,17 @@ class AccountServiceTest {
 
         settleTrade(service, trade);
 
-        assertThat(outboxRepository.calls).hasSize(2);
-        assertThat(outboxRepository.calls)
+        assertThat(outboxService.calls).hasSize(2);
+        assertThat(outboxService.calls)
                 .extracting(PositionUpdatedCall::topic)
                 .containsOnly("surprising.account.position.events.v1");
-        assertThat(outboxRepository.calls)
+        assertThat(outboxService.calls)
                 .extracting(call -> call.position().userId())
                 .containsExactly(2002L, 1001L);
-        assertThat(outboxRepository.calls)
+        assertThat(outboxService.calls)
                 .extracting(PositionUpdatedCall::tradeId)
                 .containsExactly(9401L, 9401L);
-        assertThat(outboxRepository.calls)
+        assertThat(outboxService.calls)
                 .extracting(PositionUpdatedCall::traceId)
                 .containsExactly("trace-9401", "trace-9401");
         assertThat(repository.positionUpdates).isEqualTo(2);
@@ -797,7 +795,7 @@ class AccountServiceTest {
 
     @Test
     void closingTradeReleasesPositionMarginAndSettlesRealizedPnlForBothSides() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.feeSnapshots.put(9003L, new OrderFeeSnapshot(2L, 5L));
         repository.feeSnapshots.put(9004L, new OrderFeeSnapshot(2L, 5L));
         repository.positions.put(new PositionKey(2002L, "BTC-USDT", MarginMode.CROSS),
@@ -842,7 +840,7 @@ class AccountServiceTest {
 
     @Test
     void cachesMissingLiquidationFeeContextAcrossPartialClosingFills() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.feeSnapshots.put(9014L, new OrderFeeSnapshot(2L, 5L));
         repository.feeSnapshots.put(9015L, new OrderFeeSnapshot(2L, 5L));
         repository.feeSnapshots.put(9016L, new OrderFeeSnapshot(2L, 5L));
@@ -896,18 +894,18 @@ class AccountServiceTest {
 
     @Test
     void liquidationCloseCollectsActualFeeAndEnqueuesInsuranceEvent() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.feeSnapshots.put(9010L, new OrderFeeSnapshot(0L, 0L));
         repository.feeSnapshots.put(9011L, new OrderFeeSnapshot(0L, 0L));
         repository.positions.put(new PositionKey(2002L, "BTC-USDT", MarginMode.CROSS),
                 new PositionState(2L, 1L, 600_000L, 0L));
         repository.liquidationFeeContexts.put(9010L, new LiquidationFeeContext(6001L, 9401L, 3_000L));
-        FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
+        FakeOutboxService outboxService = new FakeOutboxService();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setPositionEventsTopic("surprising.account.position.events.v1");
         properties.getKafka().setLiquidationFeeEventsTopic("surprising.account.liquidation-fee.events.v1");
         AccountService service = new AccountService(repository, new PositionCalculator(),
-                properties, outboxRepository);
+                properties, outboxService);
 
         MatchTradeEvent close = new MatchTradeEvent(
                 9205L,
@@ -932,7 +930,7 @@ class AccountServiceTest {
         settleTrade(service, close);
 
         assertThat(repository.liquidationFeeByUser).containsEntry(2002L, 3_600L);
-        assertThat(outboxRepository.liquidationFeeCalls).singleElement().satisfies(call -> {
+        assertThat(outboxService.liquidationFeeCalls).singleElement().satisfies(call -> {
             assertThat(call.topic()).isEqualTo("surprising.account.liquidation-fee.events.v1");
             assertThat(call.tradeId()).isEqualTo(9205L);
             assertThat(call.orderId()).isEqualTo(9010L);
@@ -947,7 +945,7 @@ class AccountServiceTest {
 
     @Test
     void flippingTradeClosesOldExposureBeforeConsumingNewOpeningMargin() {
-        FakeAccountRepository repository = new FakeAccountRepository();
+        FakeAccountSettlementService repository = new FakeAccountSettlementService();
         repository.feeSnapshots.put(9005L, new OrderFeeSnapshot(2L, 5L));
         repository.feeSnapshots.put(9006L, new OrderFeeSnapshot(2L, 5L));
         repository.positions.put(new PositionKey(2002L, "BTC-USDT", MarginMode.CROSS),
@@ -1043,12 +1041,12 @@ class AccountServiceTest {
                 + ":" + plan.userId() + ":" + command.marginMode() + ":" + command.positionSide();
     }
 
-    private static AccountService settlementService(FakeAccountRepository repository) {
+    private static AccountService settlementService(FakeAccountSettlementService repository) {
         return new AccountService(repository, new PositionCalculator(),
-                new AccountProperties(), new FakeOutboxRepository());
+                new AccountProperties(), new FakeOutboxService());
     }
 
-    private static final class FakeAccountRepository extends AccountRepository {
+    private static final class FakeAccountSettlementService extends AccountSettlementService {
 
         private final Map<PositionKey, PositionState> positions = new HashMap<>();
         private final Map<Long, OrderFeeSnapshot> feeSnapshots = new HashMap<>();
@@ -1092,7 +1090,7 @@ class AccountServiceTest {
         private int positionUpdates;
         private int positionMarginAdjustmentCalls;
 
-        private FakeAccountRepository() {
+        private FakeAccountSettlementService() {
             super(null, null);
         }
 
@@ -1656,13 +1654,13 @@ class AccountServiceTest {
         }
     }
 
-    private static final class FakeOutboxRepository extends AccountOutboxRepository {
+    private static final class FakeOutboxService extends AccountOutboxService {
 
         private final List<PositionUpdatedCall> calls = new ArrayList<>();
         private final List<LiquidationFeeSettledCall> liquidationFeeCalls = new ArrayList<>();
 
-        private FakeOutboxRepository() {
-            super(null, null, null);
+        private FakeOutboxService() {
+            super(null, null, null, null, null);
         }
 
         @Override

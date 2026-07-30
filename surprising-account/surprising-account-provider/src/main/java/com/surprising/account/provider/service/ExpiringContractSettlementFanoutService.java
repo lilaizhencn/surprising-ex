@@ -3,7 +3,6 @@ package com.surprising.account.provider.service;
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.account.provider.config.AccountProperties;
-import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
 import java.time.Instant;
@@ -16,16 +15,16 @@ import tools.jackson.databind.ObjectMapper;
 public class ExpiringContractSettlementFanoutService {
 
     private final AccountService accountService;
-    private final AccountOutboxRepository outboxRepository;
+    private final AccountOutboxService outboxService;
     private final AccountProperties properties;
     private final ObjectMapper objectMapper;
 
     public ExpiringContractSettlementFanoutService(AccountService accountService,
-                                                   AccountOutboxRepository outboxRepository,
+                                                   AccountOutboxService outboxService,
                                                    AccountProperties properties,
                                                    ObjectMapper objectMapper) {
         this.accountService = accountService;
-        this.outboxRepository = outboxRepository;
+        this.outboxService = outboxService;
         this.properties = properties;
         this.objectMapper = objectMapper;
     }
@@ -59,7 +58,7 @@ public class ExpiringContractSettlementFanoutService {
                     objectMapper.writeValueAsString(payload),
                     now,
                     null);
-            outboxRepository.enqueueUserCommand(
+            outboxService.enqueueUserCommand(
                     properties.getKafka().getUserCommandsTopic(), "EXPIRING_POSITION_COMMAND", command, now);
         }
         return plans.size();

@@ -1,15 +1,7 @@
 package com.surprising.account.provider.repository;
 
-import com.surprising.account.api.model.LiquidationFeeSettledEvent;
-import com.surprising.account.api.model.AccountCommandResultEvent;
-import com.surprising.account.api.model.AccountUserCommand;
-import com.surprising.account.api.model.PositionCacheEvent;
-import com.surprising.account.api.model.PositionResponse;
-import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountOutboxRecord;
-import com.surprising.account.provider.service.PositionCacheProjectionService;
-import com.surprising.trading.api.model.MarginMode;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -18,7 +10,6 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import tools.jackson.databind.ObjectMapper;
 
 /**
  * 账户侧事件的事务 outbox。
@@ -30,168 +21,36 @@ import tools.jackson.databind.ObjectMapper;
 public class AccountOutboxRepository {
 
     private final JdbcTemplate jdbcTemplate;
-    private final AccountSequenceRepository sequenceRepository;
-    private final ObjectMapper objectMapper;
     private final AccountProperties properties;
-    private final PositionCacheProjectionService positionCacheProjectionService;
 
-    public AccountOutboxRepository(JdbcTemplate jdbcTemplate,
-                                   AccountSequenceRepository sequenceRepository,
-                                   ObjectMapper objectMapper) {
-        this(jdbcTemplate, sequenceRepository, objectMapper, new AccountProperties(),
-                new PositionCacheProjectionService(jdbcTemplate));
-    }
-
-    public AccountOutboxRepository(JdbcTemplate jdbcTemplate,
-                                   AccountSequenceRepository sequenceRepository,
-                                   ObjectMapper objectMapper,
-                                   AccountProperties properties) {
-        this(jdbcTemplate, sequenceRepository, objectMapper, properties,
-                new PositionCacheProjectionService(jdbcTemplate));
+    public AccountOutboxRepository(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, new AccountProperties());
     }
 
     @Autowired
     public AccountOutboxRepository(JdbcTemplate jdbcTemplate,
-                                   AccountSequenceRepository sequenceRepository,
-                                   ObjectMapper objectMapper,
-                                   AccountProperties properties,
-                                   PositionCacheProjectionService positionCacheProjectionService) {
+                                   AccountProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
-        this.sequenceRepository = sequenceRepository;
-        this.objectMapper = objectMapper;
         this.properties = properties == null ? new AccountProperties() : properties;
-        this.positionCacheProjectionService = positionCacheProjectionService;
     }
 
-    public PositionUpdatedEvent enqueuePositionUpdated(String topic,
-                                                       long tradeId,
-                                                       PositionResponse position,
-                                                       Instant now,
-                                                       String traceId) {
-        requireCurrentProductTopic(topic);
-        PositionCacheEvent snapshot = positionCacheProjectionService.captureFinalSnapshot(
-                currentProductLine(), position.userId(), position.symbol(), position.marginMode(),
-                position.positionSide());
-        long eventId = sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.POSITION_EVENT);
-        PositionUpdatedEvent event = new PositionUpdatedEvent(
-                PositionUpdatedEvent.CURRENT_SCHEMA_VERSION,
-                eventId,
-                tradeId,
-                snapshot.productLine(),
-                snapshot.revision(),
-                snapshot.userId(),
-                snapshot.symbol(),
-                snapshot.instrumentVersion(),
-                snapshot.marginMode(),
-                snapshot.positionSide(),
-                snapshot.signedQuantitySteps(),
-                snapshot.entryPriceTicks(),
-                snapshot.entryValueTicks(),
-                snapshot.realizedPnlUnits(),
-                snapshot.marginAsset(),
-                snapshot.marginUnits(),
-                snapshot.positionUpdatedAt(),
-                snapshot.marginUpdatedAt(),
-                now,
-                traceId);
-        int rows = jdbcTemplate.update("""
-                INSERT INTO account_outbox_events (
-                    product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
-                    next_attempt_at, created_at, updated_at
-                ) VALUES (?, 'POSITION', ?, ?, ?, 'POSITION_UPDATED', ?::jsonb, ?, ?, ?)
-                """, currentProductLine().name(), eventId, topic, event.partitionKey(),
-                objectMapper.writeValueAsString(event),
-                Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
-        requireSingleRow(rows, "account position outbox enqueue");
-        return event;
-    }
-
-    public LiquidationFeeSettledEvent enqueueLiquidationFeeSettled(String topic,
-                                                                   long tradeId,
-                                                                   long orderId,
-                                                                   long liquidationOrderId,
-                                                                   long candidateId,
-                                                                   long userId,
-                                                                   String symbol,
-                                                                   MarginMode marginMode,
-                                                                   String accountType,
-                                                                   String asset,
-                                                                   long amountUnits,
-                                                                   long feeRatePpm,
-                                                                   Instant now,
-                                                                   String traceId) {
-        requireCurrentProductTopic(topic);
-        long eventId = sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LIQUIDATION_FEE_EVENT);
-        LiquidationFeeSettledEvent event = new LiquidationFeeSettledEvent(eventId, tradeId, orderId,
-                liquidationOrderId, candidateId, userId, symbol, marginMode, accountType, asset, amountUnits, feeRatePpm,
-                now, traceId);
-        int rows = jdbcTemplate.update("""
-                INSERT INTO account_outbox_events (
-                    product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
-                    next_attempt_at, created_at, updated_at
-                ) VALUES (?, 'LIQUIDATION_FEE', ?, ?, ?, 'LIQUIDATION_FEE_SETTLED', ?::jsonb, ?, ?, ?)
-                """, currentProductLine().name(), eventId, topic, asset, objectMapper.writeValueAsString(event),
-                Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
-        requireSingleRow(rows, "account liquidation fee outbox enqueue");
-        return event;
-    }
-
-    public AccountCommandResultEvent enqueueCommandResult(String topic,
-                                                          AccountUserCommand command,
-                                                          com.surprising.account.api.model.AccountCommandStatus status,
-                                                          String resultPayload,
-                                                          String errorCode,
-                                                          String errorMessage,
-                                                          Instant now) {
-        requireCurrentProductTopic(topic);
-        long eventId = sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.COMMAND_RESULT_EVENT);
-        AccountCommandResultEvent event = new AccountCommandResultEvent(
-                eventId, command.commandId(), command.productLine(), command.userId(), command.commandType(),
-                status, command.source(), command.sourceReference(), resultPayload, errorCode, errorMessage,
-                now, command.traceId());
-        int rows = jdbcTemplate.update("""
-                INSERT INTO account_outbox_events (
-                    product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
-                    next_attempt_at, created_at, updated_at
-                ) VALUES (?, 'ACCOUNT_COMMAND_RESULT', ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
-                """, currentProductLine().name(), eventId, topic, command.partitionKey(), status.name(),
-                objectMapper.writeValueAsString(event), Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
-        requireSingleRow(rows, "account command result outbox enqueue");
-        return event;
-    }
-
-    public void enqueueUserCommandRetry(String topic,
-                                        String partitionKey,
-                                        String serializedCommand,
-                                        Instant now) {
-        requireCurrentProductTopic(topic);
-        long aggregateId = sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.COMMAND_RETRY_EVENT);
-        int rows = jdbcTemplate.update("""
-                INSERT INTO account_outbox_events (
-                    product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
-                    next_attempt_at, created_at, updated_at
-                ) VALUES (?, 'ACCOUNT_COMMAND_RETRY', ?, ?, ?, 'DEPENDENCY_READY', ?::jsonb, ?, ?, ?)
-                """, currentProductLine().name(), aggregateId, topic, partitionKey, serializedCommand,
-                Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
-        requireSingleRow(rows, "account command retry outbox enqueue");
-    }
-
-    public void enqueueUserCommand(String topic,
-                                   String aggregateType,
-                                   AccountUserCommand command,
-                                   Instant now) {
-        requireCurrentProductTopic(topic);
-        long aggregateId = sequenceRepository.nextSequence(
-                AccountSequenceRepository.Sequence.USER_COMMAND_OUTBOX_EVENT);
+    public void insert(String productLine,
+                       String aggregateType,
+                       long aggregateId,
+                       String topic,
+                       String eventKey,
+                       String eventType,
+                       String serializedPayload,
+                       Instant now) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO account_outbox_events (
                     product_line, aggregate_type, aggregate_id, topic, event_key, event_type, payload,
                     next_attempt_at, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
-                """, command.productLine().name(), aggregateType, aggregateId, topic, command.partitionKey(),
-                command.commandType().name(), objectMapper.writeValueAsString(command), Timestamp.from(now),
+                """, productLine, aggregateType, aggregateId, topic, eventKey, eventType, serializedPayload,
+                Timestamp.from(now),
                 Timestamp.from(now), Timestamp.from(now));
-        requireSingleRow(rows, "account user command outbox enqueue");
+        requireSingleRow(rows, "account outbox enqueue");
     }
 
     public List<AccountOutboxRecord> claimPending(int limit, Instant leaseUntil, Instant now) {
@@ -359,25 +218,6 @@ public class AccountOutboxRepository {
         args.add(kafka.getLiquidationFeeEventsTopic());
         args.add(kafka.getCommandResultsTopic());
         args.add(kafka.getUserCommandsTopic());
-    }
-
-    private void requireCurrentProductTopic(String topic) {
-        AccountProperties.Kafka kafka = properties.getKafka();
-        if (!kafka.isProductTopicsEnabled()) {
-            return;
-        }
-        String positionEventsTopic = kafka.getPositionEventsTopic();
-        String liquidationFeeEventsTopic = kafka.getLiquidationFeeEventsTopic();
-        String commandResultsTopic = kafka.getCommandResultsTopic();
-        String userCommandsTopic = kafka.getUserCommandsTopic();
-        if (!positionEventsTopic.equals(topic)
-                && !liquidationFeeEventsTopic.equals(topic)
-                && !commandResultsTopic.equals(topic)
-                && !userCommandsTopic.equals(topic)) {
-            throw new IllegalStateException("account outbox topic must match current product line: expected one of ["
-                    + positionEventsTopic + ", " + liquidationFeeEventsTopic + ", " + commandResultsTopic
-                    + ", " + userCommandsTopic + "] actual=" + topic);
-        }
     }
 
     private com.surprising.product.api.ProductLine currentProductLine() {

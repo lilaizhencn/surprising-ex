@@ -23,8 +23,9 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - ADL、亏空回补和资金费的跨表原子结算分别由 `AdlTargetSettlementService`、
   `DeficitSettlementService` 和 `FundingSettlementService` 负责。
 - `PositionCacheProjectionService` 聚合持仓、保证金与合约元数据，生成提交后写入 Redis
-  的最终状态快照；`AccountOutboxRepository` 只持久化账户 outbox 表。
-- 交易事务、幂等、锁顺序和跨表写入由 Service 负责；拆分期间保留 `AccountRepository` 兼容门面，
+  的最终状态快照；`AccountOutboxService` 编排事件、序列号和 outbox 写入，
+  `AccountOutboxRepository` 只持久化账户 outbox 表。
+- 交易事务、幂等、锁顺序和跨表写入由 Service 负责；拆分期间保留 `AccountSettlementService` 兼容门面，
   旧调用入口和资金事务语义不变，内部能力按表逐步迁出。
 - 财务对账、订单时间线、运营报表和后台聚合查询不应继续扩展交易主库查询。相关代码以后进入
   只参与编译、不运行的 `surprising-finance-ops` 暂存模块，并在正式财务系统建设时重新设计。

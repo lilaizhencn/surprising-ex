@@ -3,7 +3,6 @@ package com.surprising.account.provider.service;
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.repository.AccountCommandSubmissionRepository;
-import com.surprising.account.provider.repository.AccountOutboxRepository;
 import java.time.Instant;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,16 +14,16 @@ public class AccountCommandSubmissionService {
     private final ObjectMapper objectMapper;
     private final AccountProperties properties;
     private final AccountCommandSubmissionRepository submissionRepository;
-    private final AccountOutboxRepository outboxRepository;
+    private final AccountOutboxService outboxService;
 
     public AccountCommandSubmissionService(ObjectMapper objectMapper,
                                            AccountProperties properties,
                                            AccountCommandSubmissionRepository submissionRepository,
-                                           AccountOutboxRepository outboxRepository) {
+                                           AccountOutboxService outboxService) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.submissionRepository = submissionRepository;
-        this.outboxRepository = outboxRepository;
+        this.outboxService = outboxService;
     }
 
     @Transactional
@@ -32,7 +31,7 @@ public class AccountCommandSubmissionService {
         String serializedEnvelope = objectMapper.writeValueAsString(command);
         Instant now = Instant.now();
         if (submissionRepository.register(command, serializedEnvelope, now)) {
-            outboxRepository.enqueueUserCommand(properties.getKafka().getUserCommandsTopic(),
+            outboxService.enqueueUserCommand(properties.getKafka().getUserCommandsTopic(),
                     "ACCOUNT_API_COMMAND", command, now);
         }
     }

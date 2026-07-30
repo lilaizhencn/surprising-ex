@@ -8,7 +8,6 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.provider.config.AccountProperties;
-import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
@@ -19,7 +18,7 @@ class AccountServicePositionCacheTest {
 
     @Test
     void productionUserPositionQueryDoesNotReadPostgres() {
-        AccountRepository repository = mock(AccountRepository.class);
+        AccountSettlementService repository = mock(AccountSettlementService.class);
         RedisPositionCache cache = mock(RedisPositionCache.class);
         AccountProperties properties = new AccountProperties();
         PositionResponse cached = new PositionResponse(

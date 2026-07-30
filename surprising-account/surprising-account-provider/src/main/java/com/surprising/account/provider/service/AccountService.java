@@ -31,9 +31,7 @@ import com.surprising.account.provider.model.PositionChange;
 import com.surprising.account.provider.model.PositionSettlementState;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
-import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountInstrumentRepository;
-import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.account.provider.repository.AdminBalanceAdjustmentRepository;
 import com.surprising.account.provider.repository.PositionModeRepository;
 import com.surprising.account.provider.repository.PositionRepository;
@@ -67,7 +65,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AccountService {
 
-    private final AccountRepository accountRepository;
+    private final AccountSettlementService accountSettlementService;
     private final AccountQueryService accountQueryService;
     private final AccountBalanceCommandService accountBalanceCommandService;
     private final AdminBalanceAdjustmentRepository adminBalanceAdjustmentRepository;
@@ -80,7 +78,7 @@ public class AccountService {
     private final SpotTradeSettlementService spotTradeSettlementService;
     private final PositionCalculator positionCalculator;
     private final AccountProperties properties;
-    private final AccountOutboxRepository outboxRepository;
+    private final AccountOutboxService outboxService;
     private final RedisPositionCache positionCache;
     private final PositionCacheAfterCommitSynchronizer positionCacheAfterCommitSynchronizer;
     private final BoundedLocalCache<ContractSpecKey, ContractSpec> contractSpecCache;
@@ -89,33 +87,33 @@ public class AccountService {
     private final BoundedLocalCache<LiquidationFeeContextKey, Optional<LiquidationFeeContext>>
             liquidationFeeContextCache;
 
-    public AccountService(AccountRepository accountRepository, PositionCalculator positionCalculator) {
-        this(accountRepository, positionCalculator, new AccountProperties(), null, null, null,
+    public AccountService(AccountSettlementService accountSettlementService, PositionCalculator positionCalculator) {
+        this(accountSettlementService, positionCalculator, new AccountProperties(), null, null, null,
                 null, null, null, null, null, null, null, null, null, null);
     }
 
-    public AccountService(AccountRepository accountRepository,
+    public AccountService(AccountSettlementService accountSettlementService,
                            PositionCalculator positionCalculator,
                            AccountProperties properties,
-                           AccountOutboxRepository outboxRepository) {
-        this(accountRepository, positionCalculator, properties, outboxRepository, null, null,
+                           AccountOutboxService outboxService) {
+        this(accountSettlementService, positionCalculator, properties, outboxService, null, null,
                 null, null, null, null, null, null, null, null, null, null);
     }
 
-    public AccountService(AccountRepository accountRepository,
+    public AccountService(AccountSettlementService accountSettlementService,
                            PositionCalculator positionCalculator,
                            AccountProperties properties,
-                           AccountOutboxRepository outboxRepository,
+                           AccountOutboxService outboxService,
                            RedisPositionCache positionCache) {
-        this(accountRepository, positionCalculator, properties, outboxRepository, positionCache, null,
+        this(accountSettlementService, positionCalculator, properties, outboxService, positionCache, null,
                 null, null, null, null, null, null, null, null, null, null);
     }
 
     @Autowired
-    public AccountService(AccountRepository accountRepository,
+    public AccountService(AccountSettlementService accountSettlementService,
                            PositionCalculator positionCalculator,
                            AccountProperties properties,
-                           AccountOutboxRepository outboxRepository,
+                           AccountOutboxService outboxService,
                            RedisPositionCache positionCache,
                            PositionCacheAfterCommitSynchronizer positionCacheAfterCommitSynchronizer,
                            AccountQueryService accountQueryService,
@@ -128,7 +126,7 @@ public class AccountService {
                            PositionQueryService positionQueryService,
                            AccountInstrumentRepository accountInstrumentRepository,
                            SpotTradeSettlementService spotTradeSettlementService) {
-        this.accountRepository = accountRepository;
+        this.accountSettlementService = accountSettlementService;
         this.accountQueryService = accountQueryService;
         this.accountBalanceCommandService = accountBalanceCommandService;
         this.adminBalanceAdjustmentRepository = adminBalanceAdjustmentRepository;
@@ -141,7 +139,7 @@ public class AccountService {
         this.spotTradeSettlementService = spotTradeSettlementService;
         this.positionCalculator = positionCalculator;
         this.properties = properties;
-        this.outboxRepository = outboxRepository;
+        this.outboxService = outboxService;
         this.positionCache = positionCache;
         this.positionCacheAfterCommitSynchronizer = positionCacheAfterCommitSynchronizer;
         AccountProperties.Cache cacheProperties = properties.getCache() == null
@@ -184,14 +182,14 @@ public class AccountService {
     public BalanceResponse balance(long userId, String asset) {
         String normalizedAsset = normalizeAsset(asset);
         return (accountQueryService == null
-                ? accountRepository.balance(userId, normalizedAsset)
+                ? accountSettlementService.balance(userId, normalizedAsset)
                 : accountQueryService.balance(userId, normalizedAsset))
                 .orElse(new BalanceResponse(userId, normalizedAsset, 0L, 0L, 0L, Instant.EPOCH));
     }
 
     public BalanceQueryResponse balances(long userId) {
         List<BalanceResponse> rows = accountQueryService == null
-                ? accountRepository.balances(userId)
+                ? accountSettlementService.balances(userId)
                 : accountQueryService.balances(userId);
         return new BalanceQueryResponse(rows.size(), rows);
     }
@@ -229,7 +227,7 @@ public class AccountService {
         AccountType normalizedType = normalizeScopedProductAccountType(accountType);
         String normalizedAsset = normalizeAsset(asset);
         return (accountQueryService == null
-                ? accountRepository.productBalance(userId, normalizedType, normalizedAsset)
+                ? accountSettlementService.productBalance(userId, normalizedType, normalizedAsset)
                 : accountQueryService.productBalance(userId, normalizedType, normalizedAsset))
                 .orElse(new ProductBalanceResponse(userId, normalizedType, normalizedAsset, 0L, 0L, 0L,
                         Instant.EPOCH));
@@ -238,7 +236,7 @@ public class AccountService {
     public ProductBalanceQueryResponse productBalances(long userId, AccountType accountType) {
         AccountType scopedAccountType = scopedProductAccountType(accountType);
         List<ProductBalanceResponse> rows = accountQueryService == null
-                ? accountRepository.productBalances(userId, scopedAccountType)
+                ? accountSettlementService.productBalances(userId, scopedAccountType)
                 : accountQueryService.productBalances(userId, scopedAccountType);
         return new ProductBalanceQueryResponse(rows.size(), rows);
     }
@@ -256,7 +254,7 @@ public class AccountService {
         requireOptionalUserId(userId);
         int safeLimit = normalizeLimit(limit);
         var page = accountQueryService == null
-                ? accountRepository.accountLedgerPage(userId, normalizeOptionalAsset(asset),
+                ? accountSettlementService.accountLedgerPage(userId, normalizeOptionalAsset(asset),
                         normalizeOptionalReferenceType(referenceType), safeLimit, cursor, sort)
                 : accountQueryService.accountLedgerPage(userId, normalizeOptionalAsset(asset),
                         normalizeOptionalReferenceType(referenceType), safeLimit, cursor, sort);
@@ -282,7 +280,7 @@ public class AccountService {
         requireOptionalUserId(userId);
         int safeLimit = normalizeLimit(limit);
         var page = accountQueryService == null
-                ? accountRepository.productLedgerPage(userId, scopedProductAccountType(accountType),
+                ? accountSettlementService.productLedgerPage(userId, scopedProductAccountType(accountType),
                         normalizeOptionalAsset(asset), normalizeOptionalReferenceType(referenceType),
                         safeLimit, cursor, sort)
                 : accountQueryService.productLedgerPage(userId, scopedProductAccountType(accountType),
@@ -308,7 +306,7 @@ public class AccountService {
         requireOptionalUserId(userId);
         int safeLimit = normalizeLimit(limit);
         var page = accountQueryService == null
-                ? accountRepository.productTransferPage(userId, scopedProductAccountType(accountType),
+                ? accountSettlementService.productTransferPage(userId, scopedProductAccountType(accountType),
                         normalizeOptionalAsset(asset), safeLimit, cursor, sort)
                 : accountQueryService.productTransferPage(userId, scopedProductAccountType(accountType),
                         normalizeOptionalAsset(asset), safeLimit, cursor, sort);
@@ -340,7 +338,7 @@ public class AccountService {
         requireOptionalUserId(userId);
         int safeLimit = normalizeLimit(limit);
         var page = accountQueryService == null
-                ? accountRepository.adminBalanceAdjustmentPage(adminUserId, userId,
+                ? accountSettlementService.adminBalanceAdjustmentPage(adminUserId, userId,
                         normalizeOptionalAdjustmentKind(adjustmentKind), accountType, normalizeOptionalAsset(asset),
                         normalizeOptionalReferenceId(referenceId), safeLimit, cursor, sort)
                 : accountQueryService.adminBalanceAdjustmentPage(adminUserId, userId,
@@ -359,7 +357,7 @@ public class AccountService {
         }
         requireScopedProductTransfer(source, target);
         if (accountBalanceCommandService == null) {
-            return accountRepository.transferProductBalance(request.userId(), source, target,
+            return accountSettlementService.transferProductBalance(request.userId(), source, target,
                     normalizeAsset(request.asset()), request.amountUnits(),
                     normalizeReferenceId(request.referenceId()), request.reason());
         }
@@ -377,7 +375,7 @@ public class AccountService {
             throw new IllegalArgumentException("userId must be positive");
         }
         if (positionModeRepository == null) {
-            return accountRepository.positionMode(productLine, userId);
+            return accountSettlementService.positionMode(productLine, userId);
         }
         ProductLine resolvedProductLine = productLine == null
                 ? ProductLine.LINEAR_PERPETUAL
@@ -397,7 +395,7 @@ public class AccountService {
             return positionModeCommandService.update(
                     request.productLine(), request.userId(), request.positionMode(), Instant.now());
         }
-        return accountRepository.updatePositionMode(request.productLine(), request.userId(),
+        return accountSettlementService.updatePositionMode(request.productLine(), request.userId(),
                 request.positionMode(), Instant.now());
     }
 
@@ -436,9 +434,9 @@ public class AccountService {
         Optional<PositionMarginResponse> margin;
         if (positionQueryService == null) {
             margin = productLine == null
-                    ? accountRepository.positionMargin(
+                    ? accountSettlementService.positionMargin(
                             userId, normalizedSymbol, normalizedMarginMode, PositionSide.NET)
-                    : accountRepository.positionMargin(
+                    : accountSettlementService.positionMargin(
                             productLine, userId, normalizedSymbol, normalizedMarginMode, PositionSide.NET);
         } else {
             margin = productLine == null
@@ -501,23 +499,23 @@ public class AccountService {
         }
         ProductLine productLine = currentProductLineFilter();
         PositionMarginAdjustmentResponse response = productLine == null
-                ? accountRepository.adjustIsolatedPositionMargin(
+                ? accountSettlementService.adjustIsolatedPositionMargin(
                         request.userId(), symbol, request.positionSide(), request.amountUnits(),
                         normalizeReferenceId(request.referenceId()), normalizeReason(request.reason(), request.amountUnits()),
                         properties.getPositionMargin().getMaxRiskSnapshotAge(),
                         properties.getPositionMargin().getRemovalBufferPpm())
-                : accountRepository.adjustIsolatedPositionMargin(
+                : accountSettlementService.adjustIsolatedPositionMargin(
                         productLine, request.userId(), symbol, request.positionSide(), request.amountUnits(),
                         normalizeReferenceId(request.referenceId()), normalizeReason(request.reason(), request.amountUnits()),
                         properties.getPositionMargin().getMaxRiskSnapshotAge(),
                         properties.getPositionMargin().getRemovalBufferPpm());
-        if (outboxRepository != null) {
+        if (outboxService != null) {
             Optional<PositionResponse> currentPosition = findPosition(
                     productLine, request.userId(), symbol, MarginMode.ISOLATED, request.positionSide());
             PositionResponse current = currentPosition
                     .orElseThrow(() -> new IllegalStateException("isolated position missing after margin adjustment"));
             // 手工调整保证金没有成交编号，tradeId=0 用于告知下游这是一次状态触发。
-            var event = outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
+            var event = outboxService.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
                     0L, current, Instant.now(), TraceContext.currentOrCreate());
             schedulePositionCacheSync(event.cacheEvent());
         } else {
@@ -610,7 +608,7 @@ public class AccountService {
                         position.userId(),
                         new ExpiringPositionSettlementAccountCommand(
                                 symbol, position.instrumentVersion(), position.marginMode(), position.positionSide(),
-                                accountRepository.settlementMarkPriceTicks(
+                                accountSettlementService.settlementMarkPriceTicks(
                                         symbol, position.instrumentVersion(), settlementTime, priceWindow),
                                 "DELIVERY_SETTLEMENT", "DELIVERY_SETTLEMENT", settlementTime)))
                 .toList();
@@ -627,7 +625,7 @@ public class AccountService {
         requireMatchingOptionInstrument(event, spec);
         String underlyingSymbol = normalizeSymbol(event.underlyingSymbol());
         Instant settlementTime = settlementTime(event.deliveryTime(), event.eventTime());
-        long underlyingPriceUnits = accountRepository.settlementMarkPriceUnits(
+        long underlyingPriceUnits = accountSettlementService.settlementMarkPriceUnits(
                 underlyingSymbol, settlementTime, settlementPriceWindow());
         ProductLine productLine = spec.contractType().productLine();
         return lockOpenPositionStatesForSettlement(productLine, symbol).stream()
@@ -670,7 +668,7 @@ public class AccountService {
                 command.settlementPriceTicks(), spec);
         long ledgerDeltaUnits = lifecycleLedgerDeltaUnits(command.referenceType(),
                 command.settlementPriceTicks(), spec, position, change);
-        boolean applied = accountRepository.settleLifecyclePnl(
+        boolean applied = accountSettlementService.settleLifecyclePnl(
                 derivativeAccountType(spec), userId, spec.settleAsset(), command.referenceType(), commandId,
                 command.reason(), command.symbol(), position.marginMode(), ledgerDeltaUnits, command.eventTime());
         if (!applied) {
@@ -678,12 +676,12 @@ public class AccountService {
                     position.marginMode(), position.positionSide());
         }
         long closeSteps = Math.absExact(position.signedQuantitySteps());
-        accountRepository.releasePositionMargin(productLine, userId, command.symbol(), position.marginMode(),
+        accountSettlementService.releasePositionMargin(productLine, userId, command.symbol(), position.marginMode(),
                 closeSteps, position.positionSide(), closeSteps, command.eventTime());
-        PositionResponse updated = accountRepository.updatePosition(productLine, userId, command.symbol(),
+        PositionResponse updated = accountSettlementService.updatePosition(productLine, userId, command.symbol(),
                 position.marginMode(), position.positionSide(), change.next(), position.signedQuantitySteps(),
                 command.eventTime());
-        var event = outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
+        var event = outboxService.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
                 0L, updated, command.eventTime(), TraceContext.currentOrCreate());
         schedulePositionCacheSync(event.cacheEvent());
         return Optional.of(updated);
@@ -724,7 +722,7 @@ public class AccountService {
             throw new IllegalArgumentException("trade side user does not match participant role");
         }
         Instant effectiveAt = trade.eventTime() == null ? Instant.now() : trade.eventTime();
-        AccountRepository.OrderMarginApplication marginApplication = AccountRepository.OrderMarginApplication.NONE;
+        AccountSettlementService.OrderMarginApplication marginApplication = AccountSettlementService.OrderMarginApplication.NONE;
         if (takerInstrumentType == InstrumentType.SPOT) {
             if (role == TradeParticipantRole.TAKER) {
                 applySpotTradeSide(trade.tradeId(), trade.takerOrderId(), trade.takerUserId(), trade.symbol(),
@@ -752,7 +750,7 @@ public class AccountService {
                     trade.makerOrderCompleted(), trade.makerFeeRatePpm(), "MAKER_FEE", effectiveAt, trade.traceId());
         }
         if (tradeSettlementSideRepository == null) {
-            accountRepository.completeTradeSide(actualProductLine, trade, role, commandId,
+            accountSettlementService.completeTradeSide(actualProductLine, trade, role, commandId,
                     marginApplication.consumedUnits(), marginApplication.releasedUnits(), Instant.now());
         } else {
             tradeSettlementSideRepository.complete(actualProductLine, trade, role, commandId,
@@ -922,7 +920,7 @@ public class AccountService {
                                     Instant eventTime) {
         SpotInstrumentSpec spec = spotInstrumentSpec(symbol, instrumentVersion);
         if (spotTradeSettlementService == null) {
-            accountRepository.settleSpotTradeSide(userId, orderId, tradeId, symbol, side, priceTicks,
+            accountSettlementService.settleSpotTradeSide(userId, orderId, tradeId, symbol, side, priceTicks,
                     quantitySteps, spec, feeRatePpm, feeReason, orderCompleted, eventTime);
             return;
         }
@@ -931,7 +929,7 @@ public class AccountService {
                 spec, feeRatePpm, feeReason, orderCompleted, eventTime);
     }
 
-    private AccountRepository.OrderMarginApplication applyTradeSide(long tradeId,
+    private AccountSettlementService.OrderMarginApplication applyTradeSide(long tradeId,
                                             long orderId,
                                             long userId,
                                             String symbol,
@@ -955,54 +953,54 @@ public class AccountService {
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
         ContractSpec fillSpec = contractSpec(symbol, fillInstrumentVersion);
         ProductLine productLine = ProductLine.requireContractTypeCode(fillSpec.contractType().name());
-        PositionState current = accountRepository.lockPosition(productLine, userId, symbol, normalizedMarginMode,
+        PositionState current = accountSettlementService.lockPosition(productLine, userId, symbol, normalizedMarginMode,
                 normalizedPositionSide);
         ContractSpec positionSpec = current.signedQuantitySteps() == 0
                 ? fillSpec
                 : contractSpec(symbol, current.instrumentVersion());
         long closeSteps = MarginTransferMath.closeSteps(current.signedQuantitySteps(), side, quantitySteps);
         long openSteps = Math.subtractExact(quantitySteps, closeSteps);
-        AccountRepository.OrderMarginApplication marginApplication = AccountRepository.OrderMarginApplication.NONE;
+        AccountSettlementService.OrderMarginApplication marginApplication = AccountSettlementService.OrderMarginApplication.NONE;
         PositionChange change = positionCalculator.apply(current, side, priceTicks, quantitySteps,
                 positionSpec, fillSpec);
         if (fillSpec.contractType().isOption()) {
-            marginApplication = accountRepository.settleOptionPremium(derivativeAccountType(fillSpec), side, userId,
+            marginApplication = accountSettlementService.settleOptionPremium(derivativeAccountType(fillSpec), side, userId,
                     fillSpec.settleAsset(), orderId, tradeId, symbol, normalizedMarginMode,
                     MarginTransferMath.optionPremiumUnits(fillSpec, priceTicks, quantitySteps),
                     reservationAccountType, reservationAsset, reservedUnits,
                     orderQuantitySteps, quantitySteps, eventTime);
         }
         if (closeSteps > 0 && !positionSpec.contractType().isOption()) {
-            accountRepository.settleRealizedPnl(derivativeAccountType(positionSpec), userId,
+            accountSettlementService.settleRealizedPnl(derivativeAccountType(positionSpec), userId,
                     positionSpec.settleAsset(), orderId, tradeId, symbol, normalizedMarginMode,
                     change.realizedPnlDeltaUnits(), eventTime);
         }
         // A reversal first releases collateral belonging to the old position. Releasing after
         // consuming the opening leg would treat the new collateral as old collateral and release it too.
         if (closeSteps > 0) {
-            accountRepository.releasePositionMargin(productLine, userId, symbol, normalizedMarginMode, closeSteps,
+            accountSettlementService.releasePositionMargin(productLine, userId, symbol, normalizedMarginMode, closeSteps,
                     normalizedPositionSide, Math.absExact(current.signedQuantitySteps()), eventTime);
         }
         if (!fillSpec.contractType().isOption() || side == OrderSide.SELL) {
             long actualMarginUnits = openSteps == 0L ? 0L
                     : MarginTransferMath.openingInitialMarginUnits(fillSpec, priceTicks, openSteps);
-            marginApplication = accountRepository.applyOrderMargin(productLine, orderId, reservationAccountType,
+            marginApplication = accountSettlementService.applyOrderMargin(productLine, orderId, reservationAccountType,
                     userId, symbol, normalizedMarginMode, normalizedPositionSide, reservationAsset, reservedUnits,
                     orderQuantitySteps, quantitySteps, openSteps, actualMarginUnits, reduceOnly, eventTime);
         }
         long feeDeltaUnits = TradeFeeMath.feeDeltaUnits(fillSpec, priceTicks, quantitySteps, feeRatePpm);
-        accountRepository.settleTradeFee(derivativeAccountType(fillSpec), userId, fillSpec.settleAsset(),
+        accountSettlementService.settleTradeFee(derivativeAccountType(fillSpec), userId, fillSpec.settleAsset(),
                 orderId, tradeId, feeDeltaUnits, feeReason, feeRatePpm, symbol,
                 normalizedMarginMode, eventTime);
         if (closeSteps > 0) {
             settleLiquidationFeeIfNeeded(tradeId, orderId, userId, symbol, normalizedMarginMode, fillSpec,
                     priceTicks, quantitySteps, eventTime, traceId);
         }
-        PositionResponse updated = accountRepository.updatePosition(productLine, userId, symbol, normalizedMarginMode,
+        PositionResponse updated = accountSettlementService.updatePosition(productLine, userId, symbol, normalizedMarginMode,
                 normalizedPositionSide,
                 change.next(), current.signedQuantitySteps(), eventTime);
-        if (outboxRepository != null) {
-            var event = outboxRepository.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
+        if (outboxService != null) {
+            var event = outboxService.enqueuePositionUpdated(properties.getKafka().getPositionEventsTopic(),
                     tradeId, updated, eventTime, traceId);
             schedulePositionCacheSync(event.cacheEvent());
         } else {
@@ -1040,7 +1038,7 @@ public class AccountService {
         liquidationFeeContext(orderId, userId, symbol).ifPresent(context -> {
             long requestedFeeUnits = liquidationFeeUnits(fillSpec, priceTicks, quantitySteps, context);
             AccountType accountType = derivativeAccountType(fillSpec);
-            accountRepository.settleLiquidationFee(accountType, userId, fillSpec.settleAsset(),
+            accountSettlementService.settleLiquidationFee(accountType, userId, fillSpec.settleAsset(),
                     orderId, tradeId, symbol, marginMode, requestedFeeUnits, context, eventTime)
                     .ifPresent(settlement -> enqueueLiquidationFeeEvent(tradeId, orderId, userId, symbol,
                             marginMode, accountType, fillSpec.settleAsset(), settlement, eventTime, traceId));
@@ -1068,10 +1066,10 @@ public class AccountService {
                                             LiquidationFeeSettlement settlement,
                                             Instant eventTime,
                                             String traceId) {
-        if (outboxRepository == null || settlement.collectedFeeUnits() <= 0) {
+        if (outboxService == null || settlement.collectedFeeUnits() <= 0) {
             return;
         }
-        outboxRepository.enqueueLiquidationFeeSettled(properties.getKafka().getLiquidationFeeEventsTopic(),
+        outboxService.enqueueLiquidationFeeSettled(properties.getKafka().getLiquidationFeeEventsTopic(),
                 tradeId, orderId, settlement.liquidationOrderId(), settlement.candidateId(), userId, symbol,
                 marginMode, accountType.name(), asset, settlement.collectedFeeUnits(), settlement.feeRatePpm(),
                 eventTime, traceId);
@@ -1079,18 +1077,18 @@ public class AccountService {
 
     private ContractSpec contractSpec(String symbol, long instrumentVersion) {
         return contractSpecCache.get(new ContractSpecKey(symbol, instrumentVersion),
-                key -> accountRepository.contractSpec(key.symbol(), key.instrumentVersion()));
+                key -> accountSettlementService.contractSpec(key.symbol(), key.instrumentVersion()));
     }
 
     private InstrumentType instrumentType(String symbol, long instrumentVersion) {
         return instrumentTypeCache.get(new ContractSpecKey(symbol, instrumentVersion),
-                key -> accountRepository.instrumentType(key.symbol(), key.instrumentVersion()));
+                key -> accountSettlementService.instrumentType(key.symbol(), key.instrumentVersion()));
     }
 
     private SpotInstrumentSpec spotInstrumentSpec(String symbol, long instrumentVersion) {
         return spotInstrumentSpecCache.get(new ContractSpecKey(symbol, instrumentVersion),
                 key -> accountInstrumentRepository == null
-                        ? accountRepository.spotInstrumentSpec(key.symbol(), key.instrumentVersion())
+                        ? accountSettlementService.spotInstrumentSpec(key.symbol(), key.instrumentVersion())
                         : accountInstrumentRepository.findSpotSpec(key.symbol(), key.instrumentVersion())
                                 .orElseThrow(() -> new IllegalStateException(
                                         "spot instrument spec not found for "
@@ -1099,7 +1097,7 @@ public class AccountService {
 
     private Optional<LiquidationFeeContext> liquidationFeeContext(long orderId, long userId, String symbol) {
         return liquidationFeeContextCache.get(new LiquidationFeeContextKey(orderId, userId, symbol),
-                key -> accountRepository.liquidationFeeContext(key.orderId(), key.userId(), key.symbol()));
+                key -> accountSettlementService.liquidationFeeContext(key.orderId(), key.userId(), key.symbol()));
     }
 
     private AccountType derivativeAccountType(ContractSpec spec) {
@@ -1125,7 +1123,7 @@ public class AccountService {
                                               String referenceId,
                                               String reason) {
         if (adminBalanceAdjustmentRepository == null) {
-            accountRepository.recordAdminBalanceAdjustment(adjustmentKind, adminUserId, adminUsername, userId,
+            accountSettlementService.recordAdminBalanceAdjustment(adjustmentKind, adminUserId, adminUsername, userId,
                     accountType, asset, amountUnits, balanceAfterUnits, referenceId, reason);
             return;
         }
@@ -1139,7 +1137,7 @@ public class AccountService {
                                           String referenceId,
                                           String reason) {
         if (accountBalanceCommandService == null) {
-            return accountRepository.adjustBalance(userId, asset, amountUnits, referenceId, reason);
+            return accountSettlementService.adjustBalance(userId, asset, amountUnits, referenceId, reason);
         }
         return accountBalanceCommandService.adjustBalance(userId, asset, amountUnits, referenceId, reason);
     }
@@ -1151,7 +1149,7 @@ public class AccountService {
                                                         String referenceId,
                                                         String reason) {
         if (accountBalanceCommandService == null) {
-            return accountRepository.adjustProductBalance(
+            return accountSettlementService.adjustProductBalance(
                     userId, accountType, asset, amountUnits, referenceId, reason);
         }
         return accountBalanceCommandService.adjustProductBalance(
@@ -1165,8 +1163,8 @@ public class AccountService {
                                                     PositionSide positionSide) {
         if (positionRepository == null) {
             return productLine == null
-                    ? accountRepository.position(userId, symbol, marginMode, positionSide)
-                    : accountRepository.position(productLine, userId, symbol, marginMode, positionSide);
+                    ? accountSettlementService.position(userId, symbol, marginMode, positionSide)
+                    : accountSettlementService.position(productLine, userId, symbol, marginMode, positionSide);
         }
         return productLine == null
                 ? positionRepository.find(userId, symbol, marginMode, positionSide)
@@ -1178,8 +1176,8 @@ public class AccountService {
                                                  PositionSide positionSide) {
         if (positionRepository == null) {
             return productLine == null
-                    ? accountRepository.positions(userId, positionSide)
-                    : accountRepository.positions(productLine, userId, positionSide);
+                    ? accountSettlementService.positions(userId, positionSide)
+                    : accountSettlementService.positions(productLine, userId, positionSide);
         }
         return productLine == null
                 ? positionRepository.findOpenByUser(userId, positionSide)
@@ -1189,7 +1187,7 @@ public class AccountService {
     private List<PositionSettlementState> lockOpenPositionStatesForSettlement(ProductLine productLine,
                                                                                String symbol) {
         if (positionRepository == null) {
-            return accountRepository.openPositionStatesForSettlement(productLine, symbol);
+            return accountSettlementService.openPositionStatesForSettlement(productLine, symbol);
         }
         return positionRepository.lockOpenStatesForSettlement(productLine, symbol);
     }

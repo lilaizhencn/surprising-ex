@@ -75,6 +75,26 @@ public class AccountSequenceRepository {
         return nextSequence(Sequence.SPOT_RESERVATION);
     }
 
+    public long nextPositionEventId() {
+        return nextSequence(Sequence.POSITION_EVENT);
+    }
+
+    public long nextLiquidationFeeEventId() {
+        return nextSequence(Sequence.LIQUIDATION_FEE_EVENT);
+    }
+
+    public long nextCommandResultEventId() {
+        return nextSequence(Sequence.COMMAND_RESULT_EVENT);
+    }
+
+    public long nextCommandRetryEventId() {
+        return nextSequence(Sequence.COMMAND_RETRY_EVENT);
+    }
+
+    public long nextUserCommandOutboxEventId() {
+        return nextSequence(Sequence.USER_COMMAND_OUTBOX_EVENT);
+    }
+
     private long allocateRangeStart(String databaseSequence) {
         Long value = jdbcTemplate.queryForObject("""
                 SELECT nextval(CAST(? AS regclass))
