@@ -16,6 +16,8 @@ Surprising Exchange account and product settlement module. The current implement
   table's SQL and does not orchestrate cross-table workflows.
 - `AccountQueryService` combines the single-table repositories for balances and deficits, legacy
   and product accounts, ledgers, transfers, and adjustment records.
+- `AccountBalanceCommandService` orchestrates balance adjustments and product-account transfers
+  by calling the balance, ledger, and transfer repositories in a fixed transactional order.
 - Services own transaction boundaries, idempotency, lock order, and cross-table writes. The
   existing `AccountRepository` remains as a compatibility facade during the incremental migration,
   preserving public entry points and funds-transaction semantics.

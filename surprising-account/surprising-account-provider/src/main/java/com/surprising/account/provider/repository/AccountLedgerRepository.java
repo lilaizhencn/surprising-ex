@@ -4,8 +4,11 @@ import com.surprising.account.api.model.AccountLedgerEntryResponse;
 import com.surprising.account.api.model.AdminCursorPage;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -75,6 +78,52 @@ public class AccountLedgerRepository {
                 AccountLedgerEntryResponse::entryId);
     }
 
+    public int insertBalanceAdjustment(long entryId,
+                                       long userId,
+                                       String asset,
+                                       long amountUnits,
+                                       String referenceId,
+                                       String reason,
+                                       Instant now) {
+        return jdbcTemplate.update("""
+                INSERT INTO account_ledger_entries (
+                    entry_id, user_id, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, created_at
+                ) VALUES (?, ?, ?, ?, 0, 'BALANCE_ADJUSTMENT', ?, ?, ?)
+                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
+                """, entryId, userId, asset, amountUnits, referenceId, reason, Timestamp.from(now));
+    }
+
+    public Optional<AdjustmentReference> findBalanceAdjustment(long userId,
+                                                                String asset,
+                                                                String referenceId) {
+        return jdbcTemplate.query("""
+                SELECT amount_units, reason
+                  FROM account_ledger_entries
+                 WHERE reference_type = 'BALANCE_ADJUSTMENT'
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, (rs, rowNum) -> new AdjustmentReference(
+                        rs.getLong("amount_units"),
+                        rs.getString("reason")), referenceId, userId, asset)
+                .stream().findFirst();
+    }
+
+    public int updateBalanceAdjustmentBalance(long userId,
+                                              String asset,
+                                              String referenceId,
+                                              long balanceAfterUnits) {
+        return jdbcTemplate.update("""
+                UPDATE account_ledger_entries
+                   SET balance_after_units = ?
+                 WHERE reference_type = 'BALANCE_ADJUSTMENT'
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, balanceAfterUnits, referenceId, userId, asset);
+    }
+
     private static AdminCursorPage.SortSpec createdAtSort(String sort, String idColumn) {
         AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
                 "createdAt", "created_at", idColumn, true);
@@ -90,5 +139,8 @@ public class AccountLedgerRepository {
 
     private static String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    public record AdjustmentReference(long amountUnits, String reason) {
     }
 }

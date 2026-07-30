@@ -10,9 +10,8 @@ import org.springframework.stereotype.Repository;
 public class AccountSequenceRepository {
 
     /**
-     * This is deliberately a code constant, not a runtime setting. Every account-service
-     * instance and the SQL stress seed must use the same stride, otherwise two Hi/Lo ranges
-     * could overlap.
+     * 该值必须保持为代码常量，不能改成运行时配置。所有账户服务实例和 SQL 压测种子必须使用相同步长，
+     * 否则不同实例分配的 Hi/Lo 区间可能重叠。
      */
     static final int HI_LO_BLOCK_SIZE = 10_000;
 
@@ -58,6 +57,18 @@ public class AccountSequenceRepository {
     public long nextSequence(Sequence sequence) {
         return ranges.computeIfAbsent(sequence, ignored -> new IdRange())
                 .next(this, sequence.databaseSequence());
+    }
+
+    public long nextLedgerEntryId() {
+        return nextSequence(Sequence.LEDGER_ENTRY);
+    }
+
+    public long nextProductLedgerEntryId() {
+        return nextSequence(Sequence.PRODUCT_LEDGER_ENTRY);
+    }
+
+    public long nextProductTransferId() {
+        return nextSequence(Sequence.PRODUCT_TRANSFER);
     }
 
     private long allocateRangeStart(String databaseSequence) {

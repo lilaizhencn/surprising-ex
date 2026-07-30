@@ -64,6 +64,7 @@ public class AccountService {
 
     private final AccountRepository accountRepository;
     private final AccountQueryService accountQueryService;
+    private final AccountBalanceCommandService accountBalanceCommandService;
     private final AdminBalanceAdjustmentRepository adminBalanceAdjustmentRepository;
     private final PositionCalculator positionCalculator;
     private final AccountProperties properties;
@@ -78,7 +79,7 @@ public class AccountService {
 
     public AccountService(AccountRepository accountRepository, PositionCalculator positionCalculator) {
         this(accountRepository, positionCalculator, new AccountProperties(), null, null, null,
-                null, null);
+                null, null, null);
     }
 
     public AccountService(AccountRepository accountRepository,
@@ -86,7 +87,7 @@ public class AccountService {
                            AccountProperties properties,
                            AccountOutboxRepository outboxRepository) {
         this(accountRepository, positionCalculator, properties, outboxRepository, null, null,
-                null, null);
+                null, null, null);
     }
 
     public AccountService(AccountRepository accountRepository,
@@ -95,7 +96,7 @@ public class AccountService {
                            AccountOutboxRepository outboxRepository,
                            RedisPositionCache positionCache) {
         this(accountRepository, positionCalculator, properties, outboxRepository, positionCache, null,
-                null, null);
+                null, null, null);
     }
 
     @Autowired
@@ -106,9 +107,11 @@ public class AccountService {
                            RedisPositionCache positionCache,
                            PositionCacheAfterCommitSynchronizer positionCacheAfterCommitSynchronizer,
                            AccountQueryService accountQueryService,
+                           AccountBalanceCommandService accountBalanceCommandService,
                            AdminBalanceAdjustmentRepository adminBalanceAdjustmentRepository) {
         this.accountRepository = accountRepository;
         this.accountQueryService = accountQueryService;
+        this.accountBalanceCommandService = accountBalanceCommandService;
         this.adminBalanceAdjustmentRepository = adminBalanceAdjustmentRepository;
         this.positionCalculator = positionCalculator;
         this.properties = properties;
@@ -130,7 +133,7 @@ public class AccountService {
         if (request.amountUnits() == 0) {
             throw new IllegalArgumentException("amountUnits must not be zero");
         }
-        return accountRepository.adjustBalance(request.userId(), normalizeAsset(request.asset()), request.amountUnits(),
+        return adjustBalance(request.userId(), normalizeAsset(request.asset()), request.amountUnits(),
                 normalizeReferenceId(request.referenceId()), request.reason());
     }
 
@@ -144,8 +147,8 @@ public class AccountService {
         long normalizedAdminUserId = normalizeAdminUserId(adminUserId);
         String normalizedAsset = normalizeAsset(request.asset());
         String normalizedReferenceId = normalizeReferenceId(request.referenceId());
-        BalanceResponse response = accountRepository.adjustBalance(request.userId(), normalizedAsset,
-                request.amountUnits(), normalizedReferenceId, request.reason());
+        BalanceResponse response = adjustBalance(request.userId(), normalizedAsset, request.amountUnits(),
+                normalizedReferenceId, request.reason());
         recordAdminBalanceAdjustment("BASIC", normalizedAdminUserId, normalizeAdminUsername(adminUsername),
                 request.userId(), null, normalizedAsset, request.amountUnits(), response.availableUnits(),
                 normalizedReferenceId, request.reason());
@@ -173,7 +176,7 @@ public class AccountService {
             throw new IllegalArgumentException("amountUnits must not be zero");
         }
         AccountType accountType = normalizeScopedProductAccountType(request.accountType());
-        return accountRepository.adjustProductBalance(request.userId(), accountType, normalizeAsset(request.asset()),
+        return adjustProductBalance(request.userId(), accountType, normalizeAsset(request.asset()),
                 request.amountUnits(), normalizeReferenceId(request.referenceId()), request.reason());
     }
 
@@ -188,8 +191,8 @@ public class AccountService {
         AccountType accountType = normalizeScopedProductAccountType(request.accountType());
         String normalizedAsset = normalizeAsset(request.asset());
         String normalizedReferenceId = normalizeReferenceId(request.referenceId());
-        ProductBalanceResponse response = accountRepository.adjustProductBalance(request.userId(), accountType,
-                normalizedAsset, request.amountUnits(), normalizedReferenceId, request.reason());
+        ProductBalanceResponse response = adjustProductBalance(request.userId(), accountType, normalizedAsset,
+                request.amountUnits(), normalizedReferenceId, request.reason());
         recordAdminBalanceAdjustment("PRODUCT", normalizedAdminUserId, normalizeAdminUsername(adminUsername),
                 request.userId(), accountType, normalizedAsset, request.amountUnits(), response.availableUnits(),
                 normalizedReferenceId, request.reason());
@@ -329,8 +332,14 @@ public class AccountService {
             throw new IllegalArgumentException("sourceAccountType and targetAccountType must be different");
         }
         requireScopedProductTransfer(source, target);
-        return accountRepository.transferProductBalance(request.userId(), source, target, normalizeAsset(request.asset()),
-                request.amountUnits(), normalizeReferenceId(request.referenceId()), request.reason());
+        if (accountBalanceCommandService == null) {
+            return accountRepository.transferProductBalance(request.userId(), source, target,
+                    normalizeAsset(request.asset()), request.amountUnits(),
+                    normalizeReferenceId(request.referenceId()), request.reason());
+        }
+        return accountBalanceCommandService.transferProductBalance(request.userId(), source, target,
+                normalizeAsset(request.asset()), request.amountUnits(),
+                normalizeReferenceId(request.referenceId()), request.reason());
     }
 
     public PositionModeResponse positionMode(long userId) {
@@ -1063,6 +1072,31 @@ public class AccountService {
         }
         adminBalanceAdjustmentRepository.record(adjustmentKind, adminUserId, adminUsername, userId,
                 accountType, asset, amountUnits, balanceAfterUnits, referenceId, reason);
+    }
+
+    private BalanceResponse adjustBalance(long userId,
+                                          String asset,
+                                          long amountUnits,
+                                          String referenceId,
+                                          String reason) {
+        if (accountBalanceCommandService == null) {
+            return accountRepository.adjustBalance(userId, asset, amountUnits, referenceId, reason);
+        }
+        return accountBalanceCommandService.adjustBalance(userId, asset, amountUnits, referenceId, reason);
+    }
+
+    private ProductBalanceResponse adjustProductBalance(long userId,
+                                                        AccountType accountType,
+                                                        String asset,
+                                                        long amountUnits,
+                                                        String referenceId,
+                                                        String reason) {
+        if (accountBalanceCommandService == null) {
+            return accountRepository.adjustProductBalance(
+                    userId, accountType, asset, amountUnits, referenceId, reason);
+        }
+        return accountBalanceCommandService.adjustProductBalance(
+                userId, accountType, asset, amountUnits, referenceId, reason);
     }
 
     private String normalizeAsset(String asset) {

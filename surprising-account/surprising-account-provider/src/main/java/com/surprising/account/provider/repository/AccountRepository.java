@@ -22,6 +22,8 @@ import com.surprising.account.provider.model.LiquidationFeeSettlement;
 import com.surprising.account.provider.model.PositionSettlementState;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
+import com.surprising.account.provider.service.AccountBalanceCommandService;
+import com.surprising.account.provider.service.AccountQueryService;
 import com.surprising.account.provider.service.MarginTransferMath;
 import com.surprising.account.provider.service.PnlSettlementMath;
 import com.surprising.account.provider.service.PositionCacheAfterCommitSynchronizer;
@@ -69,6 +71,7 @@ public class AccountRepository {
     private final AccountDeficitRepository accountDeficitRepository;
     private final ProductBalanceRepository productBalanceRepository;
     private final ProductDeficitRepository productDeficitRepository;
+    private final AccountBalanceCommandService accountBalanceCommandService;
 
     public AccountRepository(JdbcTemplate jdbcTemplate, AccountSequenceRepository sequenceRepository) {
         this(jdbcTemplate, sequenceRepository, null, null);
@@ -92,7 +95,8 @@ public class AccountRepository {
                 new AccountBalanceRepository(jdbcTemplate),
                 new AccountDeficitRepository(jdbcTemplate),
                 new ProductBalanceRepository(jdbcTemplate),
-                new ProductDeficitRepository(jdbcTemplate));
+                new ProductDeficitRepository(jdbcTemplate),
+                null);
     }
 
     @Autowired
@@ -107,7 +111,8 @@ public class AccountRepository {
                              AccountBalanceRepository accountBalanceRepository,
                              AccountDeficitRepository accountDeficitRepository,
                              ProductBalanceRepository productBalanceRepository,
-                             ProductDeficitRepository productDeficitRepository) {
+                             ProductDeficitRepository productDeficitRepository,
+                             AccountBalanceCommandService accountBalanceCommandService) {
         this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
         this.markPriceCache = markPriceCache;
@@ -120,6 +125,27 @@ public class AccountRepository {
         this.accountDeficitRepository = accountDeficitRepository;
         this.productBalanceRepository = productBalanceRepository;
         this.productDeficitRepository = productDeficitRepository;
+        if (accountBalanceCommandService == null) {
+            AccountQueryService queryService = new AccountQueryService(
+                    accountLedgerRepository,
+                    productLedgerRepository,
+                    productTransferRepository,
+                    adminBalanceAdjustmentRepository,
+                    accountBalanceRepository,
+                    accountDeficitRepository,
+                    productBalanceRepository,
+                    productDeficitRepository);
+            this.accountBalanceCommandService = new AccountBalanceCommandService(
+                    sequenceRepository,
+                    accountLedgerRepository,
+                    productLedgerRepository,
+                    productTransferRepository,
+                    accountBalanceRepository,
+                    productBalanceRepository,
+                    queryService);
+        } else {
+            this.accountBalanceCommandService = accountBalanceCommandService;
+        }
     }
 
     public Optional<BalanceResponse> balance(long userId, String asset) {
@@ -269,41 +295,8 @@ public class AccountRepository {
                                                        long amountUnits,
                                                        String referenceId,
                                                        String reason) {
-        AccountType normalizedType = requireAccountType(accountType);
-        if (isLegacyPerpetualAccount(normalizedType)) {
-            BalanceResponse updated = adjustBalance(userId, asset, amountUnits,
-                    normalizedType.name() + ":" + referenceId, reason);
-            return toProductBalance(normalizedType, updated);
-        }
-        Instant now = Instant.now();
-        int ledgerRows = jdbcTemplate.update("""
-                INSERT INTO account_product_ledger_entries (
-                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, 0, 'PRODUCT_BALANCE_ADJUSTMENT', ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
-                userId, normalizedType.name(), asset,
-                amountUnits, referenceId, reason, Timestamp.from(now));
-        if (ledgerRows == 0) {
-            requireDuplicateProductBalanceAdjustmentMatches(userId, normalizedType, asset, amountUnits, referenceId,
-                    reason);
-            return productBalance(userId, normalizedType, asset)
-                    .orElseThrow(() -> new IllegalStateException("duplicate product adjustment but balance missing"));
-        }
-        long nextAvailable = applyProductAvailableDelta(userId, normalizedType, asset, amountUnits, now);
-        int ledgerRowsAfter = jdbcTemplate.update("""
-                UPDATE account_product_ledger_entries
-                   SET balance_after_units = ?
-                 WHERE reference_type = 'PRODUCT_BALANCE_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND account_type = ?
-                   AND asset = ?
-                """, nextAvailable, referenceId, userId, normalizedType.name(), asset);
-        requireSingleRow(ledgerRowsAfter, "product balance adjustment ledger update");
-        return productBalance(userId, normalizedType, asset)
-                .orElseThrow(() -> new IllegalStateException("product balance not found after adjustment"));
+        return accountBalanceCommandService.adjustProductBalance(
+                userId, accountType, asset, amountUnits, referenceId, reason);
     }
 
     public ProductTransferResponse transferProductBalance(long userId,
@@ -313,115 +306,12 @@ public class AccountRepository {
                                                           long amountUnits,
                                                           String referenceId,
                                                           String reason) {
-        AccountType source = requireAccountType(sourceAccountType);
-        AccountType target = requireAccountType(targetAccountType);
-        if (source == target) {
-            throw new IllegalArgumentException("source and target account types must be different");
-        }
-        if (amountUnits <= 0) {
-            throw new IllegalArgumentException("amountUnits must be positive");
-        }
-        Instant now = Instant.now();
-        long transferId = sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_TRANSFER);
-        int rows = jdbcTemplate.update("""
-                INSERT INTO account_product_transfers (
-                    transfer_id, user_id, source_account_type, target_account_type, asset,
-                    amount_units, reference_id, status, reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?)
-                ON CONFLICT (user_id, reference_id) DO NOTHING
-                """, transferId, userId, source.name(), target.name(), asset, amountUnits, referenceId, reason,
-                Timestamp.from(now), Timestamp.from(now));
-        if (rows == 0) {
-            return duplicateProductTransfer(userId, source, target, asset, amountUnits, referenceId, reason);
-        }
-
-        long sourceAfter = applyProductAvailableDelta(userId, source, asset, Math.negateExact(amountUnits), now);
-        long targetAfter = applyProductAvailableDelta(userId, target, asset, amountUnits, now);
-        insertProductTransferLedger(userId, source, asset, Math.negateExact(amountUnits), sourceAfter,
-                referenceId + ":OUT", reason, now);
-        insertProductTransferLedger(userId, target, asset, amountUnits, targetAfter,
-                referenceId + ":IN", reason, now);
-
-        return new ProductTransferResponse(transferId, userId, source, target, asset, amountUnits, referenceId,
-                "COMPLETED",
-                productBalance(userId, source, asset)
-                        .orElseThrow(() -> new IllegalStateException("source balance missing after transfer")),
-                productBalance(userId, target, asset)
-                        .orElseThrow(() -> new IllegalStateException("target balance missing after transfer")),
-                now);
+        return accountBalanceCommandService.transferProductBalance(
+                userId, sourceAccountType, targetAccountType, asset, amountUnits, referenceId, reason);
     }
 
     public BalanceResponse adjustBalance(long userId, String asset, long amountUnits, String referenceId, String reason) {
-        Instant now = Instant.now();
-        int ledgerRows = jdbcTemplate.update("""
-                INSERT INTO account_ledger_entries (
-                    entry_id, user_id, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, created_at
-                ) VALUES (?, ?, ?, ?, 0, 'BALANCE_ADJUSTMENT', ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
-                userId, asset, amountUnits,
-                referenceId, reason, Timestamp.from(now));
-        if (ledgerRows == 0) {
-            requireDuplicateBalanceAdjustmentMatches(userId, asset, amountUnits, referenceId, reason);
-            return balance(userId, asset)
-                    .orElseThrow(() -> new IllegalStateException("duplicate balance adjustment but balance missing"));
-        }
-        jdbcTemplate.update("""
-                INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
-                VALUES (?, ?, 0, 0, ?)
-                ON CONFLICT (user_id, asset) DO NOTHING
-                """, userId, asset, Timestamp.from(now));
-        Long currentAvailable = jdbcTemplate.queryForObject("""
-                SELECT available_units
-                  FROM account_balances
-                 WHERE user_id = ? AND asset = ?
-                 FOR UPDATE
-                """, Long.class, userId, asset);
-        long nextAvailable = Math.addExact(currentAvailable == null ? 0L : currentAvailable, amountUnits);
-        if (nextAvailable < 0) {
-            throw new IllegalArgumentException("insufficient available balance");
-        }
-        int balanceRows = jdbcTemplate.update("""
-                UPDATE account_balances
-                   SET available_units = ?,
-                       updated_at = ?
-                 WHERE user_id = ? AND asset = ?
-                """, nextAvailable, Timestamp.from(now), userId, asset);
-        requireSingleRow(balanceRows, "balance adjustment update");
-        BalanceResponse updated = balance(userId, asset)
-                .orElseThrow(() -> new IllegalStateException("balance not found after adjustment"));
-        int ledgerRowsAfter = jdbcTemplate.update("""
-                UPDATE account_ledger_entries
-                   SET balance_after_units = ?
-                 WHERE reference_type = 'BALANCE_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, updated.availableUnits(), referenceId, userId, asset);
-        requireSingleRow(ledgerRowsAfter, "balance adjustment ledger update");
-        return updated;
-    }
-
-    private void requireDuplicateBalanceAdjustmentMatches(long userId,
-                                                          String asset,
-                                                          long amountUnits,
-                                                          String referenceId,
-                                                          String reason) {
-        AdjustmentReference existing = jdbcTemplate.query("""
-                SELECT amount_units, reason
-                  FROM account_ledger_entries
-                 WHERE reference_type = 'BALANCE_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, (rs, rowNum) -> new AdjustmentReference(
-                rs.getLong("amount_units"),
-                rs.getString("reason")), referenceId, userId, asset).stream().findFirst()
-                .orElseThrow(() -> new IllegalStateException("duplicate balance adjustment but ledger missing"));
-        if (existing.amountUnits() != amountUnits || !Objects.equals(existing.reason(), reason)) {
-            throw new IllegalStateException("conflicting duplicate balance adjustment reference " + referenceId);
-        }
+        return accountBalanceCommandService.adjustBalance(userId, asset, amountUnits, referenceId, reason);
     }
 
     public Optional<PositionResponse> position(long userId, String symbol, MarginMode marginMode) {
@@ -3348,155 +3238,6 @@ public class AccountRepository {
                 : quotientAndRemainder[0].add(BigInteger.ONE)).longValueExact();
     }
 
-    private ProductTransferResponse duplicateProductTransfer(long userId,
-                                                             AccountType source,
-                                                             AccountType target,
-                                                             String asset,
-                                                             long amountUnits,
-                                                             String referenceId,
-                                                             String reason) {
-        ProductTransferRecord existing = jdbcTemplate.query("""
-                SELECT transfer_id, source_account_type, target_account_type, asset,
-                       amount_units, status, reason, created_at
-                 FROM account_product_transfers
-                 WHERE user_id = ?
-                   AND reference_id = ?
-                """, (rs, rowNum) -> new ProductTransferRecord(
-                rs.getLong("transfer_id"),
-                AccountType.valueOf(rs.getString("source_account_type")),
-                AccountType.valueOf(rs.getString("target_account_type")),
-                rs.getString("asset"),
-                rs.getLong("amount_units"),
-                rs.getString("status"),
-                rs.getString("reason"),
-                rs.getTimestamp("created_at").toInstant()), userId, referenceId).stream().findFirst()
-                .orElseThrow(() -> new IllegalStateException("duplicate product transfer but transfer row missing"));
-        if (existing.sourceAccountType() != source
-                || existing.targetAccountType() != target
-                || existing.amountUnits() != amountUnits
-                || !Objects.equals(existing.asset(), asset)
-                || !Objects.equals(existing.reason(), reason)) {
-            throw new IllegalStateException("conflicting duplicate product transfer reference " + referenceId);
-        }
-        return new ProductTransferResponse(existing.transferId(), userId, source, target, asset, amountUnits,
-                referenceId, existing.status(),
-                productBalance(userId, source, asset)
-                        .orElseThrow(() -> new IllegalStateException("source balance missing for duplicate transfer")),
-                productBalance(userId, target, asset)
-                        .orElseThrow(() -> new IllegalStateException("target balance missing for duplicate transfer")),
-                existing.createdAt());
-    }
-
-    private void requireDuplicateProductBalanceAdjustmentMatches(long userId,
-                                                                 AccountType accountType,
-                                                                 String asset,
-                                                                 long amountUnits,
-                                                                 String referenceId,
-                                                                 String reason) {
-        AdjustmentReference existing = jdbcTemplate.query("""
-                SELECT amount_units, reason
-                  FROM account_product_ledger_entries
-                 WHERE reference_type = 'PRODUCT_BALANCE_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND account_type = ?
-                   AND asset = ?
-                """, (rs, rowNum) -> new AdjustmentReference(
-                rs.getLong("amount_units"),
-                rs.getString("reason")), referenceId, userId, accountType.name(), asset)
-                .stream().findFirst()
-                .orElseThrow(() -> new IllegalStateException("duplicate product adjustment but ledger missing"));
-        if (existing.amountUnits() != amountUnits || !Objects.equals(existing.reason(), reason)) {
-            throw new IllegalStateException("conflicting duplicate product balance adjustment reference " + referenceId);
-        }
-    }
-
-    private long applyProductAvailableDelta(long userId,
-                                            AccountType accountType,
-                                            String asset,
-                                            long amountUnits,
-                                            Instant now) {
-        if (isLegacyPerpetualAccount(accountType)) {
-            return applyLegacyAvailableDelta(userId, asset, amountUnits, now);
-        }
-        jdbcTemplate.update("""
-                INSERT INTO account_product_balances (
-                    account_type, user_id, asset, available_units, locked_units, updated_at
-                ) VALUES (?, ?, ?, 0, 0, ?)
-                ON CONFLICT (account_type, user_id, asset) DO NOTHING
-                """, accountType.name(), userId, asset, Timestamp.from(now));
-        Long currentAvailable = jdbcTemplate.queryForObject("""
-                SELECT available_units
-                  FROM account_product_balances
-                 WHERE account_type = ?
-                   AND user_id = ?
-                   AND asset = ?
-                 FOR UPDATE
-                """, Long.class, accountType.name(), userId, asset);
-        long nextAvailable = Math.addExact(currentAvailable == null ? 0L : currentAvailable, amountUnits);
-        if (nextAvailable < 0) {
-            throw new IllegalArgumentException("insufficient available balance");
-        }
-        int rows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET available_units = ?,
-                       updated_at = ?
-                 WHERE account_type = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, nextAvailable, Timestamp.from(now), accountType.name(), userId, asset);
-        requireSingleRow(rows, "product balance available update");
-        return nextAvailable;
-    }
-
-    private long applyLegacyAvailableDelta(long userId, String asset, long amountUnits, Instant now) {
-        jdbcTemplate.update("""
-                INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
-                VALUES (?, ?, 0, 0, ?)
-                ON CONFLICT (user_id, asset) DO NOTHING
-                """, userId, asset, Timestamp.from(now));
-        Long currentAvailable = jdbcTemplate.queryForObject("""
-                SELECT available_units
-                  FROM account_balances
-                 WHERE user_id = ?
-                   AND asset = ?
-                 FOR UPDATE
-                """, Long.class, userId, asset);
-        long nextAvailable = Math.addExact(currentAvailable == null ? 0L : currentAvailable, amountUnits);
-        if (nextAvailable < 0) {
-            throw new IllegalArgumentException("insufficient available balance");
-        }
-        int rows = jdbcTemplate.update("""
-                UPDATE account_balances
-                   SET available_units = ?,
-                       updated_at = ?
-                 WHERE user_id = ?
-                   AND asset = ?
-                """, nextAvailable, Timestamp.from(now), userId, asset);
-        requireSingleRow(rows, "legacy product balance available update");
-        return nextAvailable;
-    }
-
-    private void insertProductTransferLedger(long userId,
-                                             AccountType accountType,
-                                             String asset,
-                                             long amountUnits,
-                                             long balanceAfterUnits,
-                                             String referenceId,
-                                             String reason,
-                                             Instant now) {
-        int rows = jdbcTemplate.update("""
-                INSERT INTO account_product_ledger_entries (
-                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'PRODUCT_TRANSFER', ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
-                userId, accountType.name(), asset,
-                amountUnits, balanceAfterUnits, referenceId, reason, Timestamp.from(now));
-        requireSingleRow(rows, "product transfer ledger insert");
-    }
-
     private ProductBalanceResponse toProductBalance(AccountType accountType, BalanceResponse balance) {
         return new ProductBalanceResponse(balance.userId(), accountType, balance.asset(), balance.availableUnits(),
                 balance.lockedUnits(), balance.equityUnits(), balance.updatedAt());
@@ -3605,20 +3346,6 @@ public class AccountRepository {
             long reservedUnits,
             long settledUnits,
             long releasedUnits) {
-    }
-
-    private record AdjustmentReference(long amountUnits, String reason) {
-    }
-
-    private record ProductTransferRecord(
-            long transferId,
-            AccountType sourceAccountType,
-            AccountType targetAccountType,
-            String asset,
-            long amountUnits,
-            String status,
-            String reason,
-            Instant createdAt) {
     }
 
     private record ProductBalanceKey(AccountType accountType, String asset) {
