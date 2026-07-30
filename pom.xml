@@ -23,5 +23,6 @@
         <module>surprising-margin-ops</module>
         <module>surprising-edge</module>
         <module>surprising-market-maker</module>
+        <module>surprising-finance-ops</module>
     </modules>
 </project>
