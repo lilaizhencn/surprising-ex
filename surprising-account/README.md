@@ -18,6 +18,11 @@ Surprising Exchange account and product settlement module. The current implement
   and product accounts, ledgers, transfers, and adjustment records.
 - `AccountBalanceCommandService` orchestrates balance adjustments and product-account transfers
   by calling the balance, ledger, and transfer repositories in a fixed transactional order.
+- `PositionRepository`, `PositionMarginRepository`, `PositionModeRepository`, and
+  `TradeSettlementSideRepository` each own only their position-related business table.
+- `PositionQueryService` aggregates positions, instrument settlement assets, and position margins;
+  `PositionModeCommandService` orchestrates mode changes; `PositionOpenInterestService` owns the
+  atomic cross-table position and sharded-open-interest update.
 - Services own transaction boundaries, idempotency, lock order, and cross-table writes. The
   existing `AccountRepository` remains as a compatibility facade during the incremental migration,
   preserving public entry points and funds-transaction semantics.

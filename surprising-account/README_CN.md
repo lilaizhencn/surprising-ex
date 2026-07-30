@@ -14,6 +14,10 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - 写模型以“一张业务表对应一个 Repository”为目标，Repository 只负责本表 SQL，不编排跨表业务。
 - `AccountQueryService` 聚合余额与亏空、基础账户与产品账户，以及流水、划转和调整记录的单表 Repository。
 - `AccountBalanceCommandService` 编排余额调整和产品账户划转，事务内按固定顺序调用余额、流水和划转 Repository。
+- `PositionRepository`、`PositionMarginRepository`、`PositionModeRepository` 和
+  `TradeSettlementSideRepository` 分别只负责持仓、持仓保证金、持仓模式和成交侧结算表。
+- `PositionQueryService` 聚合持仓、合约结算资产和持仓保证金查询；`PositionModeCommandService`
+  负责持仓模式切换编排；持仓与分片未平仓量的原子更新由 `PositionOpenInterestService` 负责。
 - 交易事务、幂等、锁顺序和跨表写入由 Service 负责；拆分期间保留 `AccountRepository` 兼容门面，
   旧调用入口和资金事务语义不变，内部能力按表逐步迁出。
 - 财务对账、订单时间线、运营报表和后台聚合查询不应继续扩展交易主库查询。相关代码以后进入

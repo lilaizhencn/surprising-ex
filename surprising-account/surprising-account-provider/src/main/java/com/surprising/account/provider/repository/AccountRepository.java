@@ -27,6 +27,10 @@ import com.surprising.account.provider.service.AccountQueryService;
 import com.surprising.account.provider.service.MarginTransferMath;
 import com.surprising.account.provider.service.PnlSettlementMath;
 import com.surprising.account.provider.service.PositionCacheAfterCommitSynchronizer;
+import com.surprising.account.provider.service.PositionModeCommandService;
+import com.surprising.account.provider.service.PositionModeSwitchGuard;
+import com.surprising.account.provider.service.PositionOpenInterestService;
+import com.surprising.account.provider.service.PositionQueryService;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.price.api.model.MarkPriceEvent;
@@ -42,8 +46,6 @@ import java.math.BigInteger;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -57,8 +59,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class AccountRepository {
 
     private static final long PPM = 1_000_000L;
-    private static final int OPEN_INTEREST_SHARDS = 64;
-
     private final JdbcTemplate jdbcTemplate;
     private final AccountSequenceRepository sequenceRepository;
     private final LatestMarkPriceCache markPriceCache;
@@ -72,6 +72,15 @@ public class AccountRepository {
     private final ProductBalanceRepository productBalanceRepository;
     private final ProductDeficitRepository productDeficitRepository;
     private final AccountBalanceCommandService accountBalanceCommandService;
+    private final PositionModeRepository positionModeRepository;
+    private final TradeSettlementSideRepository tradeSettlementSideRepository;
+    private final PositionModeCommandService positionModeCommandService;
+    private final PositionRepository positionRepository;
+    private final PositionMarginRepository positionMarginRepository;
+    private final AccountInstrumentRepository accountInstrumentRepository;
+    private final PositionQueryService positionQueryService;
+    private final OpenInterestShardRepository openInterestShardRepository;
+    private final PositionOpenInterestService positionOpenInterestService;
 
     public AccountRepository(JdbcTemplate jdbcTemplate, AccountSequenceRepository sequenceRepository) {
         this(jdbcTemplate, sequenceRepository, null, null);
@@ -96,6 +105,15 @@ public class AccountRepository {
                 new AccountDeficitRepository(jdbcTemplate),
                 new ProductBalanceRepository(jdbcTemplate),
                 new ProductDeficitRepository(jdbcTemplate),
+                null,
+                new PositionModeRepository(jdbcTemplate),
+                new TradeSettlementSideRepository(jdbcTemplate),
+                null,
+                new PositionRepository(jdbcTemplate),
+                new PositionMarginRepository(jdbcTemplate),
+                new AccountInstrumentRepository(jdbcTemplate),
+                null,
+                new OpenInterestShardRepository(jdbcTemplate),
                 null);
     }
 
@@ -112,7 +130,16 @@ public class AccountRepository {
                              AccountDeficitRepository accountDeficitRepository,
                              ProductBalanceRepository productBalanceRepository,
                              ProductDeficitRepository productDeficitRepository,
-                             AccountBalanceCommandService accountBalanceCommandService) {
+                             AccountBalanceCommandService accountBalanceCommandService,
+                             PositionModeRepository positionModeRepository,
+                             TradeSettlementSideRepository tradeSettlementSideRepository,
+                             PositionModeCommandService positionModeCommandService,
+                             PositionRepository positionRepository,
+                             PositionMarginRepository positionMarginRepository,
+                             AccountInstrumentRepository accountInstrumentRepository,
+                             PositionQueryService positionQueryService,
+                             OpenInterestShardRepository openInterestShardRepository,
+                             PositionOpenInterestService positionOpenInterestService) {
         this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
         this.markPriceCache = markPriceCache;
@@ -146,6 +173,21 @@ public class AccountRepository {
         } else {
             this.accountBalanceCommandService = accountBalanceCommandService;
         }
+        this.positionModeRepository = positionModeRepository;
+        this.tradeSettlementSideRepository = tradeSettlementSideRepository;
+        this.positionModeCommandService = positionModeCommandService == null
+                ? new PositionModeCommandService(positionModeRepository, new PositionModeSwitchGuard(jdbcTemplate))
+                : positionModeCommandService;
+        this.positionRepository = positionRepository;
+        this.positionMarginRepository = positionMarginRepository;
+        this.accountInstrumentRepository = accountInstrumentRepository;
+        this.positionQueryService = positionQueryService == null
+                ? new PositionQueryService(positionRepository, positionMarginRepository, accountInstrumentRepository)
+                : positionQueryService;
+        this.openInterestShardRepository = openInterestShardRepository;
+        this.positionOpenInterestService = positionOpenInterestService == null
+                ? new PositionOpenInterestService(jdbcTemplate, positionRepository, openInterestShardRepository)
+                : positionOpenInterestService;
     }
 
     public Optional<BalanceResponse> balance(long userId, String asset) {
@@ -324,16 +366,9 @@ public class AccountRepository {
 
     public PositionModeResponse positionMode(ProductLine productLine, long userId) {
         ProductLine resolvedProductLine = productLine(productLine);
-        return jdbcTemplate.query("""
-                SELECT position_mode, updated_at
-                  FROM account_position_modes
-                 WHERE product_line = ?
-                   AND user_id = ?
-                """, (rs, rowNum) -> new PositionModeResponse(
-                resolvedProductLine,
-                userId,
-                PositionMode.fromNullableDbValue(rs.getString("position_mode")),
-                rs.getTimestamp("updated_at").toInstant()), resolvedProductLine.name(), userId).stream().findFirst()
+        return positionModeRepository.find(resolvedProductLine, userId)
+                .map(row -> new PositionModeResponse(
+                        resolvedProductLine, userId, row.positionMode(), row.updatedAt()))
                 .orElse(new PositionModeResponse(resolvedProductLine, userId, PositionMode.ONE_WAY, Instant.EPOCH));
     }
 
@@ -347,152 +382,21 @@ public class AccountRepository {
                                                    long userId,
                                                    PositionMode positionMode,
                                                    Instant now) {
-        ProductLine resolvedProductLine = productLine(productLine);
-        PositionMode normalizedMode = PositionMode.defaultIfNull(positionMode);
-        lockUserPositionMode(resolvedProductLine, userId);
-        PositionMode current = positionMode(resolvedProductLine, userId).positionMode();
-        if (current == normalizedMode) {
-            return new PositionModeResponse(resolvedProductLine, userId, current, now);
-        }
-        requirePositionModeSwitchable(resolvedProductLine, userId);
-        int rows = jdbcTemplate.update("""
-                INSERT INTO account_position_modes (product_line, user_id, position_mode, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (product_line, user_id) DO UPDATE
-                   SET position_mode = EXCLUDED.position_mode,
-                       updated_at = EXCLUDED.updated_at
-                """, resolvedProductLine.name(), userId, normalizedMode.name(), Timestamp.from(now));
-        requireSingleRow(rows, "position mode upsert");
-        return new PositionModeResponse(resolvedProductLine, userId, normalizedMode, now);
-    }
-
-    private void lockUserPositionMode(long userId) {
-        lockUserPositionMode(ProductLine.LINEAR_PERPETUAL, userId);
-    }
-
-    private void lockUserPositionMode(ProductLine productLine, long userId) {
-        jdbcTemplate.query("""
-                SELECT pg_advisory_xact_lock(hashtext('position-mode'), hashtext(?))
-                """, rs -> null, productLine(productLine).name() + ":" + userId);
-    }
-
-    private void requirePositionModeSwitchable(long userId) {
-        requirePositionModeSwitchable(ProductLine.LINEAR_PERPETUAL, userId);
-    }
-
-    private void requirePositionModeSwitchable(ProductLine productLine, long userId) {
-        String productLineName = productLine(productLine).name();
-        Boolean hasPositions = jdbcTemplate.queryForObject("""
-                SELECT EXISTS (
-                    SELECT 1
-                      FROM account_positions p
-                     WHERE p.user_id = ?
-                       AND p.signed_quantity_steps <> 0
-                       AND p.product_line = ?
-                )
-                """, Boolean.class, userId, productLineName);
-        if (Boolean.TRUE.equals(hasPositions)) {
-            throw new IllegalStateException("position mode switch requires no open positions");
-        }
-        Boolean hasOpenOrders = jdbcTemplate.queryForObject("""
-                SELECT EXISTS (
-                    SELECT 1
-                      FROM trading_orders o
-                     WHERE o.user_id = ?
-                       AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
-                       AND o.remaining_quantity_steps > 0
-                       AND o.product_line = ?
-                )
-                """, Boolean.class, userId, productLineName);
-        if (Boolean.TRUE.equals(hasOpenOrders)) {
-            throw new IllegalStateException("position mode switch requires no active orders");
-        }
-        Boolean hasTriggerOrders = jdbcTemplate.queryForObject("""
-                SELECT EXISTS (
-                    SELECT 1
-                      FROM trading_trigger_orders t
-                     WHERE t.user_id = ?
-                       AND t.status IN ('PENDING', 'TRIGGERING')
-                       AND t.product_line = ?
-                )
-                """, Boolean.class, userId, productLineName);
-        if (Boolean.TRUE.equals(hasTriggerOrders)) {
-            throw new IllegalStateException("position mode switch requires no pending trigger orders");
-        }
-        Boolean hasAlgoOrders = jdbcTemplate.queryForObject("""
-                SELECT EXISTS (
-                    SELECT 1
-                      FROM trading_algo_orders a
-                     WHERE a.user_id = ?
-                       AND a.status IN ('PENDING', 'RUNNING', 'CANCEL_REQUESTED')
-                       AND a.product_line = ?
-                )
-                """, Boolean.class, userId, productLineName);
-        if (Boolean.TRUE.equals(hasAlgoOrders)) {
-            throw new IllegalStateException("position mode switch requires no active algo orders");
-        }
-        Boolean hasUnsettledTrades = jdbcTemplate.queryForObject("""
-                SELECT EXISTS (
-                    SELECT 1
-                      FROM trading_match_trades mt
-                     WHERE mt.product_line = ?
-                       AND (
-                           (mt.taker_user_id = ? AND NOT EXISTS (
-                               SELECT 1
-                                 FROM account_trade_settlement_sides s
-                                WHERE s.product_line = mt.product_line
-                                  AND s.symbol = mt.symbol
-                                  AND s.trade_id = mt.trade_id
-                                  AND s.participant_role = 'TAKER'
-                           ))
-                           OR
-                           (mt.maker_user_id = ? AND NOT EXISTS (
-                               SELECT 1
-                                 FROM account_trade_settlement_sides s
-                                WHERE s.product_line = mt.product_line
-                                  AND s.symbol = mt.symbol
-                                  AND s.trade_id = mt.trade_id
-                                  AND s.participant_role = 'MAKER'
-                           ))
-                       )
-                )
-                """, Boolean.class, productLineName, userId, userId);
-        if (Boolean.TRUE.equals(hasUnsettledTrades)) {
-            throw new IllegalStateException("position mode switch requires all matched trades to be settled");
-        }
+        return positionModeCommandService.update(productLine, userId, positionMode, now);
     }
 
     public Optional<PositionResponse> position(long userId, String symbol, MarginMode marginMode,
                                                PositionSide positionSide) {
-        return jdbcTemplate.query("""
-                SELECT user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
-                       entry_price_ticks, realized_pnl_units, updated_at
-                  FROM account_positions
-                 WHERE user_id = ? AND symbol = ? AND margin_mode = ? AND position_side = ?
-                """, (rs, rowNum) -> toPositionResponse(rs), userId, symbol,
-                MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name())
-                .stream().findFirst();
+        return positionRepository.find(userId, symbol, marginMode, positionSide);
     }
 
     public Optional<PositionResponse> position(ProductLine productLine,
                                                long userId,
                                                String symbol,
                                                MarginMode marginMode,
-                                               PositionSide positionSide) {
+        PositionSide positionSide) {
         ProductLine resolvedProductLine = productLine(productLine);
-        return jdbcTemplate.query("""
-                SELECT user_id, symbol, margin_mode, position_side, instrument_version,
-                       signed_quantity_steps, entry_price_ticks, realized_pnl_units, updated_at
-                 FROM account_positions
-                 WHERE product_line = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                   AND margin_mode = ?
-                   AND position_side = ?
-                """, (rs, rowNum) -> toPositionResponse(rs),
-                resolvedProductLine.name(), userId, symbol,
-                MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name())
-                .stream().findFirst();
+        return positionRepository.find(resolvedProductLine, userId, symbol, marginMode, positionSide);
     }
 
     public List<PositionResponse> positions(long userId) {
@@ -500,87 +404,30 @@ public class AccountRepository {
     }
 
     public List<PositionResponse> positions(long userId, PositionSide positionSide) {
-        String normalizedPositionSide = positionSide == null ? null : PositionSide.defaultIfNull(positionSide).name();
-        return jdbcTemplate.query("""
-                SELECT user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
-                       entry_price_ticks, realized_pnl_units, updated_at
-                  FROM account_positions
-                 WHERE user_id = ?
-                   AND (CAST(? AS text) IS NULL OR position_side = ?)
-                   AND signed_quantity_steps <> 0
-                 ORDER BY symbol ASC, margin_mode ASC, position_side ASC
-                """, (rs, rowNum) -> toPositionResponse(rs), userId, normalizedPositionSide,
-                normalizedPositionSide);
+        return positionRepository.findOpenByUser(userId, positionSide);
     }
 
     public List<PositionResponse> positions(ProductLine productLine, long userId, PositionSide positionSide) {
         ProductLine resolvedProductLine = productLine(productLine);
-        String normalizedPositionSide = positionSide == null ? null : PositionSide.defaultIfNull(positionSide).name();
-        return jdbcTemplate.query("""
-                SELECT user_id, symbol, margin_mode, position_side, instrument_version,
-                       signed_quantity_steps, entry_price_ticks, realized_pnl_units, updated_at
-                  FROM account_positions
-                 WHERE product_line = ?
-                   AND user_id = ?
-                   AND (CAST(? AS text) IS NULL OR position_side = ?)
-                   AND signed_quantity_steps <> 0
-                 ORDER BY symbol ASC, margin_mode ASC, position_side ASC
-                """, (rs, rowNum) -> toPositionResponse(rs), resolvedProductLine.name(), userId,
-                normalizedPositionSide, normalizedPositionSide);
+        return positionRepository.findOpenByUser(resolvedProductLine, userId, positionSide);
     }
 
     public List<PositionResponse> openPositionsForSettlement(String symbol, long instrumentVersion) {
-        return jdbcTemplate.query("""
-                SELECT user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
-                       entry_price_ticks, realized_pnl_units, updated_at
-                  FROM account_positions
-                 WHERE symbol = ?
-                   AND instrument_version = ?
-                   AND signed_quantity_steps <> 0
-                 ORDER BY user_id ASC, margin_mode ASC, position_side ASC
-                 FOR UPDATE
-                """, (rs, rowNum) -> toPositionResponse(rs), symbol, instrumentVersion);
+        return positionRepository.lockOpenForSettlement(symbol, instrumentVersion);
     }
 
     public List<PositionSettlementState> openPositionStatesForSettlement(String symbol, long instrumentVersion) {
-        return jdbcTemplate.query("""
-                SELECT user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
-                       entry_price_ticks, entry_value_ticks, realized_pnl_units, updated_at
-                  FROM account_positions
-                 WHERE symbol = ?
-                   AND instrument_version = ?
-                   AND signed_quantity_steps <> 0
-                 ORDER BY user_id ASC, margin_mode ASC, position_side ASC
-                 FOR UPDATE
-                """, (rs, rowNum) -> toPositionSettlementState(rs), symbol, instrumentVersion);
+        return positionRepository.lockOpenStatesForSettlement(symbol, instrumentVersion);
     }
 
     public List<PositionResponse> openPositionsForSettlement(ProductLine productLine, String symbol) {
         ProductLine resolvedProductLine = productLine(productLine);
-        return jdbcTemplate.query("""
-                SELECT user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
-                       entry_price_ticks, realized_pnl_units, updated_at
-                  FROM account_positions
-                 WHERE product_line = ?
-                   AND symbol = ?
-                   AND signed_quantity_steps <> 0
-                 ORDER BY user_id ASC, margin_mode ASC, position_side ASC, instrument_version ASC
-                 FOR UPDATE
-                """, (rs, rowNum) -> toPositionResponse(rs), resolvedProductLine.name(), symbol);
+        return positionRepository.lockOpenForSettlement(resolvedProductLine, symbol);
     }
 
     public List<PositionSettlementState> openPositionStatesForSettlement(ProductLine productLine, String symbol) {
         ProductLine resolvedProductLine = productLine(productLine);
-        return jdbcTemplate.query("""
-                SELECT user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
-                       entry_price_ticks, entry_value_ticks, realized_pnl_units, updated_at
-                  FROM account_positions
-                 WHERE product_line = ?
-                   AND symbol = ?
-                   AND signed_quantity_steps <> 0
-                 ORDER BY user_id ASC, margin_mode ASC, position_side ASC, instrument_version ASC
-                 FOR UPDATE
-                """, (rs, rowNum) -> toPositionSettlementState(rs), resolvedProductLine.name(), symbol);
+        return positionRepository.lockOpenStatesForSettlement(resolvedProductLine, symbol);
     }
 
     public Optional<PositionMarginResponse> positionMargin(long userId, String symbol, MarginMode marginMode) {
@@ -589,86 +436,17 @@ public class AccountRepository {
 
     public Optional<PositionMarginResponse> positionMargin(long userId, String symbol, MarginMode marginMode,
                                                           PositionSide positionSide) {
-        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
-        PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
-        return jdbcTemplate.query("""
-                SELECT p.user_id,
-                       p.symbol,
-                       i.settle_asset AS asset,
-                       p.margin_mode,
-                       p.position_side,
-                       COALESCE(m.margin_units, 0) AS margin_units,
-                       COALESCE(m.updated_at, p.updated_at) AS updated_at
-                  FROM account_positions p
-                  JOIN instruments i
-                    ON i.symbol = p.symbol
-                   AND i.version = p.instrument_version
-                  LEFT JOIN account_position_margins m
-                    ON m.user_id = p.user_id
-                   AND m.symbol = p.symbol
-                   AND m.asset = i.settle_asset
-                   AND m.margin_mode = p.margin_mode
-                   AND m.position_side = p.position_side
-                 WHERE p.user_id = ?
-                   AND p.symbol = ?
-                   AND p.margin_mode = ?
-                   AND p.position_side = ?
-                """, (rs, rowNum) -> new PositionMarginResponse(
-                rs.getLong("user_id"),
-                rs.getString("symbol"),
-                rs.getString("asset"),
-                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                PositionSide.fromNullableDbValue(rs.getString("position_side")),
-                rs.getLong("margin_units"),
-                rs.getTimestamp("updated_at").toInstant()), userId, symbol, normalizedMarginMode.name(),
-                normalizedPositionSide.name())
-                .stream()
-                .findFirst();
+        return positionQueryService.positionMargin(userId, symbol, marginMode, positionSide);
     }
 
     public Optional<PositionMarginResponse> positionMargin(ProductLine productLine,
                                                            long userId,
                                                            String symbol,
                                                            MarginMode marginMode,
-                                                           PositionSide positionSide) {
+        PositionSide positionSide) {
         ProductLine resolvedProductLine = productLine(productLine);
-        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
-        PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
-        return jdbcTemplate.query("""
-                SELECT p.user_id,
-                       p.symbol,
-                       i.settle_asset AS asset,
-                       p.margin_mode,
-                       p.position_side,
-                       COALESCE(m.margin_units, 0) AS margin_units,
-                       COALESCE(m.updated_at, p.updated_at) AS updated_at
-                  FROM account_positions p
-                  JOIN instruments i
-                    ON i.symbol = p.symbol
-                   AND i.version = p.instrument_version
-                  LEFT JOIN account_position_margins m
-                    ON m.product_line = p.product_line
-                   AND m.user_id = p.user_id
-                   AND m.symbol = p.symbol
-                   AND m.asset = i.settle_asset
-                   AND m.margin_mode = p.margin_mode
-                   AND m.position_side = p.position_side
-                 WHERE p.product_line = ?
-                   AND p.user_id = ?
-                   AND p.symbol = ?
-                   AND p.margin_mode = ?
-                   AND p.position_side = ?
-                """, (rs, rowNum) -> new PositionMarginResponse(
-                rs.getLong("user_id"),
-                rs.getString("symbol"),
-                rs.getString("asset"),
-                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                PositionSide.fromNullableDbValue(rs.getString("position_side")),
-                rs.getLong("margin_units"),
-                rs.getTimestamp("updated_at").toInstant()), resolvedProductLine.name(), userId, symbol,
-                normalizedMarginMode.name(), normalizedPositionSide.name())
-                .stream()
-                .findFirst();
+        return positionQueryService.positionMargin(
+                resolvedProductLine, userId, symbol, marginMode, positionSide);
     }
 
     public PositionMarginAdjustmentResponse adjustIsolatedPositionMargin(long userId,
@@ -819,113 +597,39 @@ public class AccountRepository {
         ProductLine resolvedProductLine = productLine(productLine);
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
-        Instant now = Instant.now();
-        List<PositionState> current = jdbcTemplate.query("""
-                SELECT instrument_version, signed_quantity_steps, entry_price_ticks, entry_value_ticks,
-                       realized_pnl_units
-                  FROM account_positions
-                 WHERE product_line = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                   AND margin_mode = ?
-                   AND position_side = ?
-                 FOR UPDATE
-                """, (rs, rowNum) -> toPositionState(rs), resolvedProductLine.name(), userId, symbol,
-                normalizedMarginMode.name(), normalizedPositionSide.name());
-        if (!current.isEmpty()) {
-            return current.getFirst();
-        }
-        List<PositionState> inserted = jdbcTemplate.query("""
-                INSERT INTO account_positions (
-                    product_line, user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
-                    entry_price_ticks, entry_value_ticks, realized_pnl_units, updated_at
-                ) VALUES (?, ?, ?, ?, ?, NULL, 0, 0, 0, 0, ?)
-                ON CONFLICT (product_line, user_id, symbol, margin_mode, position_side) DO NOTHING
-                RETURNING instrument_version, signed_quantity_steps, entry_price_ticks, entry_value_ticks,
-                          realized_pnl_units
-                """, (rs, rowNum) -> toPositionState(rs), resolvedProductLine.name(), userId, symbol,
-                normalizedMarginMode.name(), normalizedPositionSide.name(), Timestamp.from(now));
-        if (!inserted.isEmpty()) {
+        PositionRepository.LockedPosition locked = positionRepository.lockOrCreate(
+                resolvedProductLine, userId, symbol, normalizedMarginMode, normalizedPositionSide, Instant.now());
+        if (locked.created()) {
             schedulePositionCacheProjection(resolvedProductLine, userId, symbol,
                     normalizedMarginMode, normalizedPositionSide);
-            return inserted.getFirst();
         }
-        // A non-command administrative writer may have inserted the same key after the first SELECT.
-        return jdbcTemplate.queryForObject("""
-                SELECT instrument_version, signed_quantity_steps, entry_price_ticks, entry_value_ticks,
-                       realized_pnl_units
-                  FROM account_positions
-                 WHERE product_line = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                   AND margin_mode = ?
-                   AND position_side = ?
-                 FOR UPDATE
-                """, (rs, rowNum) -> new PositionState(
-                rs.getLong("signed_quantity_steps"),
-                longOrZero(rs, "instrument_version"),
-                rs.getLong("entry_price_ticks"),
-                rs.getLong("entry_value_ticks"),
-                rs.getLong("realized_pnl_units")), resolvedProductLine.name(), userId, symbol, normalizedMarginMode.name(),
-                normalizedPositionSide.name());
+        return locked.state();
     }
 
     private PositionCollateralTarget lockOpenIsolatedPosition(long userId, String symbol, PositionSide positionSide) {
-        return jdbcTemplate.query("""
-                SELECT p.instrument_version,
-                       p.signed_quantity_steps,
-                       i.settle_asset AS asset
-                  FROM account_positions p
-                  JOIN instruments i
-                    ON i.symbol = p.symbol
-                   AND i.version = p.instrument_version
-                 WHERE p.user_id = ?
-                   AND p.symbol = ?
-                   AND p.margin_mode = 'ISOLATED'
-                   AND p.position_side = ?
-                   AND p.signed_quantity_steps <> 0
-                 FOR UPDATE OF p
-                """, (rs, rowNum) -> new PositionCollateralTarget(
-                userId,
-                symbol,
-                rs.getString("asset"),
-                PositionSide.defaultIfNull(positionSide),
-                rs.getLong("instrument_version"),
-                rs.getLong("signed_quantity_steps")), userId, symbol,
-                PositionSide.defaultIfNull(positionSide).name()).stream().findFirst()
+        PositionRepository.LockedPositionTarget target = positionRepository
+                .lockOpenIsolated(userId, symbol, positionSide)
                 .orElseThrow(() -> new IllegalStateException("open isolated position not found"));
+        String asset = accountInstrumentRepository.findSettleAsset(symbol, target.instrumentVersion())
+                .orElseThrow(() -> new IllegalStateException("open isolated position not found"));
+        return new PositionCollateralTarget(
+                userId, symbol, asset, PositionSide.defaultIfNull(positionSide),
+                target.instrumentVersion(), target.signedQuantitySteps());
     }
 
     private PositionCollateralTarget lockOpenIsolatedPosition(ProductLine productLine,
                                                               long userId,
                                                               String symbol,
-                                                              PositionSide positionSide) {
+        PositionSide positionSide) {
         ProductLine resolvedProductLine = productLine(productLine);
-        return jdbcTemplate.query("""
-                SELECT p.instrument_version,
-                       p.signed_quantity_steps,
-                       i.settle_asset AS asset
-                 FROM account_positions p
-                 JOIN instruments i
-                    ON i.symbol = p.symbol
-                   AND i.version = p.instrument_version
-                 WHERE p.product_line = ?
-                   AND p.user_id = ?
-                   AND p.symbol = ?
-                   AND p.margin_mode = 'ISOLATED'
-                   AND p.position_side = ?
-                   AND p.signed_quantity_steps <> 0
-                 FOR UPDATE OF p
-                """, (rs, rowNum) -> new PositionCollateralTarget(
-                userId,
-                symbol,
-                rs.getString("asset"),
-                PositionSide.defaultIfNull(positionSide),
-                rs.getLong("instrument_version"),
-                rs.getLong("signed_quantity_steps")), resolvedProductLine.name(), userId, symbol,
-                PositionSide.defaultIfNull(positionSide).name())
-                .stream().findFirst()
+        PositionRepository.LockedPositionTarget target = positionRepository
+                .lockOpenIsolated(resolvedProductLine, userId, symbol, positionSide)
                 .orElseThrow(() -> new IllegalStateException("open isolated position not found"));
+        String asset = accountInstrumentRepository.findSettleAsset(symbol, target.instrumentVersion())
+                .orElseThrow(() -> new IllegalStateException("open isolated position not found"));
+        return new PositionCollateralTarget(
+                userId, symbol, asset, PositionSide.defaultIfNull(positionSide),
+                target.instrumentVersion(), target.signedQuantitySteps());
     }
 
     private long lockPositionMarginUnits(long userId, String symbol, String asset, MarginMode marginMode) {
@@ -940,19 +644,8 @@ public class AccountRepository {
     private long lockPositionMarginUnits(ProductLine productLine, long userId, String symbol, String asset,
                                          MarginMode marginMode, PositionSide positionSide) {
         ProductLine resolvedProductLine = productLine(productLine);
-        return jdbcTemplate.query("""
-                SELECT margin_units
-                  FROM account_position_margins
-                 WHERE product_line = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                   AND asset = ?
-                   AND margin_mode = ?
-                   AND position_side = ?
-                 FOR UPDATE
-                """, (rs, rowNum) -> rs.getLong("margin_units"), resolvedProductLine.name(), userId, symbol, asset,
-                MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name())
-                .stream().findFirst().orElse(0L);
+        return positionMarginRepository.lockUnits(
+                resolvedProductLine, userId, symbol, asset, marginMode, positionSide);
     }
 
     private void addIsolatedPositionMargin(long userId,
@@ -984,15 +677,9 @@ public class AccountRepository {
         if (balanceRows != 1) {
             throw new IllegalArgumentException("insufficient available balance");
         }
-        int marginRows = jdbcTemplate.update("""
-                INSERT INTO account_position_margins (
-                    product_line, user_id, symbol, asset, margin_mode, position_side, margin_units, updated_at
-                ) VALUES (?, ?, ?, ?, 'ISOLATED', ?, ?, ?)
-                ON CONFLICT (product_line, user_id, symbol, asset, margin_mode, position_side) DO UPDATE
-                   SET margin_units = account_position_margins.margin_units + EXCLUDED.margin_units,
-                       updated_at = EXCLUDED.updated_at
-                """, resolvedProductLine.name(), userId, symbol, asset, PositionSide.defaultIfNull(positionSide).name(),
-                amountUnits, Timestamp.from(now));
+        int marginRows = positionMarginRepository.add(
+                resolvedProductLine, userId, symbol, asset, MarginMode.ISOLATED,
+                positionSide, amountUnits, now);
         requireSingleRow(marginRows, "isolated position margin add");
     }
 
@@ -1018,15 +705,9 @@ public class AccountRepository {
         if (balanceRows != 1) {
             throw new IllegalArgumentException("insufficient available product balance");
         }
-        int marginRows = jdbcTemplate.update("""
-                INSERT INTO account_position_margins (
-                    product_line, user_id, symbol, asset, margin_mode, position_side, margin_units, updated_at
-                ) VALUES (?, ?, ?, ?, 'ISOLATED', ?, ?, ?)
-                ON CONFLICT (product_line, user_id, symbol, asset, margin_mode, position_side) DO UPDATE
-                   SET margin_units = account_position_margins.margin_units + EXCLUDED.margin_units,
-                       updated_at = EXCLUDED.updated_at
-                """, resolvedProductLine.name(), userId, symbol, asset, PositionSide.defaultIfNull(positionSide).name(),
-                amountUnits, Timestamp.from(now));
+        int marginRows = positionMarginRepository.add(
+                resolvedProductLine, userId, symbol, asset, MarginMode.ISOLATED,
+                positionSide, amountUnits, now);
         requireSingleRow(marginRows, "product isolated position margin add");
     }
 
@@ -1047,25 +728,12 @@ public class AccountRepository {
                                               long amountUnits,
                                               Instant now) {
         ProductLine resolvedProductLine = productLine(productLine);
-        int marginRows = jdbcTemplate.update("""
-                UPDATE account_position_margins
-                   SET margin_units = margin_units - ?,
-                       updated_at = ?
-                 WHERE product_line = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                   AND asset = ?
-                   AND margin_mode = 'ISOLATED'
-                   AND position_side = ?
-                   AND margin_units >= ?
-                """, amountUnits, Timestamp.from(now), resolvedProductLine.name(), userId, symbol, asset,
-                PositionSide.defaultIfNull(positionSide).name(), amountUnits);
+        int marginRows = positionMarginRepository.subtract(
+                resolvedProductLine, userId, symbol, asset, MarginMode.ISOLATED,
+                positionSide, amountUnits, now);
         requireSingleRow(marginRows, "isolated position margin remove");
-        jdbcTemplate.update("""
-                DELETE FROM account_position_margins
-                 WHERE product_line = ? AND user_id = ? AND symbol = ? AND asset = ? AND margin_mode = 'ISOLATED'
-                   AND position_side = ? AND margin_units = 0
-                """, resolvedProductLine.name(), userId, symbol, asset, PositionSide.defaultIfNull(positionSide).name());
+        positionMarginRepository.deleteZero(
+                resolvedProductLine, userId, symbol, asset, MarginMode.ISOLATED, positionSide);
         int balanceRows = jdbcTemplate.update("""
                 UPDATE account_balances
                    SET available_units = available_units + ?,
@@ -1087,27 +755,14 @@ public class AccountRepository {
                                                      String asset,
                                                      PositionSide positionSide,
                                                      long amountUnits,
-                                                     Instant now) {
+        Instant now) {
         ProductLine resolvedProductLine = productLine(productLine);
-        int marginRows = jdbcTemplate.update("""
-                UPDATE account_position_margins
-                   SET margin_units = margin_units - ?,
-                       updated_at = ?
-                 WHERE product_line = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                   AND asset = ?
-                   AND margin_mode = 'ISOLATED'
-                   AND position_side = ?
-                   AND margin_units >= ?
-                """, amountUnits, Timestamp.from(now), resolvedProductLine.name(), userId, symbol, asset,
-                PositionSide.defaultIfNull(positionSide).name(), amountUnits);
+        int marginRows = positionMarginRepository.subtract(
+                resolvedProductLine, userId, symbol, asset, MarginMode.ISOLATED,
+                positionSide, amountUnits, now);
         requireSingleRow(marginRows, "product isolated position margin remove");
-        jdbcTemplate.update("""
-                DELETE FROM account_position_margins
-                 WHERE product_line = ? AND user_id = ? AND symbol = ? AND asset = ? AND margin_mode = 'ISOLATED'
-                   AND position_side = ? AND margin_units = 0
-                """, resolvedProductLine.name(), userId, symbol, asset, PositionSide.defaultIfNull(positionSide).name());
+        positionMarginRepository.deleteZero(
+                resolvedProductLine, userId, symbol, asset, MarginMode.ISOLATED, positionSide);
         int balanceRows = jdbcTemplate.update("""
                 UPDATE account_product_balances
                    SET available_units = available_units + ?,
@@ -1449,61 +1104,18 @@ public class AccountRepository {
         if (requests == null || requests.isEmpty()) {
             return;
         }
-        List<OpenInterestShard> shards = requests.stream()
-                .map(request -> new OpenInterestShard(productLine(request.productLine()), request.symbol(),
-                        Math.floorMod(request.userId(), OPEN_INTEREST_SHARDS)))
+        List<OpenInterestShardRepository.OpenInterestShard> shards = requests.stream()
+                .map(request -> new OpenInterestShardRepository.OpenInterestShard(
+                        productLine(request.productLine()), request.symbol(),
+                        OpenInterestShardRepository.shardId(request.userId())))
                 .distinct()
-                .sorted(Comparator.comparing((OpenInterestShard shard) -> shard.productLine().name())
-                        .thenComparing(OpenInterestShard::symbol)
-                        .thenComparingInt(OpenInterestShard::shardId))
+                .sorted(Comparator.comparing(
+                                (OpenInterestShardRepository.OpenInterestShard shard) ->
+                                        shard.productLine().name())
+                        .thenComparing(OpenInterestShardRepository.OpenInterestShard::symbol)
+                        .thenComparingInt(OpenInterestShardRepository.OpenInterestShard::shardId))
                 .toList();
-        String values = String.join(", ", Collections.nCopies(shards.size(),
-                "(?::text, ?::text, ?::integer, ?::timestamptz)"));
-        List<Object> seedArgs = new ArrayList<>(shards.size() * 4);
-        Timestamp lockedAt = Timestamp.from(now == null ? Instant.now() : now);
-        for (OpenInterestShard shard : shards) {
-            seedArgs.add(shard.productLine().name());
-            seedArgs.add(shard.symbol());
-            seedArgs.add(shard.shardId());
-            seedArgs.add(lockedAt);
-        }
-        int inserted = jdbcTemplate.update("""
-                WITH input(product_line, symbol, shard_id, locked_at) AS (
-                    VALUES %s
-                )
-                INSERT INTO trading_symbol_open_interest_shards (
-                    product_line, symbol, shard_id, long_quantity_steps, short_quantity_steps, updated_at
-                )
-                SELECT product_line, symbol, shard_id, 0, 0, locked_at
-                  FROM input
-                 ORDER BY product_line, symbol, shard_id
-                ON CONFLICT (product_line, symbol, shard_id) DO NOTHING
-                """.formatted(values), seedArgs.toArray());
-        if (inserted < 0 || inserted > shards.size()) {
-            throw new IllegalStateException("unexpected open interest batch seed rows: " + inserted);
-        }
-
-        String lockValues = String.join(", ", Collections.nCopies(shards.size(),
-                "(?::text, ?::text, ?::integer)"));
-        List<Object> lockArgs = new ArrayList<>(shards.size() * 3);
-        for (OpenInterestShard shard : shards) {
-            lockArgs.add(shard.productLine().name());
-            lockArgs.add(shard.symbol());
-            lockArgs.add(shard.shardId());
-        }
-        List<Integer> locked = jdbcTemplate.query("""
-                WITH input(product_line, symbol, shard_id) AS (
-                    VALUES %s
-                )
-                SELECT 1
-                  FROM trading_symbol_open_interest_shards shard
-                  JOIN input USING (product_line, symbol, shard_id)
-                 ORDER BY shard.product_line, shard.symbol, shard.shard_id
-                   FOR UPDATE OF shard
-                """.formatted(lockValues), (rs, rowNum) -> 1, lockArgs.toArray());
-        if (locked.size() != shards.size()) {
-            throw new IllegalStateException("failed to lock all open interest shards");
-        }
+        openInterestShardRepository.seedAndLock(shards, now);
     }
 
     private long lockCurrentPositionQuantity(long userId, String symbol, MarginMode marginMode) {
@@ -1518,18 +1130,8 @@ public class AccountRepository {
     private long lockCurrentPositionQuantity(ProductLine productLine, long userId, String symbol, MarginMode marginMode,
                                              PositionSide positionSide) {
         ProductLine resolvedProductLine = productLine(productLine);
-        return jdbcTemplate.query("""
-                SELECT signed_quantity_steps
-                  FROM account_positions
-                 WHERE product_line = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                   AND margin_mode = ?
-                   AND position_side = ?
-                 FOR UPDATE
-                """, (rs, rowNum) -> rs.getLong("signed_quantity_steps"), resolvedProductLine.name(), userId, symbol,
-                MarginMode.defaultIfNull(marginMode).name(), PositionSide.defaultIfNull(positionSide).name()).stream().findFirst()
-                .orElseThrow(() -> new IllegalStateException("position not found before update"));
+        return positionRepository.lockCurrentQuantity(
+                resolvedProductLine, userId, symbol, marginMode, positionSide);
     }
 
     private void updatePositionAndOpenInterest(ProductLine productLine,
@@ -1540,80 +1142,9 @@ public class AccountRepository {
                                                PositionState state,
                                                long previousSignedQuantitySteps,
                                                Instant now) {
-        long longDelta = Math.subtractExact(longQuantitySteps(state.signedQuantitySteps()),
-                longQuantitySteps(previousSignedQuantitySteps));
-        long shortDelta = Math.subtractExact(shortQuantitySteps(state.signedQuantitySteps()),
-                shortQuantitySteps(previousSignedQuantitySteps));
-        Timestamp updatedAt = Timestamp.from(now);
-        if (longDelta == 0L && shortDelta == 0L) {
-            int rows = jdbcTemplate.update("""
-                    UPDATE account_positions
-                       SET signed_quantity_steps = ?,
-                           instrument_version = ?,
-                           entry_price_ticks = ?,
-                           entry_value_ticks = ?,
-                           realized_pnl_units = ?,
-                           updated_at = ?
-                     WHERE product_line = ?
-                       AND user_id = ?
-                       AND symbol = ?
-                       AND margin_mode = ?
-                       AND position_side = ?
-                    """, state.signedQuantitySteps(), nullableVersion(state.instrumentVersion()),
-                    state.entryPriceTicks(), state.entryValueTicks(), state.realizedPnlUnits(),
-                    updatedAt, productLine.name(), userId, symbol, marginMode.name(), positionSide.name());
-            requireSingleRow(rows, "account position update");
-            return;
-        }
-        int shardId = Math.floorMod(userId, OPEN_INTEREST_SHARDS);
-        int rows = jdbcTemplate.update("""
-                INSERT INTO trading_symbol_open_interest_shards (
-                    product_line, symbol, shard_id, long_quantity_steps, short_quantity_steps, updated_at
-                ) VALUES (?, ?, ?, 0, 0, ?)
-                ON CONFLICT (product_line, symbol, shard_id) DO NOTHING
-                """, productLine.name(), symbol, shardId, updatedAt);
-        if (rows < 0 || rows > 1) {
-            throw new IllegalStateException("unexpected open interest shard seed rows: " + rows);
-        }
-        rows = jdbcTemplate.update("""
-                WITH updated_position AS (
-                    UPDATE account_positions
-                       SET signed_quantity_steps = ?,
-                           instrument_version = ?,
-                           entry_price_ticks = ?,
-                           entry_value_ticks = ?,
-                           realized_pnl_units = ?,
-                           updated_at = ?
-                     WHERE product_line = ?
-                       AND user_id = ?
-                       AND symbol = ?
-                       AND margin_mode = ?
-                       AND position_side = ?
-                 RETURNING 1
-                )
-                UPDATE trading_symbol_open_interest_shards AS shard
-                   SET long_quantity_steps = shard.long_quantity_steps + ?,
-                       short_quantity_steps = shard.short_quantity_steps + ?,
-                       updated_at = ?
-                  FROM updated_position
-                 WHERE shard.product_line = ?
-                   AND shard.symbol = ?
-                   AND shard.shard_id = ?
-                   AND shard.long_quantity_steps + ? >= 0
-                   AND shard.short_quantity_steps + ? >= 0
-                """, state.signedQuantitySteps(), nullableVersion(state.instrumentVersion()),
-                state.entryPriceTicks(), state.entryValueTicks(), state.realizedPnlUnits(), updatedAt,
-                productLine.name(), userId, symbol, marginMode.name(), positionSide.name(),
-                longDelta, shortDelta, updatedAt, productLine.name(), symbol, shardId, longDelta, shortDelta);
-        requireSingleRow(rows, "account position and open interest shard update");
-    }
-
-    private long longQuantitySteps(long signedQuantitySteps) {
-        return signedQuantitySteps > 0 ? signedQuantitySteps : 0L;
-    }
-
-    private long shortQuantitySteps(long signedQuantitySteps) {
-        return signedQuantitySteps < 0 ? Math.negateExact(signedQuantitySteps) : 0L;
+        positionOpenInterestService.update(
+                productLine, userId, symbol, marginMode, positionSide,
+                state, previousSignedQuantitySteps, now);
     }
 
     public ContractSpec contractSpec(String symbol, long instrumentVersion) {
@@ -1730,43 +1261,8 @@ public class AccountRepository {
                                   long orderMarginConsumedUnits,
                                   long orderMarginReleasedUnits,
                                   Instant now) {
-        long orderId = role == TradeParticipantRole.TAKER ? trade.takerOrderId() : trade.makerOrderId();
-        int rows = jdbcTemplate.update("""
-                INSERT INTO account_trade_settlement_sides (
-                    product_line, symbol, trade_id, participant_role,
-                    taker_user_id, maker_user_id, command_id, order_id,
-                    order_margin_consumed_units, order_margin_released_units, applied_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (product_line, symbol, trade_id, participant_role) DO NOTHING
-                """,
-                productLine.name(), trade.symbol(), trade.tradeId(), role.name(), trade.takerUserId(),
-                trade.makerUserId(), commandId, orderId, orderMarginConsumedUnits,
-                orderMarginReleasedUnits, Timestamp.from(now));
-        if (rows == 1) {
-            return;
-        }
-        Boolean identical = jdbcTemplate.queryForObject("""
-                SELECT EXISTS (
-                    SELECT 1
-                      FROM account_trade_settlement_sides
-                     WHERE product_line = ?
-                       AND symbol = ?
-                       AND trade_id = ?
-                       AND participant_role = ?
-                       AND taker_user_id = ?
-                       AND maker_user_id = ?
-                       AND command_id = ?
-                       AND order_id = ?
-                       AND order_margin_consumed_units = ?
-                       AND order_margin_released_units = ?
-                )
-                """, Boolean.class, productLine.name(), trade.symbol(), trade.tradeId(), role.name(),
-                trade.takerUserId(), trade.makerUserId(), commandId, orderId,
-                orderMarginConsumedUnits, orderMarginReleasedUnits);
-        if (!Boolean.TRUE.equals(identical)) {
-            throw new IllegalStateException("failed to complete trade side "
-                    + productLine + ":" + trade.symbol() + ":" + trade.tradeId() + ":" + role);
-        }
+        tradeSettlementSideRepository.complete(productLine, trade, role, commandId,
+                orderMarginConsumedUnits, orderMarginReleasedUnits, now);
     }
 
     public void settleRealizedPnl(long userId,
@@ -2173,15 +1669,9 @@ public class AccountRepository {
         if (actualMarginUnits > 0L) {
             MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
             PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
-            int positionMarginRows = jdbcTemplate.update("""
-                    INSERT INTO account_position_margins (
-                        product_line, user_id, symbol, asset, margin_mode, position_side, margin_units, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (product_line, user_id, symbol, asset, margin_mode, position_side) DO UPDATE
-                       SET margin_units = account_position_margins.margin_units + EXCLUDED.margin_units,
-                           updated_at = EXCLUDED.updated_at
-                    """, resolvedProductLine.name(), userId, symbol, asset, normalizedMarginMode.name(),
-                    normalizedPositionSide.name(), actualMarginUnits, Timestamp.from(now));
+            int positionMarginRows = positionMarginRepository.add(
+                    resolvedProductLine, userId, symbol, asset, normalizedMarginMode,
+                    normalizedPositionSide, actualMarginUnits, now);
             requireSingleRow(positionMarginRows, "position margin upsert");
             schedulePositionCacheProjection(resolvedProductLine, userId, symbol,
                     normalizedMarginMode, normalizedPositionSide);
@@ -2223,26 +1713,15 @@ public class AccountRepository {
         ProductLine resolvedProductLine = productLine(productLine);
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
-        List<PositionMargin> margins = jdbcTemplate.query("""
-                SELECT m.asset,
-                       m.margin_mode,
-                       m.position_side,
-                       m.margin_units,
-                       ? AS account_type
-                  FROM account_position_margins m
-                 WHERE m.product_line = ?
-                   AND m.user_id = ?
-                   AND m.symbol = ?
-                   AND m.margin_mode = ?
-                   AND m.position_side = ?
-                   AND m.margin_units > 0
-                 FOR UPDATE OF m
-                """, (rs, rowNum) -> new PositionMargin(symbol, rs.getString("asset"),
-                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                PositionSide.fromNullableDbValue(rs.getString("position_side")), rs.getLong("margin_units"),
-                accountTypeFromNullableDbValue(rs.getString("account_type"))),
-                resolvedProductLine.accountTypeCode(), resolvedProductLine.name(), userId, symbol,
-                normalizedMarginMode.name(), normalizedPositionSide.name());
+        AccountType accountType = accountType(resolvedProductLine);
+        List<PositionMargin> margins = positionMarginRepository
+                .lockByPosition(
+                        resolvedProductLine, userId, symbol, normalizedMarginMode, normalizedPositionSide)
+                .stream()
+                .map(row -> new PositionMargin(
+                        row.symbol(), row.asset(), row.marginMode(), row.positionSide(),
+                        row.marginUnits(), accountType))
+                .toList();
         for (PositionMargin margin : margins) {
             long amountUnits = MarginTransferMath.positionMarginReleaseAmount(margin.marginUnits(),
                     closeSteps, positionAbsSteps);
@@ -2250,24 +1729,13 @@ public class AccountRepository {
                 continue;
             }
             releaseBalanceLock(margin.accountType(), userId, margin.asset(), amountUnits, now);
-            int marginRows = jdbcTemplate.update("""
-                    UPDATE account_position_margins
-                       SET margin_units = margin_units - ?,
-                           updated_at = ?
-                     WHERE user_id = ? AND symbol = ? AND asset = ?
-                       AND margin_mode = ?
-                       AND position_side = ?
-                       AND product_line = ?
-                       AND margin_units >= ?
-                    """, amountUnits, Timestamp.from(now), userId, symbol, margin.asset(),
-                    margin.marginMode().name(), margin.positionSide().name(), resolvedProductLine.name(), amountUnits);
+            int marginRows = positionMarginRepository.subtract(
+                    resolvedProductLine, userId, symbol, margin.asset(), margin.marginMode(),
+                    margin.positionSide(), amountUnits, now);
             requireSingleRow(marginRows, "position margin release");
-            jdbcTemplate.update("""
-                    DELETE FROM account_position_margins
-                     WHERE user_id = ? AND symbol = ? AND asset = ? AND margin_mode = ?
-                       AND position_side = ? AND product_line = ? AND margin_units = 0
-                    """, userId, symbol, margin.asset(), margin.marginMode().name(), margin.positionSide().name(),
-                    resolvedProductLine.name());
+            positionMarginRepository.deleteZero(
+                    resolvedProductLine, userId, symbol, margin.asset(),
+                    margin.marginMode(), margin.positionSide());
             schedulePositionCacheProjection(resolvedProductLine, userId, symbol,
                     margin.marginMode(), margin.positionSide());
         }
@@ -2921,46 +2389,14 @@ public class AccountRepository {
                                                      MarginMode marginMode) {
         ProductLine resolvedProductLine = productLine(productLine);
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
-        if (normalizedMarginMode == MarginMode.ISOLATED) {
-            return jdbcTemplate.query("""
-                    SELECT symbol, asset, margin_mode, position_side, margin_units
-                      FROM account_position_margins
-                     WHERE product_line = ?
-                       AND user_id = ?
-                       AND asset = ?
-                       AND symbol = ?
-                       AND margin_mode = ?
-                       AND margin_units > 0
-                     ORDER BY updated_at ASC, symbol ASC, margin_mode ASC, position_side ASC
-                     FOR UPDATE
-                    """, (rs, rowNum) -> new PositionMargin(
-                    rs.getString("symbol"),
-                    rs.getString("asset"),
-                    MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                    PositionSide.fromNullableDbValue(rs.getString("position_side")),
-                    rs.getLong("margin_units"),
-                    AccountType.valueOf(resolvedProductLine.accountTypeCode())), resolvedProductLine.name(), userId,
-                    asset, symbol,
-                    normalizedMarginMode.name());
-        }
-        return jdbcTemplate.query("""
-                SELECT symbol, asset, margin_mode, position_side, margin_units
-                  FROM account_position_margins
-                 WHERE product_line = ?
-                   AND user_id = ?
-                   AND asset = ?
-                   AND margin_mode = ?
-                   AND margin_units > 0
-                 ORDER BY updated_at ASC, symbol ASC, margin_mode ASC, position_side ASC
-                 FOR UPDATE
-                """, (rs, rowNum) -> new PositionMargin(
-                rs.getString("symbol"),
-                rs.getString("asset"),
-                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                PositionSide.fromNullableDbValue(rs.getString("position_side")),
-                rs.getLong("margin_units"),
-                AccountType.valueOf(resolvedProductLine.accountTypeCode())), resolvedProductLine.name(), userId,
-                asset, normalizedMarginMode.name());
+        AccountType accountType = accountType(resolvedProductLine);
+        return positionMarginRepository
+                .lockByAsset(resolvedProductLine, userId, asset, symbol, normalizedMarginMode)
+                .stream()
+                .map(row -> new PositionMargin(
+                        row.symbol(), row.asset(), row.marginMode(), row.positionSide(),
+                        row.marginUnits(), accountType))
+                .toList();
     }
 
     private void reducePositionMargins(long userId,
@@ -2984,26 +2420,15 @@ public class AccountRepository {
                 break;
             }
             long debit = Math.min(margin.marginUnits(), remaining);
-            int rows = jdbcTemplate.update("""
-                    UPDATE account_position_margins
-                       SET margin_units = margin_units - ?,
-                           updated_at = ?
-                      WHERE user_id = ? AND symbol = ? AND asset = ?
-                        AND margin_mode = ?
-                        AND position_side = ?
-                        AND product_line = ?
-                        AND margin_units >= ?
-                    """, debit, Timestamp.from(now), userId, margin.symbol(), asset,
-                    margin.marginMode().name(), margin.positionSide().name(), resolvedProductLine.name(), debit);
+            int rows = positionMarginRepository.subtract(
+                    resolvedProductLine, userId, margin.symbol(), asset,
+                    margin.marginMode(), margin.positionSide(), debit, now);
             if (rows != 1) {
                 throw new IllegalStateException("failed to reduce consumed position margin");
             }
-            jdbcTemplate.update("""
-                    DELETE FROM account_position_margins
-                     WHERE user_id = ? AND symbol = ? AND asset = ? AND margin_mode = ?
-                        AND position_side = ? AND product_line = ? AND margin_units = 0
-                    """, userId, margin.symbol(), asset, margin.marginMode().name(), margin.positionSide().name(),
-                    resolvedProductLine.name());
+            positionMarginRepository.deleteZero(
+                    resolvedProductLine, userId, margin.symbol(), asset,
+                    margin.marginMode(), margin.positionSide());
             schedulePositionCacheProjection(resolvedProductLine, userId, margin.symbol(),
                     margin.marginMode(), margin.positionSide());
             remaining = Math.subtractExact(remaining, debit);
@@ -3276,43 +2701,6 @@ public class AccountRepository {
         return accountType == AccountType.USDT_PERPETUAL;
     }
 
-    private PositionResponse toPositionResponse(java.sql.ResultSet rs) throws java.sql.SQLException {
-        return new PositionResponse(
-                rs.getLong("user_id"),
-                rs.getString("symbol"),
-                longOrZero(rs, "instrument_version"),
-                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                PositionSide.fromNullableDbValue(rs.getString("position_side")),
-                rs.getLong("signed_quantity_steps"),
-                rs.getLong("entry_price_ticks"),
-                rs.getLong("realized_pnl_units"),
-                rs.getTimestamp("updated_at").toInstant());
-    }
-
-    private PositionState toPositionState(java.sql.ResultSet rs) throws java.sql.SQLException {
-        return new PositionState(
-                rs.getLong("signed_quantity_steps"),
-                longOrZero(rs, "instrument_version"),
-                rs.getLong("entry_price_ticks"),
-                rs.getLong("entry_value_ticks"),
-                rs.getLong("realized_pnl_units"));
-    }
-
-    private PositionSettlementState toPositionSettlementState(java.sql.ResultSet rs) throws java.sql.SQLException {
-        return new PositionSettlementState(
-                rs.getLong("user_id"),
-                rs.getString("symbol"),
-                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                PositionSide.fromNullableDbValue(rs.getString("position_side")),
-                new PositionState(
-                        rs.getLong("signed_quantity_steps"),
-                        longOrZero(rs, "instrument_version"),
-                        rs.getLong("entry_price_ticks"),
-                        rs.getLong("entry_value_ticks"),
-                        rs.getLong("realized_pnl_units")),
-                rs.getTimestamp("updated_at").toInstant());
-    }
-
     public record OrderMarginApplication(long consumedUnits, long releasedUnits) {
         public static final OrderMarginApplication NONE = new OrderMarginApplication(0L, 0L);
     }
@@ -3323,9 +2711,6 @@ public class AccountRepository {
                 throw new IllegalArgumentException("invalid open interest lock request");
             }
         }
-    }
-
-    private record OpenInterestShard(ProductLine productLine, String symbol, int shardId) {
     }
 
     private record PositionMargin(String symbol,
