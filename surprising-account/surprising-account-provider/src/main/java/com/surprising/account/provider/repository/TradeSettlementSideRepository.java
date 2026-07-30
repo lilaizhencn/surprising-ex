@@ -62,4 +62,19 @@ public class TradeSettlementSideRepository {
                     + productLine + ":" + trade.symbol() + ":" + trade.tradeId() + ":" + role);
         }
     }
+
+    public MarginUsage marginUsage(long orderId) {
+        return jdbcTemplate.query("""
+                SELECT COALESCE(SUM(order_margin_consumed_units), 0) AS consumed_units,
+                       COALESCE(SUM(order_margin_released_units), 0) AS released_units
+                  FROM account_trade_settlement_sides
+                 WHERE order_id = ?
+                """, (rs, rowNum) -> new MarginUsage(
+                rs.getLong("consumed_units"), rs.getLong("released_units")), orderId)
+                .stream().findFirst()
+                .orElse(new MarginUsage(0L, 0L));
+    }
+
+    public record MarginUsage(long consumedUnits, long releasedUnits) {
+    }
 }

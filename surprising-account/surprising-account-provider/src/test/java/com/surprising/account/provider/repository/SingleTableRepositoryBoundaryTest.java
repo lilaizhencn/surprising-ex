@@ -228,6 +228,20 @@ class SingleTableRepositoryBoundaryTest {
                 .doesNotContain("account_position_margins");
     }
 
+    @Test
+    void spotOrderReservationRepositoryOnlyQueriesReservationTable() {
+        JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
+        SpotOrderReservationRepository repository = new SpotOrderReservationRepository(jdbcTemplate);
+
+        repository.lock(9001L);
+
+        String sql = capturedQuery(jdbcTemplate);
+        assertThat(sql)
+                .contains("FROM account_spot_order_reservations")
+                .doesNotContain("account_product_balances")
+                .doesNotContain("account_product_ledger_entries");
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static JdbcTemplate emptyQueryJdbcTemplate() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);

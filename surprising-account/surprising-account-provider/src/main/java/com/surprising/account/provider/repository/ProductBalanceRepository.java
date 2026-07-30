@@ -84,6 +84,103 @@ public class ProductBalanceRepository {
         return nextAvailable;
     }
 
+    public boolean moveAvailableToLocked(long userId,
+                                         AccountType accountType,
+                                         String asset,
+                                         long amountUnits,
+                                         Instant now) {
+        ensure(userId, accountType, asset, now);
+        return jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET available_units = available_units - ?,
+                       locked_units = locked_units + ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                   AND available_units >= ?
+                """, amountUnits, amountUnits, Timestamp.from(now), accountType.name(), userId, asset,
+                amountUnits) == 1;
+    }
+
+    public int moveLockedToAvailable(long userId,
+                                     AccountType accountType,
+                                     String asset,
+                                     long amountUnits,
+                                     Instant now) {
+        return jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET locked_units = locked_units - ?,
+                       available_units = available_units + ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                   AND locked_units >= ?
+                """, amountUnits, amountUnits, Timestamp.from(now), accountType.name(), userId, asset, amountUnits);
+    }
+
+    public int debitLocked(long userId,
+                           AccountType accountType,
+                           String asset,
+                           long amountUnits,
+                           Instant now) {
+        ensure(userId, accountType, asset, now);
+        return jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET locked_units = locked_units - ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                   AND locked_units >= ?
+                """, amountUnits, Timestamp.from(now), accountType.name(), userId, asset, amountUnits);
+    }
+
+    public int creditAvailable(long userId,
+                               AccountType accountType,
+                               String asset,
+                               long amountUnits,
+                               Instant now) {
+        ensure(userId, accountType, asset, now);
+        return jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET available_units = available_units + ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, amountUnits, Timestamp.from(now), accountType.name(), userId, asset);
+    }
+
+    public int debitAvailable(long userId,
+                              AccountType accountType,
+                              String asset,
+                              long amountUnits,
+                              Instant now) {
+        ensure(userId, accountType, asset, now);
+        return jdbcTemplate.update("""
+                UPDATE account_product_balances
+                   SET available_units = available_units - ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                   AND available_units >= ?
+                """, amountUnits, Timestamp.from(now), accountType.name(), userId, asset, amountUnits);
+    }
+
+    public long equity(long userId, AccountType accountType, String asset) {
+        Long equityUnits = jdbcTemplate.queryForObject("""
+                SELECT available_units + locked_units
+                  FROM account_product_balances
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, Long.class, accountType.name(), userId, asset);
+        return equityUnits == null ? 0L : equityUnits;
+    }
+
     private static ProductBalanceRow toRow(java.sql.ResultSet resultSet) throws java.sql.SQLException {
         return new ProductBalanceRow(
                 resultSet.getLong("user_id"),

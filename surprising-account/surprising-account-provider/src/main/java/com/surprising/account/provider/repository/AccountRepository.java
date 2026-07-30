@@ -31,6 +31,7 @@ import com.surprising.account.provider.service.PositionModeCommandService;
 import com.surprising.account.provider.service.PositionModeSwitchGuard;
 import com.surprising.account.provider.service.PositionOpenInterestService;
 import com.surprising.account.provider.service.PositionQueryService;
+import com.surprising.account.provider.service.SpotTradeSettlementService;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.price.api.model.MarkPriceEvent;
@@ -81,6 +82,7 @@ public class AccountRepository {
     private final PositionQueryService positionQueryService;
     private final OpenInterestShardRepository openInterestShardRepository;
     private final PositionOpenInterestService positionOpenInterestService;
+    private final SpotTradeSettlementService spotTradeSettlementService;
 
     public AccountRepository(JdbcTemplate jdbcTemplate, AccountSequenceRepository sequenceRepository) {
         this(jdbcTemplate, sequenceRepository, null, null);
@@ -114,6 +116,7 @@ public class AccountRepository {
                 new AccountInstrumentRepository(jdbcTemplate),
                 null,
                 new OpenInterestShardRepository(jdbcTemplate),
+                null,
                 null);
     }
 
@@ -139,7 +142,8 @@ public class AccountRepository {
                              AccountInstrumentRepository accountInstrumentRepository,
                              PositionQueryService positionQueryService,
                              OpenInterestShardRepository openInterestShardRepository,
-                             PositionOpenInterestService positionOpenInterestService) {
+                             PositionOpenInterestService positionOpenInterestService,
+                             SpotTradeSettlementService spotTradeSettlementService) {
         this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
         this.markPriceCache = markPriceCache;
@@ -188,6 +192,11 @@ public class AccountRepository {
         this.positionOpenInterestService = positionOpenInterestService == null
                 ? new PositionOpenInterestService(jdbcTemplate, positionRepository, openInterestShardRepository)
                 : positionOpenInterestService;
+        this.spotTradeSettlementService = spotTradeSettlementService == null
+                ? new SpotTradeSettlementService(
+                        sequenceRepository, productBalanceRepository, productLedgerRepository,
+                        new SpotOrderReservationRepository(jdbcTemplate))
+                : spotTradeSettlementService;
     }
 
     public Optional<BalanceResponse> balance(long userId, String asset) {
@@ -1221,19 +1230,7 @@ public class AccountRepository {
     }
 
     public SpotInstrumentSpec spotInstrumentSpec(String symbol, long instrumentVersion) {
-        return jdbcTemplate.query("""
-                SELECT version, base_asset, quote_asset, quantity_step_units, notional_multiplier_units
-                  FROM instruments
-                 WHERE symbol = ?
-                   AND version = ?
-                   AND instrument_type = 'SPOT'
-                   AND contract_type = 'SPOT'
-                """, (rs, rowNum) -> new SpotInstrumentSpec(
-                rs.getLong("version"),
-                rs.getString("base_asset"),
-                rs.getString("quote_asset"),
-                rs.getLong("quantity_step_units"),
-                rs.getLong("notional_multiplier_units")), symbol, instrumentVersion).stream().findFirst()
+        return accountInstrumentRepository.findSpotSpec(symbol, instrumentVersion)
                 .orElseThrow(() -> new IllegalStateException("spot instrument spec not found for "
                         + symbol + " version " + instrumentVersion));
     }
@@ -1520,46 +1517,9 @@ public class AccountRepository {
                                     String feeReason,
                                     boolean orderCompleted,
                                     Instant now) {
-        if (priceTicks <= 0 || quantitySteps <= 0) {
-            throw new IllegalArgumentException("priceTicks and quantitySteps must be positive");
-        }
-        SpotReservation reservation = lockSpotReservation(orderId, userId, symbol);
-        if (reservation.side() != side) {
-            throw new IllegalStateException("spot reservation side mismatch for order " + orderId);
-        }
-        long baseUnits = multiplyToLong(quantitySteps, spec.quantityStepUnits());
-        long quoteUnits = multiplyToLong(priceTicks, quantitySteps, spec.notionalMultiplierUnits());
-        long feeUnits = spotFeeUnits(quoteUnits, feeRatePpm);
-        long positiveFeeUnits = feeRatePpm > 0 ? feeUnits : 0L;
-        long settledUnits = side == OrderSide.BUY
-                ? Math.addExact(quoteUnits, positiveFeeUnits)
-                : baseUnits;
-        long remainingReservationUnits = Math.subtractExact(reservation.reservedUnits(),
-                Math.addExact(reservation.settledUnits(), reservation.releasedUnits()));
-        if (settledUnits > remainingReservationUnits) {
-            throw new IllegalStateException("spot reservation is smaller than filled amount for order " + orderId);
-        }
-        long releaseUnits = orderCompleted ? Math.subtractExact(remainingReservationUnits, settledUnits) : 0L;
-        if (side == OrderSide.BUY) {
-            debitSpotLocked(userId, spec.quoteAsset(), quoteUnits, now, tradeId, orderId, "SPOT_BUY_COST");
-            if (positiveFeeUnits > 0) {
-                debitSpotLocked(userId, spec.quoteAsset(), positiveFeeUnits, now, tradeId, orderId, feeReason);
-            } else if (feeUnits > 0) {
-                creditSpotAvailable(userId, spec.quoteAsset(), feeUnits, now, tradeId, orderId, feeReason);
-            }
-            creditSpotAvailable(userId, spec.baseAsset(), baseUnits, now, tradeId, orderId, "SPOT_BUY_FILL");
-            releaseSpotLocked(userId, spec.quoteAsset(), releaseUnits, now);
-        } else {
-            debitSpotLocked(userId, spec.baseAsset(), baseUnits, now, tradeId, orderId, "SPOT_SELL_BASE");
-            creditSpotAvailable(userId, spec.quoteAsset(), quoteUnits, now, tradeId, orderId, "SPOT_SELL_PROCEEDS");
-            if (positiveFeeUnits > 0) {
-                debitSpotAvailable(userId, spec.quoteAsset(), positiveFeeUnits, now, tradeId, orderId, feeReason);
-            } else if (feeUnits > 0) {
-                creditSpotAvailable(userId, spec.quoteAsset(), feeUnits, now, tradeId, orderId, feeReason);
-            }
-            releaseSpotLocked(userId, spec.baseAsset(), releaseUnits, now);
-        }
-        updateSpotReservation(orderId, settledUnits, releaseUnits, feeReason, now);
+        spotTradeSettlementService.settle(
+                userId, orderId, tradeId, symbol, side, priceTicks, quantitySteps,
+                spec, feeRatePpm, feeReason, orderCompleted, now);
     }
 
     public void settleTradeFee(long userId,
@@ -2448,221 +2408,6 @@ public class AccountRepository {
         }
     }
 
-    private SpotReservation lockSpotReservation(long orderId, long userId, String symbol) {
-        return jdbcTemplate.query("""
-                SELECT user_id, side, asset, reserved_units, settled_units, released_units
-                  FROM account_spot_order_reservations
-                 WHERE order_id = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                   AND status NOT IN ('RELEASED', 'SETTLED')
-                 FOR UPDATE
-                """, (rs, rowNum) -> new SpotReservation(
-                rs.getLong("user_id"),
-                OrderSide.valueOf(rs.getString("side")),
-                rs.getString("asset"),
-                rs.getLong("reserved_units"),
-                rs.getLong("settled_units"),
-                rs.getLong("released_units")), orderId, userId, symbol).stream().findFirst()
-                .orElseThrow(() -> new IllegalStateException("active spot reservation not found for order " + orderId));
-    }
-
-    private void debitSpotLocked(long userId,
-                                 String asset,
-                                 long amountUnits,
-                                 Instant now,
-                                 long tradeId,
-                                 long orderId,
-                                 String reason) {
-        if (amountUnits <= 0) {
-            return;
-        }
-        ensureSpotBalance(userId, asset, now);
-        int rows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET locked_units = locked_units - ?,
-                       updated_at = ?
-                 WHERE account_type = 'SPOT'
-                   AND user_id = ?
-                   AND asset = ?
-                   AND locked_units >= ?
-                """, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
-        if (rows != 1) {
-            throw new IllegalStateException("insufficient locked spot balance for order " + orderId);
-        }
-        insertSpotLedger(userId, asset, Math.negateExact(amountUnits), spotEquity(userId, asset),
-                tradeId, orderId, reason, now);
-    }
-
-    private void releaseSpotLocked(long userId, String asset, long amountUnits, Instant now) {
-        if (amountUnits <= 0) {
-            return;
-        }
-        ensureSpotBalance(userId, asset, now);
-        int rows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET locked_units = locked_units - ?,
-                       available_units = available_units + ?,
-                       updated_at = ?
-                 WHERE account_type = 'SPOT'
-                   AND user_id = ?
-                   AND asset = ?
-                   AND locked_units >= ?
-                """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
-        if (rows != 1) {
-            throw new IllegalStateException("insufficient locked spot balance for release");
-        }
-    }
-
-    private void creditSpotAvailable(long userId,
-                                     String asset,
-                                     long amountUnits,
-                                     Instant now,
-                                     long tradeId,
-                                     long orderId,
-                                     String reason) {
-        if (amountUnits <= 0) {
-            return;
-        }
-        ensureSpotBalance(userId, asset, now);
-        int rows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET available_units = available_units + ?,
-                       updated_at = ?
-                 WHERE account_type = 'SPOT'
-                   AND user_id = ?
-                   AND asset = ?
-                """, amountUnits, Timestamp.from(now), userId, asset);
-        requireSingleRow(rows, "spot available credit");
-        insertSpotLedger(userId, asset, amountUnits, spotEquity(userId, asset),
-                tradeId, orderId, reason, now);
-    }
-
-    private void debitSpotAvailable(long userId,
-                                    String asset,
-                                    long amountUnits,
-                                    Instant now,
-                                    long tradeId,
-                                    long orderId,
-                                    String reason) {
-        if (amountUnits <= 0) {
-            return;
-        }
-        ensureSpotBalance(userId, asset, now);
-        int rows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET available_units = available_units - ?,
-                       updated_at = ?
-                 WHERE account_type = 'SPOT'
-                   AND user_id = ?
-                   AND asset = ?
-                   AND available_units >= ?
-                """, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
-        if (rows != 1) {
-            throw new IllegalStateException("insufficient available spot balance for fee");
-        }
-        insertSpotLedger(userId, asset, Math.negateExact(amountUnits), spotEquity(userId, asset),
-                tradeId, orderId, reason, now);
-    }
-
-    private void ensureSpotBalance(long userId, String asset, Instant now) {
-        jdbcTemplate.update("""
-                INSERT INTO account_product_balances (
-                    account_type, user_id, asset, available_units, locked_units, updated_at
-                ) VALUES ('SPOT', ?, ?, 0, 0, ?)
-                ON CONFLICT (account_type, user_id, asset) DO NOTHING
-                """, userId, asset, Timestamp.from(now));
-    }
-
-    private long spotEquity(long userId, String asset) {
-        Long equityUnits = jdbcTemplate.queryForObject("""
-                SELECT available_units + locked_units
-                  FROM account_product_balances
-                 WHERE account_type = 'SPOT'
-                   AND user_id = ?
-                   AND asset = ?
-                """, Long.class, userId, asset);
-        return equityUnits == null ? 0L : equityUnits;
-    }
-
-    private void insertSpotLedger(long userId,
-                                  String asset,
-                                  long amountUnits,
-                                  long balanceAfterUnits,
-                                  long tradeId,
-                                  long orderId,
-                                  String reason,
-                                  Instant now) {
-        if (amountUnits == 0) {
-            return;
-        }
-        String referenceId = tradeId + ":" + orderId + ":" + reason;
-        int rows = jdbcTemplate.update("""
-                INSERT INTO account_product_ledger_entries (
-                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, created_at
-                ) VALUES (?, ?, 'SPOT', ?, ?, ?, 'SPOT_TRADE', ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
-                userId, asset, amountUnits,
-                balanceAfterUnits, referenceId, reason, Timestamp.from(now));
-        requireSingleRow(rows, "spot trade ledger insert");
-    }
-
-    private void updateSpotReservation(long orderId,
-                                       long settledUnits,
-                                       long releasedUnits,
-                                       String reason,
-                                       Instant now) {
-        int rows = jdbcTemplate.update("""
-                UPDATE account_spot_order_reservations
-                   SET settled_units = settled_units + ?,
-                       released_units = released_units + ?,
-                       status = CASE
-                           WHEN settled_units + released_units + ? + ? >= reserved_units THEN 'SETTLED'
-                           WHEN settled_units + ? > 0 THEN 'PARTIALLY_SETTLED'
-                           WHEN released_units + ? > 0 THEN 'PARTIALLY_RELEASED'
-                           ELSE status
-                       END,
-                       reason = ?,
-                       updated_at = ?
-                 WHERE order_id = ?
-                   AND settled_units + released_units + ? + ? <= reserved_units
-                """, settledUnits, releasedUnits, settledUnits, releasedUnits, settledUnits, releasedUnits,
-                reason, Timestamp.from(now), orderId, settledUnits, releasedUnits);
-        requireSingleRow(rows, "spot reservation settlement update");
-    }
-
-    private long spotFeeUnits(long quoteUnits, long feeRatePpm) {
-        if (feeRatePpm == 0) {
-            return 0L;
-        }
-        BigInteger numerator = BigInteger.valueOf(quoteUnits)
-                .multiply(BigInteger.valueOf(Math.absExact(feeRatePpm)));
-        return divideCeiling(numerator, BigInteger.valueOf(PPM));
-    }
-
-    private long multiplyToLong(long... values) {
-        BigInteger product = BigInteger.ONE;
-        for (long value : values) {
-            if (value <= 0) {
-                throw new IllegalArgumentException("spot settlement inputs must be positive");
-            }
-            product = product.multiply(BigInteger.valueOf(value));
-        }
-        return product.longValueExact();
-    }
-
-    private long divideCeiling(BigInteger numerator, BigInteger denominator) {
-        if (numerator.signum() < 0 || denominator.signum() <= 0) {
-            throw new IllegalArgumentException("positive numerator and denominator are required");
-        }
-        BigInteger[] quotientAndRemainder = numerator.divideAndRemainder(denominator);
-        return (quotientAndRemainder[1].signum() == 0
-                ? quotientAndRemainder[0]
-                : quotientAndRemainder[0].add(BigInteger.ONE)).longValueExact();
-    }
-
     private ProductBalanceResponse toProductBalance(AccountType accountType, BalanceResponse balance) {
         return new ProductBalanceResponse(balance.userId(), accountType, balance.asset(), balance.availableUnits(),
                 balance.lockedUnits(), balance.equityUnits(), balance.updatedAt());
@@ -2722,15 +2467,6 @@ public class AccountRepository {
         private PositionMargin(String symbol, String asset, MarginMode marginMode, long marginUnits) {
             this(symbol, asset, marginMode, PositionSide.NET, marginUnits, AccountType.USDT_PERPETUAL);
         }
-    }
-
-    private record SpotReservation(
-            long userId,
-            OrderSide side,
-            String asset,
-            long reservedUnits,
-            long settledUnits,
-            long releasedUnits) {
     }
 
     private record ProductBalanceKey(AccountType accountType, String asset) {

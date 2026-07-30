@@ -23,6 +23,9 @@ Surprising Exchange account and product settlement module. The current implement
 - `PositionQueryService` aggregates positions, instrument settlement assets, and position margins;
   `PositionModeCommandService` orchestrates mode changes; `PositionOpenInterestService` owns the
   atomic cross-table position and sharded-open-interest update.
+- `SpotOrderReservationRepository` owns only spot order reservations.
+  `AccountOrderReservationService` aggregates reservations, balances, settlement audit, and command
+  results, while `SpotTradeSettlementService` orchestrates spot balance and ledger settlement.
 - Services own transaction boundaries, idempotency, lock order, and cross-table writes. The
   existing `AccountRepository` remains as a compatibility facade during the incremental migration,
   preserving public entry points and funds-transaction semantics.

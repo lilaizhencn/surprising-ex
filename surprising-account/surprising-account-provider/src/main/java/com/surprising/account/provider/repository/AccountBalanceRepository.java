@@ -77,6 +77,31 @@ public class AccountBalanceRepository {
         return nextAvailable;
     }
 
+    public boolean moveAvailableToLocked(long userId, String asset, long amountUnits, Instant now) {
+        ensure(userId, asset, now);
+        return jdbcTemplate.update("""
+                UPDATE account_balances
+                   SET available_units = available_units - ?,
+                       locked_units = locked_units + ?,
+                       updated_at = ?
+                 WHERE user_id = ?
+                   AND asset = ?
+                   AND available_units >= ?
+                """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits) == 1;
+    }
+
+    public int moveLockedToAvailable(long userId, String asset, long amountUnits, Instant now) {
+        return jdbcTemplate.update("""
+                UPDATE account_balances
+                   SET locked_units = locked_units - ?,
+                       available_units = available_units + ?,
+                       updated_at = ?
+                 WHERE user_id = ?
+                   AND asset = ?
+                   AND locked_units >= ?
+                """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
+    }
+
     private static void requireSingleRow(int rows, String operation) {
         if (rows != 1) {
             throw new IllegalStateException(operation + " affected " + rows + " rows");

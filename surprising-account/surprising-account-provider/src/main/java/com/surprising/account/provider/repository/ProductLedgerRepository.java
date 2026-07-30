@@ -151,6 +151,24 @@ public class ProductLedgerRepository {
                 referenceId, reason, Timestamp.from(now));
     }
 
+    public int insertSpotTrade(long entryId,
+                               long userId,
+                               String asset,
+                               long amountUnits,
+                               long balanceAfterUnits,
+                               String referenceId,
+                               String reason,
+                               Instant now) {
+        return jdbcTemplate.update("""
+                INSERT INTO account_product_ledger_entries (
+                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, created_at
+                ) VALUES (?, ?, 'SPOT', ?, ?, ?, 'SPOT_TRADE', ?, ?, ?)
+                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
+                """, entryId, userId, asset, amountUnits, balanceAfterUnits, referenceId, reason,
+                Timestamp.from(now));
+    }
+
     private static AdminCursorPage.SortSpec createdAtSort(String sort, String idColumn) {
         AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
                 "createdAt", "created_at", idColumn, true);

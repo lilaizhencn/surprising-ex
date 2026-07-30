@@ -168,6 +168,18 @@ public class AccountCommandRepository {
         return results;
     }
 
+    public long releasedOrderMargin(long orderId) {
+        Long releasedUnits = jdbcTemplate.queryForObject("""
+                SELECT COALESCE(SUM((result_payload ->> 'releasedUnits')::bigint), 0)
+                  FROM account_commands
+                 WHERE command_type = 'ORDER_RELEASE'
+                   AND source_reference = ?
+                   AND status = 'APPLIED'
+                   AND result_payload ->> 'releasedUnits' IS NOT NULL
+                """, Long.class, String.valueOf(orderId));
+        return releasedUnits == null ? 0L : releasedUnits;
+    }
+
     private void markTerminal(String commandId,
                               AccountCommandStatus status,
                               String resultPayload,

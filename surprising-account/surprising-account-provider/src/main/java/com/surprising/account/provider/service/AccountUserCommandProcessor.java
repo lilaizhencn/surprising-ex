@@ -22,7 +22,6 @@ import com.surprising.account.provider.repository.AccountDeficitSettlementReposi
 import com.surprising.account.provider.repository.AccountFundingSettlementRepository;
 import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
-import com.surprising.account.provider.repository.AccountOrderReservationRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -43,7 +42,7 @@ public class AccountUserCommandProcessor {
     private final AccountDeficitSettlementRepository deficitSettlementRepository;
     private final AccountFundingSettlementRepository fundingSettlementRepository;
     private final AccountRepository accountRepository;
-    private final AccountOrderReservationRepository orderReservationRepository;
+    private final AccountOrderReservationService orderReservationService;
     private final AccountService accountService;
     private final PositionCacheAfterCommitSynchronizer positionCacheSynchronizer;
 
@@ -55,7 +54,7 @@ public class AccountUserCommandProcessor {
                                        AccountDeficitSettlementRepository deficitSettlementRepository,
                                        AccountFundingSettlementRepository fundingSettlementRepository,
                                        AccountRepository accountRepository,
-                                       AccountOrderReservationRepository orderReservationRepository,
+                                       AccountOrderReservationService orderReservationService,
                                        AccountService accountService,
                                        PositionCacheAfterCommitSynchronizer positionCacheSynchronizer) {
         this.objectMapper = objectMapper;
@@ -66,7 +65,7 @@ public class AccountUserCommandProcessor {
         this.deficitSettlementRepository = deficitSettlementRepository;
         this.fundingSettlementRepository = fundingSettlementRepository;
         this.accountRepository = accountRepository;
-        this.orderReservationRepository = orderReservationRepository;
+        this.orderReservationService = orderReservationService;
         this.accountService = accountService;
         this.positionCacheSynchronizer = positionCacheSynchronizer;
     }
@@ -154,7 +153,7 @@ public class AccountUserCommandProcessor {
         return switch (command.commandType()) {
             case ORDER_RESERVE -> {
                 OrderReserveAccountCommand reserve = readPayload(command, OrderReserveAccountCommand.class);
-                boolean reserved = orderReservationRepository.reserve(command.productLine(), command.userId(),
+                boolean reserved = orderReservationService.reserve(command.productLine(), command.userId(),
                         reserve, Instant.now());
                 if (!reserved) {
                     throw new AccountCommandRejectedException(
@@ -169,7 +168,7 @@ public class AccountUserCommandProcessor {
             }
             case ORDER_RELEASE -> {
                 OrderReleaseAccountCommand release = readPayload(command, OrderReleaseAccountCommand.class);
-                long releasedUnits = orderReservationRepository.release(
+                long releasedUnits = orderReservationService.release(
                         command.productLine(), command.userId(), release.orderId(),
                         release.releaseAll(), release.quantitySteps(), release.remainingQuantitySteps(),
                         release.reservationExpected(), release.reservationAccountType(), release.reservationAsset(),

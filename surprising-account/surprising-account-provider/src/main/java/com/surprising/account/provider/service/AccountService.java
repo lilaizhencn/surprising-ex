@@ -32,6 +32,7 @@ import com.surprising.account.provider.model.PositionSettlementState;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
+import com.surprising.account.provider.repository.AccountInstrumentRepository;
 import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.account.provider.repository.AdminBalanceAdjustmentRepository;
 import com.surprising.account.provider.repository.PositionModeRepository;
@@ -75,6 +76,8 @@ public class AccountService {
     private final PositionModeCommandService positionModeCommandService;
     private final PositionRepository positionRepository;
     private final PositionQueryService positionQueryService;
+    private final AccountInstrumentRepository accountInstrumentRepository;
+    private final SpotTradeSettlementService spotTradeSettlementService;
     private final PositionCalculator positionCalculator;
     private final AccountProperties properties;
     private final AccountOutboxRepository outboxRepository;
@@ -88,7 +91,7 @@ public class AccountService {
 
     public AccountService(AccountRepository accountRepository, PositionCalculator positionCalculator) {
         this(accountRepository, positionCalculator, new AccountProperties(), null, null, null,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null);
     }
 
     public AccountService(AccountRepository accountRepository,
@@ -96,7 +99,7 @@ public class AccountService {
                            AccountProperties properties,
                            AccountOutboxRepository outboxRepository) {
         this(accountRepository, positionCalculator, properties, outboxRepository, null, null,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null);
     }
 
     public AccountService(AccountRepository accountRepository,
@@ -105,7 +108,7 @@ public class AccountService {
                            AccountOutboxRepository outboxRepository,
                            RedisPositionCache positionCache) {
         this(accountRepository, positionCalculator, properties, outboxRepository, positionCache, null,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -122,7 +125,9 @@ public class AccountService {
                            TradeSettlementSideRepository tradeSettlementSideRepository,
                            PositionModeCommandService positionModeCommandService,
                            PositionRepository positionRepository,
-                           PositionQueryService positionQueryService) {
+                           PositionQueryService positionQueryService,
+                           AccountInstrumentRepository accountInstrumentRepository,
+                           SpotTradeSettlementService spotTradeSettlementService) {
         this.accountRepository = accountRepository;
         this.accountQueryService = accountQueryService;
         this.accountBalanceCommandService = accountBalanceCommandService;
@@ -132,6 +137,8 @@ public class AccountService {
         this.positionModeCommandService = positionModeCommandService;
         this.positionRepository = positionRepository;
         this.positionQueryService = positionQueryService;
+        this.accountInstrumentRepository = accountInstrumentRepository;
+        this.spotTradeSettlementService = spotTradeSettlementService;
         this.positionCalculator = positionCalculator;
         this.properties = properties;
         this.outboxRepository = outboxRepository;
@@ -914,8 +921,14 @@ public class AccountService {
                                     String feeReason,
                                     Instant eventTime) {
         SpotInstrumentSpec spec = spotInstrumentSpec(symbol, instrumentVersion);
-        accountRepository.settleSpotTradeSide(userId, orderId, tradeId, symbol, side, priceTicks,
-                quantitySteps, spec, feeRatePpm, feeReason, orderCompleted, eventTime);
+        if (spotTradeSettlementService == null) {
+            accountRepository.settleSpotTradeSide(userId, orderId, tradeId, symbol, side, priceTicks,
+                    quantitySteps, spec, feeRatePpm, feeReason, orderCompleted, eventTime);
+            return;
+        }
+        spotTradeSettlementService.settle(
+                userId, orderId, tradeId, symbol, side, priceTicks, quantitySteps,
+                spec, feeRatePpm, feeReason, orderCompleted, eventTime);
     }
 
     private AccountRepository.OrderMarginApplication applyTradeSide(long tradeId,
@@ -1076,7 +1089,12 @@ public class AccountService {
 
     private SpotInstrumentSpec spotInstrumentSpec(String symbol, long instrumentVersion) {
         return spotInstrumentSpecCache.get(new ContractSpecKey(symbol, instrumentVersion),
-                key -> accountRepository.spotInstrumentSpec(key.symbol(), key.instrumentVersion()));
+                key -> accountInstrumentRepository == null
+                        ? accountRepository.spotInstrumentSpec(key.symbol(), key.instrumentVersion())
+                        : accountInstrumentRepository.findSpotSpec(key.symbol(), key.instrumentVersion())
+                                .orElseThrow(() -> new IllegalStateException(
+                                        "spot instrument spec not found for "
+                                                + key.symbol() + " version " + key.instrumentVersion())));
     }
 
     private Optional<LiquidationFeeContext> liquidationFeeContext(long orderId, long userId, String symbol) {

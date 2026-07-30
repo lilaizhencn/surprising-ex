@@ -71,6 +71,10 @@ public class AccountSequenceRepository {
         return nextSequence(Sequence.PRODUCT_TRANSFER);
     }
 
+    public long nextSpotReservationId() {
+        return nextSequence(Sequence.SPOT_RESERVATION);
+    }
+
     private long allocateRangeStart(String databaseSequence) {
         Long value = jdbcTemplate.queryForObject("""
                 SELECT nextval(CAST(? AS regclass))

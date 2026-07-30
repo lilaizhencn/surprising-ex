@@ -26,7 +26,6 @@ import com.surprising.account.provider.repository.AccountAdlTargetSettlementRepo
 import com.surprising.account.provider.repository.AccountCommandRepository;
 import com.surprising.account.provider.repository.AccountDeficitSettlementRepository;
 import com.surprising.account.provider.repository.AccountFundingSettlementRepository;
-import com.surprising.account.provider.repository.AccountOrderReservationRepository;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.product.api.ProductLine;
@@ -55,8 +54,8 @@ class AccountUserCommandProcessorTest {
     private final AccountFundingSettlementRepository fundingRepository =
             mock(AccountFundingSettlementRepository.class);
     private final AccountRepository accountRepository = mock(AccountRepository.class);
-    private final AccountOrderReservationRepository reservationRepository =
-            mock(AccountOrderReservationRepository.class);
+    private final AccountOrderReservationService reservationService =
+            mock(AccountOrderReservationService.class);
     private final AccountService accountService = mock(AccountService.class);
     private final PositionCacheAfterCommitSynchronizer cacheSynchronizer =
             mock(PositionCacheAfterCommitSynchronizer.class);
@@ -67,7 +66,7 @@ class AccountUserCommandProcessorTest {
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         processor = new AccountUserCommandProcessor(
                 objectMapper, properties, commandRepository, outboxRepository, adlRepository,
-                deficitRepository, fundingRepository, accountRepository, reservationRepository,
+                deficitRepository, fundingRepository, accountRepository, reservationService,
                 accountService, cacheSynchronizer);
     }
 
@@ -80,7 +79,7 @@ class AccountUserCommandProcessorTest {
         var outcome = process(command);
 
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.DUPLICATE);
-        verifyNoInteractions(reservationRepository, outboxRepository);
+        verifyNoInteractions(reservationService, outboxRepository);
         verify(commandRepository, never()).markApplied(any(), any(), any());
         verify(commandRepository, never()).markRejected(any(), any(), any(), any(), any());
     }
@@ -94,7 +93,7 @@ class AccountUserCommandProcessorTest {
         var outcome = process(command);
 
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.WAITING_DEPENDENCY);
-        verifyNoInteractions(reservationRepository, outboxRepository);
+        verifyNoInteractions(reservationService, outboxRepository);
     }
 
     @Test
@@ -109,7 +108,7 @@ class AccountUserCommandProcessorTest {
         var outcome = process(command);
 
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.REJECTED);
-        verifyNoInteractions(reservationRepository);
+        verifyNoInteractions(reservationService);
         verify(commandRepository).markRejected(eq(command.commandId()), eq(null),
                 eq("DEPENDENCY_REJECTED"), any(), any());
         verify(outboxRepository).enqueueCommandResult(
@@ -127,14 +126,14 @@ class AccountUserCommandProcessorTest {
                 "order-release:9004", command.partitionKey(), "{\"commandId\":\"order-release:9004\"}");
         when(commandRepository.register(eq(command), any(), any()))
                 .thenReturn(AccountCommandRegistration.READY);
-        when(reservationRepository.reserve(eq(ProductLine.LINEAR_PERPETUAL), eq(1001L), any(), any()))
+        when(reservationService.reserve(eq(ProductLine.LINEAR_PERPETUAL), eq(1001L), any(), any()))
                 .thenReturn(true);
         when(commandRepository.waitingDependents(command.commandId())).thenReturn(List.of(child));
 
         var outcome = process(command);
 
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.APPLIED);
-        verify(reservationRepository).reserve(
+        verify(reservationService).reserve(
                 eq(ProductLine.LINEAR_PERPETUAL), eq(1001L), any(), any());
         verify(commandRepository).markApplied(eq(command.commandId()), any(), any());
         verify(outboxRepository).enqueueCommandResult(
@@ -150,7 +149,7 @@ class AccountUserCommandProcessorTest {
         AccountUserCommand command = reserveCommand("order-reserve:9005", null);
         when(commandRepository.register(eq(command), any(), any()))
                 .thenReturn(AccountCommandRegistration.READY);
-        when(reservationRepository.reserve(eq(ProductLine.LINEAR_PERPETUAL), eq(1001L), any(), any()))
+        when(reservationService.reserve(eq(ProductLine.LINEAR_PERPETUAL), eq(1001L), any(), any()))
                 .thenReturn(false);
         when(commandRepository.waitingDependents(command.commandId())).thenReturn(List.of());
 
@@ -208,7 +207,7 @@ class AccountUserCommandProcessorTest {
         var outcome = process(command);
 
         assertThat(outcome).isEqualTo(AccountUserCommandProcessor.ProcessingOutcome.APPLIED);
-        verify(reservationRepository).release(
+        verify(reservationService).release(
                 ProductLine.LINEAR_PERPETUAL, 1001L, 9007L, false, 10L, 4L,
                 true, AccountType.USDT_PERPETUAL, "USDT", 500L,
                 "INTERNAL_MARKET_MAKER_SELF_TRADE", OCCURRED_AT);
@@ -234,7 +233,7 @@ class AccountUserCommandProcessorTest {
         assertThatThrownBy(() -> process(command))
                 .isInstanceOf(AccountCommandPoisonPillException.class);
 
-        verifyNoInteractions(reservationRepository, outboxRepository);
+        verifyNoInteractions(reservationService, outboxRepository);
         verify(commandRepository, never()).markApplied(any(), any(), any());
         verify(commandRepository, never()).markRejected(any(), any(), any(), any(), any());
     }
