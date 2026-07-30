@@ -8,6 +8,7 @@ import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountOutboxRecord;
+import com.surprising.account.provider.service.PositionCacheProjectionService;
 import com.surprising.trading.api.model.MarginMode;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -20,11 +21,10 @@ import org.springframework.stereotype.Repository;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Transactional outbox for account-side events.
+ * 账户侧事件的事务 outbox。
  *
- * <p>Position updates are written in the same database transaction as account settlement, then a
- * scheduled publisher sends them to Kafka. This keeps WebSocket position pushes downstream of the
- * authoritative account state instead of publishing from raw matching events.</p>
+ * <p>持仓更新与账户结算在同一数据库事务内写入，之后由定时发布器发送到 Kafka。
+ * 这样可以让 WebSocket 持仓推送以下游权威账户状态为准，而不是直接从原始撮合事件发布。</p>
  */
 @Repository
 public class AccountOutboxRepository {
@@ -33,13 +33,13 @@ public class AccountOutboxRepository {
     private final AccountSequenceRepository sequenceRepository;
     private final ObjectMapper objectMapper;
     private final AccountProperties properties;
-    private final PositionCacheProjectionRepository positionCacheProjectionRepository;
+    private final PositionCacheProjectionService positionCacheProjectionService;
 
     public AccountOutboxRepository(JdbcTemplate jdbcTemplate,
                                    AccountSequenceRepository sequenceRepository,
                                    ObjectMapper objectMapper) {
         this(jdbcTemplate, sequenceRepository, objectMapper, new AccountProperties(),
-                new PositionCacheProjectionRepository(jdbcTemplate));
+                new PositionCacheProjectionService(jdbcTemplate));
     }
 
     public AccountOutboxRepository(JdbcTemplate jdbcTemplate,
@@ -47,7 +47,7 @@ public class AccountOutboxRepository {
                                    ObjectMapper objectMapper,
                                    AccountProperties properties) {
         this(jdbcTemplate, sequenceRepository, objectMapper, properties,
-                new PositionCacheProjectionRepository(jdbcTemplate));
+                new PositionCacheProjectionService(jdbcTemplate));
     }
 
     @Autowired
@@ -55,12 +55,12 @@ public class AccountOutboxRepository {
                                    AccountSequenceRepository sequenceRepository,
                                    ObjectMapper objectMapper,
                                    AccountProperties properties,
-                                   PositionCacheProjectionRepository positionCacheProjectionRepository) {
+                                   PositionCacheProjectionService positionCacheProjectionService) {
         this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
         this.objectMapper = objectMapper;
         this.properties = properties == null ? new AccountProperties() : properties;
-        this.positionCacheProjectionRepository = positionCacheProjectionRepository;
+        this.positionCacheProjectionService = positionCacheProjectionService;
     }
 
     public PositionUpdatedEvent enqueuePositionUpdated(String topic,
@@ -69,7 +69,7 @@ public class AccountOutboxRepository {
                                                        Instant now,
                                                        String traceId) {
         requireCurrentProductTopic(topic);
-        PositionCacheEvent snapshot = positionCacheProjectionRepository.captureFinalSnapshot(
+        PositionCacheEvent snapshot = positionCacheProjectionService.captureFinalSnapshot(
                 currentProductLine(), position.userId(), position.symbol(), position.marginMode(),
                 position.positionSide());
         long eventId = sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.POSITION_EVENT);

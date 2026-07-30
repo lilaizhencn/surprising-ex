@@ -1,6 +1,7 @@
-package com.surprising.account.provider.repository;
+package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AdlTargetSettlementAccountCommand;
+import com.surprising.account.provider.repository.AccountSequenceRepository;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -9,19 +10,19 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Repository;
+import org.springframework.stereotype.Service;
 
-/** Conditionally settles the profitable target side of an ADL execution. */
-@Repository
-public class AccountAdlTargetSettlementRepository {
+/** 在满足快照条件时结算 ADL 盈利目标侧。 */
+@Service
+public class AdlTargetSettlementService {
 
     private static final int OPEN_INTEREST_SHARDS = 64;
 
     private final JdbcTemplate jdbcTemplate;
     private final AccountSequenceRepository sequenceRepository;
 
-    public AccountAdlTargetSettlementRepository(JdbcTemplate jdbcTemplate,
-                                               AccountSequenceRepository sequenceRepository) {
+    public AdlTargetSettlementService(JdbcTemplate jdbcTemplate,
+                                      AccountSequenceRepository sequenceRepository) {
         this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
     }
@@ -309,7 +310,7 @@ public class AccountAdlTargetSettlementRepository {
                         reference_type, reference_id, reason, created_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                    """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
+                    """, sequenceRepository.nextProductLedgerEntryId(),
                     productLine.accountTypeCode(),
                     userId, asset, amountUnits, balanceAfter, referenceType, commandId, reason, Timestamp.from(now))
                 : jdbcTemplate.update("""
@@ -318,7 +319,7 @@ public class AccountAdlTargetSettlementRepository {
                         reference_type, reference_id, reason, created_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
+                    """, sequenceRepository.nextLedgerEntryId(),
                     userId, asset, amountUnits,
                     balanceAfter, referenceType, commandId, reason, Timestamp.from(now));
         requireSingleRow(rows, "ADL target ledger insert");

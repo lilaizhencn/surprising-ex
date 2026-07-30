@@ -17,9 +17,6 @@ import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountCommandRegistration;
 import com.surprising.account.provider.repository.AccountCommandRepository;
-import com.surprising.account.provider.repository.AccountAdlTargetSettlementRepository;
-import com.surprising.account.provider.repository.AccountDeficitSettlementRepository;
-import com.surprising.account.provider.repository.AccountFundingSettlementRepository;
 import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import java.time.Instant;
@@ -38,9 +35,9 @@ public class AccountUserCommandProcessor {
     private final AccountProperties properties;
     private final AccountCommandRepository commandRepository;
     private final AccountOutboxRepository outboxRepository;
-    private final AccountAdlTargetSettlementRepository adlTargetSettlementRepository;
-    private final AccountDeficitSettlementRepository deficitSettlementRepository;
-    private final AccountFundingSettlementRepository fundingSettlementRepository;
+    private final AdlTargetSettlementService adlTargetSettlementService;
+    private final DeficitSettlementService deficitSettlementService;
+    private final FundingSettlementService fundingSettlementService;
     private final AccountRepository accountRepository;
     private final AccountOrderReservationService orderReservationService;
     private final AccountService accountService;
@@ -50,9 +47,9 @@ public class AccountUserCommandProcessor {
                                        AccountProperties properties,
                                        AccountCommandRepository commandRepository,
                                        AccountOutboxRepository outboxRepository,
-                                       AccountAdlTargetSettlementRepository adlTargetSettlementRepository,
-                                       AccountDeficitSettlementRepository deficitSettlementRepository,
-                                       AccountFundingSettlementRepository fundingSettlementRepository,
+                                       AdlTargetSettlementService adlTargetSettlementService,
+                                       DeficitSettlementService deficitSettlementService,
+                                       FundingSettlementService fundingSettlementService,
                                        AccountRepository accountRepository,
                                        AccountOrderReservationService orderReservationService,
                                        AccountService accountService,
@@ -61,9 +58,9 @@ public class AccountUserCommandProcessor {
         this.properties = properties;
         this.commandRepository = commandRepository;
         this.outboxRepository = outboxRepository;
-        this.adlTargetSettlementRepository = adlTargetSettlementRepository;
-        this.deficitSettlementRepository = deficitSettlementRepository;
-        this.fundingSettlementRepository = fundingSettlementRepository;
+        this.adlTargetSettlementService = adlTargetSettlementService;
+        this.deficitSettlementService = deficitSettlementService;
+        this.fundingSettlementService = fundingSettlementService;
         this.accountRepository = accountRepository;
         this.orderReservationService = orderReservationService;
         this.accountService = accountService;
@@ -195,7 +192,7 @@ public class AccountUserCommandProcessor {
             case FUNDING_SETTLE -> {
                 FundingSettlementAccountCommand funding =
                         readPayload(command, FundingSettlementAccountCommand.class);
-                long balanceAfter = fundingSettlementRepository.apply(command.productLine(), command.userId(),
+                long balanceAfter = fundingSettlementService.apply(command.productLine(), command.userId(),
                         command.commandId(), funding, Instant.now());
                 accountRepository.positions(command.productLine(), command.userId(), funding.positionSide())
                         .stream()
@@ -218,7 +215,7 @@ public class AccountUserCommandProcessor {
             case ADL_DEFICIT_RESERVE, INSURANCE_DEFICIT_RESERVE -> {
                 DeficitReservationAccountCommand reserve =
                         readPayload(command, DeficitReservationAccountCommand.class);
-                if (!deficitSettlementRepository.reserve(command.productLine(), command.userId(),
+                if (!deficitSettlementService.reserve(command.productLine(), command.userId(),
                         reserve.asset(), reserve.amountUnits(), Instant.now())) {
                     throw new AccountCommandRejectedException("DEFICIT_NOT_AVAILABLE",
                             "requested deficit is already reserved or no longer exists");
@@ -233,7 +230,7 @@ public class AccountUserCommandProcessor {
                         readPayload(command, DeficitReservationAccountCommand.class);
                 boolean adl = command.commandType()
                         == com.surprising.account.api.model.AccountUserCommandType.ADL_DEFICIT_FINALIZE;
-                long remaining = deficitSettlementRepository.finalizeReservation(
+                long remaining = deficitSettlementService.finalizeReservation(
                         command.productLine(), command.userId(), finalize.asset(), finalize.amountUnits(),
                         command.commandId(), adl ? "ADL_COVERAGE" : "INSURANCE_COVERAGE",
                         adl ? "ADL_DEFICIT_COVERAGE" : "COVER_ACCOUNT_DEFICIT", Instant.now());
@@ -246,7 +243,7 @@ public class AccountUserCommandProcessor {
             case ADL_DEFICIT_RELEASE, INSURANCE_DEFICIT_RELEASE -> {
                 DeficitReservationAccountCommand release =
                         readPayload(command, DeficitReservationAccountCommand.class);
-                long available = deficitSettlementRepository.releaseReservation(
+                long available = deficitSettlementService.releaseReservation(
                         command.productLine(), command.userId(), release.asset(), release.amountUnits(), Instant.now());
                 Map<String, Object> result = new LinkedHashMap<>();
                 result.put("asset", release.asset());
@@ -257,7 +254,7 @@ public class AccountUserCommandProcessor {
             case ADL_TARGET_SETTLE -> {
                 AdlTargetSettlementAccountCommand adl =
                         readPayload(command, AdlTargetSettlementAccountCommand.class);
-                var settled = adlTargetSettlementRepository.settle(
+                var settled = adlTargetSettlementService.settle(
                         command.productLine(), command.userId(), command.commandId(), adl, Instant.now());
                 if (!settled.applied()) {
                     throw new AccountCommandRejectedException(

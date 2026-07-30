@@ -1,4 +1,4 @@
-package com.surprising.account.provider.repository;
+package com.surprising.account.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -18,7 +18,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
-class PositionCacheProjectionRepositoryTest {
+class PositionCacheProjectionServiceTest {
 
     @Test
     void capturesOneFinalSnapshotWithoutWritingOutbox() {
@@ -27,9 +27,9 @@ class PositionCacheProjectionRepositoryTest {
         when(jdbcTemplate.query(anyString(), any(RowMapper.class),
                 eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET")))
                 .thenReturn(java.util.List.of(expected));
-        PositionCacheProjectionRepository repository = new PositionCacheProjectionRepository(jdbcTemplate);
+        PositionCacheProjectionService service = new PositionCacheProjectionService(jdbcTemplate);
 
-        PositionCacheEvent actual = repository.captureFinalSnapshot(
+        PositionCacheEvent actual = service.captureFinalSnapshot(
                 ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET);
 
         assertThat(actual).isEqualTo(expected);

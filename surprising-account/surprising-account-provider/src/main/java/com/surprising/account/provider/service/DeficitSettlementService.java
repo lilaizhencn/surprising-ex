@@ -1,21 +1,22 @@
-package com.surprising.account.provider.repository;
+package com.surprising.account.provider.service;
 
+import com.surprising.account.provider.repository.AccountSequenceRepository;
 import com.surprising.product.api.ProductLine;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Repository;
+import org.springframework.stereotype.Service;
 
-/** Owns deficit reservations used to coordinate insurance and ADL without cross-user locks. */
-@Repository
-public class AccountDeficitSettlementRepository {
+/** 管理保险基金与 ADL 之间无需跨用户锁的亏空预留。 */
+@Service
+public class DeficitSettlementService {
 
     private final JdbcTemplate jdbcTemplate;
     private final AccountSequenceRepository sequenceRepository;
 
-    public AccountDeficitSettlementRepository(JdbcTemplate jdbcTemplate,
-                                              AccountSequenceRepository sequenceRepository) {
+    public DeficitSettlementService(JdbcTemplate jdbcTemplate,
+                                    AccountSequenceRepository sequenceRepository) {
         this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
     }
@@ -87,7 +88,7 @@ public class AccountDeficitSettlementRepository {
                         reference_type, reference_id, reason, created_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                    """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
+                    """, sequenceRepository.nextProductLedgerEntryId(),
                     productLine.accountTypeCode(),
                     userId, asset, amountUnits, balanceAfter, referenceType, commandId, reason, Timestamp.from(now))
                 : jdbcTemplate.update("""
@@ -96,7 +97,7 @@ public class AccountDeficitSettlementRepository {
                         reference_type, reference_id, reason, created_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
+                    """, sequenceRepository.nextLedgerEntryId(),
                     userId, asset, amountUnits,
                     balanceAfter, referenceType, commandId, reason, Timestamp.from(now));
         if (ledgerRows != 1) {

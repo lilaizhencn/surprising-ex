@@ -26,6 +26,11 @@ Surprising Exchange account and product settlement module. The current implement
 - `SpotOrderReservationRepository` owns only spot order reservations.
   `AccountOrderReservationService` aggregates reservations, balances, settlement audit, and command
   results, while `SpotTradeSettlementService` orchestrates spot balance and ledger settlement.
+- `AdlTargetSettlementService`, `DeficitSettlementService`, and `FundingSettlementService`
+  own the atomic cross-table workflows for ADL, deficit recovery, and funding settlement.
+- `PositionCacheProjectionService` aggregates positions, margins, and instrument metadata into the
+  final snapshot written to Redis after commit; `AccountOutboxRepository` persists only the account
+  outbox table.
 - Services own transaction boundaries, idempotency, lock order, and cross-table writes. The
   existing `AccountRepository` remains as a compatibility facade during the incremental migration,
   preserving public entry points and funds-transaction semantics.

@@ -20,6 +20,10 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
   负责持仓模式切换编排；持仓与分片未平仓量的原子更新由 `PositionOpenInterestService` 负责。
 - `SpotOrderReservationRepository` 只负责现货订单预占表；`AccountOrderReservationService`
   聚合预占、余额、成交侧审计和指令结果，`SpotTradeSettlementService` 编排现货余额与流水结算。
+- ADL、亏空回补和资金费的跨表原子结算分别由 `AdlTargetSettlementService`、
+  `DeficitSettlementService` 和 `FundingSettlementService` 负责。
+- `PositionCacheProjectionService` 聚合持仓、保证金与合约元数据，生成提交后写入 Redis
+  的最终状态快照；`AccountOutboxRepository` 只持久化账户 outbox 表。
 - 交易事务、幂等、锁顺序和跨表写入由 Service 负责；拆分期间保留 `AccountRepository` 兼容门面，
   旧调用入口和资金事务语义不变，内部能力按表逐步迁出。
 - 财务对账、订单时间线、运营报表和后台聚合查询不应继续扩展交易主库查询。相关代码以后进入

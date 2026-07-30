@@ -1,7 +1,6 @@
 package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.PositionCacheEvent;
-import com.surprising.account.provider.repository.PositionCacheProjectionRepository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
@@ -16,21 +15,20 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
- * Collects changed position keys for one account transaction.
+ * 收集单个账户事务中发生变化的持仓键。
  *
- * <p>The durable position event and the low-latency Redis accelerator share the same final snapshot. When a
- * mutation has no externally visible position event, the synchronizer captures the final state once immediately
- * before commit. Redis I/O always happens after commit and never delays the financial transaction.</p>
+ * <p>持久化持仓事件与低延迟 Redis 加速层共享同一份最终快照。若某次变更没有对外持仓事件，
+ * 同步器会在提交前读取一次最终状态。Redis I/O 始终在提交后执行，不阻塞资金事务。</p>
  */
 @Component
 public class PositionCacheAfterCommitSynchronizer {
 
-    private final PositionCacheProjectionRepository repository;
+    private final PositionCacheProjectionService projectionService;
     private final PositionCacheAccelerationWorker accelerationWorker;
 
-    public PositionCacheAfterCommitSynchronizer(PositionCacheProjectionRepository repository,
+    public PositionCacheAfterCommitSynchronizer(PositionCacheProjectionService projectionService,
                                                 PositionCacheAccelerationWorker accelerationWorker) {
-        this.repository = repository;
+        this.projectionService = projectionService;
         this.accelerationWorker = accelerationWorker;
     }
 
@@ -45,8 +43,8 @@ public class PositionCacheAfterCommitSynchronizer {
     }
 
     /**
-     * Supplies the exact snapshot already stored in the transactional position event.
-     * A later revision wins when one transaction mutates the same position more than once.
+     * 提供已写入事务持仓事件的精确快照。
+     * 同一事务多次修改同一持仓时，以较新的版本号为准。
      */
     public void schedule(PositionCacheEvent snapshot) {
         if (snapshot == null) {
@@ -78,7 +76,7 @@ public class PositionCacheAfterCommitSynchronizer {
                 }
                 for (ProjectionKey changed : registeredState.keys) {
                     PositionCacheEvent supplied = registeredState.suppliedSnapshots.get(changed);
-                    registeredState.events.add(supplied != null ? supplied : repository.captureFinalSnapshot(
+                    registeredState.events.add(supplied != null ? supplied : projectionService.captureFinalSnapshot(
                             changed.productLine(), changed.userId(), changed.symbol(),
                             changed.marginMode(), changed.positionSide()));
                 }

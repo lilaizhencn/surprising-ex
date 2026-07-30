@@ -8,7 +8,6 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.surprising.account.api.model.PositionCacheEvent;
-import com.surprising.account.provider.repository.PositionCacheProjectionRepository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
@@ -31,7 +30,7 @@ class PositionCacheAfterCommitSynchronizerTest {
 
     @Test
     void capturesOneFinalSnapshotBeforeCommitAndUpdatesRedisOnlyAfterCommit() {
-        PositionCacheProjectionRepository repository = mock(PositionCacheProjectionRepository.class);
+        PositionCacheProjectionService repository = mock(PositionCacheProjectionService.class);
         PositionCacheAccelerationWorker worker = mock(PositionCacheAccelerationWorker.class);
         PositionCacheEvent snapshot = snapshot();
         when(repository.captureFinalSnapshot(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
@@ -62,7 +61,7 @@ class PositionCacheAfterCommitSynchronizerTest {
 
     @Test
     void reusesDurableEventSnapshotWithoutAnotherDatabaseRead() {
-        PositionCacheProjectionRepository repository = mock(PositionCacheProjectionRepository.class);
+        PositionCacheProjectionService repository = mock(PositionCacheProjectionService.class);
         PositionCacheAccelerationWorker worker = mock(PositionCacheAccelerationWorker.class);
         PositionCacheEvent snapshot = snapshot();
         PositionCacheAfterCommitSynchronizer synchronizer =
@@ -87,7 +86,7 @@ class PositionCacheAfterCommitSynchronizerTest {
     @Test
     void rejectsSchedulingOutsideATransaction() {
         PositionCacheAfterCommitSynchronizer synchronizer = new PositionCacheAfterCommitSynchronizer(
-                mock(PositionCacheProjectionRepository.class), mock(PositionCacheAccelerationWorker.class));
+                mock(PositionCacheProjectionService.class), mock(PositionCacheAccelerationWorker.class));
 
         assertThatThrownBy(() -> synchronizer.schedule(
                 ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET))
@@ -97,7 +96,7 @@ class PositionCacheAfterCommitSynchronizerTest {
 
     @Test
     void rollbackDoesNotCaptureOrAccelerate() {
-        PositionCacheProjectionRepository repository = mock(PositionCacheProjectionRepository.class);
+        PositionCacheProjectionService repository = mock(PositionCacheProjectionService.class);
         PositionCacheAccelerationWorker worker = mock(PositionCacheAccelerationWorker.class);
         PositionCacheAfterCommitSynchronizer synchronizer =
                 new PositionCacheAfterCommitSynchronizer(repository, worker);

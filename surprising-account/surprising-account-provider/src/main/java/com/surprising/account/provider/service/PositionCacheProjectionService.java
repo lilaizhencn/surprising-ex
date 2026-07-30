@@ -1,4 +1,4 @@
-package com.surprising.account.provider.repository;
+package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.PositionCacheEvent;
 import com.surprising.product.api.ProductLine;
@@ -6,15 +6,15 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Repository;
+import org.springframework.stereotype.Service;
 
-/** PostgreSQL final-state capture plus bootstrap/reconciliation scan for the Redis read model. */
-@Repository
-public class PositionCacheProjectionRepository {
+/** 为 Redis 读模型提供 PostgreSQL 最终状态快照、启动扫描和核对扫描。 */
+@Service
+public class PositionCacheProjectionService {
 
     private final JdbcTemplate jdbcTemplate;
 
-    public PositionCacheProjectionRepository(JdbcTemplate jdbcTemplate) {
+    public PositionCacheProjectionService(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 
@@ -81,8 +81,8 @@ public class PositionCacheProjectionRepository {
     }
 
     /**
-     * Captures the final shape of one position in one database round trip. This method must run inside the
-     * same transaction as the position mutation; the returned snapshot is only submitted to Redis after commit.
+     * 单次数据库往返读取一个持仓的最终形态。该方法必须与持仓变更处于同一事务，
+     * 返回的快照只能在事务提交后写入 Redis。
      */
     public PositionCacheEvent captureFinalSnapshot(ProductLine productLine,
                                                    long userId,

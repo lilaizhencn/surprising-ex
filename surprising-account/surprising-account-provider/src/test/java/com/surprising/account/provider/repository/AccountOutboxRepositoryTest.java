@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.api.model.PositionCacheEvent;
 import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.account.provider.service.PositionCacheProjectionService;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
@@ -33,12 +34,12 @@ class AccountOutboxRepositoryTest {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
-        PositionCacheProjectionRepository projectionRepository =
-                org.mockito.Mockito.mock(PositionCacheProjectionRepository.class);
+        PositionCacheProjectionService projectionService =
+                org.mockito.Mockito.mock(PositionCacheProjectionService.class);
         AccountOutboxRepository repository = new AccountOutboxRepository(jdbcTemplate, sequenceRepository,
-                new ObjectMapper(), properties, projectionRepository);
+                new ObjectMapper(), properties, projectionService);
         when(sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.POSITION_EVENT)).thenReturn(101L);
-        when(projectionRepository.captureFinalSnapshot(
+        when(projectionService.captureFinalSnapshot(
                 ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT-260925", MarginMode.CROSS, PositionSide.NET))
                 .thenReturn(snapshot(ProductLine.LINEAR_DELIVERY));
         when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);

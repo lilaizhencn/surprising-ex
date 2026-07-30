@@ -22,10 +22,7 @@ import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountCommandRegistration;
 import com.surprising.account.provider.model.PendingAccountCommand;
-import com.surprising.account.provider.repository.AccountAdlTargetSettlementRepository;
 import com.surprising.account.provider.repository.AccountCommandRepository;
-import com.surprising.account.provider.repository.AccountDeficitSettlementRepository;
-import com.surprising.account.provider.repository.AccountFundingSettlementRepository;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRepository;
 import com.surprising.product.api.ProductLine;
@@ -47,12 +44,12 @@ class AccountUserCommandProcessorTest {
     private final AccountProperties properties = new AccountProperties();
     private final AccountCommandRepository commandRepository = mock(AccountCommandRepository.class);
     private final AccountOutboxRepository outboxRepository = mock(AccountOutboxRepository.class);
-    private final AccountAdlTargetSettlementRepository adlRepository =
-            mock(AccountAdlTargetSettlementRepository.class);
-    private final AccountDeficitSettlementRepository deficitRepository =
-            mock(AccountDeficitSettlementRepository.class);
-    private final AccountFundingSettlementRepository fundingRepository =
-            mock(AccountFundingSettlementRepository.class);
+    private final AdlTargetSettlementService adlService =
+            mock(AdlTargetSettlementService.class);
+    private final DeficitSettlementService deficitService =
+            mock(DeficitSettlementService.class);
+    private final FundingSettlementService fundingService =
+            mock(FundingSettlementService.class);
     private final AccountRepository accountRepository = mock(AccountRepository.class);
     private final AccountOrderReservationService reservationService =
             mock(AccountOrderReservationService.class);
@@ -65,8 +62,8 @@ class AccountUserCommandProcessorTest {
     void setUp() {
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         processor = new AccountUserCommandProcessor(
-                objectMapper, properties, commandRepository, outboxRepository, adlRepository,
-                deficitRepository, fundingRepository, accountRepository, reservationService,
+                objectMapper, properties, commandRepository, outboxRepository, adlService,
+                deficitService, fundingService, accountRepository, reservationService,
                 accountService, cacheSynchronizer);
     }
 

@@ -2,8 +2,7 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.PositionCacheEvent;
 import com.surprising.account.provider.config.AccountProperties;
-import com.surprising.account.provider.repository.PositionCacheProjectionRepository;
-import com.surprising.account.provider.repository.PositionCacheProjectionRepository.Cursor;
+import com.surprising.account.provider.service.PositionCacheProjectionService.Cursor;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import org.slf4j.Logger;
@@ -13,23 +12,23 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-/** Bootstraps Redis from PostgreSQL and continuously repairs a bounded page while keeping readiness alive. */
+/** 从 PostgreSQL 初始化 Redis，并在维持就绪状态的同时持续修复有限范围的数据页。 */
 @Component
 public class PositionCacheCoordinator {
 
     private static final Logger log = LoggerFactory.getLogger(PositionCacheCoordinator.class);
 
-    private final PositionCacheProjectionRepository repository;
+    private final PositionCacheProjectionService projectionService;
     private final RedisPositionCache cache;
     private final PositionCacheRedisLease leaseLock;
     private final AccountProperties properties;
     private Cursor reconcileCursor = Cursor.start();
 
-    public PositionCacheCoordinator(PositionCacheProjectionRepository repository,
+    public PositionCacheCoordinator(PositionCacheProjectionService projectionService,
                                     RedisPositionCache cache,
                                     PositionCacheRedisLease leaseLock,
                                     AccountProperties properties) {
-        this.repository = repository;
+        this.projectionService = projectionService;
         this.cache = cache;
         this.leaseLock = leaseLock;
         this.properties = properties;
@@ -83,13 +82,13 @@ public class PositionCacheCoordinator {
         int synchronizedRows = 0;
         int batchSize = batchSize();
         while (true) {
-            List<PositionCacheEvent> page = repository.page(productLine, cursor, batchSize);
+            List<PositionCacheEvent> page = projectionService.page(productLine, cursor, batchSize);
             if (page.isEmpty()) {
                 return;
             }
             for (PositionCacheEvent event : page) {
                 cache.apply(event, true);
-                cursor = repository.cursor(event);
+                cursor = projectionService.cursor(event);
                 synchronizedRows++;
                 if (synchronizedRows % 100 == 0
                         && !leaseLock.renew(lease, properties.getPositionCache().getLockTtl())) {
@@ -103,14 +102,14 @@ public class PositionCacheCoordinator {
     }
 
     private void reconcileOnePage(ProductLine productLine) {
-        List<PositionCacheEvent> page = repository.page(productLine, reconcileCursor, batchSize());
+        List<PositionCacheEvent> page = projectionService.page(productLine, reconcileCursor, batchSize());
         if (page.isEmpty()) {
             reconcileCursor = Cursor.start();
             return;
         }
         for (PositionCacheEvent event : page) {
             cache.apply(event, true);
-            reconcileCursor = repository.cursor(event);
+            reconcileCursor = projectionService.cursor(event);
         }
         if (page.size() < batchSize()) {
             reconcileCursor = Cursor.start();

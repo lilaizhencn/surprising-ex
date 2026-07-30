@@ -1,6 +1,7 @@
-package com.surprising.account.provider.repository;
+package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.FundingSettlementAccountCommand;
+import com.surprising.account.provider.repository.AccountSequenceRepository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
@@ -8,20 +9,20 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Repository;
+import org.springframework.stereotype.Service;
 
 /**
- * Authoritative funding-payment writer. This class deliberately lives in the account module so
- * funding calculation nodes never mutate account balances, deficits, margins, or ledgers.
+ * 资金费支付的权威写入服务。该服务必须位于账户模块，确保资金费计算节点不能修改账户余额、
+ * 亏空、保证金或流水。
  */
-@Repository
-public class AccountFundingSettlementRepository {
+@Service
+public class FundingSettlementService {
 
     private final JdbcTemplate jdbcTemplate;
     private final AccountSequenceRepository sequenceRepository;
 
-    public AccountFundingSettlementRepository(JdbcTemplate jdbcTemplate,
-                                              AccountSequenceRepository sequenceRepository) {
+    public FundingSettlementService(JdbcTemplate jdbcTemplate,
+                                    AccountSequenceRepository sequenceRepository) {
         this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
     }
@@ -50,7 +51,7 @@ public class AccountFundingSettlementRepository {
                     reference_type, reference_id, reason, created_at
                 ) VALUES (?, ?, ?, ?, 0, 'FUNDING', ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.LEDGER_ENTRY),
+                """, sequenceRepository.nextLedgerEntryId(),
                 userId, payment.asset(),
                 payment.amountUnits(), commandId, reason(payment.amountUnits()), Timestamp.from(now));
         requireSingleRow(ledgerRows, "funding account ledger insert");
@@ -79,7 +80,7 @@ public class AccountFundingSettlementRepository {
                     reference_type, reference_id, reason, created_at
                 ) VALUES (?, ?, ?, ?, ?, 0, 'FUNDING', ?, ?, ?)
                 ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextSequence(AccountSequenceRepository.Sequence.PRODUCT_LEDGER_ENTRY),
+                """, sequenceRepository.nextProductLedgerEntryId(),
                 userId, accountType,
                 payment.asset(), payment.amountUnits(), commandId, reason(payment.amountUnits()),
                 Timestamp.from(now));
