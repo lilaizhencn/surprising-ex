@@ -33,6 +33,7 @@ import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRepository;
+import com.surprising.account.provider.repository.AdminBalanceAdjustmentRepository;
 import com.surprising.instrument.api.model.ContractSettlementMethod;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
@@ -62,6 +63,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class AccountService {
 
     private final AccountRepository accountRepository;
+    private final AccountQueryService accountQueryService;
+    private final AdminBalanceAdjustmentRepository adminBalanceAdjustmentRepository;
     private final PositionCalculator positionCalculator;
     private final AccountProperties properties;
     private final AccountOutboxRepository outboxRepository;
@@ -74,14 +77,16 @@ public class AccountService {
             liquidationFeeContextCache;
 
     public AccountService(AccountRepository accountRepository, PositionCalculator positionCalculator) {
-        this(accountRepository, positionCalculator, new AccountProperties(), null);
+        this(accountRepository, positionCalculator, new AccountProperties(), null, null, null,
+                null, null);
     }
 
     public AccountService(AccountRepository accountRepository,
                            PositionCalculator positionCalculator,
                            AccountProperties properties,
                            AccountOutboxRepository outboxRepository) {
-        this(accountRepository, positionCalculator, properties, outboxRepository, null);
+        this(accountRepository, positionCalculator, properties, outboxRepository, null, null,
+                null, null);
     }
 
     public AccountService(AccountRepository accountRepository,
@@ -89,7 +94,8 @@ public class AccountService {
                            AccountProperties properties,
                            AccountOutboxRepository outboxRepository,
                            RedisPositionCache positionCache) {
-        this(accountRepository, positionCalculator, properties, outboxRepository, positionCache, null);
+        this(accountRepository, positionCalculator, properties, outboxRepository, positionCache, null,
+                null, null);
     }
 
     @Autowired
@@ -98,8 +104,12 @@ public class AccountService {
                            AccountProperties properties,
                            AccountOutboxRepository outboxRepository,
                            RedisPositionCache positionCache,
-                           PositionCacheAfterCommitSynchronizer positionCacheAfterCommitSynchronizer) {
+                           PositionCacheAfterCommitSynchronizer positionCacheAfterCommitSynchronizer,
+                           AccountQueryService accountQueryService,
+                           AdminBalanceAdjustmentRepository adminBalanceAdjustmentRepository) {
         this.accountRepository = accountRepository;
+        this.accountQueryService = accountQueryService;
+        this.adminBalanceAdjustmentRepository = adminBalanceAdjustmentRepository;
         this.positionCalculator = positionCalculator;
         this.properties = properties;
         this.outboxRepository = outboxRepository;
@@ -136,19 +146,24 @@ public class AccountService {
         String normalizedReferenceId = normalizeReferenceId(request.referenceId());
         BalanceResponse response = accountRepository.adjustBalance(request.userId(), normalizedAsset,
                 request.amountUnits(), normalizedReferenceId, request.reason());
-        accountRepository.recordAdminBalanceAdjustment("BASIC", normalizedAdminUserId,
-                normalizeAdminUsername(adminUsername), request.userId(), null, normalizedAsset, request.amountUnits(),
-                response.availableUnits(), normalizedReferenceId, request.reason());
+        recordAdminBalanceAdjustment("BASIC", normalizedAdminUserId, normalizeAdminUsername(adminUsername),
+                request.userId(), null, normalizedAsset, request.amountUnits(), response.availableUnits(),
+                normalizedReferenceId, request.reason());
         return response;
     }
 
     public BalanceResponse balance(long userId, String asset) {
-        return accountRepository.balance(userId, normalizeAsset(asset))
-                .orElse(new BalanceResponse(userId, normalizeAsset(asset), 0L, 0L, 0L, Instant.EPOCH));
+        String normalizedAsset = normalizeAsset(asset);
+        return (accountQueryService == null
+                ? accountRepository.balance(userId, normalizedAsset)
+                : accountQueryService.balance(userId, normalizedAsset))
+                .orElse(new BalanceResponse(userId, normalizedAsset, 0L, 0L, 0L, Instant.EPOCH));
     }
 
     public BalanceQueryResponse balances(long userId) {
-        List<BalanceResponse> rows = accountRepository.balances(userId);
+        List<BalanceResponse> rows = accountQueryService == null
+                ? accountRepository.balances(userId)
+                : accountQueryService.balances(userId);
         return new BalanceQueryResponse(rows.size(), rows);
     }
 
@@ -175,23 +190,27 @@ public class AccountService {
         String normalizedReferenceId = normalizeReferenceId(request.referenceId());
         ProductBalanceResponse response = accountRepository.adjustProductBalance(request.userId(), accountType,
                 normalizedAsset, request.amountUnits(), normalizedReferenceId, request.reason());
-        accountRepository.recordAdminBalanceAdjustment("PRODUCT", normalizedAdminUserId,
-                normalizeAdminUsername(adminUsername), request.userId(), accountType, normalizedAsset,
-                request.amountUnits(), response.availableUnits(), normalizedReferenceId, request.reason());
+        recordAdminBalanceAdjustment("PRODUCT", normalizedAdminUserId, normalizeAdminUsername(adminUsername),
+                request.userId(), accountType, normalizedAsset, request.amountUnits(), response.availableUnits(),
+                normalizedReferenceId, request.reason());
         return response;
     }
 
     public ProductBalanceResponse productBalance(long userId, AccountType accountType, String asset) {
         AccountType normalizedType = normalizeScopedProductAccountType(accountType);
         String normalizedAsset = normalizeAsset(asset);
-        return accountRepository.productBalance(userId, normalizedType, normalizedAsset)
+        return (accountQueryService == null
+                ? accountRepository.productBalance(userId, normalizedType, normalizedAsset)
+                : accountQueryService.productBalance(userId, normalizedType, normalizedAsset))
                 .orElse(new ProductBalanceResponse(userId, normalizedType, normalizedAsset, 0L, 0L, 0L,
                         Instant.EPOCH));
     }
 
     public ProductBalanceQueryResponse productBalances(long userId, AccountType accountType) {
-        List<ProductBalanceResponse> rows = accountRepository.productBalances(userId,
-                scopedProductAccountType(accountType));
+        AccountType scopedAccountType = scopedProductAccountType(accountType);
+        List<ProductBalanceResponse> rows = accountQueryService == null
+                ? accountRepository.productBalances(userId, scopedAccountType)
+                : accountQueryService.productBalances(userId, scopedAccountType);
         return new ProductBalanceQueryResponse(rows.size(), rows);
     }
 
@@ -207,8 +226,11 @@ public class AccountService {
                                                     String sort) {
         requireOptionalUserId(userId);
         int safeLimit = normalizeLimit(limit);
-        var page = accountRepository.accountLedgerPage(userId, normalizeOptionalAsset(asset),
-                normalizeOptionalReferenceType(referenceType), safeLimit, cursor, sort);
+        var page = accountQueryService == null
+                ? accountRepository.accountLedgerPage(userId, normalizeOptionalAsset(asset),
+                        normalizeOptionalReferenceType(referenceType), safeLimit, cursor, sort)
+                : accountQueryService.accountLedgerPage(userId, normalizeOptionalAsset(asset),
+                        normalizeOptionalReferenceType(referenceType), safeLimit, cursor, sort);
         return new AccountLedgerQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
@@ -230,9 +252,13 @@ public class AccountService {
                                                     String sort) {
         requireOptionalUserId(userId);
         int safeLimit = normalizeLimit(limit);
-        var page = accountRepository.productLedgerPage(userId, scopedProductAccountType(accountType),
-                normalizeOptionalAsset(asset),
-                normalizeOptionalReferenceType(referenceType), safeLimit, cursor, sort);
+        var page = accountQueryService == null
+                ? accountRepository.productLedgerPage(userId, scopedProductAccountType(accountType),
+                        normalizeOptionalAsset(asset), normalizeOptionalReferenceType(referenceType),
+                        safeLimit, cursor, sort)
+                : accountQueryService.productLedgerPage(userId, scopedProductAccountType(accountType),
+                        normalizeOptionalAsset(asset), normalizeOptionalReferenceType(referenceType),
+                        safeLimit, cursor, sort);
         return new ProductLedgerQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
@@ -252,9 +278,11 @@ public class AccountService {
                                                                String sort) {
         requireOptionalUserId(userId);
         int safeLimit = normalizeLimit(limit);
-        var page = accountRepository.productTransferPage(userId, scopedProductAccountType(accountType),
-                normalizeOptionalAsset(asset),
-                safeLimit, cursor, sort);
+        var page = accountQueryService == null
+                ? accountRepository.productTransferPage(userId, scopedProductAccountType(accountType),
+                        normalizeOptionalAsset(asset), safeLimit, cursor, sort)
+                : accountQueryService.productTransferPage(userId, scopedProductAccountType(accountType),
+                        normalizeOptionalAsset(asset), safeLimit, cursor, sort);
         return new ProductTransferRecordQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
@@ -282,9 +310,13 @@ public class AccountService {
         requireOptionalUserId(adminUserId);
         requireOptionalUserId(userId);
         int safeLimit = normalizeLimit(limit);
-        var page = accountRepository.adminBalanceAdjustmentPage(adminUserId, userId,
-                normalizeOptionalAdjustmentKind(adjustmentKind), accountType, normalizeOptionalAsset(asset),
-                normalizeOptionalReferenceId(referenceId), safeLimit, cursor, sort);
+        var page = accountQueryService == null
+                ? accountRepository.adminBalanceAdjustmentPage(adminUserId, userId,
+                        normalizeOptionalAdjustmentKind(adjustmentKind), accountType, normalizeOptionalAsset(asset),
+                        normalizeOptionalReferenceId(referenceId), safeLimit, cursor, sort)
+                : accountQueryService.adminBalanceAdjustmentPage(adminUserId, userId,
+                        normalizeOptionalAdjustmentKind(adjustmentKind), accountType, normalizeOptionalAsset(asset),
+                        normalizeOptionalReferenceId(referenceId), safeLimit, cursor, sort);
         return new AdminBalanceAdjustmentQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
@@ -1012,6 +1044,25 @@ public class AccountService {
 
     private OrderSide opposite(OrderSide side) {
         return side == OrderSide.BUY ? OrderSide.SELL : OrderSide.BUY;
+    }
+
+    private void recordAdminBalanceAdjustment(String adjustmentKind,
+                                              long adminUserId,
+                                              String adminUsername,
+                                              long userId,
+                                              AccountType accountType,
+                                              String asset,
+                                              long amountUnits,
+                                              long balanceAfterUnits,
+                                              String referenceId,
+                                              String reason) {
+        if (adminBalanceAdjustmentRepository == null) {
+            accountRepository.recordAdminBalanceAdjustment(adjustmentKind, adminUserId, adminUsername, userId,
+                    accountType, asset, amountUnits, balanceAfterUnits, referenceId, reason);
+            return;
+        }
+        adminBalanceAdjustmentRepository.record(adjustmentKind, adminUserId, adminUsername, userId,
+                accountType, asset, amountUnits, balanceAfterUnits, referenceId, reason);
     }
 
     private String normalizeAsset(String asset) {

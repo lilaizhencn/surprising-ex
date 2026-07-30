@@ -61,6 +61,14 @@ public class AccountRepository {
     private final AccountSequenceRepository sequenceRepository;
     private final LatestMarkPriceCache markPriceCache;
     private final PositionCacheAfterCommitSynchronizer positionCacheSynchronizer;
+    private final AccountLedgerRepository accountLedgerRepository;
+    private final ProductLedgerRepository productLedgerRepository;
+    private final AdminBalanceAdjustmentRepository adminBalanceAdjustmentRepository;
+    private final ProductTransferRepository productTransferRepository;
+    private final AccountBalanceRepository accountBalanceRepository;
+    private final AccountDeficitRepository accountDeficitRepository;
+    private final ProductBalanceRepository productBalanceRepository;
+    private final ProductDeficitRepository productDeficitRepository;
 
     public AccountRepository(JdbcTemplate jdbcTemplate, AccountSequenceRepository sequenceRepository) {
         this(jdbcTemplate, sequenceRepository, null, null);
@@ -72,50 +80,60 @@ public class AccountRepository {
         this(jdbcTemplate, sequenceRepository, markPriceCache, null);
     }
 
-    @Autowired
     public AccountRepository(JdbcTemplate jdbcTemplate,
                              AccountSequenceRepository sequenceRepository,
                              LatestMarkPriceCache markPriceCache,
                              PositionCacheAfterCommitSynchronizer positionCacheSynchronizer) {
+        this(jdbcTemplate, sequenceRepository, markPriceCache, positionCacheSynchronizer,
+                new AccountLedgerRepository(jdbcTemplate),
+                new ProductLedgerRepository(jdbcTemplate),
+                new AdminBalanceAdjustmentRepository(jdbcTemplate),
+                new ProductTransferRepository(jdbcTemplate),
+                new AccountBalanceRepository(jdbcTemplate),
+                new AccountDeficitRepository(jdbcTemplate),
+                new ProductBalanceRepository(jdbcTemplate),
+                new ProductDeficitRepository(jdbcTemplate));
+    }
+
+    @Autowired
+    public AccountRepository(JdbcTemplate jdbcTemplate,
+                             AccountSequenceRepository sequenceRepository,
+                             LatestMarkPriceCache markPriceCache,
+                             PositionCacheAfterCommitSynchronizer positionCacheSynchronizer,
+                             AccountLedgerRepository accountLedgerRepository,
+                             ProductLedgerRepository productLedgerRepository,
+                             AdminBalanceAdjustmentRepository adminBalanceAdjustmentRepository,
+                             ProductTransferRepository productTransferRepository,
+                             AccountBalanceRepository accountBalanceRepository,
+                             AccountDeficitRepository accountDeficitRepository,
+                             ProductBalanceRepository productBalanceRepository,
+                             ProductDeficitRepository productDeficitRepository) {
         this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
         this.markPriceCache = markPriceCache;
         this.positionCacheSynchronizer = positionCacheSynchronizer;
+        this.accountLedgerRepository = accountLedgerRepository;
+        this.productLedgerRepository = productLedgerRepository;
+        this.adminBalanceAdjustmentRepository = adminBalanceAdjustmentRepository;
+        this.productTransferRepository = productTransferRepository;
+        this.accountBalanceRepository = accountBalanceRepository;
+        this.accountDeficitRepository = accountDeficitRepository;
+        this.productBalanceRepository = productBalanceRepository;
+        this.productDeficitRepository = productDeficitRepository;
     }
 
     public Optional<BalanceResponse> balance(long userId, String asset) {
-        return jdbcTemplate.query("""
-                SELECT b.user_id, b.asset, b.available_units, b.locked_units,
-                       b.available_units + b.locked_units - COALESCE(d.deficit_units, 0) AS equity_units,
-                       b.updated_at
-                  FROM account_balances b
-                  LEFT JOIN account_deficits d USING (user_id, asset)
-                 WHERE b.user_id = ? AND b.asset = ?
-                """, (rs, rowNum) -> new BalanceResponse(
-                rs.getLong("user_id"),
-                rs.getString("asset"),
-                rs.getLong("available_units"),
-                rs.getLong("locked_units"),
-                rs.getLong("equity_units"),
-                rs.getTimestamp("updated_at").toInstant()), userId, asset).stream().findFirst();
+        return accountBalanceRepository.find(userId, asset)
+                .map(row -> toBalance(row, accountDeficitRepository.findUnits(userId, asset).orElse(0L)));
     }
 
     public List<BalanceResponse> balances(long userId) {
-        return jdbcTemplate.query("""
-                SELECT b.user_id, b.asset, b.available_units, b.locked_units,
-                       b.available_units + b.locked_units - COALESCE(d.deficit_units, 0) AS equity_units,
-                       b.updated_at
-                  FROM account_balances b
-                  LEFT JOIN account_deficits d USING (user_id, asset)
-                 WHERE b.user_id = ?
-                 ORDER BY b.asset ASC
-                """, (rs, rowNum) -> new BalanceResponse(
-                rs.getLong("user_id"),
-                rs.getString("asset"),
-                rs.getLong("available_units"),
-                rs.getLong("locked_units"),
-                rs.getLong("equity_units"),
-                rs.getTimestamp("updated_at").toInstant()), userId);
+        java.util.Map<String, Long> deficits = new java.util.HashMap<>();
+        accountDeficitRepository.findByUser(userId)
+                .forEach(row -> deficits.put(row.asset(), row.deficitUnits()));
+        return accountBalanceRepository.findByUser(userId).stream()
+                .map(row -> toBalance(row, deficits.getOrDefault(row.asset(), 0L)))
+                .toList();
     }
 
     public Optional<ProductBalanceResponse> productBalance(long userId, AccountType accountType, String asset) {
@@ -123,24 +141,9 @@ public class AccountRepository {
         if (isLegacyPerpetualAccount(normalizedType)) {
             return balance(userId, asset).map(balance -> toProductBalance(normalizedType, balance));
         }
-        return jdbcTemplate.query("""
-                SELECT user_id, account_type, asset, available_units, locked_units,
-                       available_units + locked_units - COALESCE(d.deficit_units, 0) AS equity_units,
-                       b.updated_at
-                  FROM account_product_balances b
-                  LEFT JOIN account_product_deficits d USING (account_type, user_id, asset)
-                 WHERE b.user_id = ?
-                   AND b.account_type = ?
-                   AND b.asset = ?
-                """, (rs, rowNum) -> new ProductBalanceResponse(
-                rs.getLong("user_id"),
-                AccountType.valueOf(rs.getString("account_type")),
-                rs.getString("asset"),
-                rs.getLong("available_units"),
-                rs.getLong("locked_units"),
-                rs.getLong("equity_units"),
-                rs.getTimestamp("updated_at").toInstant()), userId, normalizedType.name(), asset)
-                .stream().findFirst();
+        return productBalanceRepository.find(userId, normalizedType, asset)
+                .map(row -> toProductBalance(row,
+                        productDeficitRepository.findUnits(userId, normalizedType, asset).orElse(0L)));
     }
 
     public List<ProductBalanceResponse> productBalances(long userId, AccountType accountType) {
@@ -164,7 +167,7 @@ public class AccountRepository {
                                                           String asset,
                                                           String referenceType,
                                                           int limit) {
-        return accountLedgerPage(userId, asset, referenceType, limit, null, null).items();
+        return accountLedgerRepository.entries(userId, asset, referenceType, limit);
     }
 
     public AdminCursorPage.CursorPage<AccountLedgerEntryResponse> accountLedgerPage(Long userId,
@@ -173,48 +176,7 @@ public class AccountRepository {
                                                                                     int limit,
                                                                                     String cursor,
                                                                                     String sort) {
-        String normalizedAsset = emptyToNull(asset);
-        String normalizedReferenceType = emptyToNull(referenceType);
-        int safeLimit = AdminCursorPage.limit(limit, 1000);
-        AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort, "entry_id");
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
-        List<Object> args = new ArrayList<>();
-        args.add(userId);
-        args.add(userId);
-        args.add(normalizedAsset);
-        args.add(normalizedAsset);
-        args.add(normalizedReferenceType);
-        args.add(normalizedReferenceType);
-        AdminCursorPage.addCursorArgs(args, decodedCursor);
-        args.add(safeLimit + 1);
-        List<AccountLedgerEntryResponse> rows = jdbcTemplate.query("""
-                SELECT entry_id, user_id, asset, amount_units, balance_after_units, reference_type,
-                       reference_id, reason, trade_id, order_id, symbol, fee_rate_ppm, created_at
-                  FROM account_ledger_entries
-                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
-                   AND (CAST(? AS text) IS NULL OR asset = ?)
-                   AND (CAST(? AS text) IS NULL OR reference_type = ?)
-                %s
-                 ORDER BY %s %s, %s %s
-                 LIMIT ?
-                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
-                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
-                (rs, rowNum) -> new AccountLedgerEntryResponse(
-                rs.getLong("entry_id"),
-                rs.getLong("user_id"),
-                rs.getString("asset"),
-                rs.getLong("amount_units"),
-                rs.getLong("balance_after_units"),
-                rs.getString("reference_type"),
-                rs.getString("reference_id"),
-                rs.getString("reason"),
-                nullableLong(rs, "trade_id"),
-                nullableLong(rs, "order_id"),
-                rs.getString("symbol"),
-                nullableLong(rs, "fee_rate_ppm"),
-                rs.getTimestamp("created_at").toInstant()), args.toArray());
-        return AdminCursorPage.page(rows, safeLimit, sortSpec, AccountLedgerEntryResponse::createdAt,
-                AccountLedgerEntryResponse::entryId);
+        return accountLedgerRepository.page(userId, asset, referenceType, limit, cursor, sort);
     }
 
     public List<ProductLedgerEntryResponse> productLedger(Long userId,
@@ -222,7 +184,7 @@ public class AccountRepository {
                                                           String asset,
                                                           String referenceType,
                                                           int limit) {
-        return productLedgerPage(userId, accountType, asset, referenceType, limit, null, null).items();
+        return productLedgerRepository.entries(userId, accountType, asset, referenceType, limit);
     }
 
     public AdminCursorPage.CursorPage<ProductLedgerEntryResponse> productLedgerPage(Long userId,
@@ -232,81 +194,14 @@ public class AccountRepository {
                                                                                     int limit,
                                                                                     String cursor,
                                                                                     String sort) {
-        String normalizedAsset = emptyToNull(asset);
-        String normalizedReferenceType = emptyToNull(referenceType);
-        String normalizedAccountType = accountType == null ? null : accountType.name();
-        int safeLimit = AdminCursorPage.limit(limit, 1000);
-        AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort, "entry_id");
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
-        List<Object> args = new ArrayList<>();
-        args.add(userId);
-        args.add(userId);
-        args.add(normalizedAccountType);
-        args.add(normalizedAccountType);
-        args.add(normalizedAsset);
-        args.add(normalizedAsset);
-        args.add(normalizedReferenceType);
-        args.add(normalizedReferenceType);
-        AdminCursorPage.addCursorArgs(args, decodedCursor);
-        args.add(safeLimit + 1);
-        List<ProductLedgerEntryResponse> rows = jdbcTemplate.query("""
-                SELECT entry_id, user_id, account_type, asset, amount_units, balance_after_units,
-                       reference_type, reference_id, reason, created_at
-                  FROM account_product_ledger_entries
-                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
-                   AND (CAST(? AS text) IS NULL OR account_type = ?)
-                   AND (CAST(? AS text) IS NULL OR asset = ?)
-                   AND (CAST(? AS text) IS NULL OR reference_type = ?)
-                %s
-                 ORDER BY %s %s, %s %s
-                 LIMIT ?
-                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
-                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
-                (rs, rowNum) -> new ProductLedgerEntryResponse(
-                rs.getLong("entry_id"),
-                rs.getLong("user_id"),
-                AccountType.valueOf(rs.getString("account_type")),
-                rs.getString("asset"),
-                rs.getLong("amount_units"),
-                rs.getLong("balance_after_units"),
-                rs.getString("reference_type"),
-                rs.getString("reference_id"),
-                rs.getString("reason"),
-                rs.getTimestamp("created_at").toInstant()), args.toArray());
-        return AdminCursorPage.page(rows, safeLimit, sortSpec, ProductLedgerEntryResponse::createdAt,
-                ProductLedgerEntryResponse::entryId);
+        return productLedgerRepository.page(userId, accountType, asset, referenceType, limit, cursor, sort);
     }
 
     public List<ProductTransferRecordResponse> productTransfers(Long userId,
                                                                 AccountType accountType,
                                                                 String asset,
                                                                 int limit) {
-        String normalizedAsset = emptyToNull(asset);
-        String normalizedAccountType = accountType == null ? null : accountType.name();
-        int safeLimit = Math.max(1, Math.min(limit, 1000));
-        return jdbcTemplate.query("""
-                SELECT transfer_id, user_id, source_account_type, target_account_type, asset, amount_units,
-                       reference_id, status, reason, created_at, updated_at
-                  FROM account_product_transfers
-                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
-                   AND (CAST(? AS text) IS NULL OR source_account_type = ? OR target_account_type = ?)
-                   AND (CAST(? AS text) IS NULL OR asset = ?)
-                 ORDER BY created_at DESC, transfer_id DESC
-                 LIMIT ?
-                """, (rs, rowNum) -> new ProductTransferRecordResponse(
-                rs.getLong("transfer_id"),
-                rs.getLong("user_id"),
-                AccountType.valueOf(rs.getString("source_account_type")),
-                AccountType.valueOf(rs.getString("target_account_type")),
-                rs.getString("asset"),
-                rs.getLong("amount_units"),
-                rs.getString("reference_id"),
-                rs.getString("status"),
-                rs.getString("reason"),
-                rs.getTimestamp("created_at").toInstant(),
-                rs.getTimestamp("updated_at").toInstant()), userId, userId,
-                normalizedAccountType, normalizedAccountType, normalizedAccountType,
-                normalizedAsset, normalizedAsset, safeLimit);
+        return productTransferRepository.entries(userId, accountType, asset, limit);
     }
 
     public AdminCursorPage.CursorPage<ProductTransferRecordResponse> productTransferPage(Long userId,
@@ -315,47 +210,7 @@ public class AccountRepository {
                                                                                          int limit,
                                                                                          String cursor,
                                                                                          String sort) {
-        String normalizedAsset = emptyToNull(asset);
-        String normalizedAccountType = accountType == null ? null : accountType.name();
-        int safeLimit = AdminCursorPage.limit(limit, 1000);
-        AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort, "transfer_id");
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
-        List<Object> args = new ArrayList<>();
-        args.add(userId);
-        args.add(userId);
-        args.add(normalizedAccountType);
-        args.add(normalizedAccountType);
-        args.add(normalizedAccountType);
-        args.add(normalizedAsset);
-        args.add(normalizedAsset);
-        AdminCursorPage.addCursorArgs(args, decodedCursor);
-        args.add(safeLimit + 1);
-        List<ProductTransferRecordResponse> rows = jdbcTemplate.query("""
-                SELECT transfer_id, user_id, source_account_type, target_account_type, asset, amount_units,
-                       reference_id, status, reason, created_at, updated_at
-                  FROM account_product_transfers
-                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
-                   AND (CAST(? AS text) IS NULL OR source_account_type = ? OR target_account_type = ?)
-                   AND (CAST(? AS text) IS NULL OR asset = ?)
-                %s
-                 ORDER BY %s %s, %s %s
-                 LIMIT ?
-                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
-                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
-                (rs, rowNum) -> new ProductTransferRecordResponse(
-                rs.getLong("transfer_id"),
-                rs.getLong("user_id"),
-                AccountType.valueOf(rs.getString("source_account_type")),
-                AccountType.valueOf(rs.getString("target_account_type")),
-                rs.getString("asset"),
-                rs.getLong("amount_units"),
-                rs.getString("reference_id"),
-                rs.getString("status"),
-                rs.getString("reason"),
-                rs.getTimestamp("created_at").toInstant(),
-                rs.getTimestamp("updated_at").toInstant()), args.toArray());
-        return AdminCursorPage.page(rows, safeLimit, sortSpec, ProductTransferRecordResponse::createdAt,
-                ProductTransferRecordResponse::transferId);
+        return productTransferRepository.page(userId, accountType, asset, limit, cursor, sort);
     }
 
     public AdminBalanceAdjustmentRecord recordAdminBalanceAdjustment(String adjustmentKind,
@@ -368,33 +223,8 @@ public class AccountRepository {
                                                                      long balanceAfterUnits,
                                                                      String referenceId,
                                                                      String reason) {
-        String normalizedKind = requireAdjustmentKind(adjustmentKind);
-        String referenceKey = adminAdjustmentReferenceKey(normalizedKind, userId, accountType, asset, referenceId);
-        return jdbcTemplate.queryForObject("""
-                INSERT INTO account_admin_balance_adjustments (
-                    reference_key, adjustment_kind, admin_user_id, admin_username, user_id, account_type,
-                    asset, amount_units, balance_after_units, reference_id, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (reference_key) DO UPDATE
-                   SET reference_key = EXCLUDED.reference_key
-                RETURNING adjustment_id, adjustment_kind, admin_user_id, admin_username, user_id, account_type,
-                          asset, amount_units, balance_after_units, reference_id, reason, created_at
-                """, (rs, rowNum) -> new AdminBalanceAdjustmentRecord(
-                rs.getLong("adjustment_id"),
-                rs.getString("adjustment_kind"),
-                rs.getLong("admin_user_id"),
-                rs.getString("admin_username"),
-                rs.getLong("user_id"),
-                nullableAccountType(rs.getString("account_type")),
-                rs.getString("asset"),
-                rs.getLong("amount_units"),
-                rs.getLong("balance_after_units"),
-                rs.getString("reference_id"),
-                rs.getString("reason"),
-                rs.getTimestamp("created_at").toInstant()),
-                referenceKey, normalizedKind, adminUserId, emptyToNull(adminUsername), userId,
-                accountType == null ? null : accountType.name(), asset, amountUnits, balanceAfterUnits,
-                referenceId, reason, Timestamp.from(Instant.now()));
+        return adminBalanceAdjustmentRepository.record(adjustmentKind, adminUserId, adminUsername, userId,
+                accountType, asset, amountUnits, balanceAfterUnits, referenceId, reason);
     }
 
     public List<AdminBalanceAdjustmentRecord> adminBalanceAdjustments(Long adminUserId,
@@ -404,38 +234,8 @@ public class AccountRepository {
                                                                       String asset,
                                                                       String referenceId,
                                                                       int limit) {
-        String normalizedKind = emptyToNull(adjustmentKind);
-        String normalizedAccountType = accountType == null ? null : accountType.name();
-        String normalizedAsset = emptyToNull(asset);
-        String normalizedReferenceId = emptyToNull(referenceId);
-        int safeLimit = Math.max(1, Math.min(limit, 1000));
-        return jdbcTemplate.query("""
-                SELECT adjustment_id, adjustment_kind, admin_user_id, admin_username, user_id, account_type,
-                       asset, amount_units, balance_after_units, reference_id, reason, created_at
-                  FROM account_admin_balance_adjustments
-                 WHERE (CAST(? AS text) IS NULL OR admin_user_id = ?)
-                   AND (CAST(? AS text) IS NULL OR user_id = ?)
-                   AND (CAST(? AS text) IS NULL OR adjustment_kind = ?)
-                   AND (CAST(? AS text) IS NULL OR account_type = ?)
-                   AND (CAST(? AS text) IS NULL OR asset = ?)
-                   AND (CAST(? AS text) IS NULL OR reference_id = ?)
-                 ORDER BY created_at DESC, adjustment_id DESC
-                 LIMIT ?
-                """, (rs, rowNum) -> new AdminBalanceAdjustmentRecord(
-                rs.getLong("adjustment_id"),
-                rs.getString("adjustment_kind"),
-                rs.getLong("admin_user_id"),
-                rs.getString("admin_username"),
-                rs.getLong("user_id"),
-                nullableAccountType(rs.getString("account_type")),
-                rs.getString("asset"),
-                rs.getLong("amount_units"),
-                rs.getLong("balance_after_units"),
-                rs.getString("reference_id"),
-                rs.getString("reason"),
-                rs.getTimestamp("created_at").toInstant()), adminUserId, adminUserId, userId, userId,
-                normalizedKind, normalizedKind, normalizedAccountType, normalizedAccountType,
-                normalizedAsset, normalizedAsset, normalizedReferenceId, normalizedReferenceId, safeLimit);
+        return adminBalanceAdjustmentRepository.entries(adminUserId, userId, adjustmentKind, accountType,
+                asset, referenceId, limit);
     }
 
     public AdminCursorPage.CursorPage<AdminBalanceAdjustmentRecord> adminBalanceAdjustmentPage(Long adminUserId,
@@ -447,96 +247,20 @@ public class AccountRepository {
                                                                                                int limit,
                                                                                                String cursor,
                                                                                                String sort) {
-        String normalizedKind = emptyToNull(adjustmentKind);
-        String normalizedAccountType = accountType == null ? null : accountType.name();
-        String normalizedAsset = emptyToNull(asset);
-        String normalizedReferenceId = emptyToNull(referenceId);
-        int safeLimit = AdminCursorPage.limit(limit, 1000);
-        AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort, "adjustment_id");
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
-        List<Object> args = new ArrayList<>();
-        args.add(adminUserId);
-        args.add(adminUserId);
-        args.add(userId);
-        args.add(userId);
-        args.add(normalizedKind);
-        args.add(normalizedKind);
-        args.add(normalizedAccountType);
-        args.add(normalizedAccountType);
-        args.add(normalizedAsset);
-        args.add(normalizedAsset);
-        args.add(normalizedReferenceId);
-        args.add(normalizedReferenceId);
-        AdminCursorPage.addCursorArgs(args, decodedCursor);
-        args.add(safeLimit + 1);
-        List<AdminBalanceAdjustmentRecord> rows = jdbcTemplate.query("""
-                SELECT adjustment_id, adjustment_kind, admin_user_id, admin_username, user_id, account_type,
-                       asset, amount_units, balance_after_units, reference_id, reason, created_at
-                  FROM account_admin_balance_adjustments
-                 WHERE (CAST(? AS text) IS NULL OR admin_user_id = ?)
-                   AND (CAST(? AS text) IS NULL OR user_id = ?)
-                   AND (CAST(? AS text) IS NULL OR adjustment_kind = ?)
-                   AND (CAST(? AS text) IS NULL OR account_type = ?)
-                   AND (CAST(? AS text) IS NULL OR asset = ?)
-                   AND (CAST(? AS text) IS NULL OR reference_id = ?)
-                %s
-                 ORDER BY %s %s, %s %s
-                 LIMIT ?
-                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
-                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
-                (rs, rowNum) -> new AdminBalanceAdjustmentRecord(
-                rs.getLong("adjustment_id"),
-                rs.getString("adjustment_kind"),
-                rs.getLong("admin_user_id"),
-                rs.getString("admin_username"),
-                rs.getLong("user_id"),
-                nullableAccountType(rs.getString("account_type")),
-                rs.getString("asset"),
-                rs.getLong("amount_units"),
-                rs.getLong("balance_after_units"),
-                rs.getString("reference_id"),
-                rs.getString("reason"),
-                rs.getTimestamp("created_at").toInstant()), args.toArray());
-        return AdminCursorPage.page(rows, safeLimit, sortSpec, AdminBalanceAdjustmentRecord::createdAt,
-                AdminBalanceAdjustmentRecord::adjustmentId);
-    }
-
-    private AdminCursorPage.SortSpec parseCreatedAtSort(String sort, String idColumn) {
-        AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
-                "createdAt", "created_at", idColumn, true);
-        AdminCursorPage.SortSpec createdAtAsc = new AdminCursorPage.SortSpec(
-                "createdAt", "created_at", idColumn, false);
-        return AdminCursorPage.parseSort(sort, createdAtDesc, List.of(createdAtDesc, createdAtAsc));
+        return adminBalanceAdjustmentRepository.page(adminUserId, userId, adjustmentKind, accountType,
+                asset, referenceId, limit, cursor, sort);
     }
 
     private List<ProductBalanceResponse> productBalancesFromTable(long userId, AccountType accountType) {
-        StringBuilder sql = new StringBuilder("""
-                SELECT user_id, account_type, asset, available_units, locked_units,
-                       available_units + locked_units - COALESCE(d.deficit_units, 0) AS equity_units,
-                       b.updated_at
-                  FROM account_product_balances b
-                  LEFT JOIN account_product_deficits d USING (account_type, user_id, asset)
-                 WHERE b.user_id = ?
-                """);
-        List<Object> args = new ArrayList<>();
-        args.add(userId);
-        if (accountType == null) {
-            sql.append("   AND b.account_type <> 'USDT_PERPETUAL'\n");
-        } else {
-            sql.append("   AND b.account_type = ?\n");
-            args.add(accountType.name());
-        }
-        sql.append("""
-                 ORDER BY account_type ASC, asset ASC
-                """);
-        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new ProductBalanceResponse(
-                rs.getLong("user_id"),
-                AccountType.valueOf(rs.getString("account_type")),
-                rs.getString("asset"),
-                rs.getLong("available_units"),
-                rs.getLong("locked_units"),
-                rs.getLong("equity_units"),
-                rs.getTimestamp("updated_at").toInstant()), args.toArray());
+        java.util.Map<ProductBalanceKey, Long> deficits = new java.util.HashMap<>();
+        productDeficitRepository.findByUser(userId, accountType)
+                .forEach(row -> deficits.put(new ProductBalanceKey(row.accountType(), row.asset()),
+                        row.deficitUnits()));
+        return productBalanceRepository.findByUser(userId, accountType).stream()
+                .filter(row -> accountType != null || row.accountType() != AccountType.USDT_PERPETUAL)
+                .map(row -> toProductBalance(row,
+                        deficits.getOrDefault(new ProductBalanceKey(row.accountType(), row.asset()), 0L)))
+                .toList();
     }
 
     public ProductBalanceResponse adjustProductBalance(long userId,
@@ -3778,6 +3502,21 @@ public class AccountRepository {
                 balance.lockedUnits(), balance.equityUnits(), balance.updatedAt());
     }
 
+    private BalanceResponse toBalance(AccountBalanceRepository.BalanceRow row, long deficitUnits) {
+        long equityUnits = Math.subtractExact(
+                Math.addExact(row.availableUnits(), row.lockedUnits()), deficitUnits);
+        return new BalanceResponse(row.userId(), row.asset(), row.availableUnits(), row.lockedUnits(),
+                equityUnits, row.updatedAt());
+    }
+
+    private ProductBalanceResponse toProductBalance(ProductBalanceRepository.ProductBalanceRow row,
+                                                    long deficitUnits) {
+        long equityUnits = Math.subtractExact(
+                Math.addExact(row.availableUnits(), row.lockedUnits()), deficitUnits);
+        return new ProductBalanceResponse(row.userId(), row.accountType(), row.asset(), row.availableUnits(),
+                row.lockedUnits(), equityUnits, row.updatedAt());
+    }
+
     private AccountType requireAccountType(AccountType accountType) {
         if (accountType == null) {
             throw new IllegalArgumentException("accountType is required");
@@ -3790,26 +3529,6 @@ public class AccountRepository {
             return AccountType.USDT_PERPETUAL;
         }
         return AccountType.valueOf(accountType);
-    }
-
-    private AccountType nullableAccountType(String accountType) {
-        return accountType == null || accountType.isBlank() ? null : AccountType.valueOf(accountType);
-    }
-
-    private String requireAdjustmentKind(String adjustmentKind) {
-        if (!"BASIC".equals(adjustmentKind) && !"PRODUCT".equals(adjustmentKind)) {
-            throw new IllegalArgumentException("adjustmentKind must be BASIC or PRODUCT");
-        }
-        return adjustmentKind;
-    }
-
-    private String adminAdjustmentReferenceKey(String adjustmentKind,
-                                               long userId,
-                                               AccountType accountType,
-                                               String asset,
-                                               String referenceId) {
-        String accountSegment = accountType == null ? "" : accountType.name();
-        return adjustmentKind + "|" + userId + "|" + accountSegment + "|" + asset + "|" + referenceId;
     }
 
     private boolean isLegacyPerpetualAccount(AccountType accountType) {
@@ -3900,6 +3619,9 @@ public class AccountRepository {
             String status,
             String reason,
             Instant createdAt) {
+    }
+
+    private record ProductBalanceKey(AccountType accountType, String asset) {
     }
 
     private record PositionCollateralTarget(

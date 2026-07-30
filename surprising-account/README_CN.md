@@ -9,6 +9,15 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - `surprising-account-api`：账户/持仓 RPC 合约和 DTO。
 - `surprising-account-provider`：余额、ledger、持仓、预占、亏空、资金费、ADL、交割/行权和成交侧结算的唯一写者。
 
+## 持久化边界
+
+- 写模型以“一张业务表对应一个 Repository”为目标，Repository 只负责本表 SQL，不编排跨表业务。
+- `AccountQueryService` 聚合余额与亏空、基础账户与产品账户，以及流水、划转和调整记录的单表 Repository。
+- 交易事务、幂等、锁顺序和跨表写入由 Service 负责；拆分期间保留 `AccountRepository` 兼容门面，
+  旧调用入口和资金事务语义不变，内部能力按表逐步迁出。
+- 财务对账、订单时间线、运营报表和后台聚合查询不应继续扩展交易主库查询。相关代码以后进入
+  只参与编译、不运行的 `surprising-finance-ops` 暂存模块，并在正式财务系统建设时重新设计。
+
 ## long 单位
 
 - 余额使用 `availableUnits`、`lockedUnits`、`equityUnits`，全部是资产最小单位的 long。

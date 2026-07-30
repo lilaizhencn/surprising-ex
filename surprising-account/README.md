@@ -10,6 +10,19 @@ Surprising Exchange account and product settlement module. The current implement
 - `surprising-account-provider`: the sole writer for balances, ledgers, positions, reservations,
   deficits, funding, ADL, delivery/exercise, and trade-side settlement.
 
+## Persistence boundaries
+
+- The write model is moving to one business table per Repository. A Repository owns only that
+  table's SQL and does not orchestrate cross-table workflows.
+- `AccountQueryService` combines the single-table repositories for balances and deficits, legacy
+  and product accounts, ledgers, transfers, and adjustment records.
+- Services own transaction boundaries, idempotency, lock order, and cross-table writes. The
+  existing `AccountRepository` remains as a compatibility facade during the incremental migration,
+  preserving public entry points and funds-transaction semantics.
+- Financial reconciliation, order timelines, operations reports, and aggregate admin queries must
+  not grow new trading-primary queries. They belong in the compile-only, non-running
+  `surprising-finance-ops` staging module until the future finance system is redesigned.
+
 ## Long Units
 
 - Balances use `availableUnits`, `lockedUnits`, and `equityUnits`, all long values in the asset's smallest unit.

@@ -137,7 +137,7 @@ class AccountRepositoryTest {
     @Test
     void usdtPerpetualProductBalanceReadsLegacyPerpetualBalance() {
         AccountRepository repository = new AccountRepository(jdbcTemplate, sequenceRepository);
-        when(jdbcTemplate.query(contains("FROM account_balances b"), anyRowMapper(),
+        when(jdbcTemplate.query(contains("FROM account_balances"), anyRowMapper(),
                 eq(1001L), eq("USDT"))).thenAnswer(balance(900L, 100L, 1_000L));
 
         var response = repository.productBalance(1001L, AccountType.USDT_PERPETUAL, "USDT");
@@ -199,7 +199,7 @@ class AccountRepositoryTest {
                     when(rs.getString("reason")).thenReturn("INITIAL_DEPOSIT");
                     return List.of(mapper.mapRow(rs, 0));
                 });
-        when(jdbcTemplate.query(contains("SELECT b.user_id"), anyRowMapper(),
+        when(jdbcTemplate.query(contains("SELECT user_id, asset, available_units"), anyRowMapper(),
                 eq(1001L), eq("USDT"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
@@ -425,7 +425,7 @@ class AccountRepositoryTest {
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("INSERT INTO account_position_margins"), any(Object[].class)))
                 .thenReturn(1);
-        when(jdbcTemplate.query(contains("FROM account_product_balances b"), anyRowMapper(),
+        when(jdbcTemplate.query(contains("FROM account_product_balances"), anyRowMapper(),
                 eq(1001L), eq("USDT_DELIVERY"), eq("USDT"))).thenAnswer(productBalance(AccountType.USDT_DELIVERY,
                 900L, 700L, 1_600L));
         when(jdbcTemplate.update(contains("UPDATE account_product_ledger_entries"), any(Object[].class)))
@@ -532,7 +532,7 @@ class AccountRepositoryTest {
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("INSERT INTO account_position_margins"), any(Object[].class)))
                 .thenReturn(1);
-        when(jdbcTemplate.query(contains("SELECT b.user_id"), anyRowMapper(),
+        when(jdbcTemplate.query(contains("SELECT user_id, asset, available_units"), anyRowMapper(),
                 eq(1001L), eq("USDT"))).thenAnswer(balance(900L, 700L, 1_600L));
         when(jdbcTemplate.update(contains("UPDATE account_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
@@ -573,7 +573,7 @@ class AccountRepositoryTest {
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("available_units = available_units +"), any(Object[].class)))
                 .thenReturn(1);
-        when(jdbcTemplate.query(contains("SELECT b.user_id"), anyRowMapper(),
+        when(jdbcTemplate.query(contains("SELECT user_id, asset, available_units"), anyRowMapper(),
                 eq(1001L), eq("USDT"))).thenAnswer(balance(1_200L, 800L, 2_000L));
         when(jdbcTemplate.update(contains("UPDATE account_ledger_entries"), any(Object[].class)))
                 .thenReturn(1);
@@ -630,7 +630,7 @@ class AccountRepositoryTest {
         when(jdbcTemplate.query(contains("SELECT margin_units"), anyRowMapper(),
                 eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("ISOLATED"), eq("NET")))
                 .thenAnswer(marginUnits(700L));
-        when(jdbcTemplate.query(contains("SELECT b.user_id"), anyRowMapper(),
+        when(jdbcTemplate.query(contains("SELECT user_id, asset, available_units"), anyRowMapper(),
                 eq(1001L), eq("USDT"))).thenAnswer(balance(900L, 700L, 1_600L));
 
         var response = repository.adjustIsolatedPositionMargin(1001L, "BTC-USDT", 100L,
