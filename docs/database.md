@@ -545,16 +545,14 @@ position.
 - `source_type` records why the override exists: `USER_OVERRIDE`, `VIP`, `MARKET_MAKER`, `PROMOTION`, or `RISK_OVERRIDE`.
   `tier_code` stores the external VIP/market-maker/program code used by admin systems.
 - Resolution order is per-symbol user fee, then user-global fee, then the instrument default. Within the same
-  specificity, `RISK_OVERRIDE`, `USER_OVERRIDE`, `PROMOTION`, and `MARKET_MAKER` outrank automatic `VIP`.
+  specificity, `RISK_OVERRIDE`, `USER_OVERRIDE`, `PROMOTION`, and `MARKET_MAKER` outrank `VIP`.
 - `effective_time` / `expire_time`, `status`, and descending indexes allow deterministic historical
   activation. The resolved ppm is copied into `trading_orders` before a command is published.
 
-`trading_fee_tiers` stores automatic fee-tier rules:
-
-- Thresholds use USD/USDT asset units, so `1000000000000000` means `10,000,000` with 8 quote decimals.
-- `qualification_mode` controls whether 30-day filled notional, total account asset value, either, or both are required.
-- The default seed tiers assign only `VIP` rates. Market-maker rebates should be configured only when a separate
-  market-maker program measures quote uptime, spread, and depth quality.
+The primary trading database no longer creates or maintains automatic fee-tier tables. Thirty-day volume,
+asset valuation, VIP qualification, and market-maker quality belong to a future finance-operations system
+that uses event projections and an independent database. It must not aggregate across trade, balance, and
+instrument tables in the primary trading database. Trading accepts only finalized `trading_fee_schedules`.
 
 `market_maker_strategy_leases` coordinates active-active market-maker providers:
 
@@ -590,15 +588,6 @@ external order book snapshot is available:
   calibrated from Binance/OKX/Bybit-style depth rather than static local parameters.
 - The table is observability only. Balances, positions, order reservations, and deficits still use the account/trading
   transactional tables as the source of truth.
-
-`trading_user_fee_tiers` stores the current calculated fee tier per user:
-
-- The refresher calculates 30-day maker+taker notional from `trading_match_trades`, valuing linear contracts by
-  fill price and inverse contracts by face value.
-- Account asset value counts USD/USDT balances 1:1 and values other assets from the latest active mark price for
-  a matching `baseAsset-USDT/USD` instrument.
-- The row owns one user-global `trading_fee_schedules` entry. Refresh updates that schedule only when the user's
-  assigned tier or rates change; order rows that were already accepted keep their copied fee snapshot.
 
 `trading_leverage_settings` stores the user's target leverage by `user_id + symbol + margin_mode`:
 

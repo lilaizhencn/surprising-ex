@@ -16,3 +16,4 @@
 - `ordertimeline`：订单时间线暂存边界。
 - `reporting`：运营报表暂存边界。
 - `adminquery`：后台聚合查询暂存边界。
+- `feequalification`：成交量、资产估值、VIP 资格和做市质量评定暂存边界。

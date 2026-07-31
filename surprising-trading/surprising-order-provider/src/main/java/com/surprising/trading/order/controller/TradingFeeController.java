@@ -2,17 +2,11 @@ package com.surprising.trading.order.controller;
 
 import com.surprising.trading.api.TradingApiPaths;
 import com.surprising.trading.api.model.EffectiveTradingFeeResponse;
-import com.surprising.trading.api.model.FeeTierAssignmentResponse;
-import com.surprising.trading.api.model.FeeTierQueryResponse;
-import com.surprising.trading.api.model.FeeTierRefreshResponse;
-import com.surprising.trading.api.model.FeeTierResponse;
-import com.surprising.trading.api.model.FeeTierUpsertRequest;
 import com.surprising.trading.api.model.FeeScheduleQueryResponse;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.order.service.FeeTierService;
 import com.surprising.trading.order.service.TradingFeeService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -28,11 +22,9 @@ import org.springframework.web.server.ResponseStatusException;
 public class TradingFeeController {
 
     private final TradingFeeService tradingFeeService;
-    private final FeeTierService feeTierService;
 
-    public TradingFeeController(TradingFeeService tradingFeeService, FeeTierService feeTierService) {
+    public TradingFeeController(TradingFeeService tradingFeeService) {
         this.tradingFeeService = tradingFeeService;
-        this.feeTierService = feeTierService;
     }
 
     @GetMapping(TradingApiPaths.FEE_BASE_PATH + "/effective")
@@ -98,68 +90,6 @@ public class TradingFeeController {
         try {
             return tradingFeeService.querySchedules(productLine(productLineValue, productLineHeader),
                     userId, symbol, status, limit, cursor, sort);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @PostMapping(TradingApiPaths.ADMIN_FEE_BASE_PATH + "/tiers")
-    public FeeTierResponse upsertTier(@RequestBody FeeTierUpsertRequest request) {
-        try {
-            return feeTierService.upsertTier(request);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @GetMapping(TradingApiPaths.ADMIN_FEE_BASE_PATH + "/tiers")
-    public FeeTierQueryResponse queryTiers(@RequestParam(value = "status", required = false)
-                                           FeeScheduleStatus status,
-                                           @RequestParam(value = "limit", defaultValue = "100") int limit,
-                                           @RequestParam(value = "cursor", required = false) String cursor,
-                                           @RequestParam(value = "sort", required = false) String sort) {
-        try {
-            return feeTierService.queryTiers(status, limit, cursor, sort);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @PostMapping(TradingApiPaths.ADMIN_FEE_BASE_PATH + "/tiers/refresh")
-    public FeeTierAssignmentResponse refreshUserTier(@RequestParam("userId") long userId,
-                                                     @RequestHeader(value = "X-Product-Line", required = false)
-                                                     String productLineHeader,
-                                                     @RequestParam(value = "productLine", required = false)
-                                                     String productLineValue) {
-        try {
-            return feeTierService.refreshUserTier(productLine(productLineValue, productLineHeader), userId);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @PostMapping(TradingApiPaths.ADMIN_FEE_BASE_PATH + "/tiers/refresh-active")
-    public FeeTierRefreshResponse refreshActiveUserTiers(@RequestParam(value = "limit", defaultValue = "1000")
-                                                         int limit,
-                                                         @RequestHeader(value = "X-Product-Line", required = false)
-                                                         String productLineHeader,
-                                                         @RequestParam(value = "productLine", required = false)
-                                                         String productLineValue) {
-        try {
-            return feeTierService.refreshActiveUserTiers(productLine(productLineValue, productLineHeader), limit);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @GetMapping(TradingApiPaths.ADMIN_FEE_BASE_PATH + "/tiers/users/{userId}")
-    public FeeTierAssignmentResponse currentUserTier(@PathVariable("userId") long userId,
-                                                    @RequestHeader(value = "X-Product-Line", required = false)
-                                                    String productLineHeader,
-                                                    @RequestParam(value = "productLine", required = false)
-                                                    String productLineValue) {
-        try {
-            return feeTierService.currentUserTier(productLine(productLineValue, productLineHeader), userId);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

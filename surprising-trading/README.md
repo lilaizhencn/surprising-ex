@@ -89,9 +89,11 @@ positions/margins, risk snapshots, liquidation, funding, ADL, and WebSocket even
 
 - `init.sql` defaults `BTC-USDT` and `ETH-USDT` to maker `200 ppm` and taker `500 ppm`, or `0.02% / 0.05%`.
 - `trading_fee_schedules` can configure user-global or per-symbol overrides. `source_type` supports `USER_OVERRIDE`, `VIP`, `MARKET_MAKER`, `PROMOTION`, and `RISK_OVERRIDE`. Per-symbol user fees win over user-global fees, then the instrument default is used.
-- When multiple user-global schedules are active, source priority is `RISK_OVERRIDE`, `USER_OVERRIDE`, `PROMOTION`, `MARKET_MAKER`, then `VIP`; this prevents the automatic VIP job from overriding manual risk, user, campaign, or market-maker terms.
+- When multiple user-global schedules are active, source priority is `RISK_OVERRIDE`, `USER_OVERRIDE`, `PROMOTION`, `MARKET_MAKER`, then `VIP`; this prevents VIP rates from overriding risk, user, campaign, or market-maker terms.
 - Admin APIs: `POST /api/v1/admin/trading/fees/schedules` creates or updates schedules, `POST /api/v1/admin/trading/fees/schedules/{feeScheduleId}/disable` disables a schedule, and `GET /api/v1/admin/trading/fees/schedules` lists schedules. Schedule lists support cursor paging with `limit`, `cursor`, and `sort`; supported sort values are `updatedAt.desc`, `updatedAt.asc`, `createdAt.desc`, `createdAt.asc`, `effectiveTime.desc`, and `effectiveTime.asc`. Responses keep `schedules/count` and add `nextCursor`, `hasMore`, `sort`, and `limit`.
-- VIP tier APIs: `POST /api/v1/admin/trading/fees/tiers` upserts tier rules, `GET /api/v1/admin/trading/fees/tiers` lists rules, `POST /api/v1/admin/trading/fees/tiers/refresh?userId=...` recalculates one user, `POST /api/v1/admin/trading/fees/tiers/refresh-active` recalculates active users, and `GET /api/v1/admin/trading/fees/tiers/users/{userId}` returns the current assignment. Tier lists support cursor paging with `limit`, `cursor`, and `sort`; supported sort values are `priority.desc` and `priority.asc`. Responses keep `tiers/count` and add `nextCursor`, `hasMore`, `sort`, and `limit`.
+- The trading runtime no longer calculates 30-day volume, asset valuation, or automatic VIP tiers and no longer
+  exposes `/fees/tiers` endpoints. Those computations belong to a future finance-operations system backed by
+  event projections and an independent database. Final rates enter trading through an explicit schedule API or event.
 
 Admin order-audit APIs use the `/api/v1/admin/trading` prefix and are reached through the gateway admin
 security domains `/api/v1/admin/gateway/trading-orders` and `/api/v1/admin/gateway/trading-trigger`.
@@ -105,11 +107,10 @@ Order-entry persistence is split by physical table: `OrderRepository` owns only 
 algo-order state use dedicated single-table repositories. `OrderPlacementStateService` aggregates those
 checks inside the business transaction. `OrderCoordinationRepository` owns PostgreSQL advisory locks and
 does not access a business table.
-- The scheduled VIP refresher computes each user's 30-day maker+taker filled notional and total account asset value in USD/USDT units, then writes the selected tier back to `trading_fee_schedules` as a user-global `VIP` schedule. Stable balances count 1:1; non-stable balances use the latest mark price for an active `baseAsset-USDT/USD` instrument and are ignored if no mark is available.
 - Runtime query: `GET /api/v1/trading/fees/effective?userId=...&symbol=...` returns the current maker/taker ppm and source, such as `INSTRUMENT` or `VIP_SYMBOL`.
 - Order admission writes the final `maker_fee_rate_ppm` and `taker_fee_rate_ppm` to `trading_orders`. Later VIP or promotion changes do not reinterpret already accepted resting orders.
 - The account provider settles fills from the order snapshot and writes `TRADE_FEE` ledger rows with `trade_id`, `order_id`, `symbol`, and `fee_rate_ppm`.
-- Market-maker rebates should still be configured by a market-maker program or admin workflow that verifies quote quality; the default automatic tiers only assign `VIP` fees.
+- Market-maker rebates should still be configured by a market-maker program or admin workflow that verifies quote quality.
 
 ## Leverage Settings
 
