@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -91,6 +92,31 @@ class RiskServiceTest {
         assertThat(outboxRepository.enqueued).isZero();
         assertThat(transactionManager.commits).isZero();
         assertThat(transactionManager.rollbacks).isZero();
+    }
+
+    @Test
+    void scanLeavesExistingProjectionUntouchedWhenAnotherNodeOwnsTheLease() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        RedisRiskStateStore stateStore = mock(RedisRiskStateStore.class);
+        RedisRiskCalculator calculator = mock(RedisRiskCalculator.class);
+        RiskService service = new RiskService(
+                new ObjectMapper(),
+                new RiskProperties(),
+                riskRepository,
+                riskRepository.persistence,
+                new FakeRiskSequenceRepository(),
+                new FakeRiskOutboxRepository(),
+                null,
+                new TrackingTransactionManager(),
+                stateStore,
+                calculator);
+
+        service.scan();
+
+        assertThat(riskRepository.riskGroupCalls).isZero();
+        verify(stateStore).tryAcquireProjection(ProductLine.LINEAR_PERPETUAL);
+        verify(stateStore, never()).startRebuild(ProductLine.LINEAR_PERPETUAL);
+        verify(stateStore, never()).markNotReady(ProductLine.LINEAR_PERPETUAL);
     }
 
     @Test
@@ -453,7 +479,18 @@ class RiskServiceTest {
                                          TrackingTransactionManager transactionManager) {
         RedisRiskStateStore stateStore = mock(RedisRiskStateStore.class);
         RedisRiskCalculator calculator = mock(RedisRiskCalculator.class);
+        RedisRiskStateStore.ProjectionLease projectionLease =
+                new RedisRiskStateStore.ProjectionLease("risk-projection-lease", "token-1");
+        when(stateStore.tryAcquireProjection(any(ProductLine.class))).thenReturn(projectionLease);
+        when(stateStore.renewProjection(projectionLease)).thenReturn(true);
+        when(stateStore.startRebuild(any(ProductLine.class))).thenReturn("generation-1");
         when(stateStore.ready(any(ProductLine.class))).thenReturn(true);
+        when(stateStore.replace(
+                any(ProductLine.class), any(RiskGroupKey.class), any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            java.util.function.Supplier<CachedRiskGroup> supplier = invocation.getArgument(2);
+            return new RedisRiskStateStore.ProjectionUpdate(supplier.get(), true);
+        });
         when(calculator.calculate(any(CachedRiskGroup.class))).thenAnswer(invocation -> {
             CachedRiskGroup state = invocation.getArgument(0);
             riskRepository.calculateCalls++;

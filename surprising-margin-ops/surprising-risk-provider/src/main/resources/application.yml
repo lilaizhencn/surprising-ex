@@ -61,6 +61,9 @@ surprising:
       state-ttl: 10m
       ready-ttl: 30s
       unchanged-trigger-interval: 30s
+      projection-lease-ttl: 1m
+      projection-group-lock-ttl: 30s
+      projection-group-lock-wait: 2s
       trigger-batch-size: 250
       trigger-concurrency: 4
     outbox:

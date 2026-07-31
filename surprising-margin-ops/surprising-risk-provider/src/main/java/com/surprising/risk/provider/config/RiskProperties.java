@@ -309,6 +309,9 @@ public class RiskProperties {
         private Duration stateTtl = Duration.ofMinutes(10);
         private Duration readyTtl = Duration.ofSeconds(30);
         private Duration unchangedTriggerInterval = Duration.ofSeconds(30);
+        private Duration projectionLeaseTtl = Duration.ofMinutes(1);
+        private Duration projectionGroupLockTtl = Duration.ofSeconds(30);
+        private Duration projectionGroupLockWait = Duration.ofSeconds(2);
         private int triggerBatchSize = 250;
         private int triggerConcurrency = 4;
 
@@ -342,6 +345,30 @@ public class RiskProperties {
 
         public void setUnchangedTriggerInterval(Duration unchangedTriggerInterval) {
             this.unchangedTriggerInterval = unchangedTriggerInterval;
+        }
+
+        public Duration getProjectionLeaseTtl() {
+            return projectionLeaseTtl;
+        }
+
+        public void setProjectionLeaseTtl(Duration projectionLeaseTtl) {
+            this.projectionLeaseTtl = projectionLeaseTtl;
+        }
+
+        public Duration getProjectionGroupLockTtl() {
+            return projectionGroupLockTtl;
+        }
+
+        public void setProjectionGroupLockTtl(Duration projectionGroupLockTtl) {
+            this.projectionGroupLockTtl = projectionGroupLockTtl;
+        }
+
+        public Duration getProjectionGroupLockWait() {
+            return projectionGroupLockWait;
+        }
+
+        public void setProjectionGroupLockWait(Duration projectionGroupLockWait) {
+            this.projectionGroupLockWait = projectionGroupLockWait;
         }
 
         public int getTriggerBatchSize() {

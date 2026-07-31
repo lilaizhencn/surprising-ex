@@ -28,6 +28,7 @@ import com.surprising.risk.provider.repository.RiskSequenceRepository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
+import jakarta.annotation.PreDestroy;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -61,8 +62,10 @@ import tools.jackson.databind.ObjectMapper;
     private final RedisRiskStateStore stateStore;
     private final RedisRiskCalculator redisCalculator;
     private RiskGroupKey reconcileAfter;
-    private boolean initialProjectionComplete;
+    private volatile boolean initialProjectionComplete;
     private boolean projectionStarted;
+    private RedisRiskStateStore.ProjectionLease projectionLease;
+    private String projectionGeneration;
 
     @Autowired
     public RiskService(ObjectMapper objectMapper,
@@ -118,39 +121,48 @@ import tools.jackson.databind.ObjectMapper;
         }
         requireRedisState();
         ProductLine productLine = properties.getKafka().getProductLine();
-        if (!projectionStarted) {
-            stateStore.clear(productLine);
-            projectionStarted = true;
-        }
-        int batchSize = Math.max(1, properties.getCalculation().getScanBatchSize());
-        List<RiskGroupKey> groups = riskRepository.riskGroups(reconcileAfter, batchSize);
-        if (groups.isEmpty()) {
-            reconcileAfter = null;
-            initialProjectionComplete = true;
-            stateStore.markReady(productLine);
+        if (!ensureProjectionOwnership(productLine)) {
             return;
         }
-        List<CachedRiskGroup> states = new ArrayList<>(groups.size());
-        List<CachedRiskGroup> changedStates = new ArrayList<>(groups.size());
-        for (RiskGroupKey key : groups) {
-            try {
+        try {
+            if (!projectionStarted) {
+                projectionGeneration = stateStore.startRebuild(productLine);
+                projectionStarted = true;
+            } else {
+                stateStore.renewRebuild(productLine, projectionGeneration);
+            }
+            int batchSize = Math.max(1, properties.getCalculation().getScanBatchSize());
+            List<RiskGroupKey> groups = riskRepository.riskGroups(reconcileAfter, batchSize);
+            if (groups.isEmpty()) {
+                completeProjectionCycle(productLine);
+                return;
+            }
+            List<CachedRiskGroup> states = new ArrayList<>(groups.size());
+            List<CachedRiskGroup> changedStates = new ArrayList<>(groups.size());
+            for (RiskGroupKey key : groups) {
                 ProjectionUpdate update = refreshState(productLine, key);
                 states.add(update.state());
                 if (update.changed()) {
                     changedStates.add(update.state());
                 }
                 reconcileAfter = key;
-            } catch (RuntimeException ex) {
-                invalidateProjection();
-                throw ex;
             }
-        }
-        List<CachedRiskGroup> evaluationStates = initialProjectionComplete ? changedStates : states;
-        if (!evaluationStates.isEmpty()) {
-            evaluateBatch(evaluationStates, Map.of());
-        }
-        if (initialProjectionComplete) {
-            stateStore.markReady(productLine);
+            List<CachedRiskGroup> evaluationStates = initialProjectionComplete ? changedStates : states;
+            if (!evaluationStates.isEmpty()) {
+                evaluateBatch(evaluationStates, Map.of());
+            }
+            requireProjectionRenewed(productLine);
+            if (initialProjectionComplete) {
+                stateStore.markReady(productLine);
+            } else {
+                stateStore.refreshReady(productLine);
+            }
+        } catch (RedisRiskStateStore.ProjectionLostException ex) {
+            abandonProjection(productLine);
+            throw ex;
+        } catch (RuntimeException ex) {
+            invalidateProjection();
+            throw ex;
         }
     }
 
@@ -209,8 +221,9 @@ import tools.jackson.databind.ObjectMapper;
     }
 
     private ProjectionUpdate refreshState(ProductLine productLine, RiskGroupKey key) {
-        CachedRiskGroup state = riskRepository.cachedRiskGroup(key);
-        return new ProjectionUpdate(state, stateStore.replace(productLine, state));
+        RedisRiskStateStore.ProjectionUpdate update =
+                stateStore.replace(productLine, key, () -> riskRepository.cachedRiskGroup(key));
+        return new ProjectionUpdate(update.state(), update.changed());
     }
 
     private void evaluateBatch(List<CachedRiskGroup> states,
@@ -285,10 +298,81 @@ import tools.jackson.databind.ObjectMapper;
 
     synchronized void invalidateProjection() {
         ProductLine productLine = properties.getKafka().getProductLine();
-        stateStore.markNotReady(productLine);
+        try {
+            stateStore.markNotReady(productLine);
+        } finally {
+            abandonProjection(productLine);
+        }
+    }
+
+    private boolean ensureProjectionOwnership(ProductLine productLine) {
+        if (projectionLease == null) {
+            projectionLease = stateStore.tryAcquireProjection(productLine);
+            if (projectionLease == null) {
+                return false;
+            }
+            resetProjectionCycle();
+            return true;
+        }
+        if (!stateStore.renewProjection(projectionLease)) {
+            loseProjectionOwnership();
+            return false;
+        }
+        return true;
+    }
+
+    private void requireProjectionRenewed(ProductLine productLine) {
+        if (!stateStore.renewProjection(projectionLease)) {
+            loseProjectionOwnership();
+            throw new RedisRiskStateStore.ProjectionLostException("Redis 风险投影协调租约已经丢失");
+        }
+        stateStore.renewRebuild(productLine, projectionGeneration);
+    }
+
+    private void completeProjectionCycle(ProductLine productLine) {
+        requireProjectionRenewed(productLine);
+        stateStore.pruneUnseen(productLine, projectionGeneration);
+        requireProjectionRenewed(productLine);
+        stateStore.completeRebuild(productLine, projectionGeneration);
+        reconcileAfter = null;
+        initialProjectionComplete = true;
+        projectionStarted = false;
+        projectionGeneration = null;
+        stateStore.markReady(productLine);
+    }
+
+    private void abandonProjection(ProductLine productLine) {
+        try {
+            if (stateStore != null) {
+                stateStore.abandonRebuild(productLine, projectionGeneration);
+            }
+        } finally {
+            try {
+                if (stateStore != null) {
+                    stateStore.releaseProjection(projectionLease);
+                }
+            } finally {
+                loseProjectionOwnership();
+            }
+        }
+    }
+
+    private void resetProjectionCycle() {
         reconcileAfter = null;
         initialProjectionComplete = false;
         projectionStarted = false;
+        projectionGeneration = null;
+    }
+
+    private void loseProjectionOwnership() {
+        projectionLease = null;
+        resetProjectionCycle();
+    }
+
+    @PreDestroy
+    synchronized void closeProjectionLease() {
+        ProductLine productLine = properties.getKafka().getProductLine();
+        abandonProjection(productLine);
     }
 
     public RiskAccountSnapshotResponse latestAccount(long userId, String settleAsset) {

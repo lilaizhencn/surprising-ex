@@ -395,8 +395,13 @@ Recommended production settings:
   and replaces the complete Redis group. A failed batch removes readiness and leaves its offsets uncommitted for retry.
 - Redis stores complete group state and a `symbol + instrumentVersion -> groupId` reverse index. Mark-price updates read
   only indexed groups and calculate fixed-point risk from Redis plus cached immutable instrument/bracket metadata. A
-  keyset PostgreSQL projection rebuild runs at startup and periodically reconciles Redis; there is no scan-lease or
-  PostgreSQL risk-calculation fallback path.
+  keyset PostgreSQL projection reconciliation runs at startup and periodically. One token-owned product-line lease
+  selects the coordinator across replicas; non-owners leave the active projection untouched. There is no PostgreSQL
+  risk-calculation fallback path.
+- Reconciliation never clears the active product-line projection. Each full keyset pass owns a generation seen-set;
+  concurrent position events refresh the active group and join that generation. At the end, only groups still unseen
+  by the same valid generation are pruned. A per-group Redis lock spans authoritative PostgreSQL loading and replacement,
+  and one Lua operation atomically changes group state, membership, and all affected reverse indexes.
 - Each affected group is evaluated in memory before opening the write transaction. One batch allocation is made from
   each native PostgreSQL sequence, followed by batch inserts for account snapshots, position snapshots, liquidation
   candidates, and candidate Outbox rows. The active-candidate partial unique index remains the duplicate guard.
@@ -526,8 +531,10 @@ Do not point this script at a shared development database. Matching restores ope
 - Index and mark providers use `price_symbol_leases` so only one live node publishes a given `module + symbol`.
 - Index and mark providers use `price_symbol_sequences` so a failover cannot reset sequence numbers.
 - Funding providers also use `price_symbol_leases` and `price_symbol_sequences`; settlement is additionally guarded by `funding_settlements(symbol, funding_time)`.
-- Risk-provider Redis readiness is fail-closed. A startup rebuild clears the product-line projection first, rebuilds
-  complete groups and reverse indexes, and publishes readiness only after reaching the end of the keyset scan.
+- Risk-provider Redis readiness is fail-closed. Startup keeps an existing complete projection readable while the
+  lease-owning node reconciles it; replicas cannot clear each other's state. Readiness is created only after a complete
+  first keyset pass and is removed on projection failure. Lease loss stops the old coordinator without deleting the
+  new owner's active projection.
 - Market-maker providers use `market_maker_strategy_leases` so only one live node quotes a given `strategyId + symbol`. If the owner dies, lease expiry allows another node to continue. The module places normal `LIMIT + GTX + postOnly` orders through order-provider and never writes matching state directly.
 - Funding-rate prediction is published directly to `surprising.linear-perp.funding.rate.v1` and cached by symbol; it performs no rate-table or outbox write. At the funding boundary, the owner freezes the cached prediction into one idempotent `FINAL` rate row before settlement. If no current prediction is available, settlement fails closed for that symbol.
 - Funding settlement never holds one transaction across all symbol positions. It scans the partial

@@ -38,6 +38,10 @@ Margin-operation APIs and providers for risk, liquidation, funding, insurance, a
 - Risk consumes account position events in Kafka batches, keeps only the highest revision for each exact position, and
   scans each affected user/account/settlement-asset group once. Complete position events eliminate the former
   instrument target-resolution query; scheduled keyset scans remain the safety fallback.
+- A single token-owned Redis lease coordinates scheduled scans for each product line; replicas no longer clear the
+  projection on startup. Each reconciliation generation records observed groups, including concurrent position-event
+  refreshes, and prunes only groups unseen by that generation. A per-group lock spans authoritative PostgreSQL load and
+  Redis replacement, while Lua atomically swaps group state, membership, and reverse indexes.
 - Risk persistence is split by physical table into account-snapshot, position-snapshot, liquidation-candidate,
   admin-rule, and outbox repositories. `RiskPersistenceService` aggregates those repositories inside business
   transactions. `RiskRepository` retains only authoritative real-time risk inputs whose position, instrument,
