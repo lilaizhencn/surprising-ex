@@ -20,6 +20,13 @@ import java.util.function.Function;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+/**
+ * 订单费率仓储。
+ *
+ * <p>不可拆原因：下单费率快照必须把 instrument 基础费率与生效中的用户费率按优先级一次解析；
+ * 分次读取遇到费率启停或 instrument 版本切换时，会把不同时间点的费率组合到同一订单。
+ * 其余费率计划读写均只操作 {@code trading_fee_schedules} 表。</p>
+ */
 @Repository
 public class OrderFeeRepository {
 

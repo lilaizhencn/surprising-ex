@@ -8,6 +8,13 @@ import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+/**
+ * 订单预占补偿扫描仓储。
+ *
+ * <p>不可拆原因：必须在同一数据库快照内筛选“账户命令已终态且订单仍待预占”的记录；
+ * 拆成两次查询会把并发完成的订单再次送入补偿流程。该查询只用于交易故障恢复，
+ * 不属于后台时间线、对账或运营报表。</p>
+ */
 @Repository
 public class OrderAccountCommandResultRepository {
 

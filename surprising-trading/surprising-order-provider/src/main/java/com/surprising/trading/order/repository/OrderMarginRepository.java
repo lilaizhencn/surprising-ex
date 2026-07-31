@@ -16,6 +16,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 
+/**
+ * 订单保证金与风险限额快照仓储。
+ *
+ * <p>不可拆原因：下单校验必须在一条 SQL 的一致快照中读取 instrument、风险档位、资产精度、
+ * 杠杆、持仓、开放订单和全市场未平仓量；拆成多条语句会在并发成交或撤单期间形成混合快照，
+ * 可能造成少冻结或突破持仓上限。这里属于交易热路径风险校验，不是后台报表查询。</p>
+ */
 @Repository
 public class OrderMarginRepository {
 

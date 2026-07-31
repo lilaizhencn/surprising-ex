@@ -33,7 +33,9 @@ public class InstrumentRuleRepository implements InstrumentRuleLookup {
 
     @Override
     public Optional<InstrumentRule> currentRule(String symbol) {
-        // Instrument owns the exact long unit conversion used by exchange-core.
+        // instrument 负责 exchange-core 使用的精确 long 单位换算。
+        // 不可拆原因：当前版本指针与版本规则必须在同一条 SQL 中解析；若分两次读取，
+        // 版本切换可能使订单使用已经失效的 tick、数量步长或保证金参数。
         StringBuilder sql = new StringBuilder("""
                 SELECT i.symbol,
                        i.version,

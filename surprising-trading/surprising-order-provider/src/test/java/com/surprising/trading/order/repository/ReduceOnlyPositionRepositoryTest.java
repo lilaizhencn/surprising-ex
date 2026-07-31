@@ -30,14 +30,15 @@ class ReduceOnlyPositionRepositoryTest {
 
     @Test
     void lockedOpenReduceOnlyStepsFailsOnOverflow() {
-        ReduceOnlyPositionRepository repository = new ReduceOnlyPositionRepository(jdbcTemplate);
+        ReduceOnlyOpenOrderRepository repository = new ReduceOnlyOpenOrderRepository(jdbcTemplate);
         when(jdbcTemplate.query(contains("FROM trading_orders"), anyRowMapper(),
                 eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET"), eq(7L),
                 eq("SELL")))
                 .thenReturn(List.of(Long.MAX_VALUE, 1L));
 
-        assertThatThrownBy(() -> repository.lockedOpenReduceOnlySteps(1001L, "BTC-USDT",
-                MarginMode.CROSS, 7L, OrderSide.SELL))
+        assertThatThrownBy(() -> repository.lockedOpenReduceOnlySteps(
+                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
+                MarginMode.CROSS, 7L, PositionSide.NET, OrderSide.SELL))
                 .isInstanceOf(ArithmeticException.class);
     }
 
@@ -64,7 +65,7 @@ class ReduceOnlyPositionRepositoryTest {
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
     void lockedOpenReduceOnlyStepsScopesByProductLine() {
-        ReduceOnlyPositionRepository repository = new ReduceOnlyPositionRepository(jdbcTemplate);
+        ReduceOnlyOpenOrderRepository repository = new ReduceOnlyOpenOrderRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
                 .thenReturn(List.of(4L));
 
