@@ -21,6 +21,11 @@ The candlestick service is designed for multi-node deployment and follows a part
 - PostgreSQL receives periodic full-snapshot upserts. The service never reads a candle row for every trade.
 - Perpetual candle update events are emitted to `surprising.linear-perp.candle.events.v1`; websocket/push services should consume that topic separately.
 - Enabled symbols are read from the current `surprising-instrument` snapshot.
+- Persistence is split by physical table: `instruments`, `instrument_current_versions`,
+  `account_asset_scales`, compatibility-mode `candlestick_symbols`, and candle storage each have a
+  single-table Repository. `SymbolRegistryService` combines eligible and current versions in memory,
+  while `PublicTradeEventMapper` combines instrument and asset scales in the service layer. Services
+  no longer execute SQL or cross-table JOINs.
 
 ## Multi-Node Mechanism
 

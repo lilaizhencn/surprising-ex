@@ -2,33 +2,42 @@ package com.surprising.candlestick.provider.service;
 
 import com.surprising.candlestick.provider.aggregation.CandleKey;
 import com.surprising.candlestick.provider.config.CandlestickProperties;
+import com.surprising.candlestick.provider.repository.CandlestickInstrumentCurrentVersionRepository;
+import com.surprising.candlestick.provider.repository.CandlestickInstrumentRepository;
+import com.surprising.candlestick.provider.repository.CandlestickInstrumentRepository.InstrumentVersion;
+import com.surprising.candlestick.provider.repository.CandlestickSymbolRepository;
 import jakarta.annotation.PostConstruct;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-@Service
 /**
- * Runtime symbol gate for dynamic market enablement.
- *
- * <p>By default strict mode reads the current instrument snapshot. Legacy deployments can switch
- * {@code surprising.candlestick.symbols.source} back to {@code CANDLESTICK_SYMBOLS}.</p>
+ * K 线运行时 symbol 门禁；服务层组合品种版本与当前版本快照。
  */
+@Service
 public class SymbolRegistryService {
 
     private static final Logger log = LoggerFactory.getLogger(SymbolRegistryService.class);
 
     private final CandlestickProperties properties;
-    private final JdbcTemplate jdbcTemplate;
+    private final CandlestickInstrumentRepository instrumentRepository;
+    private final CandlestickInstrumentCurrentVersionRepository currentVersionRepository;
+    private final CandlestickSymbolRepository symbolRepository;
     private volatile Set<String> enabledSymbols = Set.of();
 
-    public SymbolRegistryService(CandlestickProperties properties, JdbcTemplate jdbcTemplate) {
+    public SymbolRegistryService(CandlestickProperties properties,
+                                 CandlestickInstrumentRepository instrumentRepository,
+                                 CandlestickInstrumentCurrentVersionRepository currentVersionRepository,
+                                 CandlestickSymbolRepository symbolRepository) {
         this.properties = properties;
-        this.jdbcTemplate = jdbcTemplate;
+        this.instrumentRepository = instrumentRepository;
+        this.currentVersionRepository = currentVersionRepository;
+        this.symbolRepository = symbolRepository;
     }
 
     @PostConstruct
@@ -37,7 +46,7 @@ public class SymbolRegistryService {
     }
 
     /**
-     * Refreshes the enabled symbol snapshot in strict registry mode.
+     * 在严格注册表模式下刷新可用 symbol 快照。
      */
     @Scheduled(fixedDelayString = "${surprising.candlestick.symbols.refresh-delay-ms:30000}")
     public void refresh() {
@@ -46,9 +55,19 @@ public class SymbolRegistryService {
         }
         try {
             Set<String> symbols = ConcurrentHashMap.newKeySet();
-            jdbcTemplate.query(symbolQuery(), rs -> {
-                symbols.add(CandleKey.normalizeSymbol(rs.getString("symbol")));
-            });
+            if ("CANDLESTICK_SYMBOLS".equalsIgnoreCase(properties.getSymbols().getSource())) {
+                symbolRepository.findEnabledSymbols().stream()
+                        .map(CandleKey::normalizeSymbol)
+                        .forEach(symbols::add);
+            } else {
+                Map<String, Long> currentVersions = currentVersionRepository.findAll();
+                eligibleInstrumentVersions().stream()
+                        .filter(instrument -> currentVersions.getOrDefault(instrument.symbol(), -1L)
+                                == instrument.version())
+                        .map(InstrumentVersion::symbol)
+                        .map(CandleKey::normalizeSymbol)
+                        .forEach(symbols::add);
+            }
             enabledSymbols = Set.copyOf(symbols);
         } catch (Exception ex) {
             log.error("Failed to refresh candlestick symbol registry; keeping previous snapshot", ex);
@@ -62,21 +81,11 @@ public class SymbolRegistryService {
         return enabledSymbols.contains(CandleKey.normalizeSymbol(symbol));
     }
 
-    private String symbolQuery() {
-        String source = properties.getSymbols().getSource();
-        if ("CANDLESTICK_SYMBOLS".equalsIgnoreCase(source)) {
-            return "SELECT symbol FROM candlestick_symbols WHERE enabled = TRUE";
+    private List<InstrumentVersion> eligibleInstrumentVersions() {
+        if (properties.getKafka().isProductTopicsEnabled()) {
+            return instrumentRepository.findEnabledVersionsByContractType(
+                    properties.getKafka().getProductLine().contractTypeCode());
         }
-        String productFilter = properties.getKafka().isProductTopicsEnabled()
-                ? "i.contract_type = '" + properties.getKafka().getProductLine().contractTypeCode() + "'"
-                : "i.instrument_type = 'PERPETUAL'";
-        return """
-                SELECT i.symbol
-                  FROM instruments i
-                  JOIN instrument_current_versions c
-                    ON c.symbol = i.symbol AND c.version = i.version
-                 WHERE %s
-                   AND i.status IN ('PRE_TRADING', 'TRADING', 'HALT')
-                """.formatted(productFilter);
+        return instrumentRepository.findEnabledPerpetualVersions();
     }
 }

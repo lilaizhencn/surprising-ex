@@ -3,24 +3,32 @@ package com.surprising.candlestick.provider.service;
 import com.surprising.candlestick.api.model.TradeEvent;
 import com.surprising.candlestick.api.model.TradeSide;
 import com.surprising.candlestick.provider.aggregation.CandleKey;
+import com.surprising.candlestick.provider.repository.CandlestickAssetScaleRepository;
+import com.surprising.candlestick.provider.repository.CandlestickInstrumentRepository;
+import com.surprising.candlestick.provider.repository.CandlestickInstrumentRepository.InstrumentDefinition;
 import com.surprising.trading.api.model.PublicTradeEvent;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+/**
+ * 将撮合公开成交事件转换为 K 线聚合事件，并在服务层组合品种与资产精度。
+ */
 @Service
 public class PublicTradeEventMapper {
 
     private static final int DISPLAY_SCALE = 18;
 
-    private final JdbcTemplate jdbcTemplate;
+    private final CandlestickInstrumentRepository instrumentRepository;
+    private final CandlestickAssetScaleRepository assetScaleRepository;
     private final Map<InstrumentKey, InstrumentScale> scales = new ConcurrentHashMap<>();
 
-    public PublicTradeEventMapper(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    public PublicTradeEventMapper(CandlestickInstrumentRepository instrumentRepository,
+                                  CandlestickAssetScaleRepository assetScaleRepository) {
+        this.instrumentRepository = instrumentRepository;
+        this.assetScaleRepository = assetScaleRepository;
     }
 
     public TradeEvent toTradeEvent(PublicTradeEvent publicTrade) {
@@ -64,24 +72,21 @@ public class PublicTradeEventMapper {
     }
 
     private InstrumentScale loadScale(InstrumentKey key) {
-        return jdbcTemplate.query("""
-                SELECT i.price_tick_units,
-                       i.quantity_step_units,
-                       base_scale.scale_units AS base_scale_units,
-                       quote_scale.scale_units AS quote_scale_units
-                  FROM instruments i
-                  JOIN account_asset_scales base_scale ON base_scale.asset = i.base_asset
-                  JOIN account_asset_scales quote_scale ON quote_scale.asset = i.quote_asset
-                 WHERE i.symbol = ?
-                   AND i.version = ?
-                """, (rs, rowNum) -> new InstrumentScale(
-                rs.getLong("price_tick_units"),
-                rs.getLong("quantity_step_units"),
-                rs.getLong("base_scale_units"),
-                rs.getLong("quote_scale_units")), key.symbol(), key.instrumentVersion()).stream()
-                .findFirst()
+        InstrumentDefinition instrument = instrumentRepository.find(key.symbol(), key.instrumentVersion())
                 .orElseThrow(() -> new IllegalArgumentException("instrument scale not found for "
                         + key.symbol() + " version " + key.instrumentVersion()));
+        long baseScaleUnits = requireScaleUnits(instrument.baseAsset());
+        long quoteScaleUnits = requireScaleUnits(instrument.quoteAsset());
+        return new InstrumentScale(
+                instrument.priceTickUnits(),
+                instrument.quantityStepUnits(),
+                baseScaleUnits,
+                quoteScaleUnits);
+    }
+
+    private long requireScaleUnits(String asset) {
+        return assetScaleRepository.findScaleUnits(asset)
+                .orElseThrow(() -> new IllegalArgumentException("asset scale not found for " + asset));
     }
 
     private BigDecimal toDecimal(long steps, long unitSize, long scaleUnits) {

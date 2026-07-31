@@ -9,13 +9,12 @@ import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-@Repository
 /**
- * Batch sink for durable candle snapshots.
+ * 只负责 {@code candlestick_candles} 表的批量写入。
  *
- * <p>The processor writes full candle snapshots, not incremental deltas. Retrying the same snapshot
- * is therefore safe because PostgreSQL upserts by {@code symbol + period + open_time}.</p>
+ * <p>处理器写入完整快照而不是增量，因此按 symbol、周期和开盘时间重试 upsert 是安全的。</p>
  */
+@Repository
 public class PostgresCandleSink implements CandleSink {
 
     private static final String UPSERT_SQL = """
@@ -52,7 +51,7 @@ public class PostgresCandleSink implements CandleSink {
     }
 
     /**
-     * Persists the latest dirty candle snapshots in one JDBC batch.
+     * 使用一个 JDBC batch 持久化最新的脏 K 线快照。
      */
     @Override
     public void upsertBatch(List<CandleSnapshot> candles) {

@@ -11,6 +11,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
+/**
+ * 只负责 {@code candlestick_candles} 表的只读查询。
+ */
 @Repository
 public class CandleQueryRepository {
 
