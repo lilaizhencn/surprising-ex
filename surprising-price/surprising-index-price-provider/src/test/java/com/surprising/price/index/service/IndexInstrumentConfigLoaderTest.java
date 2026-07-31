@@ -1,38 +1,28 @@
 package com.surprising.price.index.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.IndexSourceConfig;
+import com.surprising.instrument.api.model.InstrumentResponse;
+import com.surprising.instrument.api.model.InstrumentStatus;
+import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.price.index.config.IndexPriceProperties;
-import com.surprising.price.index.repository.IndexInstrumentCurrentVersionRepository;
-import com.surprising.price.index.repository.IndexInstrumentKey;
-import com.surprising.price.index.repository.IndexInstrumentRepository;
-import com.surprising.price.index.repository.IndexInstrumentRepository.IndexInstrument;
-import com.surprising.price.index.repository.IndexInstrumentSourceRepository;
-import com.surprising.price.index.repository.IndexInstrumentSourceRepository.IndexSource;
 import com.surprising.product.api.ProductLine;
+import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class IndexInstrumentConfigLoaderTest {
 
     @Test
-    void legacySnapshotSelectsPerpetualInstrumentsAndAggregatesCurrentSources() {
+    void snapshotSelectsPerpetualInstrumentsAndAggregatesCurrentSources() {
         IndexPriceProperties properties = new IndexPriceProperties();
-        IndexInstrumentRepository instruments = mock(IndexInstrumentRepository.class);
-        IndexInstrumentCurrentVersionRepository versions = mock(IndexInstrumentCurrentVersionRepository.class);
-        IndexInstrumentSourceRepository sources = mock(IndexInstrumentSourceRepository.class);
-        IndexInstrument current = new IndexInstrument("BTC-USDT", 7L, 2);
-        IndexInstrument stale = new IndexInstrument("ETH-USDT", 3L, 3);
-        when(instruments.findTradingVersions(null)).thenReturn(List.of(current, stale));
-        when(versions.findAll()).thenReturn(Map.of("BTC-USDT", 7L, "ETH-USDT", 4L));
-        when(sources.findEnabled(List.of(current.key())))
-                .thenReturn(Map.of(current.key(), List.of(source())));
-        IndexInstrumentConfigLoader loader = new IndexInstrumentConfigLoader(
-                properties, instruments, versions, sources);
+        InstrumentSnapshotCache cache = new InstrumentSnapshotCache();
+        cache.replace(ProductLine.LINEAR_PERPETUAL, List.of(instrument("BTC-USDT", 7L, true),
+                instrument("ETH-USDT", 3L, false)));
+        IndexInstrumentConfigLoader loader = new IndexInstrumentConfigLoader(properties, cache);
 
         List<IndexPriceProperties.SymbolConfig> loaded = loader.load();
 
@@ -42,7 +32,6 @@ class IndexInstrumentConfigLoaderTest {
         assertThat(loaded.getFirst().getSources()).hasSize(1);
         assertThat(loaded.getFirst().getSources().getFirst().getWeight())
                 .isEqualByComparingTo("1.000000");
-        verify(instruments).findTradingVersions(null);
     }
 
     @Test
@@ -50,21 +39,16 @@ class IndexInstrumentConfigLoaderTest {
         IndexPriceProperties properties = new IndexPriceProperties();
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        IndexInstrumentRepository instruments = mock(IndexInstrumentRepository.class);
-        IndexInstrumentCurrentVersionRepository versions = mock(IndexInstrumentCurrentVersionRepository.class);
-        IndexInstrumentSourceRepository sources = mock(IndexInstrumentSourceRepository.class);
-        when(instruments.findTradingVersions("LINEAR_DELIVERY")).thenReturn(List.of());
-        when(versions.findAll()).thenReturn(Map.of());
-        IndexInstrumentConfigLoader loader = new IndexInstrumentConfigLoader(
-                properties, instruments, versions, sources);
+        InstrumentSnapshotCache cache = new InstrumentSnapshotCache();
+        cache.replace(ProductLine.LINEAR_DELIVERY, List.of());
+        IndexInstrumentConfigLoader loader = new IndexInstrumentConfigLoader(properties, cache);
 
         assertThat(loader.load()).isEmpty();
 
-        verify(instruments).findTradingVersions("LINEAR_DELIVERY");
     }
 
-    private IndexSource source() {
-        return new IndexSource(
+    private IndexSourceConfig source() {
+        return new IndexSourceConfig(
                 "BINANCE",
                 true,
                 "https://api.binance.com",
@@ -84,5 +68,16 @@ class IndexInstrumentConfigLoaderTest {
                 "{}",
                 "BINANCE",
                 1_000_000L);
+    }
+
+    private InstrumentResponse instrument(String symbol, long version, boolean withSource) {
+        Instant now = Instant.parse("2026-07-31T00:00:00Z");
+        return new InstrumentResponse(symbol, version, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL,
+                "BTC", "USDT", "USDT", 1_000_000L, "BTC", 10L, 1L, 1L, 1_000_000L,
+                1L, 1_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTC"), true,
+                true, true, 100_000_000L, 10_000L, 5_000L, 100L, 500L,
+                1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,
+                10_000_000L, withSource ? 2 : 3, null, null, null, null, null, null, null,
+                InstrumentStatus.TRADING, now, now, now, List.of(), withSource ? List.of(source()) : List.of());
     }
 }

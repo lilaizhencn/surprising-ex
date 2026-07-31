@@ -1,9 +1,8 @@
 package com.surprising.liquidation.provider.service;
 
 import com.surprising.liquidation.provider.config.LiquidationProperties;
-import com.surprising.liquidation.provider.repository.LiquidationInstrumentFeeRepository;
-import com.surprising.liquidation.provider.repository.LiquidationInstrumentFeeRepository.InstrumentFee;
-import com.surprising.liquidation.provider.repository.LiquidationInstrumentFeeRepository.InstrumentFeeRequest;
+import com.surprising.liquidation.provider.service.LiquidationInstrumentSnapshotService.InstrumentFee;
+import com.surprising.liquidation.provider.service.LiquidationInstrumentSnapshotService.InstrumentFeeRequest;
 import com.surprising.liquidation.provider.repository.LiquidationOrderEventRepository;
 import com.surprising.liquidation.provider.repository.LiquidationOrderRepository;
 import com.surprising.liquidation.provider.repository.LiquidationOrderRepository.NewLiquidationOrder;
@@ -48,7 +47,7 @@ public class LiquidationOrderPersistenceService {
     private final LiquidationOrderRepository orderRepository;
     private final LiquidationOrderEventRepository eventRepository;
     private final LiquidationTradingOutboxRepository outboxRepository;
-    private final LiquidationInstrumentFeeRepository instrumentFeeRepository;
+    private final LiquidationInstrumentSnapshotService instrumentSnapshotService;
     private final LiquidationUserFeeRepository userFeeRepository;
     private final LiquidationSequenceRepository sequenceRepository;
     private final LiquidationProperties properties;
@@ -57,14 +56,14 @@ public class LiquidationOrderPersistenceService {
             LiquidationOrderRepository orderRepository,
             LiquidationOrderEventRepository eventRepository,
             LiquidationTradingOutboxRepository outboxRepository,
-            LiquidationInstrumentFeeRepository instrumentFeeRepository,
+            LiquidationInstrumentSnapshotService instrumentSnapshotService,
             LiquidationUserFeeRepository userFeeRepository,
             LiquidationSequenceRepository sequenceRepository,
             LiquidationProperties properties) {
         this.orderRepository = orderRepository;
         this.eventRepository = eventRepository;
         this.outboxRepository = outboxRepository;
-        this.instrumentFeeRepository = instrumentFeeRepository;
+        this.instrumentSnapshotService = instrumentSnapshotService;
         this.userFeeRepository = userFeeRepository;
         this.sequenceRepository = sequenceRepository;
         this.properties = properties;
@@ -157,7 +156,7 @@ public class LiquidationOrderPersistenceService {
     }
 
     private Map<Long, FeeSnapshot> feeSnapshots(List<LiquidationOrderRequest> requests) {
-        Map<Long, InstrumentFee> defaults = instrumentFeeRepository.findAll(requests.stream()
+        Map<Long, InstrumentFee> defaults = instrumentSnapshotService.findAll(requests.stream()
                 .map(request -> new InstrumentFeeRequest(
                         request.candidateId(), request.symbol(), request.instrumentVersion()))
                 .toList());

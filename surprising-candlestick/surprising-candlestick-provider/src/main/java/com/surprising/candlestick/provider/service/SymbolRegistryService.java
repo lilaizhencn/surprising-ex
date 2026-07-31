@@ -2,15 +2,10 @@ package com.surprising.candlestick.provider.service;
 
 import com.surprising.candlestick.provider.aggregation.CandleKey;
 import com.surprising.candlestick.provider.config.CandlestickProperties;
-import com.surprising.candlestick.provider.repository.CandlestickInstrumentCurrentVersionRepository;
-import com.surprising.candlestick.provider.repository.CandlestickInstrumentRepository;
-import com.surprising.candlestick.provider.repository.CandlestickInstrumentRepository.InstrumentVersion;
 import com.surprising.candlestick.provider.repository.CandlestickSymbolRepository;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.client.InstrumentRpcApi;
 import jakarta.annotation.PostConstruct;
-import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
@@ -26,30 +21,22 @@ import org.springframework.stereotype.Service;
     private static final Logger log = LoggerFactory.getLogger(SymbolRegistryService.class);
 
     private final CandlestickProperties properties;
-    private final CandlestickInstrumentRepository instrumentRepository;
-    private final CandlestickInstrumentCurrentVersionRepository currentVersionRepository;
     private final CandlestickSymbolRepository symbolRepository;
     private final InstrumentSnapshotCache snapshotCache;
     private final InstrumentRpcApi instrumentRpcApi;
     private volatile Set<String> enabledSymbols = Set.of();
 
     public SymbolRegistryService(CandlestickProperties properties,
-                                 CandlestickInstrumentRepository instrumentRepository,
-                                 CandlestickInstrumentCurrentVersionRepository currentVersionRepository,
                                  CandlestickSymbolRepository symbolRepository) {
-        this(properties, instrumentRepository, currentVersionRepository, symbolRepository, null, null);
+        this(properties, symbolRepository, null, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
     public SymbolRegistryService(CandlestickProperties properties,
-                                 CandlestickInstrumentRepository instrumentRepository,
-                                 CandlestickInstrumentCurrentVersionRepository currentVersionRepository,
                                  CandlestickSymbolRepository symbolRepository,
                                  InstrumentSnapshotCache snapshotCache,
                                  InstrumentRpcApi instrumentRpcApi) {
         this.properties = properties;
-        this.instrumentRepository = instrumentRepository;
-        this.currentVersionRepository = currentVersionRepository;
         this.symbolRepository = symbolRepository;
         this.snapshotCache = snapshotCache;
         this.instrumentRpcApi = instrumentRpcApi;
@@ -90,18 +77,6 @@ import org.springframework.stereotype.Service;
                                 || instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.TRADING
                                 || instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.HALT)
                         .map(com.surprising.instrument.api.model.InstrumentResponse::symbol)
-                        .map(CandleKey::normalizeSymbol)
-                        .forEach(symbols::add);
-            } else if (snapshotCache == null) {
-                Map<String, Long> currentVersions = currentVersionRepository.findAll();
-                List<InstrumentVersion> versions = properties.getKafka().isProductTopicsEnabled()
-                        ? instrumentRepository.findEnabledVersionsByContractType(
-                        properties.getKafka().getProductLine().contractTypeCode())
-                        : instrumentRepository.findEnabledPerpetualVersions();
-                versions.stream()
-                        .filter(instrument -> currentVersions.getOrDefault(instrument.symbol(), -1L)
-                                == instrument.version())
-                        .map(InstrumentVersion::symbol)
                         .map(CandleKey::normalizeSymbol)
                         .forEach(symbols::add);
             } else {

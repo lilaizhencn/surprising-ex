@@ -2,9 +2,11 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.PositionMarginResponse;
 import com.surprising.account.api.model.PositionResponse;
-import com.surprising.account.provider.repository.AccountInstrumentRepository;
+import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.repository.PositionMarginRepository;
 import com.surprising.account.provider.repository.PositionRepository;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
@@ -17,14 +19,17 @@ public class PositionQueryService {
 
     private final PositionRepository positionRepository;
     private final PositionMarginRepository positionMarginRepository;
-    private final AccountInstrumentRepository instrumentRepository;
+    private final AccountProperties properties;
+    private final InstrumentSnapshotCache snapshotCache;
 
     public PositionQueryService(PositionRepository positionRepository,
                                 PositionMarginRepository positionMarginRepository,
-                                AccountInstrumentRepository instrumentRepository) {
+                                AccountProperties properties,
+                                InstrumentSnapshotCache snapshotCache) {
         this.positionRepository = positionRepository;
         this.positionMarginRepository = positionMarginRepository;
-        this.instrumentRepository = instrumentRepository;
+        this.properties = properties;
+        this.snapshotCache = snapshotCache;
     }
 
     public Optional<PositionMarginResponse> positionMargin(long userId,
@@ -54,8 +59,11 @@ public class PositionQueryService {
 
     private Optional<PositionMarginResponse> toMarginResponse(ProductLine productLine,
                                                               PositionResponse position) {
-        Optional<String> asset = instrumentRepository.findSettleAsset(
-                position.symbol(), position.instrumentVersion());
+        ProductLine resolvedProductLine = productLine == null
+                ? properties.getKafka().getProductLine() : productLine;
+        Optional<String> asset = snapshotCache.version(resolvedProductLine,
+                        position.symbol(), position.instrumentVersion())
+                .map(InstrumentResponse::settleAsset);
         if (asset.isEmpty()) {
             return Optional.empty();
         }

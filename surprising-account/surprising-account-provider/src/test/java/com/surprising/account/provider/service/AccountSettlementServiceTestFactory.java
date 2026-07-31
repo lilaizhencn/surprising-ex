@@ -2,12 +2,10 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.provider.repository.AccountBalanceRepository;
 import com.surprising.account.provider.repository.AccountDeficitRepository;
-import com.surprising.account.provider.repository.AccountInstrumentRepository;
 import com.surprising.account.provider.repository.AccountLedgerRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
 import com.surprising.account.provider.repository.AccountSettlementBalanceRepository;
 import com.surprising.account.provider.repository.AdminBalanceAdjustmentRepository;
-import com.surprising.account.provider.repository.AssetScaleRepository;
 import com.surprising.account.provider.repository.LiquidationOrderContextRepository;
 import com.surprising.account.provider.repository.OpenInterestShardRepository;
 import com.surprising.account.provider.repository.PositionMarginRepository;
@@ -27,6 +25,9 @@ import com.surprising.account.provider.repository.RiskPositionSnapshotRepository
 import com.surprising.account.provider.repository.SpotOrderReservationRepository;
 import com.surprising.account.provider.repository.TradeSettlementSideRepository;
 import com.surprising.price.consumer.LatestMarkPriceCache;
+import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.product.api.ProductLine;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -68,8 +69,9 @@ final class AccountSettlementServiceTestFactory {
         TradeSettlementSideRepository tradeSides = new TradeSettlementSideRepository(jdbcTemplate);
         PositionRepository positions = new PositionRepository(jdbcTemplate);
         PositionMarginRepository positionMargins = new PositionMarginRepository(jdbcTemplate);
-        AccountInstrumentRepository instruments = new AccountInstrumentRepository(jdbcTemplate);
-        AssetScaleRepository assetScales = new AssetScaleRepository(jdbcTemplate);
+        AccountProperties accountProperties = new AccountProperties();
+        InstrumentSnapshotCache snapshotCache = new InstrumentSnapshotCache();
+        snapshotCache.replace(ProductLine.LINEAR_PERPETUAL, java.util.List.of(), java.util.Map.of());
         RiskPositionSnapshotRepository riskSnapshots = new RiskPositionSnapshotRepository(jdbcTemplate);
         LiquidationOrderContextRepository liquidationContexts =
                 new LiquidationOrderContextRepository(jdbcTemplate);
@@ -106,7 +108,7 @@ final class AccountSettlementServiceTestFactory {
         PositionModeCommandService positionModeCommands =
                 new PositionModeCommandService(positionModes, positionModeSwitchGuard);
         PositionQueryService positionQueries =
-                new PositionQueryService(positions, positionMargins, instruments);
+                new PositionQueryService(positions, positionMargins, accountProperties, snapshotCache);
         PositionOpenInterestService positionOpenInterest =
                 new PositionOpenInterestService(positions, openInterestShards);
         SpotTradeSettlementService spotSettlement = new SpotTradeSettlementService(
@@ -133,8 +135,8 @@ final class AccountSettlementServiceTestFactory {
                 positionModeCommands,
                 positions,
                 positionMargins,
-                instruments,
-                assetScales,
+                accountProperties,
+                snapshotCache,
                 riskSnapshots,
                 liquidationContexts,
                 settlementBalances,

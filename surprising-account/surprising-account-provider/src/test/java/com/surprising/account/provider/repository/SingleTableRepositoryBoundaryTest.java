@@ -217,34 +217,6 @@ class SingleTableRepositoryBoundaryTest {
     }
 
     @Test
-    void accountInstrumentRepositoryOnlyQueriesInstrumentTable() {
-        JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
-        AccountInstrumentRepository repository = new AccountInstrumentRepository(jdbcTemplate);
-
-        repository.findSettleAsset("BTC-USDT", 7L);
-
-        String sql = capturedQuery(jdbcTemplate);
-        assertThat(sql)
-                .contains("FROM instruments")
-                .doesNotContain("account_positions")
-                .doesNotContain("account_position_margins");
-    }
-
-    @Test
-    void assetScaleRepositoryOnlyQueriesAssetScaleTable() {
-        JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
-        AssetScaleRepository repository = new AssetScaleRepository(jdbcTemplate);
-
-        repository.findScaleUnits("USDT");
-
-        String sql = capturedQuery(jdbcTemplate);
-        assertThat(sql)
-                .contains("FROM account_asset_scales")
-                .doesNotContain("instruments")
-                .doesNotContain("account_positions");
-    }
-
-    @Test
     void riskPositionSnapshotRepositoryOnlyQueriesRiskSnapshotTable() {
         JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
         RiskPositionSnapshotRepository repository = new RiskPositionSnapshotRepository(jdbcTemplate);

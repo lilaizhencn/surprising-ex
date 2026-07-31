@@ -4,13 +4,12 @@ import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AdlTargetSettlementAccountCommand;
 import com.surprising.account.provider.model.ContractSpec;
 import com.surprising.account.provider.model.PositionState;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.account.provider.repository.AccountBalanceRepository;
 import com.surprising.account.provider.repository.AccountDeficitRepository;
-import com.surprising.account.provider.repository.AccountInstrumentRepository;
-import com.surprising.account.provider.repository.AccountInstrumentRepository.ContractInstrumentRow;
 import com.surprising.account.provider.repository.AccountLedgerRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
-import com.surprising.account.provider.repository.AssetScaleRepository;
 import com.surprising.account.provider.repository.OpenInterestShardRepository;
 import com.surprising.account.provider.repository.PositionMarginRepository;
 import com.surprising.account.provider.repository.PositionRepository;
@@ -31,8 +30,7 @@ public class AdlTargetSettlementService {
     private final AccountSequenceRepository sequenceRepository;
     private final PositionRepository positionRepository;
     private final OpenInterestShardRepository openInterestShardRepository;
-    private final AccountInstrumentRepository instrumentRepository;
-    private final AssetScaleRepository assetScaleRepository;
+    private final InstrumentSnapshotCache snapshotCache;
     private final PositionMarginRepository positionMarginRepository;
     private final AccountBalanceRepository accountBalanceRepository;
     private final ProductBalanceRepository productBalanceRepository;
@@ -44,8 +42,7 @@ public class AdlTargetSettlementService {
     public AdlTargetSettlementService(AccountSequenceRepository sequenceRepository,
                                       PositionRepository positionRepository,
                                       OpenInterestShardRepository openInterestShardRepository,
-                                      AccountInstrumentRepository instrumentRepository,
-                                      AssetScaleRepository assetScaleRepository,
+                                      InstrumentSnapshotCache snapshotCache,
                                       PositionMarginRepository positionMarginRepository,
                                       AccountBalanceRepository accountBalanceRepository,
                                       ProductBalanceRepository productBalanceRepository,
@@ -56,8 +53,7 @@ public class AdlTargetSettlementService {
         this.sequenceRepository = sequenceRepository;
         this.positionRepository = positionRepository;
         this.openInterestShardRepository = openInterestShardRepository;
-        this.instrumentRepository = instrumentRepository;
-        this.assetScaleRepository = assetScaleRepository;
+        this.snapshotCache = snapshotCache;
         this.positionMarginRepository = positionMarginRepository;
         this.accountBalanceRepository = accountBalanceRepository;
         this.productBalanceRepository = productBalanceRepository;
@@ -124,13 +120,13 @@ public class AdlTargetSettlementService {
         PositionState position = positionRepository.lock(
                         productLine, userId, command.symbol(), command.marginMode(), command.positionSide())
                 .orElseThrow(() -> new StaleAdlTargetException("ADL target position is missing"));
-        ContractInstrumentRow instrument = instrumentRepository.findContractSpec(
-                        command.symbol(), position.instrumentVersion())
+        InstrumentResponse instrument = snapshotCache.version(productLine, command.symbol(), position.instrumentVersion())
+                .filter(value -> value.contractType() != com.surprising.instrument.api.model.ContractType.SPOT)
                 .orElseThrow(() -> new StaleAdlTargetException("ADL target instrument is missing"));
         if (!command.asset().equals(instrument.settleAsset())) {
             throw new StaleAdlTargetException("ADL target settle asset changed");
         }
-        long scaleUnits = assetScaleRepository.findScaleUnits(command.asset())
+        long scaleUnits = snapshotCache.scale(productLine, command.asset())
                 .orElseThrow(() -> new StaleAdlTargetException("ADL target asset scale is missing"));
         ContractSpec spec = new ContractSpec(
                 instrument.version(), instrument.contractType(), instrument.settleAsset(),

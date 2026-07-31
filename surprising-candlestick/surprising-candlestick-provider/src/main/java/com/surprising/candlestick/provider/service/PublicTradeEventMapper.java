@@ -3,10 +3,7 @@ package com.surprising.candlestick.provider.service;
 import com.surprising.candlestick.api.model.TradeEvent;
 import com.surprising.candlestick.api.model.TradeSide;
 import com.surprising.candlestick.provider.aggregation.CandleKey;
-import com.surprising.candlestick.provider.repository.CandlestickAssetScaleRepository;
-import com.surprising.candlestick.provider.repository.CandlestickInstrumentRepository;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
-import com.surprising.candlestick.provider.repository.CandlestickInstrumentRepository.InstrumentDefinition;
 import com.surprising.candlestick.provider.config.CandlestickProperties;
 import com.surprising.trading.api.model.PublicTradeEvent;
 import java.math.BigDecimal;
@@ -23,41 +20,25 @@ public class PublicTradeEventMapper {
 
     private static final int DISPLAY_SCALE = 18;
 
-    private final CandlestickInstrumentRepository instrumentRepository;
-    private final CandlestickAssetScaleRepository assetScaleRepository;
     private final InstrumentSnapshotCache snapshotCache;
     private final com.surprising.product.api.ProductLine productLine;
     private final Map<InstrumentKey, InstrumentScale> scales = new ConcurrentHashMap<>();
 
-    public PublicTradeEventMapper(CandlestickInstrumentRepository instrumentRepository,
-                                  CandlestickAssetScaleRepository assetScaleRepository) {
-        this(instrumentRepository, assetScaleRepository, null, com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
-    }
-
-    public PublicTradeEventMapper(CandlestickInstrumentRepository instrumentRepository,
-                                  CandlestickAssetScaleRepository assetScaleRepository,
-                                  InstrumentSnapshotCache snapshotCache) {
-        this(instrumentRepository, assetScaleRepository, snapshotCache,
-                com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
+    public PublicTradeEventMapper(InstrumentSnapshotCache snapshotCache) {
+        this(snapshotCache, com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public PublicTradeEventMapper(CandlestickInstrumentRepository instrumentRepository,
-                                  CandlestickAssetScaleRepository assetScaleRepository,
-                                  InstrumentSnapshotCache snapshotCache,
+    public PublicTradeEventMapper(InstrumentSnapshotCache snapshotCache,
                                   CandlestickProperties properties) {
-        this(instrumentRepository, assetScaleRepository, snapshotCache,
+        this(snapshotCache,
                 properties == null || properties.getKafka() == null
                         ? com.surprising.product.api.ProductLine.LINEAR_PERPETUAL
                         : properties.getKafka().getProductLine());
     }
 
-    private PublicTradeEventMapper(CandlestickInstrumentRepository instrumentRepository,
-                                   CandlestickAssetScaleRepository assetScaleRepository,
-                                   InstrumentSnapshotCache snapshotCache,
+    private PublicTradeEventMapper(InstrumentSnapshotCache snapshotCache,
                                    com.surprising.product.api.ProductLine productLine) {
-        this.instrumentRepository = instrumentRepository;
-        this.assetScaleRepository = assetScaleRepository;
         this.snapshotCache = snapshotCache;
         this.productLine = productLine == null
                 ? com.surprising.product.api.ProductLine.LINEAR_PERPETUAL : productLine;
@@ -104,33 +85,18 @@ public class PublicTradeEventMapper {
     }
 
     private InstrumentScale loadScale(InstrumentKey key) {
-        if (snapshotCache != null && snapshotCache.initialized(productLine)) {
-            var instrument = snapshotCache.version(productLine,
-                            key.symbol(), key.instrumentVersion())
-                    .orElseThrow(() -> new IllegalArgumentException("instrument scale not found for "
-                            + key.symbol() + " version " + key.instrumentVersion()));
-            long baseScaleUnits = snapshotCache.scale(productLine,
-                    instrument.baseAsset()).orElseThrow(() -> new IllegalArgumentException(
-                    "asset scale not found for " + instrument.baseAsset()));
-            long quoteScaleUnits = snapshotCache.scale(productLine,
-                    instrument.quoteAsset()).orElseThrow(() -> new IllegalArgumentException(
-                    "asset scale not found for " + instrument.quoteAsset()));
-            return new InstrumentScale(instrument.priceTickUnits(), instrument.quantityStepUnits(),
-                    baseScaleUnits, quoteScaleUnits);
+        if (snapshotCache == null || !snapshotCache.initialized(productLine)) {
+            throw new IllegalStateException("K 线合约 JVM 快照尚未就绪");
         }
-        // 兼容不加载 Spring 快照组件的纯单元测试；正式运行时必定走上面的 JVM 快照。
-        if (snapshotCache == null) {
-            InstrumentDefinition instrument = instrumentRepository.find(key.symbol(), key.instrumentVersion())
-                    .orElseThrow(() -> new IllegalArgumentException("instrument scale not found for "
-                            + key.symbol() + " version " + key.instrumentVersion()));
-            long baseScaleUnits = assetScaleRepository.findScaleUnits(instrument.baseAsset())
-                    .orElseThrow(() -> new IllegalArgumentException("asset scale not found for " + instrument.baseAsset()));
-            long quoteScaleUnits = assetScaleRepository.findScaleUnits(instrument.quoteAsset())
-                    .orElseThrow(() -> new IllegalArgumentException("asset scale not found for " + instrument.quoteAsset()));
-            return new InstrumentScale(instrument.priceTickUnits(), instrument.quantityStepUnits(),
-                    baseScaleUnits, quoteScaleUnits);
-        }
-        throw new IllegalStateException("K 线合约 JVM 快照尚未就绪");
+        var instrument = snapshotCache.version(productLine, key.symbol(), key.instrumentVersion())
+                .orElseThrow(() -> new IllegalArgumentException("instrument scale not found for "
+                        + key.symbol() + " version " + key.instrumentVersion()));
+        long baseScaleUnits = snapshotCache.scale(productLine, instrument.baseAsset())
+                .orElseThrow(() -> new IllegalArgumentException("asset scale not found for " + instrument.baseAsset()));
+        long quoteScaleUnits = snapshotCache.scale(productLine, instrument.quoteAsset())
+                .orElseThrow(() -> new IllegalArgumentException("asset scale not found for " + instrument.quoteAsset()));
+        return new InstrumentScale(instrument.priceTickUnits(), instrument.quantityStepUnits(),
+                baseScaleUnits, quoteScaleUnits);
     }
 
     private BigDecimal toDecimal(long steps, long unitSize, long scaleUnits) {

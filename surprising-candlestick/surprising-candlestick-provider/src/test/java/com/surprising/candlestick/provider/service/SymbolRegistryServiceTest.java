@@ -3,15 +3,17 @@ package com.surprising.candlestick.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.surprising.candlestick.provider.config.CandlestickProperties;
-import com.surprising.candlestick.provider.repository.CandlestickInstrumentCurrentVersionRepository;
-import com.surprising.candlestick.provider.repository.CandlestickInstrumentRepository;
-import com.surprising.candlestick.provider.repository.CandlestickInstrumentRepository.InstrumentVersion;
 import com.surprising.candlestick.provider.repository.CandlestickSymbolRepository;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.InstrumentResponse;
+import com.surprising.instrument.api.model.InstrumentStatus;
+import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.product.api.ProductLine;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -19,31 +21,21 @@ import org.junit.jupiter.api.Test;
 
 class SymbolRegistryServiceTest {
 
-    private final CandlestickInstrumentRepository instrumentRepository =
-            mock(CandlestickInstrumentRepository.class);
-    private final CandlestickInstrumentCurrentVersionRepository currentVersionRepository =
-            mock(CandlestickInstrumentCurrentVersionRepository.class);
     private final CandlestickSymbolRepository symbolRepository = mock(CandlestickSymbolRepository.class);
 
     @Test
-    void strictInstrumentRegistryUsesCurrentPerpetualVersionByDefault() {
+    void strictInstrumentRegistryUsesThePerpetualSnapshotByDefault() {
         CandlestickProperties properties = new CandlestickProperties();
         properties.getSymbols().setAcceptUnknownSymbols(false);
-        when(instrumentRepository.findEnabledPerpetualVersions()).thenReturn(List.of(
-                new InstrumentVersion("BTC-USDT", 1L),
-                new InstrumentVersion("BTC-USDT", 2L),
-                new InstrumentVersion("ETH-USDT", 3L)));
-        when(currentVersionRepository.findAll()).thenReturn(Map.of(
-                "BTC-USDT", 2L,
-                "ETH-USDT", 4L));
-        SymbolRegistryService service = service(properties);
+        InstrumentSnapshotCache cache = cache(ProductLine.LINEAR_PERPETUAL,
+                instrument("BTC-USDT", 2L, ContractType.LINEAR_PERPETUAL),
+                instrument("ETH-USDT", 3L, ContractType.LINEAR_PERPETUAL));
+        SymbolRegistryService service = service(properties, cache);
 
         service.refresh();
 
         assertThat(service.isEnabled("BTC-USDT")).isTrue();
-        assertThat(service.isEnabled("ETH-USDT")).isFalse();
-        verify(instrumentRepository).findEnabledPerpetualVersions();
-        verifyNoInteractions(symbolRepository);
+        assertThat(service.isEnabled("ETH-USDT")).isTrue();
     }
 
     @Test
@@ -52,15 +44,13 @@ class SymbolRegistryServiceTest {
         properties.getSymbols().setAcceptUnknownSymbols(false);
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
-        when(instrumentRepository.findEnabledVersionsByContractType("LINEAR_DELIVERY"))
-                .thenReturn(List.of(new InstrumentVersion("BTC-USDT-20260925", 7L)));
-        when(currentVersionRepository.findAll()).thenReturn(Map.of("BTC-USDT-20260925", 7L));
-        SymbolRegistryService service = service(properties);
+        SymbolRegistryService service = service(properties,
+                cache(ProductLine.LINEAR_DELIVERY,
+                        instrument("BTC-USDT-20260925", 7L, ContractType.LINEAR_DELIVERY)));
 
         service.refresh();
 
         assertThat(service.isEnabled("BTC-USDT-20260925")).isTrue();
-        verify(instrumentRepository).findEnabledVersionsByContractType("LINEAR_DELIVERY");
     }
 
     @Test
@@ -69,20 +59,36 @@ class SymbolRegistryServiceTest {
         properties.getSymbols().setAcceptUnknownSymbols(false);
         properties.getSymbols().setSource("CANDLESTICK_SYMBOLS");
         when(symbolRepository.findEnabledSymbols()).thenReturn(Set.of("btc-usdt"));
-        SymbolRegistryService service = service(properties);
+        SymbolRegistryService service = service(properties, null);
 
         service.refresh();
 
         assertThat(service.isEnabled("BTC-USDT")).isTrue();
         verify(symbolRepository).findEnabledSymbols();
-        verifyNoInteractions(instrumentRepository, currentVersionRepository);
     }
 
-    private SymbolRegistryService service(CandlestickProperties properties) {
+    private SymbolRegistryService service(CandlestickProperties properties, InstrumentSnapshotCache cache) {
         return new SymbolRegistryService(
                 properties,
-                instrumentRepository,
-                currentVersionRepository,
-                symbolRepository);
+                symbolRepository,
+                cache,
+                null);
+    }
+
+    private InstrumentSnapshotCache cache(ProductLine productLine, InstrumentResponse... instruments) {
+        InstrumentSnapshotCache cache = new InstrumentSnapshotCache();
+        cache.replace(productLine, List.of(instruments), Map.of());
+        return cache;
+    }
+
+    private InstrumentResponse instrument(String symbol, long version, ContractType contractType) {
+        Instant now = Instant.parse("2026-07-31T00:00:00Z");
+        return new InstrumentResponse(symbol, version, InstrumentType.PERPETUAL, contractType,
+                "BTC", "USDT", "USDT", 1_000_000L, "BTC", 10L, 1L, 1L, 1_000_000L,
+                1L, 1_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTC"), true,
+                true, true, 100_000_000L, 10_000L, 5_000L, 100L, 500L,
+                1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,
+                10_000_000L, 3, null, null, null, null, null, null, null,
+                InstrumentStatus.TRADING, now, now, now, List.of(), List.of());
     }
 }

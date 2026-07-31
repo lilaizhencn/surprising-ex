@@ -22,14 +22,13 @@ import com.surprising.account.provider.model.LiquidationFeeSettlement;
 import com.surprising.account.provider.model.PositionSettlementState;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
+import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.repository.AccountBalanceRepository;
 import com.surprising.account.provider.repository.AccountDeficitRepository;
-import com.surprising.account.provider.repository.AccountInstrumentRepository;
 import com.surprising.account.provider.repository.AccountLedgerRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
 import com.surprising.account.provider.repository.AccountSettlementBalanceRepository;
 import com.surprising.account.provider.repository.AdminBalanceAdjustmentRepository;
-import com.surprising.account.provider.repository.AssetScaleRepository;
 import com.surprising.account.provider.repository.LiquidationOrderContextRepository;
 import com.surprising.account.provider.repository.OpenInterestShardRepository;
 import com.surprising.account.provider.repository.PositionMarginRepository;
@@ -42,6 +41,8 @@ import com.surprising.account.provider.repository.ProductSettlementBalanceReposi
 import com.surprising.account.provider.repository.ProductTransferRepository;
 import com.surprising.account.provider.repository.RiskPositionSnapshotRepository;
 import com.surprising.account.provider.repository.TradeSettlementSideRepository;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.consumer.LatestMarkPriceCache;
@@ -88,8 +89,8 @@ public class AccountSettlementService {
     private final PositionModeCommandService positionModeCommandService;
     private final PositionRepository positionRepository;
     private final PositionMarginRepository positionMarginRepository;
-    private final AccountInstrumentRepository accountInstrumentRepository;
-    private final AssetScaleRepository assetScaleRepository;
+    private final AccountProperties properties;
+    private final InstrumentSnapshotCache snapshotCache;
     private final RiskPositionSnapshotRepository riskPositionSnapshotRepository;
     private final LiquidationOrderContextRepository liquidationOrderContextRepository;
     private final AccountSettlementBalanceRepository accountSettlementBalanceRepository;
@@ -116,8 +117,8 @@ public class AccountSettlementService {
                                     PositionModeCommandService positionModeCommandService,
                                     PositionRepository positionRepository,
                                     PositionMarginRepository positionMarginRepository,
-                                    AccountInstrumentRepository accountInstrumentRepository,
-                                    AssetScaleRepository assetScaleRepository,
+                                    AccountProperties properties,
+                                    InstrumentSnapshotCache snapshotCache,
                                     RiskPositionSnapshotRepository riskPositionSnapshotRepository,
                                     LiquidationOrderContextRepository liquidationOrderContextRepository,
                                     AccountSettlementBalanceRepository accountSettlementBalanceRepository,
@@ -143,8 +144,8 @@ public class AccountSettlementService {
         this.positionModeCommandService = positionModeCommandService;
         this.positionRepository = positionRepository;
         this.positionMarginRepository = positionMarginRepository;
-        this.accountInstrumentRepository = accountInstrumentRepository;
-        this.assetScaleRepository = assetScaleRepository;
+        this.properties = properties;
+        this.snapshotCache = snapshotCache;
         this.riskPositionSnapshotRepository = riskPositionSnapshotRepository;
         this.liquidationOrderContextRepository = liquidationOrderContextRepository;
         this.accountSettlementBalanceRepository = accountSettlementBalanceRepository;
@@ -575,7 +576,8 @@ public class AccountSettlementService {
         PositionRepository.LockedPositionTarget target = positionRepository
                 .lockOpenIsolated(userId, symbol, positionSide)
                 .orElseThrow(() -> new IllegalStateException("open isolated position not found"));
-        String asset = accountInstrumentRepository.findSettleAsset(symbol, target.instrumentVersion())
+        String asset = snapshot(symbol, target.instrumentVersion(), configuredProductLine())
+                .map(InstrumentResponse::settleAsset)
                 .orElseThrow(() -> new IllegalStateException("open isolated position not found"));
         return new PositionCollateralTarget(
                 userId, symbol, asset, PositionSide.defaultIfNull(positionSide),
@@ -590,7 +592,8 @@ public class AccountSettlementService {
         PositionRepository.LockedPositionTarget target = positionRepository
                 .lockOpenIsolated(resolvedProductLine, userId, symbol, positionSide)
                 .orElseThrow(() -> new IllegalStateException("open isolated position not found"));
-        String asset = accountInstrumentRepository.findSettleAsset(symbol, target.instrumentVersion())
+        String asset = snapshot(symbol, target.instrumentVersion(), resolvedProductLine)
+                .map(InstrumentResponse::settleAsset)
                 .orElseThrow(() -> new IllegalStateException("open isolated position not found"));
         return new PositionCollateralTarget(
                 userId, symbol, asset, PositionSide.defaultIfNull(positionSide),
@@ -1001,11 +1004,11 @@ public class AccountSettlementService {
     }
 
     public ContractSpec contractSpec(String symbol, long instrumentVersion) {
-        AccountInstrumentRepository.ContractInstrumentRow instrument =
-                accountInstrumentRepository.findContractSpec(symbol, instrumentVersion)
-                        .orElseThrow(() -> new IllegalStateException("instrument contract spec not found for "
-                                + symbol + " version " + instrumentVersion));
-        long scaleUnits = assetScaleRepository.findScaleUnits(instrument.settleAsset())
+        InstrumentResponse instrument = snapshot(symbol, instrumentVersion, configuredProductLine())
+                .filter(value -> value.contractType() != com.surprising.instrument.api.model.ContractType.SPOT)
+                .orElseThrow(() -> new IllegalStateException("instrument contract spec not found for "
+                        + symbol + " version " + instrumentVersion));
+        long scaleUnits = snapshotCache.scale(configuredProductLine(), instrument.settleAsset())
                 .orElseThrow(() -> new IllegalStateException("settle asset scale not found for "
                         + instrument.settleAsset()));
         return new ContractSpec(
@@ -1016,7 +1019,8 @@ public class AccountSettlementService {
     }
 
     public InstrumentType instrumentType(String symbol, long instrumentVersion) {
-        return accountInstrumentRepository.findInstrumentType(symbol, instrumentVersion)
+        return snapshot(symbol, instrumentVersion, configuredProductLine())
+                .map(InstrumentResponse::instrumentType)
                 .orElseThrow(() -> new IllegalStateException("instrument type not found for "
                         + symbol + " version " + instrumentVersion));
     }
@@ -1053,7 +1057,11 @@ public class AccountSettlementService {
     }
 
     public SpotInstrumentSpec spotInstrumentSpec(String symbol, long instrumentVersion) {
-        return accountInstrumentRepository.findSpotSpec(symbol, instrumentVersion)
+        return snapshot(symbol, instrumentVersion, configuredProductLine())
+                .filter(value -> value.instrumentType() == InstrumentType.SPOT
+                        && value.contractType() == com.surprising.instrument.api.model.ContractType.SPOT)
+                .map(value -> new SpotInstrumentSpec(value.version(), value.baseAsset(), value.quoteAsset(),
+                        value.quantityStepUnits(), value.notionalMultiplierUnits()))
                 .orElseThrow(() -> new IllegalStateException("spot instrument spec not found for "
                         + symbol + " version " + instrumentVersion));
     }
@@ -1956,6 +1964,19 @@ public class AccountSettlementService {
 
     private ProductLine productLine(ProductLine productLine) {
         return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+    }
+
+    private ProductLine configuredProductLine() {
+        return properties == null || properties.getKafka() == null
+                ? ProductLine.LINEAR_PERPETUAL : properties.getKafka().getProductLine();
+    }
+
+    private Optional<InstrumentResponse> snapshot(String symbol, long instrumentVersion,
+                                                  ProductLine productLine) {
+        if (snapshotCache == null || !snapshotCache.initialized(productLine)) {
+            throw new IllegalStateException("账户合约 JVM 快照尚未就绪");
+        }
+        return snapshotCache.version(productLine, symbol, instrumentVersion);
     }
 
     private AccountType accountType(ProductLine productLine) {

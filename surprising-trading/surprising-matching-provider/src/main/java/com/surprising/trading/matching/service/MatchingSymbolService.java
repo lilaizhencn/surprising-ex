@@ -5,14 +5,10 @@ import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.InstrumentSymbol;
 import com.surprising.trading.matching.model.MatchingSymbol;
 import com.surprising.trading.matching.repository.MatchingAssetRepository;
-import com.surprising.trading.matching.repository.MatchingInstrumentCurrentVersionRepository;
-import com.surprising.trading.matching.repository.MatchingInstrumentRepository;
-import com.surprising.trading.matching.repository.MatchingInstrumentRepository.InstrumentVersion;
 import com.surprising.trading.matching.repository.MatchingSequenceRepository;
 import com.surprising.trading.matching.repository.MatchingSymbolRepository;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,34 +20,25 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class MatchingSymbolService {
 
-    private final MatchingInstrumentRepository instrumentRepository;
-    private final MatchingInstrumentCurrentVersionRepository currentVersionRepository;
     private final MatchingAssetRepository assetRepository;
     private final MatchingSymbolRepository symbolRepository;
     private final MatchingSequenceRepository sequenceRepository;
     private final MatchingProperties properties;
     private final InstrumentSnapshotCache snapshotCache;
 
-    public MatchingSymbolService(MatchingInstrumentRepository instrumentRepository,
-                                 MatchingInstrumentCurrentVersionRepository currentVersionRepository,
-                                 MatchingAssetRepository assetRepository,
+    public MatchingSymbolService(MatchingAssetRepository assetRepository,
                                  MatchingSymbolRepository symbolRepository,
                                  MatchingSequenceRepository sequenceRepository,
                                  MatchingProperties properties) {
-        this(instrumentRepository, currentVersionRepository, assetRepository, symbolRepository,
-                sequenceRepository, properties, null);
+        this(assetRepository, symbolRepository, sequenceRepository, properties, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public MatchingSymbolService(MatchingInstrumentRepository instrumentRepository,
-                                 MatchingInstrumentCurrentVersionRepository currentVersionRepository,
-                                 MatchingAssetRepository assetRepository,
+    public MatchingSymbolService(MatchingAssetRepository assetRepository,
                                  MatchingSymbolRepository symbolRepository,
                                  MatchingSequenceRepository sequenceRepository,
                                  MatchingProperties properties,
                                  InstrumentSnapshotCache snapshotCache) {
-        this.instrumentRepository = instrumentRepository;
-        this.currentVersionRepository = currentVersionRepository;
         this.assetRepository = assetRepository;
         this.symbolRepository = symbolRepository;
         this.sequenceRepository = sequenceRepository;
@@ -60,15 +47,7 @@ public class MatchingSymbolService {
     }
 
     public List<InstrumentSymbol> currentTradingSymbols() {
-        if (snapshotCache == null) {
-            Map<String, Long> currentVersions = currentVersionRepository.findAll();
-            return instrumentRepository.findTradingVersions(productContractTypeFilter().orElse(null)).stream()
-                    .filter(instrument -> currentVersions.getOrDefault(instrument.symbol(), -1L)
-                            == instrument.version())
-                    .map(InstrumentVersion::toInstrumentSymbol)
-                    .toList();
-        }
-        if (!snapshotCache.initialized(properties.getKafka().getProductLine())) {
+        if (snapshotCache == null || !snapshotCache.initialized(properties.getKafka().getProductLine())) {
             throw new IllegalStateException("撮合合约 JVM 快照尚未就绪");
         }
         return snapshotCache.current(properties.getKafka().getProductLine()).stream()
@@ -80,13 +59,7 @@ public class MatchingSymbolService {
     }
 
     public Optional<InstrumentSymbol> currentTradingSymbol(String symbol) {
-        if (snapshotCache == null) {
-            return currentVersionRepository.findVersion(symbol)
-                    .flatMap(version -> instrumentRepository.findTrading(
-                            symbol, version, productContractTypeFilter().orElse(null)))
-                    .map(InstrumentVersion::toInstrumentSymbol);
-        }
-        if (!snapshotCache.initialized(properties.getKafka().getProductLine())) {
+        if (snapshotCache == null || !snapshotCache.initialized(properties.getKafka().getProductLine())) {
             throw new IllegalStateException("撮合合约 JVM 快照尚未就绪");
         }
         return snapshotCache.current(properties.getKafka().getProductLine(), symbol)
@@ -126,13 +99,6 @@ public class MatchingSymbolService {
         assetRepository.insert(asset, assetId);
         return assetRepository.findId(asset)
                 .orElseThrow(() -> new IllegalStateException("failed to ensure matching asset " + asset));
-    }
-
-    private Optional<String> productContractTypeFilter() {
-        MatchingProperties.Kafka kafka = properties.getKafka();
-        return kafka.isProductTopicsEnabled()
-                ? Optional.of(kafka.getProductLine().contractTypeCode())
-                : Optional.empty();
     }
 
 }

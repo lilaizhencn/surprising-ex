@@ -3,9 +3,6 @@ package com.surprising.price.mark.service;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.model.MarkPriceEncoding;
-import com.surprising.price.mark.repository.MarkAssetScaleRepository;
-import com.surprising.price.mark.repository.MarkInstrumentCurrentVersionRepository;
-import com.surprising.price.mark.repository.MarkInstrumentRepository;
 import org.springframework.stereotype.Service;
 
 /**
@@ -16,28 +13,12 @@ import org.springframework.stereotype.Service;
 @Service
 public class MarkPriceEncodingService {
 
-    private final MarkInstrumentRepository instrumentRepository;
-    private final MarkInstrumentCurrentVersionRepository currentVersionRepository;
-    private final MarkAssetScaleRepository assetScaleRepository;
     private final MarkPriceProperties properties;
     private final InstrumentSnapshotCache snapshotCache;
 
-    public MarkPriceEncodingService(MarkInstrumentRepository instrumentRepository,
-                                    MarkInstrumentCurrentVersionRepository currentVersionRepository,
-                                    MarkAssetScaleRepository assetScaleRepository,
-                                    MarkPriceProperties properties) {
-        this(instrumentRepository, currentVersionRepository, assetScaleRepository, properties, null);
-    }
-
     @org.springframework.beans.factory.annotation.Autowired
-    public MarkPriceEncodingService(MarkInstrumentRepository instrumentRepository,
-                                    MarkInstrumentCurrentVersionRepository currentVersionRepository,
-                                    MarkAssetScaleRepository assetScaleRepository,
-                                    MarkPriceProperties properties,
+    public MarkPriceEncodingService(MarkPriceProperties properties,
                                     InstrumentSnapshotCache snapshotCache) {
-        this.instrumentRepository = instrumentRepository;
-        this.currentVersionRepository = currentVersionRepository;
-        this.assetScaleRepository = assetScaleRepository;
         this.properties = properties == null ? new MarkPriceProperties() : properties;
         this.snapshotCache = snapshotCache;
     }

@@ -10,7 +10,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.liquidation.provider.config.LiquidationProperties;
-import com.surprising.liquidation.provider.repository.LiquidationInstrumentFeeRepository.InstrumentFee;
+import com.surprising.liquidation.provider.service.LiquidationInstrumentSnapshotService;
+import com.surprising.liquidation.provider.service.LiquidationInstrumentSnapshotService.InstrumentFee;
 import com.surprising.liquidation.provider.repository.LiquidationOrderRepository.NewLiquidationOrder;
 import com.surprising.liquidation.provider.repository.LiquidationOrderRepository.OpenReduceOnlyOrder;
 import com.surprising.liquidation.provider.repository.LiquidationOrderRepository.OrderScope;
@@ -25,7 +26,6 @@ import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
-import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -100,31 +100,6 @@ class LiquidationOrderRepositoryTest {
     }
 
     @Test
-    void instrumentFeeRepositoryOnlyReadsInstrumentTable() throws Exception {
-        LiquidationInstrumentFeeRepository repository = new LiquidationInstrumentFeeRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Object[].class)))
-                .thenAnswer(invocation -> {
-                    RowMapper<?> mapper = invocation.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.getLong("candidate_id")).thenReturn(9401L);
-                    when(rs.getString("product_line")).thenReturn("OPTION");
-                    when(rs.getLong("maker_fee_rate_ppm")).thenReturn(200L);
-                    when(rs.getLong("taker_fee_rate_ppm")).thenReturn(500L);
-                    return List.of(mapper.mapRow(rs, 0));
-                });
-
-        repository.findAll(List.of(
-                new LiquidationInstrumentFeeRepository.InstrumentFeeRequest(9401L, "BTC-C", 8L)));
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), any(Object[].class));
-        assertThat(sql.getValue())
-                .contains("JOIN instruments i")
-                .contains("WHEN 'VANILLA_OPTION' THEN 'OPTION'")
-                .doesNotContain("trading_fee_schedules");
-    }
-
-    @Test
     void userFeeRepositoryOnlyReadsFeeScheduleTable() {
         LiquidationUserFeeRepository repository = new LiquidationUserFeeRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Object[].class))).thenReturn(List.of());
@@ -145,7 +120,7 @@ class LiquidationOrderRepositoryTest {
         LiquidationOrderRepository orders = mock(LiquidationOrderRepository.class);
         LiquidationOrderEventRepository events = mock(LiquidationOrderEventRepository.class);
         LiquidationTradingOutboxRepository outbox = mock(LiquidationTradingOutboxRepository.class);
-        LiquidationInstrumentFeeRepository instrumentFees = mock(LiquidationInstrumentFeeRepository.class);
+        LiquidationInstrumentSnapshotService instrumentFees = mock(LiquidationInstrumentSnapshotService.class);
         LiquidationUserFeeRepository userFees = mock(LiquidationUserFeeRepository.class);
         LiquidationSequenceRepository sequences = mock(LiquidationSequenceRepository.class);
         LiquidationProperties properties = new LiquidationProperties();
@@ -186,7 +161,7 @@ class LiquidationOrderRepositoryTest {
         LiquidationTradingOutboxRepository outbox = mock(LiquidationTradingOutboxRepository.class);
         LiquidationSequenceRepository sequences = mock(LiquidationSequenceRepository.class);
         LiquidationOrderPersistenceService service = new LiquidationOrderPersistenceService(
-                orders, events, outbox, mock(LiquidationInstrumentFeeRepository.class),
+                orders, events, outbox, mock(LiquidationInstrumentSnapshotService.class),
                 mock(LiquidationUserFeeRepository.class), sequences, new LiquidationProperties());
         when(orders.lockOpenReduceOnlyCloseOrders(any())).thenReturn(List.of(new OpenReduceOnlyOrder(
                 101L, 2002L, "reduce-101", "BTC-USDT", 8L, OrderSide.SELL, OrderType.LIMIT,
