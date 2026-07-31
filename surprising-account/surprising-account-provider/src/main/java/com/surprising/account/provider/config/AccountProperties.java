@@ -1,8 +1,10 @@
 package com.surprising.account.provider.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.account")
@@ -16,6 +18,12 @@ public class AccountProperties {
     private ExpiringSettlement expiringSettlement = new ExpiringSettlement();
     private TradeSettlement tradeSettlement = new TradeSettlement();
     private CommandWait commandWait = new CommandWait();
+
+    /** 启动时拒绝未隔离的旧版 Topic 配置。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "account");
+    }
 
     public Kafka getKafka() {
         return kafka;

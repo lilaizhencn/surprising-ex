@@ -1,8 +1,10 @@
 package com.surprising.price.consumer;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -19,6 +21,12 @@ public class MarkPriceConsumerProperties {
     private Duration allowedFutureSkew = Duration.ofSeconds(1);
     private int concurrency = 1;
     private int maxPollRecords = 500;
+
+    /** 启动时拒绝未隔离的标记价格消费配置。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        ProductLineConfiguration.require(productLine, productTopicsEnabled, "price-consumer");
+    }
 
     public String resolvedTopic() {
         return productTopicsEnabled ? ProductTopicNames.of(productLine).markPriceTopic() : topic;

@@ -30,8 +30,8 @@ surprising:
   price:
     consumer:
       bootstrap-servers: localhost:9092
-      product-line: LINEAR_PERPETUAL
-      product-topics-enabled: false
+      product-line: ${PRODUCT_LINE}
+      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       topic: surprising.perp.mark.price.v1
       group-id: surprising-margin-ops-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 10s
@@ -44,8 +44,8 @@ surprising:
   risk:
     kafka:
       bootstrap-servers: localhost:9092
-      product-line: LINEAR_PERPETUAL
-      product-topics-enabled: false
+      product-line: ${PRODUCT_LINE}
+      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       group-id: surprising-risk-v1
       position-events-topic: surprising.account.position.events.v1
       account-risk-events-topic: surprising.risk.account.events.v1
@@ -73,8 +73,8 @@ surprising:
   liquidation:
     kafka:
       bootstrap-servers: localhost:9092
-      product-line: LINEAR_PERPETUAL
-      product-topics-enabled: false
+      product-line: ${PRODUCT_LINE}
+      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       group-id: surprising-liquidation-v1
       liquidation-candidates-topic: surprising.perp.liquidation.candidates.v1
       match-results-topic: surprising.perp.match.results.v1
@@ -101,8 +101,8 @@ surprising:
   funding:
     kafka:
       bootstrap-servers: localhost:9092
-      product-line: LINEAR_PERPETUAL
-      product-topics-enabled: false
+      product-line: ${PRODUCT_LINE}
+      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       funding-rate-topic: surprising.perp.funding.rate.v1
       cache-group-id: surprising-funding-rate-cache-${HOSTNAME:${random.uuid}}
       concurrency: 1
@@ -124,8 +124,8 @@ surprising:
   insurance:
     kafka:
       bootstrap-servers: localhost:9092
-      product-line: LINEAR_PERPETUAL
-      product-topics-enabled: false
+      product-line: ${PRODUCT_LINE}
+      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       group-id: surprising-insurance-v1
       liquidation-fee-events-topic: surprising.account.liquidation-fee.events.v1
       concurrency: 2
@@ -135,8 +135,8 @@ surprising:
       batch-size: 100
   adl:
     kafka:
-      product-line: LINEAR_PERPETUAL
-      product-topics-enabled: false
+      product-line: ${PRODUCT_LINE}
+      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
     scanner:
       scan-delay-ms: 1000
       min-deficit-age-ms: 10000

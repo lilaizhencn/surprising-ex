@@ -1,12 +1,14 @@
 package com.surprising.gateway.provider.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.gateway")
@@ -17,6 +19,15 @@ public class GatewayProperties {
     private Observability observability = new Observability();
     private Map<String, BackendRoute> routes = defaultRoutes();
     private Map<String, BackendRoute> adminRoutes = defaultAdminRoutes();
+
+    /** 仅在启用 Kafka 监控时校验其产品线，避免监控配置影响网关启动。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        if (observability.kafka.enabled) {
+            ProductLineConfiguration.require(observability.kafka.productLine,
+                    observability.kafka.productTopicsEnabled, "gateway-admin-monitor");
+        }
+    }
 
     public Security getSecurity() {
         return security;

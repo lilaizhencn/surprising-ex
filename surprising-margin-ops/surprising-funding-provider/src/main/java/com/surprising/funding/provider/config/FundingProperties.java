@@ -1,7 +1,9 @@
 package com.surprising.funding.provider.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
+import jakarta.annotation.PostConstruct;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -21,6 +23,12 @@ public class FundingProperties {
     private Settlement settlement = new Settlement();
     @Valid
     private Coordination coordination = new Coordination();
+
+    /** 启动时拒绝未隔离的资金费 Topic 配置。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "funding");
+    }
 
     public Kafka getKafka() {
         return kafka;

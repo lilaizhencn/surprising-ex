@@ -1,7 +1,9 @@
 package com.surprising.insurance.provider.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.insurance")
@@ -9,6 +11,12 @@ public class InsuranceProperties {
 
     private Kafka kafka = new Kafka();
     private Coverage coverage = new Coverage();
+
+    /** 启动时拒绝未隔离的保险基金 Topic 配置。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "insurance");
+    }
 
     public Kafka getKafka() {
         return kafka;

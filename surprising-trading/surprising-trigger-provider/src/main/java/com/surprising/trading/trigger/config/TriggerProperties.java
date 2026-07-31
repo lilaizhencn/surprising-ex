@@ -1,8 +1,10 @@
 package com.surprising.trading.trigger.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.trading.trigger")
@@ -12,6 +14,12 @@ public class TriggerProperties {
     private Execution execution = new Execution();
     private RedisIndex redisIndex = new RedisIndex();
     private Outbox outbox = new Outbox();
+
+    /** 启动时拒绝未隔离的条件单 Topic 配置。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "trigger");
+    }
 
     public Kafka getKafka() {
         return kafka;

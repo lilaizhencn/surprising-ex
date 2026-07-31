@@ -189,17 +189,24 @@ WebSocket 和资金费流量必须使用产品线 Topic 隔离。
 ```bash
 mvn -q -DskipTests package
 
-PRODUCT_LINE=LINEAR_PERPETUAL PORT_OFFSET=0 ./scripts/start-product-line-providers.sh
-PRODUCT_LINE=LINEAR_DELIVERY PORT_OFFSET=100 ./scripts/start-product-line-providers.sh
-PRODUCT_LINE=OPTION PORT_OFFSET=200 ./scripts/start-product-line-providers.sh
+PRODUCT_LINE=SPOT PORT_OFFSET=0 ./scripts/start-product-line-providers.sh
+PRODUCT_LINE=LINEAR_PERPETUAL PORT_OFFSET=100 ./scripts/start-product-line-providers.sh
+PRODUCT_LINE=LINEAR_DELIVERY PORT_OFFSET=200 ./scripts/start-product-line-providers.sh
+PRODUCT_LINE=OPTION PORT_OFFSET=300 ./scripts/start-product-line-providers.sh
 
-PRODUCT_LINE=OPTION PORT_OFFSET=200 ACTION=stop ./scripts/start-product-line-providers.sh
+PRODUCT_LINE=OPTION PORT_OFFSET=300 ACTION=stop ./scripts/start-product-line-providers.sh
 ```
 
-`PORT_OFFSET` 加到各服务默认端口。脚本设置产品线 Topic、独立消费者组、唯一客户端 ID 和协调节点
-ID，并自动跳过不适用的服务。Jar 未构建时使用 `BUILD_SERVICES=true`；用
+`PRODUCT_LINE` 必须显式设置，省略时脚本直接失败；脚本向服务传入 `PRODUCT_TOPICS_ENABLED=true`，
+若显式传入 `false`，服务启动校验会直接失败。脚本设置产品线 Topic、独立消费者组、唯一客户端 ID 和协调节点 ID，并自动跳过不适用
+的服务。`PORT_OFFSET` 加到各服务默认端口。Jar 未构建时使用 `BUILD_SERVICES=true`；用
 `SERVICES="trading-entry matching account"` 选择子集；CI 未暴露 Actuator 时使用
 `WAIT_HEALTH=false`。
+
+四条产品线的服务清单、启动前检查、验证和回滚必须分别遵循
+[SPOT Runbook](runbook-spot.md)、[LINEAR_PERPETUAL Runbook](runbook-linear-perpetual.md)、
+[LINEAR_DELIVERY Runbook](runbook-linear-delivery.md) 和 [OPTION Runbook](runbook-option.md)，
+不能把一条线的 margin、funding 或 settlement 步骤复制到另一条线。
 
 systemd/EC2 部署采用相同环境变量：
 

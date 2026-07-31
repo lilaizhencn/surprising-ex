@@ -1,9 +1,11 @@
 package com.surprising.trading.order.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import jakarta.annotation.PostConstruct;
 
 @ConfigurationProperties(prefix = "surprising.trading.order")
 public class TradingOrderProperties {
@@ -13,6 +15,12 @@ public class TradingOrderProperties {
     private Risk risk = new Risk();
     private Algo algo = new Algo();
     private RedisIndex redisIndex = new RedisIndex();
+
+    /** 启动时拒绝未隔离的订单 Topic 配置。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "order");
+    }
 
     public Kafka getKafka() {
         return kafka;

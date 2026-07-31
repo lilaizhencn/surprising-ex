@@ -1,6 +1,7 @@
 package com.surprising.marketmaker.provider.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.trading.api.model.MarginMode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -12,6 +13,7 @@ import jakarta.validation.constraints.Size;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -30,6 +32,23 @@ public class MarketMakerProperties {
 
     @Valid
     private Risk risk = new Risk();
+
+    /** 启动时校验所有启用的行情源和策略都显式声明同一产品线。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        for (ReferenceMarket.Source source : referenceMarket.sources) {
+            if (source.enabled) {
+                ProductLineConfiguration.require(source.productLine, true,
+                        "market-maker.source." + source.name);
+            }
+        }
+        for (Strategy strategy : strategies) {
+            if (strategy.enabled) {
+                ProductLineConfiguration.require(strategy.productLine, true,
+                        "market-maker.strategy." + strategy.strategyId);
+            }
+        }
+    }
 
     @Valid
     private Trade trade = new Trade();

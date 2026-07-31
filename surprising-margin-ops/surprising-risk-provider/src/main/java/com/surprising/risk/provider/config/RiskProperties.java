@@ -1,8 +1,10 @@
 package com.surprising.risk.provider.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.risk")
@@ -12,6 +14,12 @@ public class RiskProperties {
     private Calculation calculation = new Calculation();
     private Outbox outbox = new Outbox();
     private RedisState redisState = new RedisState();
+
+    /** 启动时拒绝未隔离的风险 Topic 配置。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "risk");
+    }
 
     public Kafka getKafka() {
         return kafka;

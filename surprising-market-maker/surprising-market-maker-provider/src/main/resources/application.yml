@@ -30,8 +30,8 @@ surprising:
   price:
     consumer:
       bootstrap-servers: localhost:9092
-      product-line: LINEAR_PERPETUAL
-      product-topics-enabled: false
+      product-line: ${PRODUCT_LINE}
+      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       topic: surprising.perp.mark.price.v1
       group-id: surprising-market-maker-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 3s
@@ -90,7 +90,7 @@ surprising:
       sources:
         - name: BINANCE_USDM
           enabled: true
-          product-line: LINEAR_PERPETUAL
+          product-line: ${PRODUCT_LINE}
           symbol: BTC-USDT
           external-symbol: BTCUSDT
           url: https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20
@@ -99,7 +99,7 @@ surprising:
           websocket-parser: BINANCE_DEPTH_STREAM
         - name: OKX_SWAP
           enabled: true
-          product-line: LINEAR_PERPETUAL
+          product-line: ${PRODUCT_LINE}
           symbol: BTC-USDT
           external-symbol: BTC-USDT-SWAP
           url: https://www.okx.com/api/v5/market/books?instId={symbol}&sz=20
@@ -109,7 +109,7 @@ surprising:
           websocket-parser: OKX_BOOKS_WS
         - name: BYBIT_LINEAR
           enabled: true
-          product-line: LINEAR_PERPETUAL
+          product-line: ${PRODUCT_LINE}
           symbol: BTC-USDT
           external-symbol: BTCUSDT
           url: https://api.bybit.com/v5/market/orderbook?category=linear&symbol={symbol}&limit=50
@@ -119,7 +119,7 @@ surprising:
           websocket-parser: BYBIT_ORDERBOOK_WS
     strategies:
       - strategy-id: btc-usdt-mm-a
-        product-line: LINEAR_PERPETUAL
+        product-line: ${PRODUCT_LINE}
         enabled: true
         account-ids: [900001, 900002]
         symbols: [BTC-USDT]

@@ -45,6 +45,7 @@ import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.instrument.api.model.OptionType;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
@@ -367,19 +368,18 @@ public class AccountService {
     }
 
     public PositionModeResponse positionMode(long userId) {
-        return positionMode(ProductLine.LINEAR_PERPETUAL, userId);
+        return positionMode(currentProductLineRequired(), userId);
     }
 
     public PositionModeResponse positionMode(ProductLine productLine, long userId) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
+        ProductLine resolvedProductLine = currentProductLineRequired();
+        ProductLineConfiguration.requireSame(resolvedProductLine, productLine, "account.position-mode");
         if (positionModeRepository == null) {
-            return accountSettlementService.positionMode(productLine, userId);
+            return accountSettlementService.positionMode(resolvedProductLine, userId);
         }
-        ProductLine resolvedProductLine = productLine == null
-                ? ProductLine.LINEAR_PERPETUAL
-                : productLine;
         return positionModeRepository.find(resolvedProductLine, userId)
                 .map(row -> new PositionModeResponse(
                         resolvedProductLine, userId, row.positionMode(), row.updatedAt()))
@@ -391,6 +391,8 @@ public class AccountService {
         if (request.userId() <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
+        ProductLineConfiguration.requireSame(currentProductLineRequired(), request.productLine(),
+                "account.position-mode");
         if (positionModeCommandService != null) {
             return positionModeCommandService.update(
                     request.productLine(), request.userId(), request.positionMode(), Instant.now());
@@ -528,6 +530,15 @@ public class AccountService {
     private ProductLine currentProductLineFilter() {
         AccountProperties.Kafka kafka = properties == null ? null : properties.getKafka();
         return kafka != null && kafka.isProductTopicsEnabled() ? kafka.getProductLine() : null;
+    }
+
+    /** 获取当前账户服务实例的唯一产品线，禁止读取其它产品线的账户状态。 */
+    private ProductLine currentProductLineRequired() {
+        AccountProperties.Kafka kafka = properties == null ? null : properties.getKafka();
+        if (kafka == null) {
+            throw new IllegalStateException("account 未配置产品线");
+        }
+        return ProductLineConfiguration.require(kafka.getProductLine(), kafka.isProductTopicsEnabled(), "account");
     }
 
     private ProductLine positionCacheProductLine() {

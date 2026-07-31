@@ -1,9 +1,11 @@
 package com.surprising.price.mark.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.math.BigDecimal;
 import java.time.Duration;
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.price.mark")
@@ -14,6 +16,12 @@ public class MarkPriceProperties {
     private Calculation calculation = new Calculation();
     private Coordination coordination = new Coordination();
     private Audit audit = new Audit();
+
+    /** 启动时拒绝未隔离的标记价格 Topic 配置。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "mark-price");
+    }
 
     public Kafka getKafka() {
         return kafka;

@@ -31,8 +31,8 @@ surprising:
     index:
       kafka:
         bootstrap-servers: localhost:9092
-        product-line: LINEAR_PERPETUAL
-        product-topics-enabled: false
+        product-line: ${PRODUCT_LINE}
+        product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
         index-price-topic: surprising.perp.index.price.v1
         group-id: surprising-index-price-v1
         cache-group-id: surprising-index-price-cache-${HOSTNAME:${random.uuid}}
@@ -222,8 +222,8 @@ surprising:
     mark:
       kafka:
         bootstrap-servers: localhost:9092
-        product-line: LINEAR_PERPETUAL
-        product-topics-enabled: false
+        product-line: ${PRODUCT_LINE}
+        product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
         group-id: surprising-mark-price-v1
         concurrency: 2
         max-poll-records: 500

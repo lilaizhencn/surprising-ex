@@ -30,8 +30,8 @@ surprising:
   price:
     consumer:
       bootstrap-servers: localhost:9092
-      product-line: LINEAR_PERPETUAL
-      product-topics-enabled: false
+      product-line: ${PRODUCT_LINE}
+      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       topic: surprising.perp.mark.price.v1
       group-id: surprising-liquidation-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 5s
@@ -41,8 +41,8 @@ surprising:
   liquidation:
     kafka:
       bootstrap-servers: localhost:9092
-      product-line: LINEAR_PERPETUAL
-      product-topics-enabled: false
+      product-line: ${PRODUCT_LINE}
+      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       group-id: surprising-liquidation-v1
       liquidation-candidates-topic: surprising.perp.liquidation.candidates.v1
       match-results-topic: surprising.perp.match.results.v1

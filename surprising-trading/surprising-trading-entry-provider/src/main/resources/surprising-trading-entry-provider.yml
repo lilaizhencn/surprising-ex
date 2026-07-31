@@ -44,8 +44,8 @@ surprising:
     order:
       kafka:
         bootstrap-servers: localhost:9092
-        product-line: LINEAR_PERPETUAL
-        product-topics-enabled: false
+        product-line: ${PRODUCT_LINE}
+        product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
         order-commands-topic: surprising.perp.order.commands.v1
         order-events-topic: surprising.perp.order.events.v1
       outbox:
@@ -71,8 +71,8 @@ surprising:
     trigger:
       kafka:
         bootstrap-servers: localhost:9092
-        product-line: LINEAR_PERPETUAL
-        product-topics-enabled: false
+        product-line: ${PRODUCT_LINE}
+        product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
         group-id: surprising-trigger-v1
         mark-price-topic: surprising.perp.mark.price.v1
         position-events-topic: surprising.account.position.events.v1

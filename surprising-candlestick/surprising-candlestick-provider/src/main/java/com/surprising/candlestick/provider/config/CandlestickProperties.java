@@ -1,10 +1,12 @@
 package com.surprising.candlestick.provider.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.unit.DataSize;
 
@@ -18,6 +20,12 @@ public class CandlestickProperties {
     private Query query = new Query();
     private Symbols symbols = new Symbols();
     private Rocksdb rocksdb = new Rocksdb();
+
+    /** 启动时拒绝未隔离的旧版行情 Topic 配置。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "candlestick");
+    }
 
     public List<String> getPeriods() {
         return periods;

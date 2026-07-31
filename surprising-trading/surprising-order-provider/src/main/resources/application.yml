@@ -30,8 +30,8 @@ surprising:
   price:
     consumer:
       bootstrap-servers: localhost:9092
-      product-line: LINEAR_PERPETUAL
-      product-topics-enabled: false
+      product-line: ${PRODUCT_LINE}
+      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       topic: surprising.perp.mark.price.v1
       group-id: surprising-order-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 15s
@@ -45,8 +45,8 @@ surprising:
     order:
       kafka:
         bootstrap-servers: localhost:9092
-        product-line: LINEAR_PERPETUAL
-        product-topics-enabled: false
+        product-line: ${PRODUCT_LINE}
+        product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
         account-command-results-concurrency: ${ORDER_ACCOUNT_COMMAND_RESULTS_CONCURRENCY:32}
         order-commands-topic: surprising.perp.order.commands.v1
         order-events-topic: surprising.perp.order.events.v1

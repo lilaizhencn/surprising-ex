@@ -1,7 +1,9 @@
 package com.surprising.adl.provider.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.adl")
@@ -10,6 +12,12 @@ public class AdlProperties {
     private Kafka kafka = new Kafka();
     private Scanner scanner = new Scanner();
     private RedisIndex redisIndex = new RedisIndex();
+
+    /** 启动时拒绝未隔离的 ADL 风控 Topic 配置。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "adl");
+    }
 
     public Kafka getKafka() {
         return kafka;

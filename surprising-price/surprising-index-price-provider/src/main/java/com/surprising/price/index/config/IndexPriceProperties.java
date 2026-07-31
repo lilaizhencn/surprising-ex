@@ -1,11 +1,13 @@
 package com.surprising.price.index.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.price.index")
@@ -20,6 +22,12 @@ public class IndexPriceProperties {
     private Audit audit = new Audit();
     private Instrument instrument = new Instrument();
     private List<SymbolConfig> symbols = new ArrayList<>();
+
+    /** 启动时拒绝未隔离的指数价格 Topic 配置。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "index-price");
+    }
 
     public Kafka getKafka() {
         return kafka;

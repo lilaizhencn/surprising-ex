@@ -1,10 +1,12 @@
 package com.surprising.websocket.provider.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import jakarta.annotation.PostConstruct;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -15,6 +17,12 @@ public class WebSocketProperties {
     private Session session = new Session();
     private Security security = new Security();
     private Fanout fanout = new Fanout();
+
+    /** 启动时拒绝未隔离的公共与私有推送 Topic 配置。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "websocket");
+    }
 
     public Kafka getKafka() {
         return kafka;

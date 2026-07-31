@@ -66,4 +66,25 @@ class ProductLineTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("unsupported product filter");
     }
+
+    @Test
+    void requiresExplicitIsolatedProductLineConfiguration() {
+        assertThat(ProductLineConfiguration.require(ProductLine.SPOT, true, "account"))
+                .isEqualTo(ProductLine.SPOT);
+        assertThatThrownBy(() -> ProductLineConfiguration.require(null, true, "account"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("必须显式配置 product-line");
+        assertThatThrownBy(() -> ProductLineConfiguration.require(ProductLine.SPOT, false, "account"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("product-topics-enabled=true");
+    }
+
+    @Test
+    void rejectsCrossProductLineAccess() {
+        ProductLineConfiguration.requireSame(ProductLine.OPTION, ProductLine.OPTION, "account");
+        assertThatThrownBy(() -> ProductLineConfiguration.requireSame(
+                ProductLine.OPTION, ProductLine.SPOT, "account.position-mode"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("不允许跨产品线访问");
+    }
 }

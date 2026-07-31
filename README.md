@@ -107,6 +107,13 @@ RECONCILE_FUNDS=true \
 
 ## 生产部署
 
+四条产品线必须按独立 Runbook 部署：
+
+- [SPOT 现货 Runbook](docs/runbook-spot.md)
+- [LINEAR_PERPETUAL U 本位永续 Runbook](docs/runbook-linear-perpetual.md)
+- [LINEAR_DELIVERY U 本位交割 Runbook](docs/runbook-linear-delivery.md)
+- [OPTION 欧式期权 Runbook](docs/runbook-option.md)
+
 永续首发的 EC2、JVM、RDS、MSK、Valkey 和容量基线见
 [LINEAR_PERPETUAL AWS 生产部署基线](docs/linear-perpetual-aws-production-deployment.md)。
 部署前必须：
@@ -114,7 +121,8 @@ RECONCILE_FUNDS=true \
 - 关闭 Kafka 自动建 Topic，使用 [create-topics.sh](scripts/create-topics.sh) 显式创建；
 - 永续首发把普通 Topic 和账户指令 Topic 都固定为 32 分区，RF=3、`min.insync.replicas=2`；
 - 不在已有 symbol-keyed Topic 上直接增加分区；扩容需要新版本 Topic、维护窗口和状态重建方案；
-- 为每条产品线配置独立 Topic、消费组、client id、协调 node id 和 gateway route；
+- 为每条产品线配置独立 Topic、消费组、client id、协调 node id 和 gateway route；`PRODUCT_LINE`
+  不允许省略，服务启动会拒绝空值或 `product-topics-enabled=false`；
 - Order Provider 的账户指令结果 listener 并发度对齐 32 个分区；同一 `productLine:userId` 保序，
   每个 poll 批量完成订单状态迁移及 ACCEPTED/PLACE Outbox 入库；
 - 撮合指令使用有界 poll 批量事务，批量读取幂等及保护状态；同批同用户/标的的潜在冲突仍逐条复查，

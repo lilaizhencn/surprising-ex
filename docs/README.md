@@ -33,8 +33,13 @@ PostgreSQL。触发单、ADL 和强平 candidate 的 Redis ZSET 只做候选过�
 ## 部署
 
 - [通用部署、Topic 和运行约束](deployment.md)
+- [SPOT 现货产品线部署 Runbook](runbook-spot.md)
+- [LINEAR_PERPETUAL U 本位永续产品线部署 Runbook](runbook-linear-perpetual.md)
+- [LINEAR_DELIVERY U 本位交割产品线部署 Runbook](runbook-linear-delivery.md)
+- [OPTION 欧式期权产品线部署 Runbook](runbook-option.md)
 - [LINEAR_PERPETUAL AWS 生产基线](linear-perpetual-aws-production-deployment.md)
 
-生产永续首发使用产品线 Topic、32 分区、RF=3 和 `min.insync.replicas=2`。账户命令、DLT 和结果
-Topic 固定 32 分区；已有 symbol-keyed Topic 不允许直接增加分区。精确 Topic 清单和校验命令以
+四份 Runbook 必须独立执行，一次只部署一条产品线。每条线均使用自己的 `PRODUCT_LINE`、Topic
+命名空间、consumer group、client id、协调节点和 gateway 路由；账户命令、DLT 和结果 Topic 固定
+32 分区，已有 symbol-keyed Topic 不允许直接增加分区。通用 Topic 清单和校验命令以
 [deployment.md](deployment.md) 为准。

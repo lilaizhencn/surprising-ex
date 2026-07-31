@@ -1,11 +1,13 @@
 package com.surprising.trading.matching.config;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.trading.matching")
@@ -17,6 +19,12 @@ public class MatchingProperties {
     private Protection protection = new Protection();
     private MarketData marketData = new MarketData();
     private Outbox outbox = new Outbox();
+
+    /** 启动时拒绝未隔离的撮合 Topic 配置。 */
+    @PostConstruct
+    void validateProductLineConfiguration() {
+        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "matching");
+    }
 
     public Kafka getKafka() {
         return kafka;
