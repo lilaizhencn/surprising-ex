@@ -3462,8 +3462,6 @@ VALUES
     ('admin.approvals.read', 'Read approvals', 'View admin approval requests.'),
     ('admin.approvals.write', 'Write approvals', 'Create, approve, reject and consume admin approvals.'),
     ('admin.system.read', 'Read system state', 'View configured routes and backend health.'),
-    ('admin.alerts.read', 'Read alerts', 'View admin alert rules and alert events.'),
-    ('admin.alerts.write', 'Write alerts', 'Create, update, evaluate and acknowledge admin alerts.'),
     ('admin.security.mfa', 'Manage own MFA', 'Enroll, confirm and disable own admin TOTP MFA.'),
     ('admin.support.read', 'Read support console', 'View read-only customer support user overviews.'),
     ('admin.support.write', 'Write support tickets', 'Create and update customer support tickets and internal notes.'),
@@ -3505,8 +3503,6 @@ SELECT r.role_id, p.permission_id
       'admin.approvals.read',
       'admin.approvals.write',
       'admin.system.read',
-      'admin.alerts.read',
-      'admin.alerts.write',
       'admin.security.mfa',
       'admin.compliance.read',
       'admin.compliance.write',
@@ -3803,160 +3799,3 @@ CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_service_time_idx
 CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_consumed_trace_idx
     ON gateway_admin_approval_requests (consumed_trace_id)
     WHERE consumed_trace_id IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS gateway_admin_alert_rules (
-    alert_rule_id          BIGSERIAL PRIMARY KEY,
-    rule_code              TEXT NOT NULL,
-    rule_name              TEXT NOT NULL,
-    domain                 TEXT NOT NULL,
-    metric_key             TEXT NOT NULL,
-    target                 TEXT,
-    condition_operator     TEXT NOT NULL,
-    threshold_value        NUMERIC(38, 8) NOT NULL,
-    severity               TEXT NOT NULL,
-    enabled                BOOLEAN NOT NULL DEFAULT TRUE,
-    window_seconds         BIGINT NOT NULL DEFAULT 300,
-    cooldown_seconds       BIGINT NOT NULL DEFAULT 300,
-    description            TEXT,
-    created_by_user_id     BIGINT REFERENCES gateway_users(user_id),
-    updated_by_user_id     BIGINT REFERENCES gateway_users(user_id),
-    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT gateway_admin_alert_rules_code_check CHECK (rule_code ~ '^[A-Z0-9_.:-]{2,96}$'),
-    CONSTRAINT gateway_admin_alert_rules_domain_check CHECK (
-        domain IN ('SYSTEM', 'MARKET', 'TRADING', 'RISK', 'WALLET')
-    ),
-    CONSTRAINT gateway_admin_alert_rules_metric_check CHECK (metric_key ~ '^[A-Z0-9_.:-]{2,96}$'),
-    CONSTRAINT gateway_admin_alert_rules_operator_check CHECK (
-        condition_operator IN ('GT', 'GTE', 'LT', 'LTE', 'EQ', 'NE')
-    ),
-    CONSTRAINT gateway_admin_alert_rules_severity_check CHECK (
-        severity IN ('INFO', 'WARN', 'CRITICAL')
-    ),
-    CONSTRAINT gateway_admin_alert_rules_window_positive CHECK (
-        window_seconds > 0 AND cooldown_seconds >= 0
-    )
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS gateway_admin_alert_rules_code_uidx
-    ON gateway_admin_alert_rules (rule_code);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_alert_rules_domain_idx
-    ON gateway_admin_alert_rules (domain, enabled, updated_at DESC);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_alert_rules_updated_page_idx
-    ON gateway_admin_alert_rules (updated_at DESC, alert_rule_id DESC);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_alert_rules_created_page_idx
-    ON gateway_admin_alert_rules (created_at DESC, alert_rule_id DESC);
-
-CREATE TABLE IF NOT EXISTS gateway_admin_alert_events (
-    alert_event_id         BIGSERIAL PRIMARY KEY,
-    alert_rule_id          BIGINT REFERENCES gateway_admin_alert_rules(alert_rule_id),
-    rule_code              TEXT NOT NULL,
-    domain                 TEXT NOT NULL,
-    metric_key             TEXT NOT NULL,
-    target                 TEXT,
-    severity               TEXT NOT NULL,
-    status                 TEXT NOT NULL DEFAULT 'OPEN',
-    condition_operator     TEXT NOT NULL,
-    threshold_value        NUMERIC(38, 8) NOT NULL,
-    current_value          NUMERIC(38, 8) NOT NULL,
-    fingerprint            TEXT NOT NULL,
-    message                TEXT NOT NULL,
-    occurrences            BIGINT NOT NULL DEFAULT 1,
-    first_seen_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_seen_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
-    acknowledged_by_user_id BIGINT REFERENCES gateway_users(user_id),
-    acknowledged_at        TIMESTAMPTZ,
-    resolved_at            TIMESTAMPTZ,
-    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT gateway_admin_alert_events_domain_check CHECK (
-        domain IN ('SYSTEM', 'MARKET', 'TRADING', 'RISK', 'WALLET')
-    ),
-    CONSTRAINT gateway_admin_alert_events_operator_check CHECK (
-        condition_operator IN ('GT', 'GTE', 'LT', 'LTE', 'EQ', 'NE')
-    ),
-    CONSTRAINT gateway_admin_alert_events_severity_check CHECK (
-        severity IN ('INFO', 'WARN', 'CRITICAL')
-    ),
-    CONSTRAINT gateway_admin_alert_events_status_check CHECK (
-        status IN ('OPEN', 'ACKNOWLEDGED', 'RESOLVED')
-    ),
-    CONSTRAINT gateway_admin_alert_events_occurrences_positive CHECK (occurrences > 0)
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS gateway_admin_alert_events_active_uidx
-    ON gateway_admin_alert_events (fingerprint)
-    WHERE status IN ('OPEN', 'ACKNOWLEDGED');
-
-CREATE INDEX IF NOT EXISTS gateway_admin_alert_events_status_time_idx
-    ON gateway_admin_alert_events (status, severity, last_seen_at DESC);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_alert_events_rule_time_idx
-    ON gateway_admin_alert_events (alert_rule_id, last_seen_at DESC);
-
-CREATE TABLE IF NOT EXISTS gateway_admin_alert_channels (
-    alert_channel_id      BIGSERIAL PRIMARY KEY,
-    channel_code          TEXT NOT NULL,
-    channel_name          TEXT NOT NULL,
-    channel_type          TEXT NOT NULL,
-    enabled               BOOLEAN NOT NULL DEFAULT TRUE,
-    domain                TEXT,
-    min_severity          TEXT NOT NULL DEFAULT 'WARN',
-    endpoint              TEXT,
-    description           TEXT,
-    created_by_user_id    BIGINT REFERENCES gateway_users(user_id),
-    updated_by_user_id    BIGINT REFERENCES gateway_users(user_id),
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT gateway_admin_alert_channels_code_check CHECK (channel_code ~ '^[A-Z0-9_.:-]{2,96}$'),
-    CONSTRAINT gateway_admin_alert_channels_type_check CHECK (
-        channel_type IN ('WEBHOOK', 'EMAIL', 'SLACK', 'PAGERDUTY', 'OPS')
-    ),
-    CONSTRAINT gateway_admin_alert_channels_domain_check CHECK (
-        domain IS NULL OR domain IN ('SYSTEM', 'MARKET', 'TRADING', 'RISK', 'WALLET')
-    ),
-    CONSTRAINT gateway_admin_alert_channels_severity_check CHECK (
-        min_severity IN ('INFO', 'WARN', 'CRITICAL')
-    )
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS gateway_admin_alert_channels_code_uidx
-    ON gateway_admin_alert_channels (channel_code);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_alert_channels_enabled_idx
-    ON gateway_admin_alert_channels (enabled, domain, min_severity, updated_at DESC);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_alert_channels_updated_page_idx
-    ON gateway_admin_alert_channels (updated_at DESC, alert_channel_id DESC);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_alert_channels_created_page_idx
-    ON gateway_admin_alert_channels (created_at DESC, alert_channel_id DESC);
-
-CREATE TABLE IF NOT EXISTS gateway_admin_alert_deliveries (
-    alert_delivery_id     BIGSERIAL PRIMARY KEY,
-    alert_event_id        BIGINT NOT NULL REFERENCES gateway_admin_alert_events(alert_event_id),
-    alert_channel_id      BIGINT NOT NULL REFERENCES gateway_admin_alert_channels(alert_channel_id),
-    channel_code          TEXT NOT NULL,
-    channel_type          TEXT NOT NULL,
-    delivery_status       TEXT NOT NULL DEFAULT 'PENDING',
-    attempt_count         INTEGER NOT NULL DEFAULT 0,
-    next_attempt_at       TIMESTAMPTZ,
-    last_attempt_at       TIMESTAMPTZ,
-    delivered_at          TIMESTAMPTZ,
-    error_message         TEXT,
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT gateway_admin_alert_deliveries_status_check CHECK (
-        delivery_status IN ('PENDING', 'SENT', 'FAILED', 'SKIPPED')
-    ),
-    CONSTRAINT gateway_admin_alert_deliveries_attempt_check CHECK (attempt_count >= 0)
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS gateway_admin_alert_deliveries_event_channel_uidx
-    ON gateway_admin_alert_deliveries (alert_event_id, alert_channel_id);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_alert_deliveries_status_idx
-    ON gateway_admin_alert_deliveries (delivery_status, next_attempt_at, created_at DESC);

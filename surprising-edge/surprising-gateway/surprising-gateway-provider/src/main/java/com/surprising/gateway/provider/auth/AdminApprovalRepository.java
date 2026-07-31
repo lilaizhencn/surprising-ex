@@ -17,6 +17,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * 只负责 {@code gateway_admin_approval_requests} 表。
+ */
 @Repository
 public class AdminApprovalRepository {
 

@@ -719,17 +719,17 @@ Gateway support operations use two local admin tables:
 - `gateway_support_ticket_notes` stores the chronological note timeline for each ticket. Notes carry the
   admin user, note type, visibility, body, and creation time.
 
-Gateway admin alerting uses four tables:
+Gateway authentication and support persistence follow a single-table Repository boundary. `gateway_users`,
+`gateway_roles`, `gateway_permissions`, `gateway_user_roles`, `gateway_role_permissions`, login logs, MFA,
+refresh sessions, support tickets, and support notes are accessed by separate repositories. Services aggregate
+roles, permissions, ticket notes, and cross-table transactions. The compliance list projection is the sole
+gateway-local exception because its filters and cursor must use one consistent snapshot; its source comment
+records the exact non-splittable reason.
 
-- `gateway_admin_alert_rules` stores configurable alert rules for `SYSTEM`, `MARKET`, `TRADING`, `RISK`, and
-  `WALLET` domains.
-- `gateway_admin_alert_events` stores the current and historical alert events keyed by a rule/target
-  fingerprint. Active events are unique while `OPEN` or `ACKNOWLEDGED`; a resolved fingerprint may open again later.
-- `gateway_admin_alert_channels` stores admin-managed notification channels with optional domain scope and minimum
-  severity. Channel config writes go through gateway admin RBAC, operation audit, and approval.
-- `gateway_admin_alert_deliveries` stores per-event/per-channel delivery queue rows. Evaluation creates `PENDING`
-  rows for matching enabled channels; external sender workers can claim these rows and update status to `SENT`,
-  `FAILED`, or `SKIPPED`. Admin-web can query and retry failed/skipped rows.
+The gateway no longer stores or evaluates an operations alert center and does not query live trading services
+to build cross-domain user profiles. Those read models belong to a future independent operations database or
+observability platform, populated by events, outbox records, controlled CDC, and telemetry rather than report
+queries against the trading primary database.
 
 `account_outbox_events` stores account-side Kafka events written inside the same transaction as the
 account state change. It carries `POSITION_UPDATED` events for WebSocket private position pushes and

@@ -15,6 +15,9 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+/**
+ * 只负责 {@code gateway_admin_operation_logs} 表。
+ */
 @Repository
 public class AdminAuditRepository {
 

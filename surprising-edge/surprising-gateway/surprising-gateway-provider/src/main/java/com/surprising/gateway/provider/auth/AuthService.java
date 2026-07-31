@@ -35,14 +35,14 @@ public class AuthService {
     private static final String USERNAME_PATTERN = "^[A-Za-z0-9_]{3,32}$";
 
     private final GatewayProperties properties;
-    private final UserAuthRepository repository;
+    private final AuthPersistenceService repository;
     private final PasswordHasher passwordHasher;
     private final JwtTokenService jwtTokenService;
     private final TotpService totpService;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthService(GatewayProperties properties,
-                       UserAuthRepository repository,
+                       AuthPersistenceService repository,
                        PasswordHasher passwordHasher,
                        JwtTokenService jwtTokenService,
                        TotpService totpService) {
@@ -70,7 +70,7 @@ public class AuthService {
     public AuthResponse login(LoginRequest request, HttpServletRequest httpRequest) {
         String username = normalizeUsername(request.username());
         Instant now = Instant.now();
-        UserAuthRepository.UserCredential credential = repository.credentialByUsername(username).orElse(null);
+        GatewayUserRepository.UserCredential credential = repository.credentialByUsername(username).orElse(null);
         if (credential == null || !passwordHasher.matches(request.password(), credential.passwordHash())) {
             repository.loginLog(credential == null ? 0L : credential.userId(), "FAILED", "BAD_CREDENTIALS",
                     userAgent(httpRequest), ipAddress(httpRequest), now);
@@ -92,7 +92,7 @@ public class AuthService {
     public AuthResponse refresh(RefreshRequest request, HttpServletRequest httpRequest) {
         Instant now = Instant.now();
         String tokenHash = hashRefreshToken(request.refreshToken());
-        UserAuthRepository.RefreshSession session = repository.refreshSession(tokenHash)
+        GatewayRefreshSessionRepository.RefreshSession session = repository.refreshSession(tokenHash)
                 .orElseThrow(() -> new IllegalArgumentException("invalid refresh token"));
         if (session.revokedAt() != null || !session.expiresAt().isAfter(now)) {
             throw new IllegalArgumentException("invalid refresh token");
@@ -297,7 +297,7 @@ public class AuthService {
     @Transactional
     public AdminMfaStatusResponse confirmAdminMfa(String authorizationHeader, AdminMfaVerificationRequest request) {
         JwtPrincipal principal = authenticateAdminBearer(authorizationHeader);
-        UserAuthRepository.MfaCredential credential = repository.mfaCredential(principal.userId())
+        GatewayUserMfaRepository.MfaCredential credential = repository.mfaCredential(principal.userId())
                 .orElseThrow(() -> new IllegalArgumentException("mfa enrollment not found"));
         String secret = totpService.decryptSecret(credential.totpSecretCiphertext());
         if (!totpService.verify(secret, request == null ? null : request.totpCode(), Instant.now())) {

@@ -69,9 +69,6 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
         if (path.startsWith("/system")) {
             return "admin.system.read";
         }
-        if (path.startsWith("/alerts")) {
-            return "admin.alerts." + (read ? "read" : "write");
-        }
         if (path.startsWith("/security/mfa")) {
             return "admin.security.mfa";
         }

@@ -103,20 +103,6 @@ class AdminPermissionFilterTest {
     }
 
     @Test
-    void mapsAlertRuleWriteToAlertsWritePermission() throws ServletException, IOException {
-        AuthService authService = authService();
-        AdminPermissionFilter filter = new AdminPermissionFilter(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/admin/alerts/rules");
-        request.addHeader("Authorization", "Bearer admin");
-        MockHttpServletResponse response = new MockHttpServletResponse();
-
-        filter.doFilter(request, response, new MockFilterChain());
-
-        assertThat(response.getStatus()).isEqualTo(200);
-        verify(authService).requireAdminPermission("Bearer admin", "admin.alerts.write");
-    }
-
-    @Test
     void publicGatewayIsNotRestrictedByAdminPermissions() throws ServletException, IOException {
         AuthService authService = authService();
         AdminPermissionFilter filter = new AdminPermissionFilter(authService);
@@ -137,8 +123,6 @@ class AdminPermissionFilterTest {
         org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.support.read"))
                 .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));
         org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.support.write"))
-                .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));
-        org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.alerts.write"))
                 .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));
         return authService;
     }

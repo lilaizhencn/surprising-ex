@@ -15,7 +15,6 @@ public class GatewayProperties {
     private Security security = new Security();
     private HttpClient httpClient = new HttpClient();
     private Observability observability = new Observability();
-    private Alerts alerts = new Alerts();
     private Map<String, BackendRoute> routes = defaultRoutes();
     private Map<String, BackendRoute> adminRoutes = defaultAdminRoutes();
 
@@ -41,14 +40,6 @@ public class GatewayProperties {
 
     public void setObservability(Observability observability) {
         this.observability = observability == null ? new Observability() : observability;
-    }
-
-    public Alerts getAlerts() {
-        return alerts;
-    }
-
-    public void setAlerts(Alerts alerts) {
-        this.alerts = alerts == null ? new Alerts() : alerts;
     }
 
     public Map<String, BackendRoute> getRoutes() {
@@ -524,97 +515,6 @@ public class GatewayProperties {
 
         public void setMaxBodyBytes(int maxBodyBytes) {
             this.maxBodyBytes = Math.max(1024, maxBodyBytes);
-        }
-    }
-
-    public static class Alerts {
-        private DeliveryWorker deliveryWorker = new DeliveryWorker();
-
-        public DeliveryWorker getDeliveryWorker() {
-            return deliveryWorker;
-        }
-
-        public void setDeliveryWorker(DeliveryWorker deliveryWorker) {
-            this.deliveryWorker = deliveryWorker == null ? new DeliveryWorker() : deliveryWorker;
-        }
-    }
-
-    public static class DeliveryWorker {
-        private boolean enabled = true;
-        private long initialDelayMs = 5_000L;
-        private long pollDelayMs = 2_000L;
-        private int batchSize = 25;
-        private int maxAttempts = 5;
-        private Duration retryDelay = Duration.ofSeconds(30);
-        private Duration claimLease = Duration.ofMinutes(2);
-        private int maxErrorMessageLength = 500;
-
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
-
-        public long getInitialDelayMs() {
-            return initialDelayMs;
-        }
-
-        public void setInitialDelayMs(long initialDelayMs) {
-            this.initialDelayMs = Math.max(0L, initialDelayMs);
-        }
-
-        public long getPollDelayMs() {
-            return pollDelayMs;
-        }
-
-        public void setPollDelayMs(long pollDelayMs) {
-            this.pollDelayMs = Math.max(100L, pollDelayMs);
-        }
-
-        public int getBatchSize() {
-            return batchSize;
-        }
-
-        public void setBatchSize(int batchSize) {
-            this.batchSize = Math.max(1, Math.min(batchSize, 500));
-        }
-
-        public int getMaxAttempts() {
-            return maxAttempts;
-        }
-
-        public void setMaxAttempts(int maxAttempts) {
-            this.maxAttempts = Math.max(1, maxAttempts);
-        }
-
-        public Duration getRetryDelay() {
-            return retryDelay;
-        }
-
-        public void setRetryDelay(Duration retryDelay) {
-            this.retryDelay = retryDelay == null || retryDelay.isNegative() || retryDelay.isZero()
-                    ? Duration.ofSeconds(30)
-                    : retryDelay;
-        }
-
-        public Duration getClaimLease() {
-            return claimLease;
-        }
-
-        public void setClaimLease(Duration claimLease) {
-            this.claimLease = claimLease == null || claimLease.isNegative() || claimLease.isZero()
-                    ? Duration.ofMinutes(2)
-                    : claimLease;
-        }
-
-        public int getMaxErrorMessageLength() {
-            return maxErrorMessageLength;
-        }
-
-        public void setMaxErrorMessageLength(int maxErrorMessageLength) {
-            this.maxErrorMessageLength = Math.max(80, Math.min(maxErrorMessageLength, 2_000));
         }
     }
 

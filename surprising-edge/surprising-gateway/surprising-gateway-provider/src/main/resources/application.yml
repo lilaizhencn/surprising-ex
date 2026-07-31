@@ -687,13 +687,3 @@ surprising:
         enabled: true
         sample-preview-limit: 8
         max-body-bytes: 1000000
-    alerts:
-      delivery-worker:
-        enabled: ${ADMIN_ALERT_DELIVERY_WORKER_ENABLED:true}
-        initial-delay-ms: ${ADMIN_ALERT_DELIVERY_WORKER_INITIAL_DELAY_MS:5000}
-        poll-delay-ms: ${ADMIN_ALERT_DELIVERY_WORKER_POLL_DELAY_MS:2000}
-        batch-size: ${ADMIN_ALERT_DELIVERY_WORKER_BATCH_SIZE:25}
-        max-attempts: ${ADMIN_ALERT_DELIVERY_WORKER_MAX_ATTEMPTS:5}
-        retry-delay: ${ADMIN_ALERT_DELIVERY_WORKER_RETRY_DELAY:30s}
-        claim-lease: ${ADMIN_ALERT_DELIVERY_WORKER_CLAIM_LEASE:2m}
-        max-error-message-length: 500

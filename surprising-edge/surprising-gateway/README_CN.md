@@ -30,7 +30,7 @@ curl 'http://localhost:9094/api/v1/gateway/market-maker/strategies' -H 'X-User-I
 后台本地接口示例：
 
 ```bash
-curl 'http://localhost:9094/api/v1/admin/users/1001/profile?settleAsset=USDT&limit=50' \
+curl 'http://localhost:9094/api/v1/admin/support/users/1001/overview' \
   -H 'Authorization: Bearer <admin-token>'
 curl 'http://localhost:9094/api/v1/admin/compliance/users/1001' \
   -H 'Authorization: Bearer <admin-token>'
@@ -66,7 +66,7 @@ Gateway 会拒绝未知 service 名称。它不会把用户输入拼成任意后
 当前实现要求私有路由携带 `X-User-Id` 或 `Authorization`。生产环境应在 gateway 前完成认证，只有 token/session 验证通过后才注入可信 `X-User-Id`。
 `X-Trace-Id` 所有路由都可以带；gateway 会清洗、回写给客户端并转发给后端 provider。它只用于可观测性和排障，不能参与认证或鉴权判断。
 
-后台路径 `/api/v1/admin/...` 不使用普通前端的 `X-User-Id` fallback，只接受具备 `SUPPORT`、`ADMIN` 或 `SUPER_ADMIN` 的 Bearer Token，并继续用权限点限制实际访问范围。后台代理会向下游注入 `X-Admin-User-Id`、`X-Admin-Username`、`X-Admin-Roles`；客服只读接口 `/api/v1/admin/support/users/{userId}/overview` 聚合用户基础状态、KYC 摘要、资产、订单和风险快照，不返回会话治理、角色编辑或登录审计；客服工单接口 `/api/v1/admin/support/tickets` 支持工单查询、创建、备注时间线和状态变更，写操作要求 `admin.support.write`。用户详情聚合接口 `/api/v1/admin/users/{userId}/profile` 会聚合账户、订单、条件单、风险、会话和登录日志，并把下游失败作为局部错误返回。告警中心接口 `/api/v1/admin/alerts` 管理规则、事件、手动评估和事件确认。合规风控接口 `/api/v1/admin/compliance/...` 管理 KYC 档案、风险标签和 AML case。风控后台代理服务名 `risk-admin` 转发到 `/api/v1/admin/risk`，仅用于规则覆盖和爆仓候选后台分页查询。强平后台代理服务名 `liquidation-admin` 转发到 `/api/v1/admin/liquidations`，用于强平订单分页和候选取消运营动作。管理员 TOTP 2FA 可通过 `/api/v1/admin/security/mfa` 绑定、确认和关闭，生产环境可设置 `surprising.gateway.security.require-admin-mfa=true` 强制管理员登录提供动态码。
+后台路径 `/api/v1/admin/...` 不使用普通前端的 `X-User-Id` fallback，只接受具备 `SUPPORT`、`ADMIN` 或 `SUPER_ADMIN` 的 Bearer Token，并继续用权限点限制实际访问范围。后台代理会向下游注入 `X-Admin-User-Id`、`X-Admin-Username`、`X-Admin-Roles`；客服只读接口 `/api/v1/admin/support/users/{userId}/overview` 只聚合 gateway 本地用户状态和合规摘要，不查询账户、订单、成交或风险在线服务；客服工单接口 `/api/v1/admin/support/tickets` 支持工单查询、创建、备注时间线和状态变更，写操作要求 `admin.support.write`。原跨域用户详情接口 `/api/v1/admin/users/{userId}/profile` 已移除。合规风控接口 `/api/v1/admin/compliance/...` 管理 KYC 档案、风险标签和 AML case。风控后台代理服务名 `risk-admin` 转发到 `/api/v1/admin/risk`，仅用于规则覆盖和爆仓候选后台分页查询。强平后台代理服务名 `liquidation-admin` 转发到 `/api/v1/admin/liquidations`，用于强平订单分页和候选取消运营动作。管理员 TOTP 2FA 可通过 `/api/v1/admin/security/mfa` 绑定、确认和关闭，生产环境可设置 `surprising.gateway.security.require-admin-mfa=true` 强制管理员登录提供动态码。
 
 用户列表 `GET /api/v1/admin/users` 支持 `createdAt.desc`、`createdAt.asc` 游标分页，响应返回 `nextCursor`、`hasMore`、`sort`、`limit`；用户状态和角色写操作仍属于敏感操作，需要审批单。
 会话列表 `GET /api/v1/admin/sessions` 与 `GET /api/v1/admin/users/{userId}/sessions` 支持 `createdAt.desc`、`createdAt.asc` 游标分页，响应返回 `nextCursor`、`hasMore`、`sort`、`limit`；撤销会话仍属于敏感操作，需要审批单。
@@ -75,7 +75,9 @@ Gateway 会拒绝未知 service 名称。它不会把用户输入拼成任意后
 
 做市后台代理服务名 `market-maker` 转发到 `/api/v1/admin/market-maker`，覆盖策略状态、报价质量指标、策略参数覆盖、做市收益归因和策略运行日志。`/strategy-logs` 支持 `createdAt.desc`、`createdAt.asc` 游标分页，返回 `nextCursor`、`hasMore`、`sort`、`limit`。
 
-权限点 RBAC 由 `gateway_permissions` 和 `gateway_role_permissions` 驱动。gateway 会对本地 admin 路径校验 `admin.support.read`、`admin.users.read/write`、`admin.audit.read`、`admin.alerts.read/write`、`admin.compliance.read/write`、`admin.permissions.write` 等权限，对后台代理路径校验 `admin.gateway.{service}.read/write`。角色和权限点接口位于 `/api/v1/admin/roles` 与 `/api/v1/admin/permissions`。`SUPER_ADMIN` 默认拥有 `admin.*`，`ADMIN` 默认拥有当前运营权限但不能修改权限点，`SUPPORT` 默认只拥有 `admin.support.read` 和 `admin.security.mfa`。
+权限点 RBAC 由 `gateway_permissions` 和 `gateway_role_permissions` 驱动。gateway 会对本地 admin 路径校验 `admin.support.read`、`admin.users.read/write`、`admin.audit.read`、`admin.compliance.read/write`、`admin.permissions.write` 等权限，对后台代理路径校验 `admin.gateway.{service}.read/write`。角色和权限点接口位于 `/api/v1/admin/roles` 与 `/api/v1/admin/permissions`。`SUPER_ADMIN` 默认拥有 `admin.*`，`ADMIN` 默认拥有当前运营权限但不能修改权限点，`SUPPORT` 默认只拥有 `admin.support.read` 和 `admin.security.mfa`。
+
+认证持久化按物理表拆分：用户、角色、权限、用户角色、角色权限、登录日志、MFA 和刷新会话分别由单表 Repository 负责，`AuthPersistenceService` 完成角色与权限聚合。客服工单和备注也分别落在单表 Repository，由 `SupportTicketService` 保证跨表写入事务。
 
 合规风控数据落在 `gateway_user_kyc_profiles`、`gateway_user_risk_tags`、`gateway_user_aml_cases`。合规用户列表 `GET /api/v1/admin/compliance/users` 支持 `updatedAt.desc`、`updatedAt.asc` 游标分页；风险标签列表支持 `createdAt.desc`、`createdAt.asc`、`updatedAt.desc`、`updatedAt.asc`；AML case 列表支持 `updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc`。响应返回 `nextCursor`、`hasMore`、`sort`、`limit`。KYC 更新、风险标签创建/解除、AML case 创建/状态更新均属于本地后台写操作，需要 `admin.compliance.write` 权限和匹配的已批准审批单。
 
@@ -89,9 +91,7 @@ gateway 本地核心后台列表使用统一游标分页协议：`/api/v1/admin/
 gateway 中实现。后续 `surprising-finance-ops` 模块必须配置独立数据源和独立物理数据库，
 通过领域事件、outbox 或受控 CDC 建立查询投影，禁止对交易主库执行报表 JOIN。
 
-系统监控接口位于 `/api/v1/admin/system`：`/routes` 返回普通和后台路由配置，`/health` 统一巡检后端 `/actuator/health`，`/metrics` 聚合 outbox backlog、后台 API 错误率、登录失败和审批积压，`/observability` 聚合 Kafka consumer lag、WebSocket 连接/订阅指标和各后端 `/actuator/prometheus` 抓取状态。这些接口需要 `admin.system.read`。Kafka lag 默认关闭，生产可通过 `ADMIN_KAFKA_LAG_ENABLED=true` 和 `ADMIN_KAFKA_BOOTSTRAP_SERVERS` 开启。
-
-告警中心接口位于 `/api/v1/admin/alerts`：`/rules` 管理告警规则，`/events` 查询和确认告警事件，`/channels` 管理通知渠道，`/deliveries` 查询和重试投递记录，`/evaluate` 按固定 metric key 手动评估当前系统/市场/交易状态并写入事件。规则和通知渠道支持 `updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc` 游标分页；事件列表支持 `lastSeenAt.desc`、`lastSeenAt.asc`、`createdAt.desc`、`createdAt.asc` 游标分页；投递记录支持 `createdAt.desc`、`createdAt.asc`、`updatedAt.desc`、`updatedAt.asc` 游标分页，响应返回 `nextCursor`、`hasMore`、`sort`、`limit`。读接口需要 `admin.alerts.read`，写接口需要 `admin.alerts.write`；规则和渠道新增、更新、启用和停用默认还需要匹配的已批准审批单。触发告警会按域和最小级别为启用渠道创建 `PENDING` 投递记录，gateway 内置 `AdminAlertDeliveryWorker` 使用 `FOR UPDATE SKIP LOCKED` 领取任务并发送 HTTP 通知。`WEBHOOK`、`SLACK`、`PAGERDUTY` 渠道会向 `endpoint` POST JSON，2xx 标记 `SENT`，失败按 `surprising.gateway.alerts.delivery-worker.max-attempts` 和 `retry-delay` 重试，耗尽后标记 `FAILED`；`EMAIL` 和 `OPS` 在未配置外部适配器时标记 `SKIPPED`。生产可通过 `ADMIN_ALERT_DELIVERY_WORKER_ENABLED`、`ADMIN_ALERT_DELIVERY_WORKER_BATCH_SIZE`、`ADMIN_ALERT_DELIVERY_WORKER_POLL_DELAY_MS`、`ADMIN_ALERT_DELIVERY_WORKER_RETRY_DELAY` 和 `ADMIN_ALERT_DELIVERY_WORKER_CLAIM_LEASE` 调整 worker。
+系统监控接口位于 `/api/v1/admin/system`：`/routes` 返回普通和后台路由配置，`/health` 统一巡检后端 `/actuator/health`，`/observability` 聚合 Kafka consumer lag、WebSocket 连接/订阅指标和各后端 `/actuator/prometheus` 抓取状态。这些接口需要 `admin.system.read`。Kafka lag 默认关闭，生产可通过 `ADMIN_KAFKA_LAG_ENABLED=true` 和 `ADMIN_KAFKA_BOOTSTRAP_SERVERS` 开启。依赖业务库聚合的 `/metrics` 与本地告警中心已移除；以后应从独立运营数据库或可观测性平台提供。
 
 下游 `trading-orders` 和 `trading-trigger` 后台代理仍保留单一领域内、受限分页的客服操作明细。
 跨领域时间线和聚合运营报表统一归属上述独立财务运营数据库。

@@ -23,7 +23,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 
 class AuthServiceTest {
 
-    private final UserAuthRepository repository = mock(UserAuthRepository.class);
+    private final AuthPersistenceService repository = mock(AuthPersistenceService.class);
     private final PasswordHasher passwordHasher = mock(PasswordHasher.class);
     private final JwtTokenService jwtTokenService = mock(JwtTokenService.class);
     private final TotpService totpService = mock(TotpService.class);
@@ -165,11 +165,11 @@ class AuthServiceTest {
     @Test
     void loginRequiresTotpWhenAdminMfaIsEnabled() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
-        when(repository.credentialByUsername("admin")).thenReturn(Optional.of(new UserAuthRepository.UserCredential(
+        when(repository.credentialByUsername("admin")).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(
                 7L, "admin", null, "hash", "NORMAL", now)));
         when(passwordHasher.matches("password", "hash")).thenReturn(true);
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
-        when(repository.mfaCredential(7L)).thenReturn(Optional.of(new UserAuthRepository.MfaCredential(
+        when(repository.mfaCredential(7L)).thenReturn(Optional.of(new GatewayUserMfaRepository.MfaCredential(
                 7L, "ciphertext", true, now, now, now)));
         when(totpService.decryptSecret("ciphertext")).thenReturn("SECRET");
         when(totpService.verify(eq("SECRET"), eq("123456"), any())).thenReturn(true);
@@ -186,7 +186,7 @@ class AuthServiceTest {
     @Test
     void loginDoesNotCheckMfaForNonAdminUsers() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
-        when(repository.credentialByUsername("user")).thenReturn(Optional.of(new UserAuthRepository.UserCredential(
+        when(repository.credentialByUsername("user")).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(
                 42L, "user", null, "hash", "NORMAL", now)));
         when(passwordHasher.matches("password", "hash")).thenReturn(true);
         when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(

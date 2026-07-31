@@ -1,14 +1,14 @@
 package com.surprising.gateway.provider.auth;
 
 import com.surprising.gateway.provider.auth.AuthModels.AuthenticatedUser;
-import com.surprising.gateway.provider.auth.ComplianceRepository.AmlCase;
-import com.surprising.gateway.provider.auth.ComplianceRepository.AmlCaseCreateRequest;
-import com.surprising.gateway.provider.auth.ComplianceRepository.AmlCaseStatusUpdateRequest;
-import com.surprising.gateway.provider.auth.ComplianceRepository.ComplianceUserSummary;
-import com.surprising.gateway.provider.auth.ComplianceRepository.KycProfile;
-import com.surprising.gateway.provider.auth.ComplianceRepository.KycUpdateRequest;
-import com.surprising.gateway.provider.auth.ComplianceRepository.RiskTag;
-import com.surprising.gateway.provider.auth.ComplianceRepository.RiskTagCreateRequest;
+import com.surprising.gateway.provider.auth.ComplianceModels.AmlCase;
+import com.surprising.gateway.provider.auth.ComplianceModels.AmlCaseCreateRequest;
+import com.surprising.gateway.provider.auth.ComplianceModels.AmlCaseStatusUpdateRequest;
+import com.surprising.gateway.provider.auth.ComplianceModels.ComplianceUserSummary;
+import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.ComplianceModels.KycUpdateRequest;
+import com.surprising.gateway.provider.auth.ComplianceModels.RiskTag;
+import com.surprising.gateway.provider.auth.ComplianceModels.RiskTagCreateRequest;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.config.GatewayTraceFilter;
 import jakarta.servlet.http.HttpServletRequest;
@@ -34,18 +34,18 @@ import tools.jackson.databind.ObjectMapper;
 public class AdminComplianceController {
 
     private final AuthService authService;
-    private final ComplianceRepository complianceRepository;
+    private final ComplianceService complianceService;
     private final AdminApprovalRepository adminApprovalRepository;
     private final GatewayProperties properties;
     private final ObjectMapper objectMapper;
 
     public AdminComplianceController(AuthService authService,
-                                     ComplianceRepository complianceRepository,
+                                     ComplianceService complianceService,
                                      AdminApprovalRepository adminApprovalRepository,
                                      GatewayProperties properties,
                                      ObjectMapper objectMapper) {
         this.authService = authService;
-        this.complianceRepository = complianceRepository;
+        this.complianceService = complianceService;
         this.adminApprovalRepository = adminApprovalRepository;
         this.properties = properties;
         this.objectMapper = objectMapper;
@@ -62,7 +62,7 @@ public class AdminComplianceController {
         try {
             authService.requireAdminPermission(authorization, "admin.compliance.read");
             AdminCursorPage.CursorPage<ComplianceUserSummary> page =
-                    complianceRepository.usersPage(userId, kycStatus, tagCode, limit, cursor, sort);
+                    complianceService.usersPage(userId, kycStatus, tagCode, limit, cursor, sort);
             return new ComplianceUserQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                     page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {
@@ -80,9 +80,9 @@ public class AdminComplianceController {
             AuthenticatedUser user = authService.adminUser(authorization, userId);
             return new ComplianceUserDetailResponse(
                     user,
-                    complianceRepository.kyc(userId),
-                    complianceRepository.riskTags(userId, null, 200),
-                    complianceRepository.amlCases(userId, null, 200));
+                    complianceService.kyc(userId),
+                    complianceService.riskTags(userId, null, 200),
+                    complianceService.amlCases(userId, null, 200));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -100,7 +100,7 @@ public class AdminComplianceController {
         try {
             authService.requireAdminPermission(authorization, "admin.compliance.read");
             AdminCursorPage.CursorPage<RiskTag> page =
-                    complianceRepository.riskTagsPage(userId, status, limit, cursor, sort);
+                    complianceService.riskTagsPage(userId, status, limit, cursor, sort);
             return new RiskTagQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                     page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {
@@ -120,7 +120,7 @@ public class AdminComplianceController {
         try {
             authService.requireAdminPermission(authorization, "admin.compliance.read");
             AdminCursorPage.CursorPage<AmlCase> page =
-                    complianceRepository.amlCasesPage(userId, status, limit, cursor, sort);
+                    complianceService.amlCasesPage(userId, status, limit, cursor, sort);
             return new AmlCaseQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                     page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {
@@ -139,7 +139,7 @@ public class AdminComplianceController {
             var principal = requireWrite(authorization, httpRequest, body);
             authService.adminUser(authorization, userId);
             KycUpdateRequest request = readBody(body, KycUpdateRequest.class);
-            return complianceRepository.upsertKyc(userId, principal.userId(), request, Instant.now());
+            return complianceService.upsertKyc(userId, principal.userId(), request, Instant.now());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -156,7 +156,7 @@ public class AdminComplianceController {
             var principal = requireWrite(authorization, httpRequest, body);
             authService.adminUser(authorization, userId);
             RiskTagCreateRequest request = readBody(body, RiskTagCreateRequest.class);
-            return complianceRepository.createRiskTag(userId, principal.userId(), request, Instant.now());
+            return complianceService.createRiskTag(userId, principal.userId(), request, Instant.now());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -171,7 +171,7 @@ public class AdminComplianceController {
                                   HttpServletRequest httpRequest) {
         try {
             var principal = requireWrite(authorization, httpRequest, body);
-            return complianceRepository.resolveRiskTag(tagId, principal.userId(), Instant.now());
+            return complianceService.resolveRiskTag(tagId, principal.userId(), Instant.now());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -188,7 +188,7 @@ public class AdminComplianceController {
             var principal = requireWrite(authorization, httpRequest, body);
             authService.adminUser(authorization, userId);
             AmlCaseCreateRequest request = readBody(body, AmlCaseCreateRequest.class);
-            return complianceRepository.createAmlCase(userId, principal.userId(), request, Instant.now());
+            return complianceService.createAmlCase(userId, principal.userId(), request, Instant.now());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -204,7 +204,7 @@ public class AdminComplianceController {
         try {
             var principal = requireWrite(authorization, httpRequest, body);
             AmlCaseStatusUpdateRequest request = readBody(body, AmlCaseStatusUpdateRequest.class);
-            return complianceRepository.updateAmlCaseStatus(caseId, principal.userId(), request, Instant.now());
+            return complianceService.updateAmlCaseStatus(caseId, principal.userId(), request, Instant.now());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
