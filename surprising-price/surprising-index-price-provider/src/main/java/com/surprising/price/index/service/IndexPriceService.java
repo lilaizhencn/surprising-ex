@@ -15,11 +15,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 @Service
-public class IndexPriceService {
+    public class IndexPriceService {
 
     private static final Logger log = LoggerFactory.getLogger(IndexPriceService.class);
     private static final String SEQUENCE_MODULE = "price-index";
@@ -53,7 +52,6 @@ public class IndexPriceService {
         this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
     }
 
-    @Scheduled(fixedDelayString = "${surprising.price.index.calculation.poll-delay-ms:1000}")
     public void pollAndPublish() {
         for (IndexPriceProperties.SymbolConfig symbolConfig : indexInstrumentConfigService.symbols()) {
             try {

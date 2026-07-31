@@ -36,11 +36,10 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 @Service
-public class ExchangeCoreEngine {
+    public class ExchangeCoreEngine {
 
     private static final Logger log = LoggerFactory.getLogger(ExchangeCoreEngine.class);
 
@@ -94,7 +93,6 @@ public class ExchangeCoreEngine {
         }
     }
 
-    @Scheduled(fixedDelayString = "${surprising.trading.matching.engine.initial-symbol-refresh-delay-ms:30000}")
     public void refreshSymbols() {
         List<InstrumentSymbol> instruments = symbolService.currentTradingSymbols();
         Set<String> refreshedActiveSymbols = new HashSet<>(instruments.size());

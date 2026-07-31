@@ -6,12 +6,11 @@ import com.surprising.trading.order.repository.AlgoOrderRepository;
 import com.surprising.trading.order.repository.CancelAllAfterRepository;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /** 在令牌租约保护下重建 Redis 调度索引，数据库扫描始终作为安全回退路径。 */
 @Component
-public class OrderScheduleIndexCoordinator {
+    public class OrderScheduleIndexCoordinator {
     private final TradingOrderProperties properties;
     private final CancelAllAfterRepository timerRepository;
     private final AlgoOrderRepository algoRepository;
@@ -33,7 +32,6 @@ public class OrderScheduleIndexCoordinator {
     @EventListener(ApplicationReadyEvent.class)
     public void onReady() { reconcile(); }
 
-    @Scheduled(fixedDelayString = "${surprising.trading.order.redis-index.reconcile-delay-ms:10000}")
     public void reconcile() {
         ProductLine line = properties.getKafka().getProductLine();
         if (index.ready(line)) {

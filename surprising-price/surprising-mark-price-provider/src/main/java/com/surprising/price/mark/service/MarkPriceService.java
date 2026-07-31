@@ -22,12 +22,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
-public class MarkPriceService {
+    public class MarkPriceService {
 
     private static final Logger log = LoggerFactory.getLogger(MarkPriceService.class);
     private static final String SEQUENCE_MODULE = "price-mark";
@@ -101,7 +100,6 @@ public class MarkPriceService {
         parse(payload, PerpFundingRateEvent.class, "funding rate", event -> fundingRates.put(event.symbol(), event));
     }
 
-    @Scheduled(fixedRateString = "${surprising.price.mark.calculation.publish-interval-ms:1000}")
     public void publishMarkPrices() {
         Instant now = Instant.now();
         for (String symbol : symbols()) {

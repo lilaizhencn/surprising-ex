@@ -36,13 +36,12 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
-public class LiquidationService {
+    public class LiquidationService {
 
     private static final Logger log = LoggerFactory.getLogger(LiquidationService.class);
 
@@ -241,7 +240,6 @@ public class LiquidationService {
                         candidateId, update.candidateStatus()));
     }
 
-    @Scheduled(fixedDelayString = "${surprising.liquidation.settlement-reconcile-delay-ms:50}")
     public void finalizeSettledCandidates() {
         liquidationRepository.completeSettledCandidates(1_000);
     }

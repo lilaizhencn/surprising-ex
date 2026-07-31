@@ -39,7 +39,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -47,7 +46,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
-public class RiskService {
+    public class RiskService {
 
     private static final Logger log = LoggerFactory.getLogger(RiskService.class);
 
@@ -113,7 +112,6 @@ public class RiskService {
                 transactionManager, null, null);
     }
 
-    @Scheduled(fixedDelayString = "${surprising.risk.calculation.scan-delay-ms:1000}")
     public synchronized void scan() {
         if (!properties.getCalculation().isEnabled()) {
             return;

@@ -9,12 +9,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /** 构建并维护 Redis 止盈止损索引，分布式锁不参与业务正确性判断。 */
 @Component
-public class TriggerOrderIndexCoordinator {
+    public class TriggerOrderIndexCoordinator {
 
     private static final Logger log = LoggerFactory.getLogger(TriggerOrderIndexCoordinator.class);
 
@@ -38,7 +37,6 @@ public class TriggerOrderIndexCoordinator {
         reconcile();
     }
 
-    @Scheduled(fixedDelayString = "${surprising.trading.trigger.redis-index.reconcile-delay-ms:10000}")
     public void reconcile() {
         ProductLine productLine = properties.getKafka().getProductLine();
         if (index.ready(productLine)) {

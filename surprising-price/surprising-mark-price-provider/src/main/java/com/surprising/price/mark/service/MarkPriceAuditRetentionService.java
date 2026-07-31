@@ -5,12 +5,11 @@ import com.surprising.price.mark.repository.MarkPriceTickRepository;
 import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /** 通过分批删除限制标记价审计表规模，避免单次无界删除。 */
 @Component
-public class MarkPriceAuditRetentionService {
+    public class MarkPriceAuditRetentionService {
 
     private static final Logger log = LoggerFactory.getLogger(MarkPriceAuditRetentionService.class);
 
@@ -22,7 +21,6 @@ public class MarkPriceAuditRetentionService {
         this.properties = properties;
     }
 
-    @Scheduled(fixedDelayString = "${surprising.price.mark.audit.cleanup-delay-ms:60000}")
     public void deleteExpiredAuditRows() {
         MarkPriceProperties.Audit audit = properties.getAudit();
         Instant cutoff = Instant.now().minus(audit.getRetention());

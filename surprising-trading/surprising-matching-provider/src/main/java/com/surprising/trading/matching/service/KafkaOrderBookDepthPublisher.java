@@ -14,7 +14,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -25,7 +24,7 @@ import tools.jackson.databind.ObjectMapper;
  * 热门交易对也不会覆盖其他交易对的最新状态。</p>
  */
 @Service
-public class KafkaOrderBookDepthPublisher implements OrderBookDepthPublisher {
+    public class KafkaOrderBookDepthPublisher implements OrderBookDepthPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaOrderBookDepthPublisher.class);
 
@@ -66,7 +65,6 @@ public class KafkaOrderBookDepthPublisher implements OrderBookDepthPublisher {
         schedule(symbol, slot);
     }
 
-    @Scheduled(fixedDelayString = "${surprising.trading.matching.market-data.publish-delay-ms:5}")
     public void publishPending() {
         if (!properties.getMarketData().isEnabled()) {
             return;

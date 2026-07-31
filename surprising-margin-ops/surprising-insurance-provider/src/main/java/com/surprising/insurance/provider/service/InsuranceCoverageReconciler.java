@@ -9,7 +9,6 @@ import com.surprising.insurance.provider.repository.InsurancePendingCoverageRepo
 import com.surprising.insurance.provider.repository.InsuranceSequenceRepository;
 import java.time.Instant;
 import java.util.Map;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -44,7 +43,6 @@ public class InsuranceCoverageReconciler {
     /**
      * 账户命令表中的终态是权威结果，基金扣减、预留释放和覆盖完成不依赖结果主题的消息顺序。
      */
-    @Scheduled(fixedDelayString = "${surprising.insurance.coverage.reconcile-delay-ms:200}")
     @Transactional
     public void reconcile() {
         Instant now = Instant.now();

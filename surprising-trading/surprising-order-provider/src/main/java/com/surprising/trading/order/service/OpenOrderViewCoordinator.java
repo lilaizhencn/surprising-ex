@@ -5,12 +5,11 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.repository.OrderRepository;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /** 先重建按代隔离的活跃订单投影，再开放 Redis 读取。 */
 @Component
-public class OpenOrderViewCoordinator {
+    public class OpenOrderViewCoordinator {
     private final TradingOrderProperties properties;
     private final OrderRepository repository;
     private final RedisOpenOrderView view;
@@ -27,7 +26,6 @@ public class OpenOrderViewCoordinator {
     @EventListener(ApplicationReadyEvent.class)
     public void onReady() { reconcile(); }
 
-    @Scheduled(fixedDelayString = "${surprising.trading.order.redis-index.reconcile-delay-ms:10000}")
     public void reconcile() {
         ProductLine line = properties.getKafka().getProductLine();
         if (!view.rebuildRequired(line, properties.getRedisIndex().getRebuildMaxAge())) {

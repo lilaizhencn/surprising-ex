@@ -34,11 +34,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
-public class ExternalSpotWebSocketManager {
+    public class ExternalSpotWebSocketManager {
 
     private static final Logger log = LoggerFactory.getLogger(ExternalSpotWebSocketManager.class);
 
@@ -82,7 +81,6 @@ public class ExternalSpotWebSocketManager {
         scheduler.scheduleAtFixedRate(this::checkIdleSessions, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
     }
 
-    @Scheduled(fixedDelayString = "${surprising.price.index.instrument.refresh-delay-ms:30000}")
     public void refreshConnections() {
         if (running && properties.getWebSocket().isEnabled()) {
             refreshConnections(groupedSources());

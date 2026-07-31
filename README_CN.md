@@ -59,6 +59,11 @@ Repository 默认只操作一张物理表，由 Service 在事务内聚合。在
 CI 可运行 `./scripts/check-persistence-boundaries.sh`，拦截 Repository 之外的生产 JDBC 访问，
 以及未写中文“不可拆原因”的多表 Repository。
 
+Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，不直接访问 Repository，也不承载事务或
+业务编排。`task` 包只负责声明定时触发时机，所有实际执行都委托给 Service。CI 可运行
+`./scripts/check-entry-layer-boundaries.sh`，阻止 Controller 越过 Service，以及 `@Scheduled`
+回流到 Service、Repository 或客户端实现。
+
 ## 构建与本地启动
 
 要求 JDK 21。先启动 PostgreSQL、Kafka 和 Redis，再初始化数据库与 Topic：

@@ -11,13 +11,14 @@ import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
+import com.surprising.trading.trigger.task.TriggerOrderMaintenanceTask;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.scheduling.annotation.Scheduled;
 
-class MarkPriceTriggerSchedulerTest {
+class MarkPriceTriggerServiceTest {
 
     @Test
     void scansEveryFreshSymbolOncePerSequence() {
@@ -26,7 +27,7 @@ class MarkPriceTriggerSchedulerTest {
         MarkPriceEvent btc = mark("BTC-USDT", 51L, 60_001L);
         MarkPriceEvent eth = mark("ETH-USDT", 61L, 3_001L);
         when(cache.freshSnapshots()).thenReturn(List.of(btc, eth));
-        MarkPriceTriggerScheduler scheduler = new MarkPriceTriggerScheduler(service, cache);
+        MarkPriceTriggerService scheduler = new MarkPriceTriggerService(service, cache);
 
         scheduler.scanLatest();
         scheduler.scanLatest();
@@ -42,7 +43,7 @@ class MarkPriceTriggerSchedulerTest {
         MarkPriceEvent event = mark("BTC-USDT", 71L, 70_001L);
         when(cache.freshSnapshots()).thenReturn(List.of(event));
         doThrow(new IllegalStateException("database unavailable")).doNothing().when(service).onMarkPrice(event);
-        MarkPriceTriggerScheduler scheduler = new MarkPriceTriggerScheduler(service, cache);
+        MarkPriceTriggerService scheduler = new MarkPriceTriggerService(service, cache);
 
         scheduler.scanLatest();
         scheduler.scanLatest();
@@ -56,15 +57,15 @@ class MarkPriceTriggerSchedulerTest {
         LatestMarkPriceCache cache = mock(LatestMarkPriceCache.class);
         when(cache.freshSnapshots()).thenReturn(List.of());
 
-        new MarkPriceTriggerScheduler(service, cache).scanLatest();
+        new MarkPriceTriggerService(service, cache).scanLatest();
 
         verify(cache).freshSnapshots();
         verify(service, times(0)).onMarkPrice(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
-    void scheduledScanUsesFixedOneSecondCadence() throws Exception {
-        Scheduled scheduled = MarkPriceTriggerScheduler.class.getMethod("scanLatest")
+    void taskUsesFixedOneSecondScanCadence() throws Exception {
+        Scheduled scheduled = TriggerOrderMaintenanceTask.class.getMethod("scanLatestMarkPrices")
                 .getAnnotation(Scheduled.class);
         assertThat(scheduled.fixedRate()).isEqualTo(1_000L);
         assertThat(scheduled.initialDelay()).isEqualTo(1_000L);

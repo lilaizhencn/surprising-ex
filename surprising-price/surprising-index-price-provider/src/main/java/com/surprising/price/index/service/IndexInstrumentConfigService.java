@@ -5,12 +5,11 @@ import jakarta.annotation.PostConstruct;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /** 维护指数价格运行时使用的不可变配置快照。 */
 @Service
-public class IndexInstrumentConfigService {
+    public class IndexInstrumentConfigService {
 
     private static final Logger log = LoggerFactory.getLogger(IndexInstrumentConfigService.class);
 
@@ -28,7 +27,6 @@ public class IndexInstrumentConfigService {
         refresh();
     }
 
-    @Scheduled(fixedDelayString = "${surprising.price.index.instrument.refresh-delay-ms:30000}")
     public void refresh() {
         if (!properties.getInstrument().isEnabled()) {
             symbols = List.copyOf(properties.getSymbols());

@@ -42,7 +42,6 @@ import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -57,7 +56,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * 生成只减仓平仓单，因此账户和持仓状态仍只通过正常的订单、撮合和结算链路变更。</p>
  */
 @Service
-public class TriggerOrderService {
+    public class TriggerOrderService {
 
     private static final Logger log = LoggerFactory.getLogger(TriggerOrderService.class);
     private static final String TRIGGER_ORDER_SEQUENCE = "trigger-order";
@@ -420,7 +419,6 @@ public class TriggerOrderService {
         }
     }
 
-    @Scheduled(fixedDelayString = "${surprising.trading.trigger.execution.maintenance-delay-ms:1000}")
     public void maintenance() {
         Instant now = Instant.now();
         expirePending(now, properties.getExecution().getTriggerBatchSize());

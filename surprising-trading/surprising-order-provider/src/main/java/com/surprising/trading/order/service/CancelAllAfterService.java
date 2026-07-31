@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,7 +24,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
-public class CancelAllAfterService {
+    public class CancelAllAfterService {
 
     private static final Logger log = LoggerFactory.getLogger(CancelAllAfterService.class);
     private static final int CANCEL_LIMIT = 1000;
@@ -84,7 +83,6 @@ public class CancelAllAfterService {
         return toResponse(timer);
     }
 
-    @Scheduled(fixedDelayString = "${surprising.trading.order.cancel-all-after.scan-delay-ms:250}")
     public void scanDueTimers() {
         Instant now = Instant.now();
         List<CancelAllAfterTimer> timers = scheduleIndex.dueTimers(currentProductLine(), now, CLAIM_LIMIT)

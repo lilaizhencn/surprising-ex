@@ -21,11 +21,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 @Service
-public class TradingOutboxPublisher {
+    public class TradingOutboxPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(TradingOutboxPublisher.class);
     private static final Duration MINIMUM_CLAIM_LEASE = Duration.ofSeconds(30);
@@ -48,7 +47,6 @@ public class TradingOutboxPublisher {
         this.publishExecutor = Executors.newFixedThreadPool(maxInFlight, threadFactory());
     }
 
-    @Scheduled(fixedDelayString = "${surprising.liquidation.outbox.publish-delay-ms:100}")
     public void publishPending() {
         if (!publishing.compareAndSet(false, true)) {
             return;
@@ -74,7 +72,6 @@ public class TradingOutboxPublisher {
         }
     }
 
-    @Scheduled(fixedDelayString = "${surprising.liquidation.outbox.cleanup-delay-ms:60000}")
     public void cleanupPublished() {
         int batchSize = Math.max(1, properties.getOutbox().getCleanupBatchSize());
         int totalDeleted = 0;

@@ -6,11 +6,10 @@ import com.surprising.instrument.provider.config.InstrumentProperties;
 import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 @Service
-public class InstrumentLifecycleService {
+    public class InstrumentLifecycleService {
 
     private static final Logger log = LoggerFactory.getLogger(InstrumentLifecycleService.class);
 
@@ -26,7 +25,6 @@ public class InstrumentLifecycleService {
         this.properties = properties;
     }
 
-    @Scheduled(fixedDelayString = "${surprising.instrument.lifecycle.poll-delay-ms:1000}")
     public void advanceLifecycle() {
         if (!properties.getLifecycle().isEnabled()) {
             return;

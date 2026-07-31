@@ -10,7 +10,6 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -25,7 +24,7 @@ public class AdlRedisIndexCoordinator {
         this.repository=repository; this.index=index; this.redis=redis; this.properties=properties;
     }
     @EventListener(ApplicationReadyEvent.class) public void onReady() { rebuild(); }
-    @Scheduled(fixedDelayString = "${surprising.adl.redis-index.reconcile-delay-ms:10000}") public void rebuild() {
+    public void rebuild() {
         ProductLine productLine = properties.getKafka().getProductLine();
         String token=UUID.randomUUID().toString(); String lock=rebuildLockKey(productLine);
         if (!Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(lock, token, Duration.ofSeconds(30)))) return;

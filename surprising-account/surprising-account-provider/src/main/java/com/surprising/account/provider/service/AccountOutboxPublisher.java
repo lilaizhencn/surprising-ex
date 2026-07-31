@@ -27,7 +27,6 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /**
@@ -37,7 +36,7 @@ import org.springframework.stereotype.Service;
  * must treat event id/trade id as idempotency keys.</p>
  */
 @Service
-public class AccountOutboxPublisher {
+    public class AccountOutboxPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(AccountOutboxPublisher.class);
     private static final Duration MINIMUM_CLAIM_LEASE = Duration.ofSeconds(30);
@@ -60,7 +59,6 @@ public class AccountOutboxPublisher {
         this.publishExecutor = Executors.newFixedThreadPool(this.maxInFlight, threadFactory());
     }
 
-    @Scheduled(fixedDelayString = "${surprising.account.outbox.publish-delay-ms:200}")
     public void publishPending() {
         if (!publishing.compareAndSet(false, true)) {
             return;
@@ -90,7 +88,6 @@ public class AccountOutboxPublisher {
         }
     }
 
-    @Scheduled(fixedDelayString = "${surprising.account.outbox.cleanup-delay-ms:60000}")
     public void cleanupPublished() {
         int batchSize = Math.max(1, properties.getOutbox().getCleanupBatchSize());
         int totalDeleted = 0;

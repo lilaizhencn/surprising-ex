@@ -33,13 +33,12 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
-public class FundingService {
+    public class FundingService {
 
     private static final Logger log = LoggerFactory.getLogger(FundingService.class);
 
@@ -90,7 +89,6 @@ public class FundingService {
         this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
     }
 
-    @Scheduled(fixedDelayString = "${surprising.funding.calculation.publish-delay-ms:1000}")
     public void publishRates() {
         if (!properties.getCalculation().isEnabled()) {
             return;
@@ -112,7 +110,6 @@ public class FundingService {
         }
     }
 
-    @Scheduled(fixedDelayString = "${surprising.funding.settlement.settle-delay-ms:1000}")
     public void settleDueRates() {
         if (!properties.getSettlement().isEnabled()) {
             return;

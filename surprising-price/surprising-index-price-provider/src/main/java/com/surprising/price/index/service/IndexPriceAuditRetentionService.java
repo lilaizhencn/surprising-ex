@@ -4,12 +4,11 @@ import com.surprising.price.index.config.IndexPriceProperties;
 import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /** 通过有界批量删除控制指数价格审计表规模。 */
 @Component
-public class IndexPriceAuditRetentionService {
+    public class IndexPriceAuditRetentionService {
 
     private static final Logger log = LoggerFactory.getLogger(IndexPriceAuditRetentionService.class);
 
@@ -21,7 +20,6 @@ public class IndexPriceAuditRetentionService {
         this.properties = properties;
     }
 
-    @Scheduled(fixedDelayString = "${surprising.price.index.audit.cleanup-delay-ms:60000}")
     public void deleteExpiredAuditRows() {
         IndexPriceProperties.Audit audit = properties.getAudit();
         Instant cutoff = Instant.now().minus(audit.getRetention());

@@ -18,7 +18,6 @@ import java.util.List;
 import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -47,9 +46,6 @@ public class ExchangeRateService {
                 .build();
     }
 
-    @Scheduled(
-            initialDelayString = "${surprising.price.index.fiat.refresh-initial-delay-ms:1000}",
-            fixedDelayString = "${surprising.price.index.fiat.refresh-delay-ms:3600000}")
     public void refreshFiatRates() {
         IndexPriceProperties.Fiat fiat = properties.getFiat();
         if (!fiat.isEnabled()) {
@@ -75,9 +71,6 @@ public class ExchangeRateService {
         }
     }
 
-    @Scheduled(
-            initialDelayString = "${surprising.price.index.fiat.stable-coin.refresh-initial-delay-ms:1000}",
-            fixedDelayString = "${surprising.price.index.fiat.stable-coin.refresh-delay-ms:10000}")
     public void refreshStableCoinRate() {
         IndexPriceProperties.StableCoin stableCoin = properties.getFiat().getStableCoin();
         if (!properties.getFiat().isEnabled() || !stableCoin.isEnabled()) {

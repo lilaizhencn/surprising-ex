@@ -15,7 +15,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -24,7 +23,7 @@ import tools.jackson.databind.ObjectMapper;
  * 每个交易对使用独立的有界 FIFO，事件不会合并。
  */
 @Service
-public class KafkaPublicTradePublisher implements PublicTradePublisher {
+    public class KafkaPublicTradePublisher implements PublicTradePublisher {
 
     static final int BATCH_SIZE = 2_000;
     static final int MAX_PER_SYMBOL_PER_BATCH = 256;
@@ -80,7 +79,6 @@ public class KafkaPublicTradePublisher implements PublicTradePublisher {
         }
     }
 
-    @Scheduled(fixedDelay = 50L)
     public void publishPending() {
         int remaining = Math.min(BATCH_SIZE, availableInFlight());
         while (remaining > 0) {

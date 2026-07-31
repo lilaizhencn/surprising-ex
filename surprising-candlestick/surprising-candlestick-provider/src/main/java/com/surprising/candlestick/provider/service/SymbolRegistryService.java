@@ -13,14 +13,13 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /**
  * K 线运行时 symbol 门禁；服务层组合品种版本与当前版本快照。
  */
 @Service
-public class SymbolRegistryService {
+    public class SymbolRegistryService {
 
     private static final Logger log = LoggerFactory.getLogger(SymbolRegistryService.class);
 
@@ -48,7 +47,6 @@ public class SymbolRegistryService {
     /**
      * 在严格注册表模式下刷新可用 symbol 快照。
      */
-    @Scheduled(fixedDelayString = "${surprising.candlestick.symbols.refresh-delay-ms:30000}")
     public void refresh() {
         if (properties.getSymbols().isAcceptUnknownSymbols()) {
             return;

@@ -23,13 +23,12 @@ import com.surprising.insurance.provider.repository.InsuranceSequenceRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
-public class InsuranceService {
+    public class InsuranceService {
 
     private static final String DEFAULT_ACCOUNT_TYPE = "USDT_PERPETUAL";
 
@@ -67,7 +66,6 @@ public class InsuranceService {
      * 周期性覆盖账户结算产生的穿仓缺口；同一事务包含基金余额锁、预留、覆盖记录和账户命令 outbox。
      */
     @Transactional
-    @Scheduled(fixedDelayString = "${surprising.insurance.coverage.scan-delay-ms:1000}")
     public void coverDeficits() {
         if (!properties.getCoverage().isEnabled()) {
             return;

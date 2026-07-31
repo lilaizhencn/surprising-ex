@@ -61,6 +61,11 @@ trading database; a future finance-operations module should build event-driven p
 Run `./scripts/check-persistence-boundaries.sh` in CI to reject direct production JDBC access outside
 repositories and undocumented multi-table repository exceptions.
 
+Controllers are protocol adapters only: they validate HTTP input, extract request context, and map service results
+without accessing repositories or owning transactions and business orchestration. Classes in `task` only declare
+schedule triggers and delegate execution to services. Run `./scripts/check-entry-layer-boundaries.sh` in CI to
+prevent controllers from bypassing services and to keep `@Scheduled` out of services, repositories, and clients.
+
 ## Build and local run
 
 JDK 21 is required. Start PostgreSQL, Kafka, and Redis, then initialize the schema and topics:

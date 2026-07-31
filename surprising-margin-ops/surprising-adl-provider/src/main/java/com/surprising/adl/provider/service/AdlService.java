@@ -21,12 +21,11 @@ import java.util.Optional;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public class AdlService {
+    public class AdlService {
 
     private final AdlProperties properties;
     private final AdlRepository adlRepository;
@@ -57,7 +56,6 @@ public class AdlService {
      * ADL 刻意排在保险基金覆盖之后；只要对应资产仍有保险基金余额，就把缺口留给保险基金优先处理。
      */
     @Transactional
-    @Scheduled(fixedDelayString = "${surprising.adl.scanner.scan-delay-ms:1000}")
     public void processResidualDeficits() {
         var scanner = properties.getScanner();
         if (!scanner.isEnabled()) {

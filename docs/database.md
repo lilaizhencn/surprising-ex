@@ -736,6 +736,13 @@ physical-table vocabulary from project DDL, rejects production JDBC access outsi
 implementations, and requires every repository that references multiple physical tables to carry an
 explicit Chinese `不可拆原因` comment. This check should run in CI before module tests.
 
+HTTP and scheduler entry layers follow the same dependency direction. Controllers validate protocol input,
+extract non-persistence request context, call services, and translate service outcomes to HTTP responses.
+They never query repositories or own transaction boundaries. Scheduled methods live only in `task` packages;
+task classes contain trigger configuration and delegate each execution to a service. Repository, Redis, external
+client, transaction, and message-consumer responsibilities remain outside task classes. The boundary is enforced
+by `scripts/check-entry-layer-boundaries.sh`.
+
 `account_outbox_events` stores account-side Kafka events written inside the same transaction as the
 account state change. It carries `POSITION_UPDATED` events for WebSocket private position pushes and
 `LIQUIDATION_FEE_SETTLED` events for insurance-fund credits. Redis position snapshots are not business events and

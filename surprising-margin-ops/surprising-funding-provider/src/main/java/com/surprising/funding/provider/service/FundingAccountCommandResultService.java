@@ -7,7 +7,6 @@ import com.surprising.funding.provider.model.FundingPaymentResult;
 import com.surprising.funding.provider.repository.FundingPaymentCompletionRepository;
 import com.surprising.funding.provider.repository.FundingPendingCommandRepository;
 import java.util.List;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,7 +44,6 @@ public class FundingAccountCommandResultService {
      * 数据库中的账户命令终态是权威结果。此任务修复遗漏、重复或乱序的结果事件，
      * 从而避免把跨主题消息顺序作为正确性的前提。
      */
-    @Scheduled(fixedDelayString = "${surprising.funding.settlement.reconcile-delay-ms:1000}")
     @Transactional
     public void reconcileTerminalCommands() {
         List<FundingPaymentResult> results = pendingCommandRepository

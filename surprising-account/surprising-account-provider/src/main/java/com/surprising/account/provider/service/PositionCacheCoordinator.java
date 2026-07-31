@@ -9,12 +9,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /** 从 PostgreSQL 初始化 Redis，并在维持就绪状态的同时持续修复有限范围的数据页。 */
 @Component
-public class PositionCacheCoordinator {
+    public class PositionCacheCoordinator {
 
     private static final Logger log = LoggerFactory.getLogger(PositionCacheCoordinator.class);
 
@@ -39,7 +38,6 @@ public class PositionCacheCoordinator {
         reconcile();
     }
 
-    @Scheduled(fixedDelayString = "${surprising.account.position-cache.reconcile-delay-ms:10000}")
     public void reconcile() {
         ProductLine productLine = properties.getKafka().getProductLine();
         if (cache.ready(productLine)) {

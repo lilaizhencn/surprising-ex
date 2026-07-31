@@ -61,11 +61,10 @@ import java.util.zip.CRC32;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 @Service
-public class MarketMakerService {
+    public class MarketMakerService {
 
     private static final Logger log = LoggerFactory.getLogger(MarketMakerService.class);
     private static final Set<OrderStatus> LIVE_STATUSES = EnumSet.of(OrderStatus.ACCEPTED, OrderStatus.PARTIALLY_FILLED);
@@ -150,7 +149,6 @@ public class MarketMakerService {
                 + "-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
-    @Scheduled(fixedDelayString = "${surprising.market-maker.engine.cycle-delay-ms:250}")
     public void scheduledRun() {
         if (!properties.getEngine().isEnabled()) {
             return;

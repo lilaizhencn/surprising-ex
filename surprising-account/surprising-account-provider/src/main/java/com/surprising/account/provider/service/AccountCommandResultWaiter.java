@@ -11,7 +11,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /**
@@ -19,7 +18,7 @@ import org.springframework.stereotype.Service;
  * poll interval. Kafka result topics are intentionally not required for correctness.
  */
 @Service
-public class AccountCommandResultWaiter {
+    public class AccountCommandResultWaiter {
 
     private final AccountCommandRepository commandRepository;
     private final Map<String, WaitSlot> waiting = new ConcurrentHashMap<>();
@@ -54,7 +53,6 @@ public class AccountCommandResultWaiter {
         }
     }
 
-    @Scheduled(fixedDelayString = "${surprising.account.command-wait.poll-delay-ms:20}")
     public void completeTerminalCommands() {
         if (waiting.isEmpty()) {
             return;

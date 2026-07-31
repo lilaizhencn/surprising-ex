@@ -7,30 +7,28 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * 每个交易对只保留最新标记价格，并按固定的一秒周期评估触发单。
+ * 每个交易对只保留最新标记价格，并执行触发单评估。
  */
 @Component
-public class MarkPriceTriggerScheduler {
+public class MarkPriceTriggerService {
 
     public static final long SCAN_INTERVAL_MS = 1_000L;
 
-    private static final Logger log = LoggerFactory.getLogger(MarkPriceTriggerScheduler.class);
+    private static final Logger log = LoggerFactory.getLogger(MarkPriceTriggerService.class);
 
     private final TriggerOrderService triggerOrderService;
     private final LatestMarkPriceCache markPriceCache;
     private final ConcurrentMap<String, Long> processedSequences = new ConcurrentHashMap<>();
     private final AtomicBoolean scanning = new AtomicBoolean(false);
 
-    public MarkPriceTriggerScheduler(TriggerOrderService triggerOrderService, LatestMarkPriceCache markPriceCache) {
+    public MarkPriceTriggerService(TriggerOrderService triggerOrderService, LatestMarkPriceCache markPriceCache) {
         this.triggerOrderService = triggerOrderService;
         this.markPriceCache = markPriceCache;
     }
 
-    @Scheduled(fixedRate = SCAN_INTERVAL_MS, initialDelay = SCAN_INTERVAL_MS)
     public void scanLatest() {
         if (!scanning.compareAndSet(false, true)) {
             return;

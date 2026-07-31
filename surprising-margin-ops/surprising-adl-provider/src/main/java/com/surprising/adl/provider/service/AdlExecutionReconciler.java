@@ -6,7 +6,6 @@ import com.surprising.adl.provider.repository.AdlExecutionSagaRepository;
 import com.surprising.adl.provider.repository.AdlPendingExecutionRepository;
 import java.time.Instant;
 import java.util.Map;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -35,7 +34,6 @@ public class AdlExecutionReconciler {
     /**
      * 从数据库读取权威账户命令终态。Kafka 结果事件可改善可观测性，但 ADL 完成与补偿不依赖其顺序。
      */
-    @Scheduled(fixedDelayString = "${surprising.adl.scanner.reconcile-delay-ms:200}")
     @Transactional
     public void reconcile() {
         Instant now = Instant.now();

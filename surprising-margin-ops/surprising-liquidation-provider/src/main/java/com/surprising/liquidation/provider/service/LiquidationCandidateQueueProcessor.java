@@ -15,11 +15,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 @Service
-public class LiquidationCandidateQueueProcessor {
+    public class LiquidationCandidateQueueProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(LiquidationCandidateQueueProcessor.class);
 
@@ -61,7 +60,6 @@ public class LiquidationCandidateQueueProcessor {
         running = false;
     }
 
-    @Scheduled(fixedDelayString = "${surprising.liquidation.redis-index.recovery-delay-ms:1000}")
     public void recoverDurableCandidates() {
         int limit = properties.getRedisIndex().getCandidateBatchSize()
                 * properties.getRedisIndex().getWorkerCount();
