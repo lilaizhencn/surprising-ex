@@ -509,16 +509,6 @@ INSERT INTO instrument_index_sources (
  TRUE, 'wss://ws.kraken.com/v2', '{"method":"subscribe","params":{"channel":"ticker","symbol":["ETH/USDT"]}}', 'KRAKEN_TICKER', 1000000)
 ON CONFLICT (symbol, version, source) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS candlestick_symbols (
-    symbol              TEXT PRIMARY KEY,
-    base_asset          TEXT,
-    quote_asset         TEXT,
-    enabled             BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT candlestick_symbols_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$')
-);
-
 CREATE TABLE IF NOT EXISTS candlestick_candles (
     symbol              TEXT NOT NULL,
     period              TEXT NOT NULL,

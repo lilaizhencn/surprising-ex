@@ -4,14 +4,6 @@ server:
 spring:
   application:
     name: surprising-candlestick-provider
-  task:
-    scheduling:
-      pool:
-        size: 2
-      thread-name-prefix: candlestick-scheduler-
-      shutdown:
-        await-termination: true
-        await-termination-period: 10s
   datasource:
     url: jdbc:postgresql://localhost:5432/surprising_exchange
     username: surprising
@@ -65,7 +57,3 @@ surprising:
       max-batch-size: 1000
     query:
       max-limit: 1500
-    symbols:
-      accept-unknown-symbols: false
-      source: INSTRUMENT
-      refresh-delay-ms: 30000

@@ -1,12 +1,8 @@
 package com.surprising.candlestick.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 import com.surprising.candlestick.provider.config.CandlestickProperties;
-import com.surprising.candlestick.provider.repository.CandlestickSymbolRepository;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentResponse;
@@ -16,17 +12,13 @@ import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class SymbolRegistryServiceTest {
 
-    private final CandlestickSymbolRepository symbolRepository = mock(CandlestickSymbolRepository.class);
-
     @Test
-    void strictInstrumentRegistryUsesThePerpetualSnapshotByDefault() {
+    void instrumentSnapshotIsTheOnlySymbolSource() {
         CandlestickProperties properties = new CandlestickProperties();
-        properties.getSymbols().setAcceptUnknownSymbols(false);
         InstrumentSnapshotCache cache = cache(ProductLine.LINEAR_PERPETUAL,
                 instrument("BTC-USDT", 2L, ContractType.LINEAR_PERPETUAL),
                 instrument("ETH-USDT", 3L, ContractType.LINEAR_PERPETUAL));
@@ -39,9 +31,8 @@ class SymbolRegistryServiceTest {
     }
 
     @Test
-    void strictInstrumentRegistryFiltersByProductLineWhenProductTopicsAreEnabled() {
+    void instrumentSnapshotFiltersByProductLineWhenProductTopicsAreEnabled() {
         CandlestickProperties properties = new CandlestickProperties();
-        properties.getSymbols().setAcceptUnknownSymbols(false);
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
         SymbolRegistryService service = service(properties,
@@ -54,25 +45,19 @@ class SymbolRegistryServiceTest {
     }
 
     @Test
-    void compatibilityRegistryUsesCandlestickSymbolsTableOnly() {
+    void symbolsOutsideInstrumentSnapshotAreRejected() {
         CandlestickProperties properties = new CandlestickProperties();
-        properties.getSymbols().setAcceptUnknownSymbols(false);
-        properties.getSymbols().setSource("CANDLESTICK_SYMBOLS");
-        when(symbolRepository.findEnabledSymbols()).thenReturn(Set.of("btc-usdt"));
-        SymbolRegistryService service = service(properties, null);
+        SymbolRegistryService service = service(properties, cache(ProductLine.LINEAR_PERPETUAL,
+                instrument("BTC-USDT", 2L, ContractType.LINEAR_PERPETUAL)));
 
         service.refresh();
 
         assertThat(service.isEnabled("BTC-USDT")).isTrue();
-        verify(symbolRepository).findEnabledSymbols();
+        assertThat(service.isEnabled("ETH-USDT")).isFalse();
     }
 
     private SymbolRegistryService service(CandlestickProperties properties, InstrumentSnapshotCache cache) {
-        return new SymbolRegistryService(
-                properties,
-                symbolRepository,
-                cache,
-                null);
+        return new SymbolRegistryService(properties, cache, null);
     }
 
     private InstrumentSnapshotCache cache(ProductLine productLine, InstrumentResponse... instruments) {

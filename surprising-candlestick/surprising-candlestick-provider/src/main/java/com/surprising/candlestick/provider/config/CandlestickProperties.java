@@ -18,7 +18,6 @@ public class CandlestickProperties {
     private Stream stream = new Stream();
     private Flush flush = new Flush();
     private Query query = new Query();
-    private Symbols symbols = new Symbols();
     private Rocksdb rocksdb = new Rocksdb();
 
     /** 启动时拒绝未隔离的旧版行情 Topic 配置。 */
@@ -65,14 +64,6 @@ public class CandlestickProperties {
 
     public void setQuery(Query query) {
         this.query = query;
-    }
-
-    public Symbols getSymbols() {
-        return symbols;
-    }
-
-    public void setSymbols(Symbols symbols) {
-        this.symbols = symbols;
     }
 
     public Rocksdb getRocksdb() {
@@ -235,36 +226,6 @@ public class CandlestickProperties {
 
         public void setMaxLimit(int maxLimit) {
             this.maxLimit = maxLimit;
-        }
-    }
-
-    public static class Symbols {
-        private boolean acceptUnknownSymbols = true;
-        private String source = "INSTRUMENT";
-        private long refreshDelayMs = 30000L;
-
-        public boolean isAcceptUnknownSymbols() {
-            return acceptUnknownSymbols;
-        }
-
-        public void setAcceptUnknownSymbols(boolean acceptUnknownSymbols) {
-            this.acceptUnknownSymbols = acceptUnknownSymbols;
-        }
-
-        public String getSource() {
-            return source;
-        }
-
-        public void setSource(String source) {
-            this.source = source;
-        }
-
-        public long getRefreshDelayMs() {
-            return refreshDelayMs;
-        }
-
-        public void setRefreshDelayMs(long refreshDelayMs) {
-            this.refreshDelayMs = refreshDelayMs;
         }
     }
 

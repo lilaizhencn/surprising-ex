@@ -22,9 +22,9 @@ K 线服务按多节点部署设计，采用分区化行情数据流水线：
 - 启用交易对启动时通过 Instrument 内部聚合 RPC 加载本产品线完整 JVM 快照，运行中消费
   `surprising.instrument.events.v1` 增量更新；`SymbolRegistryService` 和 `PublicTradeEventMapper`
   只从本地快照读取合约正文、版本和资产精度。
-- 兼容模式的 `candlestick_symbols` 和 K 线表仍分别由单表 Repository 负责；行情热路径不再读取
-  `instruments`、`instrument_current_versions` 或 `account_asset_scales`，也不在 Service 中执行
-  合约参数 SQL 或跨表 JOIN。
+- K 线交易对只来源于本地 Instrument 快照；行情热路径不读取 `instruments`、
+  `instrument_current_versions` 或 `account_asset_scales`，也不在 Service 中执行合约参数 SQL
+  或跨表 JOIN。
 
 ## 多节点核心机制
 
@@ -162,9 +162,6 @@ surprising:
       application-id: surprising-candlestick-v1
     stream:
       threads: 2
-    symbols:
-      accept-unknown-symbols: false
-      source: INSTRUMENT
 ```
 
 ## WebSocket 监听和推送

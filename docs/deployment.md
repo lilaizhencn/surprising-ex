@@ -435,19 +435,9 @@ Redis、外部客户端或开启事务。长任务使用独立工作池，避免
 
 ## 动态交易对
 
-默认配置：
-
-```yaml
-surprising:
-  candlestick:
-    symbols:
-      accept-unknown-symbols: false
-      source: INSTRUMENT
-```
-
-该模式下，K 线和指数价格服务启动时通过 Instrument 内部聚合 RPC 加载本产品线 JVM 快照，
-并消费 `surprising.instrument.events.v1` 增量事件；快照更新后，K 线服务开始处理新交易对，
-指数价格服务同步刷新指数源配置，不再从主库读取合约表。
+K 线服务启动时通过 Instrument 内部聚合 RPC 加载本产品线 JVM 快照，并消费
+`surprising.instrument.events.v1` 增量事件。快照更新后，K 线服务自动刷新本地交易对注册表，
+不再维护独立交易对表或从主库读取合约表。
 
 ## K 线 API
 
