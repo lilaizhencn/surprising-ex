@@ -6,10 +6,9 @@ import com.surprising.insurance.api.model.InsuranceFundAdjustmentRequest;
 import com.surprising.insurance.api.model.InsuranceFundBalanceQueryResponse;
 import com.surprising.insurance.api.model.InsuranceFundBalanceResponse;
 import com.surprising.insurance.api.model.InsuranceLedgerQueryResponse;
-import com.surprising.insurance.provider.config.InsuranceProperties;
 import com.surprising.insurance.provider.service.InsuranceService;
+import com.surprising.insurance.provider.service.InsuranceRuntimeConfigService;
 import jakarta.validation.Valid;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,11 +25,12 @@ import org.springframework.web.server.ResponseStatusException;
 public class InsuranceController {
 
     private final InsuranceService insuranceService;
-    private final InsuranceProperties properties;
+    private final InsuranceRuntimeConfigService runtimeConfigService;
 
-    public InsuranceController(InsuranceService insuranceService, InsuranceProperties properties) {
+    public InsuranceController(InsuranceService insuranceService,
+                               InsuranceRuntimeConfigService runtimeConfigService) {
         this.insuranceService = insuranceService;
-        this.properties = properties;
+        this.runtimeConfigService = runtimeConfigService;
     }
 
     @PostMapping("/admin/fund-adjustments")
@@ -95,48 +95,18 @@ public class InsuranceController {
 
     @GetMapping("/admin/runtime-config")
     public Map<String, Object> runtimeConfig(@RequestHeader("X-Admin-User-Id") String adminUserId) {
-        return runtimeConfig();
+        return runtimeConfigService.current();
     }
 
     @PostMapping("/admin/runtime-config")
     public Map<String, Object> updateRuntimeConfig(@RequestHeader("X-Admin-User-Id") String adminUserId,
                                                    @RequestBody RuntimeConfigUpdate request) {
-        if (request.coverageEnabled() != null) {
-            properties.getCoverage().setEnabled(request.coverageEnabled());
+        try {
+            return runtimeConfigService.update(
+                    request.coverageEnabled(), request.scanDelayMs(), request.batchSize());
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
-        if (request.scanDelayMs() != null) {
-            properties.getCoverage().setScanDelayMs(nonNegative(request.scanDelayMs(), "scanDelayMs"));
-        }
-        if (request.batchSize() != null) {
-            properties.getCoverage().setBatchSize(bounded(request.batchSize(), 1, 10_000, "batchSize"));
-        }
-        return runtimeConfig();
-    }
-
-    private Map<String, Object> runtimeConfig() {
-        Map<String, Object> coverage = new LinkedHashMap<>();
-        coverage.put("enabled", properties.getCoverage().isEnabled());
-        coverage.put("scanDelayMs", properties.getCoverage().getScanDelayMs());
-        coverage.put("batchSize", properties.getCoverage().getBatchSize());
-
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("scope", "runtime");
-        response.put("coverage", coverage);
-        return response;
-    }
-
-    private long nonNegative(long value, String field) {
-        if (value < 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " must be non-negative");
-        }
-        return value;
-    }
-
-    private int bounded(int value, int min, int max, String field) {
-        if (value < min || value > max) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " must be between " + min + " and " + max);
-        }
-        return value;
     }
 
     public record RuntimeConfigUpdate(
