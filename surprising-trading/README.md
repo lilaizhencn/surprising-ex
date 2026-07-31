@@ -1,42 +1,40 @@
 # surprising-trading
 
-[English](README.md) | [简体中文](README_CN.md)
 
-Surprising Exchange trading module for spot, perpetual, delivery, and option product lines. The current implementation contains `surprising-order-provider`, `surprising-trigger-provider`, `surprising-trading-entry-provider`, and `surprising-matching-provider`: order entry, take-profit/stop-loss trigger orders, instrument-rule validation, idempotent persistence, product-line Kafka command publishing, real exchange-core order-book matching, matching results, and trade events.
+Surprising Exchange 现货、永续、交割和期权交易模块。当前已实现 `surprising-order-provider`、`surprising-trigger-provider`、`surprising-trading-entry-provider` 和 `surprising-matching-provider`：订单入口、止盈止损条件单、instrument 规则校验、幂等落库、产品线 Kafka 撮合命令发布、exchange-core 真实订单簿撮合、撮合结果和成交事件输出。
 
-## Modules
+## 模块
 
-- `surprising-trading-api`: order RPC contracts, DTOs, and Kafka command/event models.
-- `surprising-order-provider`: order entry provider.
-- `surprising-trigger-provider`: take-profit and stop-loss conditional order provider.
-- `surprising-trading-entry-provider`: combined deployable provider for order entry and trigger orders.
-- `surprising-matching-provider`: `exchange-core` based matching provider.
+- `surprising-trading-api`：订单 RPC 合约、DTO、Kafka command/event 模型。
+- `surprising-order-provider`：订单入口 provider。
+- `surprising-trigger-provider`：止盈止损条件单 provider。
+- `surprising-trading-entry-provider`：订单入口和条件单的合并部署 provider。
+- `surprising-matching-provider`：基于 `exchange-core` 的撮合 provider。
 
-## Long Fixed-Point Model
+## long 定点数模型
 
-Order entry does not use `BigDecimal`. API, database, and Kafka commands use long values:
+订单入口不使用 `BigDecimal`。API、数据库、Kafka command 都使用 long：
 
-- `priceTicks`: number of price ticks. Display price = `priceTicks * price_tick_units / quote_asset_scale`.
-- `quantitySteps`: number of quantity steps. Display quantity = `quantitySteps * quantity_step_units / base_asset_scale`.
-- `MARKET` orders must use `priceTicks = 0`.
-- `MARKET` orders only allow `IOC` or `FOK`.
-- Notional validation uses `contract_type`. Linear contracts check `priceTicks * quantitySteps * notional_multiplier_units`; inverse contracts check `quantitySteps * notional_multiplier_units` because the multiplier is the quote face value per contract step. Both paths use `Math.multiplyExact` to reject long overflow.
-- Market orders are protected by `markPriceTicks +/- marketMaxSlippagePpm` before exchange-core IOC/FOK submission. Order entry uses the same mark-derived execution band for risk checks: linear contracts reserve initial margin at the upper bound for both BUY and SELL, while inverse contracts reserve at the lower bound because collateral requirement increases as price falls.
-- When `surprising.trading.order.risk.limit-price-protection-enabled=true`, limit orders also require a fresh mark price. BUY limit prices cannot exceed `markPriceTicks * (1 + limitPriceBandPpm / 1_000_000)`, and SELL limit prices cannot be below `markPriceTicks * (1 - limitPriceBandPpm / 1_000_000)`. Passive low bids and high asks are still allowed.
-- Instrument versions store default maker/taker ppm fees. Order entry resolves user/VIP/market-maker overrides, snapshots the final rates on `trading_orders`, and account settlement charges fills from that snapshot.
+- `priceTicks`：价格 tick 个数，展示价格 = `priceTicks * price_tick_units / quote_asset_scale`。
+- `quantitySteps`：数量 step 个数，展示数量 = `quantitySteps * quantity_step_units / base_asset_scale`。
+- `MARKET` 订单要求 `priceTicks = 0`。
+- `MARKET` 订单只允许 `IOC` 或 `FOK`。
+- notional 校验按 `contract_type` 分支。U 本位线性合约校验 `priceTicks * quantitySteps * notional_multiplier_units`；币本位反向合约校验 `quantitySteps * notional_multiplier_units`，因为 multiplier 表示每个合约 step 的报价币面值。两条路径都用 `Math.multiplyExact` 防止 long 溢出。
+- 市价单用 `markPriceTicks +/- marketMaxSlippagePpm` 做提交 exchange-core 前的价格保护。订单入口使用同一个 mark 派生的可成交区间做风控：U 本位线性合约无论 BUY/SELL 都按上边界冻结初始保证金，币本位反向合约按下边界冻结，因为价格越低所需抵押越高。
+- 当 `surprising.trading.order.risk.limit-price-protection-enabled=true` 时，限价单也要求新鲜 mark price。BUY 限价不能高于 `markPriceTicks * (1 + limitPriceBandPpm / 1_000_000)`，SELL 限价不能低于 `markPriceTicks * (1 - limitPriceBandPpm / 1_000_000)`。被动低价买单和高价卖单仍然允许。
+- instrument version 保存产品默认 maker/taker ppm 费率；订单入口会叠加用户/VIP/做市覆盖后，把本订单实际费率快照写入 `trading_orders`，成交后由 account provider 按快照结算。
 
-Example for `BTC-USDT` with `price_tick_units = 10000000`, `quantity_step_units = 100000`,
-USDT scale `100000000`, and BTC scale `100000000`:
+例子：`BTC-USDT` 的 `price_tick_units = 10000000`、`quantity_step_units = 100000`，USDT scale 为 `100000000`，BTC scale 为 `100000000`。
 
-- `priceTicks = 650000` means price `65000.0`.
-- `quantitySteps = 10` means quantity `0.01 BTC`.
+- `priceTicks = 650000` 表示价格 `65000.0`。
+- `quantitySteps = 10` 表示数量 `0.01 BTC`。
 
-This aligns with the long-based input model used by `exchange-core`, so the matching provider passes `priceTicks` and `quantitySteps` directly to the order book.
-Keep this invariant for the trading path: do not convert order, fill, margin, PnL, or funding-settlement values to `BigDecimal` in Java. External market-data modules may still store decimal display values, but trading execution and accounting must use scaled `long`.
-Decimal values are only allowed at system boundaries: external market-data/FX parsing, admin input, REST display, and reports. Before a value enters order entry, matching, account, risk, liquidation, funding, insurance, or ADL, it must already be converted to instrument-defined ticks, steps, ppm, or asset units.
-Critical core-path aggregations use checked long addition. Matching filled quantity and reduce-only pending close quantity fail with overflow instead of wrapping into a smaller value.
+这和 `exchange-core` 的 long 输入模型一致，撮合服务可以直接把 `priceTicks`、`quantitySteps` 传给 order book。
+交易链路必须保持这个约束：订单、成交、保证金、PnL、资金费结算的 Java 代码不要转换成 `BigDecimal`。外部行情模块可以存展示用 decimal 值，但交易执行和账户记账必须使用缩放后的 `long`。
+允许使用小数的地方只在系统边界：外部行情/汇率解析、管理后台录入、REST 展示和报表输出。进入订单、撮合、账户、风控、强平、资金费、保险基金、ADL 前，必须先转换为 instrument 定义的 tick、step、ppm 或 asset unit。
+关键核心链路聚合使用 checked long addition。matching 成交总量和 reduce-only 待平数量溢出时会失败，而不是回绕成更小的值。
 
-## Core Flow
+## 核心链路
 
 ```text
 client / internal gateway
@@ -47,11 +45,11 @@ client / internal gateway
   -> surprising.<product-segment>.order.commands.v1
   -> surprising-matching-provider / exchange-core
   -> trading_match_results / trading_match_trades
-  -> durable financial path: match.results.v1 + account.user.commands.v1
-  -> in-memory public path: match.trades.v1 + orderbook.depth.v1
+  -> 可靠资金链路：match.results.v1 + account.user.commands.v1
+  -> 内存公共行情链路：match.trades.v1 + orderbook.depth.v1
 ```
 
-Trigger orders use a separate path:
+止盈止损走独立链路：
 
 ```text
 client / internal gateway
@@ -59,101 +57,94 @@ client / internal gateway
   -> surprising-trading-entry-provider / surprising-trigger-provider
   -> PostgreSQL trading_trigger_orders
   -> consume surprising.<product-segment>.mark.price.v1
-  -> submit reduceOnly order through the order-entry API
-  -> normal order / matching / account / WebSocket flow
+  -> 通过订单入口 API 提交 reduceOnly 平仓单
+  -> 正常订单 / 撮合 / 账户 / WebSocket 链路
 ```
 
-The order provider does not match orders and does not own WebSocket fanout. Order-state push is performed by a separate service consuming the current product-line order and match topics.
+订单 provider 不直接撮合，也不直接承担 WebSocket 推送。订单状态推送由独立服务消费当前产品线的订单和撮合 Topic 后完成 fanout。
 
-## Margin Mode
+## 保证金模式
 
-Orders, matching commands, match trades, account reservations, and account positions now carry `marginMode`.
-The default is `CROSS`. `ISOLATED` is wired through order entry, matching events, account margin, positions,
-risk snapshots, funding, and liquidation. Cross-margin losses, trading fees, and funding payments can use cross
-available balance plus cross position margin as collateral. Isolated margin consumes only the exact
-`userId + symbol + asset + marginMode` position margin and does not touch other symbols or cross balance.
-Manual isolated margin add/remove is handled by `surprising-account-provider` through
-`POST /api/v1/accounts/position-margin-adjustments`. Switching a symbol between `CROSS` and `ISOLATED`
-still requires the user to close that symbol's existing position and cancel open normal or trigger
-orders first; order-provider and trigger-provider serialize this check with a PostgreSQL transaction
-advisory lock on `userId + symbol`.
+订单、撮合 command、成交事件、账户 reservation 和账户持仓现在都会携带 `marginMode`。
+默认值是 `CROSS`。`ISOLATED` 已经进入订单入口、撮合事件、账户保证金、持仓、风控快照、资金费和强平链路。
+全仓亏损、手续费和资金费可以使用全仓可用余额以及全仓持仓保证金兜底；逐仓只消耗同一 `userId + symbol + asset + marginMode`
+下的逐仓持仓保证金，不会动用其他 symbol 或全仓余额。用户手动追加/减少逐仓保证金由
+`surprising-account-provider` 的 `POST /api/v1/accounts/position-margin-adjustments` 处理。同一用户同一 symbol
+要在 `CROSS` 和 `ISOLATED` 之间切换，必须先关闭该 symbol 已有持仓并取消普通开放订单和待触发条件单；order-provider 和
+trigger-provider 会用 `userId + symbol` 的 PostgreSQL transaction advisory lock 串行化这条检查。
 
-Position mode is user-scoped and defaults to `ONE_WAY`. Users can switch to `HEDGE` through the
-account `position-mode` API only when they have no non-zero positions, no active orders, no pending
-trigger orders, and no unsettled matching/account state. `ONE_WAY` orders use `positionSide = NET`.
-`HEDGE` orders and trigger orders must carry `positionSide = LONG` or `SHORT`; closing the selected
-hedge leg is normalized to reduce-only and the position side is carried through matching, account
-positions/margins, risk snapshots, liquidation, funding, ADL, and WebSocket events.
+持仓模式按用户维度配置，默认是 `ONE_WAY`。用户只能在无非零持仓、无活动挂单、无待触发条件单、无未结算撮合/账户状态时通过
+account 的 `position-mode` API 切换到 `HEDGE`。`ONE_WAY` 使用 `positionSide = NET`；`HEDGE` 下普通订单和条件单必须携带
+`positionSide = LONG` 或 `SHORT`，关闭所选仓位腿会被规范化为 reduce-only，并且 `positionSide` 会贯穿撮合、账户持仓/保证金、
+风控快照、强平、资金费、ADL 和 WebSocket 推送。
 
-## Trading Fees
+## 手续费
 
-- `init.sql` defaults `BTC-USDT` and `ETH-USDT` to maker `200 ppm` and taker `500 ppm`, or `0.02% / 0.05%`.
-- `trading_fee_schedules` can configure user-global or per-symbol overrides. `source_type` supports `USER_OVERRIDE`, `VIP`, `MARKET_MAKER`, `PROMOTION`, and `RISK_OVERRIDE`. Per-symbol user fees win over user-global fees, then the instrument default is used.
-- When multiple user-global schedules are active, source priority is `RISK_OVERRIDE`, `USER_OVERRIDE`, `PROMOTION`, `MARKET_MAKER`, then `VIP`; this prevents VIP rates from overriding risk, user, campaign, or market-maker terms.
-- Admin APIs: `POST /api/v1/admin/trading/fees/schedules` creates or updates schedules, `POST /api/v1/admin/trading/fees/schedules/{feeScheduleId}/disable` disables a schedule, and `GET /api/v1/admin/trading/fees/schedules` lists schedules. Schedule lists support cursor paging with `limit`, `cursor`, and `sort`; supported sort values are `updatedAt.desc`, `updatedAt.asc`, `createdAt.desc`, `createdAt.asc`, `effectiveTime.desc`, and `effectiveTime.asc`. Responses keep `schedules/count` and add `nextCursor`, `hasMore`, `sort`, and `limit`.
-- The trading runtime no longer calculates 30-day volume, asset valuation, or automatic VIP tiers and no longer
-  exposes `/fees/tiers` endpoints. Those computations belong to a future finance-operations system backed by
-  event projections and an independent database. Final rates enter trading through an explicit schedule API or event.
+- `init.sql` 默认 `BTC-USDT`、`ETH-USDT` 使用 maker `200 ppm`、taker `500 ppm`，即 `0.02% / 0.05%`。
+- `trading_fee_schedules` 可配置用户全局或单 symbol 覆盖，`source_type` 支持 `USER_OVERRIDE`、`VIP`、`MARKET_MAKER`、`PROMOTION`、`RISK_OVERRIDE`。
+  单 symbol 优先于用户全局，最后回退 instrument 默认费率。
+- 多个用户全局费率同时 active 时，source 优先级是 `RISK_OVERRIDE`、`USER_OVERRIDE`、`PROMOTION`、`MARKET_MAKER`、`VIP`，防止 VIP 费率覆盖风控、人工、活动或做市商费率。
+- 管理接口：`POST /api/v1/admin/trading/fees/schedules` 新增/更新费率，`POST /api/v1/admin/trading/fees/schedules/{feeScheduleId}/disable` 禁用费率，
+  `GET /api/v1/admin/trading/fees/schedules` 查询配置。查询支持 `limit/cursor/sort` 游标分页，排序白名单为 `updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc`、`effectiveTime.desc`、`effectiveTime.asc`，响应保留 `schedules/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。
+- 交易服务不再计算 30 日成交量、资产估值或自动 VIP 档位，也不再提供 `/fees/tiers` 系列接口。
+  这些逻辑属于未来财务运营系统，必须消费事件投影并使用独立数据库；产出的最终费率通过明确的费率配置接口或事件进入交易服务。
 
-Admin order-audit APIs use the `/api/v1/admin/trading` prefix and are reached through the gateway admin
-security domains `/api/v1/admin/gateway/trading-orders` and `/api/v1/admin/gateway/trading-trigger`.
-The trading runtime now exposes only the single-table `GET /orders` and `GET /trigger-orders` lists.
-Order events, match results, trade details, and aggregate timelines are no longer queried from the primary
-trading database. A future finance-operations system must build these cross-table views, reconciliation, and
-reports from event projections in its own database.
+后台订单审计接口使用 `/api/v1/admin/trading` 前缀，并由 gateway 的
+`/api/v1/admin/gateway/trading-orders` 与 `/api/v1/admin/gateway/trading-trigger`
+后台安全域转发。当前交易服务只保留直接读取单表的 `GET /orders` 和
+`GET /trigger-orders` 列表；订单事件、撮合结果、成交明细和聚合时间线接口不再从交易主库提供。
+这些跨表后台查询、资金对账和运营报表必须由未来财务运营系统消费事件投影，并连接独立数据库实现。
 
-Order-entry persistence is split by physical table: `OrderRepository` owns only `trading_orders`,
-`OrderEventRepository` owns only `trading_order_events`, and position, position-mode, trigger-order, and
-algo-order state use dedicated single-table repositories. `OrderPlacementStateService` aggregates those
-checks inside the business transaction. `OrderCoordinationRepository` owns PostgreSQL advisory locks and
-does not access a business table.
-- Runtime query: `GET /api/v1/trading/fees/effective?userId=...&symbol=...` returns the current maker/taker ppm and source, such as `INSTRUMENT` or `VIP_SYMBOL`.
-- Order admission writes the final `maker_fee_rate_ppm` and `taker_fee_rate_ppm` to `trading_orders`. Later VIP or promotion changes do not reinterpret already accepted resting orders.
-- The account provider settles fills from the order snapshot and writes `TRADE_FEE` ledger rows with `trade_id`, `order_id`, `symbol`, and `fee_rate_ppm`.
-- Market-maker rebates should still be configured by a market-maker program or admin workflow that verifies quote quality.
+订单入口的持久化边界按物理表拆分：`OrderRepository` 只操作 `trading_orders`，
+`OrderEventRepository` 只操作 `trading_order_events`，仓位、仓位模式、触发单和算法单状态分别由各自
+单表 Repository 查询，`OrderPlacementStateService` 在业务事务内聚合冲突校验和锁协调。
+PostgreSQL advisory lock 不访问业务表，由 `OrderCoordinationRepository` 独立负责。
+- 业务查询：`GET /api/v1/trading/fees/effective?userId=...&symbol=...` 返回当前最终 maker/taker ppm 和来源，例如 `INSTRUMENT`、`VIP_SYMBOL`。
+- 订单接受时会把最终 `maker_fee_rate_ppm`、`taker_fee_rate_ppm` 写入 `trading_orders`。后续用户 VIP 等级或活动费率变化，不会重解释已接受挂单。
+- account provider 结算成交时按订单快照写 `TRADE_FEE`，并在 ledger 保存 `trade_id`、`order_id`、`symbol`、`fee_rate_ppm`。
+- 做市商返佣仍应由做市商计划或后台流程根据挂单质量确认后配置。
 
-## Leverage Settings
+## 杠杆设置
 
-- User leverage settings are stored in `trading_leverage_settings`, keyed by `user_id + symbol + margin_mode`.
-- `leveragePpm` uses ppm: `10_000_000 = 10x`, `100_000_000 = 100x`.
-- User APIs: `POST /api/v1/trading/leverage/settings` sets leverage, and `GET /api/v1/trading/leverage/settings?userId=...&symbol=...&marginMode=...` returns the current setting.
-- Setting leverage first validates it against the current instrument version's `max_leverage_ppm`.
-- Order margin reservation then selects the matching `instrument_risk_brackets` row from the order notional plus the current same-`marginMode` position notional. If the user setting exceeds that bracket's `max_leverage_ppm`, the order is rejected.
-- Effective initial-margin rate = `max(leverage-derived margin rate, risk-bracket initial_margin_rate_ppm)`. When no user setting exists, order entry uses the current risk bracket's max leverage / initial margin rate.
+- 用户杠杆配置保存在 `trading_leverage_settings`，唯一键是 `user_id + symbol + margin_mode`。
+- `leveragePpm` 使用 ppm 表示杠杆：`10_000_000 = 10x`，`100_000_000 = 100x`。
+- 用户接口：`POST /api/v1/trading/leverage/settings` 设置杠杆，`GET /api/v1/trading/leverage/settings?userId=...&symbol=...&marginMode=...` 查询当前设置。
+- 设置杠杆时会先校验不能超过 instrument 当前版本的 `max_leverage_ppm`。
+- 下单冻结保证金时还会按订单名义价值和当前同 `marginMode` 持仓名义价值选择 `instrument_risk_brackets` 档位；如果用户设置杠杆超过该档 `max_leverage_ppm`，订单会拒绝。
+- 有效初始保证金率 = `max(用户杠杆换算出的保证金率, 风险档位 initial_margin_rate_ppm)`。未设置用户杠杆时，按当前风险档位最大杠杆/初始保证金率冻结。
 
-## Order Amend
+## 普通订单改单
 
-- Ordinary order amend uses cancel-replace semantics through order-provider; exchange-core is not modified.
-- Only open `LIMIT` orders in `ACCEPTED` or `PARTIALLY_FILLED` state can be amended.
-- Amend can change `priceTicks`, remaining `quantitySteps`, resting `timeInForce` (`GTC`/`GTX`), and `postOnly`.
-- Amend cannot change `side`, `symbol`, `orderType`, `marginMode`, `positionSide`, or `reduceOnly`.
-- The replacement order must use a new `newClientOrderId` for idempotency. Opening replacement orders run the same validation and fund reservation path as normal orders; original-order release still follows cancel matching result and account settlement.
-- REST endpoints: `POST /api/v1/trading/orders/amend` and `POST /api/v1/trading/orders/batch-amend`.
+- 普通订单改单在 order-provider 中使用 cancel-replace 语义，不修改 exchange-core。
+- 只允许改单开放的 `LIMIT` 订单，订单状态必须是 `ACCEPTED` 或 `PARTIALLY_FILLED`。
+- 可修改 `priceTicks`、未成交 `quantitySteps`、挂单 `timeInForce`（`GTC`/`GTX`）和 `postOnly`。
+- 不允许修改 `side`、`symbol`、`orderType`、`marginMode`、`positionSide` 或 `reduceOnly`。
+- 替换单必须使用新的 `newClientOrderId` 保持幂等。开仓替换单会重新走普通订单校验和资金预占；原单释放仍由撤单撮合结果和 account 结算链路完成。
+- REST 接口：`POST /api/v1/trading/orders/amend`、`POST /api/v1/trading/orders/batch-amend`。
 
-## Cancel All After
+## 全部撤单倒计时
 
-`POST /api/v1/trading/orders/cancel-all-after` implements a dead-man switch for API clients:
+`POST /api/v1/trading/orders/cancel-all-after` 为 API 客户端提供 dead-man switch：
 
-- `countdownMs=0` disables the timer.
-- A positive `countdownMs` refreshes the timer for the user and optional `symbol`; omitting `symbol` applies to all symbols.
-- When the timer expires, order-provider cancels the user's open ordinary orders through the existing `cancel-open` path and calls trigger-provider to cancel pending TP/SL orders.
-- The timer state is stored in `trading_cancel_all_after`; the latest execution records ordinary-order and trigger-order cancellation counts.
+- `countdownMs=0` 关闭倒计时。
+- 正数 `countdownMs` 会刷新用户级倒计时；传 `symbol` 时只作用于该交易对，不传则作用于全部 symbol。
+- 倒计时到期后，order-provider 复用现有 `cancel-open` 路径撤用户开放普通单，并调用 trigger-provider 撤 pending TP/SL 条件单。
+- timer 状态保存在 `trading_cancel_all_after`；最近一次执行会记录普通单和条件单撤单数量。
 
-## Algo Orders
+## 算法单
 
-TWAP and Iceberg are implemented as an order-provider algo layer before exchange-core. The parent algo order never enters the live order book; scheduled child orders are ordinary order-provider orders and continue through matching, account settlement, risk, liquidation checks, and WebSocket fanout.
+`TWAP` 和 `ICEBERG` 在 order-provider 中作为 exchange-core 之前的算法单层实现。父算法单不会进入实时订单簿；被调度出来的子单是普通 order-provider 订单，继续走撮合、账户结算、风控、强平检查和 WebSocket fanout。
 
-- `TWAP` validates `durationSeconds >= intervalSeconds` and that `childQuantitySteps` can finish the target quantity inside the configured duration. Child orders are IOC; `priceTicks=0` creates MARKET IOC children, while a positive price creates LIMIT IOC children.
-- `ICEBERG` requires a positive limit price and `GTC` or `GTX`. It keeps only one visible child active at a time, then places the next slice after the previous child fills or is canceled.
-- `AlgoOrderRepository` accesses only `trading_algo_orders`, while child insertion is isolated in
-  `AlgoOrderChildRepository` for `trading_algo_order_children`; `AlgoOrderService` aggregates both
-  writes in one transaction. Child status refresh, progress, and active-child cancellation must read
-  the child mapping and live regular-order state in one SQL snapshot, with the concurrency reason
-  documented next to those queries.
-- Active algo orders block margin-mode and position-mode switches because future child orders would otherwise be emitted under stale mode assumptions.
-- Canceling a parent algo order also cancels any active child orders. `cancel-open` supports user-level and optional symbol-level bulk cancellation.
+- `TWAP` 要求 `durationSeconds >= intervalSeconds`，并校验 `childQuantitySteps` 能在配置时间内完成目标数量。子单使用 IOC；`priceTicks=0` 会生成 MARKET IOC 子单，正数价格会生成 LIMIT IOC 子单。
+- `ICEBERG` 要求正数限价，`timeInForce` 必须为 `GTC` 或 `GTX`。它同一时间只保留一笔可见子单，前一片成交或取消后再放出下一片。
+- 活动算法单会阻断保证金模式和持仓模式切换，避免未来子单按旧模式假设继续发出。
+- 取消父算法单会同时取消活动子单；`cancel-open` 支持用户级和可选 symbol 级批量取消。
+- `AlgoOrderRepository` 只操作 `trading_algo_orders`，子单插入由
+  `AlgoOrderChildRepository` 操作 `trading_algo_order_children`，两步在
+  `AlgoOrderService` 事务中聚合。子单状态刷新、进度聚合和待撤子单查询必须同时读取
+  子单映射与普通订单实时状态，代码中已标注不能拆成两次查询的并发原因。
 
-REST endpoints:
+REST 接口：
 
 - `POST /api/v1/trading/orders/algo`
 - `POST /api/v1/trading/orders/algo/cancel`
@@ -161,30 +152,30 @@ REST endpoints:
 - `GET /api/v1/trading/orders/algo/{algoOrderId}`
 - `GET /api/v1/trading/orders/algo/open`
 
-## Take-Profit, Stop-Loss, And Trailing Stop
+## 止盈、止损和追踪止损
 
-Large exchanges implement TP/SL as conditional orders outside the live order book. This module follows that model:
+大型交易所的 TP/SL 通常是活跃订单簿外的条件单。本模块按这个模型实现：
 
-- A trigger order is stored in `trading_trigger_orders` with `PENDING` status. It does not enter exchange-core and does not reserve new margin.
-- Mark price is the trigger source. Newer mark sequences replace older pending samples per symbol, and a fixed one-second scheduler evaluates only the newest sample.
-- Direction is derived from close side and trigger type: long TP is `SELL + TAKE_PROFIT` and triggers when sampled mark price is greater than or equal to the trigger; long SL is `SELL + STOP_LOSS` and triggers when sampled mark price is less than or equal to the trigger. Short closes use the inverse conditions with `BUY`.
-- `TRAILING_STOP` requires `MARKET` execution, `callbackRatePpm` in `[1000, 100000]` (`0.1%` to `10%`), and optional `activationPriceTicks`. A SELL trailing stop activates when the sampled mark price reaches the activation price, tracks the highest post-activation sampled mark, and triggers when that mark falls by the callback. A BUY trailing stop tracks the lowest sampled mark and triggers after an upward callback. Only trailing stops have these watermarks; fixed TP/SL rows never update them, and PostgreSQL writes a trailing watermark only on activation or a new sampled extreme.
-- The trigger provider consumes only the current product line's committed mark-price topic and validates Kafka key = payload `symbol`. The Kafka listener only updates an in-memory latest-sample slot; once per second the scheduler uses the newest event's fixed `markPriceTicks` directly and claims due rows with PostgreSQL `FOR UPDATE SKIP LOCKED`. It never reads the mark-price audit table, and intra-second marks replaced by a newer sequence are intentionally not evaluated.
-- Multiple trigger-provider nodes can run at the same time. Only one node can claim a due trigger row, and stale `TRIGGERING` rows are reset after `surprising.trading.trigger.execution.stale-triggering-after` so downstream failures retry on later mark events.
-- Static `TAKE_PROFIT`/`STOP_LOSS` rows are always indexed in product-line/symbol Redis ZSETs through Spring Data Redis and Lettuce; no feature flag is required. One Lua call reads both greater-or-equal and less-or-equal ranges, then PostgreSQL rechecks the candidate ids and performs the existing `FOR UPDATE SKIP LOCKED` state transition. Trailing-stop high/low watermark updates stay in PostgreSQL and use the same one-second mark samples.
-- Redis scores use exact integer ticks up to `2^53-1`; an existing value above that range keeps the index not-ready and uses database fallback instead of risking floating-point misses. New static TP/SL placement is fail-closed when its Redis index write fails. Existing committed orders still trigger through the database fallback when Redis lookup is unavailable.
-- The readiness marker is short-lived and refreshed after reconciliation. A token-owned `SET NX` lease with compare-and-delete Lua release prevents rebuild stampedes; it is not used to serialize trigger execution. Redis removal is idempotent and happens after authoritative terminal DB transitions, so a crash can leave only a safe stale candidate, never a false terminal DB state.
-- When triggered, it calls order-provider with `reduceOnly=true`, `postOnly=false`, and `clientOrderId=trigger-<triggerOrderId>`. The order-provider idempotency key protects retries from creating duplicate close orders.
-- Triggered orders go through the same order, matching, account, fee, PnL, risk, liquidation, and WebSocket flow as user-submitted close orders. The trigger service never mutates balances or positions directly.
-- `MARKET` trigger execution requires `priceTicks=0` and `IOC` or `FOK`. Static TP/SL can also use `LIMIT` execution with a positive `priceTicks`; `GTX` is rejected for trigger execution.
-- Optional `ocoGroupId` supports paired TP/SL. When the latest sampled mark price claims any pending order in the same `userId + symbol + marginMode + ocoGroupId` group, the database claim statement also moves the other pending siblings to `CANCELED` before the generated reduce-only order is submitted.
-- A fully closed position emits a durable user-keyed position event. Trigger-provider consumes it and cancels all exact-scope `PENDING` triggers created no later than the close event, with `rejectReason=POSITION_CLOSED`, while writing status outbox rows in its own transaction. Redis ZSET cleanup runs after that commit. Duplicate delivery updates no rows, newly opened-position triggers are protected by `created_at`, and `TRIGGERING` rows are not stolen from an in-flight claim.
-- Batch trigger placement accepts `atomic=true` for composite TP/SL submissions. In atomic mode any validation failure rejects the whole batch, rolls back all inserted trigger rows, and returns per-item failed results; default batch mode still keeps item failures isolated.
-- Because OCO siblings are canceled at claim time, a later downstream execution failure leaves the group consumed. This avoids duplicate close attempts under multi-node trigger-provider concurrency; clients can place a fresh TP/SL pair if execution fails.
-- Every committed trigger status change (`PENDING`, `TRIGGERING`, `TRIGGERED`, `TRIGGER_FAILED`, `CANCELED`, or `EXPIRED`) writes a full `TriggerOrderUpdatedEvent` snapshot to `trading_outbox_events` in the same database transaction. The trigger outbox publisher sends it on the product line's `trigger-order.events` topic, and WebSocket exposes it as the authenticated private `triggerOrders` channel. Delivery is at least once, so clients deduplicate by `eventId` and reload `GET /open` after reconnect.
-- The public API has no in-place trigger amend. A user price/quantity update is cancel-and-place with a new `clientTriggerOrderId`, which preserves validation and avoids a cross-store move race. `GET /open` reads authoritative `PENDING`/`TRIGGERING` rows from PostgreSQL; the private `triggerOrders` channel updates or removes list rows immediately, while generated close-order and fill changes continue through the normal private WebSocket channels.
+- 条件单先以 `PENDING` 状态保存在 `trading_trigger_orders`，触发前不进入 exchange-core，也不冻结新增保证金。
+- 标记价格是止盈止损触发源。每个 symbol 的更高 sequence 会覆盖尚未扫描的旧标记价格，固定每秒只处理最新样本。
+- 触发方向由平仓方向和条件单类型自动推导：多仓止盈是 `SELL + TAKE_PROFIT`，采样标记价大于等于触发价时触发；多仓止损是 `SELL + STOP_LOSS`，采样标记价小于等于触发价时触发。空仓平仓用 `BUY`，方向相反。
+- `TRAILING_STOP` 要求执行单为 `MARKET`，`callbackRatePpm` 在 `[1000, 100000]`（`0.1%` 到 `10%`），`activationPriceTicks` 可选。SELL 追踪止损激活后维护每秒采样标记价的最高价，从最高价回撤达到回调比例时触发；BUY 追踪止损维护每秒采样标记价的最低价，反弹达到回调比例时触发。只有追踪止损有这些水位字段；固定 TP/SL 不会更新它们，PostgreSQL 也只在首次激活或采样标记价出现新高/新低时写追踪水位。
+- trigger provider 只消费当前产品线的 mark-price topic 并校验 Kafka key 等于 payload `symbol`。Kafka listener 只更新内存中的 symbol 最新样本；每秒调度器直接使用事件里的定点数 `markPriceTicks`，并用 PostgreSQL `FOR UPDATE SKIP LOCKED` 抢占到期条件单。触发热路径不读取标记价格审计表；一秒内被更高 sequence 覆盖的旧样本不会参与判断。
+- 多个 trigger-provider 节点可以同时运行。每条到期条件单只能被一个节点抢到；如果下游 order-provider 故障，`TRIGGERING` 状态超过 `surprising.trading.trigger.execution.stale-triggering-after` 后会重置，等待后续 mark 事件重试。
+- 静态 `TAKE_PROFIT`/`STOP_LOSS` 默认且始终通过 Spring Data Redis + Lettuce 写入按产品线、symbol 隔离的 Redis ZSET，无需功能开关。一次 Lua 调用同时读取大于等于和小于等于两个范围，PostgreSQL 再对候选 id 复核并执行原有 `FOR UPDATE SKIP LOCKED` 状态迁移；追踪止损的高低水位保留在 PostgreSQL，并使用相同的每秒标记价格样本。
+- Redis score 只使用 `2^53-1` 以内可精确表示的整数 ticks；已有数据超过范围时索引保持 not-ready 并退回数据库扫描，不能用浮点近似冒漏触发风险。新静态 TP/SL 在 Redis 索引写失败时 fail-closed；Redis 查询不可用时，已经提交的条件单仍走数据库 fallback 触发。
+- readiness marker 使用短 TTL 并在校准后刷新。带 token 的 `SET NX` lease 和 compare-and-delete Lua 解锁只用于防止多节点重复重建，不串行业务触发。终态 DB 更新成功后再幂等删除 Redis member，因此故障最多留下会被 DB 拒绝的陈旧候选，不会制造错误数据库终态。
+- 触发后通过 order-provider 提交 `reduceOnly=true`、`postOnly=false` 的平仓单，`clientOrderId=trigger-<triggerOrderId>`。order-provider 的幂等键会保护重试不会创建重复平仓单。
+- 触发后的真实订单继续走普通订单、撮合、账户、手续费、PnL、风控、强平和 WebSocket 链路。trigger 服务不直接修改余额或持仓。
+- `MARKET` 触发执行要求 `priceTicks=0` 且 `timeInForce` 为 `IOC` 或 `FOK`。静态 TP/SL 也可用 `LIMIT` 执行且要求 `priceTicks > 0`；触发执行不支持 `GTX`。
+- 可选 `ocoGroupId` 支持成对 TP/SL 互撤。每秒采样的最新标记价抢占同一个 `userId + symbol + marginMode + ocoGroupId` 组里任意一条 pending 条件单时，同一条数据库 claim 语句会先把其它 pending sibling 置为 `CANCELED`，再提交生成的 reduce-only 平仓单。
+- 持仓完全归零时，account 发送按用户分区的持久化持仓事件。trigger-provider 消费后，在自己的事务里按精确的 `productLine + userId + symbol + marginMode + positionSide` 范围取消不晚于关仓事件创建的全部 `PENDING` 条件单，写入 `rejectReason=POSITION_CLOSED` 和状态 outbox，提交后再清理 Redis ZSET。重复事件不会重复更新，新仓位创建的条件单受 `created_at` 边界保护，`TRIGGERING` 行不会被抢撤。
+- 批量条件单放置支持 `atomic=true`，用于组合 TP/SL 的全成全撤语义。原子模式下任一条校验失败会拒绝整组、回滚已插入条件单，并返回逐项失败结果；默认批量模式仍保持逐条隔离成功/失败。
+- OCO sibling 在 claim 阶段就会取消；如果后续 order-provider 执行失败，该 OCO 组也已经被消费。这个取舍可以避免多节点 trigger-provider 并发下重复平仓，执行失败后客户端可以重新挂一组 TP/SL。
+- 每次已提交的条件单状态变化（`PENDING`、`TRIGGERING`、`TRIGGERED`、`TRIGGER_FAILED`、`CANCELED`、`EXPIRED`）都会在同一数据库事务内向 `trading_outbox_events` 写入完整 `TriggerOrderUpdatedEvent` 快照。trigger outbox publisher 把它发送到当前产品线的 `trigger-order.events` topic，WebSocket 再通过认证私有频道 `triggerOrders` 推送。该链路是至少一次投递，客户端需按 `eventId` 去重，并在重连后重新拉取 `GET /open`。
+- 当前条件单 API 不做原地改单。用户更新触发价或数量时应先撤旧单，再使用新的 `clientTriggerOrderId` 下单，确保重新执行完整校验并避免跨存储 move 竞争。`GET /open` 始终查询 PostgreSQL 的权威 `PENDING`/`TRIGGERING` 状态；私有 `triggerOrders` 频道会立即更新或移除列表行，触发生成的真实平仓单和成交继续走现有私有 WebSocket 频道。
 
-REST endpoints:
+REST 接口：
 
 ```bash
 curl -X POST 'http://localhost:9084/api/v1/trading/trigger-orders' \
@@ -213,173 +204,172 @@ curl 'http://localhost:9084/api/v1/trading/trigger-orders/open?userId=1001&symbo
 curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symbol=BTC-USDT&limit=100' -H 'X-User-Id: 1001'
 ```
 
-Trigger-order user endpoints are also available through the gateway:
-`/api/v1/gateway/trading-trigger` maps to direct `/api/v1/trading/trigger-orders`.
+条件单用户接口也可通过 gateway 访问：`/api/v1/gateway/trading-trigger` 对应直连
+`/api/v1/trading/trigger-orders`。
 
-- `POST /api/v1/trading/trigger-orders/batch`: place up to 20 TP/SL trigger orders; set `atomic=true` when a multi-leg TP/SL group must be all-or-nothing.
-- `POST /api/v1/trading/trigger-orders/batch-cancel`: cancel up to 50 trigger orders.
-- `POST /api/v1/trading/trigger-orders/cancel-open`: cancel the user's `PENDING` trigger orders, optionally filtered by `symbol`, up to 1000 rows per call. Rows already in `TRIGGERING` are not canceled here to avoid racing trigger execution.
+- `POST /api/v1/trading/trigger-orders/batch`：批量提交 TP/SL 条件单，最多 20 条；需要多腿 TP/SL 组合全成全撤时传 `atomic=true`。
+- `POST /api/v1/trading/trigger-orders/batch-cancel`：批量撤销条件单，最多 50 条。
+- `POST /api/v1/trading/trigger-orders/cancel-open`：撤销用户所有 `PENDING` 条件单，可按 `symbol` 过滤，单次最多 1000 条；已经进入 `TRIGGERING` 的条件单不在这里撤销，避免和触发执行抢状态。
 
-Trigger persistence is isolated by table. `TriggerOrderRepository`, `TriggerPositionRepository`,
-`TriggerPositionModeRepository`, `TriggerOpenOrderRepository`, and `TriggerOrderOutboxRepository`
-access only the trigger-order, position, position-mode, regular-order, and outbox tables respectively.
-`TriggerSequenceRepository` and `TriggerCoordinationRepository` use only PostgreSQL native sequences
-and advisory locks. `TriggerOrderPersistenceService` aggregates these repositories inside the business
-transaction, so placement validation no longer depends on a multi-table repository query.
+触发单持久化按表隔离：`TriggerOrderRepository`、`TriggerPositionRepository`、
+`TriggerPositionModeRepository`、`TriggerOpenOrderRepository` 和
+`TriggerOrderOutboxRepository` 分别只访问触发单、持仓、仓位模式、普通委托和 outbox 表；
+`TriggerSequenceRepository` 与 `TriggerCoordinationRepository` 只使用 PostgreSQL 原生序列和
+advisory lock，不访问业务表。`TriggerOrderPersistenceService` 在业务事务内聚合这些仓储，
+下单校验不再通过多表 Repository 查询。
 
-## Trace Id
+## TraceId 链路追踪
 
-- Public clients may send `X-Trace-Id`; otherwise gateway/order entry generates one.
-- `surprising-order-provider` keeps the trace id in request scope only while handling the HTTP request, then writes it explicitly into `OrderEvent` and `OrderCommandEvent`.
-- The outbox payload carries the trace id, so retries and Kafka replay keep the same request identity.
-- `surprising-matching-provider` must copy `OrderCommandEvent.traceId` into every `MatchResultEvent` and generated `MatchTradeEvent`. Do not regenerate it in the matcher.
-- `surprising-account-provider` copies `MatchTradeEvent.traceId` into `PositionUpdatedEvent`, allowing private WebSocket pushes to be correlated with order entry and matching audit rows.
-- PostgreSQL stores `trace_id` in `trading_order_events`, `trading_match_results`, and `trading_match_trades`. Operational logs should include this id together with `orderId`, `commandId`, `tradeId`, symbol, and Kafka topic/partition/offset.
+- 前端或 BFF 可以传 `X-Trace-Id`；未传时 gateway/order 入口会自动生成。
+- `surprising-order-provider` 只在当前 HTTP 请求内用 ThreadLocal 保存 traceId，请求结束会清理；进入异步链路前会显式写入 `OrderEvent` 和 `OrderCommandEvent`。
+- outbox payload 会携带 traceId，所以 outbox 重试和 Kafka 重放仍然保持同一个请求身份。
+- `surprising-matching-provider` 必须把 `OrderCommandEvent.traceId` 原样复制到每个 `MatchResultEvent` 和撮合产生的 `MatchTradeEvent`，撮合层不要重新生成 traceId。
+- `surprising-account-provider` 会把 `MatchTradeEvent.traceId` 写入 `PositionUpdatedEvent`，这样私有 WebSocket 持仓推送也能和订单入口、撮合审计行关联。
+- PostgreSQL 的 `trading_order_events`、`trading_match_results`、`trading_match_trades` 都保存 `trace_id`。生产日志建议同时输出 `traceId`、`orderId`、`commandId`、`tradeId`、symbol 和 Kafka topic/partition/offset。
 
-## Margin Reservation
+## 保证金冻结
 
-Regular opening/resting orders reserve initial margin inside `surprising-order-provider`:
+普通开仓/挂单在 `surprising-order-provider` 内完成初始保证金冻结：
 
-- Read `contract_type`, `initial_margin_rate_ppm`, `notional_multiplier_units`, `price_tick_units`, `settle_asset`, and asset scales from the current instrument version.
-- Convert the requirement to `initialMarginUnits` in Java `OrderMarginMath`: inputs and outputs are long ticks/steps/asset units, while multiplication/division uses exact integer intermediates to reject overflow instead of wrapping.
-- Insert `trading_orders` first, confirm there is no `clientOrderId` idempotency conflict, then move `account_balances.available_units` to `locked_units`.
-- Persist account type, settlement asset, and reserved units as an immutable `trading_orders` snapshot and propagate it in `OrderCommandEvent`; perpetual products no longer maintain a separate margin-reservation record.
-- If the order row was inserted but margin is insufficient, the order is changed to `REJECTED` in the same transaction; only a rejection event is published and no matching command is emitted.
+- 从 instrument 当前版本读取 `contract_type`、`initial_margin_rate_ppm`、`notional_multiplier_units`、`price_tick_units`、`settle_asset` 和资产 scale。
+- 在 Java `OrderMarginMath` 中换算 `initialMarginUnits`：输入和输出都是 long ticks/steps/asset units，中间乘除使用精确整数计算，溢出会拒绝而不是回绕。
+- 下单事务会先插入 `trading_orders`，确认没有命中 `clientOrderId` 幂等冲突后，再把 `account_balances.available_units` 转入 `locked_units`。
+- 账户类型、结算资产和初始冻结量作为不可变快照保存在 `trading_orders` 并随 `OrderCommandEvent` 传递；永续不再维护独立的保证金预占记录。
+- 如果订单已插入但保证金不足，订单会在同一事务内改为 `REJECTED`，只发布拒单事件，不发布撮合命令。
 
-`reduceOnly=true` close and liquidation orders do not reserve additional margin.
-Matching treats a missing reservation snapshot as valid only for `reduceOnly=true` orders. A non-reduce-only order without `reservedUnits` metadata is an accounting invariant failure and must fail instead of silently continuing.
+`reduceOnly=true` 的平仓和强平订单不冻结新增保证金。
+matching 保证金释放只允许 `reduceOnly=true` 订单没有预占快照。非 reduce-only 订单缺少 `reservedUnits` 快照是会计不变量错误，必须失败，不能静默继续。
 
-For user close orders, order entry validates reduce-only safety before publishing to matching:
+用户主动平仓订单在发布撮合前会做 reduce-only 安全校验：
 
-- Long positions can only submit reduce-only `SELL` orders.
-- Short positions can only submit reduce-only `BUY` orders.
-- Existing open reduce-only close orders reserve close capacity, so the sum of pending close quantity plus the new order cannot exceed the current position.
-- Pending close quantity is aggregated with checked long addition; overflow rejects the order or liquidation transaction instead of silently increasing close capacity.
-- The validator locks the current `account_positions` row and matching open `trading_orders` rows with PostgreSQL `FOR UPDATE`, which keeps the check safe across multiple order-provider nodes.
-- After fills, liquidation, or ADL changes a position, order-provider consumes the durable user-keyed position event and cancels wrong-side, stale-version, or excess-capacity pre-event orders in its own transaction. It shares the order-entry advisory lock and ignores orders created after the event, preventing delayed snapshots from canceling a reopened position's new close orders.
+- 多仓只能提交 reduce-only `SELL`。
+- 空仓只能提交 reduce-only `BUY`。
+- 已存在的未完成 reduce-only 平仓单会占用可平数量，新订单数量加上已有待平数量不能超过当前持仓。
+- 待平数量聚合使用 checked long addition；如果溢出，会拒绝订单或回滚强平事务，不能静默扩大可平容量。
+- 校验会用 PostgreSQL `FOR UPDATE` 锁住当前 `account_positions` 行和相关未完成 `trading_orders` 行，多节点 order-provider 并发下也不会超额平仓。
+- 持仓被成交、强平或 ADL 改变后，order-provider 消费按用户分区的持久化持仓事件，并在自己的事务里撤销事件发生前创建且反向、版本不一致或超过新持仓容量的订单。它与下单入口共用 advisory lock，并忽略事件之后创建的订单，避免延迟快照误撤重开仓位的新平仓单。
 
-`surprising-matching-provider` releases all reserved margin on matching rejection and releases the unused remaining proportion on cancel or terminal immediate orders. `surprising-account-provider` consumes match trades, calculates filled opening collateral from the actual execution price, moves that amount from order reservation into `account_position_margins`, and releases order-price improvement or market-protection excess. Linear market orders intentionally reserve at the upper risk bound even for SELL orders, because a SELL market order can execute against higher resting bids than mark. Filled closing quantity releases old position margin instead of consuming new order margin.
+`surprising-matching-provider` 在撮合拒绝时释放全部冻结；撤单成功或 immediate order 终态时按未成交比例释放未使用保证金。`surprising-account-provider` 消费成交后，按实际成交价计算开仓保证金，把这部分从订单冻结迁移到 `account_position_margins`，并释放委托价改善或市价风险边界多冻结的差额。线性合约市价单即使是 SELL 也故意按上边界冻结，因为 SELL 市价单可能吃到高于 mark 的买一挂单。平仓成交释放旧持仓保证金，不消耗新的订单保证金。
 
-Margin release uses a guarded PostgreSQL update with `locked_units >= releaseUnits`. If locked balance is insufficient, the matching transaction fails and triggers the command-failure restart path, so the process restarts, restores the book from DB, and lets Kafka replay continue. Do not use `GREATEST(0, locked_units - releaseUnits)` here because it can turn an inconsistent locked balance into newly available funds.
+保证金释放使用 PostgreSQL 条件更新：`locked_units >= releaseUnits`。如果冻结余额不足，matching 事务会失败并触发 command failure 重启保护，等待进程重启后通过 DB 恢复订单簿和 Kafka 重放继续处理。这里不能用 `GREATEST(0, locked_units - releaseUnits)` 静默扣减，否则会在异常状态下把不存在的冻结金额释放成可用余额。
 
-## Instrument Rules
+## Instrument 规则来源
 
-Order entry reads current instrument rules from PostgreSQL tables maintained by `surprising-instrument`:
+订单入口动态读取 `surprising-instrument` 写入 PostgreSQL 的当前版本：
 
 - `instrument_current_versions`
 - `instruments`
 
-Instrument already stores exchange-core-aligned long rule boundaries:
+instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
 - `min_quantity_steps -> minQuantitySteps`
 - `max_quantity_steps -> maxQuantitySteps`
-- `min_notional_units`, `max_notional_units`, and `notional_multiplier_units` are kept as long units and evaluated by `contract_type`.
-- `LINEAR_PERPETUAL` order notional = `priceTicks * quantitySteps * notional_multiplier_units`.
-- `INVERSE_PERPETUAL` order face value = `quantitySteps * notional_multiplier_units`.
-- `max_leverage_ppm` and `instrument_risk_brackets` participate in order margin reservation; higher risk brackets lower max leverage and raise the minimum initial-margin rate.
-- `maker_fee_rate_ppm` and `taker_fee_rate_ppm` are not passed into exchange-core. Instrument provides
-  the default, `trading_fee_schedules` can override by user globally or by symbol, order admission
-  freezes the final rates on `trading_orders`, and matching copies the taker/maker rates into
-  `OrderCommandEvent` / `MatchTradeEvent` so account settlement does not re-read fee schedules or orders.
+- `min_notional_units`、`max_notional_units`、`notional_multiplier_units` 保持 long 原始单位，并按 `contract_type` 校验。
+- `LINEAR_PERPETUAL` 订单 notional = `priceTicks * quantitySteps * notional_multiplier_units`。
+- `INVERSE_PERPETUAL` 订单面值 = `quantitySteps * notional_multiplier_units`。
+- `max_leverage_ppm` 和 `instrument_risk_brackets` 会参与下单保证金冻结；风险档位越高，允许杠杆越低，最低初始保证金率越高。
+- `maker_fee_rate_ppm` 和 `taker_fee_rate_ppm` 不传给 exchange-core。instrument 提供默认费率，
+  `trading_fee_schedules` 可提供用户全局或单 symbol 覆盖，订单接受时会把最终费率固化到
+  `trading_orders`，matching 再把 taker/maker 实际费率带入 `OrderCommandEvent` / `MatchTradeEvent`，
+  账户结算不再回查 fee schedule 或订单费率。
 
-The trading Java module remains long-only.
+所以交易模块 Java 代码仍然保持 long-only。
 
-## Instrument Version Pinning
+## Instrument 版本绑定
 
-- Every accepted order stores `instrument_version` from the rule snapshot used at validation time.
-- Reduce-only close orders bind to the current position version, so users can close an old-version position safely.
-- `OrderCommandEvent` carries `instrumentVersion`; matching results keep the taker command version.
-- `MatchTradeEvent` carries both `takerInstrumentVersion` and `makerInstrumentVersion`, allowing account settlement to use each side's own contract formula.
-- The matching provider rejects a new `PLACE` command when the symbol already has open orders from a different `instrument_version`. This prevents exchange-core from matching two incompatible tick/multiplier versions in the same book.
-- Operationally, changes to tick size, quantity step, multiplier, contract type, or settlement asset should be done only after halting the symbol and clearing open orders.
+- 每个已接受订单都会保存校验时使用的 `instrument_version`。
+- `reduceOnly` 平仓单绑定当前持仓版本，因此用户可以安全平掉旧版本持仓。
+- `OrderCommandEvent` 携带 `instrumentVersion`；撮合结果保留 taker command 版本。
+- `MatchTradeEvent` 同时携带 `takerInstrumentVersion` 和 `makerInstrumentVersion`，账户结算时可以按双方各自合约公式处理。
+- matching provider 遇到同一 symbol 已有不同 `instrument_version` 的开放订单时，会拒绝新的 `PLACE` command，避免 exchange-core 在同一个 book 里撮合不兼容的 tick/multiplier 版本。
+- 运维上，tick size、quantity step、multiplier、contract type、settlement asset 这类核心字段变更前，应先暂停交易并清理开放订单。
 
-## Idempotency And Multi-Node Safety
+## 幂等和多节点
 
-- `trading_orders_user_client_order_uidx` makes `(userId, clientOrderId)` idempotent.
-- Order inserts only suppress that partial `(userId, clientOrderId)` conflict. `orderId` or unrelated unique-key conflicts must fail instead of being treated as request replay.
-- Idempotency conflicts happen before margin reservation. Replayed requests return the existing order and never create a new reservation or lock balance twice.
-- PostgreSQL native sequences (`trading_order_seq`, `trading_event_seq`, `trading_command_seq`, `trading_outbox_seq`, and related trading sequences) allocate ids. They are used instead of table-counter rows to avoid a hot row-lock under concurrent order entry and matching.
-- `trading_outbox_events` is committed in the same transaction as the order.
-- `trading_trigger_orders_user_client_uidx` makes `(userId, clientTriggerOrderId)` idempotent for TP/SL placement.
-- `ocoGroupId` groups paired TP/SL rows for one-cancels-other behavior; it is optional, scoped by `userId + symbol + marginMode`, and does not replace `clientTriggerOrderId`.
-- `trading_order_events` and `trading_outbox_events` inserts must affect exactly one row; otherwise the transaction fails to avoid order/message divergence.
-- The outbox publisher first claims due rows with `FOR UPDATE SKIP LOCKED` by moving `next_attempt_at` to a short lease, then publishes to Kafka outside the database transaction. This keeps Kafka network waits from holding PostgreSQL row locks or connections.
-- Failed outbox rows retry with exponential backoff through `next_attempt_at`, avoiding hot loops during Kafka incidents.
-- Kafka producer uses `acks=all` and `enable.idempotence=true`.
-- Downstream consumers must deduplicate commands by `commandId/orderId` and events by `eventId`.
+- `trading_orders_user_client_order_uidx` 保证同一用户 `clientOrderId` 幂等。
+- 下单插入只允许这个部分 `(userId, clientOrderId)` 唯一键冲突被幂等跳过。`orderId` 或其他唯一键冲突必须失败，不能被当成请求重放。
+- 幂等冲突发生在保证金冻结前；重复请求只返回已存在订单，不会创建新的 reservation 或重复锁定余额。
+- `orderId`、`eventId`、`commandId`、`outboxId` 等交易链路 ID 使用 PostgreSQL native sequence（例如 `trading_order_seq`、`trading_event_seq`、`trading_command_seq`、`trading_outbox_seq`）。不再用表计数器热点行分配高频 ID，避免并发下单和撮合时形成行锁瓶颈。
+- `trading_outbox_events` 与订单写入在同一事务提交。
+- `trading_trigger_orders_user_client_uidx` 保证同一用户 `clientTriggerOrderId` 的止盈止损下单幂等。
+- `ocoGroupId` 用于把成对 TP/SL 条件单组成 one-cancels-other 互撤组；它是可选、按 `userId + symbol + marginMode` 隔离的字段，不替代 `clientTriggerOrderId`。
+- `trading_order_events` 和 `trading_outbox_events` 插入必须影响 1 行，否则事务失败，避免订单状态和消息链路不一致。
+- outbox 发布器先用 `FOR UPDATE SKIP LOCKED` claim 到期待发消息，并把 `next_attempt_at` 推进为短租约；随后在数据库事务外发送 Kafka，避免 Kafka 网络等待占住 PostgreSQL 行锁和连接。
+- outbox 失败后按 `next_attempt_at` 指数退避重试，避免 Kafka 故障时热循环。
+- Kafka producer 开启 `acks=all` 和 `enable.idempotence=true`。
+- 下游消费者需要按 `commandId/orderId` 幂等处理 command，按 `eventId` 幂等处理 event。
 
-## Kafka
+## Kafka 事件
 
-- `surprising.<product-segment>.order.commands.v1`: matching commands, key = `symbol`.
-- `surprising.<product-segment>.order.events.v1`: order entry events, key = `symbol`.
-- `surprising.<product-segment>.match.results.v1`: durable matching results, key = `symbol`; private match/order projection consumers use this stream.
-- `surprising.<product-segment>.account.user.commands.v1`: durable per-user financial commands produced through the matching outbox; account settlement never consumes the public trade stream.
-- `surprising.<product-segment>.match.trades.v1`: lossy `PublicTradeEvent` stream for WebSocket public trades and candlestick calculation, key = `symbol`. Matching queues each symbol independently and flushes every 50 ms through a dedicated non-blocking Kafka producer. It preserves FIFO and does not coalesce trades; when one symbol exceeds 10,000 queued events, only that symbol's oldest events are dropped.
-- `surprising.<product-segment>.orderbook.depth.v1`: lossy L2 order-book snapshots, key = `symbol`; only the latest pending snapshot per symbol is retained.
-- `surprising.<product-segment>.mark.price.v1`: mark-price stream consumed by trigger-provider, key = `symbol`.
+- `surprising.<product-segment>.order.commands.v1`：订单撮合命令，key = `symbol`。
+- `surprising.<product-segment>.order.events.v1`：订单入口事件，key = `symbol`。
+- `surprising.<product-segment>.match.results.v1`：可靠撮合结果，key = `symbol`；私有成交和开放订单投影只消费这条链路。
+- `surprising.<product-segment>.account.user.commands.v1`：matching outbox 产生的可靠用户资金命令；账户结算绝不消费公共逐笔流。
+- `surprising.<product-segment>.match.trades.v1`：供 WebSocket 公共逐笔与 K 线计算使用的可丢失 `PublicTradeEvent`，key = `symbol`。matching 按 symbol 使用独立队列，每 50ms 由专用非阻塞 Kafka producer 批量刷新；逐笔保持 FIFO、不合并，同一 symbol 排队超过 10,000 条时只丢弃该 symbol 最旧的消息。
+- `surprising.<product-segment>.orderbook.depth.v1`：可丢失的 L2 盘口快照，key = `symbol`；每个 symbol 只保留最新一份待发送快照。
+- `surprising.<product-segment>.mark.price.v1`：trigger-provider 消费的标记价格流，key = `symbol`。
 
-The public trade/depth path does not read or write the matching database and cannot block or roll back financial processing. Full economic `MatchTradeEvent` rows remain in `trading_match_trades` for audit and are embedded in the durable `MatchResultEvent`; maker/taker settlement is performed only from durable account commands. A match whose maker and taker are both configured internal market-maker users remains in the public trade/depth stream but skips the economic trade row and trade-side settlement commands.
+公共逐笔/盘口链路不读写 matching 数据库，也不能阻塞或回滚资金处理。真实经济成交的完整 `MatchTradeEvent` 仍落在 `trading_match_trades` 用于审计，并包含在可靠的 `MatchResultEvent` 中；maker/taker 结算只通过可靠的账户命令执行。maker 和 taker 都属于内部做市白名单时，成交仍进入公共逐笔和盘口链路，但跳过经济成交表与双方成交结算命令。
 
-Production product topics are fixed at `32` partitions and keyed by symbol. All commands for the same symbol must route to the same matching shard/order book. Do not increase partitions on a live topic; capacity beyond 32 partitions requires a versioned topic, a coordinated cutover, matching recovery, and state rebuild.
-`surprising.trading.matching.kafka.max-poll-records` defaults to `500`; tune it with Kafka lag and command processing latency instead of changing code.
+生产产品 Topic 固定为 `32` 个分区并按 symbol 取 key。同一个 symbol 的 command 必须固定落到同一个 matching shard/order book。不能直接增加已运行 Topic 的分区；容量超过 32 分区时，需要创建版本化 Topic、协同切换生产消费端，并完成撮合恢复和状态重建。
+`surprising.trading.matching.kafka.max-poll-records` 默认 `500`；生产调优时应结合 Kafka lag 和 command 处理延迟调整，不需要改代码。
 
-## exchange-core Matching
+## exchange-core 撮合
 
-`surprising-matching-provider` loads current `TRADING` symbols from instrument and creates stable exchange-core symbol/currency ids:
+`surprising-matching-provider` 启动时从 instrument 当前版本加载 `TRADING` symbol，并为 exchange-core 建立稳定的 `symbolId`、asset/currency id：
 
-- Symbol and asset mappings are loaded during the scheduled symbol refresh. The command hot path reads an atomically replaced in-memory active-symbol snapshot and does not query instrument, matching-symbol, or matching-asset tables per order.
-- A symbol removed from the current tradable set is rejected after the next successful refresh. Its exchange-core registration remains process-local for existing book safety but is no longer reachable by new commands.
-- Matching results, trades, order state, matching assets, and matching symbols use separate single-table repositories.
-  `instruments` and `instrument_current_versions` also use separate repositories.
-  `MatchingPersistenceService` and `MatchingSymbolService` aggregate them; current-version selection runs in a
-  repeatable-read transaction. Only startup order-book recovery keeps a consistent-snapshot join, with the
-  non-splittable reason documented in the source.
+- symbol 和 asset 映射只在定时 symbol 刷新阶段加载。command 热路径读取原子替换的内存活跃 symbol 快照，不再逐单查询 instrument、matching symbol 或 matching asset 表。
+- symbol 从当前可交易集合移除后，会在下一次成功刷新后拒绝新 command。为保证已有订单簿安全，其 exchange-core 注册仍保留在当前进程内，但新 command 已无法访问。
+- 撮合结果、成交、订单状态、撮合资产和撮合交易对分别使用单表 Repository；跨表事务由
+  `MatchingPersistenceService`、`MatchingSymbolService` 聚合；`instruments` 与
+  `instrument_current_versions` 也分别由单表 Repository 读取，当前版本筛选在可重复读事务中完成。
+  只有启动订单簿恢复保留一致快照 JOIN，并在源码中文注释中说明不可拆原因。
 
 - `trading_matching_assets`
 - `trading_matching_symbols`
 
-Symbols are registered in exchange-core as `CURRENCY_EXCHANGE_PAIR`. This is intentional: exchange-core is used as a deterministic long-based order book and matcher, while futures margin, trading fees, liquidation, funding, insurance, and ADL are handled by the surrounding services.
+symbol 在 exchange-core 内注册为 `CURRENCY_EXCHANGE_PAIR`。这是有意设计：exchange-core 在这里只作为确定性的 long 订单簿和撮合器使用；合约保证金、交易手续费、强平、资金费率、保险基金和 ADL 都由外围服务负责。
 
-For each `OrderCommandEvent`:
+收到 `OrderCommandEvent` 后：
 
 - `PLACE` -> `ApiPlaceOrder`
 - `CANCEL` -> `ApiCancelOrder`
 - `BUY` -> `OrderAction.BID`
 - `SELL` -> `OrderAction.ASK`
-- `GTC/IOC/FOK/GTX` -> exchange-core order types; GTX/post-only checks the book only for `PLACE` before submit and rejects if it would take liquidity. `CANCEL` must bypass post-only checks.
-- `MARKET` maps to an IOC/FOK protected limit order derived from the latest mark price and configured max slippage.
-- `IOC`, `FOK`, and `MARKET` orders are terminal when matching returns, so the unfilled frozen margin is released after the matching result is applied. If a filled MARKET order reserved at the conservative risk bound but executed at a better book price, account settlement releases the excess when the trade is processed.
-- `trading_match_trades` uses `(product_line, symbol, trade_id)` as the trade idempotency key. `trade_id` is derived deterministically as `commandId * 1_000_000 + matchIndex`, eliminating a database sequence round trip from every fill.
-- `trading_match_results` is the command replay gate. A replay whose `command_id` already exists is a no-op; a trade-id conflict while inserting a new result fails the whole transaction as an invariant violation.
-- Maker order snapshots are loaded in one bounded query per command. Trade rows and financial outbox rows use JDBC batches, while maker fills use one guarded set-based update.
-- Account settlement commands carry immutable order quantity and `reduceOnly` snapshots. Account-provider validates these against its own reservation row and never joins `trading_orders` on the fill hot path.
-- Guarded order fill/status updates, margin release, and matching outbox writes must still affect exactly one row. If an overfill guard, inconsistent quantity invariant, missing target row, or outbox write skips a row, the matcher fails and restarts instead of continuing with a mutated in-memory exchange-core book.
+- `GTC/IOC/FOK/GTX` -> exchange-core 对应 order type；GTX/post-only 只对 `PLACE` 在提交前检查盘口，若会吃单则拒绝。`CANCEL` 必须绕过 post-only 检查。
+- `MARKET` 转换为基于最新 mark price 和配置最大滑点的 IOC/FOK 保护限价单。
+- `IOC`、`FOK`、`MARKET` 订单在撮合返回后就是终态，撮合结果落库后会释放未成交部分冻结保证金。如果 MARKET 订单按保守风险边界冻结、但按更优订单簿价格成交，account 结算成交时会释放差额。
+- `trading_match_trades` 使用 `(product_line, symbol, trade_id)` 作为成交幂等键。`trade_id` 由 `commandId * 1_000_000 + matchIndex` 确定性生成，去掉每笔 fill 的数据库序列往返。
+- `trading_match_results` 是 command 重放幂等门；已有 `command_id` 的重放直接结束。新结果写入时若出现 trade-id 冲突，整笔事务按不变量异常失败。
+- 每个 command 的 maker 订单快照用一次有界批量查询读取；成交和资金 outbox 使用 JDBC batch，maker 成交量使用一条带条件保护的集合更新。
+- 资金结算命令携带不可变的订单总量和 `reduceOnly` 快照；account-provider 对照自己持有的 reservation 校验，成交热路径不再 join `trading_orders`。
+- guarded 订单成交/状态更新、保证金释放和 matching outbox 写入仍然必须影响 1 行。若 overfill guard、数量不变量不一致、目标订单缺失或 outbox 写入导致行数异常，matcher 会失败并走重启恢复，不能在已变更的 exchange-core 内存簿上继续处理。
 
-The provider uses the real exchange-core order book and matcher event chain, but exchange-core risk processing and built-in fees are disabled. Order entry reserves initial margin before command publication; account-provider migrates filled opening margin into position margin and writes maker/taker `TRADE_FEE` ledger entries from the required fee rates on `MatchTradeEvent`. Funding, insurance, and ADL are handled by separate settlement modules.
+当前 matching-provider 使用 exchange-core 的真实订单簿和成交事件链，但关闭 exchange-core 内置风险处理和内置手续费。订单入口已接入下单前初始保证金冻结；账户 provider 已接入成交后的开仓保证金迁移，并按 `MatchTradeEvent` 必须携带的费率写入 maker/taker `TRADE_FEE` ledger。资金费率、保险基金和 ADL 由独立结算模块处理。
 
-### Order Book Depth
+### 盘口深度
 
-After every successful exchange-core command that changes the book, matching offers a full `SNAPSHOT` directly to a dedicated public-market-data publisher before database/outbox persistence:
+每个成功的 exchange-core 命令改变盘口后，matching 会在数据库/outbox 持久化之前，把完整 `SNAPSHOT` 直接交给独立的公共行情 publisher：
 
-- the publisher keeps an independent latest-only slot for every symbol; a hot symbol never replaces another symbol's snapshot;
-- while one snapshot for a symbol is in flight, newer snapshots for that same symbol overwrite its one pending slot, so stale intermediate states are discarded instead of accumulating;
-- different symbols can publish concurrently up to `surprising.trading.matching.market-data.max-in-flight`;
-- the publisher uses a dedicated non-transactional Kafka producer and sends to the existing `orderbook.depth` topic with key = `symbol`;
-- Kafka backpressure and send failures do not block matching or create outbox rows. A failed snapshot may be dropped and is healed by the next book change;
-- every event is a self-contained full snapshot. Consumers replace their local symbol book and do not apply deltas.
+- 每个 symbol 有独立的 latest-only 槽位，热点 symbol 不会覆盖其他 symbol 的快照；
+- 某个 symbol 有一条快照正在发送时，后续新快照只覆盖该 symbol 唯一的待发送槽位，过时的中间状态直接丢弃，不形成积压；
+- 不同 symbol 可并行发送，全局并发上限由 `surprising.trading.matching.market-data.max-in-flight` 控制；
+- publisher 使用独立的非事务 Kafka producer，继续写现有 `orderbook.depth` topic，key = `symbol`；
+- Kafka 背压或发送失败不会阻塞撮合，也不会产生 outbox 行。失败快照允许丢弃，并由下一次盘口变化发布的新快照修复；
+- 每条事件都是可独立使用的全量快照，消费者按 symbol 整体替换本地盘口，不再套用增量。
 
-Public REST snapshot endpoint:
+公共 REST 快照接口：
 
 ```bash
 curl 'http://localhost:9085/api/v1/trading/market/orderbook?symbol=BTC-USDT&depth=50'
 curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50'
 ```
 
-Depth events are market-data fanout, not accounting state. PostgreSQL remains the order-state audit source, and exchange-core remains the live order-book source.
+深度事件只是行情 fanout，不是账户或订单状态权威。PostgreSQL 仍是订单状态审计源，exchange-core 仍是实时订单簿源。
 
-### Order Book Recovery
+### 订单簿恢复
 
-Startup recovery is enabled by default:
+启动恢复默认开启：
 
 ```yaml
 surprising:
@@ -390,51 +380,51 @@ surprising:
         open-order-batch-size: 10000
 ```
 
-On startup the matching provider rebuilds exchange-core books from PostgreSQL open orders:
+matching provider 启动时从 PostgreSQL 的开放订单重建 exchange-core 订单簿：
 
-- Only current `TRADING` instruments are restored.
-- Only open `LIMIT` + `GTC/GTX` orders with `remaining_quantity_steps > 0` are restored.
-- The order must already have a successful `PLACE` row in `trading_match_results`; an accepted DB order that never reached matching is not injected into the book.
-- Restore order is `created_at, order_id`, so maker priority is deterministic for recovered books.
-- If recovered orders cross the book and generate matcher events during restore, startup fails fast. Do not silently continue with a corrupt persisted book.
+- 只恢复当前仍为 `TRADING` 的 instrument。
+- 只恢复未完成的 `LIMIT` + `GTC/GTX` 订单，并要求 `remaining_quantity_steps > 0`。
+- 订单必须已经在 `trading_match_results` 中有成功的 `PLACE` 结果；仅在订单库里 accepted、但从未进入撮合的命令不会被注入订单簿。
+- 恢复顺序是 `created_at, order_id`，恢复后的 maker 优先级确定。
+- 如果恢复订单互相 crossed 并在恢复阶段产生撮合事件，启动会 fail fast。不能带着损坏的持久化订单簿静默继续。
 
-This is DB open-order reconstruction, not native exchange-core journal replay. It is enough for service restart and failover correctness because the database is the authoritative order state. If later latency targets require sub-second hot recovery for very large books, add exchange-core snapshot/journal persistence and keep DB recovery as an audit fallback.
+这是基于 DB 开放订单的重建，不是 exchange-core 原生 journal replay。因为数据库是订单状态权威源，这已经能保证服务重启和故障切换正确性。如果后续超大订单簿要求亚秒级热恢复，再增加 exchange-core snapshot/journal 持久化，DB 恢复保留为审计兜底。
 
-### Multi-Node Matching
+### 多节点撮合
 
-The product-line order command topic must be keyed by `symbol`. Kafka assigns each partition to one consumer in that product line's matching consumer group, so one live matcher owns a symbol partition at a time.
+当前产品线的 order command topic 必须以 `symbol` 作为 key。Kafka 会把每个 partition 分配给该产品线 matching consumer group 中的一个 consumer，所以同一时刻一个 symbol partition 只能由一个 live matcher 处理。
 
-The matching consumer uses cooperative sticky assignment and `MatchingPartitionAssignmentGuard`:
+matching consumer 使用 cooperative sticky assignment 和 `MatchingPartitionAssignmentGuard`：
 
-- At process start, the node restores open books from DB before consuming commands.
-- If a running matcher that has already processed commands receives a new partition, it closes the Spring context. systemd/EC2 Auto Scaling should restart it, and the fresh process restores current books from DB before consuming.
-- This avoids an unsafe case where a long-running process receives a symbol whose local exchange-core book is stale.
-- If command processing fails after the payload has been decoded, the matcher also closes the Spring context. This avoids retrying a Kafka command against an exchange-core book that may already have been mutated before PostgreSQL/outbox persistence failed.
-- This covers fail-fast write failures for match results, trades, order status updates, margin release, and matching outbox rows. Check sequences, unique-index conflicts, missing order rows, and transaction errors first.
-- Keep `surprising.trading.matching.kafka.restart-on-partition-reassignment=true` in production.
-- `surprising.trading.matching.kafka.partition-assignment-startup-grace-ms` defaults to `30000` so concurrent listener containers can finish their initial assignment before the guard starts treating new partitions as unsafe runtime movement.
-- The command-failure restart is unconditional; the partition-reassignment flag only controls restart behavior for partition movement.
-- Set `surprising.trading.matching.kafka.client-id` to a stable unique value per matching process. This keeps Kafka consumer-group output usable for mapping a `symbol` partition to the exact node that owns the local exchange-core order book.
+- 进程启动时先从 DB 恢复开放订单簿，再消费命令。
+- 如果一个已经处理过命令的 matcher 在运行中拿到新的 partition，会关闭 Spring context。systemd/EC2 ASG 应重启进程，新进程先恢复当前 DB 订单簿再消费。
+- 这样可以避免旧进程拿到一个本地 exchange-core 订单簿已经过期的 symbol 后继续撮合。
+- 如果 command payload 已经解析成功、但后续处理失败，matcher 也会关闭 Spring context。这样可以避免 exchange-core 已经被本次命令修改、但 PostgreSQL/outbox 持久化失败后，在同一个脏内存订单簿上继续重试 Kafka command。
+- 这也覆盖撮合结果、成交、订单状态、保证金释放和 matching outbox 的 fail-fast 写入失败。排障时应优先检查 sequence、唯一索引冲突、订单行缺失和数据库事务错误。
+- 生产环境保持 `surprising.trading.matching.kafka.restart-on-partition-reassignment=true`。
+- `surprising.trading.matching.kafka.partition-assignment-startup-grace-ms` 默认 `30000`，用于让并发 listener 容器完成初始 assignment，然后再把新 partition 视为不安全的运行期迁移。
+- command 失败后的重启是无条件保护；partition-reassignment 开关只控制 partition 迁移场景的重启行为。
+- `surprising.trading.matching.kafka.client-id` 要给每个 matching 进程配成稳定且唯一的值。这样 Kafka consumer group 输出才能把某个 `symbol` partition 映射到真正持有本地 exchange-core 订单簿的节点。
 
-Scaling rule: first tune matching instances and listener concurrency within the existing 32-partition map. Do not increase partitions on the live topic. Capacity beyond 32 partitions requires a versioned-topic migration and a planned restart-and-recover. Avoid frequent autoscaling of matching processes because every partition movement may require restart-and-recover.
-Treat any matching process exit during command handling as a required DB-recovery restart, not as an in-place consumer retry.
+扩容规则：先在既有 32 分区映射内调整 matching 实例和 listener 并发，不增加线上 Topic 的分区。容量超过 32 分区时必须采用版本化 Topic 迁移，并安排重启恢复。不要对 matching 进程做高频自动扩缩容，因为 partition 迁移可能触发重启并重建订单簿。
+把 matching 在命令处理期间退出视为必须通过 DB 恢复重启的场景，不要在同一进程内强行重试。
 
-## Self-Trade Prevention
+## 自成交防护
 
-`surprising-matching-provider` rejects a new taker order when the same user has an open opposite-side order that is marketable at the incoming effective price.
+`surprising-matching-provider` 在提交 taker 订单前检查同一用户是否存在可成交的反向挂单，命中则拒绝新订单。
 
-- BUY checks own open SELL orders with `priceTicks <= effectivePriceTicks`.
-- SELL checks own open BUY orders with `priceTicks >= effectivePriceTicks`.
-- `CANCEL_REQUESTED` orders are included because they may still be live in exchange-core until the cancel command is processed.
-- The rejected match result uses `SELF_TRADE_PREVENTED` and releases any reserved margin through the normal rejection path.
-- `surprising.trading.matching.protection.internal-market-maker-user-ids` is the single internal-liquidity whitelist. Whitelisted takers bypass self-trade prevention so internal liquidity can maintain the public price path.
-- When both participants are whitelisted, matching still publishes the same `PublicTradeEvent`, order-book depth, match result, candlestick input, and WebSocket update. It does not insert `trading_match_trades` or enqueue `TRADE_SIDE_SETTLE`.
-- Internal-only fills still update both persisted order quantities and enqueue the existing `ORDER_RELEASE` command for each affected reservation. This prevents stale order-book recovery and locked margin without creating positions, fees, PnL, or account ledgers.
-- If either participant is not whitelisted, the fill follows the complete economic trade and account-settlement path. Mixed sweeps classify every matcher fill independently and make the active-order release depend on its last economic taker settlement.
+- BUY 检查自己的 SELL 挂单是否有 `priceTicks <= effectivePriceTicks`。
+- SELL 检查自己的 BUY 挂单是否有 `priceTicks >= effectivePriceTicks`。
+- `CANCEL_REQUESTED` 订单也会计入，因为 cancel 命令真正处理前订单仍可能在 exchange-core 内有效。
+- 拒绝原因是 `SELF_TRADE_PREVENTED`，已冻结保证金会走正常拒单释放链路。
+- `surprising.trading.matching.protection.internal-market-maker-user-ids` 是唯一的内部流动性账号白名单。白名单 taker 绕过自成交防护，用于维持平台公共价格走势。
+- maker 和 taker 都在白名单时，撮合仍发布相同的 `PublicTradeEvent`、盘口深度、撮合结果、K 线输入和 WebSocket 推送，但不插入 `trading_match_trades`，也不发送 `TRADE_SIDE_SETTLE`。
+- 内部自成交仍更新双方订单的数据库剩余数量，并复用现有 `ORDER_RELEASE` 释放对应冻结保证金，防止撮合重启恢复出陈旧订单或资金长期冻结；不会形成持仓、手续费、盈亏和账户账本。
+- 任意一方不在白名单时，成交完整进入经济成交和账户结算链路。混合扫单按每一笔 matcher fill 独立分类，主动订单的最终释放依赖最后一笔真实 taker 结算命令。
 
-## API
+## 接口
 
-Place a limit order:
+下限价单：
 
 ```bash
 curl -X POST 'http://localhost:9084/api/v1/trading/orders' \
@@ -454,22 +444,22 @@ curl -X POST 'http://localhost:9084/api/v1/trading/orders' \
   }'
 ```
 
-Frontend and BFF traffic should normally use the gateway route. `POST /api/v1/gateway/trading`
-maps to direct `POST /api/v1/trading/orders`, and child paths are preserved, for example
-`/api/v1/gateway/trading/test`, `/batch`, `/close-position`, and `/cancel-open`.
+前端/BFF 应通过 gateway 调用同一订单服务：`POST /api/v1/gateway/trading` 对应直连
+`POST /api/v1/trading/orders`，其余子路径保持一致，例如
+`/api/v1/gateway/trading/test`、`/batch`、`/close-position`、`/cancel-open`。
 
-User order endpoints:
+订单用户接口：
 
-- `POST /api/v1/trading/orders`: place a normal order. `clientOrderId` is idempotent per user.
-- `POST /api/v1/trading/orders/test`: dry-run an order. It validates request fields, instrument rules, reduce-only safety, fee snapshot availability, and opening-reserve requirements; it does not insert `trading_orders`, reserve balances, or publish Kafka commands.
-- `POST /api/v1/trading/orders/batch`: place up to 20 orders and return per-item results. A business-rejected item still returns its order response.
-- `POST /api/v1/trading/orders/close-position`: one-click close the current position. The service locks the current `account_positions` row and creates a `reduceOnly=true`, `MARKET + IOC` close order from the live position side and quantity.
-- `POST /api/v1/trading/orders/cancel`: cancel by `orderId`.
-- `POST /api/v1/trading/orders/batch-cancel`: cancel up to 50 orders.
-- `POST /api/v1/trading/orders/cancel-open`: cancel a user's open normal orders, optionally filtered by `symbol`, up to 1000 rows per call.
-- `GET /api/v1/trading/orders/{orderId}`, `GET /api/v1/trading/orders/by-client-order-id`, and `GET /api/v1/trading/orders/open`: query orders.
+- `POST /api/v1/trading/orders`：提交普通订单。`clientOrderId` 在同一用户内幂等。
+- `POST /api/v1/trading/orders/test`：测单。只执行基础字段、产品规则、reduce-only、手续费快照和开仓冻结需求测算；不写 `trading_orders`，不冻结余额，不发布 Kafka command。
+- `POST /api/v1/trading/orders/batch`：批量下单，最多 20 条。响应逐项返回成功/失败；单项业务拒单仍会返回对应订单响应。
+- `POST /api/v1/trading/orders/close-position`：一键平当前仓位。服务端锁定当前 `account_positions` 行，按仓位方向生成 `reduceOnly=true`、`MARKET + IOC` 平仓单；不会冻结新增保证金。
+- `POST /api/v1/trading/orders/cancel`：按 `orderId` 撤单。
+- `POST /api/v1/trading/orders/batch-cancel`：批量撤单，最多 50 条。
+- `POST /api/v1/trading/orders/cancel-open`：撤销用户普通开放订单，可按 `symbol` 过滤，单次最多 1000 条。
+- `GET /api/v1/trading/orders/{orderId}`、`GET /api/v1/trading/orders/by-client-order-id`、`GET /api/v1/trading/orders/open`：订单查询。
 
-Cancel:
+撤单：
 
 ```bash
 curl -X POST 'http://localhost:9084/api/v1/trading/orders/cancel' \
@@ -478,7 +468,7 @@ curl -X POST 'http://localhost:9084/api/v1/trading/orders/cancel' \
   -d '{"userId":1001,"orderId":1}'
 ```
 
-Query:
+查询订单：
 
 ```bash
 curl 'http://localhost:9084/api/v1/trading/orders/1'
@@ -486,11 +476,11 @@ curl 'http://localhost:9084/api/v1/trading/orders/by-client-order-id?userId=1001
 curl 'http://localhost:9084/api/v1/trading/orders/open?userId=1001&symbol=BTC-USDT&limit=100'
 ```
 
-## Database
+## 数据库
 
-Root [init.sql](../init.sql) creates:
+根目录 [init.sql](../init.sql) 创建：
 
-- `trading_order_seq`, `trading_event_seq`, `trading_command_seq`, `trading_outbox_seq`
+- `trading_order_seq`、`trading_event_seq`、`trading_command_seq`、`trading_outbox_seq`
 - `trading_orders`
 - `trading_order_events`
 - `trading_trigger_orders`
@@ -501,7 +491,7 @@ Root [init.sql](../init.sql) creates:
 - `trading_match_results`
 - `trading_match_trades`
 
-Core indexes:
+核心索引：
 
 - `trading_orders_user_client_order_uidx`
 - `trading_orders_open_query_idx`
@@ -523,7 +513,7 @@ Core indexes:
 - `trading_match_trades_symbol_time_idx`
 - `trading_match_trades_trace_idx`
 
-## Local Run
+## 本地运行
 
 ```bash
 brew services start postgresql@18
@@ -536,33 +526,33 @@ JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=ja
 mvn -pl :surprising-matching-provider -am spring-boot:run
 ```
 
-Port:
+端口：
 
-- `9084`: trading-entry combined service for order entry and trigger orders.
-- `9085`: matching service.
-- `9095`: trigger service in split mode.
+- `9084`：trading-entry 合并服务，包含普通订单入口和条件单。
+- `9085`：撮合服务。
+- `9095`：拆分部署时的止盈止损条件单服务。
 
-## Production Notes
+## 生产注意事项
 
-- `surprising-trading-entry-provider` is the default deployable entry process for order and trigger traffic.
-- `surprising-order-provider` and `surprising-trigger-provider` remain available for split deployment. Both can run multiple instances, sharing the same PostgreSQL and Kafka clusters. Scale trigger by Kafka partitions and database claim batches; do not create one worker per symbol.
-- Keep `surprising-matching-provider` independent from trading-entry; it owns exchange-core order books and should be scaled/restarted separately.
-- Run the matching provider on JDK 21. Chronicle/OpenHFT dependencies used by exchange-core require explicit Java module opens/exports; set the same `JAVA_TOOL_OPTIONS` shown in local run for production processes.
-- A new symbol must first be enabled in instrument, Kafka partitions must be checked, and only then should order entry be opened.
-- MARKET orders require fresh mark price at order entry and matching. Order entry enforces min/max notional with the configured mark-derived execution band before publishing a matching command; linear max-notional and initial-margin checks use the upper bound to avoid under-collateralized market SELL opens. Tune `surprising.trading.*.market-max-slippage-ppm` per product liquidity.
-- LIMIT order price-band protection is enabled in the default application configuration with `limit-price-band-ppm: 50000` (5%). Tune this per instrument liquidity before exposing high-frequency users or market-maker quoting.
-- Matching open-order recovery is implemented from PostgreSQL; native exchange-core journal/snapshot persistence is still optional future hardening for faster very-large-book recovery.
-- Instrument `max_notional_units` is enforced for both limit orders and protected-price market orders. Keep product notional limits conservative until real venue depth, latency, and liquidation stress tests prove larger limits safe.
-- Order margin admission also enforces projected position exposure. It uses current position plus same-side open non-reduce-only orders plus the new order to check `max_position_notional_units`, the dynamic platform-OI cap, and the selected `instrument_risk_brackets.notional_cap_units`; pure reducing orders are checked against the reduced projection, not current exposure plus order notional.
-- Dynamic per-user position caps are implemented. Account settlement writes `trading_symbol_open_interest_shards` in 64 user-derived shards; `trading_symbol_open_interest` aggregates long, short, and `open_quantity_steps=max(long_quantity_steps, short_quantity_steps)` for readers. Order entry converts current platform OI to notional at the admission price and uses `min(max_position_notional_units, max(openInterestNotional * user_open_interest_limit_rate_ppm / 1_000_000, user_open_interest_limit_floor_units))` as the effective user cap. BTC/ETH default to 30% platform OI with a 250,000 USDT floor. Production should periodically rebuild-check the shards from `account_positions`, especially after manual data repair or disaster recovery.
-- User-initiated close orders should use `reduceOnly=true`; liquidation orders are generated by the liquidation provider and bypass user order-entry validation after a risk re-check.
-- TP/SL trigger execution always submits reduce-only close orders through order-provider. WebSocket clients will see the generated order id and fills through the normal private order/match/position channels after trigger execution.
-- Outbox delivery is at least once; downstream matching and push consumers must be idempotent.
-- Matching results are idempotent by `commandId`; trades are idempotent by `tradeId`.
-- A matching process that gets a new Kafka partition after processing commands will exit and restart to rebuild a fresh exchange-core book from DB. Treat this as expected failover behavior.
-- Do not create one thread per symbol in order entry. Symbol scaling should be handled by Kafka partitions and matching-shard scheduling.
+- `surprising-trading-entry-provider` 是默认交易入口部署进程，承载普通订单和条件单流量。
+- `surprising-order-provider` 和 `surprising-trigger-provider` 仍然保留，可用于拆分部署。二者都可以多节点水平部署，但必须共享同一个 PostgreSQL 和 Kafka 集群。trigger 按 Kafka partition 和数据库 claim batch 扩展，不要做每个 symbol 一个 worker。
+- `surprising-matching-provider` 必须继续独立于 trading-entry；它持有 exchange-core 订单簿，应该单独扩缩容和重启恢复。
+- matching provider 使用 JDK 21 运行。exchange-core 依赖的 Chronicle/OpenHFT 需要显式 Java module opens/exports；生产进程使用本地运行示例里的 `JAVA_TOOL_OPTIONS`。
+- 新 symbol 必须先在 instrument 模块上线，确认 Kafka partition 足够，再开放下单。
+- MARKET 订单在订单入口和撮合阶段都要求 mark price 新鲜。订单入口会用配置的 mark 派生可成交区间校验 min/max notional，再发布撮合命令；线性合约 max-notional 和初始保证金按上边界计算，避免市价 SELL 开空在高买价成交时抵押不足。`surprising.trading.*.market-max-slippage-ppm` 需要按产品流动性配置。
+- 默认 application 配置已开启 LIMIT 订单价格带保护，`limit-price-band-ppm: 50000` 表示 5%。正式开放高频用户或做市商报价前，需要按具体产品流动性调整。
+- 当前已经实现基于 PostgreSQL 的开放订单簿恢复；exchange-core 原生 snapshot/journal 可作为后续超大订单簿更快恢复的增强。
+- Instrument `max_notional_units` 已同时约束限价单和保护价市价单。真实盘口深度、延迟和强平压力测试证明更大额度安全之前，产品 notional 限额应保持保守。
+- 下单冻结保证金时还会校验投影后的持仓敞口：当前持仓 + 同方向未完成非 reduce-only 委托 + 本次委托，用这个投影值检查 `max_position_notional_units`、动态平台 OI 限额和命中的 `instrument_risk_brackets.notional_cap_units`；纯减仓单按减仓后的投影校验，不会简单用当前敞口加本单 notional 误拒。
+- 动态单用户持仓量限额已实现：account 结算按用户把 OI 写入 64 个 `trading_symbol_open_interest_shards`，`trading_symbol_open_interest` 视图向读端聚合 long/short 和 `open_quantity_steps=max(long_quantity_steps, short_quantity_steps)`；order 入口按当前价格折算平台 OI notional，并使用 `min(max_position_notional_units, max(openInterestNotional * user_open_interest_limit_rate_ppm / 1_000_000, user_open_interest_limit_floor_units))` 作为每个用户的有效持仓上限。默认 BTC/ETH 为 30% 平台 OI，固定下限 250,000 USDT。生产需要定期用 `account_positions` 重建核对分片，尤其在人工修数或灾备恢复之后。
+- 用户主动平仓应使用 `reduceOnly=true`；强平订单由 liquidation provider 复核风险后生成，不走用户订单入口校验。
+- 止盈止损触发后一定通过 order-provider 提交 reduce-only 平仓单。WebSocket 客户端会在普通私有订单/成交/持仓频道收到触发后生成的真实订单和成交。
+- outbox 是至少一次投递；下游撮合和推送必须幂等。
+- matching result 通过 `commandId` 幂等，成交通过 `tradeId` 幂等。
+- 如果 matching 进程处理过命令后又拿到新的 Kafka partition，会主动退出并由编排系统重启，以便从 DB 重建新的 exchange-core 订单簿。这是预期的 failover 行为。
+- 不要在订单入口做每个 symbol 一个线程，symbol 扩展应通过 Kafka partition 和 matching shard 调度完成。
 
-## Verification
+## 验证
 
 ```bash
 mvn -pl :surprising-order-provider -am test

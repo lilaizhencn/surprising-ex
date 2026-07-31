@@ -40,11 +40,10 @@ Surprising-EX 是交易所后端核心项目。改动必须严谨，资金安全
 
 ## 文档
 
-- 新增或调整产品线、资金模型、撮合、风控、交割、期权、WebSocket、Kafka topic 后，要同步 README、README_CN 和相关 docs。
+- 新增或调整产品线、资金模型、撮合、风控、交割、期权、WebSocket、Kafka Topic 后，要同步中文 README 和相关文档。
 - 说明要结合源码路径和关键类，避免只写概念。
 
 ## 提交
 
 - 每完成一个模块并通过测试后 commit and push。
 - 不提交 `.idea/`、`.local-logs/`、`data/`、本地运行产物。
-

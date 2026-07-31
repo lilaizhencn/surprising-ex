@@ -216,7 +216,7 @@ ssl.endpoint.identification.algorithm=https
 
 ## 5. 容量是怎样定下来的
 
-### Valkey
+### Valkey 检查
 
 首发按以下上限估算：
 
@@ -250,7 +250,7 @@ revision，因此这里的 100 万持仓 slot 必须按“生命周期内出现�
 若该数量可能超过 100 万，应在上线前扩大 Valkey 或设计带 revision tombstone 的安全压缩流程；
 不能直接删除零仓位字段。
 
-### PostgreSQL
+### PostgreSQL 检查
 
 4 TiB 的基线按“高增长表 30 天热数据不超过 80 GiB/天”确定：
 
@@ -267,7 +267,7 @@ revision，因此这里的 100 万持仓 slot 必须按“生命周期内出现�
 若实测日增长超过 80 GiB，上线前必须给 order/event/match/trade/price/risk 快照等大表增加按时间
 partition、保留期和 S3 归档；不能只继续扩大单表和磁盘。资金账本长期保留，但同样需要按时间分区。
 
-### Kafka
+### Kafka 检查
 
 Kafka 按压缩后的真实写入速率计算，不按 JSON 原始大小猜测：
 

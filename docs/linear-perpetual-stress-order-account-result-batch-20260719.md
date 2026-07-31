@@ -1,4 +1,4 @@
-# LINEAR_PERPETUAL 20 Symbol / 2000 用户真实链路压测报告
+# LINEAR_PERPETUAL 20 个交易对 / 2000 用户真实链路压测报告
 
 时间：2026-07-19T09:10:47Z
 
@@ -22,7 +22,7 @@
 - 资金准备：批量 fixture 写入 balance、ledger 和 admin adjustment；下单、撮合、Kafka、account 结算全部走真实 provider 链路。
 - 临时日志目录：`/tmp/surprising-product-line-api.nXNYqA`
 
-## LINEAR_PERPETUAL
+## 线性永续
 
 - Run label：order-account-result-batch
 - Symbols active：20/20（instrument universe=20）
@@ -40,7 +40,7 @@
 - Scoped outbox publish `published pending spanSeconds effectiveTps ageP50Ms ageP95Ms ageP99Ms ageMaxMs`：trading=47678 0 154.301 308.994 99.553 6607.782 11927.162 24196.627; account=18242 0 152.937 119.278 241.007 3325.378 4510.231 6724.870; risk=0 0 0.000 0.000 0 0 0 0
 - Trading Outbox observation：id>1427030743；ORDER=order-provider，TRIGGER_ORDER=trigger-provider，其余压测 aggregate=matching-provider；phase=other 表示事件未携带 open/close trace。
 
-### Open 链路分段延迟
+### 开仓链路分段延迟
 
 | 阶段 | 样本 | min ms | p50 ms | p95 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|---:|
@@ -55,7 +55,7 @@
 | account commands created → bilateral settled | 2000 | 52.427 | 356.503 | 2898.128 | 3949.105 | 4732.543 |
 | ACCEPTED → bilateral settled | 2000 | 2048.760 | 16149.127 | 26725.325 | 29275.291 | 32346.753 |
 
-### Close 链路分段延迟
+### 平仓链路分段延迟
 
 | 阶段 | 样本 | min ms | p50 ms | p95 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|---:|
@@ -87,7 +87,7 @@
 | account | account-provider | ACCOUNT_COMMAND_RESULT | linear-perp.account.command.results.v1 | REJECTED | 96 | 0 | 28.429 | 71.575 | 151.532 | 151.532 |
 | account | account-provider | POSITION | linear-perp.account.position.events.v1 | POSITION_UPDATED | 8000 | 0 | 483.912 | 3831.456 | 5334.572 | 6724.870 |
 
-### Trading Outbox Open/Close 发布延迟
+### 交易 Outbox 开仓/平仓发布延迟
 
 | phase | provider owner | aggregate type | topic | event type | published | pending | p50 ms | p95 ms | p99 ms | max ms |
 |---|---|---|---|---|---:|---:|---:|---:|---:|---:|
@@ -104,7 +104,7 @@
 | close | order-provider | ORDER | linear-perp.order.commands.v1 | PLACE | 2000 | 0 | 447.986 | 1003.762 | 1224.106 | 1730.967 |
 | close | order-provider | ORDER | linear-perp.order.events.v1 | ACCEPTED | 2000 | 0 | 447.986 | 1003.786 | 1224.106 | 1730.967 |
 
-### Trading Outbox 积压峰值
+### 交易 Outbox 积压峰值
 
 | phase | provider owner | aggregate type | topic | event type | events | peak pending | max pending age ms | final pending |
 |---|---|---|---|---|---:|---:|---:|---:|
@@ -140,7 +140,7 @@
 | other | order-provider | ORDER | linear-perp.order.events.v1 | CANCEL_REQUESTED | 343 | 20 | 21376.153 | 0 |
 | other | order-provider | ORDER | linear-perp.order.events.v1 | RESERVE_PENDING | 449 | 24 | 16385.803 | 0 |
 
-### Kafka Consumer Lag
+### Kafka 消费积压
 
 | group | topic | samples | peak total lag | peak partition lag | final total lag |
 |---|---|---:|---:|---:|---:|
@@ -149,7 +149,7 @@
 | surprising-linear-perp-order-account-results-v1 | surprising.linear-perp.account.command.results.v1 | 5 | 131 | 15 | 0 |
 | surprising-linear-perp-order-position-maintenance-v1 | surprising.linear-perp.account.position.events.v1 | 5 | 86 | 8 | 0 |
 
-### Matching shard 流量分布
+### 撮合分片流量分布
 
 Open：
 
@@ -169,7 +169,7 @@ Close：
 | 2 | 5 | 500 | 25.000% |
 | 3 | 5 | 500 | 25.000% |
 
-### PostgreSQL Top SQL
+### PostgreSQL 高耗时 SQL
 
 | calls | total exec ms | mean exec ms | rows | query |
 |---:|---:|---:|---:|---|

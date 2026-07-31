@@ -1,69 +1,67 @@
 # surprising-candlestick
 
-[English](README.md) | [简体中文](README_CN.md)
 
-Perpetual candlestick service for Surprising Exchange.
+Surprising Exchange 合约 K 线服务。
 
-## Modules
+## 模块
 
-- `surprising-candlestick-api`: RPC contracts and trade/candle DTOs.
-- `surprising-candlestick-provider`: Kafka Streams + PostgreSQL candlestick service.
+- `surprising-candlestick-api`：K 线 RPC 合约、成交和 K 线 DTO。
+- `surprising-candlestick-provider`：基于 Kafka Streams 和 PostgreSQL 的 K 线服务实现。
 
-## Architecture
+## 架构
 
-The candlestick service is designed for multi-node deployment and follows a partitioned market-data pipeline:
+K 线服务按多节点部署设计，采用分区化行情数据流水线：
 
-- The matching service produces lightweight `PublicTradeEvent` JSON directly from exchange-core to the product topic `surprising.linear-perp.match.trades.v1`, without a database or outbox dependency.
-- Matching keeps an independent bounded FIFO per symbol and flushes every 50 ms. This public market-data stream is intentionally lossy under overflow or Kafka failure; financial settlement uses a separate durable account-command path.
-- Kafka record key must be the normalized symbol, for example `BTC-USDT`.
-- Kafka partitions distribute symbols across service nodes. There is no one-thread-per-symbol model.
-- Kafka Streams uses RocksDB state stores for hot candle state, trade idempotency, dirty snapshots, and latest sequence per symbol.
-- PostgreSQL receives periodic full-snapshot upserts. The service never reads a candle row for every trade.
-- Perpetual candle update events are emitted to `surprising.linear-perp.candle.events.v1`; websocket/push services should consume that topic separately.
-- Enabled symbols are read from the current `surprising-instrument` snapshot.
-- Persistence is split by physical table: `instruments`, `instrument_current_versions`,
-  `account_asset_scales`, compatibility-mode `candlestick_symbols`, and candle storage each have a
-  single-table Repository. `SymbolRegistryService` combines eligible and current versions in memory,
-  while `PublicTradeEventMapper` combines instrument and asset scales in the service layer. Services
-  no longer execute SQL or cross-table JOINs.
+- 撮合模块直接从 exchange-core 生成轻量 `PublicTradeEvent` JSON，写入产品线 Kafka Topic：`surprising.linear-perp.match.trades.v1`，不依赖数据库或 outbox。
+- matching 按 symbol 使用独立有界 FIFO，每 50ms 刷新一次。公共行情流在队列溢出或 Kafka 故障时允许少量丢失；资金结算走另一条可靠的账户命令链路。
+- Kafka record key 必须是标准化后的交易对，例如 `BTC-USDT`。
+- Kafka partition 在多个服务节点之间分配 symbol，不采用“一个合约一个线程”的模型。
+- Kafka Streams 使用 RocksDB state store 保存热 K 线状态、成交幂等状态、待落库 dirty snapshot、每个 symbol 的最新 sequence。
+- PostgreSQL 只接收周期性的完整快照 upsert。服务不会在每笔成交时读取数据库 K 线行。
+- 合约 K 线变更事件发送到 `surprising.linear-perp.candle.events.v1`，websocket/行情推送服务应独立消费这个 Topic。
+- 启用交易对从 `surprising-instrument` 的 `instruments` 当前版本读取。
+- 数据访问按物理表拆分：`instruments`、`instrument_current_versions`、`account_asset_scales`、
+  兼容模式的 `candlestick_symbols` 和 K 线表分别由单表 Repository 负责。`SymbolRegistryService`
+  在内存中合并可交易版本与当前版本，`PublicTradeEventMapper` 在服务层组合品种精度和资产精度，
+  不再在 Service 中执行 SQL 或跨表 JOIN。
 
-## Multi-Node Mechanism
+## 多节点核心机制
 
-The service supports horizontal deployment:
+服务支持水平多节点部署：
 
-- All provider instances use the same Kafka Streams `application-id`: `surprising-candlestick-v1`.
-- Each trade record uses `symbol` as the Kafka key.
-- Kafka assigns topic partitions to provider instances.
-- Trades for one symbol stay in one Kafka partition, so candle calculation for that symbol remains serial and concurrency-safe.
-- Different symbols are spread across partitions and can be processed by different stream threads or service nodes.
-- RocksDB state stores keep hot candle state locally. Kafka Streams changelog topics restore that state during restart or rebalance.
-- PostgreSQL is the shared durable query store. Writes are full-snapshot upserts keyed by `(symbol, period, open_time)`.
+- 所有 provider 实例使用同一个 Kafka Streams `application-id`：`surprising-candlestick-v1`。
+- 每条成交消息用 `symbol` 作为 Kafka key。
+- Kafka 会把 topic partition 分配给不同 provider 实例。
+- 同一个 symbol 的成交会留在同一个 Kafka partition，因此这个 symbol 的 K 线计算仍然是串行且并发安全的。
+- 不同 symbol 会分散到不同 partition，可由不同 stream 线程或不同服务节点并行处理。
+- RocksDB state store 在本地保存热 K 线状态。服务重启或 rebalance 时，Kafka Streams 通过 changelog topic 恢复状态。
+- PostgreSQL 是共享持久化查询库，写入方式是按 `(symbol, period, open_time)` 做完整快照 upsert。
 
-## Production Notes
+## 生产注意事项
 
-- Run at least two `surprising-candlestick-provider` instances.
-- Use a production Kafka cluster with at least three brokers and replication factor `3`.
-- Use PostgreSQL HA, such as managed RDS, Patroni, or another primary/standby setup.
-- Do not share one `surprising.candlestick.stream.state-dir` between multiple service processes.
-- Keep Kafka auto topic creation disabled in production and create topics explicitly before deployment.
-- Plan input topic partition count upfront. Increasing partitions later may cause the same symbol to hash to a different partition, splitting state. If the partition count must change after production traffic exists, create a new versioned topic/application-id and replay history to rebuild state.
+- `surprising-candlestick-provider` 至少部署 2 个实例。
+- Kafka 生产集群建议至少 3 个 broker，topic replication factor 建议为 `3`。
+- PostgreSQL 使用高可用方案，例如云 RDS、Patroni 或其他主备架构。
+- 多个服务进程不能共用同一个 `surprising.candlestick.stream.state-dir`。
+- 生产环境关闭 Kafka 自动创建 topic，部署前显式创建 topic。
+- 输入 topic 的 partition 数要提前规划。生产流量开始后不要随意增加 partition，因为同一个 symbol 可能 hash 到新的 partition，导致状态被拆开。如果必须调整 partition 数，建议创建新的版本化 topic/application-id，并从历史成交重放重建状态。
 
-## RocksDB Installation And Tuning
+## RocksDB 安装和调优
 
-RocksDB is not deployed as a separate server in this project. Kafka Streams embeds RocksDB through
-the `org.rocksdb:rocksdbjni` dependency, which is pulled transitively by `org.apache.kafka:kafka-streams`.
-You do not need to run `apt install rocksdb` or manage a RocksDB daemon.
+本项目不把 RocksDB 当成独立服务部署。Kafka Streams 会通过 `org.rocksdb:rocksdbjni`
+把 RocksDB 嵌入到应用进程里，这个依赖由 `org.apache.kafka:kafka-streams` 传递引入。
+因此不需要执行 `apt install rocksdb`，也不需要维护 RocksDB daemon。
 
-Runtime requirements:
+运行环境要求：
 
-- Use a glibc-based Linux image such as Debian or Ubuntu JRE. Avoid Alpine/musl images unless you have verified `rocksdbjni` native loading.
-- Keep `java.io.tmpdir` writable because `rocksdbjni` extracts native libraries at runtime.
-- Put `surprising.candlestick.stream.state-dir` on local SSD/NVMe. Do not use NFS or a shared network filesystem.
-- Every provider process must have its own state directory, for example `/data/kafka-streams/${HOSTNAME}`.
-- Keep enough free disk space for RocksDB state, changelog restore, and compaction. Alert before disk free space drops below 30%.
-- Raise file descriptor limits in production, for example `ulimit -n 100000`.
+- 使用 glibc 系 Linux 镜像，例如 Debian/Ubuntu JRE。不要直接用 Alpine/musl，除非已经验证 `rocksdbjni` native library 可以正常加载。
+- `java.io.tmpdir` 必须可写，因为 `rocksdbjni` 启动时会解压 native library。
+- `surprising.candlestick.stream.state-dir` 放到本地 SSD/NVMe。不要放 NFS 或共享网络文件系统。
+- 每个 provider 进程必须使用独立 state 目录，例如 `/data/kafka-streams/${HOSTNAME}`。
+- 预留 RocksDB state、changelog restore 和 compaction 所需磁盘空间。生产建议磁盘剩余低于 30% 前告警。
+- 生产环境提高文件句柄限制，例如 `ulimit -n 100000`。
 
-Current optimized defaults:
+当前优化默认值：
 
 ```yaml
 surprising:
@@ -84,15 +82,14 @@ surprising:
       bloom-filter-bits-per-key: 10.0
 ```
 
-The code uses a process-level shared RocksDB block cache and write-buffer manager. A practical
-native memory estimate per provider process is:
+代码里使用的是进程级共享 RocksDB block cache 和 write-buffer manager。单个 provider 进程的
+native 内存可以按下面估算：
 
 ```text
 native_memory ~= block-cache-size + write-buffer-manager-size + compaction/read overhead
 ```
 
-Leave room for JVM heap, direct buffers, Netty/Tomcat, and OS page cache. For a 4 GB container, a
-reasonable first profile is:
+还要给 JVM heap、direct buffer、Netty/Tomcat 和 OS page cache 留空间。4 GB 容器可以先用这个配置起步：
 
 ```bash
 JAVA_TOOL_OPTIONS="-Xms1g -Xmx2g"
@@ -100,22 +97,22 @@ surprising.candlestick.rocksdb.block-cache-size=512MB
 surprising.candlestick.rocksdb.write-buffer-manager-size=512MB
 ```
 
-Tuning rules:
+调优规则：
 
-- Increase `block-cache-size` when range/latest queries from state stores become read-heavy.
-- Increase `write-buffer-manager-size` and `max-background-jobs` when Kafka input lag grows and disk is not saturated.
-- Keep `compression-type=LZ4_COMPRESSION` for low CPU and good write throughput. Use `ZSTD_COMPRESSION` only if disk is the bottleneck and CPU has headroom.
-- Do not put `state-dir` on ephemeral tiny container layers. Use a mounted volume or local node disk.
-- If a node dies, Kafka Streams can restore RocksDB from changelog topics; persistent local state mainly reduces restart time.
+- state store 读压力高时，优先增大 `block-cache-size`。
+- Kafka input lag 上升且磁盘没打满时，增大 `write-buffer-manager-size` 和 `max-background-jobs`。
+- 默认保持 `compression-type=LZ4_COMPRESSION`，CPU 低、写入吞吐好。只有磁盘成为瓶颈且 CPU 有余量时再考虑 `ZSTD_COMPRESSION`。
+- 不要把 `state-dir` 放到很小的容器层临时目录里，应使用挂载卷或本地节点磁盘。
+- 节点挂掉后，Kafka Streams 可以从 changelog topic 恢复 RocksDB；持久化本地 state 的主要价值是缩短重启恢复时间。
 
-## Kafka Partition Planning
+## Kafka Partition 规划
 
-Each product line uses one 32-partition trade topic for all symbols:
+每条产品线使用一个固定为 32 分区的成交 Topic 承载全部 symbol：
 
-- Input topic: `surprising.<product-segment>.match.trades.v1`
-- Output topic: `surprising.<product-segment>.candle.events.v1`
+- 输入 Topic：`surprising.<product-segment>.match.trades.v1`
+- 输出 Topic：`surprising.<product-segment>.candle.events.v1`
 
-Do not create one topic per symbol. The initial perpetual deployment pins both topics to 32 partitions:
+不要按每个 symbol 创建 Topic。永续首发部署中输入和输出 Topic 都固定为 32 分区：
 
 ```bash
 PRODUCT_LINES=LINEAR_PERPETUAL \
@@ -125,10 +122,10 @@ REPLICATION_FACTOR=3 \
 ./scripts/create-topics.sh
 ```
 
-Do not add partitions in place after traffic starts; that changes symbol-to-partition mapping and Kafka Streams
-state ownership. A future capacity increase must use a versioned topic/application id and replay trades.
+生产流量开始后不能原地增加分区，否则 symbol 到 partition 的映射和 Kafka Streams 状态归属都会改变。
+未来容量需要超过 32 分区时，应创建新版本 Topic/application-id 并从成交记录重放状态。
 
-`create-topics.sh` retains this sizing formula for a new topic that has not launched:
+`create-topics.sh` 保留下面的动态公式，供尚未上线的新 Topic 做容量预估：
 
 ```text
 partitions = roundUp(
@@ -141,7 +138,7 @@ partitions = roundUp(
 )
 ```
 
-Default script values:
+脚本默认值：
 
 - `MIN_PARTITIONS=32`
 - `TARGET_SYMBOLS_PER_PARTITION=10`
@@ -150,10 +147,10 @@ Default script values:
 - `PARTITION_STEP=12`
 - `MAX_PARTITIONS=384`
 
-Without `PARTITIONS`, the default calculation rounds 32 up to 36 by the step of 12. Production must therefore
-set `PARTITIONS=32` explicitly instead of relying on the calculated default.
+不传 `PARTITIONS` 时默认会把 32 按步长 12 向上取整为 36，因此生产必须显式传
+`PARTITIONS=32`，不能依赖默认计算。
 
-Runtime processing is configured here:
+运行时消费配置在这里：
 
 ```yaml
 surprising:
@@ -169,48 +166,47 @@ surprising:
       source: INSTRUMENT
 ```
 
-## WebSocket Fanout
+## WebSocket 监听和推送
 
-This service does not hold WebSocket connections directly. It emits candle snapshots to Kafka and
-lets a dedicated WebSocket/fanout service push them to clients.
+本服务不直接维护 WebSocket 连接。它只把 K 线快照发送到 Kafka，由独立的 WebSocket/行情推送服务消费后推给客户端。
 
-WebSocket service input:
+WebSocket 服务监听的 topic：
 
 ```text
 surprising.linear-perp.candle.events.v1
 ```
 
-Recommended routing key for client subscriptions:
+推荐的客户端订阅路由 key：
 
 ```text
 perp:kline:{symbol}:{period}
 perp:kline:BTC-USDT:1m
 ```
 
-Push semantics:
+推送语义：
 
-- `status=PARTIAL`: update the currently open candle.
-- `status=CLOSED`: finalize the candle; clients should stop mutating that bucket.
-- The event payload is a full snapshot, not a delta, so clients can replace the candle by `symbol + period + openTime`.
-- On client reconnect, fetch history/latest candle from the REST/RPC API first, then subscribe to WebSocket updates.
+- `status=PARTIAL`：更新当前未结束 K 线。
+- `status=CLOSED`：固定当前时间桶，客户端不应再修改这根 K 线。
+- 事件内容是完整快照，不是增量，所以客户端可以按 `symbol + period + openTime` 直接替换本地 K 线。
+- 客户端重连时，先通过 REST/RPC 查询历史和最新 K 线，再订阅 WebSocket 增量更新。
 
-Consumer group caution:
+Consumer group 注意事项：
 
-- If every WebSocket node must push to its own connected clients, do not put all WebSocket nodes in one shared consumer group unless you have a shared subscription/fanout layer.
-- A shared consumer group delivers each Kafka record to only one WebSocket node.
-- Common choices are either one unique consumer group per WebSocket node, or one market-data fanout service that consumes Kafka once and forwards updates through NATS/internal pub-sub.
+- 如果每个 WebSocket 节点都需要给自己连接的客户端推送数据，不要让所有 WebSocket 节点共用同一个 consumer group，除非你另有共享订阅/转发层。
+- 同一个 consumer group 下，一条 Kafka 消息只会被其中一个 WebSocket 节点消费。
+- 常见做法是每个 WebSocket 节点使用独立 consumer group，或者由一个行情 fanout 服务消费 Kafka 后，再通过 NATS/内部 pub-sub 分发给各 WebSocket 节点。
 
-Hot-symbol push control:
+热门合约推送控制：
 
-- Do not fan out every trade-level update directly for hot symbols.
-- Coalesce `PARTIAL` updates per `symbol + period` in a 100-500 ms window and push only the latest snapshot.
-- Never drop the final `CLOSED` update for a bucket.
-- Preserve ordering per `symbol + period`; avoid unordered parallel push for the same channel.
-- Use bounded queues and drop intermediate `PARTIAL` snapshots under backpressure, keeping the newest snapshot.
+- 不要把热门合约的每笔成交级 K 线更新都直接 fanout 给所有客户端。
+- 对 `PARTIAL` 更新按 `symbol + period` 做 100-500 ms 合并，只推送窗口内最新快照。
+- 每个时间桶最终的 `CLOSED` 更新不能丢。
+- 同一个 `symbol + period` 的推送要保持顺序，避免无序并行推送同一个频道。
+- WebSocket 服务需要有有界队列和背压策略，压力过大时可以丢弃中间 `PARTIAL` 快照，但要保留最新快照。
 
-## Trade Event Contract
+## 成交事件合约
 
-Example Kafka message:
+Kafka 消息示例：
 
 ```json
 {
@@ -226,17 +222,17 @@ Example Kafka message:
 }
 ```
 
-Producer requirements:
+生产端要求：
 
-- Set Kafka key to `symbol`.
-- `tradeId` must be globally unique per symbol.
-- `sequence` must be monotonic per symbol.
-- `tradeTime` must be the matching-engine trade time in UTC.
-- `side` must be the real aggressor direction: `BUY`, `SELL`, or `UNKNOWN`.
+- Kafka key 设置为 `symbol`。
+- `tradeId` 在同一 symbol 下必须唯一。
+- `sequence` 在同一 symbol 下必须单调递增。
+- `tradeTime` 必须是撮合引擎产生的 UTC 成交时间。
+- `side` 必须是真实吃单方向：`BUY`、`SELL` 或 `UNKNOWN`。
 
-## Local Run
+## 本地运行
 
-Run from repository root:
+在仓库根目录执行：
 
 ```bash
 brew services start postgresql@18
@@ -246,21 +242,21 @@ psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f in
 mvn -pl :surprising-candlestick-provider -am spring-boot:run
 ```
 
-Query candles:
+查询 K 线：
 
 ```bash
 curl 'http://localhost:9081/api/v1/candlestick/candles?symbol=BTC-USDT&period=1m&startTime=2026-06-30T10:00:00Z&endTime=2026-06-30T11:00:00Z&limit=100'
 curl 'http://localhost:9081/api/v1/candlestick/candles/latest?symbol=BTC-USDT&period=1m'
 ```
 
-## Verification
+## 验证
 
-Run from repository root:
+在仓库根目录执行：
 
 ```bash
 mvn -pl :surprising-candlestick-provider -am test
 ```
 
-The current simulation tests validate UTC bucket flooring, OHLCV aggregation, out-of-order trade handling, and duplicate trade suppression.
+当前模拟测试覆盖 UTC 时间桶取整、OHLCV 聚合、乱序成交处理和重复成交抑制。
 
-See [deployment.md](../docs/deployment.md) for production deployment notes.
+生产部署说明见 [deployment.md](../docs/deployment.md)。

@@ -1,161 +1,160 @@
 # surprising-websocket
 
-[简体中文](README_CN.md)
 
-Client-facing WebSocket fanout for the exchange.
+面向前端的 WebSocket 推送服务。
 
-This service is not a calculator. It consumes Kafka domain events, filters subscriptions in memory, and pushes realtime updates to clients connected to the current node.
+这个服务不是计算服务。它消费 Kafka 领域事件，在本节点内存里维护订阅关系，只把实时消息推给连接到当前节点的客户端。
 
-## Modules
+## 模块
 
-- `surprising-websocket-api`: shared channel, command, and server-message protocol models.
-- `surprising-websocket-provider`: Spring Boot WebSocket server and Kafka fanout consumer.
+- `surprising-websocket-api`：WebSocket 频道、客户端命令和服务端消息模型。
+- `surprising-websocket-provider`：Spring Boot WebSocket 服务和 Kafka fanout consumer。
 
-## Endpoint
+## 入口
 
-- HTTP port: `9093`
-- WebSocket path: `/ws/v1`
+- HTTP 端口：`9093`
+- WebSocket 路径：`/ws/v1`
 
-Example public subscription:
+公共 K 线订阅示例：
 
 ```json
 {"op":"subscribe","id":"c1","channel":"candles","symbol":"BTC-USDT","period":"1m"}
 ```
 
-Example public depth subscription:
+公共盘口深度订阅示例：
 
 ```json
 {"op":"subscribe","id":"d1","channel":"depth","symbol":"BTC-USDT"}
 ```
 
-Example private position subscription:
+私有持仓订阅示例：
 
 ```json
 {"op":"subscribe","id":"p1","channel":"positions","symbol":"BTC-USDT"}
 ```
 
-Example private trigger-order subscription:
+私有条件单订阅示例：
 
 ```json
 {"op":"subscribe","id":"t1","channel":"triggerOrders","symbol":"BTC-USDT","productLine":"LINEAR_PERPETUAL"}
 ```
 
-Example private risk subscriptions:
+私有风险订阅示例：
 
 ```json
 {"op":"subscribe","id":"r1","channel":"positionRisk","symbol":"BTC-USDT"}
 {"op":"subscribe","id":"r2","channel":"accountRisk"}
 ```
 
-Private channels require an authenticated user id. In production the ingress/auth layer should inject `X-User-Id`; direct local debugging may pass the same value as a query parameter, but that is not a production security model.
+私有频道必须有已认证用户 id。生产环境应由 ingress/auth 层注入 `X-User-Id`；本地调试可以用 query 参数传同样的值，但这不是生产安全模型。
 
-## Channels
+## 频道
 
-| Channel | Public | Required fields | Source topic |
+| 频道 | 公共频道 | 必填字段 | 来源 topic |
 | --- | --- | --- | --- |
-| `candles` | yes | `symbol`, `period` | `surprising.linear-perp.candle.events.v1` |
-| `trades` | yes | `symbol` | `surprising.linear-perp.trade.events.v1`, `surprising.linear-perp.match.trades.v1` |
-| `depth` | yes | `symbol` | `surprising.linear-perp.orderbook.depth.v1` |
-| `index` | yes | `symbol` | `surprising.linear-perp.index.price.v1` |
-| `mark` | yes | `symbol` | `surprising.linear-perp.mark.price.v1` |
-| `funding` | yes | `symbol` | `surprising.linear-perp.funding.rate.v1` |
-| `orders` | no | optional `symbol` | `surprising.linear-perp.order.events.v1` |
-| `triggerOrders` | no | optional `symbol` | `surprising.linear-perp.trigger-order.events.v1` |
-| `matches` | no | optional `symbol` | `surprising.linear-perp.match.results.v1` |
-| `positions` | no | optional `symbol` | `surprising.linear-perp.account.position.events.v1` |
-| `positionRisk` | no | optional `symbol` | `surprising.linear-perp.risk.position.events.v1` |
-| `accountRisk` | no | optional `symbol` ignored as wildcard | `surprising.linear-perp.risk.account.events.v1` |
+| `candles` | 是 | `symbol`, `period` | `surprising.linear-perp.candle.events.v1` |
+| `trades` | 是 | `symbol` | `surprising.linear-perp.trade.events.v1`, `surprising.linear-perp.match.trades.v1` |
+| `depth` | 是 | `symbol` | `surprising.linear-perp.orderbook.depth.v1` |
+| `index` | 是 | `symbol` | `surprising.linear-perp.index.price.v1` |
+| `mark` | 是 | `symbol` | `surprising.linear-perp.mark.price.v1` |
+| `funding` | 是 | `symbol` | `surprising.linear-perp.funding.rate.v1` |
+| `orders` | 否 | 可选 `symbol` | `surprising.linear-perp.order.events.v1` |
+| `triggerOrders` | 否 | 可选 `symbol` | `surprising.linear-perp.trigger-order.events.v1` |
+| `matches` | 否 | 可选 `symbol` | `surprising.linear-perp.match.results.v1` |
+| `positions` | 否 | 可选 `symbol` | `surprising.linear-perp.account.position.events.v1` |
+| `positionRisk` | 否 | 可选 `symbol` | `surprising.linear-perp.risk.position.events.v1` |
+| `accountRisk` | 否 | 可选 `symbol` 会按通配符处理 | `surprising.linear-perp.risk.account.events.v1` |
 
-Private subscriptions without `symbol` use wildcard symbol `*` and receive all events for the authenticated user.
+私有订阅不传 `symbol` 时使用通配符 `*`，表示接收该认证用户的所有相关事件。
 
-`triggerOrders` carries a full `TriggerOrderUpdatedEvent` wrapper with `eventId`, `productLine`, `order`, `eventTime`, and `traceId`. Clients keep `PENDING`/`TRIGGERING` snapshots in the open list, remove terminal snapshots immediately, ignore replayed or out-of-order `eventId` values, and reload the REST open-trigger snapshot after reconnect.
+`triggerOrders` 推送完整的 `TriggerOrderUpdatedEvent` 包装，包含 `eventId`、`productLine`、`order`、`eventTime` 和 `traceId`。客户端把 `PENDING`/`TRIGGERING` 快照保留在开放条件单列表，收到终态立即移除；重复或乱序 `eventId` 必须忽略，重连后要重新拉 REST 开放条件单快照。
 
-Matching tick trades reach the public `trades` channel as lightweight, loss-tolerant `PublicTradeEvent` messages. Private `matches` and execution reports are rebuilt only from the durable `MatchResultEvent`, so public Kafka backpressure or dropped market-data events cannot affect user notifications or settlement.
+撮合逐笔以轻量、允许丢失的 `PublicTradeEvent` 进入公共 `trades` 频道。私有 `matches` 和成交回报只从可靠的 `MatchResultEvent` 重建，因此公共 Kafka 背压或行情消息丢失不会影响用户通知与资金结算。
 
-## Depth Push Flow
+## 盘口深度推送链路
 
-Depth is produced by matching from the live exchange-core L2 book:
+盘口深度由 matching 基于 live exchange-core L2 book 生成：
 
 ```text
 order command
-  -> exchange-core mutates the book
-  -> matching offers the latest full L2 snapshot to the per-symbol market-data publisher
-  -> the dedicated Kafka producer publishes surprising.linear-perp.orderbook.depth.v1
-  -> websocket node consumes the event and pushes channel=depth
+  -> exchange-core 修改订单簿
+  -> matching 把最新全量 L2 快照交给按 symbol 隔离的行情 publisher
+  -> 独立 Kafka producer 发布 surprising.linear-perp.orderbook.depth.v1
+  -> websocket 节点消费事件，并推送 channel=depth
 ```
 
-Every depth event is a full `SNAPSHOT`. Each symbol has its own latest-only pending slot, so intermediate snapshots may be coalesced for a hot symbol without affecting other symbols. Clients replace the complete local symbol book whenever a snapshot arrives.
+每条 depth 都是全量 `SNAPSHOT`。每个 symbol 有独立的 latest-only 待发送槽位，热点 symbol 的中间快照可以被合并，但不会影响其他 symbol。客户端收到快照后整体替换该 symbol 的本地盘口。
 
-Robust client flow:
+稳妥的客户端流程：
 
-1. Subscribe to `depth` and buffer events for the symbol.
-2. Load `GET /api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50`.
-3. Initialize the local book from the REST snapshot.
-4. Replace it with each newer WebSocket snapshot for that symbol.
-5. On reconnect, discard the local book, reload the REST snapshot, and resubscribe.
+1. 订阅 `depth`，并先缓存该 symbol 的事件。
+2. 拉取 `GET /api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50`。
+3. 用 REST 快照初始化本地盘口。
+4. 收到该 symbol 更新的 WebSocket 快照后整体替换。
+5. 重连时丢弃本地盘口，重新拉 REST 快照并重新订阅。
 
-## Position Push Flow
+## 持仓推送链路
 
-Positions are pushed only after account settlement:
+持仓只能在账户结算后推送：
 
 ```text
 matching trade
-  -> account consumes match trade
-  -> account updates balances, margin, PnL, fees, and positions in one DB transaction
-  -> account writes account_outbox_events row for POSITION_UPDATED
-  -> account outbox publisher sends surprising.linear-perp.account.position.events.v1
-  -> websocket node consumes event and sends it to matching private subscriptions
+  -> account 消费撮合成交
+  -> account 在一个 DB 事务里更新余额、保证金、PnL、手续费和持仓
+  -> account 写 account_outbox_events 的 POSITION_UPDATED 行
+  -> account outbox publisher 发送 surprising.linear-perp.account.position.events.v1
+  -> websocket 节点消费事件，并推给匹配的私有订阅
 ```
 
-This prevents the frontend from seeing a position derived from raw matching output before account state is authoritative.
+这样前端不会看到从原始撮合结果推导出来、但账户状态还没落定的持仓。
 
-The account outbox is at-least-once. Clients should treat `eventId` and `tradeId` as dedupe/version hints when updating local state.
-Private position messages also carry the original trading `traceId` when available, so support and operations can correlate a WebSocket push with the order, matching trade, and account settlement rows.
+account outbox 是至少一次投递。客户端更新本地状态时应把 `eventId` 和 `tradeId` 当成去重/版本提示。
+私有持仓消息在可用时也会携带原始交易链路的 `traceId`，方便客服和运维把 WebSocket 推送关联到订单、撮合成交和账户结算行。
 
-`positions` is an account-state channel, not a realtime PnL calculator. It carries signed quantity, entry price, realized PnL, and margin mode after account settlement. For backend-authoritative unrealized PnL, equity, maintenance margin, and margin ratio, subscribe to:
+`positions` 是账户持仓状态频道，不是实时 PnL 计算器。它在账户结算后推送签名数量、开仓均价、已实现盈亏和保证金模式。后端权威的未实现盈亏、权益、维持保证金和保证金率要订阅：
 
-- `positionRisk`: per-position risk snapshot including `markPriceTicks`, `notionalUnits`, `unrealizedPnlUnits`, `maintenanceMarginUnits`, `positionMarginUnits`, `marginRatioPpm`, and `status`.
-- `accountRisk`: per `userId + settleAsset` account risk snapshot including wallet balance, total unrealized PnL, equity, maintenance margin, margin ratio, and status.
+- `positionRisk`：单持仓风险快照，包含 `markPriceTicks`、`notionalUnits`、`unrealizedPnlUnits`、`maintenanceMarginUnits`、`positionMarginUnits`、`marginRatioPpm` 和 `status`。
+- `accountRisk`：`userId + settleAsset` 维度账户风险快照，包含钱包余额、总未实现盈亏、权益、维持保证金、保证金率和状态。
 
-Frontend clients may locally combine `positions` and public `mark` updates for high-frequency visual interpolation, but risk-provider `positionRisk`/`accountRisk` events are the values that match liquidation decisions.
-Risk events triggered by account position updates carry the original trading `traceId` when available; fallback scheduled scans may not have one.
+前端可以把 `positions` 和公共 `mark` 更新组合起来做更高频的视觉插值，但和爆仓系统一致的权威值来自 risk-provider 的 `positionRisk` / `accountRisk` 事件。
+由账户持仓更新触发的风险事件会尽量携带原交易 `traceId`；定时兜底扫描产生的风险事件可能没有 traceId。
 
-## User State And Node Selection
+## 用户状态和节点选择
 
-WebSocket user state is local and transient:
+WebSocket 用户状态是本地、临时状态：
 
-- `ClientConnection` keeps the current socket, authenticated `userId`, and bounded outbound queue.
-- `SubscriptionRegistry` keeps `sessionId -> subscriptions` and `subscription -> local sessions`.
-- No account balance, position, margin, or order authority is stored in WebSocket memory.
+- `ClientConnection` 保存当前 socket、认证后的 `userId` 和有界发送队列。
+- `SubscriptionRegistry` 保存 `sessionId -> subscriptions` 和 `subscription -> local sessions`。
+- WebSocket 内存里不保存账户余额、持仓、保证金或订单的权威状态。
 
-User-related events are delivered by local filtering, not by routing the event to one chosen node:
+用户相关事件不是“精准投递给某个节点”，而是每个节点收到后做本地过滤：
 
 ```text
 position event on Kafka
-  -> every WebSocket node consumes it with its own consumer group
-  -> each node checks local subscriptions for userId + channel + symbol
-  -> only nodes that currently host matching sessions push to clients
-  -> other nodes drop the event locally
+  -> 每个 WebSocket 节点用自己的 consumer group 消费
+  -> 每个节点检查本机是否有 userId + channel + symbol 的订阅
+  -> 只有托管了匹配 session 的节点推给客户端
+  -> 其他节点本地丢弃
 ```
 
-If the same user is connected on two devices through two different nodes, both nodes can push the same account update to their own local session. If a node dies, the client reconnects to any healthy node and resubscribes.
+如果同一用户两个设备分别连到两个节点，两个节点都可以把同一账户更新推给各自本地 session。某个节点宕机后，客户端连到任意健康节点并重新订阅即可。
 
-## Horizontal Scaling
+## 水平扩展
 
-- Development and small deployments can use `surprising-edge-provider` for REST and `/ws/v1` in one process.
-- Keep `surprising-websocket-provider` separate in production when long-lived WebSocket connections need independent scaling.
-- Deploy at least two WebSocket nodes.
-- Every WebSocket node must use a unique Kafka consumer group id, for example the default `surprising-websocket-${HOSTNAME:${random.uuid}}`.
-- Do not share one group id across all WebSocket processes. A shared group would deliver each Kafka record to only one node, and clients connected to other nodes would miss public market updates.
-- Prefer an explicit stable node value such as `surprising-websocket-${HOSTNAME}` in production. A pure random group id on every restart leaves stale consumer groups in Kafka and makes lag dashboards noisy.
-- No cross-node session state is required. Each node keeps only local WebSocket sessions and local subscription maps.
-- A load balancer can distribute new connections across nodes. Existing WebSocket TCP connections are naturally tied to one node; on reconnect the client must resubscribe.
-- Public market events are consumed by every node and filtered by local subscriptions.
-- Private events are consumed by every node and filtered by authenticated `userId` before sending.
-- Each connection has a bounded outbound queue. Slow clients are closed instead of letting one client exhaust memory or block fanout.
-- Open candle updates are coalesced by `surprising.websocket.fanout.candle-partial-coalesce-window`; closed candles are pushed immediately.
+- 开发和小规模部署可以使用 `surprising-edge-provider`，在一个进程里同时提供 REST 和 `/ws/v1`。
+- 生产环境如果长连接很多，继续单独部署 `surprising-websocket-provider`，让 WebSocket 独立扩容。
+- WebSocket 节点至少部署 2 个。
+- 每个 WebSocket 节点必须使用唯一 Kafka consumer group，例如默认值 `surprising-websocket-${HOSTNAME:${random.uuid}}`。
+- 不要让所有 WebSocket 进程共用一个 group。共用 group 会导致每条 Kafka 记录只被一个节点收到，连接在其他节点上的客户端会漏掉公共行情。
+- 生产环境建议显式配置稳定的 node 值，例如 `surprising-websocket-${HOSTNAME}`。每次重启都使用纯随机 group 会在 Kafka 里留下过期 group，让 consumer lag 看板变得很吵。
+- 不需要跨节点 session 状态。每个节点只维护本机 WebSocket session 和订阅表。
+- 负载均衡器可以把新连接分散到不同节点。已经建立的 WebSocket TCP 连接自然固定在一个节点；断线重连后客户端必须重新订阅。
+- 公共行情事件会被每个节点消费，然后按本地订阅过滤。
+- 私有事件也会被每个节点消费，但发送前会按认证 `userId` 再过滤。
+- 每个连接都有有界发送队列。慢客户端会被关闭，不能让单个连接拖垮本节点 fanout。
+- 未结束 K 线会按 `surprising.websocket.fanout.candle-partial-coalesce-window` 合并推送；已结束 K 线立即推送。
 
-## Configuration
+## 配置
 
 ```yaml
 surprising:
@@ -182,22 +181,22 @@ surprising:
       candle-partial-coalesce-window: 250ms
 ```
 
-The default `allowed-origins: ["*"]` is convenient for local development. Production should use exact HTTPS origins.
+默认 `allowed-origins: ["*"]` 方便本地开发。生产环境应配置精确 HTTPS Origin。
 
-For very large public fanout, add an internal pub/sub layer such as NATS or a dedicated market-data fanout tier later. The current design is intentionally simple and correct for horizontal WebSocket processes because Kafka already carries the authoritative event stream.
+如果未来公共行情推送规模非常大，可以再加 NATS 或独立 market-data fanout 层。当前设计先保持简单和正确：Kafka 保存权威事件流，每个 WebSocket 节点做本地 fanout。
 
-## Operations
+## 运维注意事项
 
-- Admin metrics endpoint: `GET /api/v1/admin/websocket/metrics`. It requires the gateway-injected `X-Admin-User-Id` header and returns node-local connections, authenticated/anonymous connections, subscriptions, unique topics, and channel distribution.
-- The service also exposes Micrometer gauges for `/actuator/prometheus`: `surprising.websocket.connections.active`, `surprising.websocket.connections.authenticated`, `surprising.websocket.subscriptions.active`, and `surprising.websocket.topics.active`.
-- Monitor WebSocket connection count, outbound queue pressure, Kafka consumer lag, and send timeout closes.
-- Alert on lag for active WebSocket node groups only. Old random groups from retired nodes should be deleted or filtered out of dashboards.
-- Keep Kafka topics partitioned by `symbol`.
-- Frontend clients should call REST first for a snapshot, then subscribe to WebSocket deltas.
-- Clients should send periodic `ping` messages and reconnect with exponential backoff.
-- Reconnect logic must resubscribe all channels after the socket opens.
+- 后台指标接口：`GET /api/v1/admin/websocket/metrics`。该接口要求 gateway 注入 `X-Admin-User-Id`，返回本节点连接数、认证/匿名连接数、订阅数、唯一 topic 数和频道分布。
+- 服务同时暴露 Micrometer Gauge：`surprising.websocket.connections.active`、`surprising.websocket.connections.authenticated`、`surprising.websocket.subscriptions.active`、`surprising.websocket.topics.active`，可由 `/actuator/prometheus` 抓取。
+- 监控 WebSocket 连接数、发送队列压力、Kafka consumer lag 和 send timeout 关闭次数。
+- consumer lag 告警应只看活跃 WebSocket 节点 group。历史随机 group 应删除，或在看板里过滤。
+- Kafka topic 继续按 `symbol` 分区。
+- 前端应先用 REST 获取快照，再用 WebSocket 订阅增量。
+- 客户端要发送周期性 `ping`，断线后用指数退避重连。
+- 每次重连成功后，客户端必须重新订阅所有频道。
 
-## Build And Test
+## 构建和测试
 
 ```bash
 mvn -pl :surprising-websocket-provider -am test

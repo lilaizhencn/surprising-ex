@@ -1,74 +1,63 @@
 # surprising-margin-ops
 
-[English](README.md) | [简体中文](README_CN.md)
 
-Margin-operation APIs and providers for risk, liquidation, funding, insurance, and ADL.
+保证金运营链路模块，包含风险、强平、资金费、保险基金和 ADL 的 API 与 provider。
 
-## Modules
+## 模块
 
-- `surprising-risk-api` / `surprising-risk-provider`: risk snapshot query contracts, margin scanning, and liquidation candidate generation.
-- `surprising-liquidation-api` / `surprising-liquidation-provider`: liquidation order query contracts and reduce-only liquidation execution.
-- `surprising-funding-api` / `surprising-funding-provider`: perpetual funding-rate query contracts, publishing, settlement, and account-ledger integration.
-- `surprising-insurance-api` / `surprising-insurance-provider`: insurance fund query/adjustment contracts, liquidation-fee collection, and bankruptcy deficit coverage.
-- `surprising-adl-api` / `surprising-adl-provider`: ADL queue and event contracts, residual deficit allocation, and deleveraging execution.
-- `surprising-margin-ops-provider`: combined deployable jar for the five providers above.
+- `surprising-risk-api` / `surprising-risk-provider`：风险快照查询契约、保证金扫描和爆仓候选生成。
+- `surprising-liquidation-api` / `surprising-liquidation-provider`：强平订单查询契约和 reduce-only 强平执行。
+- `surprising-funding-api` / `surprising-funding-provider`：永续资金费查询契约、费率发布、资金费结算和账户流水集成。
+- `surprising-insurance-api` / `surprising-insurance-provider`：保险基金查询/调整契约、强平费入账和穿仓亏损覆盖。
+- `surprising-adl-api` / `surprising-adl-provider`：ADL 队列与事件契约、剩余亏损分摊和自动减仓执行。
+- `surprising-margin-ops-provider`：以上五个 provider 的合并部署 jar。
 
-## Combined Provider Deployment
+## 合并 Provider 部署
 
-`surprising-margin-ops-provider` starts the existing risk, liquidation, funding, insurance, and ADL provider components in one JVM. This is only a packaging merge:
+`surprising-margin-ops-provider` 会在一个 JVM 里启动现有风险、强平、资金费、保险基金和 ADL 组件。这个改动只合并部署包：
 
-- Business packages remain isolated under `com.surprising.risk`, `com.surprising.liquidation`, `com.surprising.funding`, `com.surprising.insurance`, and `com.surprising.adl`.
-- The five services still coordinate through their existing PostgreSQL tables, Kafka topics, outbox rows, idempotency keys, leases, and sequences.
-- Funding freezes settlement mark inputs once, persists a composite position cursor, and dispatches bounded keyset pages
-  in separate transactions. Each page batch-inserts payments and account outbox commands; native cached PostgreSQL
-  sequences remove the former per-payment sequence-row hotspot. Account results are consumed in batches and update
-  settlement counters incrementally without rescanning all payments.
-- Funding persistence is split by physical table for leases, sequences, rates, settlements, payments, and account
-  outbox rows, with `FundingService` aggregating them transactionally. Only online safety paths for rate inputs,
-  due-rate selection, settlement candidates, command recovery, and atomic payment completion retain cross-table SQL;
-  each exception is documented in source.
-- Insurance persistence is split by physical table for sequences, fund balances, fund ledger, deficit coverages,
-  product-scoped deficits, legacy deficits, and account outbox rows. `InsuranceService` and
-  `InsuranceCoverageReconciler` aggregate them transactionally. Only the recovery lock that correlates coverage rows
-  with reserve/finalize command states retains cross-table SQL, with its reason documented in source.
-- ADL persistence is split by physical table for sequences, events, execution sagas, and account outbox rows.
-  `AdlService`, `AdlExecutionPersistenceService`, and `AdlExecutionReconciler` aggregate them inside business
-  transactions. Only online candidate safety decisions and the recovery lock correlating saga and account-command
-  terminal states require a shared database snapshot; each exception is documented in source.
-- Risk consumes account position events in Kafka batches, keeps only the highest revision for each exact position, and
-  scans each affected user/account/settlement-asset group once. Complete position events eliminate the former
-  instrument target-resolution query; scheduled keyset scans remain the safety fallback.
-- A single token-owned Redis lease coordinates scheduled scans for each product line; replicas no longer clear the
-  projection on startup. Each reconciliation generation records observed groups, including concurrent position-event
-  refreshes, and prunes only groups unseen by that generation. A per-group lock spans authoritative PostgreSQL load and
-  Redis replacement, while Lua atomically swaps group state, membership, and reverse indexes.
-- Risk persistence is split by physical table into account-snapshot, position-snapshot, liquidation-candidate,
-  admin-rule, and outbox repositories. `RiskPersistenceService` aggregates those repositories inside business
-  transactions. `RiskRepository` retains only authoritative real-time risk inputs whose position, instrument,
-  balance, deficit, reservation, and risk-bracket data must share one database snapshot; each exception is documented
-  in source.
-- Liquidation persistence is also split by physical table: candidate, position lock, liquidation audit, admin action,
-  trading order, order event, trading outbox, instrument default fee, and user fee each have a dedicated repository.
-  `LiquidationService` and `LiquidationOrderPersistenceService` aggregate them transactionally so the trading order,
-  accepted event, and outbox intents commit atomically. `LiquidationRepository` retains only real-time safety queries
-  that require a shared database snapshot or an atomic state check, with each exception documented in source.
-- Liquidation candidate timelines no longer JOIN the primary trading database. A future finance-operations module
-  should consume liquidation, order, trade, and funds events into an independent query database for timelines,
-  reconciliation, and operational reports.
-- High-risk account aggregation and similar admin reports no longer query the primary trading database. A future
-  finance-operations module must build event-driven projections in an independent database for cross-table queries,
-  reconciliation, and operational reporting.
-- Funding settlement timelines, cross-account reconciliation, and operational statistics must likewise be served
-  from that independent finance-operations projection rather than new JOINs in the primary trading database.
-- Insurance-fund history analysis, cross-user coverage reconciliation, and operational statistics belong in the same
-  independent finance-operations database rather than expanded primary-database queries.
-- ADL execution timelines, deficit-allocation reconciliation, and operational statistics must likewise come from
-  event projections in the independent finance-operations database. ADL cross-table queries in the primary database
-  are restricted to real-time safety decisions and funds-consistency recovery, never admin reporting.
-- No module reads another module's in-memory state directly.
-- The original standalone provider jars remain available for split deployment.
+- 业务包仍然按 `com.surprising.risk`、`com.surprising.liquidation`、`com.surprising.funding`、`com.surprising.insurance`、`com.surprising.adl` 隔离。
+- 五个模块仍然通过已有 PostgreSQL 表、Kafka topic、outbox、幂等键、租约和 sequence 协作。
+- 资金费结算只冻结一次标记价格输入，并持久化复合持仓游标；每个 keyset 分页使用独立短事务，批量写
+  payment 与账户 outbox。原生带缓存 PostgreSQL sequence 消除了逐付款争抢 sequence 行的问题；账户结果
+  批量消费并增量更新结算计数，不再为每个结果重新扫描全部 payment。
+- 资金费持久化已按租约、序列、费率、结算、支付和账户 outbox 等物理表拆分，由 `FundingService`
+  在业务事务内聚合。只有费率输入、到期费率选择、结算候选、自愈关联和支付结果原子回写需要跨表；
+  源码均标注“不可拆原因”，且这些查询只服务在线资金安全链路。
+- 保险基金持久化已按序列、基金余额、基金流水、缺口覆盖、产品线缺口、兼容缺口和账户 outbox 拆分，
+  `InsuranceService` 与 `InsuranceCoverageReconciler` 在事务内聚合。只有覆盖记录与 reserve/finalize
+  账户命令终态的自愈锁定查询保留跨表，并在源码标注“不可拆原因”。
+- ADL 持久化已按序列、事件、执行 saga 和账户 outbox 拆分，由 `AdlService`、
+  `AdlExecutionPersistenceService` 与 `AdlExecutionReconciler` 在业务事务内聚合。只有在线候选安全决策
+  和 saga 与账户命令终态的自愈锁定需要共享数据库快照，源码均标注“不可拆原因”。
+- 风险模块批量消费账户持仓事件，同一具体持仓只保留最高 revision，并让每个受影响的
+  `用户 + 账户类型 + 结算资产` 风险组只扫描一次。完整持仓事件已经能够定位风险组，不再额外查询
+  instrument；定时 keyset 扫描继续作为安全兜底。
+- 多节点定时扫描由每条产品线唯一的 Redis token 租约协调，不再在节点启动时清空整条投影。
+  每轮对账使用独立 generation 记录已观察风险组；持仓事件在对账期间同步登记，扫描结束后只删除
+  本代未观察到的陈旧组。权威数据库加载与 Redis 替换由风险组锁串行，组状态、成员关系和反向索引
+  使用 Lua 一次原子切换，价格线程不会读取到半更新投影。
+- 风险持久化已经按物理表拆分为账户快照、持仓快照、强平候选、管理规则和 outbox 仓储，由
+  `RiskPersistenceService` 在业务事务内聚合调用。`RiskRepository` 只保留实时风控所需的权威输入查询；
+  其中持仓、合约、账户余额、负债、冻结和风险档位必须在同一数据库快照内组合，源码已逐项标注
+  “不可拆原因”。
+- 强平持久化同样按物理表拆分：候选、持仓锁、强平审计、管理员动作、交易订单、订单事件、
+  trading outbox、合约默认费率和用户费率分别由独立仓储负责。`LiquidationService` 与
+  `LiquidationOrderPersistenceService` 在事务内完成聚合，保证强平订单、订单事件和 outbox 原子提交。
+  `LiquidationRepository` 只保留必须共享数据库快照或原子状态检查的实时强平查询，并标注“不可拆原因”。
+- 强平候选时间线不再 JOIN 交易主库。后续财务运营模块应消费强平、订单、成交和资金事件，在独立
+  数据库建立查询投影后提供时间线、资金对账与运营报表。
+- 高风险账户聚合等后台报表查询不再由交易主库提供。后续财务运营模块应消费领域事件建立独立投影，
+  并使用独立数据库完成跨表查询、资金对账和运营报表。
+- 资金费后台结算时间线、跨账户对账和运营统计同样不得在交易主库增加 JOIN；后续统一由财务运营模块的
+  独立数据库投影提供。
+- 保险基金历史分析、跨用户覆盖对账和运营统计也只能进入财务运营独立数据库，不能扩展交易主库查询。
+- ADL 后台执行时间线、穿仓分摊对账和运营统计同样只能由财务运营独立数据库的事件投影提供。交易主库中的
+  ADL 跨表查询仅允许服务实时安全决策与资金一致性自愈，不能扩展为后台报表接口。
+- 任何模块都不能直接读取另一个模块的内存状态。
+- 原来的独立 provider jar 仍然保留，可以随时拆分部署。
 
-The combined jar defaults to port `9088`, serving the existing API paths:
+合并 jar 默认端口是 `9088`，继续提供原有 API path：
 
 ```text
 /api/v1/risk
@@ -79,7 +68,7 @@ The combined jar defaults to port `9088`, serving the existing API paths:
 /api/v1/adl
 ```
 
-When using the combined provider behind gateway, point all margin-operation routes to the same base URL:
+通过 gateway 使用合并 provider 时，把保证金运营相关 route 都指向同一个 base URL：
 
 ```bash
 export GATEWAY_ROUTE_RISK_BASE_URL=http://localhost:9088
@@ -89,15 +78,15 @@ export GATEWAY_ROUTE_INSURANCE_BASE_URL=http://localhost:9088
 export GATEWAY_ROUTE_ADL_BASE_URL=http://localhost:9088
 ```
 
-## Local Run
+## 本地运行
 
-Combined process:
+合并进程：
 
 ```bash
 mvn -pl :surprising-margin-ops-provider -am spring-boot:run
 ```
 
-Standalone processes remain available:
+独立进程仍然可用：
 
 ```bash
 mvn -pl :surprising-risk-provider -am spring-boot:run
@@ -107,7 +96,7 @@ mvn -pl :surprising-insurance-provider -am spring-boot:run
 mvn -pl :surprising-adl-provider -am spring-boot:run
 ```
 
-## Verification
+## 验证
 
 ```bash
 mvn -pl :surprising-margin-ops-provider -am test

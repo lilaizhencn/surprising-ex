@@ -125,7 +125,7 @@ funding-provider 只计算并为每个用户写 `FUNDING_SETTLE`。结算保持
 `PROCESSING -> WAITING_ACCOUNTS -> COMPLETED/FAILED`，每个 payment 以账户命令终态为准。
 结果 Topic 只加速唤醒，定时 reconciliation 直接读账户命令表。
 
-### ADL
+### ADL 自动减仓
 
 ```text
 ADL_DEFICIT_RESERVE

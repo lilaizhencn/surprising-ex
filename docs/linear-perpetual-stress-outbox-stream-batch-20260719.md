@@ -1,4 +1,4 @@
-# LINEAR_PERPETUAL 20 Symbol / 2000 用户真实链路压测报告
+# LINEAR_PERPETUAL 20 个交易对 / 2000 用户真实链路压测报告
 
 时间：2026-07-19T08:24:05Z
 
@@ -20,7 +20,7 @@
 - 资金准备：批量 fixture 写入 balance、ledger 和 admin adjustment；下单、撮合、Kafka、account 结算全部走真实 provider 链路。
 - 临时日志目录：`/tmp/surprising-product-line-api.mROMYR`
 
-## LINEAR_PERPETUAL
+## 线性永续
 
 - Run label：outbox-window-batch-final
 - Symbols active：20/20（instrument universe=20）
@@ -38,7 +38,7 @@
 - Scoped outbox publish `published pending spanSeconds effectiveTps ageP50Ms ageP95Ms ageP99Ms ageMaxMs`：trading=49003 0 161.363 303.683 94.473 21494.407 29757.438 33207.471; account=18579 0 160.857 115.500 187.584 1285.131 2033.114 4585.620; risk=0 0 0.000 0.000 0 0 0 0
 - Trading Outbox observation：id>1946025621；ORDER=order-provider，TRIGGER_ORDER=trigger-provider，其余压测 aggregate=matching-provider；phase=other 表示事件未携带 open/close trace。
 
-### Open 链路分段延迟
+### 开仓链路分段延迟
 
 | 阶段 | 样本 | min ms | p50 ms | p95 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|---:|
@@ -51,7 +51,7 @@
 | account commands published → bilateral settled | 2000 | -0.091 | 96.662 | 863.367 | 1741.292 | 4017.313 |
 | ACCEPTED → bilateral settled | 2000 | 4192.729 | 23597.650 | 32846.617 | 33896.187 | 34377.074 |
 
-### Close 链路分段延迟
+### 平仓链路分段延迟
 
 | 阶段 | 样本 | min ms | p50 ms | p95 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|---:|
@@ -83,7 +83,7 @@
 | account | account-provider | ACCOUNT_COMMAND_RESULT | linear-perp.account.command.results.v1 | REJECTED | 70 | 0 | 28.572 | 120.559 | 206.597 | 206.597 |
 | account | account-provider | POSITION | linear-perp.account.position.events.v1 | POSITION_UPDATED | 8000 | 0 | 310.332 | 1563.204 | 2474.828 | 4585.620 |
 
-### Trading Outbox Open/Close 发布延迟
+### 交易 Outbox 开仓/平仓发布延迟
 
 | phase | provider owner | aggregate type | topic | event type | published | pending | p50 ms | p95 ms | p99 ms | max ms |
 |---|---|---|---|---|---:|---:|---:|---:|---:|---:|
@@ -100,7 +100,7 @@
 | close | order-provider | ORDER | linear-perp.order.commands.v1 | PLACE | 2000 | 0 | 698.587 | 1647.285 | 2246.541 | 3784.600 |
 | close | order-provider | ORDER | linear-perp.order.events.v1 | ACCEPTED | 2000 | 0 | 698.587 | 1647.285 | 2246.541 | 3784.600 |
 
-### Trading Outbox 积压峰值
+### 交易 Outbox 积压峰值
 
 | phase | provider owner | aggregate type | topic | event type | events | peak pending | max pending age ms | final pending |
 |---|---|---|---|---|---:|---:|---:|---:|
@@ -136,7 +136,7 @@
 | other | order-provider | ORDER | linear-perp.order.events.v1 | CANCEL_REQUESTED | 557 | 12 | 6020.351 | 0 |
 | other | order-provider | ORDER | linear-perp.order.events.v1 | RESERVE_PENDING | 677 | 10 | 5972.379 | 0 |
 
-### Trading Outbox claim → publish 诊断
+### 交易 Outbox 领取到发布诊断
 
 本轮异步 publisher 的 claim lease 固定为 30 秒；成功行保留的 `next_attempt_at` 等于 claim 时间加 30 秒，因此可将 claim 后 Kafka ACK + 批量标记时间与 claim 前时间拆开。报告上方的 `created_at → published_at` 使用业务状态迁移携带的时间戳；尤其 open `ACCEPTED/PLACE` 会包含账户预占及状态迁移完成前的等待，不能全部归因于 Outbox publisher。
 
@@ -148,7 +148,7 @@
 
 结论：本轮 ORDER Outbox 的实际 claim → publish p99 为 2.384 秒（open）/ 0.986 秒（close），最终 pending 为 0；上方约 33 秒的 open 尾延迟主要发生在行可 claim 之前。
 
-### Kafka Consumer Lag
+### Kafka 消费积压
 
 | group | topic | samples | peak total lag | peak partition lag | final total lag |
 |---|---|---:|---:|---:|---:|
@@ -157,7 +157,7 @@
 | surprising-linear-perp-order-account-results-v1 | surprising.linear-perp.account.command.results.v1 | 5 | 2552 | 122 | 0 |
 | surprising-linear-perp-order-position-maintenance-v1 | surprising.linear-perp.account.position.events.v1 | 5 | 225 | 22 | 0 |
 
-### Matching shard 流量分布
+### 撮合分片流量分布
 
 Open：
 
@@ -177,7 +177,7 @@ Close：
 | 2 | 5 | 500 | 25.000% |
 | 3 | 5 | 500 | 25.000% |
 
-### PostgreSQL Top SQL
+### PostgreSQL 高耗时 SQL
 
 | calls | total exec ms | mean exec ms | rows | query |
 |---:|---:|---:|---:|---|

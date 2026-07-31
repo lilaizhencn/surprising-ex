@@ -1,74 +1,71 @@
 # surprising-ex
 
-English | [简体中文](README_CN.md)
 
-Surprising-EX is a multi-product exchange backend built with Java 21, PostgreSQL, Kafka, and Redis/Valkey.
-The repository covers spot, USDT perpetuals, USDT delivery futures, and European cash-settled options.
-Production processes run one product line each with isolated topics, consumer groups, order books, and account types.
+Surprising-EX 是基于 Java 21、PostgreSQL、Kafka 和 Redis/Valkey 的多产品线交易所后端。仓库覆盖
+现货、U 本位永续、U 本位交割和欧式现金结算期权；生产部署时每个进程只运行一条产品线，并使用
+独立 Topic、消费组、订单簿和账户类型。
 
-## Core boundaries
+## 核心边界
 
-- PostgreSQL is authoritative for orders, balances, positions, collateral, ledgers, and risk state.
-- Account-provider is the sole writer of funds, positions, collateral, and deficits. Other modules submit
-  user-partitioned account commands.
-- Cross-service consistency uses local transactions, transactional outbox, at-least-once Kafka delivery,
-  and idempotent consumers. It does not use XA.
-- Trading order and matching outboxes claim a capped contiguous prefix per `topic + eventKey` with one
-  pending-row window scan and MVCC compare-and-set, pipeline independent streams concurrently, and batch-mark Kafka acknowledgements.
-- User positions are read only from a Redis Hash projection. Open-order reads prefer a Redis ZSET/Hash
-  projection. Redis never authorizes fills, cancellations, funds movements, or liquidation.
-- Risk-provider maintains complete Redis risk groups plus a `symbol + instrumentVersion -> group` reverse index.
-  Mark-price updates calculate only affected groups, while PostgreSQL atomically batch-writes snapshots,
-  liquidation candidates, and candidate outbox rows; liquidation still revalidates and locks PostgreSQL state.
-- Liquidation candidates enter a same-hash-tag Redis priority queue with atomic deduplication, leases, and delayed
-  retries. Workers batch-lock and revalidate PostgreSQL state, then batch-write orders, events, and Outbox rows;
-  Redis loss is recovered from PostgreSQL and never changes the financial authority boundary.
-- Account commands use `<PRODUCT_LINE>:<userId>` as their Kafka key and are serialized across 32 partitions.
-- Matching commands, trades, depth, and prices use `symbol` as their key. Commands for one symbol must stay ordered.
-- Internal market-maker self-matches still produce public trades, depth, candles, and WebSocket updates, but
-  skip economic trades and settlement. Trades with real users use the full settlement path.
+- PostgreSQL 是订单、余额、持仓、保证金、账本和风险状态的唯一事实源。
+- account-provider 是资金、持仓、保证金和亏空的唯一写者；其他模块通过按用户分区的账户指令请求变更。
+- 跨服务一致性使用本地事务、transactional outbox、Kafka 至少一次投递和消费端幂等，不使用 XA。
+- 交易订单和撮合 Outbox 通过一次 pending 行窗口扫描，按 `topic + eventKey` 领取有上限的连续前缀并用
+  MVCC CAS 竞争，不同 stream 并发流水线写入 Kafka，ACK 后批量标记发布状态。
+- 用户持仓只从 Redis Hash 读取；未完成订单优先从 Redis ZSET/Hash 投影读取。Redis 不授权成交、
+  撤单、资金变更或最终强平执行。
+- risk-provider 在 Redis 维护完整风险组和 `symbol + instrumentVersion -> group` 反向索引；标记价更新
+  只计算受影响的风险组，PostgreSQL 在同一事务内批量写风险快照、强平 candidate 和 candidate Outbox，
+  liquidation 执行前仍重新校验并锁定 PostgreSQL 权威状态。
+- 强平 candidate 进入同 hash-tag 的 Redis 优先队列，由 Lua 原子完成去重、lease 和延迟重试；worker
+  批量锁定并复核 PostgreSQL，再批量写订单、事件和 Outbox。Redis 丢失时从 PostgreSQL 恢复，
+  不改变资金权威边界。
+- 同一产品线、同一用户的账户指令固定使用 `<PRODUCT_LINE>:<userId>` 作为 Kafka key，并通过
+  32 个分区串行处理。
+- 撮合命令、成交、盘口和价格事件使用 `symbol` 作为 key。同一 symbol 的命令必须保持有序。
+- 内部做市账户之间的自成交继续产生公共成交、盘口、K 线和 WebSocket 行情，但不生成经济成交、
+  持仓、手续费和资金结算；做市账户与真实用户成交时执行完整结算。
 
-## Product lines
+## 产品线
 
-| Product | `ProductLine` | Account type | Topic prefix |
+| 产品线 | `ProductLine` | 账户类型 | Topic 前缀 |
 |---|---|---|---|
-| Spot | `SPOT` | `SPOT` | `surprising.spot` |
-| USDT perpetual | `LINEAR_PERPETUAL` | `USDT_PERPETUAL` | `surprising.linear-perp` |
-| USDT delivery | `LINEAR_DELIVERY` | `USDT_DELIVERY` | `surprising.linear-delivery` |
-| European option | `OPTION` | `OPTION` | `surprising.option` |
+| 现货 | `SPOT` | `SPOT` | `surprising.spot` |
+| U 本位永续 | `LINEAR_PERPETUAL` | `USDT_PERPETUAL` | `surprising.linear-perp` |
+| U 本位交割 | `LINEAR_DELIVERY` | `USDT_DELIVERY` | `surprising.linear-delivery` |
+| 欧式期权 | `OPTION` | `OPTION` | `surprising.option` |
 
-`INVERSE_PERPETUAL` and `INVERSE_DELIVERY` have shared enums and topic mappings, while process-level
-acceptance currently focuses on the four lines above.
+`INVERSE_PERPETUAL` 和 `INVERSE_DELIVERY` 已有公共枚举和 Topic 映射，但当前进程级验收主要覆盖上表
+四条产品线。
 
-## Modules
+## 模块
 
-| Module | Responsibility |
+| 模块 | 职责 |
 |---|---|
-| `surprising-product-api` | Product lines, account types, and topic naming |
-| `surprising-instrument` | Symbols, contract rules, risk tiers, and lifecycle |
-| `surprising-price` | Index price, mark price, and FX |
-| `surprising-trading` | Orders, triggers, algo orders, and exchange-core matching |
-| `surprising-account` | Balances, ledgers, commands, settlement, positions, and collateral |
-| `surprising-margin-ops` | Risk, liquidation, funding, insurance, and ADL |
-| `surprising-candlestick` | Kafka Streams and RocksDB candles |
-| `surprising-edge` | REST gateway and WebSocket fanout |
-| `surprising-market-maker` | Internal quoting and trading-path load generation |
+| `surprising-product-api` | 产品线、账户类型和 Topic 命名 |
+| `surprising-instrument` | symbol、合约规格、风险档位和生命周期 |
+| `surprising-price` | 指数价、标记价和汇率 |
+| `surprising-trading` | 普通订单、条件单、算法单和 exchange-core 撮合 |
+| `surprising-account` | 余额、账本、账户指令、结算、持仓和保证金 |
+| `surprising-margin-ops` | 风险、强平、资金费、保险基金和 ADL |
+| `surprising-candlestick` | Kafka Streams + RocksDB K 线 |
+| `surprising-edge` | REST gateway 和 WebSocket fanout |
+| `surprising-market-maker` | 内部做市和交易链路压测 |
 
-Repositories operate one physical table by default, while services aggregate them transactionally. Cross-table SQL
-in online trading, risk, or settlement paths requires an explicit source-level justification for consistency or
-atomicity. Admin order timelines, funds reconciliation, and operational reports must not add JOINs to the primary
-trading database; a future finance-operations module should build event-driven projections in an independent database.
-Run `./scripts/check-persistence-boundaries.sh` in CI to reject direct production JDBC access outside
-repositories and undocumented multi-table repository exceptions.
+Repository 默认只操作一张物理表，由 Service 在事务内聚合。在线交易、风控和结算链路若因一致性或原子性
+必须跨表，源码需要逐项写明中文“不可拆原因”。后台订单时间线、资金对账和运营报表不得在交易主库新增
+多表 JOIN；后续财务运营模块应消费领域事件，并使用独立数据库建立查询投影。
+CI 可运行 `./scripts/check-persistence-boundaries.sh`，拦截 Repository 之外的生产 JDBC 访问，
+以及未写中文“不可拆原因”的多表 Repository。
 
-Controllers are protocol adapters only: they validate HTTP input, extract request context, and map service results
-without accessing repositories or owning transactions and business orchestration. Classes in `task` only declare
-schedule triggers and delegate execution to services. Run `./scripts/check-entry-layer-boundaries.sh` in CI to
-prevent controllers from bypassing services and to keep `@Scheduled` out of services, repositories, and clients.
+Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，不直接访问 Repository，也不承载事务或
+业务编排。`task` 包只负责声明定时触发时机，所有实际执行都委托给 Service。CI 可运行
+`./scripts/check-entry-layer-boundaries.sh`，阻止 Controller 越过 Service，以及 `@Scheduled`
+回流到 Service、Repository 或客户端实现。
 
-## Build and local run
+## 构建与本地启动
 
-JDK 21 is required. Start PostgreSQL, Kafka, and Redis, then initialize the schema and topics:
+要求 JDK 21。先启动 PostgreSQL、Kafka 和 Redis，再初始化数据库与 Topic：
 
 ```bash
 mvn -DskipTests package
@@ -77,12 +74,22 @@ PRODUCT_LINES=LINEAR_PERPETUAL PARTITIONS=32 ACCOUNT_COMMAND_PARTITIONS=32 ./scr
 PRODUCT_LINE=LINEAR_PERPETUAL BUILD_SERVICES=false ./scripts/start-product-line-providers.sh
 ```
 
-Matching uses exchange-core/OpenHFT and requires the JVM module flags listed in
-[Deployment](docs/deployment.md). Default combined processes use ports `9080` instrument, `9081` candlestick,
-`9082` price, `9084` trading-entry, `9085` matching, `9086` account, `9088` margin-ops, `9094` edge,
-and `9096` market-maker.
+matching 使用 exchange-core/OpenHFT，必须使用 [部署文档](docs/deployment.md) 中列出的
+`--add-opens/--add-exports` JVM 参数。默认合并进程和端口：
 
-## Test
+| Provider | 端口 |
+|---|---:|
+| instrument | 9080 |
+| candlestick | 9081 |
+| price（index + mark） | 9082 |
+| trading-entry（order + trigger） | 9084 |
+| matching | 9085 |
+| account | 9086 |
+| margin-ops | 9088 |
+| edge（gateway + WebSocket） | 9094 |
+| market-maker | 9096 |
+
+## 测试
 
 ```bash
 mvn test
@@ -95,39 +102,37 @@ RECONCILE_FUNDS=true \
 ./scripts/product-line-api-flow-smoke.sh
 ```
 
-The product-line smoke runs real API order entry, market making, matching, account settlement, self-close,
-liquidation, and applicable funding/delivery/exercise flows, then performs funds-conservation reconciliation.
-Stress reports default to a temporary directory; only stable, reproducible guidance belongs in the repository.
+产品线 smoke 覆盖真实 API 下单、做市、撮合、账户结算、主动平仓、强平和适用的资金费/
+交割/行权，最后执行资金守恒核对。压测报告默认写入临时目录；只有稳定、可复现的长期结论才应整理进文档。
 
-## Production
+## 生产部署
 
-Before deployment:
+永续首发的 EC2、JVM、RDS、MSK、Valkey 和容量基线见
+[LINEAR_PERPETUAL AWS 生产部署基线](docs/linear-perpetual-aws-production-deployment.md)。
+部署前必须：
 
-- disable Kafka auto topic creation and use [create-topics.sh](scripts/create-topics.sh);
-- for the initial perpetual deployment, create all regular and account-command topics with exactly 32
-  partitions, RF=3, and `min.insync.replicas=2`;
-- do not add partitions in place to existing symbol-keyed topics; use a versioned-topic migration and state rebuild;
-- isolate topics, groups, client ids, coordinator node ids, and gateway routes by product line;
-- run the order-provider account-command-result listener at the 32-partition ceiling; records remain ordered by
-  `productLine:userId`, while each poll applies order transitions and ACCEPTED/PLACE Outbox writes in batches;
-- process matching commands in bounded transactional polls, batch-read idempotency and protection state while
-  conservatively rechecking same-user/symbol conflicts, preserve symbol-partition order, and prioritize
-  financial ORDER_RESERVE/PLACE/CANCEL Outbox rows over notification-only order events during backlog;
-- use persistent `noeviction` Redis/Valkey compatible with same-hash-tag Lua operations;
-- retain PostgreSQL durability and monitor Kafka lag, Outbox backlog/age, database locks and slow SQL,
-  Redis readiness, JVM GC, failover behavior, and zero-difference funds reconciliation.
+- 关闭 Kafka 自动建 Topic，使用 [create-topics.sh](scripts/create-topics.sh) 显式创建；
+- 永续首发把普通 Topic 和账户指令 Topic 都固定为 32 分区，RF=3、`min.insync.replicas=2`；
+- 不在已有 symbol-keyed Topic 上直接增加分区；扩容需要新版本 Topic、维护窗口和状态重建方案；
+- 为每条产品线配置独立 Topic、消费组、client id、协调 node id 和 gateway route；
+- Order Provider 的账户指令结果 listener 并发度对齐 32 个分区；同一 `productLine:userId` 保序，
+  每个 poll 批量完成订单状态迁移及 ACCEPTED/PLACE Outbox 入库；
+- 撮合指令使用有界 poll 批量事务，批量读取幂等及保护状态；同批同用户/标的的潜在冲突仍逐条复查，
+  保持 symbol 分区顺序；Outbox 积压时优先发布
+  `ORDER_RESERVE/PLACE/CANCEL` 财务指令，再发布通知型订单事件；
+- Redis/Valkey 使用持久化、`noeviction` 和同 hash-tag Lua 兼容的部署；
+- 保持 PostgreSQL durability，监控 Kafka lag、Outbox pending/最老年龄、数据库锁与慢 SQL、Redis
+  readiness、JVM GC，并在上线前完成故障切换和资金零差异核对。
 
-See [Deployment](docs/deployment.md) for the exact topic inventory and verification commands. The concrete
-single-line AWS baseline is documented in
-[LINEAR_PERPETUAL AWS production baseline](docs/linear-perpetual-aws-production-deployment_CN.md).
+Topic 的精确清单、分区数量和创建后校验命令见 [部署文档](docs/deployment.md)。
 
-## Documentation
+## 文档
 
-- [Documentation index](docs/README.md)
-- [Deployment and topic planning](docs/deployment.md)
-- [Database design](docs/database.md)
-- [Product-line architecture](docs/product-line-architecture.md)
-- [Account single-writer lane](docs/account-single-writer-command-lane_CN.md)
-- [Position Redis read model](docs/position-redis-cache.md)
-- [Open-order Redis projection](docs/open-order-redis-cache.md)
-- [Testing and funds conservation](docs/product-line-testing-and-funds-reconciliation.md)
+- [文档索引](docs/README.md)
+- [部署与 Topic 规划](docs/deployment.md)
+- [数据库设计](docs/database.md)
+- [产品线架构](docs/product-line-architecture.md)
+- [账户单写者和单用户串行](docs/account-single-writer-command-lane.md)
+- [持仓 Redis 读模型](docs/position-redis-cache.md)
+- [未完成订单 Redis 投影](docs/open-order-redis-cache.md)
+- [测试与资金守恒](docs/product-line-testing-and-funds-reconciliation.md)

@@ -1,38 +1,44 @@
-# Database Design
+# 数据库设计
 
-Initialize a new PostgreSQL database from repository root:
+在仓库根目录初始化新的 PostgreSQL 数据库：
 
 ```bash
 brew services start postgresql@18
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ```
 
-Local integration tests use the Homebrew PostgreSQL instance on `localhost:5432`; see
-[local-homebrew-infra.md](local-homebrew-infra.md) for the service and tuning commands.
+本地集成测试使用 `localhost:5432` 上由 Homebrew 管理的 PostgreSQL。服务管理和调优命令见
+[本地 Homebrew 中间件](local-homebrew-infra.md)。
 
-## Admin gateway tables
+## 管理网关表
 
-`gateway_admin_operation_logs.duration_ms` stores admin gateway proxy request duration as local
-security-audit evidence. Cross-table metrics, exports, and long-running report queries are not
-stored in the gateway; they belong to the independent finance-operations database.
+`gateway_admin_operation_logs.duration_ms` 保存管理网关代理请求耗时，作为本地安全审计证据。
+跨表指标、导出和长时间运行的报表查询不存放在网关中，也不允许查询交易主库；这些能力属于使用
+独立数据库的财务运营模块。
 
 ## `instruments`
 
-One row stores one version of one tradable product:
+每一行保存一个可交易产品的一个不可变版本：
 
-- `symbol`: normalized market symbol, for example `BTC-USDT`.
-- `version`: immutable config version.
-- `instrument_type` / `contract_type`: product category, currently perpetual contracts.
-- `base_asset` / `quote_asset` / `settle_asset`: display, pricing, and settlement assets.
-- `price_tick_units` / `quantity_step_units`: integer tick and step sizes in quote/base asset smallest units.
-- `min_quantity_steps` / `max_quantity_steps` / `min_notional_units` / `max_notional_units`: order bounds in long units.
-- `notional_multiplier_units`: for `LINEAR_PERPETUAL`, settlement units per `priceTick * quantityStep`; for `INVERSE_PERPETUAL`, quote face-value units per contract step.
-- `supported_order_types` / `supported_time_in_force`: order-entry constraints.
-- `max_leverage_ppm`, margin-rate ppm fields, `maker_fee_rate_ppm`, `taker_fee_rate_ppm`, funding ppm fields, and `impact_notional_units`: risk, trading-fee, and funding inputs.
-- `user_open_interest_limit_rate_ppm` / `user_open_interest_limit_floor_units`: dynamic per-user position cap inputs. Order entry computes `max(platformOpenInterestNotional * rate / 1_000_000, floor)` and also applies `max_position_notional_units`.
-- `status`: `PRE_TRADING`, `TRADING`, `HALT`, `SETTLING`, or `CLOSED`.
+- `symbol`：规范化交易对，例如 `BTC-USDT`。
+- `version`：不可变配置版本。
+- `instrument_type` / `contract_type`：产品和合约类型。
+- `base_asset` / `quote_asset` / `settle_asset`：基础资产、报价资产和结算资产。
+- `price_tick_units` / `quantity_step_units`：使用资产最小单位表示的价格档位和数量步长。
+- `min_quantity_steps` / `max_quantity_steps` / `min_notional_units` /
+  `max_notional_units`：使用长整型单位表示的订单边界。
+- `notional_multiplier_units`：`LINEAR_PERPETUAL` 表示每个
+  `priceTick * quantityStep` 对应的结算资产单位；`INVERSE_PERPETUAL` 表示每个合约步长的报价面值。
+- `supported_order_types` / `supported_time_in_force`：下单约束。
+- `max_leverage_ppm`、保证金率、Maker/Taker 手续费率、资金费率和
+  `impact_notional_units`：风控、手续费和资金费计算输入。
+- `user_open_interest_limit_rate_ppm` / `user_open_interest_limit_floor_units`：
+  单用户动态持仓上限。下单入口计算
+  `max(platformOpenInterestNotional * rate / 1_000_000, floor)`，并同时应用
+  `max_position_notional_units`。
+- `status`：`PRE_TRADING`、`TRADING`、`HALT`、`SETTLING` 或 `CLOSED`。
 
-Primary key:
+主键：
 
 ```sql
 PRIMARY KEY (symbol, version)
@@ -40,118 +46,88 @@ PRIMARY KEY (symbol, version)
 
 ## `instrument_current_versions`
 
-One row points each symbol to its current config version:
+每个 `symbol` 一行，指向当前生效配置版本：
 
 ```sql
 PRIMARY KEY (symbol)
 ```
 
-Downstream services should use this table to read the current snapshot. Historical versions are kept
-in `instruments`.
+下游服务应通过该表读取当前快照，历史版本继续保存在 `instruments`。
 
 ## `instrument_symbol_sequences`
 
-One row atomically allocates the next immutable instrument config version per symbol:
+按 `symbol` 原子分配下一个不可变合约版本：
 
 ```sql
 PRIMARY KEY (symbol)
 ```
 
-Admin writes use this table instead of `MAX(version) + 1`, so multiple instrument provider nodes can
-handle concurrent changes without assigning the same version.
+管理端写入使用该表，而不是 `MAX(version) + 1`，避免多个 instrument-provider 节点并发修改时
+分配出相同版本。
 
 ## `instrument_risk_brackets`
 
-Risk limit brackets for a specific `symbol + version`. Matching and risk services use these to
-resolve max leverage and margin rates by position notional.
+保存指定 `symbol + version` 的风险限额档位。撮合和风控服务根据持仓名义价值解析最大杠杆和保证金率。
 
 ## `instrument_index_sources`
 
-External spot-source configuration for index price calculation:
+保存指数价格使用的外部现货源配置：
 
-- REST endpoint and parser.
-- WebSocket endpoint and subscription payload.
-- quote currency and target quote currency.
-- USD/USDT conversion source and conversion direction.
-- source `weight_ppm`, `fallback_weight_multiplier_ppm`, and enabled flag.
+- REST 地址与解析器。
+- WebSocket 地址与订阅载荷。
+- 源报价币种与目标报价币种。
+- USD/USDT 换算源及换算方向。
+- `weight_ppm`、`fallback_weight_multiplier_ppm` 和启用状态。
 
-The index price provider reads this table dynamically.
+指数价格服务动态读取该表。
 
 ## `candlestick_candles`
 
-One row represents one OHLCV candle:
+每一行表示一根 OHLCV K 线：
 
-- `symbol`: normalized market symbol, for example `BTC-USDT`.
-- `period`: interval code, for example `1m`, `5m`, `1h`, `1d`.
-- `open_time`: inclusive UTC bucket start.
-- `close_time`: exclusive UTC bucket end.
-- `open_price`: price of earliest trade in the bucket.
-- `high_price`: max trade price in the bucket.
-- `low_price`: min trade price in the bucket.
-- `close_price`: price of latest trade in the bucket.
-- `base_volume`: sum of trade quantity.
-- `quote_volume`: sum of `price * quantity`.
-- `trade_count`: accepted trade count after dedupe.
-- `first_trade_id` / `last_trade_id`: audit fields for open/close.
-- `first_sequence` / `last_sequence`: audit fields for replay checks.
-- `source_partition` / `source_offset`: last Kafka record that changed this candle.
-
-Primary key:
+- `symbol`：规范化交易对。
+- `period`：周期，例如 `1m`、`5m`、`1h`、`1d`。
+- `open_time` / `close_time`：左闭右开的 UTC 时间桶。
+- `open_price` / `high_price` / `low_price` / `close_price`：开、高、低、收价格。
+- `base_volume`：成交数量之和。
+- `quote_volume`：`price * quantity` 之和。
+- `trade_count`：去重后的有效成交数。
+- `first_trade_id` / `last_trade_id`：开收价格审计字段。
+- `first_sequence` / `last_sequence`：回放检查字段。
+- `source_partition` / `source_offset`：最后一次修改该 K 线的 Kafka 位点。
 
 ```sql
 PRIMARY KEY (symbol, period, open_time)
 ```
 
-This supports fast range queries and idempotent full-snapshot upserts.
-
-## Partitioning Later
-
-For very large production history, keep the logical schema and partition by time:
-
-```sql
-CREATE TABLE candlestick_candles_y2026m06
-PARTITION OF candlestick_candles
-FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
-```
-
-The service code does not need dynamic table names when PostgreSQL native partitioning is used.
+该主键支持快速区间查询和完整快照的幂等更新。历史数据量很大时应保持逻辑表不变，使用 PostgreSQL
+原生时间分区；服务代码不需要拼接动态表名。
 
 ## `price_index_ticks`
 
-One row represents one calculated index price snapshot:
+每一行表示一份指数价格计算快照：
 
-- `symbol`: contract symbol, for example `BTC-USDT`.
-- `sequence`: database-allocated monotonic sequence per symbol.
-- `index_price`: weighted fair spot index price.
-- `status`: `HEALTHY`, `DEGRADED`, `STALE`, `INSUFFICIENT_SOURCES`, or `CLAMPED`.
-- `component_count`: configured source count.
-- `valid_component_count`: source count after stale/outlier filtering.
-- `total_configured_weight`: original source weight sum.
-- `event_time`: calculation time.
-
-Primary key:
+- `symbol`：合约交易对。
+- `sequence`：数据库按交易对分配的单调递增序号。
+- `index_price`：加权公平现货指数价格。
+- `status`：`HEALTHY`、`DEGRADED`、`STALE`、`INSUFFICIENT_SOURCES` 或 `CLAMPED`。
+- `component_count` / `valid_component_count`：配置源数量及过期、异常值过滤后的有效源数量。
+- `total_configured_weight`：原始配置权重总和。
+- `event_time`：计算时间。
 
 ```sql
 PRIMARY KEY (symbol, sequence)
-```
-
-Query index:
-
-```sql
 CREATE INDEX price_index_ticks_query_idx ON price_index_ticks (symbol, event_time DESC);
 CREATE INDEX price_index_ticks_event_time_brin ON price_index_ticks USING BRIN (event_time);
 ```
 
-The index provider publishes one complete Kafka event first. A separate audit consumer batches that same
-event into this table and `price_index_components`; both tables are retained for three days and are not
-real-time price inputs.
+指数服务先发布完整 Kafka 事件，独立审计消费者再批量写入本表和 `price_index_components`。
+两表只保留三天，不能作为实时价格输入。
 
 ## `price_index_components`
 
-This table stores one audit row per external source per index calculation. It records source price,
-configured weight, effective weight, status, source timestamp, latency, and reject reason.
-
-Primary key:
+每次指数计算的每个外部价格源保存一行审计记录，包含源价格、配置权重、有效权重、状态、源时间戳、
+延迟和拒绝原因。
 
 ```sql
 PRIMARY KEY (symbol, sequence, source)
@@ -159,15 +135,13 @@ PRIMARY KEY (symbol, sequence, source)
 
 ## `price_symbol_leases`
 
-This table coordinates active-active price providers:
+协调价格服务的多节点主主运行：
 
-- `module`: publisher namespace, for example `price-index` or `price-mark`.
-- `symbol`: market symbol.
-- `owner_id`: current publishing node.
-- `lease_until`: when another node may take over if this node stops renewing.
-- `updated_at`: local lease update time.
-
-Primary key:
+- `module`：发布者命名空间，例如 `price-index` 或 `price-mark`。
+- `symbol`：交易对。
+- `owner_id`：当前发布节点。
+- `lease_until`：租约截止时间，节点停止续约后其他节点才可接管。
+- `updated_at`：本地更新时间。
 
 ```sql
 PRIMARY KEY (module, symbol)
@@ -175,128 +149,104 @@ PRIMARY KEY (module, symbol)
 
 ## `price_symbol_sequences`
 
-This table allocates global monotonic sequences for active-active price providers:
-
-- `module`: publisher namespace.
-- `symbol`: market symbol.
-- `sequence`: latest allocated sequence.
-- `updated_at`: latest allocation time.
-
-Primary key:
+为多节点价格服务分配全局单调序号。失败后允许出现序号空洞，但同一个 `module + symbol` 的序号
+绝不能倒退。
 
 ```sql
 PRIMARY KEY (module, symbol)
 ```
 
-Sequence gaps are acceptable after failures, but a sequence must never move backwards for the same
-`module + symbol`.
-
 ## `price_exchange_rates`
 
-One row stores the latest known FX or stable-coin bridge rate:
+每行保存最新的外汇或稳定币桥接汇率：
 
-- `base_currency`: source currency, for example `USD` or `USDT`.
-- `quote_currency`: target currency, for example `CNY`.
-- `rate`: multiplier from base to quote.
-- `provider`: FX vendor or stable-coin ticker source.
-- `rate_time`: timestamp supplied by the rate source.
-- `updated_at`: local refresh timestamp.
-
-Primary key:
+- `base_currency` / `quote_currency`：源币种和目标币种。
+- `rate`：从源币种到目标币种的乘数。
+- `provider`：汇率供应方或稳定币行情源。
+- `rate_time` / `updated_at`：来源时间和本地刷新时间。
 
 ```sql
 PRIMARY KEY (base_currency, quote_currency)
 ```
 
-The index provider stores both direct and inverse rates, so display services can convert routes such
-as `USDT -> USD -> CNY` without calling third-party FX APIs per user request.
+指数服务同时保存正向和反向汇率，使展示服务能够完成 `USDT -> USD -> CNY` 等换算，无需在每次
+用户请求中调用第三方汇率接口。
 
 ## `price_mark_ticks`
 
-One row represents one asynchronous mark-price audit snapshot. Real-time order, trigger, risk,
-liquidation, funding, ADL, and settlement decisions must consume the Kafka mark-price event and must
-not wait for or query this table.
+每行保存一份异步标记价格审计快照。下单、条件单、风控、强平、资金费、ADL 和结算必须消费 Kafka
+标记价格事件，不能等待或查询本表。
 
-- `sequence`: database-allocated monotonic sequence per symbol.
-- `mark_price`: final mark price after median and clamp.
-- `product_line` / `instrument_version`: the exact product and instrument encoding used.
-- `mark_price_units` / `mark_price_ticks`: final fixed-point values published to real-time consumers.
-- `index_price`: latest index input.
-- `price1`: funding convergence price.
-- `price2`: index plus moving-average basis.
-- `last_trade_price`: latest perpetual trade price.
-- `best_bid_price` / `best_ask_price`: latest perpetual book top.
-- `basis_average`: moving average of `(bid1 + ask1) / 2 - indexPrice`.
-- `clamp_low` / `clamp_high`: final protection band around index price.
-- `event_time` / `published_at`: calculation time and Kafka publication time used for freshness checks.
-- `calculation_inputs`: the complete mark-price Kafka JSON envelope, including the exact index component
-  snapshots, book ticker, last trade, funding input, basis intermediate, and final result.
+- `sequence`：数据库按交易对分配的单调序号。
+- `mark_price`：经过中位数和限幅后的最终标记价格。
+- `product_line` / `instrument_version`：准确的产品线和合约版本。
+- `mark_price_units` / `mark_price_ticks`：发布给实时消费者的定点数值。
+- `index_price`、`price1`、`price2`：指数输入、资金费收敛价、指数加移动平均基差。
+- `last_trade_price`、`best_bid_price`、`best_ask_price`：最新成交价和盘口一档。
+- `basis_average`：`(bid1 + ask1) / 2 - indexPrice` 的移动平均。
+- `clamp_low` / `clamp_high`：指数价格周围的最终保护区间。
+- `event_time` / `published_at`：计算时间和发布时间，用于新鲜度检查。
+- `calculation_inputs`：完整的标记价格 Kafka JSON 信封，包含指数成分、盘口、最新成交、
+  资金费输入、中间基差和最终结果。
 
-An independent consumer group reads the same mark-price topic in JDBC batches. Rows older than three
-days are deleted every minute in bounded batches (up to 100,000 rows per default run). The retention
-index is BRIN because inserts are time-ordered. No database write or cleanup operation is on the
-real-time price-consumer path.
-
-Primary key:
+独立消费者组以 JDBC 批次写入本表。超过三天的数据每分钟按有界批次删除，默认每轮最多
+100,000 行。由于写入按时间有序，保留期索引使用 BRIN。实时价格消费链路不能执行数据库写入或清理。
 
 ```sql
 PRIMARY KEY (symbol, sequence)
 ```
 
-## Funding Tables
+## 资金费表
 
-`funding_rate_ticks` stores only `FINAL` funding rates frozen at a settlement boundary, using long ppm values. Per-second `PREDICTED` rates are Kafka events held in each consumer's latest-by-symbol cache and are not inserted here:
+`funding_rate_ticks` 只保存结算边界冻结的 `FINAL` 资金费率，统一使用长整型 ppm。
+每秒产生的 `PREDICTED` 费率只作为 Kafka 事件保存在消费者的按交易对最新缓存中，不写入该表。
 
-- `funding_rate_ppm`: final clamped funding rate in parts per million.
-- `premium_rate_ppm`: `(markPrice - indexPrice) / indexPrice * 1_000_000`.
-- `interest_rate_ppm`: instrument interest rate converted to ppm.
-- `funding_time`: UTC interval boundary when the rate should settle.
+- `funding_rate_ppm`：限幅后的最终资金费率。
+- `premium_rate_ppm`：`(markPrice - indexPrice) / indexPrice * 1_000_000`。
+- `interest_rate_ppm`：转换为 ppm 的合约利率。
+- `funding_time`：应执行结算的 UTC 周期边界。
 
-`funding_settlements` stores one settlement batch per `symbol + funding_time`.
-The unique index on `(symbol, funding_time)` prevents duplicate settlement across multiple funding-provider nodes.
+`funding_settlements` 按 `symbol + funding_time` 保存结算批次；唯一索引阻止多个资金费节点重复结算。
 
-`funding_payments` stores each user payment for a settlement:
+`funding_payments` 保存每个用户的结算金额：
 
-- Positive `amount_units`: user receives funding.
-- Negative `amount_units`: user pays funding.
-- `notional_units`: position notional in settlement-asset smallest units.
+- `amount_units > 0`：用户收取资金费。
+- `amount_units < 0`：用户支付资金费。
+- `notional_units`：以结算资产最小单位表示的持仓名义价值。
 
-The funding provider writes `account_ledger_entries` with `reference_type = FUNDING` and applies
-payments to `account_balances` / `account_deficits` in the same transaction.
+资金费服务在同一事务中写入 `reference_type = FUNDING` 的 `account_ledger_entries`，并更新
+`account_balances` / `account_deficits`。
 
-## Risk Tables
+## 风控表
 
-`risk_account_snapshots` stores account-level margin state by `snapshot_id`, including wallet balance,
-unrealized PnL, equity, maintenance margin, margin ratio, and status.
+`risk_account_snapshots` 按 `snapshot_id` 保存账户级保证金状态，包括钱包余额、未实现盈亏、权益、
+维持保证金、保证金率和状态。
 
-`risk_position_snapshots` stores the position-level inputs used for each account snapshot:
+`risk_position_snapshots` 保存账户快照所使用的持仓级输入：
 
-- `signed_quantity_steps`: long exposure from `account_positions`.
-- `mark_price_ticks`: latest usable Kafka mark-price event ticks for the position's pinned
-  `instrument_version`.
-- `notional_units`, `unrealized_pnl_units`, and `maintenance_margin_units`: long settlement-asset units.
+- `signed_quantity_steps`：来自 `account_positions` 的长整型敞口。
+- `mark_price_ticks`：该持仓固定 `instrument_version` 对应的最新可用 Kafka 标记价格。
+- `notional_units`、`unrealized_pnl_units`、`maintenance_margin_units`：
+  使用结算资产最小单位表示的名义价值、未实现盈亏和维持保证金。
 
-When an account position event closes a symbol completely, risk-provider writes a zero-quantity position snapshot for
-that symbol. In that flat snapshot, `entry_price_ticks` and `mark_price_ticks` are `0`, and the account snapshot carries
-zero unrealized PnL and zero maintenance margin. This prevents `latestPositions` from showing stale nonzero exposure
-after a full close.
+持仓完全归零时，risk-provider 仍写入数量为零的持仓快照，`entry_price_ticks` 和
+`mark_price_ticks` 为 `0`，账户快照的未实现盈亏和维持保证金也为零，防止
+`latestPositions` 返回陈旧敞口。
 
-Risk-provider projects complete account risk groups from PostgreSQL into Redis and maintains a
-`symbol + instrument_version -> group_id` reverse index. Mark-price Kafka updates read only affected
-groups from Redis, require the exact pinned instrument version, and use cached immutable instrument/bracket
-metadata. Funding, liquidation, and ADL still revalidate their authoritative PostgreSQL state. All contract
-notional/PnL/margin amounts use shared exact-integer `PerpetualContractMath`; none reads the mark-price audit table.
-Position-risk Kafka batches retry indefinitely when a transient input such as the fresh mark cache is unavailable;
-they must never be committed or discarded merely because the periodic scanner can later repair the projection.
+risk-provider 将完整账户风险组从 PostgreSQL 投影到 Redis，并维护
+`symbol + instrument_version -> group_id` 反向索引。标记价格事件只读取受影响的 Redis 风险组，
+要求版本严格一致，并使用缓存的不可变合约和风险档位元数据。资金费、强平和 ADL 仍必须复核
+PostgreSQL 权威状态。所有合约名义价值、盈亏和保证金计算统一使用精确整数
+`PerpetualContractMath`，禁止读取标记价格审计表。
 
-Risk ids come from native PostgreSQL sequences. A write transaction allocates each required sequence in one
-batch, then batch-inserts account snapshots, position snapshots, liquidation candidates, and candidate Outbox rows.
-Native sequences may contain gaps after rollback; they must never move backwards.
+持仓风险 Kafka 批次遇到新鲜标记价格暂不可用等瞬时问题时必须持续重试，不能因为定时扫描可以补偿
+就提交或丢弃消息。
 
-`risk_liquidation_candidates` stores liquidation inputs. A candidate is not execution proof; the
-liquidation provider must re-check latest risk before submitting a reduce-only close order.
+风险 ID 来自 PostgreSQL 原生 sequence。写事务一次批量申请所需序号，再批量插入账户快照、
+持仓快照、强平候选和候选 Outbox。事务回滚后允许序号不连续，但不能倒退。
 
-Core indexes:
+`risk_liquidation_candidates` 保存强平输入；候选记录不是执行凭证，强平服务提交只减仓订单前必须
+重新检查最新风险。
 
 ```sql
 CREATE UNIQUE INDEX risk_liquidation_candidates_snapshot_uidx
@@ -305,522 +255,240 @@ CREATE UNIQUE INDEX risk_liquidation_candidates_snapshot_uidx
 CREATE UNIQUE INDEX risk_liquidation_candidates_active_uidx
     ON risk_liquidation_candidates (product_line, user_id, symbol, margin_mode, position_side)
     WHERE status IN ('NEW', 'PROCESSING');
-
-CREATE INDEX risk_liquidation_candidates_status_idx
-    ON risk_liquidation_candidates (product_line, status, event_time ASC);
 ```
 
-Redis projection readiness is fail-closed and a rebuild clears the product-line projection before repopulating it.
-The active candidate unique index prevents duplicate live liquidation candidates for the same account position
-during concurrent mark updates or Kafka replay. Once the prior
-candidate is `COMPLETED` or `CANCELED`, a later scan may create the next staged liquidation candidate if the account is still unsafe.
-Risk insertion should target only the partial active-candidate index for `DO NOTHING`; candidate-id
-or snapshot uniqueness conflicts are data-integrity issues and must fail rather than being treated
-as normal duplicate scans.
-
-The liquidation provider consumes candidate Kafka records in batches and offers them to five Redis keys sharing
-one Cluster hash tag: ready priority, delayed retry, in-flight lease, payload, and priority. Lua scripts perform
-atomic offer/deduplication, promote due retries, claim highest-priority candidates with a lease, acknowledge, and
-reschedule. A fixed worker set claims bounded batches; PostgreSQL remains the durable recovery source if Redis is
-empty or unavailable.
-
-For every claimed batch, PostgreSQL performs set-based candidate state claims, position/risk locks and validation,
-fee snapshot lookup, and reduce-only preemption. It reserves native sequence ranges and batch-inserts liquidation
-orders, order events, `ACCEPTED`/`PLACE` Outbox rows, and audit rows. The JDBC URL enables
-`reWriteBatchedInserts=true`; the partial `trading_orders_liquidation_preempt_idx` limits preemption locks to live
-reduce-only orders. A candidate remains `PROCESSING` after a fill until a newer risk projection proves that the
-position changed, closing the duplicate-liquidation window without trusting Redis as a correctness lock.
-
-`risk_admin_rule_overrides` stores admin-managed risk rule overrides:
-
-- `GLOBAL_MARGIN_POLICY` persists warning and liquidation margin-ratio thresholds.
-- `RISK_SCAN_CONTROL` persists scan enablement, scan delay, and scan batch size.
-- `admin_user_id`, `reason`, and `updated_at` provide an audit trail for risk policy changes.
-- The risk-provider applies a successful write to the current node's runtime configuration immediately; the row is the durable source for admin inspection and later startup/rollout automation.
-
-## Insurance Tables
-
-`insurance_fund_balances` stores the current insurance fund balance per settlement asset.
-Amounts are long asset units and are never negative.
-
-`insurance_fund_ledger` stores immutable fund balance changes:
-
-- Positive `amount_units`: fund deposit or operational top-up.
-- Positive `amount_units` with `reference_type = LIQUIDATION_FEE`: actual liquidation-fee income
-  collected by account-provider and replay-protected by `reference_id = tradeId:orderId`.
-- Negative `amount_units`: fund withdrawal or account deficit coverage.
-- `(reference_type, reference_id, asset)` is unique for idempotency.
-
-`insurance_deficit_coverages` stores actual coverage attempts that paid a positive amount from the
-fund. If the fund has no balance, the deficit remains in `account_deficits` and no empty coverage row
-is written.
-
-Insurance coverage writes `account_ledger_entries` with `reference_type = INSURANCE_COVERAGE`.
-Coverage reduces explicit deficit and does not credit available balance.
-
-Core indexes:
-
-```sql
-CREATE UNIQUE INDEX insurance_fund_ledger_reference_uidx
-    ON insurance_fund_ledger (reference_type, reference_id, asset);
-
-CREATE INDEX insurance_coverages_user_time_idx
-    ON insurance_deficit_coverages (user_id, created_at DESC);
-```
-
-## ADL Tables
-
-`adl_events` stores auto-deleveraging executions after the insurance fund is depleted:
-
-- `deficit_user_id`: user whose `account_deficits` row is being covered.
-- `target_user_id`: profitable account whose position is reduced.
-- `target_position_side`: `NET`, `LONG`, or `SHORT`; records which position bucket was deleveraged.
-- `closed_quantity_steps`: reduced position size.
-- `realized_profit_units`: target-side profit realized by the ADL close.
-- `covered_units`: amount transferred to cover the deficit.
-- `remaining_deficit_units`: deficit left after this ADL event.
-- `priority_score_ppm`: long ADL queue score derived from profit rate and effective leverage.
-
-ADL writes these account ledger reference types:
-
-- `ADL_REALIZED_PNL`: target account realizes PnL from the reduced position.
-- `ADL_TRANSFER`: target account transfers part of realized PnL to cover deficit.
-- `ADL_COVERAGE`: deficit account receives coverage by reducing `account_deficits`.
-
-Core indexes:
-
-```sql
-CREATE INDEX adl_events_deficit_user_time_idx
-    ON adl_events (deficit_user_id, created_at DESC);
-
-CREATE INDEX adl_events_asset_symbol_time_idx
-    ON adl_events (asset, symbol, created_at DESC);
-```
-
-## Trading And Account Margin Tables
-
-`trading_orders` stores the accepted/rejected order state using long ticks and steps:
-
-- `instrument_version`: instrument snapshot used by the accepted order. Rejected unknown-symbol orders may have no version.
-- `price_ticks`: exchange-core price ticks.
-- `quantity_steps`, `executed_quantity_steps`, `remaining_quantity_steps`: exchange-core size steps.
-- `maker_fee_rate_ppm` and `taker_fee_rate_ppm`: the order-admission fee snapshot. Account settlement
-  receives the executed-side rates through `MatchTradeEvent` instead of querying the current instrument,
-  user tier, or order rows on the hot path, so old resting orders are not reinterpreted after a VIP,
-  rebate, or promotion change.
-- `reduce_only` and `post_only`: execution flags.
-- `(user_id, client_order_id)` is unique when `client_order_id` is present.
-- `trading_orders_stp_open_idx` supports self-trade prevention checks by user, symbol, side, and price.
-- `trading_orders_recovery_idx` supports startup order-book recovery by scanning open `LIMIT` + `GTC/GTX` orders in maker-priority order.
-
-`trading_cancel_all_after` stores the user dead-man switch timers used by `POST /trading/orders/cancel-all-after`:
-
-- `(user_id, symbol_scope)` is the primary key. `symbol_scope='*'` means account-wide; otherwise it is a concrete symbol.
-- `countdown_ms=0` with `DISABLED` turns the timer off. Positive countdowns set `ACTIVE` with `trigger_at`.
-- The order provider claims due `ACTIVE` rows through `trading_cancel_all_after_due_idx`, moves them to
-  `TRIGGERING`, cancels open ordinary orders through the same `cancel-open` path, calls trigger-provider
-  `cancel-open` for pending TP/SL, then marks the timer `TRIGGERED`.
-- `canceled_order_count` and `canceled_trigger_order_count` record how many cancellation requests were issued in
-  the latest trigger execution; they are reset whenever the timer is refreshed or disabled.
-
-`trading_algo_orders` stores parent TWAP/Iceberg instructions before their child orders enter the live order path:
-
-- `client_algo_order_id` is scoped by `user_id` for idempotent placement.
-- `algo_type` is `TWAP` or `ICEBERG`; `status` moves through `PENDING/RUNNING/CANCEL_REQUESTED` and terminal
-  `CANCELED/COMPLETED/FAILED`.
-- TWAP uses IOC child orders. If `price_ticks=0`, the child is a MARKET IOC order; otherwise it is a LIMIT IOC
-  order at `price_ticks`.
-- Iceberg requires `price_ticks > 0` and uses LIMIT `GTC` or `GTX` child orders. Only one visible child order is
-  active at a time; after that child fills or is canceled, the scheduler places the next slice.
-- `quantity_steps` is the total target and `child_quantity_steps` is the per-slice visible quantity. `interval_seconds`
-  and `duration_seconds` bound TWAP scheduling validation.
-- `current_order_id` points at the latest child `trading_orders` row. `trace_id` is forwarded to child orders so
-  the parent request can be followed through matching, account settlement, risk, and WebSocket events.
-- Active algo rows are included in margin-mode and position-mode switch blockers, so a user cannot switch mode while
-  future child orders may still be emitted.
-
-`trading_algo_order_children` links each parent slice to the ordinary order that actually enters matching:
-
-- `(algo_order_id, slice_index)` is unique, and `order_id` references `trading_orders(order_id)`.
-- `status` mirrors the child order status; the order-provider refreshes it from `trading_orders` before scheduling
-  the next slice or returning parent progress.
-- Progress is derived from child `executed_quantity_steps` plus active child remaining quantity; balances and
-  positions are never updated directly from the algo tables.
-
-Core algo indexes:
-
-```sql
-CREATE UNIQUE INDEX trading_algo_orders_user_client_uidx
-    ON trading_algo_orders (user_id, client_algo_order_id)
-    WHERE client_algo_order_id IS NOT NULL;
-
-CREATE INDEX trading_algo_orders_due_idx
-    ON trading_algo_orders (next_slice_at, algo_order_id)
-    WHERE status IN ('PENDING', 'RUNNING');
-
-CREATE INDEX trading_algo_orders_user_status_idx
-    ON trading_algo_orders (user_id, symbol, status, created_at DESC);
-
-CREATE UNIQUE INDEX trading_algo_order_children_client_uidx
-    ON trading_algo_order_children (client_order_id);
-```
-
-`trading_trigger_orders` stores take-profit, stop-loss, and trailing-stop conditional orders before they enter the live
-order path:
-
-- `client_trigger_order_id` is scoped by `user_id` for idempotent placement.
-- `oco_group_id` is optional and scoped by `user_id + symbol + margin_mode`. Pending siblings in the same
-  OCO group are canceled when one row is claimed for execution.
-- `trigger_condition` is derived from close side and trigger type. Every trigger is evaluated from the latest
-  mark price sampled once per second, so there is no configurable price-source field.
-- `trigger_price_ticks`, `price_ticks`, and `quantity_steps` stay in the same long tick/step model as
-  regular orders. Static TP/SL requires a positive `trigger_price_ticks`; trailing stop allows `0` and uses
-  `activation_price_ticks`, `callback_rate_ppm`, `highest_price_ticks`, `lowest_price_ticks`, and `activated_at`
-  to track activation and callback state.
-- `status` moves through `PENDING -> TRIGGERING -> TRIGGERED` or `TRIGGER_FAILED`; user cancellation moves
-  only `PENDING` rows to `CANCELED`, and expiry moves due rows to `EXPIRED`.
-- `placed_order_id` links the generated reduce-only close order in `trading_orders`.
-- `trigger_sequence` and `triggered_price_ticks` record which sampled mark-price event triggered the row.
-- `trace_id` is forwarded to the generated order request so private WebSocket order/match/position pushes can
-  be traced back to the original TP/SL placement.
-
-Core trigger indexes:
-
-```sql
-CREATE UNIQUE INDEX trading_trigger_orders_user_client_uidx
-    ON trading_trigger_orders (product_line, user_id, client_trigger_order_id)
-    WHERE client_trigger_order_id IS NOT NULL;
-
-CREATE INDEX trading_trigger_orders_user_oco_idx
-    ON trading_trigger_orders (product_line, user_id, symbol, margin_mode, oco_group_id, status, updated_at DESC)
-    WHERE oco_group_id IS NOT NULL;
-
-CREATE INDEX trading_trigger_orders_symbol_gte_idx
-    ON trading_trigger_orders (product_line, symbol, trigger_price_ticks, trigger_order_id)
-    WHERE status = 'PENDING'
-      AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
-      AND trigger_condition = 'GREATER_OR_EQUAL';
-
-CREATE INDEX trading_trigger_orders_symbol_lte_idx
-    ON trading_trigger_orders (product_line, symbol, trigger_price_ticks DESC, trigger_order_id)
-    WHERE status = 'PENDING'
-      AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
-      AND trigger_condition = 'LESS_OR_EQUAL';
-
-CREATE INDEX trading_trigger_orders_trailing_pending_idx
-    ON trading_trigger_orders (product_line, symbol, trigger_order_id)
-    WHERE status = 'PENDING'
-      AND trigger_type = 'TRAILING_STOP';
-```
-
-The trigger provider claims due rows with `FOR UPDATE SKIP LOCKED`, so active-active nodes can consume the
-same mark-price stream without executing the same trigger twice. The claim statement partitions candidates by
-OCO group, selects one pending row per group, sets that row to
-`TRIGGERING`, and cancels pending siblings in the same statement. The expiry and `TRIGGERING` indexes support
-scheduled expiry and stale execution retry.
-
-Spring Data Redis with Lettuce always keeps static TP/SL ids
-in product-line/symbol sorted sets. Redis performs one atomic Lua range lookup, but the returned ids
-still pass through the same PostgreSQL exact predicate and row claim. The database remains authoritative for user
-queries and all state transitions. Placement writes the candidate before DB insert and cleans it on rollback;
-terminal DB changes remove the member afterward, so a process crash can only leave a harmless stale candidate.
-The rebuild coordinator uses a token-owned Redis lease with compare-and-delete Lua release. It is an efficiency
-lock only; trigger uniqueness depends on the PostgreSQL conditional update and `SKIP LOCKED`.
-
-When account settlement makes a position quantity zero, its transactional position outbox emits the full,
-user-keyed snapshot. Trigger-provider consumes that event and changes matching `PENDING` rows created no later
-than the close event to `CANCELED` with `reject_reason = 'POSITION_CLOSED'`. The trigger update and trigger-status
-outbox rows commit together, then Redis members are removed after commit. Duplicate Kafka delivery is idempotent,
-and the `created_at <= event_time` predicate prevents a delayed close event from canceling triggers for a reopened
-position.
-
-`trading_fee_schedules` stores user-level fee overrides:
-
-- `symbol IS NULL` is a user-global fee tier; a concrete `symbol` is a per-symbol override.
-- `source_type` records why the override exists: `USER_OVERRIDE`, `VIP`, `MARKET_MAKER`, `PROMOTION`, or `RISK_OVERRIDE`.
-  `tier_code` stores the external VIP/market-maker/program code used by admin systems.
-- Resolution order is per-symbol user fee, then user-global fee, then the instrument default. Within the same
-  specificity, `RISK_OVERRIDE`, `USER_OVERRIDE`, `PROMOTION`, and `MARKET_MAKER` outrank `VIP`.
-- `effective_time` / `expire_time`, `status`, and descending indexes allow deterministic historical
-  activation. The resolved ppm is copied into `trading_orders` before a command is published.
-
-The primary trading database no longer creates or maintains automatic fee-tier tables. Thirty-day volume,
-asset valuation, VIP qualification, and market-maker quality belong to a future finance-operations system
-that uses event projections and an independent database. It must not aggregate across trade, balance, and
-instrument tables in the primary trading database. Trading accepts only finalized `trading_fee_schedules`.
-
-`market_maker_strategy_leases` coordinates active-active market-maker providers:
-
-- Primary key is `(strategy_id, symbol)`, so one strategy may quote different symbols on different nodes.
-- `owner_id` should be the provider's stable node id in production.
-- `lease_until` lets another node take over after a failed owner stops refreshing the row.
-- The table does not store balances. The provider still reads instruments, order book, mark price, account positions,
-  and open orders each cycle before placing normal post-only orders through order-provider.
-
-`market_maker_strategy_overrides` stores the latest admin-approved hot override for a configured strategy:
-
-- Only quote/risk parameters are hot-editable: enabled, base quantity, margin mode, spread, level spacing,
-  inventory cap/skew, and quote levels. Account ids and symbols remain deployment-level config.
-- Null fields mean "use the configured value from `application.yml`"; deleting the row fully resets the strategy to
-  file config.
-- `updated_by_admin_user_id`, `reason`, `updated_at`, and `version` record the current effective override metadata.
-  Full operator audit and four-eyes approval are enforced in gateway admin operation logs and approval tables.
-
-`market_maker_strategy_run_events` stores best-effort strategy execution events for admin operations:
-
-- Events are keyed by strategy, symbol, account, node id, cycle sequence, event type, trace id, and creation time.
-- Event types cover cycle success/failure, quote reconciliation, IOC trade submit/reject outcomes, and skipped cycles.
-- The admin `/api/v1/admin/market-maker/strategy-logs` endpoint uses this table for run-log troubleshooting.
-- Financial attribution no longer joins orders, trades, ledger entries, and positions in the primary trading
-  database. A future finance-operations module must consume domain events into an independent database projection
-  for attribution, reconciliation, and operational reports.
-
-`market_maker_reference_samples` stores one best-effort reference-market sample per strategy symbol cycle when an
-external order book snapshot is available:
-
-- `source_name` and `transport` identify whether the quote plan used REST fallback or a WebSocket-maintained local book.
-- `bid_levels`, `ask_levels`, best bid/ask, mid, and spread ticks allow production tests to prove the maker was
-  calibrated from Binance/OKX/Bybit-style depth rather than static local parameters.
-- The table is observability only. Balances, positions, order reservations, and deficits still use the account/trading
-  transactional tables as the source of truth.
-
-`trading_leverage_settings` stores the user's target leverage by `user_id + symbol + margin_mode`:
-
-- `leverage_ppm`: leverage in ppm, so `10_000_000` means `10x` and `100_000_000` means `100x`.
-- Order entry validates the setting against `instruments.max_leverage_ppm` when it is saved, then re-checks
-  it against the matching `instrument_risk_brackets.max_leverage_ppm` for the current order/position notional
-  before reserving margin.
-- If no user setting exists, order entry uses the selected risk bracket's maximum leverage, which is equivalent
-  to reserving at that bracket's `initial_margin_rate_ppm`.
-- The effective initial-margin rate is `max(leverage-derived rate, risk-bracket initial margin rate)`.
-
-`trading_symbol_open_interest_shards` stores platform open interest in 64 user-derived shards per
-product line and symbol. `trading_symbol_open_interest` is the aggregate read view:
-
-- Account settlement updates the position and its OI shard in one data-modifying CTE and one database
-  round trip. `shard_id=floorMod(userId, 64)` removes the single symbol-row write hotspot.
-- `long_quantity_steps` and `short_quantity_steps` track the absolute live long and short quantities. Direction flips apply both a negative delta on the old side and a positive delta on the new side.
-- The aggregate view calculates `open_quantity_steps=GREATEST(SUM(long_quantity_steps),
-  SUM(short_quantity_steps))`, which avoids double-counting both sides when order entry applies
-  platform-OI-based user caps.
-- Order entry reads `open_quantity_steps`, converts it to notional with the current admission price and instrument formula, then applies the instrument's `user_open_interest_limit_*` settings.
-- Because this is derived state, production operations should periodically rebuild-check it from `account_positions`, especially after manual repairs, emergency imports, or disaster recovery.
-
-`trading_match_results` stores one idempotent result per matching command:
-
-- `command_id` is the idempotency key.
-- `instrument_version` is the taker command/order version.
-- `trace_id` is copied from the order command and links the result to the originating REST request.
-- `trading_match_results_success_place_idx` lets the recovery query confirm that an open order had a successful `PLACE` result before restoring it into exchange-core.
-
-`trading_match_trades` stores `taker_instrument_version`, `maker_instrument_version`,
-`taker_fee_rate_ppm`, and `maker_fee_rate_ppm`. Account settlement uses those side-specific versions
-and required fee rates because maker orders can be older than the taker command. `trace_id` is copied
-from the taker command that produced the trade and is forwarded to account position events.
-
-`trading_order_events` stores `trace_id` from the HTTP order or cancel request. Use it with
-`trading_match_results.trace_id`, `trading_match_trades.trace_id`, Kafka topic/partition/offset, and
-the relevant ids (`order_id`, `command_id`, `trade_id`) when tracing a user request across the trading
-chain.
-The `trading_trigger_orders_trace_idx`, `trading_order_events_trace_idx`,
-`trading_match_results_trace_idx`, `trading_match_trades_trace_idx`,
-`trading_outbox_events_trace_idx`, `account_outbox_events_trace_idx`,
-`gateway_admin_operation_logs_trace_idx`, and
-`gateway_admin_approval_requests_consumed_trace_idx` indexes preserve correlation keys that a future
-independent operations database may ingest through events or controlled CDC. The gateway does not
-JOIN these primary tables into a TraceId timeline.
-`gateway_admin_operation_logs.duration_ms` stores admin gateway proxy request duration as audit
-evidence that can be projected into the independent operations database.
-The same side-specific versions are used for contract math, while maker/taker fee ppm comes from the
-required fee fields stored on `trading_match_trades`.
-
-Derivative order entry moves initial margin directly from `account_balances.available_units` to
-`locked_units`. `trading_orders.reservation_account_type`, `reservation_asset`, and `reserved_units`
-form the immutable reservation snapshot propagated through matching and account commands. A duplicate
-`clientOrderId` returns the existing order without locking funds again. Each
-`account_trade_settlement_sides` row audits margin consumed into a position and excess released by that
-trade side; terminal order release subtracts those audited values from the original snapshot.
-
-`account_position_margins` tracks current position collateral by `user_id + symbol + asset + margin_mode`.
-Opening fills increase this table by consuming locked order margin. Closing fills release the remaining
-collateral proportionally back to `account_balances.available_units`.
-User-initiated isolated-margin adjustments also mutate this table: positive adjustments move
-`account_balances.available_units` into locked position collateral, while negative adjustments release
-position collateral back to available balance only after the latest `risk_position_snapshots` row proves
-the position remains above maintenance margin plus the configured removal buffer.
-Opening fills require a positive immutable reservation snapshot on non-reduce-only orders. Missing
-snapshots or skipped margin migration updates fail the account transaction instead of creating an
-uncollateralized position.
-
-`account_deficits` tracks bankruptcy deficits without allowing negative `account_balances` columns.
-Realized profits first clear deficits, then increase `available_units`. Cross-margin realized losses
-and fees reduce `available_units`, then the portion of cross `locked_units` backed by
-`account_position_margins`, and any remainder increases `deficit_units`. Isolated-margin losses and
-fees do not debit cross available balance; they consume only the exact `user_id + symbol + asset +
-ISOLATED` position collateral, then record any remainder as deficit. Order-reservation locked funds
-are not eligible for PnL, trading-fee, or funding-fee loss debits. When position-backed locked
-collateral is consumed, the matching `account_position_margins` rows are reduced under `FOR UPDATE`
-so later position-margin releases cannot over-credit available balance.
-
-`account_positions` stores perpetual exposure by position bucket:
-
-- `margin_mode`: `CROSS` or `ISOLATED`.
-- `position_side`: `NET`, `LONG`, or `SHORT`. `ONE_WAY` accounts use the single `NET` bucket. `HEDGE`
-  accounts keep independent `LONG` and `SHORT` buckets for the same user, symbol, and margin mode.
-  Position mode switching is user-scoped and is allowed only when the user has no non-zero positions,
-  no active orders, no pending trigger orders, and no unsettled matching/account state.
-- `instrument_version`: contract version for the current non-zero exposure. It is `NULL` when the position is flat.
-- `signed_quantity_steps`: positive for long, negative for short.
-- `entry_price_ticks`: average entry in exchange-core ticks.
-- `realized_pnl_units`: realized PnL accumulator in the instrument settlement asset. Closing fills are
-  written to `account_ledger_entries` as `TRADE_PNL`.
-- Maker/taker fee debits or rebates are written to `account_ledger_entries` as `TRADE_FEE`.
-  `trade_id`, `order_id`, `symbol`, and `fee_rate_ppm` are stored with the ledger row for audit and
-  reconciliation.
-- Actual liquidation fees are written to `account_ledger_entries` as `LIQUIDATION_FEE` with the same
-  trade/order/symbol/fee-rate audit fields. The amount is capped by collectible collateral and never
-  creates a new `account_deficits` row. Insurance fund income is driven only by these collected
-  amounts, not by liquidation estimates.
-
-The account provider executes every maker/taker side through `account_commands`. The immutable
-command id and envelope SHA-256 provide execution idempotency, while
-`account_trade_settlement_sides(product_line, symbol, trade_id, participant_role)` records one
-immutable row per participant. Taker and maker never update a shared settlement row.
-`account_trade_settlement_completions` is the bilateral-completion read view. Identity conflicts roll
-back the whole participant transaction; the monitor uses `reconciled_at` and the pending-only partial
-index so normal health checks do not rescan completed history.
-All balance and margin transitions run inside one PostgreSQL transaction and lock the affected
-position/margin rows with `FOR UPDATE`. Position, balance, deficit, ledger, reservation, and
-position-margin writes are fail-fast when an expected row is not written.
-For the common linear-perpetual cross-margin case, `TRADE_PNL` and `TRADE_FEE` each use one
-data-modifying CTE to update available balance and insert the ledger row with its final
-`balance_after_units`. Insufficient available balance, isolated margin, or an unsettled deficit falls
-through without mutation to the full locked-margin/deficit settlement algorithm. Command idempotency
-is checked before dispatch, and ledger conflicts are never silently skipped.
-`LIQUIDATION_FEE` uses `tradeId:orderId` as the reference id and is emitted to the insurance fund
-only after the balance debit succeeds.
-Manual isolated-margin transfers write `account_ledger_entries.reference_type = POSITION_MARGIN_ADJUSTMENT`
-with signed `amount_units`: positive means collateral added to the position, negative means collateral
-released from the position. The unique `account_ledger_reference_uidx` makes these requests idempotent
-by `reference_id + user_id + asset`.
-Back-office balance and product-balance adjustments also keep a dedicated operator audit trail in
-`account_admin_balance_adjustments`. The ledger rows remain the source of funds truth, while this
-admin table stores `admin_user_id`, `admin_username`, adjustment kind, account type, reference id,
-amount, balance-after value, and timestamp for back-office traceability.
-Account valuation, reconciliation, daily snapshots, order timelines, and operations reports are not
-stored or queried by the trading gateway. A future `surprising-finance-ops` module must use a
-separate datasource and physical database, populate read models from domain events, outbox events,
-or controlled CDC, and never execute report JOINs against the primary trading database.
-
-Gateway support operations use two local admin tables:
-
-- `gateway_support_tickets` stores customer support cases by user, status, priority, category, assignee,
-  creator, resolver, and close time.
-- `gateway_support_ticket_notes` stores the chronological note timeline for each ticket. Notes carry the
-  admin user, note type, visibility, body, and creation time.
-
-Gateway authentication and support persistence follow a single-table Repository boundary. `gateway_users`,
-`gateway_roles`, `gateway_permissions`, `gateway_user_roles`, `gateway_role_permissions`, login logs, MFA,
-refresh sessions, support tickets, and support notes are accessed by separate repositories. Services aggregate
-roles, permissions, ticket notes, and cross-table transactions. The compliance list projection is the sole
-gateway-local exception because its filters and cursor must use one consistent snapshot; its source comment
-records the exact non-splittable reason.
-
-The gateway no longer stores or evaluates an operations alert center and does not query live trading services
-to build cross-domain user profiles. Those read models belong to a future independent operations database or
-observability platform, populated by events, outbox records, controlled CDC, and telemetry rather than report
-queries against the trading primary database.
-
-The repository boundary is enforced by `scripts/check-persistence-boundaries.sh`. It derives the
-physical-table vocabulary from project DDL, rejects production JDBC access outside repository
-implementations, and requires every repository that references multiple physical tables to carry an
-explicit Chinese `不可拆原因` comment. This check should run in CI before module tests.
-
-HTTP and scheduler entry layers follow the same dependency direction. Controllers validate protocol input,
-extract non-persistence request context, call services, and translate service outcomes to HTTP responses.
-They never query repositories or own transaction boundaries. Scheduled methods live only in `task` packages;
-task classes contain trigger configuration and delegate each execution to a service. Repository, Redis, external
-client, transaction, and message-consumer responsibilities remain outside task classes. The boundary is enforced
-by `scripts/check-entry-layer-boundaries.sh`.
-
-`account_outbox_events` stores account-side Kafka events written inside the same transaction as the
-account state change. It carries `POSITION_UPDATED` events for WebSocket private position pushes and
-`LIQUIDATION_FEE_SETTLED` events for insurance-fund credits. Redis position snapshots are not business events and
-are deliberately excluded from this table:
-
-- `id`: database-allocated outbox id.
-- `topic`: Kafka destination, for example `surprising.linear-perp.account.position.events.v1` or
-  `surprising.linear-perp.account.liquidation-fee.events.v1`.
-- `product_line`: outbox ownership and publisher scope. A provider only claims rows for its configured product line.
-- `event_key`: Kafka key. Position updates use `<PRODUCT_LINE>:<userId>` so all position revisions for one
-  account remain ordered; liquidation-fee events use the settlement asset so insurance fund updates can be
-  serialized by asset.
-- `payload`: JSONB event body.
-- `attempts`, `next_attempt_at`, `published_at`, and `last_error`: retry and publish state.
-- `POSITION_UPDATED` payloads carry the complete position/collateral snapshot, PostgreSQL `revision`, product line,
-  and original match-trade `traceId`. The same durable event drives Redis CAS projection, risk, trigger cleanup,
-  and WebSocket/private-account pushes.
-- `LIQUIDATION_FEE_SETTLED` payloads carry `tradeId`, `orderId`, `liquidationOrderId`, `candidateId`,
-  `asset`, collected `amountUnits`, `feeRatePpm`, and `traceId`.
-- Account-provider captures one complete position/collateral snapshot per distinct changed key and inserts it into
-  `account_outbox_events` in the same transaction as the account mutation. After commit, the identical snapshot is
-  also submitted to a bounded, coalescing Redis worker for low latency. A dedicated Kafka consumer provides durable
-  replay. Redis Lua CAS rejects older revisions; queue overflow, malformed events, or Redis failure marks the
-  product-line projection unavailable until Kafka replay or PostgreSQL reconciliation repairs it.
-
-Indexes:
-
-```sql
-CREATE INDEX account_outbox_pending_idx
-    ON account_outbox_events (product_line, next_attempt_at, id)
-    WHERE published_at IS NULL;
-
-CREATE INDEX account_outbox_pending_stream_idx
-    ON account_outbox_events (product_line, topic, event_key, id)
-    INCLUDE (next_attempt_at)
-    WHERE published_at IS NULL;
-
-CREATE INDEX account_outbox_aggregate_idx
-    ON account_outbox_events (aggregate_type, aggregate_id);
-
-CREATE INDEX account_outbox_published_line_cleanup_idx
-    ON account_outbox_events (product_line, published_at, id)
-    WHERE published_at IS NOT NULL;
-```
-
-The account publisher combines transaction-scoped advisory locks per `topic + event_key` with an
-atomic lease update, so multiple account-provider nodes can drain different streams safely.
-Publishing is at-least-once; consumers should deduplicate by event id, trade id, or their own
-latest-position version rules. Insurance uses
-`insurance_fund_ledger(reference_type, reference_id, asset)` with `reference_id = tradeId:orderId`.
-The account claim materializes the product-line pending set once, ranks each `topic + event_key`
-stream in one window pass, and leases only a continuous due prefix. A future retry still blocks every
-later row for that key, and the round-robin candidate order prevents a deep symbol stream from taking
-the whole batch.
-Published rows are transient delivery records. Every publisher owns a scheduled retention task: the shared
-trading table is partitioned logically by `aggregate_type`, the account table by `product_line`, and the risk
-publisher owns the risk table. Rows older than seven days are deleted once per minute in up to ten short
-10,000-row `FOR UPDATE SKIP LOCKED` batches. Pending or failed rows are never selected for deletion. The
-retention duration, cleanup delay, batch size, and maximum batches per run must all be positive.
-
-## Liquidation Tables
-
-`liquidation_orders` audits each liquidation candidate outcome:
-
-- `SUBMITTED` rows must have positive `quantity_steps`.
-- `CANCELED` rows may have `quantity_steps = 0` when the account has recovered or the position is gone.
-- `bankruptcy_price_ticks`, `takeover_price_ticks`, `liquidation_fee_rate_ppm`, and
-  `liquidation_fee_units` are fixed at submission time for audit and insurance/ADL reconciliation.
-  Canceled rows keep these fields at zero.
-- The provider locks live `account_positions`, locks existing same-side reduce-only `trading_orders`, writes cancel-request events/commands for them, and then sizes the staged liquidation order from `abs(livePosition)`.
-- Existing user reduce-only orders must not reduce liquidation capacity; otherwise a far-away GTC close order could block forced liquidation.
-- Strong liquidation order creation does not use broad conflict suppression on `trading_orders`; uniqueness violations roll the transaction back.
-- Sizing first attempts risk-bracket reduction, then configured partial close ratios, and only fully closes when the margin ratio is above the full-close threshold.
-- Before submitting, the provider reads the latest fresh risk position/account snapshots and cancels with `RISK_POSITION_CHANGED` if the snapshot quantity no longer matches the locked live position.
-
-`liquidation_admin_actions` stores admin-side operational actions for liquidation candidates:
-
-- `CANCEL_CANDIDATE` is currently supported.
-- Actions reference `risk_liquidation_candidates(candidate_id)`.
-- `admin_user_id`, `reason`, and `created_at` are persisted for dispute review and audit.
-- A candidate can be canceled from the admin UI only while it is `NEW` or `PROCESSING` and has no active `SUBMITTED` or `PARTIALLY_FILLED` liquidation order.
+Redis 投影采用失败关闭。多节点定时对账由产品线 token 租约协调，不清空正在服务的完整投影；
+每轮 generation 记录扫描和并发事件观察到的风险组，仅清理同一有效 generation 中未出现的陈旧组。
+权威数据库加载与 Redis 替换受风险组锁保护，Lua 原子更新组状态、成员关系和反向索引。只有完整
+首轮扫描结束后才建立就绪标记；投影失败会删除就绪标记。
+
+活动候选唯一索引防止并发价格更新和 Kafka 回放为同一持仓创建多个有效候选。旧候选进入
+`COMPLETED` 或 `CANCELED` 后，如果账户仍不安全，后续扫描可以创建下一阶段候选。
+插入时只能针对活动候选部分唯一索引执行 `DO NOTHING`；候选 ID 或快照唯一性冲突属于数据完整性
+错误，必须失败。
+
+强平消费者批量读取候选事件，并写入共享同一 Redis Cluster hash tag 的就绪优先队列、延迟重试、
+处理中租约、载荷和优先级五类 key。Lua 原子完成投递去重、到期提升、带租约领取、确认和重排。
+固定工作线程按有界批次领取；Redis 为空或不可用时，PostgreSQL 仍是持久恢复来源。
+
+每批候选在 PostgreSQL 中以集合操作完成状态领取、持仓和风险锁定校验、费率快照查询以及只减仓
+订单抢占。服务预留原生 sequence 区间，批量插入强平订单、订单事件、`ACCEPTED` / `PLACE`
+Outbox 和审计记录。候选成交后保持 `PROCESSING`，直到更新的风险投影证明持仓已经改变，从而在不把
+Redis 当作正确性锁的前提下关闭重复强平窗口。
+
+`risk_admin_rule_overrides` 保存管理端风控覆盖：
+
+- `GLOBAL_MARGIN_POLICY`：预警和强平保证金率阈值。
+- `RISK_SCAN_CONTROL`：扫描开关、延迟和批量大小。
+- `admin_user_id`、`reason`、`updated_at`：策略变更审计。
+- 写入成功后当前节点立即应用运行时配置；数据库记录是管理查询及后续启动、发布自动化的持久来源。
+
+## 保险基金表
+
+`insurance_fund_balances` 按结算资产保存当前保险基金余额，使用长整型资产单位且绝不能为负。
+
+`insurance_fund_ledger` 保存不可变基金流水：
+
+- 正 `amount_units`：充值或运营补充。
+- `reference_type = LIQUIDATION_FEE` 的正金额：account-provider 实际收取的强平费收入，
+  使用 `reference_id = tradeId:orderId` 防止重放。
+- 负 `amount_units`：提取资金或覆盖账户穿仓。
+- `(reference_type, reference_id, asset)` 唯一，保证幂等。
+
+`insurance_deficit_coverages` 只保存实际支付了正金额的覆盖尝试。基金无余额时，穿仓继续保留在
+`account_deficits`，不能写入空覆盖记录。
+
+覆盖操作写入 `reference_type = INSURANCE_COVERAGE` 的 `account_ledger_entries`；它减少显式穿仓，
+不会增加可用余额。
+
+## ADL 表
+
+保险基金耗尽后，`adl_events` 保存自动减仓执行结果：
+
+- `deficit_user_id`：被覆盖 `account_deficits` 的用户。
+- `target_user_id`：被减仓的盈利账户。
+- `target_position_side`：`NET`、`LONG` 或 `SHORT`。
+- `closed_quantity_steps`：减少的持仓数量。
+- `realized_profit_units`：目标账户在 ADL 平仓中实现的利润。
+- `covered_units` / `remaining_deficit_units`：本次覆盖额及剩余穿仓。
+- `priority_score_ppm`：由收益率和有效杠杆计算的长整型 ADL 排队分数。
+
+ADL 使用以下账户流水类型：
+
+- `ADL_REALIZED_PNL`：目标账户因减仓实现盈亏。
+- `ADL_TRANSFER`：目标账户转出部分已实现利润覆盖穿仓。
+- `ADL_COVERAGE`：穿仓账户通过减少 `account_deficits` 获得覆盖。
+
+## 交易与账户保证金表
+
+### 订单、条件单与算法单
+
+`trading_orders` 使用长整型 ticks 和 steps 保存订单状态：
+
+- `instrument_version`：订单接纳时使用的合约快照；未知交易对的拒绝单可以没有版本。
+- `price_ticks`、`quantity_steps`、`executed_quantity_steps`、
+  `remaining_quantity_steps`：撮合价格和数量。
+- `maker_fee_rate_ppm` / `taker_fee_rate_ppm`：准入时冻结的费率快照。结算通过
+  `MatchTradeEvent` 接收实际成交侧费率，不在热路径重新查询当前合约、用户等级或订单，
+  避免旧挂单被新的 VIP、返佣或活动规则重新解释。
+- `reduce_only` / `post_only`：执行标志。
+- 存在 `client_order_id` 时，`(user_id, client_order_id)` 唯一。
+- `trading_orders_stp_open_idx` 支持按用户、交易对、方向和价格执行自成交保护。
+- `trading_orders_recovery_idx` 支持启动时按 Maker 优先级恢复已成功 `PLACE` 的
+  `LIMIT + GTC/GTX` 未完成订单。
+
+`trading_cancel_all_after` 保存 `POST /trading/orders/cancel-all-after` 设置的用户死亡开关。
+`(user_id, symbol_scope)` 为主键，`symbol_scope='*'` 表示全账户；倒计时为零且状态为
+`DISABLED` 表示关闭。到期任务把 `ACTIVE` 改为 `TRIGGERING`，通过统一 `cancel-open` 服务取消
+普通订单和待触发 TP/SL，最后改为 `TRIGGERED`。每次刷新或关闭时重置取消计数。
+
+`trading_algo_orders` 保存 TWAP/Iceberg 父指令，子订单进入普通订单链路前由
+`trading_algo_order_children` 记录关联关系。`client_algo_order_id` 在用户范围内幂等；
+状态从 `PENDING` / `RUNNING` / `CANCEL_REQUESTED` 进入
+`CANCELED` / `COMPLETED` / `FAILED`。TWAP 使用 IOC 子单，Iceberg 在当前子单结束后补充下一笔，
+所有子单继续遵循普通订单的资金、风控、Outbox 和撮合边界。
+
+`trading_trigger_orders` 保存止盈止损、止损限价、跟踪委托和 OCO 状态。触发价、激活价、回调率、
+最高价、最低价、触发序号及实际触发价格均保存为长整型字段。触发后通过普通订单服务创建
+`placed_order_id`，不能直接写撮合状态。OCO 一侧触发或取消后，另一侧必须按同一组规则收敛。
+
+### 费率、做市和杠杆
+
+`trading_fee_schedules` 按产品线、费率等级和生效时间保存 Maker/Taker 费率。订单接纳时冻结有效
+费率，成交结算不回查后来生效的费率。
+
+`market_maker_strategy_leases` 协调做市策略多节点所有权；
+`market_maker_strategy_overrides` 保存运行参数覆盖，空字段表示继续使用 `application.yml`；
+`market_maker_strategy_run_events` 保存周期执行、报价协调、IOC 提交或拒绝和跳过周期等尽力而为的
+运维事件；`market_maker_reference_samples` 保存外部盘口样本。以上运行表只用于观察，余额、持仓、
+冻结和穿仓仍以账户及交易事务表为事实源。跨订单、成交、流水和持仓的财务归因必须由未来独立的
+财务运营数据库消费领域事件后完成。
+
+`trading_leverage_settings` 按 `user_id + symbol + margin_mode` 保存用户目标杠杆。
+`10_000_000` 表示 10 倍，`100_000_000` 表示 100 倍。保存时校验合约最大杠杆，下单冻结保证金前
+再按当前名义价值校验风险档位。没有用户设置时使用风险档位最大杠杆；有效初始保证金率取
+杠杆推导值和档位初始保证金率的较大者。
+
+`trading_symbol_open_interest_shards` 按产品线和交易对使用 64 个用户散列分片保存平台持仓量，
+`trading_symbol_open_interest` 是聚合读视图。账户结算在同一个数据修改 CTE 中更新持仓和分片，
+避免单交易对热点行。聚合值取多空绝对数量总和的较大者，防止计算平台持仓上限时重复统计。
+该数据是派生状态，人工修复、紧急导入或灾难恢复后应从 `account_positions` 定期重建核对。
+
+### 撮合结果与追踪
+
+`trading_match_results` 按 `command_id` 幂等保存每条撮合命令结果，并保存合约版本和来自 REST
+请求的 `trace_id`。恢复索引用于确认未完成订单曾获得成功 `PLACE` 结果后，才允许恢复进
+exchange-core。
+
+`trading_match_trades` 同时保存 Taker/Maker 各自的合约版本和费率，因为 Maker 挂单可能早于
+Taker 命令。账户结算使用成交侧版本和冻结费率，`trace_id` 从 Taker 命令传递到持仓事件。
+
+`trading_order_events` 保存下单或撤单请求的 `trace_id`。排查链路时应结合撮合结果、成交、
+Kafka topic/partition/offset 和 `order_id`、`command_id`、`trade_id`。相关 trace 索引只保留
+关联键，网关禁止 JOIN 主库表拼装时间线；未来运营库可以通过事件或受控 CDC 建立读模型。
+
+### 保证金、余额和持仓
+
+衍生品下单直接把初始保证金从 `account_balances.available_units` 移至 `locked_units`。
+`reservation_account_type`、`reservation_asset` 和 `reserved_units` 构成不可变冻结快照。
+重复 `clientOrderId` 返回原订单，不能再次冻结资金。
+
+`account_trade_settlement_sides` 按成交参与方记录已迁移到持仓的保证金和释放的多余金额；
+终态订单解冻从原始冻结快照中扣除已经审计的消耗及释放额，只释放剩余部分。
+`account_trade_settlement_completions` 是买卖双方均完成后的读取视图。
+
+`account_position_margins` 按 `user_id + symbol + asset + margin_mode` 保存当前持仓抵押品。
+开仓成交消耗订单冻结资金并增加持仓保证金；平仓按比例把剩余抵押品释放回可用余额。
+逐仓手动加减保证金也更新该表；减少保证金前必须由最新风险快照证明扣减后仍高于维持保证金和
+配置缓冲。非只减仓开仓订单缺少正数冻结快照或保证金迁移未命中时，账户事务必须失败。
+
+`account_deficits` 显式记录穿仓，`account_balances` 列不允许为负。已实现盈利先偿还穿仓，再增加
+可用余额。全仓亏损和费用依次扣可用余额、由 `account_position_margins` 支撑的全仓锁定抵押品，
+剩余部分增加穿仓。逐仓亏损只消耗准确持仓范围的抵押品，不能扣全仓可用余额。订单冻结资金不能
+用于盈亏、手续费或资金费亏损。消耗持仓抵押品时必须以 `FOR UPDATE` 同步减少保证金行，避免后续
+重复释放。
+
+`account_positions` 按持仓桶保存永续敞口：
+
+- `margin_mode`：`CROSS` 或 `ISOLATED`。
+- `position_side`：`NET`、`LONG` 或 `SHORT`。单向模式使用 `NET`；双向模式分别保存多空桶。
+  只有用户没有非零持仓、活动订单、待触发条件单和未结算状态时才允许切换模式。
+- `instrument_version`：当前非零敞口的合约版本，空仓时为 `NULL`。
+- `signed_quantity_steps`：多仓为正、空仓为负。
+- `entry_price_ticks`：平均开仓价格。
+- `realized_pnl_units`：结算资产单位的累计已实现盈亏，平仓写入 `TRADE_PNL` 流水。
+- Maker/Taker 手续费或返佣写入 `TRADE_FEE`；实际收取的强平费写入
+  `LIQUIDATION_FEE`，金额不超过可收取抵押品且不能制造新的穿仓。保险基金只接收实际收取额，
+  不能按估算金额入账。
+
+account-provider 通过 `account_commands` 执行每个成交参与方。不可变命令 ID 和信封 SHA-256
+保证执行幂等；身份冲突回滚整个参与方事务。所有余额、持仓、保证金、穿仓、流水和冻结迁移在一个
+PostgreSQL 事务内完成，并锁定所需行。预期更新未命中时必须快速失败，不能静默跳过。
+
+`TRADE_PNL`、`TRADE_FEE` 和 `LIQUIDATION_FEE` 流水在扣款成功后才写入最终
+`balance_after_units`。人工逐仓保证金调整使用
+`reference_type = POSITION_MARGIN_ADJUSTMENT`；正金额表示增加抵押品，负金额表示释放。
+后台余额调整还写入 `account_admin_balance_adjustments` 保存操作员、调整类型、账户类型、
+引用 ID、金额和调整后余额；账户流水仍是资金事实源。
+
+账户估值、对账、日快照、订单时间线和运营报表不能由交易网关查询或存储。未来
+`surprising-finance-ops` 必须使用独立数据源和物理数据库，通过领域事件、Outbox 或受控 CDC
+构建读模型，禁止对交易主库执行报表 JOIN。
+
+### 网关本地数据与代码边界
+
+`gateway_support_tickets` 保存客服工单；`gateway_support_ticket_notes` 保存工单时间线。
+用户、角色、权限、登录日志、MFA、刷新会话、工单和备注分别由单表 Repository 访问，Service
+负责聚合。合规列表投影是唯一网关本地多表例外，因为过滤和游标必须基于同一数据库快照，源码必须
+以中文 `不可拆原因` 注释说明。
+
+`scripts/check-persistence-boundaries.sh` 从 DDL 推导物理表词汇，禁止生产 JDBC 在 Repository
+之外访问数据库，并要求多表 Repository 明确说明不可拆原因。
+`scripts/check-entry-layer-boundaries.sh` 保证 Controller 只校验协议输入、提取非持久化上下文、
+调用 Service 并转换响应；定时入口只能位于 `task` 包并委托 Service。
+
+### `account_outbox_events`
+
+账户状态变化与 Kafka 事件在同一事务写入本表。它承载 WebSocket、风控和条件单使用的
+`POSITION_UPDATED`，以及保险基金入账使用的 `LIQUIDATION_FEE_SETTLED`。Redis 持仓快照不是
+业务事件，不进入本表。
+
+- `id`：数据库分配的 Outbox ID。
+- `topic` / `product_line`：目标 Topic 和发布者所属产品线。
+- `event_key`：持仓更新使用 `<PRODUCT_LINE>:<userId>`，保证同一账户修订顺序；强平费事件
+  使用结算资产，保证基金更新按资产串行。
+- `payload`：JSONB 事件体。
+- `attempts`、`next_attempt_at`、`published_at`、`last_error`：重试和发布状态。
+- 持仓事件携带完整持仓及抵押品快照、PostgreSQL `revision`、产品线和原成交 `traceId`。
+- 强平费事件携带 `tradeId`、`orderId`、`liquidationOrderId`、`candidateId`、资产、
+  实收金额、费率和 `traceId`。
+
+账户事务按发生变化的精确 key 生成完整快照并插入 Outbox。提交后，相同快照还会进入有界合并
+Redis 工作队列以降低延迟，专用 Kafka 消费者负责持久回放。Redis Lua CAS 拒绝旧修订；队列溢出、
+消息非法或 Redis 失败会把产品线投影标记为不可用，直到回放或 PostgreSQL 对账修复。
+
+发布者对每个 `topic + event_key` 组合使用事务级 advisory lock 和原子租约更新，使多个节点可以
+安全处理不同流。发布语义为至少一次，消费者按事件 ID、成交 ID 或最新持仓版本去重。未来重试项
+必须阻塞相同 key 的后续记录，轮询顺序应避免深队列独占整个批次。
+
+已发布 Outbox 是临时投递记录。发布者每分钟按最多十个、每批 10,000 行的短事务清理七天前数据，
+使用 `FOR UPDATE SKIP LOCKED`；未发布或失败记录绝不能进入清理范围。
+
+## 强平表
+
+`liquidation_orders` 审计每个强平候选结果：
+
+- `SUBMITTED` 必须具有正 `quantity_steps`。
+- 账户恢复或持仓消失时可以写 `CANCELED`，此时数量允许为零。
+- 破产价、接管价、强平费率和强平费在提交时冻结，供保险基金和 ADL 对账；取消记录保持为零。
+- 服务锁定实时 `account_positions` 和同方向现存只减仓订单，先写撤单事件及命令，再根据
+  `abs(livePosition)` 计算分阶段强平数量。
+- 用户已有只减仓订单不能占用强平容量，否则远价 GTC 平仓单会阻断强制平仓。
+- 强平订单写入不能对 `trading_orders` 使用宽泛冲突忽略，唯一性冲突必须回滚事务。
+- 数量计算先尝试降至风险档位，再应用配置的部分平仓比例，只有保证金率达到全平阈值才全部平仓。
+- 提交前读取最新风险账户及持仓快照；快照数量与锁定实时持仓不一致时，以
+  `RISK_POSITION_CHANGED` 取消候选。
+
+`liquidation_admin_actions` 保存管理端对强平候选的操作。目前支持 `CANCEL_CANDIDATE`，并持久化
+管理员、原因和时间。只有候选为 `NEW` 或 `PROCESSING` 且不存在
+`SUBMITTED` / `PARTIALLY_FILLED` 活动强平订单时，管理端才可取消。

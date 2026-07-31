@@ -1,16 +1,16 @@
 # surprising-edge
 
-Frontend access layer modules.
+面向前端的接入层模块。
 
-- `surprising-gateway`: standalone REST gateway provider.
-- `surprising-websocket`: standalone WebSocket fanout API/provider.
-- `surprising-edge-provider`: combined REST gateway and WebSocket fanout deployment for development and small installations.
+- `surprising-gateway`：独立 REST gateway provider。
+- `surprising-websocket`：独立 WebSocket fanout API/provider。
+- `surprising-edge-provider`：开发环境和小规模部署用的 REST gateway + WebSocket fanout 合并 provider。
 
-`surprising-edge-provider` exposes REST gateway routes on `/api/v1/gateway/**` and `/api/v1/admin/**`, WebSocket fanout on `/ws/v1`, and uses port `9094` by default.
+`surprising-edge-provider` 默认端口是 `9094`，REST gateway 路径是 `/api/v1/gateway/**` 和 `/api/v1/admin/**`，WebSocket 路径是 `/ws/v1`。
 
-For production deployments with many long-lived WebSocket connections, keep `surprising-gateway-provider` and `surprising-websocket-provider` as separate deployables under this module so WebSocket fanout can scale independently.
+生产环境如果 WebSocket 长连接很多，继续使用本模块下的 `surprising-gateway-provider` 和 `surprising-websocket-provider` 独立部署，让 WebSocket fanout 单独扩容。
 
-Run locally:
+本地启动：
 
 ```bash
 mvn -pl :surprising-edge-provider -am spring-boot:run

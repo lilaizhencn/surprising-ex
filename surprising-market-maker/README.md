@@ -1,32 +1,31 @@
 # surprising-market-maker
 
-[简体中文](README_CN.md)
 
-Internal market-making service for controlled liquidity, depth simulation, and long-running exchange-chain testing.
+内网做市商服务，用于控制盘口流动性、模拟深度、长期运行压测和完整交易链路验证。
 
-The module is not a matching shortcut. It calls the same order-entry RPCs as every other client, so price protection, margin checks, post-only handling, order outbox, exchange-core matching, account settlement, risk, WebSocket, liquidation, funding, and insurance paths are exercised normally.
+这个模块不会绕过撮合。它和普通客户端一样调用订单入口 RPC，因此价格保护、保证金检查、post-only、订单 outbox、exchange-core 撮合、账户结算、风控、WebSocket、强平、资金费率和保险基金链路都会正常被验证。
 
-## Modules
+## 模块
 
-- `surprising-market-maker-api`: internal RPC contracts.
-- `surprising-market-maker-provider`: scheduled quote planner and quote reconciler.
+- `surprising-market-maker-api`：内网 RPC 契约。
+- `surprising-market-maker-provider`：定时报价策略和订单对账执行器。
 
-## Runtime Safety
+## 运行安全
 
-- `surprising.market-maker.engine.enabled` defaults to `false`; no scheduled live orders are sent until explicitly enabled. A private `run-once` API call can still place orders for enabled strategies.
-- Every quote is a `LIMIT + GTX + postOnly=true` order.
-- The strategy queries account position before quoting. If account state is unavailable, the cycle fails closed and does not quote.
-- Inventory caps stop quoting the exposure-increasing side once `maxInventorySteps` is reached.
-- Existing market-maker orders are reconciled by `clientOrderId` prefix and canceled when stale, too far from the target price, or no longer desired.
-- Optional reference-market calibration is fail-closed per cycle: if enabled WebSocket/REST sources are unavailable and no fresh cache exists, the provider falls back to the normal local mark/order-book quote model instead of using stale external depth.
-- The service should be deployed on an internal network only. Exposing it to public clients would allow operational control of liquidity accounts.
-- HTTP `X-Trace-Id` is accepted and forwarded to downstream Feign calls. Scheduled cycles create a trace id and expose the last value in `/strategies`.
+- `surprising.market-maker.engine.enabled` 默认是 `false`，显式开启前不会定时真实下单。已启用策略仍可以通过私有 `run-once` API 手动执行一轮报价。
+- 所有报价单都是 `LIMIT + GTX + postOnly=true`。
+- 策略每轮都会查询账户持仓。账户状态不可用时，本轮 fail closed，不继续报价。
+- 当前净仓位达到 `maxInventorySteps` 后，会停止继续增加该方向风险的报价。
+- 自己的做市订单通过 `clientOrderId` 前缀识别；过期、偏离目标价格或不再需要的订单会撤掉。
+- 可选参考市场校准按轮次 fail closed：如果开启的 WebSocket/REST 外部 source 不可用且没有新鲜缓存，provider 会回退到本地 mark/order-book 报价模型，不使用过期外部深度继续报价。
+- 这个服务只能部署在内网。不要把做市商控制接口暴露给普通公网用户。
+- HTTP `X-Trace-Id` 会被接收并透传到下游 Feign 调用。定时策略会生成 traceId，最后一轮的值会暴露在 `/strategies` 返回里。
 
-## API
+## 接口
 
-Provider port: `9096`
+Provider 端口：`9096`
 
-The existing internal provider API remains compatible:
+普通内网 API 保持兼容：
 
 ```bash
 curl 'http://localhost:9096/api/v1/market-maker/strategies'
@@ -38,7 +37,7 @@ curl -X POST 'http://localhost:9096/api/v1/market-maker/run-once' \
   -d '{"strategyId":"btc-usdt-mm-a","symbol":"BTC-USDT"}'
 ```
 
-Admin operations use a separate admin path and require the gateway-injected admin identity header:
+后台管理 API 使用独立 admin path，必须由 gateway 注入管理员身份头：
 
 ```bash
 curl 'http://localhost:9096/api/v1/admin/market-maker/strategies' -H 'X-Admin-User-Id: 1001'
@@ -51,7 +50,7 @@ curl -X POST 'http://localhost:9096/api/v1/admin/market-maker/strategies/btc-usd
   -d '{"baseQuantitySteps":25,"spreadTicks":40,"orderLevels":2,"reason":"quote tuning"}'
 ```
 
-admin-web calls through the unified admin gateway route. Gateway maps the `market-maker` admin route to `/api/v1/admin/market-maker`:
+admin-web 通过统一后台 gateway 调用，gateway 会把 `market-maker` 后台路由转发到 `/api/v1/admin/market-maker`：
 
 ```bash
 curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/strategies' -H 'Authorization: Bearer <admin-token>'
@@ -59,22 +58,19 @@ curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/metrics?limit=200'
 curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/strategy-logs?limit=200&sort=createdAt.desc' -H 'Authorization: Bearer <admin-token>'
 ```
 
-`/metrics` aggregates inventory usage, owned live quotes, desired quote coverage, missing quotes, stale quotes, off-target quotes, spread, trace id, and anomalies by strategy/account/symbol. Anomaly types include `NO_LIVE_QUOTES`, `MISSING_DESIRED_QUOTES`, `STALE_QUOTES`, `OFF_TARGET_QUOTES`, `INVENTORY_LIMIT_REACHED`, `INSTRUMENT_NOT_TRADING`, and `METRIC_COLLECTION_FAILED`.
+`/metrics` 聚合策略/账号/Symbol 维度的库存占用、owned live 挂单、目标报价覆盖率、缺失报价、陈旧报价、偏离目标报价、盘口价差、TraceId 和异常列表。异常类型包含 `NO_LIVE_QUOTES`、`MISSING_DESIRED_QUOTES`、`STALE_QUOTES`、`OFF_TARGET_QUOTES`、`INVENTORY_LIMIT_REACHED`、`INSTRUMENT_NOT_TRADING` 和 `METRIC_COLLECTION_FAILED`。
 
-Market-maker PnL attribution has been removed from the primary trading database. Correlating orders, trades, fee
-ledger entries, and positions is a finance-operations query; a future finance-operations module should consume domain
-events into an independent database projection for attribution, reconciliation, and operational reporting.
+做市 PnL 归因接口已从交易主库移除。订单、成交、手续费流水和持仓的关联属于财务运营查询；后续应由
+独立财务运营模块消费领域事件，在独立数据库建立投影并提供归因、对账和运营报表。
 
-`/strategy-logs` reads `market_maker_strategy_run_events`, which records cycle success/failure, quote reconciliation, IOC trade submit/reject outcomes, skipped cycles, error messages, counters, node id, and trace id. It supports cursor paging with `limit`, `cursor`, and `sort`; supported sort values are `createdAt.desc` and `createdAt.asc`. Responses keep `events/count` and add `nextCursor`, `hasMore`, `sort`, and `limit`. Event writes are best-effort and do not block the quoting cycle.
+`/strategy-logs` 读取 `market_maker_strategy_run_events`，记录 cycle 成功/失败、报价对账、IOC 交易提交/拒绝、跳过轮次、错误信息、计数器、节点 id 和 TraceId。接口支持 `limit/cursor/sort` 游标分页，排序白名单为 `createdAt.desc`、`createdAt.asc`，响应保留 `events/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。事件写入是 best-effort，不会阻断报价循环。
 
-Strategy run events and reference-market samples use separate single-table repositories, with `MarketMakerService`
-performing business aggregation.
-`MarketMakerLeaseRepository` exclusively owns `market_maker_strategy_leases`; the coordination
-interface remains in the service layer.
+策略运行事件与参考行情样本分别由独立 Repository 访问各自物理表，`MarketMakerService` 负责业务聚合。
+`MarketMakerLeaseRepository` 只负责 `market_maker_strategy_leases`，租约协调接口保留在 Service 层。
 
-`/strategies/{strategyId}/config` reads and writes `market_maker_strategy_overrides`. Only enabled, base quote quantity, margin mode, spread, level spacing, inventory cap/skew, and quote levels are hot-editable; accounts and symbols remain deployment config. `null` request fields fall back to `application.yml`, and a request with all editable fields set to `null` clears the override.
+`/strategies/{strategyId}/config` 读取和写入 `market_maker_strategy_overrides`。只支持热更新 enabled、基础报价数量、保证金模式、价差、层间距、库存上限/偏斜阈值和报价层数；账号和交易对仍由部署配置管理。请求体里为 `null` 的字段会回退到 `application.yml` 基线配置，全部可编辑字段为 `null` 会清除覆盖。
 
-## Configuration
+## 配置
 
 ```yaml
 surprising:
@@ -156,28 +152,28 @@ surprising:
         margin-mode: CROSS
 ```
 
-## Quote Model
+## 报价机制
 
-For each configured `strategyId + symbol`, the provider:
+每个 `strategyId + symbol` 的流程：
 
-1. Acquires a PostgreSQL lease in `market_maker_strategy_leases` when coordination is enabled.
-2. Reads instrument config, latest order book, latest mark price, and the market-maker account position.
-3. Uses mark price as the anchor when available; otherwise it falls back to order-book midpoint.
-4. If `reference-market.enabled=true`, uses a fresh Binance/OKX/Bybit-style reference book and mirrors each reference level's distance from midpoint plus its quantity into local ticks/steps, subject to local price-deviation, post-only, quantity, and inventory caps.
-5. Without a fresh reference snapshot, places symmetric post-only levels around the anchor using configured spread and spacing.
-6. Applies inventory skew and inventory caps before submitting orders.
-7. Cancels stale or off-target owned orders and submits only missing desired quotes.
-8. Propagates the cycle trace id to order-provider, so order events, matching events, account settlement, risk events, and private WebSocket pushes can be correlated.
+1. 如果开启多节点协调，先在 PostgreSQL 的 `market_maker_strategy_leases` 获取租约。
+2. 读取合约配置、最新盘口、最新标记价格和做市账号当前持仓。
+3. 优先使用 mark price 作为报价锚点；mark 不可用时回退盘口中价。
+4. 如果 `reference-market.enabled=true`，使用新鲜的 Binance/OKX/Bybit 风格参考盘口，把外部每档相对中间价的距离和该档数量映射成本地 ticks/steps，同时仍受本地价格偏离、post-only、数量和库存上限保护。
+5. 没有新鲜参考盘口时，继续按配置的 spread 和 spacing 围绕锚点生成对称 post-only 报价。
+6. 按库存偏移和库存上限调整报价数量和方向。
+7. 撤掉过期或偏离目标的自有订单，只补齐缺失报价。
+8. 把本轮 traceId 透传给 order-provider，后续订单事件、撮合事件、账户结算、风控事件和私有 WebSocket 推送都可以关联排查。
 
-Reference-market calibration uses WebSocket local books when `websocket-enabled=true` and falls back to REST depth snapshots when no fresh streaming book is available. The built-in parsers cover Binance depth streams, OKX books, and Bybit V5 orderbook messages. It is enough for stress tests to follow mainstream exchange depth, per-level spacing, and per-level quantities; production tests still need long-running evidence with the streaming source enabled.
+参考市场校准在 `websocket-enabled=true` 时优先维护 WebSocket 本地订单簿；没有新鲜流式盘口时，回退 REST 深度快照。内置解析器覆盖 Binance depth stream、OKX books 和 Bybit V5 orderbook 消息，足够让压测时的本地盘口档位、档间距和每档数量跟随主流交易所深度；生产前仍需要补一轮启用流式 source 的长时间真实进程压测证据。
 
-## Multi-Node Deployment
+## 多节点部署
 
-Multiple nodes can run the same config. The lease key is `strategyId + symbol`, so only one node actively quotes that symbol for a strategy at a time. Use a stable `node-id` in production so logs and leases are easy to inspect.
+可以多节点部署同一份配置。租约 key 是 `strategyId + symbol`，同一个策略的同一个合约同一时间只会由一个节点报价。生产环境建议配置稳定的 `node-id`，方便排查日志和租约。
 
-Use distinct accounts or distinct strategy IDs for independent market-maker programs. Do not let two strategies control the same account and symbol unless the inventory caps are intentionally sized for the combined exposure.
+如果要跑多个做市商账号，可以使用同一个策略的多个 `account-ids`，也可以拆成多个策略。不要让多个策略同时控制同一个账号和合约，除非库存上限已经按合并风险设计。
 
-## Build And Test
+## 构建和测试
 
 ```bash
 mvn -pl :surprising-market-maker-provider -am test

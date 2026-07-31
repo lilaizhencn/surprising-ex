@@ -1,30 +1,29 @@
-# Product-Line Architecture and Business Boundaries
+# 产品线架构与业务边界
 
-English | [简体中文](product-line-architecture_CN.md)
 
-## Current State
+## 当前状态
 
-`surprising-ex` has moved from a single perpetual-futures path toward product-line-isolated trading. The codebase and schema are still shared, but business state is separated by `ProductLine`, account type, Kafka topic, consumer group, provider startup configuration, and gateway routing.
+`surprising-ex` 已从单一永续链路推进到按产品线隔离运行的交易系统。当前共享同一套 Java 模块和数据库 schema，但通过 `ProductLine`、账户类型、Kafka topic、consumer group、provider 启动参数和 gateway 路由把业务逻辑隔离到不同产品线。
 
-The currently validated product lines are:
+当前主要运行和测试覆盖的四条线：
 
-| Product line | `ProductLine` | Account type | Contract type | Topic namespace | Status |
+| 产品线 | `ProductLine` | 账户类型 | 合约类型 | Topic 命名空间 | 当前状态 |
 | --- | --- | --- | --- | --- | --- |
-| Spot | `SPOT` | `SPOT` | `SPOT` | `surprising.spot.*.v1` | Order entry, matching, asset exchange, reservation release, product ledger |
-| USDT perpetual | `LINEAR_PERPETUAL` | `USDT_PERPETUAL` | `LINEAR_PERPETUAL` | `surprising.linear-perp.*.v1` | Margin, funding, risk, liquidation, insurance fund, ADL |
-| USDT delivery futures | `LINEAR_DELIVERY` | `USDT_DELIVERY` | `LINEAR_DELIVERY` | `surprising.linear-delivery.*.v1` | Delivery instrument, isolated matching flow, cash delivery event, position closeout |
-| European options | `OPTION` | `OPTION` | `VANILLA_OPTION` | `surprising.option.*.v1` | Option instrument, premium/margin accounting, European exercise event, position closeout |
+| 现货 | `SPOT` | `SPOT` | `SPOT` | `surprising.spot.*.v1` | 已接入下单、撮合、资产互换、冻结释放、产品账户流水 |
+| U 本位永续 | `LINEAR_PERPETUAL` | `USDT_PERPETUAL` | `LINEAR_PERPETUAL` | `surprising.linear-perp.*.v1` | 已接入保证金、资金费、风控、强平、保险基金、ADL |
+| U 本位交割 | `LINEAR_DELIVERY` | `USDT_DELIVERY` | `LINEAR_DELIVERY` | `surprising.linear-delivery.*.v1` | 已接入交割 instrument、独立撮合链路、现金交割事件和持仓归零 |
+| 欧式期权 | `OPTION` | `OPTION` | `VANILLA_OPTION` | `surprising.option.*.v1` | 已接入期权 instrument、权利金/保证金账户链路、欧式自动行权事件和持仓归零 |
 
-`INVERSE_PERPETUAL` and `INVERSE_DELIVERY` are already represented in enums, account types, and topic mapping. The current process-level smoke suite focuses on `SPOT`, `LINEAR_PERPETUAL`, `LINEAR_DELIVERY`, and `OPTION`.
+`INVERSE_PERPETUAL` 和 `INVERSE_DELIVERY` 的枚举、账户类型和 topic 映射已经保留，当前 smoke 主覆盖集中在 `SPOT`、`LINEAR_PERPETUAL`、`LINEAR_DELIVERY`、`OPTION` 四条线。
 
-## Principles
+## 设计原则
 
-- Shared components must be business-neutral: product-line API, instrument metadata, long fixed-point units, matching wrapper, event model, gateway routing, and test utilities.
-- Business state must be isolated: order books, Kafka topics, consumer groups, account type, settlement strategy, risk scans, liquidation candidates, and lifecycle events.
-- The current phase intentionally keeps one shared provider codebase. Separate product-line instances are started by configuration with `product-line` and `product-topics-enabled`.
-- Accounting safety has priority over abstraction purity. Every product line must prove balances, ledgers, positions, margin, liquidation fees, funding payments, delivery/exercise records, and insurance credits independently.
+- 共享的是通用能力：产品线枚举、instrument 元数据、long 定点数、撮合封装、事件模型、gateway 路由、测试工具。
+- 隔离的是业务状态：订单簿、Kafka topic、consumer group、账户类型、结算策略、风险扫描、强平候选、生命周期事件。
+- 现阶段不做大规模模块重构。provider 二进制仍复用，通过 `product-line` 和 `product-topics-enabled` 启动为不同产品线实例。
+- 资金安全优先于抽象纯度。每条线必须独立验证余额、流水、持仓、保证金、强平费、资金费、交割/行权和保险基金入账。
 
-## Runtime Boundary
+## 运行边界
 
 ```text
 SPOT:
@@ -46,46 +45,46 @@ OPTION:
   -> option exercise event
 ```
 
-The matching provider still uses the same `exchange-core` wrapper, but a product-line instance consumes only its own `order.commands` topic and publishes only its own `match.results`, `match.trades`, and `orderbook.depth` topics. Consumers validate the actual Kafka topic against the configured `ProductLine` to prevent cross-product consumption.
+撮合 provider 仍使用同一个 `exchange-core` 封装，但每条产品线实例只消费当前产品线的 `order.commands`，只发布当前产品线的 `match.results`、`match.trades` 和 `orderbook.depth`。consumer 会校验实际 Kafka topic 与当前 `ProductLine` 一致，避免跨线误消费。
 
-## Shared Components
+## 共享组件
 
-- `surprising-product-api`: `ProductLine`, account-type mapping, contract-type mapping, product topic names, and consumer groups.
-- `surprising-instrument`: unified `SPOT`, `PERPETUAL`, `DELIVERY`, and `OPTION` instrument metadata, including expiry, delivery, strike, and option type fields.
-- `surprising-trading`: order entry, trigger orders, algo orders, exchange-core wrapper, and product-line topic routing.
-- `surprising-account`: basic balances, product balances, ledgers, product ledgers, positions, margin, funding, delivery, and exercise accounting.
-- `surprising-margin-ops`: shared margin-product risk, liquidation, funding, insurance, and ADL handling, isolated by product line and account type.
-- `surprising-edge`: client-facing REST routing and realtime subscriptions by `productLine`; `surprising-gateway` and `surprising-websocket` remain independently deployable under the edge module.
+- `surprising-product-api`：`ProductLine`、账户类型映射、合约类型映射、产品线 topic 和 consumer group 生成。
+- `surprising-instrument`：统一管理 `SPOT`、`PERPETUAL`、`DELIVERY`、`OPTION` instrument，包含到期、交割、行权价、期权类型等字段。
+- `surprising-trading`：订单入口、条件单、算法单、exchange-core 撮合封装和产品线 topic 路由。
+- `surprising-account`：基础账户、产品账户、余额流水、产品流水、持仓、保证金、资金费、交割/行权账务。
+- `surprising-margin-ops`：保证金产品共用的风控、强平、资金费、保险基金和 ADL 链路，按产品线和账户类型隔离。
+- `surprising-edge`：客户端使用 `productLine` 路由 REST 和订阅实时推送；`surprising-gateway` 和 `surprising-websocket` 仍保留在 edge 模块下，可按生产容量独立部署。
 
-## Delivery Futures Model
+## 交割合约执行模型
 
-Delivery futures reuse most of the perpetual path: order entry, matching, margin, risk, and liquidation. The main difference is lifecycle:
+交割合约复用永续的下单、撮合、保证金、风控和强平链路，但没有资金费。区别在生命周期：
 
-1. Instrument rows include `expiry_time`, `delivery_time`, and `settlement_method`.
-2. Before expiry, the symbol enters reduce-only mode and rejects new opening exposure.
-3. At expiry, instrument enters `SETTLING`; the immutable version and its Outbox event commit in one transaction.
-4. Order and trigger providers persist a symbol fence before draining algo, ordinary, and trigger orders. Matching still accepts cancellation for the retired book but rejects new placement.
-5. After order drain readiness, account verifies every reservation against applied releases and trade-side margin audit before acknowledging that frozen order funds are gone.
-6. Instrument can enter `CLOSED` only after `ORDER`, `TRIGGER`, and `ACCOUNT` acknowledgements match the same symbol, version, and product line.
-7. The delivery event is then published to `surprising.linear-delivery.delivery.settlements.v1`.
-8. Account settlement closes positions at the settlement price, writes `DELIVERY_SETTLEMENT` ledger entries, releases position margin, and returns position quantity to zero.
-9. Gateway, WebSocket, and admin pages display delivery status, settlement price, delivery ledger, and final balances.
+1. instrument 带 `expiry_time`、`delivery_time` 和 `settlement_method`。
+2. 到期前进入只减仓窗口，禁止新增开仓。
+3. 到期时 instrument 进入 `SETTLING`，状态变更与 `instrument_outbox_events` 在同一事务提交。
+4. order 和 trigger provider 先持久化 symbol 关闭栅栏，再排空算法单、普通挂单和触发单；撮合只允许旧订单撤单，不再接受新单。
+5. order 排空确认发布后，account 逐笔核对 `ORDER_RESERVE`、`ORDER_RELEASE` 和成交侧保证金审计，确认冻结资金已全部消费或释放。
+6. instrument 只在 `ORDER`、`TRIGGER`、`ACCOUNT` 三类确认均按相同 symbol、版本和产品线持久化后进入 `CLOSED`。
+7. 交割 lifecycle 事件随后发布到 `surprising.linear-delivery.delivery.settlements.v1`。
+8. account 按结算价把未平仓位现金结算为 `DELIVERY_SETTLEMENT` 流水，释放持仓保证金，持仓归零。
+9. gateway、WebSocket 和后台展示交割状态、结算价、交割流水和最终余额。
 
-## Options Model
+## 期权执行模型
 
-The current options path is cash-settled European vanilla options. Early exercise is intentionally out of scope for the first implementation:
+当前期权路线是现金结算欧式期权，先不做提前行权：
 
-1. Instrument rows use `VANILLA_OPTION` and store underlying, expiry, delivery time, strike, call/put type, and exercise style.
-2. Buyers pay premium; their maximum loss is the premium.
-3. Sellers post margin; portfolio margin, Greeks, and volatility-surface risk are later enhancements.
-4. Expiry first reuses the `SETTLING -> order/trigger drain -> account reservation verification -> CLOSED` barrier above.
-5. CALL payoff is `max(underlying settlement price - strike, 0)` and PUT payoff is `max(strike - underlying settlement price, 0)`.
-6. A lifecycle event is published to `surprising.option.option.exercises.v1`.
-7. Account settlement writes `OPTION_PREMIUM` and `OPTION_EXERCISE` ledger entries, releases position margin, and returns position quantity to zero.
+1. instrument 使用 `VANILLA_OPTION`，包含标的、到期日、交割时间、行权价、看涨/看跌、行权风格。
+2. 买方成交时支付权利金，最大亏损为权利金。
+3. 卖方冻结保证金，后续可升级组合保证金和希腊值风控。
+4. 到期先复用上述 `SETTLING -> 订单/触发单排空 -> 账户冻结核对 -> CLOSED` 屏障。
+5. 到期自动行权，CALL payoff 为 `max(标的结算价 - 行权价, 0)`，PUT payoff 为 `max(行权价 - 标的结算价, 0)`。
+6. lifecycle 事件发布到 `surprising.option.option.exercises.v1`。
+7. account 写入 `OPTION_PREMIUM` 和 `OPTION_EXERCISE` 流水，释放持仓保证金，持仓归零。
 
-## Topic Model
+## Topic 模型
 
-Product-line topics are generated by `ProductTopicNames`:
+产品线 topic 统一由 `ProductTopicNames` 生成：
 
 ```text
 surprising.<product-segment>.order.commands.v1
@@ -112,23 +111,22 @@ surprising.<product-segment>.delivery.settlements.v1
 surprising.<product-segment>.option.exercises.v1
 ```
 
-The shared `surprising.instrument.lifecycle-drain.v1` topic is keyed by symbol and carries the
-`ORDER`, `TRIGGER`, and `ACCOUNT` readiness acknowledgements. It is an operational barrier, not an
-analytics topic or a substitute for a future isolated finance/operations database.
+共享的 `surprising.instrument.lifecycle-drain.v1` 使用 symbol 作为 key，承载
+`ORDER`、`TRIGGER`、`ACCOUNT` 三类到期排空确认。它不是运营查询 topic，也不能替代后续独立财务运营库。
 
-Each product line creates only the applicable subset. See [Deployment](deployment.md) for the exact
-perpetual inventory and the 32-partition contract.
+不同产品线只创建适用的 Topic。永续生产的精确清单和 32 分区约束见
+[部署文档](deployment.md)。
 
-Create topics locally:
+本地创建 topic：
 
 ```bash
 DRY_RUN=true ./scripts/create-topics.sh
 PRODUCT_TOPIC_LINES="spot linear-perp linear-delivery option" ./scripts/create-topics.sh
 ```
 
-## Local Verification
+## 本地验证
 
-Run one product line at a time. The four matching businesses do not need to run together:
+每次只跑一条业务线，不需要同时启动四条撮合链路：
 
 ```bash
 PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
@@ -137,23 +135,23 @@ PRODUCT_LINES=OPTION BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_
 PRODUCT_LINES=SPOT BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
 ```
 
-The smoke suite covers:
+脚本覆盖：
 
-- Market-maker quoting plus ordinary-user API taker flow.
-- Open, self-close, cancellation, and order-control APIs.
-- Position creation, risk scan, liquidation, liquidation fee, and insurance credit for margin products.
-- Perpetual funding.
-- Delivery settlement event and position closeout.
-- Option exercise event, premium/exercise ledgers, and position closeout.
-- Spot asset exchange, no derivative position creation, and reservation release.
-- Independent funds reconciliation at the end of each product-line run.
+- 做市 provider 持续报价，普通用户通过 API 下单吃单。
+- 普通开仓、主动平仓、撤单、控制类订单 API。
+- 保证金产品的持仓形成、风险扫描、强平、强平费和保险基金入账。
+- 永续资金费。
+- 交割合约交割事件和持仓归零。
+- 期权行权事件、权利金/行权流水和持仓归零。
+- 现货资产互换、无衍生品持仓、冻结释放。
+- 每条线结束后执行独立资金核对脚本。
 
-See [Product-Line Funds Conservation and Account Reconciliation](product-line-testing-and-funds-reconciliation.md).
+资金核对详见 [产品线资金守恒与账账核对](product-line-testing-and-funds-reconciliation.md)。
 
-## Capability Boundaries
+## 能力边界
 
-- Inverse perpetual and inverse delivery are modeled, but still need the same process-level smoke coverage as the four currently validated lines.
-- Options currently use a single-leg European cash-settlement model. Portfolio margin, Greeks, volatility surface risk, risk limits, and production market making are later work.
-- Delivery futures still need production expiry scheduling, multi-source TWAP settlement price, manual review, task reruns, and exception reports.
-- Web, admin web, and Flutter iOS/Android must keep `productLine`, order panels, positions, ledgers, and lifecycle pages aligned.
-- Before production, run multi-node, multi-broker, long-duration stress tests, failover drills, alert threshold calibration, and wallet/clearing-boundary review.
+- 币本位永续和币本位交割的产品线枚举已存在，但还需要补齐同等级真实流程 smoke。
+- 期权当前是单腿欧式现金结算模型，组合保证金、希腊值、波动率曲面、风险限额和更复杂的做市报价仍是后续增强。
+- 交割合约需要生产级到期调度、结算价多源 TWAP、人工复核、任务重跑和异常报表。
+- 客户端需要保持 web、admin web、Flutter iOS/Android 的 `productLine` 参数、订单面板、持仓/流水/生命周期页面完全一致。
+- 生产上线前还需要多节点、多 broker、长时间压测、故障演练、监控阈值和真实钱包/清结算边界复核。

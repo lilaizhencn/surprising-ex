@@ -1,48 +1,47 @@
 # surprising-instrument
 
-[English](README.md) | [简体中文](README_CN.md)
 
-Instrument configuration module for Surprising Exchange. It is the product-rule center for spot, perpetual, delivery, and option matching, risk, account, candlestick, index price, mark price, funding-rate, delivery, and exercise services.
+Surprising Exchange 产品基础配置模块。它是现货、永续、交割和期权交易系统的产品规则中心，后续撮合、风控、账户、K 线、指数价格、标记价格、资金费率、交割和行权都应该从这里获取 symbol 和交易规则。
 
-## Modules
+## 模块
 
-- `surprising-instrument-api`: RPC contracts, DTOs, and event models.
-- `surprising-instrument-provider`: persistence, query/admin APIs, and Kafka change-event publishing.
+- `surprising-instrument-api`：RPC 合约、DTO 和事件模型。
+- `surprising-instrument-provider`：配置持久化、查询、管理接口和 Kafka 变更事件发布。
 
-## Responsibilities
+## 核心职责
 
-- Base product metadata: `symbol`, product line, instrument type, base/quote/settle asset, contract type, contract size.
-- Price and quantity rules: tick size, step size, min/max order quantity, notional limits, precision.
-- Order rules: supported order types, time in force, post-only, reduce-only, market-order switches.
-- Risk rules: maximum leverage, initial margin rate, maintenance margin rate, risk limit brackets.
-- Default trading fee schedule: maker/taker fee rates in ppm. Positive values charge the user; negative values represent rebates. User/VIP/market-maker/promotion overrides are resolved from order-provider `trading_fee_schedules` and snapshotted on the order.
-- Funding configuration: interval, interest rate, cap/floor, impact notional for perpetual products.
-- Lifecycle metadata: expiry time, delivery time, settlement method, underlying symbol, strike price, option type, and option exercise style for delivery and option products.
-- Index components: external spot source REST/WS config, weights, USD/USDT conversion rules.
-- Versioning: every change creates a new `version`; `instrument_current_versions` switches the current snapshot.
-- Multi-node safety: `instrument_symbol_sequences` atomically allocates versions per symbol and prevents version conflicts during concurrent admin requests.
-- Storage boundary: each repository accesses one table only. `InstrumentStorageService` aggregates the immutable version,
-  global/product current pointers, risk brackets, and index sources, with batched detail hydration.
+- 产品基础信息：`symbol`、产品线、instrument 类型、base/quote/settle asset、合约类型、合约面值。
+- 价格/数量规则：tick size、step size、最小/最大下单数量、notional 限制、精度。
+- 下单规则：支持的订单类型、time in force、post-only、reduce-only、market order 开关。
+- 风险规则：最大杠杆、初始保证金率、维持保证金率、风险限额档位。
+- 交易手续费默认配置：maker/taker 费率使用 ppm。正数表示向用户收费，负数表示返佣；用户/VIP/做市/活动覆盖由 order provider 的 `trading_fee_schedules` 解析后写入订单快照。
+- 资金费率配置：永续产品的 funding interval、interest rate、cap/floor、impact notional。
+- 生命周期字段：交割和期权产品的到期时间、交割时间、结算方式、标的 symbol、行权价、期权类型和行权风格。
+- 指数价格成分源：外部现货源 REST/WS 配置、权重、USD/USDT 换算规则。
+- 版本管理：每次变更生成新 `version`，通过 `instrument_current_versions` 切换当前版本。
+- 多节点安全：`instrument_symbol_sequences` 为同一个 symbol 原子分配版本号，避免多个 admin 请求并发时 version 冲突。
+- 存储边界：每个 Repository 只访问一张表；`InstrumentStorageService` 在事务内聚合主版本、
+  全局/产品线当前版本指针、风险档位和指数源，并对附属配置执行批量补全。
 
-## Long Unit Model
+## long 单位模型
 
-Instrument configuration is stored in exchange-core-friendly long units:
+instrument 配置按 exchange-core 友好的 long 单位保存：
 
-- `price_tick_units`: quote asset smallest units per one price tick.
-- `quantity_step_units`: base asset smallest units per one quantity step.
-- `min_quantity_steps` / `max_quantity_steps`: order quantity bounds already expressed as steps.
-- `min_notional_units` / `max_notional_units`: long notional bounds. For `LINEAR_PERPETUAL` they are settlement asset units; for `INVERSE_PERPETUAL` they are quote face-value units.
-- `notional_multiplier_units`: for `LINEAR_PERPETUAL`, settlement units per `priceTick * quantityStep`; for `INVERSE_PERPETUAL`, quote face-value units per contract step.
-- `contract_type` is not descriptive metadata only. Account, risk, funding, liquidation, and ADL formulas branch on it.
-- `maker_fee_rate_ppm` / `taker_fee_rate_ppm`: product default fees. Order entry applies `trading_fee_schedules` overrides and writes the final rates to `trading_orders`; account settlement writes `TRADE_FEE` ledger entries from that order snapshot. Positive values debit the user, and negative values credit a rebate. Default BTC/ETH contracts use maker `200 ppm` and taker `500 ppm`.
-- `user_open_interest_limit_rate_ppm` / `user_open_interest_limit_floor_units`: dynamic per-user position cap settings. Order provider uses `max(platform OI notional * rate, floor)`, additionally bounded by `max_position_notional_units`. BTC/ETH default to `300000 ppm` and `25000000000000`, equal to a 250,000 USDT floor.
-- `*_rate_ppm`, `max_leverage_ppm`, `weight_ppm`: rates, leverage, and weights use ppm.
+- `price_tick_units`：一个价格 tick 对应的 quote asset 最小单位。
+- `quantity_step_units`：一个数量 step 对应的 base asset 最小单位。
+- `min_quantity_steps` / `max_quantity_steps`：下单数量边界，已经是 step。
+- `min_notional_units` / `max_notional_units`：long notional 边界。`LINEAR_PERPETUAL` 使用结算资产最小单位；`INVERSE_PERPETUAL` 使用报价币合约面值单位。
+- `notional_multiplier_units`：`LINEAR_PERPETUAL` 表示每个 `priceTick * quantityStep` 对应的结算资产最小单位；`INVERSE_PERPETUAL` 表示每个合约 step 的报价币面值单位。
+- `contract_type` 不只是展示字段，账户、风控、资金费、强平和 ADL 的公式都会按它分支。
+- `maker_fee_rate_ppm` / `taker_fee_rate_ppm`：产品默认手续费。订单入口会叠加 `trading_fee_schedules` 覆盖后写入 `trading_orders` 快照；账户结算按订单快照写入 `TRADE_FEE` ledger。正数扣用户余额，负数给用户返佣。默认 BTC/ETH 合约为 maker `200 ppm`、taker `500 ppm`。
+- `user_open_interest_limit_rate_ppm` / `user_open_interest_limit_floor_units`：单用户动态持仓量上限配置。order provider 使用 `max(平台 OI notional * rate, floor)` 并再受 `max_position_notional_units` 限制。默认 BTC/ETH 为 `300000 ppm`，固定下限 `25000000000000`，即 250,000 USDT。
+- `*_rate_ppm`、`max_leverage_ppm`、`weight_ppm`：费率、杠杆、权重统一使用 ppm。
 
-`surprising-instrument-api` also owns `PerpetualContractMath`, the shared long-unit formula implementation for linear/inverse notional, unrealized PnL, notional-per-step, and maintenance margin. Risk, funding, liquidation, and ADL should call this shared math instead of reimplementing contract formulas in SQL.
+`surprising-instrument-api` 同时提供 `PerpetualContractMath`，作为线性/反向合约 notional、未实现 PnL、每 step notional 和维持保证金的共享 long 公式实现。risk、funding、liquidation、ADL 应调用这个共享 math，不要在各自 SQL 里重复实现合约公式。
 
-Admin APIs should send these integer fields directly. Human decimal formatting belongs at the admin UI/API gateway edge.
+admin API 应直接提交这些整数字段。人类可读的小数格式放在后台 UI 或 API gateway 边界转换。
 
-## Dynamic Configuration Flow
+## 动态配置链路
 
 ```text
 instrument-provider
@@ -52,74 +51,74 @@ instrument-provider
   -> candlestick / price / future matching / risk local cache
 ```
 
-Currently integrated:
+当前已接入：
 
-- `surprising-candlestick-provider` strict mode reads enabled symbols from the current `instruments` snapshot.
-- `surprising-index-price-provider` dynamically reads symbols and index sources from `instruments + instrument_index_sources`; static BTC/ETH YAML config is only a fallback before DB initialization.
+- `surprising-candlestick-provider` strict 模式从 `instruments` 当前版本读取启用 symbol。
+- `surprising-index-price-provider` 从 `instruments + instrument_index_sources` 动态读取 symbol 和指数源；`application.yml` 中的静态 BTC/ETH 配置只作为数据库未初始化时的兜底。
 
-## Status Semantics
+## 状态语义
 
-- `PRE_TRADING`: market data warm-up; real matching is usually disabled.
-- `TRADING`: normal trading and market-data calculation.
-- `HALT`: matching paused; market-history services can still recognize the symbol.
-- `SETTLING`: settlement in progress.
-- `CLOSED`: retired market.
+- `PRE_TRADING`：允许行情预热，通常不允许真实撮合。
+- `TRADING`：正常交易和行情计算。
+- `HALT`：暂停撮合，行情历史服务仍可识别该 symbol。
+- `SETTLING`：结算中。
+- `CLOSED`：下线，不再处理新业务。
 
-## API
+## 接口
 
-Latest version:
+查询当前版本：
 
 ```bash
 curl 'http://localhost:9080/api/v1/instruments/latest?symbol=BTC-USDT'
 ```
 
-Specific version:
+查询指定版本：
 
 ```bash
 curl 'http://localhost:9080/api/v1/instruments/version?symbol=BTC-USDT&version=1'
 ```
 
-List:
+查询列表：
 
 ```bash
 curl 'http://localhost:9080/api/v1/instruments/list?type=PERPETUAL&status=TRADING'
 ```
 
-Admin paginated current-market list:
+后台分页查询当前产品：
 
 ```bash
 curl 'http://localhost:9080/api/v1/instruments/admin/list?type=PERPETUAL&status=TRADING&limit=100&sort=symbol.asc'
 ```
 
-Admin current-market detail and version history:
+后台查询当前产品详情和历史版本：
 
 ```bash
 curl 'http://localhost:9080/api/v1/instruments/admin/BTC-USDT'
 curl 'http://localhost:9080/api/v1/instruments/admin/BTC-USDT/versions?limit=50&sort=version.desc'
 ```
 
-Admin list endpoints support `limit/cursor/sort` cursor pagination. Current-market sort tokens are `symbol.asc`, `symbol.desc`, `updatedAt.desc`, `updatedAt.asc`, `createdAt.desc`, and `createdAt.asc`; version-history sort tokens are `version.desc` and `version.asc`. Responses keep `count/instruments` and add `nextCursor`, `hasMore`, `sort`, and `limit`.
+后台列表支持 `limit/cursor/sort` 游标分页。当前版本列表排序白名单为 `symbol.asc`、`symbol.desc`、`updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc`；历史版本排序白名单为 `version.desc`、`version.asc`。响应保留 `count/instruments`，并返回 `nextCursor`、`hasMore`、`sort`、`limit`。
 
-Status update:
+更新状态：
 
 ```bash
 curl -X POST 'http://localhost:9080/api/v1/instruments/admin/BTC-USDT/status?status=HALT'
 ```
 
-Full upsert uses `POST /api/v1/instruments/admin/upsert` with an `InstrumentUpsertRequest` body. In production, admin APIs should be called through the gateway admin proxy only; product configuration and status changes must pass approval, permission checks, and operation audit logging.
+完整 upsert 使用 `POST /api/v1/instruments/admin/upsert`，body 为 `InstrumentUpsertRequest`。生产应只允许后台管理系统通过 gateway 后台代理调用 admin API，产品配置和状态变更必须经过审批流、权限校验和操作审计。
 
-## Kafka
+## Kafka 事件
 
 ```text
 surprising.instrument.events.v1
 ```
 
-The event key is `symbol`. Each event carries the full new `InstrumentResponse` snapshot so downstream services can replace their local cache directly.
-The producer uses `acks=all`, idempotence, `zstd`, and `max.in.flight.requests.per.connection=5` so version-change events have the same durable Kafka baseline as the trading and price pipelines.
+事件 key 使用 `symbol`。事件内容包含新版本的完整 `InstrumentResponse` 快照，下游可以直接替换本地缓存。
+producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.connection=5`，让合约版本变更事件和交易、价格链路保持一致的可靠 Kafka 基线。
 
-## Database
+## 数据库
 
-Root [init.sql](../init.sql) creates:
+根目录 [init.sql](../init.sql) 创建：
 
 - `instruments`
 - `instrument_current_versions`
@@ -129,20 +128,20 @@ Root [init.sql](../init.sql) creates:
 - `instrument_index_sources`
 - `instrument_outbox_events`
 
-Default markets:
+默认已写入：
 
-- `BTC-USDT`: linear USDT perpetual, `contract_multiplier_ppm=1000000`, `contract_value_asset=USDT`,
-  `price_tick_units=10000000` (0.1 USDT), `quantity_step_units=100000` (0.001 BTC),
-  `quantity_precision=3`, `min_quantity_steps=1`, `max_quantity_steps=100000`,
-  `notional_multiplier_units=10000`, `user_open_interest_limit_rate_ppm=300000`,
-  `user_open_interest_limit_floor_units=25000000000000`.
-- `ETH-USDT`: linear USDT perpetual, `contract_multiplier_ppm=1000000`, `contract_value_asset=USDT`,
-  `price_tick_units=1000000` (0.01 USDT), `quantity_step_units=10000000000000000` (0.01 ETH),
-  `quantity_precision=2`, `min_quantity_steps=1`, `max_quantity_steps=500000`,
-  `notional_multiplier_units=10000`, `user_open_interest_limit_rate_ppm=300000`,
-  `user_open_interest_limit_floor_units=25000000000000`.
+- `BTC-USDT`：U 本位线性永续，`contract_multiplier_ppm=1000000`，`contract_value_asset=USDT`，
+  `price_tick_units=10000000`（0.1 USDT），`quantity_step_units=100000`（0.001 BTC），
+  `quantity_precision=3`，`min_quantity_steps=1`，`max_quantity_steps=100000`，
+  `notional_multiplier_units=10000`，`user_open_interest_limit_rate_ppm=300000`，
+  `user_open_interest_limit_floor_units=25000000000000`。
+- `ETH-USDT`：U 本位线性永续，`contract_multiplier_ppm=1000000`，`contract_value_asset=USDT`，
+  `price_tick_units=1000000`（0.01 USDT），`quantity_step_units=10000000000000000`（0.01 ETH），
+  `quantity_precision=2`，`min_quantity_steps=1`，`max_quantity_steps=500000`，
+  `notional_multiplier_units=10000`，`user_open_interest_limit_rate_ppm=300000`，
+  `user_open_interest_limit_floor_units=25000000000000`。
 
-## Local Run
+## 本地运行
 
 ```bash
 brew services start postgresql@18
@@ -152,22 +151,22 @@ psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f in
 mvn -pl :surprising-instrument-provider -am spring-boot:run
 ```
 
-## Production Notes
+## 生产注意事项
 
-- Instrument is the single product configuration source. Do not keep a second symbol-rule set in matching, risk, or market-data services.
-- Query APIs are stateless and horizontally scalable. Admin writes share PostgreSQL, and `instrument_symbol_sequences` keeps per-symbol versions monotonic.
-- Instrument version, status, delivery, and exercise events commit to `instrument_outbox_events` with the business change. Publishers mark rows only after Kafka acknowledgement, retry failures with exponential backoff, and preserve per-`topic + event_key` order across nodes.
-- Once an expiry version enters `SETTLING`, order and trigger providers persist a database fence before draining orders; account then reconciles reservation, trade consumption, and release. Lifecycle may enter `CLOSED` and publish delivery/exercise only after matching-version `ORDER`, `TRIGGER`, and `ACCOUNT` readiness rows exist in `instrument_lifecycle_drain_acks`.
-- Drain readiness uses the shared symbol-keyed `surprising.instrument.lifecycle-drain.v1` topic. Repeated acknowledgements are idempotent by `(symbol, instrument_version, component)`.
-- Current-version reads resolve a single-table version pointer, load the immutable `instruments` row, and batch-hydrate
-  risk brackets and index sources; repositories do not execute cross-table joins.
-- Core downstream services should use local caches, not database reads for every request.
-- Tick/step, leverage, and status changes must create a new version instead of overwriting history.
-- Instrument default maker/taker fee-rate changes also create a new version. Accepted orders keep the fee snapshot stored on `trading_orders`; old positions keep the contract-math version they were opened with.
-- Changes affecting matching and risk need approval, audit logs, and controlled effective time.
-- To list a new symbol, create the instrument first, confirm Kafka partitions, start external price sources, then open trading.
+- Instrument 是全系统唯一产品配置源，不要在撮合、风控、行情服务里再维护第二套 symbol 规则。
+- 查询接口无状态，可以多节点水平部署；写接口共享 PostgreSQL，通过 `instrument_symbol_sequences` 保证同 symbol 版本号单调递增。
+- instrument 版本、状态变更、交割和行权事件先与业务状态一起写入 `instrument_outbox_events`；发布器收到 Kafka ACK 后才标记成功，失败事件按指数退避重试，同一 `topic + event_key` 在多节点下保持顺序。
+- 到期版本进入 `SETTLING` 后，order/trigger provider 会先写数据库关闭栅栏再排空订单；account 在订单排空后核对预占、成交消耗和释放。只有相同版本的 `ORDER`、`TRIGGER`、`ACCOUNT` 确认全部写入 `instrument_lifecycle_drain_acks`，调度器才允许进入 `CLOSED` 并发布交割或行权事件。
+- 生命周期清理确认使用共享 topic `surprising.instrument.lifecycle-drain.v1`，以 symbol 为 key；重复确认按 `(symbol, instrument_version, component)` 幂等。
+- 当前版本查询先读取单表版本指针，再从 `instruments` 获取不可变版本，最后批量装配风险档位和指数源；
+  不在 Repository 内执行跨表 JOIN。
+- 下游核心服务不要每笔请求查数据库，应通过本地缓存消费 instrument 快照。
+- 修改 tick/step、杠杆、状态时必须生成新版本，不能原地覆盖历史版本。
+- 修改 instrument 默认 maker/taker 手续费率也必须生成新版本。已接受订单继续使用 `trading_orders` 上的费率快照；旧持仓继续使用开仓时绑定的合约数学版本。
+- 影响撮合和风控的配置变更需要审批流、审计日志和灰度生效时间。
+- 新增 symbol 时，先写 instrument，再创建/确认 Kafka partition，再启动外部价格源，最后开放交易。
 
-## Verification
+## 验证
 
 ```bash
 mvn -pl :surprising-instrument-provider -am test

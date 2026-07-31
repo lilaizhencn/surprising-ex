@@ -44,7 +44,7 @@ Run label：`linear-perp-liquidation-5000-final`
 candidate 的 p50/p95/p99 几乎决定了总耗时；candidate 到强平单提交的 p99 只有 7.071 秒，说明
 主要瓶颈不在 liquidation consumer，而在风险发现。
 
-## Kafka lag
+## Kafka 积压
 
 | consumer group | peak total lag | peak partition lag | 最后一次采样 total lag |
 |---|---:|---:|---:|

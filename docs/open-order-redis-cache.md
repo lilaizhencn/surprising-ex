@@ -1,10 +1,10 @@
-# Open-order Redis projection
+# 用户未完成订单 Redis 投影
 
-`surprising-order-provider` serves ordinary user open-order reads from a replayable Redis projection. PostgreSQL remains the authority for every order and funds transition.
+`surprising-order-provider` 用可重放的 Redis 投影承接普通用户未完成订单查询；PostgreSQL 始终是订单状态和资金变更的唯一权威。
 
-## Keys and product isolation
+## Key 与产品线隔离
 
-For one user and product line, all mutable keys use the same Redis Cluster hash tag:
+同一用户、同一产品线的可变 key 共用 Redis Cluster hash tag：
 
 ```
 surprising:order:v1:{LINEAR_PERPETUAL:1001}:open
@@ -13,29 +13,29 @@ surprising:order:v1:{LINEAR_PERPETUAL:1001}:open:revisions
 surprising:order:v1:{LINEAR_PERPETUAL:1001}:open:epoch
 ```
 
-- `:open` is a ZSET. The member is `orderId`; the score is the same positive monotonic `orderId`. This is exact only up to `2^53 - 1`; the service rejects an unrepresentable id rather than silently corrupting pagination.
-- `:open:orders` is a hash of complete `OrderRecord` snapshots keyed by `orderId`.
-- `:open:revisions` is a hash keyed by `orderId`. It retains a terminal revision after the ZSET/hash entry is deleted, preventing a delayed event from restoring a closed order.
-- `:open:epoch` records the product-line rebuild epoch used by this user's keys. Product-level epoch, ready, rebuild-time, and lease keys are kept separate per product line.
+- `:open` 为 ZSET；member 与 score 都是单调递增的 `orderId`。score 只允许不超过 `2^53 - 1` 的精确整数，服务会拒绝不能精确表示的订单号。
+- `:open:orders` 是以 `orderId` 为 field 的完整 `OrderRecord` 快照 Hash。
+- `:open:revisions` 保存每个订单最新 revision。终态删除 ZSET/hash 快照后仍保留 revision tombstone，延迟 Kafka 事件不能把关闭订单重新写回。
+- `:open:epoch` 是此用户 key 所属的重建 epoch；产品级 epoch、ready、重建时间和 lease key 也分别按产品线隔离。
 
-The projection stores only `ACCEPTED` and `PARTIALLY_FILLED` orders. `CANCEL_REQUESTED` is not returned as an open order because it is already a state-transition request; all terminal statuses delete the snapshot and ZSET member.
+仅 `ACCEPTED` 与 `PARTIALLY_FILLED` 会留在投影中。`CANCEL_REQUESTED` 已经是状态迁移请求，不作为未完成订单返回；所有终态都删除 ZSET member 和快照。
 
-## Write and recovery flow
+## 写入与恢复
 
-1. Order entry and every state mutation update `trading_orders` and write the existing transactional outbox in the same PostgreSQL transaction. `trading_orders.revision` starts at 1 and each direct order-state or matching fill mutation increments it.
-2. The cache consumer receives committed order events and matching results in Kafka batches, deduplicates all affected taker/maker order ids, and reloads them with one bounded PostgreSQL query per batch. It then verifies the configured product line and invokes one Lua revision compare-and-set per affected order.
-3. The Lua script clears a user's old epoch only once, ignores a revision not newer than the retained revision, and updates the ZSET/hash/revision hash atomically.
-4. A token-leased, paged rebuild scans active users and their active orders. It starts a new epoch, lets live Kafka updates safely overlap, and marks the line ready only after the scan completes. The ready marker is refreshed and a complete rebuild is required at most every configured `rebuild-max-age` (five minutes by default).
+1. 订单创建和每次状态变更都在同一个 PostgreSQL 事务中更新 `trading_orders` 并写入既有 outbox。`trading_orders.revision` 从 1 开始；订单状态和撮合成交的每次直接更新都会递增它。
+2. 缓存消费者批量接收已提交的订单事件和撮合结果，去重全部受影响的 taker/maker 订单号，并在每个 Kafka 批次内用一次有界 PostgreSQL 查询读取；随后校验产品线，对每个受影响订单执行一次 Lua revision CAS。
+3. Lua 脚本只在用户仍属旧 epoch 时清空旧 key；只接受更大的 revision，并原子更新 ZSET、快照 Hash 和 revision Hash。
+4. token lease 保护分页重建：先创建新 epoch，再扫描活跃用户及其活跃订单。实时 Kafka 投影可以并行运行并由更高 revision 胜出；扫描结束后才标记 ready。ready 会定时刷新，默认最长五分钟完成一次完整重建。
 
-Redis errors or incomplete data make the cache unavailable for that request; the endpoint falls back to PostgreSQL. Redis must use persistence and `maxmemory-policy noeviction` in production. Do not manually edit one key of a user's key group.
+Redis 异常或数据不完整只会让本次查询回退 PostgreSQL，不会授权任何资金或订单动作。生产 Redis 应启用持久化并使用 `maxmemory-policy noeviction`；不要手工单独修改一个用户的某个 key。
 
-## Query contract
+## 查询约定
 
-`GET /orders/open` accepts `userId`, optional `symbol`, `limit`, and optional opaque `cursor`. Results are ordered by descending `orderId`. The response includes `nextCursor`, `hasMore`, and `sort = orderId.desc`.
+`GET /orders/open` 接受 `userId`、可选 `symbol`、`limit` 和可选不透明 `cursor`。按 `orderId` 倒序返回，响应带有 `nextCursor`、`hasMore` 和 `sort = orderId.desc`。
 
-The cache scans the ordered ZSET and reads corresponding hash snapshots. A missing/corrupt snapshot, wrong product line/user, stale epoch, Redis error, or a scan that cannot safely establish the page makes it use the PostgreSQL product-line-scoped keyset query instead. It never mixes a partial Redis page with database rows.
+查询从 ZSET 顺序读取并取同 key slot 下的 Hash 快照。缺失/损坏快照、用户或产品线不匹配、epoch 过期、Redis 异常，或无法安全确认分页完整性时，整页使用 PostgreSQL 的产品线隔离 keyset 查询；不会把部分 Redis 数据和数据库行拼在同一页。
 
-## Operational configuration
+## 运行配置
 
 ```yaml
 surprising:
@@ -50,4 +50,4 @@ surprising:
         lock-ttl: 30s
 ```
 
-Monitor Redis failures and latency, order cache consumer lag, order outbox backlog, rebuild duration, database-fallback rate, and the rate of stale revisions. A cache loss only raises PostgreSQL read load; it must never authorize a cancellation, balance movement, fill, or liquidation action.
+监控 Redis 延迟/错误、缓存消费者 lag、订单 outbox 积压、重建耗时、数据库回退率和陈旧 revision 数。缓存丢失只允许增加数据库读负载，绝不能决定撤单、余额变动、成交或强平。

@@ -1,4 +1,4 @@
-# Matching symbol 分片和上线容量注意事项
+# 撮合交易对分片和上线容量注意事项
 
 本文记录 `surprising-matching-provider` 使用 `exchange-core2` 时的 symbol 分片模型和上线前容量检查点。重点结论：`exchange-core2` 不会为每个 symbol 自动创建独立的单生产者、单消费者队列；它使用共享 Disruptor RingBuffer，并按整数 `symbolId` 把 symbol 路由到固定数量的 matching engine shard。
 
@@ -11,7 +11,7 @@
 - `exchange-core2` 内部把所有命令发布到同一个 Disruptor RingBuffer，底层 producer 类型是 `ProducerType.MULTI`。
 - `exchange-core2` 创建固定数量的 `MatchingEngineRouter`，每个 router 持有一组 `symbolId -> orderBook`。路由规则是 `symbolId & shardMask == shardId`。
 
-## shard 的含义
+## 分片的含义
 
 这里的 shard 指 `exchange-core2` 内部的 matching engine shard，也就是一个 `MatchingEngineRouter` 实例。它不是 Kafka partition，也不是每个 symbol 一个独立队列。
 
