@@ -10,7 +10,7 @@ import java.util.Optional;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-/** Latest risk-snapshot ranking only; every selected member is revalidated and locked in PostgreSQL. */
+/** 这里只缓存最新风险快照的排序；每个入选成员都必须在 PostgreSQL 中重新校验并锁定。 */
 @Component
 public class RedisAdlCandidateIndex {
     private final StringRedisTemplate redis;
@@ -30,7 +30,7 @@ public class RedisAdlCandidateIndex {
                 redis.opsForZSet().remove(key(event.productLine(), event.settleAsset()), member);
                 return;
             }
-            // Negative score makes ZRANGEBYSCORE return highest ADL priority first.
+            // 使用负分值，使 ZRANGEBYSCORE 优先返回 ADL 优先级最高的候选。
             redis.opsForZSet().add(key(event.productLine(), event.settleAsset()), member, -((double) priority));
         } catch (RuntimeException ignored) { }
     }

@@ -8,6 +8,7 @@ import com.surprising.adl.api.model.AdlSide;
 import com.surprising.adl.provider.config.AdlProperties;
 import com.surprising.adl.provider.model.AdlCandidate;
 import com.surprising.adl.provider.model.DeficitRow;
+import com.surprising.adl.provider.repository.AdlEventRepository;
 import com.surprising.adl.provider.repository.AdlRepository;
 import java.time.Duration;
 import java.time.Instant;
@@ -54,7 +55,8 @@ class AdlServiceTest {
         repository.queueRows.add(new AdlCandidate(1002L, "USDT", "ETH-USDT", AdlSide.LONG,
                 10L, 10L, 3_000L, 3_500L, 500L, 35_000L,
                 5_000L, 10_000L, 500_000L, 1_000_000L, 800_000L));
-        AdlService service = new AdlService(new AdlProperties(), repository);
+        AdlService service = new AdlService(
+                new AdlProperties(), repository, null, new FakeAdlEventRepository(), null, null);
 
         var firstPage = service.queue("usdt", 1, null, null);
         var secondPage = service.queue("USDT", 1, firstPage.nextCursor(), null);
@@ -78,16 +80,18 @@ class AdlServiceTest {
                 "BTC-USDT", AdlSide.LONG, 10L, 50_000L, 55_000L,
                 1_000L, 500L, 500L, 500L, 900_000L, "ADL_DEFICIT_COVERAGE",
                 Instant.parse("2026-07-01T00:00:00Z"));
-        repository.eventPage = new AdminCursorPage.CursorPage<>(List.of(event), "next-events",
+        FakeAdlEventRepository eventRepository = new FakeAdlEventRepository();
+        eventRepository.eventPage = new AdminCursorPage.CursorPage<>(List.of(event), "next-events",
                 true, "createdAt.desc", 50);
-        AdlService service = new AdlService(new AdlProperties(), repository);
+        AdlService service = new AdlService(
+                new AdlProperties(), repository, null, eventRepository, null, null);
 
         var response = service.events(1001L, "usdt", "btc-usdt", 50, "cursor-events", "createdAt.desc");
 
-        assertThat(repository.lastEventsUserId).isEqualTo(1001L);
-        assertThat(repository.lastEventsAsset).isEqualTo("USDT");
-        assertThat(repository.lastEventsSymbol).isEqualTo("BTC-USDT");
-        assertThat(repository.lastEventsCursor).isEqualTo("cursor-events");
+        assertThat(eventRepository.lastEventsUserId).isEqualTo(1001L);
+        assertThat(eventRepository.lastEventsAsset).isEqualTo("USDT");
+        assertThat(eventRepository.lastEventsSymbol).isEqualTo("BTC-USDT");
+        assertThat(eventRepository.lastEventsCursor).isEqualTo("cursor-events");
         assertThat(response.events()).containsExactly(event);
         assertThat(response.nextCursor()).isEqualTo("next-events");
         assertThat(response.hasMore()).isTrue();
@@ -101,14 +105,6 @@ class AdlServiceTest {
         private final List<AdlCandidate> queueRows = new ArrayList<>();
         private String lastAsset;
         private int lastLimit;
-        private Long lastEventsUserId;
-        private String lastEventsAsset;
-        private String lastEventsSymbol;
-        private String lastEventsCursor;
-        private String lastEventsSort;
-        private AdminCursorPage.CursorPage<AdlEventResponse> eventPage =
-                new AdminCursorPage.CursorPage<>(List.of(), null, false, "createdAt.desc", 0);
-
         private FakeAdlRepository() {
             super(null);
         }
@@ -133,23 +129,32 @@ class AdlServiceTest {
             return Optional.empty();
         }
 
-        @Override
-        public List<AdlEventResponse> events(Long userId, String asset, String symbol, int limit) {
-            return List.of();
+    }
+
+    private static final class FakeAdlEventRepository extends AdlEventRepository {
+        private Long lastEventsUserId;
+        private String lastEventsAsset;
+        private String lastEventsSymbol;
+        private String lastEventsCursor;
+        private AdminCursorPage.CursorPage<AdlEventResponse> eventPage =
+                new AdminCursorPage.CursorPage<>(List.of(), null, false, "createdAt.desc", 0);
+
+        private FakeAdlEventRepository() {
+            super(null);
         }
 
         @Override
-        public AdminCursorPage.CursorPage<AdlEventResponse> eventsPage(Long userId,
-                                                                       String asset,
-                                                                       String symbol,
-                                                                       int limit,
-                                                                       String cursor,
-                                                                       String sort) {
+        public AdminCursorPage.CursorPage<AdlEventResponse> page(String accountType,
+                                                                 Long userId,
+                                                                 String asset,
+                                                                 String symbol,
+                                                                 int limit,
+                                                                 String cursor,
+                                                                 String sort) {
             lastEventsUserId = userId;
             lastEventsAsset = asset;
             lastEventsSymbol = symbol;
             lastEventsCursor = cursor;
-            lastEventsSort = sort;
             return eventPage;
         }
     }

@@ -9,8 +9,9 @@ import com.surprising.adl.provider.config.AdlProperties;
 import com.surprising.adl.provider.model.AdlCandidate;
 import com.surprising.adl.provider.model.AdlExecutionPlan;
 import com.surprising.adl.provider.model.DeficitRow;
-import com.surprising.adl.provider.repository.AdlExecutionRepository;
+import com.surprising.adl.provider.repository.AdlEventRepository;
 import com.surprising.adl.provider.repository.AdlRepository;
+import com.surprising.adl.provider.repository.AdlSequenceRepository;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
@@ -29,26 +30,31 @@ public class AdlService {
 
     private final AdlProperties properties;
     private final AdlRepository adlRepository;
-    private final AdlExecutionRepository executionRepository;
+    private final AdlEventRepository eventRepository;
+    private final AdlSequenceRepository sequenceRepository;
+    private final AdlExecutionPersistenceService executionPersistenceService;
     private final RedisAdlCandidateIndex redisCandidateIndex;
 
     public AdlService(AdlProperties properties, AdlRepository adlRepository) {
-        this(properties, adlRepository, null, null);
+        this(properties, adlRepository, null, null, null, null);
     }
 
     @Autowired
     public AdlService(AdlProperties properties, AdlRepository adlRepository,
                       RedisAdlCandidateIndex redisCandidateIndex,
-                      AdlExecutionRepository executionRepository) {
+                      AdlEventRepository eventRepository,
+                      AdlSequenceRepository sequenceRepository,
+                      AdlExecutionPersistenceService executionPersistenceService) {
         this.properties = properties;
         this.adlRepository = adlRepository;
         this.redisCandidateIndex = redisCandidateIndex;
-        this.executionRepository = executionRepository;
+        this.eventRepository = eventRepository;
+        this.sequenceRepository = sequenceRepository;
+        this.executionPersistenceService = executionPersistenceService;
     }
 
     /**
-     * ADL is intentionally delayed behind insurance coverage. If insurance has
-     * balance for an asset, the scanner leaves the deficit to insurance first.
+     * ADL 刻意排在保险基金覆盖之后；只要对应资产仍有保险基金余额，就把缺口留给保险基金优先处理。
      */
     @Transactional
     @Scheduled(fixedDelayString = "${surprising.adl.scanner.scan-delay-ms:1000}")
@@ -99,10 +105,10 @@ public class AdlService {
             throw new IllegalArgumentException("userId must be positive");
         }
         int capped = normalizeLimit(limit);
-        var rows = adlRepository.events(userId,
+        var rows = eventRepository.page(accountType(), userId,
                 asset == null || asset.isBlank() ? null : normalizeAsset(asset),
                 symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol),
-                capped);
+                capped, null, null).items();
         return new AdlEventQueryResponse(rows.size(), rows);
     }
 
@@ -115,7 +121,7 @@ public class AdlService {
         if (userId != null && userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        AdminCursorPage.CursorPage<AdlEventResponse> page = adlRepository.eventsPage(userId,
+        AdminCursorPage.CursorPage<AdlEventResponse> page = eventRepository.page(accountType(), userId,
                 asset == null || asset.isBlank() ? null : normalizeAsset(asset),
                 symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol),
                 normalizeLimit(limit), cursor, sort);
@@ -146,10 +152,10 @@ public class AdlService {
                 continue;
             }
             AdlExecutionPlan plan = plan(deficit, locked.get(), remaining);
-            if (executionRepository == null) {
+            if (executionPersistenceService == null) {
                 throw new IllegalStateException("ADL execution repository is not configured");
             }
-            executionRepository.create(plan, java.time.Instant.now());
+            executionPersistenceService.create(plan, java.time.Instant.now());
             remaining = Math.subtractExact(remaining, plan.coveredUnits());
             executions++;
         }
@@ -164,7 +170,7 @@ public class AdlService {
         if (closeSteps <= 0 || realizedProfitUnits <= 0 || coveredUnits <= 0) {
             throw new IllegalStateException("invalid ADL execution plan");
         }
-        long executionId = adlRepository.nextAdlSequence("adl-execution");
+        long executionId = sequenceRepository.next("adl-execution");
         var productLine = properties.getKafka().getProductLine();
         String prefix = productLine.name() + ":" + executionId;
         return new AdlExecutionPlan(
@@ -213,6 +219,13 @@ public class AdlService {
 
     private Duration maxMarkAge() {
         return Duration.ofMillis(Math.max(1L, properties.getScanner().getMaxMarkAgeMs()));
+    }
+
+    private String accountType() {
+        String accountType = properties.getKafka().getAccountType();
+        return accountType == null || accountType.isBlank()
+                ? "USDT_PERPETUAL"
+                : accountType.trim().toUpperCase();
     }
 
     private String normalizeSymbol(String symbol) {

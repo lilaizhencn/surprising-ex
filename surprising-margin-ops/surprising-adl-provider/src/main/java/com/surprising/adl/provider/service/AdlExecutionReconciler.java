@@ -1,6 +1,9 @@
 package com.surprising.adl.provider.service;
 
-import com.surprising.adl.provider.repository.AdlExecutionRepository;
+import com.surprising.adl.provider.model.AdlSagaState;
+import com.surprising.adl.provider.repository.AdlEventRepository;
+import com.surprising.adl.provider.repository.AdlExecutionSagaRepository;
+import com.surprising.adl.provider.repository.AdlPendingExecutionRepository;
 import java.time.Instant;
 import java.util.Map;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -11,32 +14,41 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class AdlExecutionReconciler {
 
-    private final AdlExecutionRepository executionRepository;
+    private final AdlPendingExecutionRepository pendingExecutionRepository;
+    private final AdlExecutionSagaRepository sagaRepository;
+    private final AdlEventRepository eventRepository;
+    private final AdlExecutionPersistenceService persistenceService;
     private final ObjectMapper objectMapper;
 
-    public AdlExecutionReconciler(AdlExecutionRepository executionRepository,
-                                 ObjectMapper objectMapper) {
-        this.executionRepository = executionRepository;
+    public AdlExecutionReconciler(AdlPendingExecutionRepository pendingExecutionRepository,
+                                  AdlExecutionSagaRepository sagaRepository,
+                                  AdlEventRepository eventRepository,
+                                  AdlExecutionPersistenceService persistenceService,
+                                  ObjectMapper objectMapper) {
+        this.pendingExecutionRepository = pendingExecutionRepository;
+        this.sagaRepository = sagaRepository;
+        this.eventRepository = eventRepository;
+        this.persistenceService = persistenceService;
         this.objectMapper = objectMapper;
     }
 
     /**
-     * Reads authoritative command states from the database. Kafka result events may improve
-     * observability, but ADL completion and compensation never depend on their ordering.
+     * 从数据库读取权威账户命令终态。Kafka 结果事件可改善可观测性，但 ADL 完成与补偿不依赖其顺序。
      */
     @Scheduled(fixedDelayString = "${surprising.adl.scanner.reconcile-delay-ms:200}")
     @Transactional
     public void reconcile() {
         Instant now = Instant.now();
-        for (AdlExecutionRepository.SagaState saga : executionRepository.lockPending(500)) {
+        for (AdlSagaState saga : pendingExecutionRepository.lock(500)) {
             if (saga.reserveRejected()) {
-                executionRepository.failWithoutReservation(saga, now);
+                sagaRepository.failWithoutReservation(saga, now);
             } else if (saga.targetRejectedAfterReservation() && saga.releaseCommandId() == null) {
-                executionRepository.beginRelease(saga, now);
+                persistenceService.beginRelease(saga, now);
             } else if (saga.releaseApplied()) {
-                executionRepository.completeRelease(saga, now);
+                sagaRepository.completeRelease(saga, now);
             } else if (saga.finalizeApplied()) {
-                executionRepository.complete(saga, remainingDeficit(saga.finalizeResult()), now);
+                eventRepository.insert(saga, remainingDeficit(saga.finalizeResult()), now);
+                sagaRepository.complete(saga.executionId(), now);
             }
         }
     }

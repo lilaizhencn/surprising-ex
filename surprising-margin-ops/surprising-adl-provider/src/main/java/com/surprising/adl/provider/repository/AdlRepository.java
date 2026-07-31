@@ -1,7 +1,5 @@
 package com.surprising.adl.provider.repository;
 
-import com.surprising.adl.api.model.AdminCursorPage;
-import com.surprising.adl.api.model.AdlEventResponse;
 import com.surprising.adl.api.model.AdlSide;
 import com.surprising.adl.provider.config.AdlProperties;
 import com.surprising.adl.provider.model.AdlCandidate;
@@ -21,6 +19,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+/**
+ * 提供 ADL 在线安全决策所需的权威输入。
+ *
+ * <p>不可拆原因：残余缺口扫描必须在同一数据库快照中同时确认账户缺口与保险基金已无可用余额；
+ * 候选排序和执行前复查必须把持仓、合约参数、资产精度、逐仓保证金、账户缺口及同版本标记价组合计算。
+ * 拆成单表查询会在并发结算或版本切换窗口选择错误用户或错误减仓数量。这里不提供后台时间线、资金对账或
+ * 运营报表；ADL 事件查询已由单表 Repository 承担。</p>
+ */
 @Repository
 public class AdlRepository {
 
@@ -47,24 +53,8 @@ public class AdlRepository {
         this.markPriceCache = markPriceCache;
     }
 
-    public long nextAdlSequence(String sequenceName) {
-        Long value = jdbcTemplate.queryForObject("""
-                INSERT INTO adl_sequences (sequence_name, sequence_value, updated_at)
-                VALUES (?, 1, now())
-                ON CONFLICT (sequence_name) DO UPDATE SET
-                    sequence_value = adl_sequences.sequence_value + 1,
-                    updated_at = now()
-                RETURNING sequence_value
-                """, Long.class, sequenceName);
-        if (value == null) {
-            throw new IllegalStateException("failed to allocate adl sequence " + sequenceName);
-        }
-        return value;
-    }
-
     /**
-     * ADL only claims aged deficits when the insurance fund for the asset is empty.
-     * This gives insurance-provider the first chance to absorb bankruptcy losses.
+     * 仅在对应资产的保险基金为空时领取已达到等待时间的缺口，确保保险基金优先吸收穿仓损失。
      */
     public List<DeficitRow> claimResidualDeficits(int batchSize, Duration minAge) {
         String accountType = accountType();
@@ -182,65 +172,6 @@ public class AdlRepository {
         return lockCandidate(userId, symbol, MarginMode.CROSS, PositionSide.NET, asset, maxMarkAge);
     }
 
-    public List<AdlEventResponse> events(Long userId, String asset, String symbol, int limit) {
-        return jdbcTemplate.query("""
-                SELECT *
-                  FROM adl_events
-                 WHERE account_type = ?
-                   AND (CAST(? AS text) IS NULL OR deficit_user_id = ? OR target_user_id = ?)
-                   AND (CAST(? AS text) IS NULL OR asset = ?)
-                   AND (CAST(? AS text) IS NULL OR symbol = ?)
-                 ORDER BY created_at DESC
-                 LIMIT ?
-                """, (rs, rowNum) -> toEvent(rs), accountType(), userId, userId, userId, asset, asset, symbol,
-                symbol, limit);
-    }
-
-    public AdminCursorPage.CursorPage<AdlEventResponse> eventsPage(
-            Long userId,
-            String asset,
-            String symbol,
-            int limit,
-            String cursor,
-            String sort) {
-        int safeLimit = AdminCursorPage.limit(limit, 1000);
-        AdminCursorPage.SortSpec sortSpec = parseCreatedAtSort(sort);
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
-        List<Object> args = new ArrayList<>();
-        args.add(accountType());
-        args.add(userId);
-        args.add(userId);
-        args.add(userId);
-        args.add(asset);
-        args.add(asset);
-        args.add(symbol);
-        args.add(symbol);
-        AdminCursorPage.addCursorArgs(args, decodedCursor);
-        args.add(safeLimit + 1);
-        String sql = """
-                SELECT *
-                  FROM adl_events
-                 WHERE account_type = ?
-                   AND (CAST(? AS text) IS NULL OR deficit_user_id = ? OR target_user_id = ?)
-                   AND (CAST(? AS text) IS NULL OR asset = ?)
-                   AND (CAST(? AS text) IS NULL OR symbol = ?)
-                """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
-                 ORDER BY created_at %s, event_id %s
-                 LIMIT ?
-                """.formatted(sortSpec.directionSql(), sortSpec.directionSql());
-        List<AdlEventResponse> rows = jdbcTemplate.query(sql, (rs, rowNum) -> toEvent(rs), args.toArray());
-        return AdminCursorPage.page(rows, safeLimit, sortSpec, AdlEventResponse::createdAt,
-                AdlEventResponse::eventId);
-    }
-
-    private AdminCursorPage.SortSpec parseCreatedAtSort(String value) {
-        AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
-                "createdAt", "created_at", "event_id", true);
-        AdminCursorPage.SortSpec createdAtAsc = new AdminCursorPage.SortSpec(
-                "createdAt", "created_at", "event_id", false);
-        return AdminCursorPage.parseSort(value, createdAtDesc, List.of(createdAtDesc, createdAtAsc));
-    }
-
     private String accountType() {
         return normalizeAccountType(properties.getKafka().getAccountType());
     }
@@ -251,33 +182,12 @@ public class AdlRepository {
                 : accountType.trim().toUpperCase();
     }
 
-    private void requireProviderAccountType(String accountType) {
-        if (productTopicsEnabled() && !accountType().equals(accountType)) {
-            throw new IllegalArgumentException("ADL deficit account type " + accountType
-                    + " does not match provider account type " + accountType());
-        }
-    }
-
     private boolean productTopicsEnabled() {
         return properties.getKafka().isProductTopicsEnabled();
     }
 
     private String productLine() {
         return properties.getKafka().getProductLine().name();
-    }
-
-    private String productLinePredicate() {
-        return productTopicsEnabled() ? "product_line = ?" : "1 = 1";
-    }
-
-    private Object[] productLineArgs(Object... rest) {
-        if (!productTopicsEnabled()) {
-            return rest;
-        }
-        Object[] args = new Object[rest.length + 1];
-        System.arraycopy(rest, 0, args, 0, rest.length);
-        args[rest.length] = productLine();
-        return args;
     }
 
     private String candidateSelect() {
@@ -419,24 +329,4 @@ public class AdlRepository {
                 priorityScorePpm);
     }
 
-    private AdlEventResponse toEvent(java.sql.ResultSet rs) throws java.sql.SQLException {
-        return new AdlEventResponse(
-                rs.getLong("event_id"),
-                rs.getLong("deficit_user_id"),
-                rs.getLong("target_user_id"),
-                rs.getString("asset"),
-                rs.getString("symbol"),
-                AdlSide.valueOf(rs.getString("target_side")),
-                PositionSide.fromNullableDbValue(rs.getString("target_position_side")),
-                rs.getLong("closed_quantity_steps"),
-                rs.getLong("entry_price_ticks"),
-                rs.getLong("mark_price_ticks"),
-                rs.getLong("requested_deficit_units"),
-                rs.getLong("realized_profit_units"),
-                rs.getLong("covered_units"),
-                rs.getLong("remaining_deficit_units"),
-                rs.getLong("priority_score_ppm"),
-                rs.getString("reason"),
-                rs.getTimestamp("created_at").toInstant());
-    }
 }

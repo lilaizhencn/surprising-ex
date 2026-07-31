@@ -32,8 +32,8 @@ public class AdlRiskPositionConsumer {
             try {
                 event = objectMapper.readValue(record.value(), RiskPositionUpdatedEvent.class);
             } catch (Exception ex) {
-                // The Redis ADL index is a rebuildable acceleration structure. A malformed historical
-                // publication must never block the partition or delay valid risk updates behind it.
+                // Redis ADL 索引是可重建的加速结构。格式错误的历史消息不能阻塞分区，
+                // 也不能延迟其后的有效风险更新。
                 log.warn("Discarding invalid ADL risk event topic={} partition={} offset={}: {}", record.topic(),
                         record.partition(), record.offset(), ex.getMessage());
                 continue;

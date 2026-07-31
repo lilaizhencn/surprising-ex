@@ -31,6 +31,10 @@ Margin-operation APIs and providers for risk, liquidation, funding, insurance, a
   product-scoped deficits, legacy deficits, and account outbox rows. `InsuranceService` and
   `InsuranceCoverageReconciler` aggregate them transactionally. Only the recovery lock that correlates coverage rows
   with reserve/finalize command states retains cross-table SQL, with its reason documented in source.
+- ADL persistence is split by physical table for sequences, events, execution sagas, and account outbox rows.
+  `AdlService`, `AdlExecutionPersistenceService`, and `AdlExecutionReconciler` aggregate them inside business
+  transactions. Only online candidate safety decisions and the recovery lock correlating saga and account-command
+  terminal states require a shared database snapshot; each exception is documented in source.
 - Risk consumes account position events in Kafka batches, keeps only the highest revision for each exact position, and
   scans each affected user/account/settlement-asset group once. Complete position events eliminate the former
   instrument target-resolution query; scheduled keyset scans remain the safety fallback.
@@ -54,6 +58,9 @@ Margin-operation APIs and providers for risk, liquidation, funding, insurance, a
   from that independent finance-operations projection rather than new JOINs in the primary trading database.
 - Insurance-fund history analysis, cross-user coverage reconciliation, and operational statistics belong in the same
   independent finance-operations database rather than expanded primary-database queries.
+- ADL execution timelines, deficit-allocation reconciliation, and operational statistics must likewise come from
+  event projections in the independent finance-operations database. ADL cross-table queries in the primary database
+  are restricted to real-time safety decisions and funds-consistency recovery, never admin reporting.
 - No module reads another module's in-memory state directly.
 - The original standalone provider jars remain available for split deployment.
 
