@@ -65,8 +65,8 @@ public class RiskKafkaConfiguration {
         factory.setConcurrency(properties.getKafka().getConcurrency());
         factory.setBatchListener(true);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
-        // A position event may temporarily outrun its mark-price cache update. Never recover by discarding a
-        // financial risk trigger; pause/retry the batch until the authoritative inputs are available.
+        // 持仓事件可能暂时早于标记价格缓存更新。资金风险触发不能通过丢弃来恢复；
+        // 应暂停并重试当前批次，直到权威输入可用。
         factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
         return factory;
     }

@@ -11,7 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-/** Dispatches Redis-indexed risk scans for price changes plus a bounded stable-price retry heartbeat. */
+/** 根据价格变化触发 Redis 索引风险扫描，并提供有界的稳定价格重试心跳。 */
 @Component
 public class MarkPriceRiskTrigger implements MarkPriceUpdateListener {
 

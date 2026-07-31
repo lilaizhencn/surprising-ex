@@ -3,7 +3,7 @@ package com.surprising.risk.provider.model;
 import java.time.Instant;
 import java.util.List;
 
-/** Complete Redis projection used by the only live risk-discovery path. */
+/** 实时风险发现唯一路径使用的完整 Redis 投影。 */
 public record CachedRiskGroup(
         RiskGroupKey key,
         long walletBalanceUnits,

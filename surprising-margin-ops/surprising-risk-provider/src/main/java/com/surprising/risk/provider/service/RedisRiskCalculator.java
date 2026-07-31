@@ -15,7 +15,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
 
-/** Calculates a complete group from Redis account inputs and the latest in-process mark prices. */
+/** 使用 Redis 账户输入和进程内最新标记价格计算完整风险组。 */
 @Component
 public class RedisRiskCalculator {
 

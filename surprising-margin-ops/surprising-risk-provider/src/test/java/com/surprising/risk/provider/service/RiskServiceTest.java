@@ -25,10 +25,9 @@ import com.surprising.risk.provider.model.CachedRiskGroup;
 import com.surprising.risk.provider.repository.RiskOutboxRepository;
 import com.surprising.risk.provider.repository.RiskOutboxRepository.PendingRiskOutboxEvent;
 import com.surprising.risk.provider.repository.RiskRepository;
-import com.surprising.risk.provider.repository.RiskRepository.HighRiskAccount;
-import com.surprising.risk.provider.repository.RiskRepository.LiquidationCandidateWrite;
-import com.surprising.risk.provider.repository.RiskRepository.PositionSnapshotWrite;
-import com.surprising.risk.provider.repository.RiskRepository.RiskRuleOverride;
+import com.surprising.risk.provider.repository.RiskLiquidationCandidateRepository.LiquidationCandidateWrite;
+import com.surprising.risk.provider.repository.RiskPositionSnapshotRepository.PositionSnapshotWrite;
+import com.surprising.risk.provider.repository.RiskRuleRepository.RiskRuleOverride;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
 import com.surprising.risk.provider.model.RiskGroupKey;
 import com.surprising.trading.api.model.MarginMode;
@@ -162,7 +161,7 @@ class RiskServiceTest {
         FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
         TrackingTransactionManager transactionManager = new TrackingTransactionManager();
         RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
+                riskRepository.persistence, new FakeRiskSequenceRepository(), outboxRepository, transactionManager);
 
         service.scanPositionUpdates(List.of(
                 positionEvent(31L, 1001L, "BTC-USDT", 7L, "USDT", "trace-1")));
@@ -218,7 +217,8 @@ class RiskServiceTest {
     void positionEventBatchRejectsIncompleteProjectionFields() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
         RiskService service = new RiskService(new ObjectMapper(), new RiskProperties(), riskRepository,
-                new FakeRiskSequenceRepository(), new FakeRiskOutboxRepository(), new TrackingTransactionManager());
+                riskRepository.persistence, new FakeRiskSequenceRepository(),
+                new FakeRiskOutboxRepository(), new TrackingTransactionManager());
 
         assertThatThrownBy(() -> service.scanPositionUpdates(List.of(
                 positionEvent(31L, 1001L, "BTC-USDT", 7L, "", "trace-1"))))
@@ -234,7 +234,8 @@ class RiskServiceTest {
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), new FakeRiskOutboxRepository(), new TrackingTransactionManager());
+                riskRepository.persistence, new FakeRiskSequenceRepository(),
+                new FakeRiskOutboxRepository(), new TrackingTransactionManager());
 
         RiskAccountSnapshotResponse response = service.latestAccount(1001L, "USDT");
 
@@ -250,7 +251,8 @@ class RiskServiceTest {
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.OPTION);
         RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), new FakeRiskOutboxRepository(), new TrackingTransactionManager());
+                riskRepository.persistence, new FakeRiskSequenceRepository(),
+                new FakeRiskOutboxRepository(), new TrackingTransactionManager());
 
         assertThatThrownBy(() -> service.latestAccount(1001L, "USDT_DELIVERY", "USDT"))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -403,7 +405,8 @@ class RiskServiceTest {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
         RiskProperties properties = new RiskProperties();
         RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), new FakeRiskOutboxRepository(), new TrackingTransactionManager());
+                riskRepository.persistence, new FakeRiskSequenceRepository(),
+                new FakeRiskOutboxRepository(), new TrackingTransactionManager());
 
         RiskService.RiskRuleResponse response = service.updateRiskRule("global_margin_policy", " admin-risk ",
                 new RiskService.RiskRuleUpdateCommand("Margin policy", true, 700_000L,
@@ -423,48 +426,17 @@ class RiskServiceTest {
     }
 
     @Test
-    void returnsHighRiskAccountAggregationUsingWarningThresholdByDefault() {
-        FakeRiskRepository riskRepository = new FakeRiskRepository();
-        riskRepository.highRiskRows = List.of(new HighRiskAccount(901L, 1001L, "USDT_PERPETUAL", "USDT",
-                1_000_000L, -300_000L, 700_000L, 600_000L, 857_142L,
-                RiskStatus.WARNING, Instant.parse("2026-07-01T00:00:00Z"), 2, 1,
-                0, "BTC-USDT", MarginMode.CROSS, 900_000L, RiskStatus.WARNING, "WARNING"));
-        RiskProperties properties = new RiskProperties();
-        properties.getCalculation().setWarningMarginRatioPpm(750_000L);
-        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), new FakeRiskOutboxRepository(), new TrackingTransactionManager());
-
-        RiskService.HighRiskAccountsResponse response = service.highRiskAccounts(null, 50);
-
-        assertThat(riskRepository.lastHighRiskThreshold).isEqualTo(750_000L);
-        assertThat(riskRepository.lastHighRiskLimit).isEqualTo(50);
-        assertThat(response.accountCount()).isEqualTo(1);
-        assertThat(response.warningCount()).isEqualTo(1);
-        assertThat(response.liquidationCount()).isZero();
-        assertThat(response.accounts()).singleElement().satisfies(account -> {
-            assertThat(account.userId()).isEqualTo(1001L);
-            assertThat(account.accountType()).isEqualTo("USDT_PERPETUAL");
-            assertThat(account.topSymbol()).isEqualTo("BTC-USDT");
-            assertThat(account.riskLevel()).isEqualTo("WARNING");
-        });
-    }
-
-    @Test
-    void adminRiskQueriesExposeCursorMetadata() {
+    void liquidationCandidateAdminQueryExposesCursorMetadata() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
         riskRepository.candidateRows = List.of(new LiquidationCandidateResponse(9401L, 9301L, 2002L,
                 "BTC-USDT", 8L, "USDT", 10L, 590_000L, -200_000_000L,
                 88_500_000L, 1_100_000L, LiquidationCandidateStatus.NEW,
                 Instant.parse("2026-07-01T00:00:00Z")));
-        riskRepository.highRiskRows = List.of(new HighRiskAccount(901L, 1001L, "USDT_PERPETUAL", "USDT",
-                1_000_000L, -300_000L, 700_000L, 600_000L, 857_142L,
-                RiskStatus.WARNING, Instant.parse("2026-07-01T00:00:00Z"), 2, 1,
-                0, "BTC-USDT", MarginMode.CROSS, 900_000L, RiskStatus.WARNING, "WARNING"));
         RiskService service = new RiskService(new ObjectMapper(), new RiskProperties(), riskRepository,
-                new FakeRiskSequenceRepository(), new FakeRiskOutboxRepository(), new TrackingTransactionManager());
+                riskRepository.persistence, new FakeRiskSequenceRepository(),
+                new FakeRiskOutboxRepository(), new TrackingTransactionManager());
 
         var candidates = service.liquidationCandidates("new", 25, "cursor-candidates", "eventTime.asc");
-        var accounts = service.highRiskAccounts(null, 25, "cursor-accounts", "eventTime.desc");
 
         assertThat(riskRepository.lastCandidateStatus).isEqualTo(LiquidationCandidateStatus.NEW);
         assertThat(riskRepository.lastCandidateCursor).isEqualTo("cursor-candidates");
@@ -472,10 +444,6 @@ class RiskServiceTest {
         assertThat(candidates.candidates()).hasSize(1);
         assertThat(candidates.nextCursor()).isEqualTo("next-candidates");
         assertThat(candidates.hasMore()).isTrue();
-        assertThat(accounts.accounts()).hasSize(1);
-        assertThat(accounts.nextCursor()).isEqualTo("next-accounts");
-        assertThat(accounts.sort()).isEqualTo("eventTime.desc");
-        assertThat(accounts.limit()).isEqualTo(25);
     }
 
     private RiskService redisRiskService(RiskProperties properties,
@@ -495,7 +463,8 @@ class RiskServiceTest {
                     .toList();
         });
         return new RiskService(new ObjectMapper(), properties, riskRepository,
-                new FakeRiskSequenceRepository(), outboxRepository, kafka, transactionManager, stateStore,
+                riskRepository.persistence, new FakeRiskSequenceRepository(),
+                outboxRepository, kafka, transactionManager, stateStore,
                 calculator);
     }
 
@@ -530,6 +499,7 @@ class RiskServiceTest {
     }
 
     private static final class FakeRiskRepository extends RiskRepository {
+        private final FakeRiskPersistenceService persistence = new FakeRiskPersistenceService(this);
         private List<CalculatedPositionRisk> positions = List.of(new CalculatedPositionRisk(1001L,
                 "BTC-USDT", 7L, "USDT", 10L, 65_000L, 60_000L, 600_000L, -100L, 100L));
         private Set<String> failedCandidateSymbols = Set.of();
@@ -545,12 +515,7 @@ class RiskServiceTest {
         private long walletBalanceUnits;
         private int scanLeaseAttempts;
         private final List<RiskRuleOverride> ruleOverrides = new ArrayList<>();
-        private List<HighRiskAccount> highRiskRows = List.of();
         private List<LiquidationCandidateResponse> candidateRows = List.of();
-        private long lastHighRiskThreshold;
-        private int lastHighRiskLimit;
-        private String lastHighRiskCursor;
-        private String lastHighRiskSort;
         private String lastLatestAccountType;
         private String lastLatestAccountSettleAsset;
         private LiquidationCandidateStatus lastCandidateStatus;
@@ -597,10 +562,21 @@ class RiskServiceTest {
             return walletBalanceUnits;
         }
 
+    }
+
+    private static final class FakeRiskPersistenceService extends RiskPersistenceService {
+        private final FakeRiskRepository owner;
+
+        private FakeRiskPersistenceService(FakeRiskRepository owner) {
+            super(null, null, null, null);
+            this.owner = owner;
+        }
+
         @Override
-        public Optional<RiskAccountSnapshotResponse> latestAccount(long userId, String accountType, String settleAsset) {
-            lastLatestAccountType = accountType;
-            lastLatestAccountSettleAsset = settleAsset;
+        public Optional<RiskAccountSnapshotResponse> latestAccount(
+                long userId, String accountType, String settleAsset) {
+            owner.lastLatestAccountType = accountType;
+            owner.lastLatestAccountSettleAsset = settleAsset;
             return Optional.of(new RiskAccountSnapshotResponse(101L, userId, accountType, settleAsset,
                     1_000_000L, 0L, 1_000_000L, 0L, 0L, RiskStatus.NORMAL,
                     Instant.parse("2026-07-01T00:00:00Z")));
@@ -608,25 +584,26 @@ class RiskServiceTest {
 
         @Override
         public void saveAccountSnapshots(List<RiskAccountSnapshotResponse> snapshots) {
-            savedAccounts += snapshots.size();
+            owner.savedAccounts += snapshots.size();
             if (!snapshots.isEmpty()) {
-                lastAccountSnapshot = snapshots.getLast();
+                owner.lastAccountSnapshot = snapshots.getLast();
             }
         }
 
         @Override
         public void savePositionSnapshots(List<PositionSnapshotWrite> snapshots) {
-            savedPositions += snapshots.size();
-            savedPositionSnapshots.addAll(snapshots.stream().map(PositionSnapshotWrite::position).toList());
+            owner.savedPositions += snapshots.size();
+            owner.savedPositionSnapshots.addAll(
+                    snapshots.stream().map(PositionSnapshotWrite::position).toList());
         }
 
         @Override
         public Set<Long> createLiquidationCandidates(List<LiquidationCandidateWrite> candidates) {
-            if (failCandidateBatch || candidates.stream()
-                    .anyMatch(candidate -> failedCandidateSymbols.contains(candidate.position().symbol()))) {
+            if (owner.failCandidateBatch || candidates.stream()
+                    .anyMatch(candidate -> owner.failedCandidateSymbols.contains(candidate.position().symbol()))) {
                 throw new IllegalStateException("candidate batch failed");
             }
-            return returnInsertedCandidate
+            return owner.returnInsertedCandidate
                     ? candidates.stream().map(LiquidationCandidateWrite::candidateId)
                     .collect(java.util.stream.Collectors.toSet())
                     : Set.of();
@@ -634,7 +611,7 @@ class RiskServiceTest {
 
         @Override
         public List<RiskRuleOverride> riskRuleOverrides() {
-            return List.copyOf(ruleOverrides);
+            return List.copyOf(owner.ruleOverrides);
         }
 
         @Override
@@ -652,29 +629,9 @@ class RiskServiceTest {
             RiskRuleOverride override = new RiskRuleOverride(ruleCode, ruleName, ruleType, enabled,
                     warningMarginRatioPpm, liquidationMarginRatioPpm, scanDelayMs, scanBatchSize,
                     adminUserId, reason, now, now);
-            ruleOverrides.removeIf(item -> item.ruleCode().equals(ruleCode));
-            ruleOverrides.add(override);
+            owner.ruleOverrides.removeIf(item -> item.ruleCode().equals(ruleCode));
+            owner.ruleOverrides.add(override);
             return override;
-        }
-
-        @Override
-        public List<HighRiskAccount> highRiskAccounts(long minMarginRatioPpm, int limit) {
-            lastHighRiskThreshold = minMarginRatioPpm;
-            lastHighRiskLimit = limit;
-            return highRiskRows;
-        }
-
-        @Override
-        public AdminCursorPage.CursorPage<HighRiskAccount> highRiskAccountsPage(long minMarginRatioPpm,
-                                                                                int limit,
-                                                                                String cursor,
-                                                                                String sort) {
-            lastHighRiskThreshold = minMarginRatioPpm;
-            lastHighRiskLimit = limit;
-            lastHighRiskCursor = cursor;
-            lastHighRiskSort = sort;
-            return new AdminCursorPage.CursorPage<>(highRiskRows, "next-accounts", true,
-                    "eventTime.desc", limit);
         }
 
         @Override
@@ -683,11 +640,11 @@ class RiskServiceTest {
                 int limit,
                 String cursor,
                 String sort) {
-            lastCandidateStatus = status;
-            lastCandidateLimit = limit;
-            lastCandidateCursor = cursor;
-            lastCandidateSort = sort;
-            return new AdminCursorPage.CursorPage<>(candidateRows, "next-candidates", true,
+            owner.lastCandidateStatus = status;
+            owner.lastCandidateLimit = limit;
+            owner.lastCandidateCursor = cursor;
+            owner.lastCandidateSort = sort;
+            return new AdminCursorPage.CursorPage<>(owner.candidateRows, "next-candidates", true,
                     "eventTime.asc", limit);
         }
     }

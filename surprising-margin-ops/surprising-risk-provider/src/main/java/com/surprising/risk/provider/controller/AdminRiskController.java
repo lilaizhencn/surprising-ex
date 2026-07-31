@@ -2,7 +2,6 @@ package com.surprising.risk.provider.controller;
 
 import com.surprising.risk.api.model.LiquidationCandidateQueryResponse;
 import com.surprising.risk.provider.service.RiskService;
-import com.surprising.risk.provider.service.RiskService.HighRiskAccountsResponse;
 import com.surprising.risk.provider.service.RiskService.RiskRuleResponse;
 import com.surprising.risk.provider.service.RiskService.RiskRuleUpdateCommand;
 import com.surprising.risk.provider.service.RiskService.RiskRulesResponse;
@@ -41,21 +40,6 @@ public class AdminRiskController {
             @RequestBody RiskRuleUpdateCommand request) {
         try {
             return riskService.updateRiskRule(ruleCode, requireAdmin(adminUserId), request);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @GetMapping("/high-risk-accounts")
-    public HighRiskAccountsResponse highRiskAccounts(
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestParam(value = "minMarginRatioPpm", required = false) Long minMarginRatioPpm,
-            @RequestParam(value = "limit", defaultValue = "100") int limit,
-            @RequestParam(value = "cursor", required = false) String cursor,
-            @RequestParam(value = "sort", required = false) String sort) {
-        requireAdmin(adminUserId);
-        try {
-            return riskService.highRiskAccounts(minMarginRatioPpm, limit, cursor, sort);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

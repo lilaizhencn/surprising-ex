@@ -26,6 +26,14 @@ Margin-operation APIs and providers for risk, liquidation, funding, insurance, a
 - Risk consumes account position events in Kafka batches, keeps only the highest revision for each exact position, and
   scans each affected user/account/settlement-asset group once. Complete position events eliminate the former
   instrument target-resolution query; scheduled keyset scans remain the safety fallback.
+- Risk persistence is split by physical table into account-snapshot, position-snapshot, liquidation-candidate,
+  admin-rule, and outbox repositories. `RiskPersistenceService` aggregates those repositories inside business
+  transactions. `RiskRepository` retains only authoritative real-time risk inputs whose position, instrument,
+  balance, deficit, reservation, and risk-bracket data must share one database snapshot; each exception is documented
+  in source.
+- High-risk account aggregation and similar admin reports no longer query the primary trading database. A future
+  finance-operations module must build event-driven projections in an independent database for cross-table queries,
+  reconciliation, and operational reporting.
 - No module reads another module's in-memory state directly.
 - The original standalone provider jars remain available for split deployment.
 

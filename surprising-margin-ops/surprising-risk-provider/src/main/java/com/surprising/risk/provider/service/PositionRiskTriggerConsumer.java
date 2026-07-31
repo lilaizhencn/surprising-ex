@@ -33,8 +33,8 @@ public class PositionRiskTriggerConsumer {
     }
 
     /**
-     * Account position events are consumed in durable Kafka batches. RiskService coalesces every batch by risk group
-     * and exact position before scanning, while Kafka retry plus the DB lease preserve at-least-once safety.
+     * 账户持仓事件按可靠 Kafka 批次消费。RiskService 扫描前按风险组和精确持仓合并每个批次，
+     * Kafka 重试与数据库租约共同保证至少一次处理语义。
      */
     @KafkaListener(
             topics = "#{__listener.positionEventsTopic()}",

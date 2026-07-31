@@ -72,7 +72,7 @@ Gateway 会拒绝未知 service 名称。它不会把用户输入拼成任意后
 当前实现要求私有路由携带 `X-User-Id` 或 `Authorization`。生产环境应在 gateway 前完成认证，只有 token/session 验证通过后才注入可信 `X-User-Id`。
 `X-Trace-Id` 所有路由都可以带；gateway 会清洗、回写给客户端并转发给后端 provider。它只用于可观测性和排障，不能参与认证或鉴权判断。
 
-后台路径 `/api/v1/admin/...` 不使用普通前端的 `X-User-Id` fallback，只接受具备 `SUPPORT`、`ADMIN` 或 `SUPER_ADMIN` 的 Bearer Token，并继续用权限点限制实际访问范围。后台代理会向下游注入 `X-Admin-User-Id`、`X-Admin-Username`、`X-Admin-Roles`；客服只读接口 `/api/v1/admin/support/users/{userId}/overview` 聚合用户基础状态、KYC 摘要、资产、订单和风险快照，不返回会话治理、角色编辑或登录审计；客服工单接口 `/api/v1/admin/support/tickets` 支持工单查询、创建、备注时间线和状态变更，写操作要求 `admin.support.write`。用户详情聚合接口 `/api/v1/admin/users/{userId}/profile` 会聚合账户、订单、条件单、风险、会话和登录日志，并把下游失败作为局部错误返回。市场健康接口 `/api/v1/admin/market/health` 汇总行情源、index、mark 和 K 线新鲜度。告警中心接口 `/api/v1/admin/alerts` 管理规则、事件、手动评估和事件确认。交易运营聚合接口 `/api/v1/admin/trading/metrics` 汇总订单、成交、撮合、条件单、持仓和 Symbol 指标。账户资产报表接口 `/api/v1/admin/reports/account-assets` 提供跨币种估值和日终快照。合规风控接口 `/api/v1/admin/compliance/...` 管理 KYC 档案、风险标签和 AML case。风控后台代理服务名 `risk-admin` 转发到 `/api/v1/admin/risk`，用于规则覆盖、高风险账户聚合和爆仓候选后台分页查询；强平后台代理服务名 `liquidation-admin` 转发到 `/api/v1/admin/liquidations`，用于强平订单分页、候选时间线和候选取消运营动作。导出任务接口 `/api/v1/admin/exports` 创建、查询和下载后台 CSV 导出；长查询任务接口 `/api/v1/admin/query-tasks` 创建、查询和查看受控 JSON 查询结果。管理员 TOTP 2FA 可通过 `/api/v1/admin/security/mfa` 绑定、确认和关闭，生产环境可设置 `surprising.gateway.security.require-admin-mfa=true` 强制管理员登录提供动态码。
+后台路径 `/api/v1/admin/...` 不使用普通前端的 `X-User-Id` fallback，只接受具备 `SUPPORT`、`ADMIN` 或 `SUPER_ADMIN` 的 Bearer Token，并继续用权限点限制实际访问范围。后台代理会向下游注入 `X-Admin-User-Id`、`X-Admin-Username`、`X-Admin-Roles`；客服只读接口 `/api/v1/admin/support/users/{userId}/overview` 聚合用户基础状态、KYC 摘要、资产、订单和风险快照，不返回会话治理、角色编辑或登录审计；客服工单接口 `/api/v1/admin/support/tickets` 支持工单查询、创建、备注时间线和状态变更，写操作要求 `admin.support.write`。用户详情聚合接口 `/api/v1/admin/users/{userId}/profile` 会聚合账户、订单、条件单、风险、会话和登录日志，并把下游失败作为局部错误返回。市场健康接口 `/api/v1/admin/market/health` 汇总行情源、index、mark 和 K 线新鲜度。告警中心接口 `/api/v1/admin/alerts` 管理规则、事件、手动评估和事件确认。交易运营聚合接口 `/api/v1/admin/trading/metrics` 汇总订单、成交、撮合、条件单、持仓和 Symbol 指标。账户资产报表接口 `/api/v1/admin/reports/account-assets` 提供跨币种估值和日终快照。合规风控接口 `/api/v1/admin/compliance/...` 管理 KYC 档案、风险标签和 AML case。风控后台代理服务名 `risk-admin` 转发到 `/api/v1/admin/risk`，仅用于规则覆盖和爆仓候选后台分页查询；高风险账户聚合后续由使用独立数据库的财务运营系统提供。强平后台代理服务名 `liquidation-admin` 转发到 `/api/v1/admin/liquidations`，用于强平订单分页、候选时间线和候选取消运营动作。导出任务接口 `/api/v1/admin/exports` 创建、查询和下载后台 CSV 导出；长查询任务接口 `/api/v1/admin/query-tasks` 创建、查询和查看受控 JSON 查询结果。管理员 TOTP 2FA 可通过 `/api/v1/admin/security/mfa` 绑定、确认和关闭，生产环境可设置 `surprising.gateway.security.require-admin-mfa=true` 强制管理员登录提供动态码。
 
 用户列表 `GET /api/v1/admin/users` 支持 `createdAt.desc`、`createdAt.asc` 游标分页，响应返回 `nextCursor`、`hasMore`、`sort`、`limit`；用户状态和角色写操作仍属于敏感操作，需要审批单。
 会话列表 `GET /api/v1/admin/sessions` 与 `GET /api/v1/admin/users/{userId}/sessions` 支持 `createdAt.desc`、`createdAt.asc` 游标分页，响应返回 `nextCursor`、`hasMore`、`sort`、`limit`；撤销会话仍属于敏感操作，需要审批单。
@@ -119,7 +119,11 @@ TraceId 查询接口位于 `/api/v1/admin/traces/{traceId}`，使用 `admin.trac
 
 费率后台代理路由位于 `/api/v1/admin/gateway/trading-fees`，由 gateway 转发到 trading provider 的 `/api/v1/admin/trading/fees`。`/schedules` 支持 `updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc`、`effectiveTime.desc`、`effectiveTime.asc`；`/tiers` 支持 `priority.desc`、`priority.asc`。两者均返回 `nextCursor`、`hasMore`、`sort`、`limit`，费率和档位写操作属于敏感写操作，需要审批。
 
-风控、强平和 ADL 后台列表使用同一 `limit/cursor/sort` 响应约定。`/api/v1/admin/gateway/risk-admin/high-risk-accounts` 与 `/liquidation-candidates` 支持 `eventTime.desc`、`eventTime.asc`；`/api/v1/admin/gateway/liquidation-admin/orders` 和 `/api/v1/admin/gateway/adl/admin/events` 支持 `createdAt.desc`、`createdAt.asc`；`/api/v1/admin/gateway/adl/admin/queue` 使用实时排名游标 `priorityScorePpm.desc`。
+风控、强平和 ADL 后台单表列表使用同一 `limit/cursor/sort` 响应约定。
+`/api/v1/admin/gateway/risk-admin/liquidation-candidates` 支持 `eventTime.desc`、`eventTime.asc`；
+`/api/v1/admin/gateway/liquidation-admin/orders` 和 `/api/v1/admin/gateway/adl/admin/events`
+支持 `createdAt.desc`、`createdAt.asc`；`/api/v1/admin/gateway/adl/admin/queue`
+使用实时排名游标 `priorityScorePpm.desc`。高风险账户聚合不再查询交易主库，后续由财务运营系统的独立数据库提供。
 
 不要把内部 provider 端口直接暴露到公网。公共客户端应使用：
 

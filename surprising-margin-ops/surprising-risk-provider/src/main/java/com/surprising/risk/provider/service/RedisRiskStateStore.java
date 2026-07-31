@@ -16,7 +16,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
-/** Redis risk-state projection plus symbol-to-risk-group reverse index. */
+/** Redis 风险状态投影，以及从交易对到风险组的反向索引。 */
 @Component
 public class RedisRiskStateStore {
 
@@ -72,7 +72,7 @@ public class RedisRiskStateStore {
         return changed;
     }
 
-    /** Clears the complete product-line projection before an authoritative rebuild. */
+    /** 在权威重建前清空整条产品线的投影。 */
     public void clear(ProductLine productLine) {
         Set<String> groupIds = members(groupsKey(productLine));
         for (String groupId : groupIds) {

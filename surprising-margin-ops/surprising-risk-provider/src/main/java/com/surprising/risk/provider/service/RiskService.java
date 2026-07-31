@@ -21,10 +21,9 @@ import com.surprising.risk.provider.model.RiskGroupKey;
 import com.surprising.risk.provider.repository.RiskOutboxRepository;
 import com.surprising.risk.provider.repository.RiskOutboxRepository.PendingRiskOutboxEvent;
 import com.surprising.risk.provider.repository.RiskRepository;
-import com.surprising.risk.provider.repository.RiskRepository.HighRiskAccount;
-import com.surprising.risk.provider.repository.RiskRepository.LiquidationCandidateWrite;
-import com.surprising.risk.provider.repository.RiskRepository.PositionSnapshotWrite;
-import com.surprising.risk.provider.repository.RiskRepository.RiskRuleOverride;
+import com.surprising.risk.provider.repository.RiskLiquidationCandidateRepository.LiquidationCandidateWrite;
+import com.surprising.risk.provider.repository.RiskPositionSnapshotRepository.PositionSnapshotWrite;
+import com.surprising.risk.provider.repository.RiskRuleRepository.RiskRuleOverride;
 import com.surprising.risk.provider.repository.RiskSequenceRepository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
@@ -55,6 +54,7 @@ public class RiskService {
     private final ObjectMapper objectMapper;
     private final RiskProperties properties;
     private final RiskRepository riskRepository;
+    private final RiskPersistenceService persistenceService;
     private final RiskSequenceRepository sequenceRepository;
     private final RiskOutboxRepository outboxRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
@@ -69,6 +69,7 @@ public class RiskService {
     public RiskService(ObjectMapper objectMapper,
                        RiskProperties properties,
                        RiskRepository riskRepository,
+                       RiskPersistenceService persistenceService,
                        RiskSequenceRepository sequenceRepository,
                        RiskOutboxRepository outboxRepository,
                        @Qualifier("riskKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate,
@@ -78,6 +79,7 @@ public class RiskService {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.riskRepository = riskRepository;
+        this.persistenceService = persistenceService;
         this.sequenceRepository = sequenceRepository;
         this.outboxRepository = outboxRepository;
         this.kafkaTemplate = kafkaTemplate;
@@ -89,21 +91,25 @@ public class RiskService {
     RiskService(ObjectMapper objectMapper,
                 RiskProperties properties,
                 RiskRepository riskRepository,
+                RiskPersistenceService persistenceService,
                 RiskSequenceRepository sequenceRepository,
                 RiskOutboxRepository outboxRepository,
                 KafkaTemplate<String, String> kafkaTemplate,
                 PlatformTransactionManager transactionManager) {
-        this(objectMapper, properties, riskRepository, sequenceRepository, outboxRepository, kafkaTemplate,
+        this(objectMapper, properties, riskRepository, persistenceService, sequenceRepository,
+                outboxRepository, kafkaTemplate,
                 transactionManager, null, null);
     }
 
     RiskService(ObjectMapper objectMapper,
                 RiskProperties properties,
                 RiskRepository riskRepository,
+                RiskPersistenceService persistenceService,
                 RiskSequenceRepository sequenceRepository,
                 RiskOutboxRepository outboxRepository,
                 PlatformTransactionManager transactionManager) {
-        this(objectMapper, properties, riskRepository, sequenceRepository, outboxRepository, null,
+        this(objectMapper, properties, riskRepository, persistenceService, sequenceRepository,
+                outboxRepository, null,
                 transactionManager, null, null);
     }
 
@@ -151,8 +157,8 @@ public class RiskService {
     }
 
     /**
-     * Event-driven fast path. A Kafka poll can contain many fills for one user, so events are reduced to the latest
-     * revision per exact position and every user/account/settle group is projected and evaluated only once.
+     * 事件驱动快速路径。一次 Kafka 拉取可能包含同一用户的多笔成交，因此先按精确持仓保留最新修订，
+     * 再确保每个用户、账户类型和结算资产组成的风险组只投影和评估一次。
      */
     public void scanPositionUpdates(List<PositionUpdatedEvent> events) {
         if (!properties.getCalculation().isEnabled()) {
@@ -265,9 +271,9 @@ public class RiskService {
                 }
             }
 
-            riskRepository.saveAccountSnapshots(accounts);
-            riskRepository.savePositionSnapshots(positions);
-            Set<Long> insertedCandidateIds = riskRepository.createLiquidationCandidates(candidates);
+            persistenceService.saveAccountSnapshots(accounts);
+            persistenceService.savePositionSnapshots(positions);
+            Set<Long> insertedCandidateIds = persistenceService.createLiquidationCandidates(candidates);
             outboxRepository.enqueue(candidateOutboxEvents(candidates, insertedCandidateIds));
         });
         publishRealtimeEvents(realtimeEvents);
@@ -292,18 +298,18 @@ public class RiskService {
     }
 
     public RiskAccountSnapshotResponse latestAccount(long userId, String accountType, String settleAsset) {
-        return riskRepository.latestAccount(userId, scopedAccountType(accountType), normalizeAsset(settleAsset))
+        return persistenceService.latestAccount(userId, scopedAccountType(accountType), normalizeAsset(settleAsset))
                 .orElseThrow(() -> new IllegalStateException("risk snapshot not found"));
     }
 
     public RiskPositionQueryResponse latestPositions(long userId) {
-        List<RiskPositionSnapshotResponse> rows = riskRepository.latestPositions(userId);
+        List<RiskPositionSnapshotResponse> rows = persistenceService.latestPositions(userId);
         return new RiskPositionQueryResponse(rows.size(), rows);
     }
 
     public LiquidationCandidateQueryResponse liquidationCandidates(String status, int limit) {
         LiquidationCandidateStatus candidateStatus = LiquidationCandidateStatus.valueOf(status.trim().toUpperCase());
-        List<LiquidationCandidateResponse> rows = riskRepository.liquidationCandidates(candidateStatus,
+        List<LiquidationCandidateResponse> rows = persistenceService.liquidationCandidates(candidateStatus,
                 normalizeLimit(limit));
         return new LiquidationCandidateQueryResponse(rows.size(), rows);
     }
@@ -313,14 +319,15 @@ public class RiskService {
                                                                   String cursor,
                                                                   String sort) {
         LiquidationCandidateStatus candidateStatus = LiquidationCandidateStatus.valueOf(status.trim().toUpperCase());
-        AdminCursorPage.CursorPage<LiquidationCandidateResponse> page = riskRepository.liquidationCandidatesPage(
+        AdminCursorPage.CursorPage<LiquidationCandidateResponse> page =
+                persistenceService.liquidationCandidatesPage(
                 candidateStatus, normalizeLimit(limit), cursor, sort);
         return new LiquidationCandidateQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
 
     public RiskRulesResponse riskRules() {
-        List<RiskRuleOverride> overrides = riskRepository.riskRuleOverrides();
+        List<RiskRuleOverride> overrides = persistenceService.riskRuleOverrides();
         RiskRuleOverride marginOverride = override(overrides, "GLOBAL_MARGIN_POLICY");
         RiskRuleOverride scanOverride = override(overrides, "RISK_SCAN_CONTROL");
         List<RiskRuleResponse> rules = List.of(
@@ -367,7 +374,7 @@ public class RiskService {
             }
             properties.getCalculation().setWarningMarginRatioPpm(warning);
             properties.getCalculation().setLiquidationMarginRatioPpm(liquidation);
-            RiskRuleOverride override = riskRepository.upsertRiskRuleOverride(normalizedCode,
+            RiskRuleOverride override = persistenceService.upsertRiskRuleOverride(normalizedCode,
                     ruleName(command.ruleName(), "Global margin thresholds"), "GLOBAL_MARGIN",
                     command.enabled() == null || command.enabled(), warning, liquidation, null, null,
                     normalizedAdmin, reason, Instant.now());
@@ -384,58 +391,12 @@ public class RiskService {
             properties.getCalculation().setEnabled(enabled);
             properties.getCalculation().setScanDelayMs(scanDelayMs);
             properties.getCalculation().setScanBatchSize(scanBatchSize);
-            RiskRuleOverride override = riskRepository.upsertRiskRuleOverride(normalizedCode,
+            RiskRuleOverride override = persistenceService.upsertRiskRuleOverride(normalizedCode,
                     ruleName(command.ruleName(), "Risk scan control"), "SCAN_CONTROL", enabled,
                     null, null, scanDelayMs, scanBatchSize, normalizedAdmin, reason, Instant.now());
             return ruleFromOverride(override);
         }
         throw new IllegalArgumentException("unsupported risk rule: " + ruleCode);
-    }
-
-    public HighRiskAccountsResponse highRiskAccounts(Long minMarginRatioPpm, int limit) {
-        long threshold = nonNegative(minMarginRatioPpm == null
-                ? properties.getCalculation().getWarningMarginRatioPpm()
-                : minMarginRatioPpm, "minMarginRatioPpm");
-        List<HighRiskAccount> rows = riskRepository.highRiskAccounts(threshold, normalizeLimit(limit));
-        List<HighRiskAccountResponse> accounts = rows.stream()
-                .map(row -> new HighRiskAccountResponse(row.snapshotId(), row.userId(), row.accountType(),
-                        row.settleAsset(), row.walletBalanceUnits(), row.unrealizedPnlUnits(), row.equityUnits(),
-                        row.maintenanceMarginUnits(), row.marginRatioPpm(), row.status(), row.eventTime(),
-                        row.positionCount(), row.riskPositionCount(), row.activeCandidateCount(),
-                        row.topSymbol(), row.topMarginMode(), row.topPositionMarginRatioPpm(),
-                        row.topPositionStatus(), row.riskLevel()))
-                .toList();
-        long liquidationCount = accounts.stream()
-                .filter(account -> "LIQUIDATION".equals(account.riskLevel()))
-                .count();
-        long warningCount = accounts.stream()
-                .filter(account -> "WARNING".equals(account.riskLevel()))
-                .count();
-        return new HighRiskAccountsResponse(threshold, accounts.size(), liquidationCount, warningCount, accounts);
-    }
-
-    public HighRiskAccountsResponse highRiskAccounts(Long minMarginRatioPpm, int limit, String cursor, String sort) {
-        long threshold = nonNegative(minMarginRatioPpm == null
-                ? properties.getCalculation().getWarningMarginRatioPpm()
-                : minMarginRatioPpm, "minMarginRatioPpm");
-        AdminCursorPage.CursorPage<HighRiskAccount> page = riskRepository.highRiskAccountsPage(threshold,
-                normalizeLimit(limit), cursor, sort);
-        List<HighRiskAccountResponse> accounts = page.items().stream()
-                .map(row -> new HighRiskAccountResponse(row.snapshotId(), row.userId(), row.accountType(),
-                        row.settleAsset(), row.walletBalanceUnits(), row.unrealizedPnlUnits(), row.equityUnits(),
-                        row.maintenanceMarginUnits(), row.marginRatioPpm(), row.status(), row.eventTime(),
-                        row.positionCount(), row.riskPositionCount(), row.activeCandidateCount(),
-                        row.topSymbol(), row.topMarginMode(), row.topPositionMarginRatioPpm(),
-                        row.topPositionStatus(), row.riskLevel()))
-                .toList();
-        long liquidationCount = accounts.stream()
-                .filter(account -> "LIQUIDATION".equals(account.riskLevel()))
-                .count();
-        long warningCount = accounts.stream()
-                .filter(account -> "WARNING".equals(account.riskLevel()))
-                .count();
-        return new HighRiskAccountsResponse(threshold, accounts.size(), liquidationCount, warningCount, accounts,
-                page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
     private GroupEvaluation evaluateGroup(RiskGroupKey key,
@@ -837,44 +798,4 @@ public class RiskService {
                                         String reason) {
     }
 
-    public record HighRiskAccountsResponse(long minMarginRatioPpm,
-                                           int accountCount,
-                                           long liquidationCount,
-                                           long warningCount,
-                                           List<HighRiskAccountResponse> accounts,
-                                           String nextCursor,
-                                           boolean hasMore,
-                                           String sort,
-                                           int limit) {
-
-        public HighRiskAccountsResponse(long minMarginRatioPpm,
-                                        int accountCount,
-                                        long liquidationCount,
-                                        long warningCount,
-                                        List<HighRiskAccountResponse> accounts) {
-            this(minMarginRatioPpm, accountCount, liquidationCount, warningCount, accounts,
-                    null, false, "eventTime.desc", accountCount);
-        }
-    }
-
-    public record HighRiskAccountResponse(long snapshotId,
-                                          long userId,
-                                          String accountType,
-                                          String settleAsset,
-                                          long walletBalanceUnits,
-                                          long unrealizedPnlUnits,
-                                          long equityUnits,
-                                          long maintenanceMarginUnits,
-                                          long marginRatioPpm,
-                                          RiskStatus status,
-                                          Instant eventTime,
-                                          int positionCount,
-                                          int riskPositionCount,
-                                          int activeCandidateCount,
-                                          String topSymbol,
-                                          MarginMode topMarginMode,
-                                          Long topPositionMarginRatioPpm,
-                                          RiskStatus topPositionStatus,
-                                          String riskLevel) {
-    }
 }

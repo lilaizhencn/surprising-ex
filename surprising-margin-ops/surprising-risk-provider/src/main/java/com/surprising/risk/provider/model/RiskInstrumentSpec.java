@@ -4,7 +4,7 @@ import com.surprising.instrument.api.model.ContractType;
 import java.util.Comparator;
 import java.util.List;
 
-/** Static calculation parameters cached in-process by instrument version. */
+/** 按合约版本在进程内缓存的静态计算参数。 */
 public record RiskInstrumentSpec(
         String symbol,
         long version,
