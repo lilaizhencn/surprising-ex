@@ -1091,7 +1091,10 @@ class AccountServiceTest {
         private int positionMarginAdjustmentCalls;
 
         private FakeAccountSettlementService() {
-            super(null, null);
+            super(
+                    null, null, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null);
         }
 
         @Override

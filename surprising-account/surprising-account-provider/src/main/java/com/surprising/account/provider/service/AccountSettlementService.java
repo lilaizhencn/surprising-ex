@@ -33,12 +33,7 @@ import com.surprising.account.provider.repository.AssetScaleRepository;
 import com.surprising.account.provider.repository.LiquidationOrderContextRepository;
 import com.surprising.account.provider.repository.OpenInterestShardRepository;
 import com.surprising.account.provider.repository.PositionMarginRepository;
-import com.surprising.account.provider.repository.PositionModeAlgoOrderRepository;
-import com.surprising.account.provider.repository.PositionModeLockRepository;
-import com.surprising.account.provider.repository.PositionModeOrderRepository;
 import com.surprising.account.provider.repository.PositionModeRepository;
-import com.surprising.account.provider.repository.PositionModeTriggerOrderRepository;
-import com.surprising.account.provider.repository.PositionModeUnsettledTradeRepository;
 import com.surprising.account.provider.repository.PositionRepository;
 import com.surprising.account.provider.repository.ProductBalanceRepository;
 import com.surprising.account.provider.repository.ProductDeficitRepository;
@@ -46,7 +41,6 @@ import com.surprising.account.provider.repository.ProductLedgerRepository;
 import com.surprising.account.provider.repository.ProductSettlementBalanceRepository;
 import com.surprising.account.provider.repository.ProductTransferRepository;
 import com.surprising.account.provider.repository.RiskPositionSnapshotRepository;
-import com.surprising.account.provider.repository.SpotOrderReservationRepository;
 import com.surprising.account.provider.repository.TradeSettlementSideRepository;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.price.api.model.MarkPriceEvent;
@@ -64,8 +58,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -107,76 +99,33 @@ public class AccountSettlementService {
     private final PositionOpenInterestService positionOpenInterestService;
     private final SpotTradeSettlementService spotTradeSettlementService;
 
-    public AccountSettlementService(JdbcTemplate jdbcTemplate, AccountSequenceRepository sequenceRepository) {
-        this(jdbcTemplate, sequenceRepository, null, null);
-    }
-
-    public AccountSettlementService(JdbcTemplate jdbcTemplate,
-                             AccountSequenceRepository sequenceRepository,
-                             LatestMarkPriceCache markPriceCache) {
-        this(jdbcTemplate, sequenceRepository, markPriceCache, null);
-    }
-
-    public AccountSettlementService(JdbcTemplate jdbcTemplate,
-                             AccountSequenceRepository sequenceRepository,
-                             LatestMarkPriceCache markPriceCache,
-                             PositionCacheAfterCommitSynchronizer positionCacheSynchronizer) {
-        this(jdbcTemplate, sequenceRepository, markPriceCache, positionCacheSynchronizer,
-                new AccountLedgerRepository(jdbcTemplate),
-                new ProductLedgerRepository(jdbcTemplate),
-                new AdminBalanceAdjustmentRepository(jdbcTemplate),
-                new ProductTransferRepository(jdbcTemplate),
-                new AccountBalanceRepository(jdbcTemplate),
-                new AccountDeficitRepository(jdbcTemplate),
-                new ProductBalanceRepository(jdbcTemplate),
-                new ProductDeficitRepository(jdbcTemplate),
-                null,
-                new PositionModeRepository(jdbcTemplate),
-                new TradeSettlementSideRepository(jdbcTemplate),
-                null,
-                new PositionRepository(jdbcTemplate),
-                new PositionMarginRepository(jdbcTemplate),
-                new AccountInstrumentRepository(jdbcTemplate),
-                new AssetScaleRepository(jdbcTemplate),
-                new RiskPositionSnapshotRepository(jdbcTemplate),
-                new LiquidationOrderContextRepository(jdbcTemplate),
-                new AccountSettlementBalanceRepository(jdbcTemplate),
-                new ProductSettlementBalanceRepository(jdbcTemplate),
-                null,
-                new OpenInterestShardRepository(jdbcTemplate),
-                null,
-                null);
-    }
-
-    @Autowired
-    public AccountSettlementService(JdbcTemplate jdbcTemplate,
-                             AccountSequenceRepository sequenceRepository,
-                             LatestMarkPriceCache markPriceCache,
-                             PositionCacheAfterCommitSynchronizer positionCacheSynchronizer,
-                             AccountLedgerRepository accountLedgerRepository,
-                             ProductLedgerRepository productLedgerRepository,
-                             AdminBalanceAdjustmentRepository adminBalanceAdjustmentRepository,
-                             ProductTransferRepository productTransferRepository,
-                             AccountBalanceRepository accountBalanceRepository,
-                             AccountDeficitRepository accountDeficitRepository,
-                             ProductBalanceRepository productBalanceRepository,
-                             ProductDeficitRepository productDeficitRepository,
-                             AccountBalanceCommandService accountBalanceCommandService,
-                             PositionModeRepository positionModeRepository,
-                             TradeSettlementSideRepository tradeSettlementSideRepository,
-                             PositionModeCommandService positionModeCommandService,
-                             PositionRepository positionRepository,
-                             PositionMarginRepository positionMarginRepository,
-                             AccountInstrumentRepository accountInstrumentRepository,
-                             AssetScaleRepository assetScaleRepository,
-                             RiskPositionSnapshotRepository riskPositionSnapshotRepository,
-                             LiquidationOrderContextRepository liquidationOrderContextRepository,
-                             AccountSettlementBalanceRepository accountSettlementBalanceRepository,
-                             ProductSettlementBalanceRepository productSettlementBalanceRepository,
-                             PositionQueryService positionQueryService,
-                             OpenInterestShardRepository openInterestShardRepository,
-                             PositionOpenInterestService positionOpenInterestService,
-                             SpotTradeSettlementService spotTradeSettlementService) {
+    public AccountSettlementService(AccountSequenceRepository sequenceRepository,
+                                    LatestMarkPriceCache markPriceCache,
+                                    PositionCacheAfterCommitSynchronizer positionCacheSynchronizer,
+                                    AccountLedgerRepository accountLedgerRepository,
+                                    ProductLedgerRepository productLedgerRepository,
+                                    AdminBalanceAdjustmentRepository adminBalanceAdjustmentRepository,
+                                    ProductTransferRepository productTransferRepository,
+                                    AccountBalanceRepository accountBalanceRepository,
+                                    AccountDeficitRepository accountDeficitRepository,
+                                    ProductBalanceRepository productBalanceRepository,
+                                    ProductDeficitRepository productDeficitRepository,
+                                    AccountBalanceCommandService accountBalanceCommandService,
+                                    PositionModeRepository positionModeRepository,
+                                    TradeSettlementSideRepository tradeSettlementSideRepository,
+                                    PositionModeCommandService positionModeCommandService,
+                                    PositionRepository positionRepository,
+                                    PositionMarginRepository positionMarginRepository,
+                                    AccountInstrumentRepository accountInstrumentRepository,
+                                    AssetScaleRepository assetScaleRepository,
+                                    RiskPositionSnapshotRepository riskPositionSnapshotRepository,
+                                    LiquidationOrderContextRepository liquidationOrderContextRepository,
+                                    AccountSettlementBalanceRepository accountSettlementBalanceRepository,
+                                    ProductSettlementBalanceRepository productSettlementBalanceRepository,
+                                    PositionQueryService positionQueryService,
+                                    OpenInterestShardRepository openInterestShardRepository,
+                                    PositionOpenInterestService positionOpenInterestService,
+                                    SpotTradeSettlementService spotTradeSettlementService) {
         this.sequenceRepository = sequenceRepository;
         this.markPriceCache = markPriceCache;
         this.positionCacheSynchronizer = positionCacheSynchronizer;
@@ -188,38 +137,10 @@ public class AccountSettlementService {
         this.accountDeficitRepository = accountDeficitRepository;
         this.productBalanceRepository = productBalanceRepository;
         this.productDeficitRepository = productDeficitRepository;
-        if (accountBalanceCommandService == null) {
-            AccountQueryService queryService = new AccountQueryService(
-                    accountLedgerRepository,
-                    productLedgerRepository,
-                    productTransferRepository,
-                    adminBalanceAdjustmentRepository,
-                    accountBalanceRepository,
-                    accountDeficitRepository,
-                    productBalanceRepository,
-                    productDeficitRepository);
-            this.accountBalanceCommandService = new AccountBalanceCommandService(
-                    sequenceRepository,
-                    accountLedgerRepository,
-                    productLedgerRepository,
-                    productTransferRepository,
-                    accountBalanceRepository,
-                    productBalanceRepository,
-                    queryService);
-        } else {
-            this.accountBalanceCommandService = accountBalanceCommandService;
-        }
+        this.accountBalanceCommandService = accountBalanceCommandService;
         this.positionModeRepository = positionModeRepository;
         this.tradeSettlementSideRepository = tradeSettlementSideRepository;
-        this.positionModeCommandService = positionModeCommandService == null
-                ? new PositionModeCommandService(positionModeRepository, new PositionModeSwitchGuard(
-                        new PositionModeLockRepository(jdbcTemplate),
-                        positionRepository,
-                        new PositionModeOrderRepository(jdbcTemplate),
-                        new PositionModeTriggerOrderRepository(jdbcTemplate),
-                        new PositionModeAlgoOrderRepository(jdbcTemplate),
-                        new PositionModeUnsettledTradeRepository(jdbcTemplate)))
-                : positionModeCommandService;
+        this.positionModeCommandService = positionModeCommandService;
         this.positionRepository = positionRepository;
         this.positionMarginRepository = positionMarginRepository;
         this.accountInstrumentRepository = accountInstrumentRepository;
@@ -228,18 +149,10 @@ public class AccountSettlementService {
         this.liquidationOrderContextRepository = liquidationOrderContextRepository;
         this.accountSettlementBalanceRepository = accountSettlementBalanceRepository;
         this.productSettlementBalanceRepository = productSettlementBalanceRepository;
-        this.positionQueryService = positionQueryService == null
-                ? new PositionQueryService(positionRepository, positionMarginRepository, accountInstrumentRepository)
-                : positionQueryService;
+        this.positionQueryService = positionQueryService;
         this.openInterestShardRepository = openInterestShardRepository;
-        this.positionOpenInterestService = positionOpenInterestService == null
-                ? new PositionOpenInterestService(positionRepository, openInterestShardRepository)
-                : positionOpenInterestService;
-        this.spotTradeSettlementService = spotTradeSettlementService == null
-                ? new SpotTradeSettlementService(
-                        sequenceRepository, productBalanceRepository, productLedgerRepository,
-                        new SpotOrderReservationRepository(jdbcTemplate))
-                : spotTradeSettlementService;
+        this.positionOpenInterestService = positionOpenInterestService;
+        this.spotTradeSettlementService = spotTradeSettlementService;
     }
 
     public Optional<BalanceResponse> balance(long userId, String asset) {

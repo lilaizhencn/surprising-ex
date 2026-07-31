@@ -196,7 +196,10 @@ class ProductAccountServiceTest {
         private long transferId;
 
         private FakeProductAccountSettlementService() {
-            super(null, null);
+            super(
+                    null, null, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null);
         }
 
         @Override

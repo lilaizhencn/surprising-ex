@@ -52,7 +52,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void lockOpenInterestShardsDeduplicatesAndUsesOneGlobalLockOrder() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         when(jdbcTemplate.update(contains("INSERT INTO trading_symbol_open_interest_shards"),
                 any(Object[].class))).thenReturn(2);
@@ -88,7 +88,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void completeTradeSideInsertsOneImmutableParticipantRow() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         MatchTradeEvent trade = mock(MatchTradeEvent.class);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         Timestamp timestamp = Timestamp.from(now);
@@ -117,7 +117,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void completeTradeSideFailsWhenSideWasAlreadyAppliedOrTradeIdentityConflicts() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         MatchTradeEvent trade = mock(MatchTradeEvent.class);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         when(trade.symbol()).thenReturn("BTC-USDT");
@@ -136,7 +136,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void usdtPerpetualProductBalanceReadsLegacyPerpetualBalance() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         when(jdbcTemplate.query(contains("FROM account_balances"), anyRowMapper(),
                 eq(1001L), eq("USDT"))).thenAnswer(balance(900L, 100L, 1_000L));
 
@@ -155,7 +155,7 @@ class AccountSettlementServiceTest {
     void settlementMarkPriceTicksUsesFreshKafkaCacheValue() {
         LatestMarkPriceCache markPriceCache = mock(LatestMarkPriceCache.class);
         MarkPriceEvent markPrice = mock(MarkPriceEvent.class);
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository, markPriceCache);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository, markPriceCache);
         Instant settlementTime = Instant.parse("2026-07-01T08:00:00Z");
         Duration window = Duration.ofMinutes(30);
         when(markPriceCache.requireFresh("BTC-USDT-260626")).thenReturn(markPrice);
@@ -172,7 +172,7 @@ class AccountSettlementServiceTest {
     void settlementMarkPriceUnitsUsesFreshKafkaCacheValue() {
         LatestMarkPriceCache markPriceCache = mock(LatestMarkPriceCache.class);
         MarkPriceEvent markPrice = mock(MarkPriceEvent.class);
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository, markPriceCache);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository, markPriceCache);
         Instant settlementTime = Instant.parse("2026-07-01T08:00:00Z");
         Duration window = Duration.ofMinutes(15);
         when(markPriceCache.requireFresh("BTC-USDT")).thenReturn(markPrice);
@@ -186,7 +186,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void duplicateBalanceAdjustmentReturnsCurrentBalanceWhenPayloadMatches() throws Exception {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
 
         when(sequenceRepository.nextLedgerEntryId()).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
@@ -221,7 +221,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void duplicateBalanceAdjustmentWithDifferentPayloadFailsBeforeBalanceMutation() throws Exception {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
 
         when(sequenceRepository.nextLedgerEntryId()).thenReturn(1L);
         when(jdbcTemplate.update(contains("INSERT INTO account_ledger_entries"), any(Object[].class)))
@@ -244,7 +244,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void updatePositionModeSwitchesWhenAllGuardsAreClear() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         stubMissingPositionMode(1001L);
         stubPositionModeSwitchChecks(false, false, false, false, false, false);
@@ -261,7 +261,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void updatePositionModeUsesProductLineScope() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         stubMissingPositionMode(ProductLine.INVERSE_DELIVERY, 1001L);
         stubPositionModeSwitchChecks(ProductLine.INVERSE_DELIVERY,
@@ -305,7 +305,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void positionQueryCanScopeByProductLineContractType() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         when(jdbcTemplate.query(contains("product_line = ?"), anyRowMapper(),
                 eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT-260925"), eq("CROSS"), eq("NET")))
                 .thenReturn(List.of());
@@ -319,7 +319,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void positionsQueryCanScopeByProductLineContractType() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         when(jdbcTemplate.query(contains("product_line = ?"), anyRowMapper(),
                 eq("INVERSE_PERPETUAL"), eq(1001L), eq("SHORT"), eq("SHORT"))).thenReturn(List.of());
 
@@ -331,7 +331,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void settlementOpenPositionsLockAllVersionsForProductLineAndSymbol() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         when(jdbcTemplate.query(contains("FOR UPDATE"), anyRowMapper(),
                 eq("LINEAR_DELIVERY"), eq("BTC-USDT-260925"))).thenReturn(List.of());
 
@@ -350,7 +350,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void positionMarginQueryCanScopeByProductLineContractType() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         when(jdbcTemplate.query(contains("FROM account_positions"), anyRowMapper(),
                 eq("OPTION"), eq(1001L), eq("BTC-USDT-260925-70000-C"), eq("ISOLATED"), eq("LONG")))
                 .thenReturn(List.of());
@@ -364,7 +364,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void positionMarginAdjustmentLocksPositionByProductLineContractType() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         when(jdbcTemplate.query(contains("FROM account_product_ledger_entries"), anyRowMapper(),
                 eq("iso-add-line"), eq(1001L), eq("USDT_DELIVERY"), eq("BTC-USDT-260925")))
                 .thenReturn(List.of());
@@ -385,7 +385,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void releasePositionMarginUsesProductLineAccountType() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         when(jdbcTemplate.query(contains("FROM account_position_margins"), anyRowMapper(),
                 eq("INVERSE_PERPETUAL"), eq(1001L), eq("BTC-USD"),
                 eq("ISOLATED"), eq("SHORT"))).thenReturn(List.of());
@@ -406,7 +406,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void productPositionMarginAdjustmentUsesProductBalanceAndLedger() throws Exception {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         when(sequenceRepository.nextProductLedgerEntryId()).thenReturn(7101L);
         when(jdbcTemplate.query(contains("FROM account_product_ledger_entries"), anyRowMapper(),
                 eq("iso-add-delivery"), eq(1001L), eq("USDT_DELIVERY"), eq("BTC-USDT-260925")))
@@ -454,7 +454,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void updatePositionModeRequiresNoOpenPositions() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         stubMissingPositionMode(1001L);
         stubPositionModeSwitchChecks(true, false, false, false, false, false);
@@ -467,7 +467,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void updatePositionModeRequiresNoActiveOrders() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         stubMissingPositionMode(1001L);
         stubPositionModeSwitchChecks(false, true, false, false, false, false);
@@ -480,7 +480,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void updatePositionModeRequiresNoPendingTriggerOrders() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         stubMissingPositionMode(1001L);
         stubPositionModeSwitchChecks(false, false, true, false, false, false);
@@ -493,7 +493,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void updatePositionModeRequiresAllMatchedTradesSettled() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         stubMissingPositionMode(1001L);
         stubPositionModeSwitchChecks(false, false, false, false, true, false);
@@ -506,7 +506,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void updatePositionModeRequiresNoActiveAlgoOrders() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         stubMissingPositionMode(1001L);
         stubPositionModeSwitchChecks(false, false, false, true, false, false);
@@ -519,7 +519,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void addIsolatedPositionMarginMovesAvailableToLockedAndPositionMargin() throws Exception {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         when(sequenceRepository.nextLedgerEntryId()).thenReturn(10L);
         when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
                 eq("iso-add-1"), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
@@ -560,7 +560,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void removeIsolatedPositionMarginRequiresFreshRiskBuffer() throws Exception {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         when(sequenceRepository.nextLedgerEntryId()).thenReturn(11L);
         when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
                 eq("iso-remove-1"), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
@@ -599,7 +599,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void removeIsolatedPositionMarginRejectsUnsafeRiskAfterRemoval() throws Exception {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         when(sequenceRepository.nextLedgerEntryId()).thenReturn(12L);
         when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
                 eq("iso-remove-risky"), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
@@ -626,7 +626,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void duplicatePositionMarginAdjustmentReturnsCurrentStateWithoutMutating() throws Exception {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
                 eq("iso-add-dup"), eq(1001L), eq("BTC-USDT"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -656,7 +656,7 @@ class AccountSettlementServiceTest {
         PositionCacheAfterCommitSynchronizer cacheSynchronizer =
                 mock(PositionCacheAfterCommitSynchronizer.class);
         AccountSettlementService repository =
-                new AccountSettlementService(jdbcTemplate, sequenceRepository, null, cacheSynchronizer);
+                AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository, null, cacheSynchronizer);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
         when(sequenceRepository.nextLedgerEntryId()).thenReturn(1L);
@@ -708,7 +708,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void tradePnlLedgerConflictFailsBeforeBalanceMutation() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
         when(sequenceRepository.nextLedgerEntryId()).thenReturn(1L);
@@ -725,7 +725,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void tradeFeeLedgerConflictFailsBeforeBalanceMutation() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
         when(sequenceRepository.nextLedgerEntryId()).thenReturn(1L);
@@ -742,7 +742,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void liquidationFeeContextReadsFrozenAuditRate() throws Exception {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         when(jdbcTemplate.query(contains("FROM liquidation_orders"), anyRowMapper(),
                 eq(5001L), eq(1001L), eq("BTC-USDT"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -762,7 +762,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void liquidationFeeCollectionIsCappedAtAvailableCollateralAndAudited() throws Exception {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         LiquidationFeeContext context = new LiquidationFeeContext(6001L, 9401L, 3_000L);
 
@@ -824,7 +824,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void updatePositionMaintainsSymbolOpenInterestBySide() throws Exception {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         when(jdbcTemplate.query(contains("SELECT signed_quantity_steps"), anyRowMapper(),
                 eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET"))).thenAnswer(invocation -> {
@@ -866,7 +866,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void updatePositionWithNegativeOpenInterestDeltaUsesZeroSeedAndGuardedUpdate() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         when(jdbcTemplate.update(contains("UPDATE account_positions"), any(Object[].class)))
                 .thenReturn(1);
@@ -890,7 +890,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void tradeFeeLedgerStoresFeeAuditSnapshot() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
         when(sequenceRepository.nextLedgerEntryId()).thenReturn(1L);
@@ -931,7 +931,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void tradeFeeUsesAvailableBalanceFastPathWhenCrossMarginCanCoverDebit() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
         when(sequenceRepository.nextLedgerEntryId()).thenReturn(1L);
@@ -960,7 +960,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void coinPerpetualTradeFeeSettlesProductBalanceWithoutLegacyBalanceMutation() throws Exception {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
         when(sequenceRepository.nextProductLedgerEntryId()).thenReturn(7001L);
@@ -998,7 +998,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void coinPerpetualTradeFeeUsesProductAvailableBalanceFastPath() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
 
         when(sequenceRepository.nextProductLedgerEntryId()).thenReturn(7001L);
@@ -1026,7 +1026,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void openingFillMovesActualMarginAndReleasesOnlyPriceImprovement() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         when(jdbcTemplate.update(contains("INSERT INTO account_position_margins"), any(Object[].class))).thenReturn(1);
         when(jdbcTemplate.update(contains("UPDATE account_balances"), any(Object[].class))).thenReturn(1);
@@ -1047,7 +1047,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void reduceOnlyClosingFillWithoutReservationDoesNotTouchOrderMargin() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
 
         AccountSettlementService.OrderMarginApplication result = repository.applyOrderMargin(
                 ProductLine.LINEAR_PERPETUAL, 9001L, null, 1001L, "BTC-USDT", MarginMode.CROSS,
@@ -1060,7 +1060,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void openingFillWithoutReservationSnapshotFailsClosed() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
 
         assertThatThrownBy(() -> repository.applyOrderMargin(
                 ProductLine.LINEAR_PERPETUAL, 9001L, null, 1001L, "BTC-USDT", MarginMode.CROSS,
@@ -1072,7 +1072,7 @@ class AccountSettlementServiceTest {
 
     @Test
     void openingFillCannotConsumeMoreThanItsProportionalReservation() {
-        AccountSettlementService repository = new AccountSettlementService(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
 
         assertThatThrownBy(() -> repository.applyOrderMargin(
                 ProductLine.LINEAR_PERPETUAL, 9001L, AccountType.USDT_PERPETUAL, 1001L,

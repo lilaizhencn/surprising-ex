@@ -36,7 +36,8 @@ Surprising Exchange account and product settlement module. The current implement
   sequence allocation, and outbox writes; `AccountOutboxRepository` persists only the account outbox
   table.
 - `AccountSettlementService` is now a compatibility facade for transaction boundaries,
-  idempotency, lock order, and funds calculation; it contains no business SQL.
+  idempotency, lock order, and funds calculation; it contains no business SQL and does not construct
+  JDBC repositories. Unit-test-only dependency assembly stays under `src/test`.
 - A multi-table repository is allowed only where online correctness cannot be split, and must carry
   an explicit Chinese `不可拆原因` comment. Current exceptions are joint balance/deficit locking,
   the single-statement balance-plus-idempotent-ledger fast path, unsettled-trade checks before a
