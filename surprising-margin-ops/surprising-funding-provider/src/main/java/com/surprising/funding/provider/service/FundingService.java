@@ -9,8 +9,18 @@ import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.api.model.FundingSettlementResponse;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.model.FundingPaymentCandidate;
+import com.surprising.funding.provider.model.FundingPaymentPage;
+import com.surprising.funding.provider.model.FundingPaymentWrite;
+import com.surprising.funding.provider.model.FundingSettlementWork;
 import com.surprising.funding.provider.repository.FundingAccountCommandOutboxRepository;
-import com.surprising.funding.provider.repository.FundingRepository;
+import com.surprising.funding.provider.repository.FundingDueRateRepository;
+import com.surprising.funding.provider.repository.FundingLeaseRepository;
+import com.surprising.funding.provider.repository.FundingPaymentCandidateRepository;
+import com.surprising.funding.provider.repository.FundingPaymentRepository;
+import com.surprising.funding.provider.repository.FundingRateInputRepository;
+import com.surprising.funding.provider.repository.FundingRateRepository;
+import com.surprising.funding.provider.repository.FundingSequenceRepository;
+import com.surprising.funding.provider.repository.FundingSettlementRepository;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -34,7 +44,14 @@ public class FundingService {
     private static final Logger log = LoggerFactory.getLogger(FundingService.class);
 
     private final FundingProperties properties;
-    private final FundingRepository fundingRepository;
+    private final FundingLeaseRepository leaseRepository;
+    private final FundingSequenceRepository sequenceRepository;
+    private final FundingRateInputRepository rateInputRepository;
+    private final FundingRateRepository rateRepository;
+    private final FundingDueRateRepository dueRateRepository;
+    private final FundingSettlementRepository settlementRepository;
+    private final FundingPaymentCandidateRepository paymentCandidateRepository;
+    private final FundingPaymentRepository paymentRepository;
     private final FundingAccountCommandOutboxRepository accountCommandOutboxRepository;
     private final LatestFundingRateCache latestFundingRateCache;
     private final KafkaTemplate<String, Object> kafkaTemplate;
@@ -43,14 +60,28 @@ public class FundingService {
     private final tools.jackson.databind.ObjectMapper objectMapper;
 
     public FundingService(FundingProperties properties,
-                          FundingRepository fundingRepository,
+                          FundingLeaseRepository leaseRepository,
+                          FundingSequenceRepository sequenceRepository,
+                          FundingRateInputRepository rateInputRepository,
+                          FundingRateRepository rateRepository,
+                          FundingDueRateRepository dueRateRepository,
+                          FundingSettlementRepository settlementRepository,
+                          FundingPaymentCandidateRepository paymentCandidateRepository,
+                          FundingPaymentRepository paymentRepository,
                           FundingAccountCommandOutboxRepository accountCommandOutboxRepository,
                           LatestFundingRateCache latestFundingRateCache,
                           @Qualifier("fundingKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
                           tools.jackson.databind.ObjectMapper objectMapper,
                           PlatformTransactionManager transactionManager) {
         this.properties = properties;
-        this.fundingRepository = fundingRepository;
+        this.leaseRepository = leaseRepository;
+        this.sequenceRepository = sequenceRepository;
+        this.rateInputRepository = rateInputRepository;
+        this.rateRepository = rateRepository;
+        this.dueRateRepository = dueRateRepository;
+        this.settlementRepository = settlementRepository;
+        this.paymentCandidateRepository = paymentCandidateRepository;
+        this.paymentRepository = paymentRepository;
         this.accountCommandOutboxRepository = accountCommandOutboxRepository;
         this.latestFundingRateCache = latestFundingRateCache;
         this.kafkaTemplate = kafkaTemplate;
@@ -65,11 +96,11 @@ public class FundingService {
             return;
         }
         Instant now = Instant.now();
-        for (var input : fundingRepository.rateInputs(properties.getCalculation().getMaxMarkAge())) {
+        for (var input : rateInputRepository.find(properties.getCalculation().getMaxMarkAge())) {
             if (!ownsSymbol(input.symbol())) {
                 continue;
             }
-            long sequence = fundingRepository.nextSymbolSequence(input.symbol());
+            long sequence = sequenceRepository.next(input.symbol());
             long rawRate = Math.addExact(input.interestRatePpm(), input.premiumRatePpm());
             long fundingRate = FundingMath.clampRate(rawRate, input.fundingRateFloorPpm(), input.fundingRateCapPpm());
             Instant fundingTime = FundingTime.nextFundingTime(now, input.fundingIntervalHours());
@@ -88,14 +119,15 @@ public class FundingService {
         }
         Instant now = Instant.now();
         freezeDuePredictions(now);
-        Deque<FundingRepository.FundingSettlementWork> settlements = new ArrayDeque<>();
-        for (FundingRateResponse rate : fundingRepository.dueRates(now, properties.getSettlement().getBatchSize())) {
+        Deque<FundingSettlementWork> settlements = new ArrayDeque<>();
+        for (FundingRateResponse rate : dueRateRepository.findDue(
+                now, properties.getSettlement().getBatchSize())) {
             if (!ownsSymbol(rate.symbol())) {
                 continue;
             }
             try {
-                FundingRepository.FundingSettlementWork settlement = transactionTemplate.execute(
-                        status -> fundingRepository.createOrResumeSettlement(rate, Instant.now()).orElse(null));
+                FundingSettlementWork settlement = transactionTemplate.execute(
+                        status -> settlementRepository.createOrResume(rate, Instant.now()).orElse(null));
                 if (settlement != null) {
                     settlements.addLast(settlement);
                 }
@@ -106,7 +138,7 @@ public class FundingService {
         }
         int remainingPages = Math.max(1, properties.getSettlement().getMaxPagesPerRun());
         while (remainingPages > 0 && !settlements.isEmpty()) {
-            FundingRepository.FundingSettlementWork settlement = settlements.removeFirst();
+            FundingSettlementWork settlement = settlements.removeFirst();
             if (!ownsSymbol(settlement.symbol())) {
                 continue;
             }
@@ -134,13 +166,13 @@ public class FundingService {
 
     public FundingRateQueryResponse rateHistory(String symbol, int limit, String cursor, String sort) {
         int capped = normalizeLimit(limit);
-        var page = fundingRepository.rateHistoryPage(normalizeSymbol(symbol), capped, cursor, sort);
+        var page = rateRepository.historyPage(normalizeSymbol(symbol), capped, cursor, sort);
         return new FundingRateQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
     public FundingSettlementResponse latestSettlement(String symbol) {
-        return fundingRepository.latestSettlement(normalizeSymbol(symbol))
+        return settlementRepository.latest(normalizeSymbol(symbol))
                 .orElseThrow(() -> new IllegalStateException("funding settlement not found for symbol: " + symbol));
     }
 
@@ -154,28 +186,28 @@ public class FundingService {
         }
         int capped = normalizeLimit(limit);
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
-        var page = fundingRepository.paymentsPage(userId, normalizedSymbol, capped, cursor, sort);
+        var page = paymentRepository.page(userId, normalizedSymbol, capped, cursor, sort);
         return new FundingPaymentQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
     private boolean settlePage(long settlementId, Instant now) {
-        FundingRepository.FundingSettlementWork settlement = fundingRepository
-                .lockProcessingSettlement(settlementId)
+        FundingSettlementWork settlement = settlementRepository
+                .lockProcessing(settlementId)
                 .orElse(null);
         if (settlement == null) {
             return true;
         }
-        FundingRepository.FundingPaymentPage page = fundingRepository.paymentCandidatesPage(
+        FundingPaymentPage page = paymentCandidateRepository.findPage(
                 settlement, Math.max(1, properties.getSettlement().getPaymentPageSize()));
         List<FundingPaymentCandidate> payable = page.items().stream()
                 .filter(payment -> payment.amountUnits() != 0L)
                 .toList();
-        List<FundingRepository.FundingPaymentWrite> writes =
-                fundingRepository.insertPayments(settlementId, payable, now);
+        List<FundingPaymentWrite> writes =
+                paymentRepository.insert(settlementId, payable, now);
         List<FundingAccountCommandOutboxRepository.FundingAccountCommandWrite> commands =
                 new ArrayList<>(writes.size());
-        for (FundingRepository.FundingPaymentWrite write : writes) {
+        for (FundingPaymentWrite write : writes) {
             FundingPaymentCandidate payment = write.payment();
             FundingSettlementAccountCommand payload = new FundingSettlementAccountCommand(
                     settlementId, write.paymentId(), payment.symbol(), payment.marginMode(),
@@ -197,7 +229,7 @@ public class FundingService {
                     write.paymentId(), command));
         }
         accountCommandOutboxRepository.enqueueBatch(commands, now);
-        fundingRepository.advanceSettlementPage(settlementId, page, writes, now);
+        settlementRepository.advancePage(settlementId, page, writes, now);
         return !page.hasMore();
     }
 
@@ -205,7 +237,7 @@ public class FundingService {
         if (!properties.getCoordination().isEnabled()) {
             return true;
         }
-        return fundingRepository.acquireLease(symbol, nodeId, properties.getCoordination().getLeaseDuration());
+        return leaseRepository.acquire(symbol, nodeId, properties.getCoordination().getLeaseDuration());
     }
 
     private void freezeDuePredictions(Instant now) {
@@ -214,7 +246,7 @@ public class FundingService {
                 continue;
             }
             try {
-                fundingRepository.saveFinalRate(rate);
+                rateRepository.saveFinal(rate);
                 latestFundingRateCache.removeIfCurrent(rate);
             } catch (Exception ex) {
                 log.error("Failed to freeze funding rate symbol={} fundingTime={}: {}",

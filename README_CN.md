@@ -53,6 +53,10 @@ Surprising-EX 是基于 Java 21、PostgreSQL、Kafka 和 Redis/Valkey 的多产�
 | `surprising-edge` | REST gateway 和 WebSocket fanout |
 | `surprising-market-maker` | 内部做市和交易链路压测 |
 
+Repository 默认只操作一张物理表，由 Service 在事务内聚合。在线交易、风控和结算链路若因一致性或原子性
+必须跨表，源码需要逐项写明中文“不可拆原因”。后台订单时间线、资金对账和运营报表不得在交易主库新增
+多表 JOIN；后续财务运营模块应消费领域事件，并使用独立数据库建立查询投影。
+
 ## 构建与本地启动
 
 要求 JDK 21。先启动 PostgreSQL、Kafka 和 Redis，再初始化数据库与 Topic：

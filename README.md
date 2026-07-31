@@ -54,6 +54,11 @@ acceptance currently focuses on the four lines above.
 | `surprising-edge` | REST gateway and WebSocket fanout |
 | `surprising-market-maker` | Internal quoting and trading-path load generation |
 
+Repositories operate one physical table by default, while services aggregate them transactionally. Cross-table SQL
+in online trading, risk, or settlement paths requires an explicit source-level justification for consistency or
+atomicity. Admin order timelines, funds reconciliation, and operational reports must not add JOINs to the primary
+trading database; a future finance-operations module should build event-driven projections in an independent database.
+
 ## Build and local run
 
 JDK 21 is required. Start PostgreSQL, Kafka, and Redis, then initialize the schema and topics:

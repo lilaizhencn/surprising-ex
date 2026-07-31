@@ -14,7 +14,7 @@ import org.springframework.stereotype.Repository;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Stores account commands in the shared durable outbox in the same transaction as funding rows.
+ * 仅负责 account_outbox_events 表，并与资金费支付记录在同一事务内写入。
  */
 @Repository
 public class FundingAccountCommandOutboxRepository {

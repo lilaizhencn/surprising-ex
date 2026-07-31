@@ -3,7 +3,9 @@ package com.surprising.funding.provider.service;
 import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.funding.provider.config.FundingProperties;
-import com.surprising.funding.provider.repository.FundingRepository;
+import com.surprising.funding.provider.model.FundingPaymentResult;
+import com.surprising.funding.provider.repository.FundingPaymentCompletionRepository;
+import com.surprising.funding.provider.repository.FundingPendingCommandRepository;
 import java.util.List;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -12,12 +14,15 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class FundingAccountCommandResultService {
 
-    private final FundingRepository fundingRepository;
+    private final FundingPaymentCompletionRepository completionRepository;
+    private final FundingPendingCommandRepository pendingCommandRepository;
     private final FundingProperties properties;
 
-    public FundingAccountCommandResultService(FundingRepository fundingRepository,
+    public FundingAccountCommandResultService(FundingPaymentCompletionRepository completionRepository,
+                                              FundingPendingCommandRepository pendingCommandRepository,
                                               FundingProperties properties) {
-        this.fundingRepository = fundingRepository;
+        this.completionRepository = completionRepository;
+        this.pendingCommandRepository = pendingCommandRepository;
         this.properties = properties;
     }
 
@@ -28,32 +33,32 @@ public class FundingAccountCommandResultService {
 
     @Transactional
     public void applyBatch(List<AccountCommandResultEvent> events) {
-        List<FundingRepository.PaymentResult> results = events.stream()
+        List<FundingPaymentResult> results = events.stream()
                 .filter(event -> event.commandType() == AccountUserCommandType.FUNDING_SETTLE
                         && "FUNDING".equals(event.source()))
                 .map(this::toPaymentResult)
                 .toList();
-        fundingRepository.completePayments(results);
+        completionRepository.completeBatch(results);
     }
 
     /**
-     * The database terminal command is authoritative. This repairs a missing, duplicated, or
-     * reordered result event and therefore removes cross-topic ordering from correctness.
+     * 数据库中的账户命令终态是权威结果。此任务修复遗漏、重复或乱序的结果事件，
+     * 从而避免把跨主题消息顺序作为正确性的前提。
      */
     @Scheduled(fixedDelayString = "${surprising.funding.settlement.reconcile-delay-ms:1000}")
     @Transactional
     public void reconcileTerminalCommands() {
-        List<FundingRepository.PaymentResult> results = fundingRepository
-                .terminalAccountCommandsForPendingPayments(
+        List<FundingPaymentResult> results = pendingCommandRepository
+                .findTerminal(
                         Math.max(1, properties.getSettlement().getReconcileBatchSize()));
-        fundingRepository.completePayments(results);
+        completionRepository.completeBatch(results);
     }
 
-    private FundingRepository.PaymentResult toPaymentResult(AccountCommandResultEvent event) {
+    private FundingPaymentResult toPaymentResult(AccountCommandResultEvent event) {
         if (event.productLine() != properties.getKafka().getProductLine()) {
             throw new IllegalStateException("funding result product line mismatch");
         }
-        return new FundingRepository.PaymentResult(
+        return new FundingPaymentResult(
                 event.commandId(),
                 event.userId(),
                 event.status().name(),

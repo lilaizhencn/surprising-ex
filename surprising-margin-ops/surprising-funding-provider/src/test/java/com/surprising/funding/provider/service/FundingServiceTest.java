@@ -6,17 +6,28 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.model.FundingPaymentCandidate;
+import com.surprising.funding.provider.model.FundingPaymentCursor;
+import com.surprising.funding.provider.model.FundingPaymentPage;
+import com.surprising.funding.provider.model.FundingPaymentWrite;
 import com.surprising.funding.provider.model.FundingRateInput;
-import com.surprising.funding.provider.repository.FundingRepository;
+import com.surprising.funding.provider.model.FundingSettlementWork;
 import com.surprising.funding.provider.repository.FundingAccountCommandOutboxRepository;
+import com.surprising.funding.provider.repository.FundingDueRateRepository;
+import com.surprising.funding.provider.repository.FundingLeaseRepository;
+import com.surprising.funding.provider.repository.FundingPaymentCandidateRepository;
+import com.surprising.funding.provider.repository.FundingPaymentRepository;
+import com.surprising.funding.provider.repository.FundingRateInputRepository;
+import com.surprising.funding.provider.repository.FundingRateRepository;
+import com.surprising.funding.provider.repository.FundingSequenceRepository;
+import com.surprising.funding.provider.repository.FundingSettlementRepository;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -34,55 +45,51 @@ class FundingServiceTest {
     @Test
     void publishesPredictedFundingDirectlyToKafkaWithoutWritingRateTicksOrOutbox() {
         FundingProperties properties = new FundingProperties();
-        FakeFundingRepository repository = new FakeFundingRepository();
-        @SuppressWarnings("unchecked")
-        KafkaTemplate<String, Object> kafka = mock(KafkaTemplate.class);
-        FundingService service = service(properties, repository, kafka);
+        Fixture fixture = new Fixture(properties, transactionManager());
+        when(fixture.rateInputRepository.find(properties.getCalculation().getMaxMarkAge()))
+                .thenReturn(List.of(rateInput()));
+        when(fixture.sequenceRepository.next("BTC-USDT")).thenReturn(11L);
 
-        service.publishRates();
+        fixture.service.publishRates();
 
         ArgumentCaptor<PerpFundingRateEvent> event = ArgumentCaptor.forClass(PerpFundingRateEvent.class);
-        verify(kafka).send(eq(properties.getKafka().getFundingRateTopic()), eq("BTC-USDT"), event.capture());
-        assertThat(repository.finalized).isEmpty();
+        verify(fixture.kafka).send(eq(properties.getKafka().getFundingRateTopic()), eq("BTC-USDT"), event.capture());
+        verify(fixture.rateRepository, never()).saveFinal(any());
         assertThat(event.getValue().fundingRate()).isEqualByComparingTo("0.000110");
-        assertThat(service.latestRate("btc-usdt").status()).isEqualTo("PREDICTED");
+        assertThat(fixture.service.latestRate("btc-usdt").status()).isEqualTo("PREDICTED");
     }
 
     @Test
     void freezesOnlyDuePredictionBeforeSettlementReadsFinalRows() {
         FundingProperties properties = new FundingProperties();
-        FakeFundingRepository repository = new FakeFundingRepository();
-        @SuppressWarnings("unchecked")
-        KafkaTemplate<String, Object> kafka = mock(KafkaTemplate.class);
-        LatestFundingRateCache cache = new LatestFundingRateCache(properties);
+        Fixture fixture = new Fixture(properties, transactionManager());
         FundingRateResponse due = new FundingRateResponse("BTC-USDT", 11L, 110L, 100L, 10L,
                 Instant.now().minusSeconds(1), 8, "PREDICTED", Instant.now());
-        cache.update(due);
-        cache.update(new FundingRateResponse("BTC-USDT", 12L, 120L, 100L, 20L,
+        fixture.cache.update(due);
+        fixture.cache.update(new FundingRateResponse("BTC-USDT", 12L, 120L, 100L, 20L,
                 Instant.now().plusSeconds(8 * 60 * 60), 8, "PREDICTED", Instant.now()));
-        FundingService service = new FundingService(properties, repository,
-                mock(FundingAccountCommandOutboxRepository.class), cache, kafka,
-                new ObjectMapper(), transactionManager());
+        when(fixture.rateRepository.saveFinal(due)).thenReturn(true);
+        when(fixture.dueRateRepository.findDue(any(Instant.class),
+                eq(properties.getSettlement().getBatchSize()))).thenReturn(List.of());
 
-        service.settleDueRates();
+        fixture.service.settleDueRates();
 
-        assertThat(repository.finalized).containsExactly(due);
-        assertThat(repository.dueRateCalls).isEqualTo(1);
-        assertThat(service.latestRate("BTC-USDT").sequence()).isEqualTo(12L);
+        verify(fixture.rateRepository).saveFinal(due);
+        verify(fixture.dueRateRepository).findDue(any(Instant.class),
+                eq(properties.getSettlement().getBatchSize()));
+        assertThat(fixture.service.latestRate("BTC-USDT").sequence()).isEqualTo(12L);
     }
 
     @Test
     void doesNotPublishWhenCalculationIsDisabled() {
         FundingProperties properties = new FundingProperties();
         properties.getCalculation().setEnabled(false);
-        FakeFundingRepository repository = new FakeFundingRepository();
-        @SuppressWarnings("unchecked")
-        KafkaTemplate<String, Object> kafka = mock(KafkaTemplate.class);
+        Fixture fixture = new Fixture(properties, transactionManager());
 
-        service(properties, repository, kafka).publishRates();
+        fixture.service.publishRates();
 
-        assertThat(repository.rateInputCalls).isZero();
-        verify(kafka, never()).send(any(), any(), any());
+        verify(fixture.rateInputRepository, never()).find(any());
+        verify(fixture.kafka, never()).send(any(), any(), any());
     }
 
     @Test
@@ -90,140 +97,83 @@ class FundingServiceTest {
         FundingProperties properties = new FundingProperties();
         properties.getSettlement().setPaymentPageSize(2);
         properties.getSettlement().setMaxPagesPerRun(1);
-        FakeFundingRepository repository = new FakeFundingRepository();
+        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        Fixture fixture = new Fixture(properties, transactionManager);
         FundingRateResponse rate = new FundingRateResponse("BTC-USDT", 11L, 100L, 90L, 10L,
                 Instant.now().minusSeconds(1), 8, "FINAL", Instant.now());
-        repository.dueRates = List.of(rate);
         FundingPaymentCandidate longPayment = new FundingPaymentCandidate(
                 1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET, "USDT",
                 10L, 100_000L, 100L, -10L);
         FundingPaymentCandidate shortPayment = new FundingPaymentCandidate(
                 1002L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET, "USDT",
                 -10L, 100_000L, 100L, 10L);
-        repository.pages = List.of(new FundingRepository.FundingPaymentPage(
-                List.of(longPayment, shortPayment),
-                FundingRepository.FundingPaymentCursor.from(shortPayment), false));
-        FundingAccountCommandOutboxRepository outbox = mock(FundingAccountCommandOutboxRepository.class);
-        @SuppressWarnings("unchecked")
-        KafkaTemplate<String, Object> kafka = mock(KafkaTemplate.class);
-        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
-        FundingService service = new FundingService(properties, repository, outbox,
-                new LatestFundingRateCache(properties), kafka, new ObjectMapper(), transactionManager);
+        FundingSettlementWork settlement = new FundingSettlementWork(
+                77L, "BTC-USDT", Instant.parse("2026-07-01T00:00:00Z"),
+                100L, 7L, 65_000L, new FundingPaymentCursor(0L, "", ""));
+        FundingPaymentPage page = new FundingPaymentPage(
+                List.of(longPayment, shortPayment), FundingPaymentCursor.from(shortPayment), false);
+        List<FundingPaymentWrite> writes = List.of(
+                new FundingPaymentWrite(100L, "FUNDING:LINEAR_PERPETUAL:77:100", longPayment),
+                new FundingPaymentWrite(101L, "FUNDING:LINEAR_PERPETUAL:77:101", shortPayment));
+        when(fixture.dueRateRepository.findDue(any(Instant.class), any(Integer.class)))
+                .thenReturn(List.of(rate));
+        when(fixture.settlementRepository.createOrResume(eq(rate), any(Instant.class)))
+                .thenReturn(Optional.of(settlement));
+        when(fixture.settlementRepository.lockProcessing(77L)).thenReturn(Optional.of(settlement));
+        when(fixture.paymentCandidateRepository.findPage(settlement, 2)).thenReturn(page);
+        when(fixture.paymentRepository.insert(eq(77L), eq(List.of(longPayment, shortPayment)), any(Instant.class)))
+                .thenReturn(writes);
 
-        service.settleDueRates();
+        fixture.service.settleDueRates();
 
-        assertThat(repository.pageCalls).isEqualTo(1);
-        assertThat(repository.requestedPageSize).isEqualTo(2);
-        assertThat(repository.insertedPayments).containsExactly(longPayment, shortPayment);
-        assertThat(repository.advanceCalls).isEqualTo(1);
+        verify(fixture.paymentCandidateRepository).findPage(settlement, 2);
+        verify(fixture.paymentRepository).insert(eq(77L), eq(List.of(longPayment, shortPayment)),
+                any(Instant.class));
+        verify(fixture.settlementRepository).advancePage(eq(77L), eq(page), eq(writes), any(Instant.class));
         assertThat(transactionManager.commits).isEqualTo(2);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<FundingAccountCommandOutboxRepository.FundingAccountCommandWrite>> commands =
                 ArgumentCaptor.forClass(List.class);
-        verify(outbox).enqueueBatch(commands.capture(), any(Instant.class));
+        verify(fixture.outboxRepository).enqueueBatch(commands.capture(), any(Instant.class));
         assertThat(commands.getValue()).hasSize(2);
         assertThat(commands.getValue()).extracting(item -> item.command().partitionKey())
                 .containsExactly("LINEAR_PERPETUAL:1001", "LINEAR_PERPETUAL:1002");
     }
 
-    private FundingService service(FundingProperties properties,
-                                   FakeFundingRepository repository,
-                                   KafkaTemplate<String, Object> kafka) {
-        return new FundingService(properties, repository, mock(FundingAccountCommandOutboxRepository.class),
-                new LatestFundingRateCache(properties), kafka, new ObjectMapper(), transactionManager());
-    }
-
-    private static final class FakeFundingRepository extends FundingRepository {
-        private int rateInputCalls;
-        private int dueRateCalls;
-        private final java.util.ArrayList<FundingRateResponse> finalized = new java.util.ArrayList<>();
-        private List<FundingRateResponse> dueRates = List.of();
-        private List<FundingRepository.FundingPaymentPage> pages = List.of();
-        private int pageCalls;
-        private int requestedPageSize;
-        private int advanceCalls;
-        private List<FundingPaymentCandidate> insertedPayments = List.of();
-        private final FundingRepository.FundingSettlementWork settlement =
-                new FundingRepository.FundingSettlementWork(
-                        77L, "BTC-USDT", Instant.parse("2026-07-01T00:00:00Z"),
-                        100L, 7L, 65_000L, new FundingRepository.FundingPaymentCursor(0L, "", ""));
-
-        private FakeFundingRepository() {
-            super(null);
-        }
-
-        @Override
-        public boolean acquireLease(String symbol, String ownerId, Duration leaseDuration) {
-            return true;
-        }
-
-        @Override
-        public List<FundingRateInput> rateInputs(Duration maxMarkAge) {
-            rateInputCalls++;
-            return List.of(new FundingRateInput("BTC-USDT", 0L, 100L, 10L,
-                    -3_750L, 3_750L, 8, Instant.now()));
-        }
-
-        @Override
-        public long nextSymbolSequence(String symbol) {
-            return 11L;
-        }
-
-        @Override
-        public boolean saveFinalRate(FundingRateResponse rate) {
-            finalized.add(rate);
-            return true;
-        }
-
-        @Override
-        public List<FundingRateResponse> dueRates(Instant now, int limit) {
-            dueRateCalls++;
-            return dueRates;
-        }
-
-        @Override
-        public Optional<FundingRepository.FundingSettlementWork> createOrResumeSettlement(
-                FundingRateResponse rate, Instant now) {
-            return Optional.of(settlement);
-        }
-
-        @Override
-        public Optional<FundingRepository.FundingSettlementWork> lockProcessingSettlement(long settlementId) {
-            return Optional.of(settlement);
-        }
-
-        @Override
-        public FundingRepository.FundingPaymentPage paymentCandidatesPage(
-                FundingRepository.FundingSettlementWork settlement, int limit) {
-            requestedPageSize = limit;
-            return pages.get(pageCalls++);
-        }
-
-        @Override
-        public List<FundingRepository.FundingPaymentWrite> insertPayments(
-                long settlementId, List<FundingPaymentCandidate> payments, Instant now) {
-            insertedPayments = List.copyOf(payments);
-            java.util.ArrayList<FundingRepository.FundingPaymentWrite> writes = new java.util.ArrayList<>();
-            long paymentId = 100L;
-            for (FundingPaymentCandidate payment : payments) {
-                writes.add(new FundingRepository.FundingPaymentWrite(
-                        paymentId, "FUNDING:LINEAR_PERPETUAL:77:" + paymentId, payment));
-                paymentId++;
-            }
-            return writes;
-        }
-
-        @Override
-        public void advanceSettlementPage(long settlementId,
-                                          FundingRepository.FundingPaymentPage page,
-                                          List<FundingRepository.FundingPaymentWrite> writes,
-                                          Instant now) {
-            advanceCalls++;
-        }
+    private static FundingRateInput rateInput() {
+        return new FundingRateInput("BTC-USDT", 0L, 100L, 10L,
+                -3_750L, 3_750L, 8, Instant.now());
     }
 
     private static PlatformTransactionManager transactionManager() {
         return new TrackingTransactionManager();
+    }
+
+    private static final class Fixture {
+        private final FundingLeaseRepository leaseRepository = mock(FundingLeaseRepository.class);
+        private final FundingSequenceRepository sequenceRepository = mock(FundingSequenceRepository.class);
+        private final FundingRateInputRepository rateInputRepository = mock(FundingRateInputRepository.class);
+        private final FundingRateRepository rateRepository = mock(FundingRateRepository.class);
+        private final FundingDueRateRepository dueRateRepository = mock(FundingDueRateRepository.class);
+        private final FundingSettlementRepository settlementRepository = mock(FundingSettlementRepository.class);
+        private final FundingPaymentCandidateRepository paymentCandidateRepository =
+                mock(FundingPaymentCandidateRepository.class);
+        private final FundingPaymentRepository paymentRepository = mock(FundingPaymentRepository.class);
+        private final FundingAccountCommandOutboxRepository outboxRepository =
+                mock(FundingAccountCommandOutboxRepository.class);
+        @SuppressWarnings("unchecked")
+        private final KafkaTemplate<String, Object> kafka = mock(KafkaTemplate.class);
+        private final LatestFundingRateCache cache;
+        private final FundingService service;
+
+        private Fixture(FundingProperties properties, PlatformTransactionManager transactionManager) {
+            when(leaseRepository.acquire(any(), any(), any())).thenReturn(true);
+            cache = new LatestFundingRateCache(properties);
+            service = new FundingService(properties, leaseRepository, sequenceRepository,
+                    rateInputRepository, rateRepository, dueRateRepository, settlementRepository,
+                    paymentCandidateRepository, paymentRepository, outboxRepository, cache, kafka,
+                    new ObjectMapper(), transactionManager);
+        }
     }
 
     private static final class TrackingTransactionManager implements PlatformTransactionManager {

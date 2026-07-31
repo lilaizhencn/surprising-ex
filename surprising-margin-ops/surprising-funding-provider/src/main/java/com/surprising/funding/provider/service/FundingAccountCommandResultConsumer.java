@@ -41,7 +41,7 @@ public class FundingAccountCommandResultConsumer {
             try {
                 event = objectMapper.readValue(record.value(), AccountCommandResultEvent.class);
             } catch (Exception ex) {
-                // The database reconciler is authoritative, so a poison notification does not block later results.
+                // 数据库自愈任务以账户命令终态为准，因此异常通知不能阻塞后续有效结果。
                 log.error("Ignoring malformed account result topic={} partition={} offset={}: {}",
                         record.topic(), record.partition(), record.offset(), ex.getMessage(), ex);
                 continue;

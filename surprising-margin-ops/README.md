@@ -23,6 +23,10 @@ Margin-operation APIs and providers for risk, liquidation, funding, insurance, a
   in separate transactions. Each page batch-inserts payments and account outbox commands; native cached PostgreSQL
   sequences remove the former per-payment sequence-row hotspot. Account results are consumed in batches and update
   settlement counters incrementally without rescanning all payments.
+- Funding persistence is split by physical table for leases, sequences, rates, settlements, payments, and account
+  outbox rows, with `FundingService` aggregating them transactionally. Only online safety paths for rate inputs,
+  due-rate selection, settlement candidates, command recovery, and atomic payment completion retain cross-table SQL;
+  each exception is documented in source.
 - Risk consumes account position events in Kafka batches, keeps only the highest revision for each exact position, and
   scans each affected user/account/settlement-asset group once. Complete position events eliminate the former
   instrument target-resolution query; scheduled keyset scans remain the safety fallback.
@@ -42,6 +46,8 @@ Margin-operation APIs and providers for risk, liquidation, funding, insurance, a
 - High-risk account aggregation and similar admin reports no longer query the primary trading database. A future
   finance-operations module must build event-driven projections in an independent database for cross-table queries,
   reconciliation, and operational reporting.
+- Funding settlement timelines, cross-account reconciliation, and operational statistics must likewise be served
+  from that independent finance-operations projection rather than new JOINs in the primary trading database.
 - No module reads another module's in-memory state directly.
 - The original standalone provider jars remain available for split deployment.
 

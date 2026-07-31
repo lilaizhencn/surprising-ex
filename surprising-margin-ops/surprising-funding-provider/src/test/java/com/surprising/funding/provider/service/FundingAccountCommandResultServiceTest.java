@@ -9,7 +9,9 @@ import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.api.model.AccountCommandStatus;
 import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.funding.provider.config.FundingProperties;
-import com.surprising.funding.provider.repository.FundingRepository;
+import com.surprising.funding.provider.model.FundingPaymentResult;
+import com.surprising.funding.provider.repository.FundingPaymentCompletionRepository;
+import com.surprising.funding.provider.repository.FundingPendingCommandRepository;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
@@ -20,9 +22,13 @@ class FundingAccountCommandResultServiceTest {
 
     @Test
     void appliesFundingResultsAsOneRepositoryBatchAndIgnoresOtherCommandTypes() {
-        FundingRepository repository = mock(FundingRepository.class);
+        FundingPaymentCompletionRepository completionRepository =
+                mock(FundingPaymentCompletionRepository.class);
+        FundingPendingCommandRepository pendingCommandRepository =
+                mock(FundingPendingCommandRepository.class);
         FundingAccountCommandResultService service =
-                new FundingAccountCommandResultService(repository, new FundingProperties());
+                new FundingAccountCommandResultService(
+                        completionRepository, pendingCommandRepository, new FundingProperties());
         AccountCommandResultEvent funding = result("FUNDING:1", 1001L,
                 AccountUserCommandType.FUNDING_SETTLE, "FUNDING");
         AccountCommandResultEvent other = result("ORDER:1", 1001L,
@@ -31,8 +37,8 @@ class FundingAccountCommandResultServiceTest {
         service.applyBatch(List.of(funding, other));
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<FundingRepository.PaymentResult>> results = ArgumentCaptor.forClass(List.class);
-        verify(repository).completePayments(results.capture());
+        ArgumentCaptor<List<FundingPaymentResult>> results = ArgumentCaptor.forClass(List.class);
+        verify(completionRepository).completeBatch(results.capture());
         assertThat(results.getValue()).singleElement().satisfies(result -> {
             assertThat(result.commandId()).isEqualTo("FUNDING:1");
             assertThat(result.userId()).isEqualTo(1001L);
@@ -42,19 +48,23 @@ class FundingAccountCommandResultServiceTest {
 
     @Test
     void reconcilesConfiguredNumberOfTerminalCommandsInOneBatch() {
-        FundingRepository repository = mock(FundingRepository.class);
+        FundingPaymentCompletionRepository completionRepository =
+                mock(FundingPaymentCompletionRepository.class);
+        FundingPendingCommandRepository pendingCommandRepository =
+                mock(FundingPendingCommandRepository.class);
         FundingProperties properties = new FundingProperties();
         properties.getSettlement().setReconcileBatchSize(321);
-        FundingRepository.PaymentResult result = new FundingRepository.PaymentResult(
+        FundingPaymentResult result = new FundingPaymentResult(
                 "FUNDING:1", 1001L, "APPLIED", null, null,
                 Instant.parse("2026-07-01T00:00:00Z"));
-        when(repository.terminalAccountCommandsForPendingPayments(321)).thenReturn(List.of(result));
+        when(pendingCommandRepository.findTerminal(321)).thenReturn(List.of(result));
         FundingAccountCommandResultService service =
-                new FundingAccountCommandResultService(repository, properties);
+                new FundingAccountCommandResultService(
+                        completionRepository, pendingCommandRepository, properties);
 
         service.reconcileTerminalCommands();
 
-        verify(repository).completePayments(List.of(result));
+        verify(completionRepository).completeBatch(List.of(result));
     }
 
     private AccountCommandResultEvent result(String commandId,
