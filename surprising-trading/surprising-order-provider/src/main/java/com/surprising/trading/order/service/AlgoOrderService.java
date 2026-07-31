@@ -23,6 +23,7 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.AlgoOrderProgress;
 import com.surprising.trading.order.model.AlgoOrderRecord;
 import com.surprising.trading.order.repository.AlgoOrderRepository;
+import com.surprising.trading.order.repository.AlgoOrderChildRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,22 +45,26 @@ public class AlgoOrderService {
 
     private final TradingOrderProperties properties;
     private final AlgoOrderRepository algoOrderRepository;
+    private final AlgoOrderChildRepository childRepository;
     private final OrderService orderService;
     private final OrderScheduleIndex scheduleIndex;
 
     public AlgoOrderService(TradingOrderProperties properties,
                             AlgoOrderRepository algoOrderRepository,
+                            AlgoOrderChildRepository childRepository,
                             OrderService orderService) {
-        this(properties, algoOrderRepository, orderService, OrderScheduleIndex.disabled());
+        this(properties, algoOrderRepository, childRepository, orderService, OrderScheduleIndex.disabled());
     }
 
     @Autowired
     public AlgoOrderService(TradingOrderProperties properties,
                             AlgoOrderRepository algoOrderRepository,
+                            AlgoOrderChildRepository childRepository,
                             OrderService orderService,
                             OrderScheduleIndex scheduleIndex) {
         this.properties = properties;
         this.algoOrderRepository = algoOrderRepository;
+        this.childRepository = childRepository;
         this.orderService = orderService;
         this.scheduleIndex = scheduleIndex;
     }
@@ -231,8 +236,8 @@ public class AlgoOrderService {
     }
 
     void executeDue(AlgoOrderRecord record, Instant now) {
-        algoOrderRepository.refreshChildStatuses(record.algoOrderId(), now);
-        AlgoOrderProgress progress = algoOrderRepository.progress(record.algoOrderId());
+        childRepository.refreshStatuses(record.algoOrderId(), now);
+        AlgoOrderProgress progress = childRepository.progress(record.algoOrderId());
         if (progress.executedQuantitySteps() >= record.quantitySteps()
                 && progress.activeChildOrderCount() == 0) {
             algoOrderRepository.markCompleted(record.algoOrderId(), now);
@@ -257,7 +262,11 @@ public class AlgoOrderService {
             return;
         }
         Instant nextSliceAt = nextSliceAt(record, now);
-        algoOrderRepository.markChildPlaced(record, progress.nextSliceIndex(), child, now, nextSliceAt);
+        if (!childRepository.insert(record, progress.nextSliceIndex(), child, now)) {
+            throw new IllegalStateException("算法子单切片已存在：" + record.algoOrderId()
+                    + ":" + progress.nextSliceIndex());
+        }
+        algoOrderRepository.markChildLinked(record.algoOrderId(), child.orderId(), nextSliceAt, now);
     }
 
     private PlaceOrderRequest childRequest(AlgoOrderRecord record, int sliceIndex, long quantitySteps) {
@@ -288,7 +297,7 @@ public class AlgoOrderService {
     private void cancelRecord(AlgoOrderRecord record) {
         Instant now = Instant.now();
         algoOrderRepository.markCancelRequested(record.algoOrderId(), now);
-        for (var child : algoOrderRepository.activeChildOrders(record.algoOrderId())) {
+        for (var child : childRepository.activeOrders(record.algoOrderId())) {
             try {
                 orderService.cancel(new CancelOrderRequest(child.userId(), child.orderId()));
             } catch (RuntimeException ex) {
@@ -301,8 +310,8 @@ public class AlgoOrderService {
     }
 
     private AlgoOrderResponse toResponse(AlgoOrderRecord record) {
-        algoOrderRepository.refreshChildStatuses(record.algoOrderId(), Instant.now());
-        AlgoOrderProgress progress = algoOrderRepository.progress(record.algoOrderId());
+        childRepository.refreshStatuses(record.algoOrderId(), Instant.now());
+        AlgoOrderProgress progress = childRepository.progress(record.algoOrderId());
         return new AlgoOrderResponse(
                 record.algoOrderId(),
                 record.userId(),

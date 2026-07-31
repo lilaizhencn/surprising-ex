@@ -132,6 +132,10 @@ account 的 `position-mode` API 切换到 `HEDGE`。`ONE_WAY` 使用 `positionSi
 - `ICEBERG` 要求正数限价，`timeInForce` 必须为 `GTC` 或 `GTX`。它同一时间只保留一笔可见子单，前一片成交或取消后再放出下一片。
 - 活动算法单会阻断保证金模式和持仓模式切换，避免未来子单按旧模式假设继续发出。
 - 取消父算法单会同时取消活动子单；`cancel-open` 支持用户级和可选 symbol 级批量取消。
+- `AlgoOrderRepository` 只操作 `trading_algo_orders`，子单插入由
+  `AlgoOrderChildRepository` 操作 `trading_algo_order_children`，两步在
+  `AlgoOrderService` 事务中聚合。子单状态刷新、进度聚合和待撤子单查询必须同时读取
+  子单映射与普通订单实时状态，代码中已标注不能拆成两次查询的并发原因。
 
 REST 接口：
 

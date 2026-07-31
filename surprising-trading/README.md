@@ -133,6 +133,11 @@ TWAP and Iceberg are implemented as an order-provider algo layer before exchange
 
 - `TWAP` validates `durationSeconds >= intervalSeconds` and that `childQuantitySteps` can finish the target quantity inside the configured duration. Child orders are IOC; `priceTicks=0` creates MARKET IOC children, while a positive price creates LIMIT IOC children.
 - `ICEBERG` requires a positive limit price and `GTC` or `GTX`. It keeps only one visible child active at a time, then places the next slice after the previous child fills or is canceled.
+- `AlgoOrderRepository` accesses only `trading_algo_orders`, while child insertion is isolated in
+  `AlgoOrderChildRepository` for `trading_algo_order_children`; `AlgoOrderService` aggregates both
+  writes in one transaction. Child status refresh, progress, and active-child cancellation must read
+  the child mapping and live regular-order state in one SQL snapshot, with the concurrency reason
+  documented next to those queries.
 - Active algo orders block margin-mode and position-mode switches because future child orders would otherwise be emitted under stale mode assumptions.
 - Canceling a parent algo order also cancels any active child orders. `cancel-open` supports user-level and optional symbol-level bulk cancellation.
 

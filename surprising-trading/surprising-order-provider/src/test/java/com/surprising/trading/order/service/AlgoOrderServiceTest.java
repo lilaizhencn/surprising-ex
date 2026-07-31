@@ -28,6 +28,7 @@ import com.surprising.trading.order.model.AlgoOrderProgress;
 import com.surprising.trading.order.model.AlgoOrderRecord;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.repository.AlgoOrderRepository;
+import com.surprising.trading.order.repository.AlgoOrderChildRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -38,7 +39,8 @@ class AlgoOrderServiceTest {
 
     @Test
     void twapRejectsChildQuantityThatCannotFinishInsideDuration() {
-        AlgoOrderService service = service(mock(AlgoOrderRepository.class), mock(OrderService.class));
+        AlgoOrderService service = service(mock(AlgoOrderRepository.class),
+                mock(AlgoOrderChildRepository.class), mock(OrderService.class));
 
         assertThatThrownBy(() -> service.place(new PlaceAlgoOrderRequest(
                 1001L,
@@ -64,12 +66,14 @@ class AlgoOrderServiceTest {
     @Test
     void dueTwapPlacesIocChildOrderThroughOrderService() {
         AlgoOrderRepository repository = mock(AlgoOrderRepository.class);
+        AlgoOrderChildRepository childRepository = mock(AlgoOrderChildRepository.class);
         OrderService orderService = mock(OrderService.class);
-        AlgoOrderService service = service(repository, orderService);
+        AlgoOrderService service = service(repository, childRepository, orderService);
         AlgoOrderRecord record = twapRecord();
         Instant now = Instant.parse("2026-07-05T00:00:00Z");
-        when(repository.progress(record.algoOrderId()))
+        when(childRepository.progress(record.algoOrderId()))
                 .thenReturn(new AlgoOrderProgress(0L, 0L, 0, 0, 1));
+        when(childRepository.insert(eq(record), eq(1), any(OrderResponse.class), eq(now))).thenReturn(true);
         when(orderService.place(any())).thenReturn(orderResponse(9001L, "algo-77-1", TimeInForce.IOC));
 
         service.executeDue(record, now);
@@ -80,18 +84,19 @@ class AlgoOrderServiceTest {
         assertThat(request.getValue().orderType()).isEqualTo(OrderType.MARKET);
         assertThat(request.getValue().timeInForce()).isEqualTo(TimeInForce.IOC);
         assertThat(request.getValue().quantitySteps()).isEqualTo(50L);
-        verify(repository).markChildPlaced(eq(record), eq(1), any(OrderResponse.class), eq(now),
-                eq(now.plusSeconds(10)));
+        verify(childRepository).insert(eq(record), eq(1), any(OrderResponse.class), eq(now));
+        verify(repository).markChildLinked(record.algoOrderId(), 9001L, now.plusSeconds(10), now);
     }
 
     @Test
     void icebergWaitsForActiveVisibleChildBeforePlacingNextSlice() {
         AlgoOrderRepository repository = mock(AlgoOrderRepository.class);
+        AlgoOrderChildRepository childRepository = mock(AlgoOrderChildRepository.class);
         OrderService orderService = mock(OrderService.class);
-        AlgoOrderService service = service(repository, orderService);
+        AlgoOrderService service = service(repository, childRepository, orderService);
         AlgoOrderRecord record = icebergRecord();
         Instant now = Instant.parse("2026-07-05T00:00:00Z");
-        when(repository.progress(record.algoOrderId()))
+        when(childRepository.progress(record.algoOrderId()))
                 .thenReturn(new AlgoOrderProgress(10L, 40L, 1, 1, 2));
 
         service.executeDue(record, now);
@@ -103,8 +108,9 @@ class AlgoOrderServiceTest {
     @Test
     void cancelAlgoCancelsActiveChildrenAndStopsFutureSlices() {
         AlgoOrderRepository repository = mock(AlgoOrderRepository.class);
+        AlgoOrderChildRepository childRepository = mock(AlgoOrderChildRepository.class);
         OrderService orderService = mock(OrderService.class);
-        AlgoOrderService service = service(repository, orderService);
+        AlgoOrderService service = service(repository, childRepository, orderService);
         AlgoOrderRecord record = icebergRecord();
         AlgoOrderRecord canceled = new AlgoOrderRecord(record.algoOrderId(), record.userId(),
                 record.clientAlgoOrderId(), record.symbol(), record.algoType(), record.side(), record.priceTicks(),
@@ -116,8 +122,8 @@ class AlgoOrderServiceTest {
         when(repository.findByAlgoOrderId(record.algoOrderId()))
                 .thenReturn(Optional.of(record))
                 .thenReturn(Optional.of(canceled));
-        when(repository.activeChildOrders(record.algoOrderId())).thenReturn(List.of(childRecord()));
-        when(repository.progress(record.algoOrderId()))
+        when(childRepository.activeOrders(record.algoOrderId())).thenReturn(List.of(childRecord()));
+        when(childRepository.progress(record.algoOrderId()))
                 .thenReturn(new AlgoOrderProgress(0L, 50L, 1, 1, 2));
 
         var response = service.cancel(new CancelAlgoOrderRequest(record.userId(), record.algoOrderId()));
@@ -132,7 +138,8 @@ class AlgoOrderServiceTest {
     void cancelRejectsAlgoOrderOutsideCurrentProductLineBeforeMutating() {
         AlgoOrderRepository repository = mock(AlgoOrderRepository.class);
         OrderService orderService = mock(OrderService.class);
-        AlgoOrderService service = service(ProductLine.OPTION, repository, orderService);
+        AlgoOrderService service = service(ProductLine.OPTION, repository,
+                mock(AlgoOrderChildRepository.class), orderService);
         AlgoOrderRecord record = twapRecord();
         when(repository.findByAlgoOrderId(record.algoOrderId())).thenReturn(Optional.of(record));
         when(repository.algoOrderMatchesContractType(record.algoOrderId(), "VANILLA_OPTION")).thenReturn(false);
@@ -145,22 +152,25 @@ class AlgoOrderServiceTest {
         verify(orderService, never()).cancel(any(CancelOrderRequest.class));
     }
 
-    private AlgoOrderService service(AlgoOrderRepository repository, OrderService orderService) {
+    private AlgoOrderService service(AlgoOrderRepository repository,
+                                     AlgoOrderChildRepository childRepository,
+                                     OrderService orderService) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getAlgo().setMinDurationSeconds(1L);
         properties.getAlgo().setMinIntervalSeconds(1L);
-        return new AlgoOrderService(properties, repository, orderService);
+        return new AlgoOrderService(properties, repository, childRepository, orderService);
     }
 
     private AlgoOrderService service(ProductLine productLine,
                                      AlgoOrderRepository repository,
+                                     AlgoOrderChildRepository childRepository,
                                      OrderService orderService) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getAlgo().setMinDurationSeconds(1L);
         properties.getAlgo().setMinIntervalSeconds(1L);
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(productLine);
-        return new AlgoOrderService(properties, repository, orderService);
+        return new AlgoOrderService(properties, repository, childRepository, orderService);
     }
 
     private AlgoOrderRecord twapRecord() {
