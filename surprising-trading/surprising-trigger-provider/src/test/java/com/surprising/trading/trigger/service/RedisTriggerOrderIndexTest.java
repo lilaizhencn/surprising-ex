@@ -24,6 +24,7 @@ import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.data.redis.core.script.RedisScript;
 
@@ -68,6 +69,28 @@ class RedisTriggerOrderIndexTest {
                 eq("70000"), eq("400"));
     }
 
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void localPriceIndexOnlyReturnsOrdersInTriggeredPriceRange() {
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        ZSetOperations<String, String> zSetOperations = mock(ZSetOperations.class);
+        ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
+        when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
+        when(zSetOperations.add(any(), any(), any(Double.class))).thenReturn(true);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(redisTemplate.hasKey("surprising:trigger:v1:ready:LINEAR_PERPETUAL")).thenReturn(true);
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), any(), any())).thenReturn(List.of());
+        RedisTriggerOrderIndex index = new RedisTriggerOrderIndex(redisTemplate, properties());
+
+        index.indexPlaced(order(501L, TriggerCondition.GREATER_OR_EQUAL, TriggerOrderStatus.PENDING));
+        index.synchronize(orderWithPrice(502L, TriggerCondition.GREATER_OR_EQUAL, 80_000L));
+        index.synchronize(orderWithPrice(503L, TriggerCondition.LESS_OR_EQUAL, 80_000L));
+        index.markReady(ProductLine.LINEAR_PERPETUAL);
+
+        assertThat(index.dueCandidates(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 70_000L, 10))
+                .contains(List.of(501L, 503L));
+    }
+
     private TriggerProperties properties() {
         return new TriggerProperties();
     }
@@ -75,9 +98,22 @@ class RedisTriggerOrderIndexTest {
     private TriggerOrderRecord order(long triggerOrderId,
                                      TriggerCondition condition,
                                      TriggerOrderStatus status) {
+        return orderWithPrice(triggerOrderId, condition, 70_000L, status);
+    }
+
+    private TriggerOrderRecord orderWithPrice(long triggerOrderId,
+                                              TriggerCondition condition,
+                                              long triggerPriceTicks) {
+        return orderWithPrice(triggerOrderId, condition, triggerPriceTicks, TriggerOrderStatus.PENDING);
+    }
+
+    private TriggerOrderRecord orderWithPrice(long triggerOrderId,
+                                              TriggerCondition condition,
+                                              long triggerPriceTicks,
+                                              TriggerOrderStatus status) {
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         return new TriggerOrderRecord(triggerOrderId, 1001L, "tp-" + triggerOrderId, null, "BTC-USDT",
-                OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, condition, 70_000L,
+                OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, condition, triggerPriceTicks,
                 OrderType.MARKET, TimeInForce.IOC, 0L, 2L, MarginMode.CROSS, PositionSide.NET, status,
                 null, null, null, null, "trace-" + triggerOrderId, null, null, now, now);
     }

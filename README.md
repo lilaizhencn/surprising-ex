@@ -16,7 +16,8 @@ Surprising-EX 是基于 Java 21、PostgreSQL、Kafka 和 Redis/Valkey 的多产�
   撤单、资金变更或最终强平执行。
 - risk-provider 在 Redis 维护完整风险组和 `symbol + instrumentVersion -> group` 反向索引；标记价更新
   只计算受影响的风险组，PostgreSQL 在同一事务内批量写风险快照、强平 candidate 和 candidate Outbox，
-  liquidation 执行前仍重新校验并锁定 PostgreSQL 权威状态。
+  liquidation 执行前仍重新校验并锁定 PostgreSQL 权威状态。内部规格缓存已引入
+  `productLine + symbol + epoch` 代际键，旧字段仍由兼容层双读。
 - 强平 candidate 进入同 hash-tag 的 Redis 优先队列，由 Lua 原子完成去重、lease 和延迟重试；worker
   批量锁定并复核 PostgreSQL，再批量写订单、事件和 Outbox。Redis 丢失时从 PostgreSQL 恢复，
   不改变资金权威边界。
@@ -24,6 +25,7 @@ Surprising-EX 是基于 Java 21、PostgreSQL、Kafka 和 Redis/Valkey 的多产�
   32 个分区串行处理。
 - 撮合命令、成交、盘口和价格事件使用 `symbol` 作为 key。同一 symbol 的命令必须保持有序。
 - 撮合保护、最新成交、盘口和热 K 线优先使用进程内内存或 RocksDB；行情数据库只负责关闭 K 线、恢复快照和最终审计，具体边界见[内存与无锁热点路径](docs/in-memory-acceleration.md)。
+- WebSocket 公共行情按 Kafka 批次分组入队，连接使用有界队列和背压指标；私有事件仍按用户和产品线隔离。
 - 内部做市账户之间的自成交继续产生公共成交、盘口、K 线和 WebSocket 行情，但不生成经济成交、
   持仓、手续费和资金结算；做市账户与真实用户成交时执行完整结算。
 

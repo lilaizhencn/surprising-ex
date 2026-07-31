@@ -40,4 +40,17 @@ public class WebSocketKafkaConfiguration {
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
         return factory;
     }
+
+    /** 高频公共行情使用批量拉取，私有事件继续使用逐条确认以保持失败重试粒度。 */
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, String> webSocketKafkaBatchListenerContainerFactory(
+            ConsumerFactory<String, String> webSocketConsumerFactory,
+            WebSocketProperties properties) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(webSocketConsumerFactory);
+        factory.setConcurrency(properties.getKafka().getConcurrency());
+        factory.setBatchListener(true);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
+        return factory;
+    }
 }

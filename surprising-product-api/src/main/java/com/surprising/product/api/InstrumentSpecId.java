@@ -26,4 +26,9 @@ public record InstrumentSpecId(ProductLine productLine, String symbol, long spec
     public String key() {
         return productLine.name() + ":" + symbol + ":" + specId;
     }
+
+    /** 迁移期内部别名；不改变旧字段的读取兼容性。 */
+    public long epoch() {
+        return specId;
+    }
 }

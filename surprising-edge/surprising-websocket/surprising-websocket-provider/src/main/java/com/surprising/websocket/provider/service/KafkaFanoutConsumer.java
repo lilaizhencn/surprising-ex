@@ -23,6 +23,10 @@ import com.surprising.websocket.api.model.ExecutionReportEvent;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import com.surprising.websocket.provider.config.WebSocketProperties;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.time.Duration;
 import java.time.Instant;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -67,10 +71,6 @@ public class KafkaFanoutConsumer {
         this.properties = properties;
     }
 
-    @KafkaListener(
-            topics = "#{__listener.candleTopic()}",
-            groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onCandle(ConsumerRecord<String, String> record) {
         try {
             requireCurrentProductTopic(record.topic(), candleTopic(), "candle update");
@@ -84,9 +84,15 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "#{__listener.tradeTopic()}",
+            topics = "#{__listener.candleTopic()}",
             groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaListenerContainerFactory")
+            containerFactory = "webSocketKafkaBatchListenerContainerFactory")
+    public void onCandleBatch(List<ConsumerRecord<String, String>> records) {
+        for (ConsumerRecord<String, String> record : records) {
+            onCandle(record);
+        }
+    }
+
     public void onTrade(ConsumerRecord<String, String> record) {
         try {
             requireCurrentProductTopic(record.topic(), tradeTopic(), "public trade");
@@ -100,9 +106,25 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "#{__listener.orderBookDepthTopic()}",
+            topics = "#{__listener.tradeTopic()}",
             groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaListenerContainerFactory")
+            containerFactory = "webSocketKafkaBatchListenerContainerFactory")
+    public void onTradeBatch(List<ConsumerRecord<String, String>> records) {
+        try {
+            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
+            for (ConsumerRecord<String, String> record : records) {
+                requireCurrentProductTopic(record.topic(), tradeTopic(), "public trade");
+                TradeEvent event = objectMapper.readValue(record.value(), TradeEvent.class);
+                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "public trade");
+                addBatch(grouped, topic(WsChannel.TRADES, event.symbol(), null), event, event.tradeTime());
+            }
+            publishBatches(grouped);
+        } catch (Exception ex) {
+            log.error("Failed to batch fanout public trade: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to batch fanout public trade", ex);
+        }
+    }
+
     public void onOrderBookDepth(ConsumerRecord<String, String> record) {
         try {
             requireCurrentProductTopic(record.topic(), orderBookDepthTopic(), "order book depth");
@@ -116,9 +138,25 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "#{__listener.indexPriceTopic()}",
+            topics = "#{__listener.orderBookDepthTopic()}",
             groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaListenerContainerFactory")
+            containerFactory = "webSocketKafkaBatchListenerContainerFactory")
+    public void onOrderBookDepthBatch(List<ConsumerRecord<String, String>> records) {
+        try {
+            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
+            for (ConsumerRecord<String, String> record : records) {
+                requireCurrentProductTopic(record.topic(), orderBookDepthTopic(), "order book depth");
+                OrderBookDepthEvent event = objectMapper.readValue(record.value(), OrderBookDepthEvent.class);
+                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "order book depth");
+                addBatch(grouped, topic(WsChannel.ORDER_BOOK_DEPTH, event.symbol(), null), event, event.eventTime());
+            }
+            publishBatches(grouped);
+        } catch (Exception ex) {
+            log.error("Failed to batch fanout order book depth: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to batch fanout order book depth", ex);
+        }
+    }
+
     public void onIndexPrice(ConsumerRecord<String, String> record) {
         try {
             requireCurrentProductTopic(record.topic(), indexPriceTopic(), "index price");
@@ -132,9 +170,25 @@ public class KafkaFanoutConsumer {
     }
 
     @KafkaListener(
-            topics = "#{__listener.markPriceTopic()}",
+            topics = "#{__listener.indexPriceTopic()}",
             groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaListenerContainerFactory")
+            containerFactory = "webSocketKafkaBatchListenerContainerFactory")
+    public void onIndexPriceBatch(List<ConsumerRecord<String, String>> records) {
+        try {
+            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
+            for (ConsumerRecord<String, String> record : records) {
+                requireCurrentProductTopic(record.topic(), indexPriceTopic(), "index price");
+                IndexPriceEvent event = objectMapper.readValue(record.value(), IndexPriceEvent.class);
+                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "index price");
+                addBatch(grouped, topic(WsChannel.INDEX_PRICE, event.symbol(), null), event, event.eventTime());
+            }
+            publishBatches(grouped);
+        } catch (Exception ex) {
+            log.error("Failed to batch fanout index price: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to batch fanout index price", ex);
+        }
+    }
+
     public void onMarkPrice(ConsumerRecord<String, String> record) {
         try {
             requireCurrentProductTopic(record.topic(), markPriceTopic(), "mark price");
@@ -157,6 +211,33 @@ public class KafkaFanoutConsumer {
         }
     }
 
+    @KafkaListener(
+            topics = "#{__listener.markPriceTopic()}",
+            groupId = "#{__listener.groupId()}",
+            containerFactory = "webSocketKafkaBatchListenerContainerFactory")
+    public void onMarkPriceBatch(List<ConsumerRecord<String, String>> records) {
+        try {
+            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
+            for (ConsumerRecord<String, String> record : records) {
+                requireCurrentProductTopic(record.topic(), markPriceTopic(), "mark price");
+                MarkPricePublishedEvent publication = objectMapper.readValue(
+                        record.value(), MarkPricePublishedEvent.class);
+                MarkPriceEvent event = publication.result();
+                if (event == null) {
+                    throw new IllegalArgumentException("mark price publication result is required");
+                }
+                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "mark price");
+                if (isFreshMarkPrice(event)) {
+                    addBatch(grouped, topic(WsChannel.MARK_PRICE, event.symbol(), null), event, event.eventTime());
+                }
+            }
+            publishBatches(grouped);
+        } catch (Exception ex) {
+            log.error("Failed to batch fanout mark price: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to batch fanout mark price", ex);
+        }
+    }
+
     private boolean isFreshMarkPrice(MarkPriceEvent event) {
         if (event == null || event.productLine() != properties.getKafka().getProductLine()
                 || event.instrumentVersion() <= 0 || event.markPriceUnits() <= 0 || event.markPriceTicks() <= 0
@@ -176,11 +257,6 @@ public class KafkaFanoutConsumer {
                 && !event.publishedAt().isAfter(now.plus(futureSkew));
     }
 
-    @KafkaListener(
-            topics = "#{__listener.fundingRateTopic()}",
-            groupId = "#{__listener.groupId()}",
-            autoStartup = "#{__listener.fundingRateListenerEnabled()}",
-            containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onFundingRate(ConsumerRecord<String, String> record) {
         try {
             requireCurrentProductTopic(record.topic(), fundingRateTopic(), "funding rate");
@@ -190,6 +266,27 @@ public class KafkaFanoutConsumer {
         } catch (Exception ex) {
             log.error("Failed to fanout funding rate: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout funding rate", ex);
+        }
+    }
+
+    @KafkaListener(
+            topics = "#{__listener.fundingRateTopic()}",
+            groupId = "#{__listener.groupId()}",
+            autoStartup = "#{__listener.fundingRateListenerEnabled()}",
+            containerFactory = "webSocketKafkaBatchListenerContainerFactory")
+    public void onFundingRateBatch(List<ConsumerRecord<String, String>> records) {
+        try {
+            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
+            for (ConsumerRecord<String, String> record : records) {
+                requireCurrentProductTopic(record.topic(), fundingRateTopic(), "funding rate");
+                PerpFundingRateEvent event = objectMapper.readValue(record.value(), PerpFundingRateEvent.class);
+                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "funding rate");
+                addBatch(grouped, topic(WsChannel.FUNDING_RATE, event.symbol(), null), event, event.eventTime());
+            }
+            publishBatches(grouped);
+        } catch (Exception ex) {
+            log.error("Failed to batch fanout funding rate: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to batch fanout funding rate", ex);
         }
     }
 
@@ -258,10 +355,6 @@ public class KafkaFanoutConsumer {
         }
     }
 
-    @KafkaListener(
-            topics = "#{__listener.matchTradesTopic()}",
-            groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onPublicTrade(ConsumerRecord<String, String> record) {
         try {
             requireCurrentProductTopic(record.topic(), matchTradesTopic(), "public trade");
@@ -271,6 +364,26 @@ public class KafkaFanoutConsumer {
         } catch (Exception ex) {
             log.error("Failed to fanout public trade: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to fanout public trade", ex);
+        }
+    }
+
+    @KafkaListener(
+            topics = "#{__listener.matchTradesTopic()}",
+            groupId = "#{__listener.groupId()}",
+            containerFactory = "webSocketKafkaBatchListenerContainerFactory")
+    public void onPublicTradeBatch(List<ConsumerRecord<String, String>> records) {
+        try {
+            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
+            for (ConsumerRecord<String, String> record : records) {
+                requireCurrentProductTopic(record.topic(), matchTradesTopic(), "public trade");
+                PublicTradeEvent event = objectMapper.readValue(record.value(), PublicTradeEvent.class);
+                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "public trade");
+                addBatch(grouped, topic(WsChannel.TRADES, event.symbol(), null), event, event.eventTime());
+            }
+            publishBatches(grouped);
+        } catch (Exception ex) {
+            log.error("Failed to batch fanout public trade: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to batch fanout public trade", ex);
         }
     }
 
@@ -555,5 +668,17 @@ public class KafkaFanoutConsumer {
 
     private String name(Enum<?> value) {
         return value == null ? null : value.name();
+    }
+
+    private void addBatch(Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped,
+                          SubscriptionTopic topic,
+                          Object payload,
+                          Instant eventTime) {
+        grouped.computeIfAbsent(topic, ignored -> new ArrayList<>())
+                .add(new SubscriptionRegistry.TimedPayload(payload, eventTime));
+    }
+
+    private void publishBatches(Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped) {
+        grouped.forEach(registry::publishTimedBatch);
     }
 }

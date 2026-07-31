@@ -6,12 +6,15 @@ import com.surprising.candlestick.api.model.CandleResponse;
 import com.surprising.candlestick.provider.aggregation.CandleKey;
 import com.surprising.candlestick.provider.config.CandlestickProperties;
 import com.surprising.candlestick.provider.repository.CandleQueryRepository;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.LongAdder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -21,18 +24,31 @@ public class CandleQueryService {
     private final CandleQueryRepository candleQueryRepository;
     private final CandlestickProperties properties;
     private final CandleHotCache hotCache;
+    private final LongAdder databaseFallbacks = new LongAdder();
 
     public CandleQueryService(CandleQueryRepository candleQueryRepository, CandlestickProperties properties) {
-        this(candleQueryRepository, properties, null);
+        this(candleQueryRepository, properties, null, null);
+    }
+
+    public CandleQueryService(CandleQueryRepository candleQueryRepository,
+                              CandlestickProperties properties,
+                              CandleHotCache hotCache) {
+        this(candleQueryRepository, properties, hotCache, null);
     }
 
     @Autowired
     public CandleQueryService(CandleQueryRepository candleQueryRepository,
                               CandlestickProperties properties,
-                              CandleHotCache hotCache) {
+                              CandleHotCache hotCache,
+                              MeterRegistry meterRegistry) {
         this.candleQueryRepository = candleQueryRepository;
         this.properties = properties;
         this.hotCache = hotCache;
+        if (meterRegistry != null) {
+            Gauge.builder("surprising.candlestick.query.database-fallbacks", databaseFallbacks, LongAdder::sum)
+                    .description("K 线查询回退数据库次数")
+                    .register(meterRegistry);
+        }
     }
 
     public CandleQueryResponse query(String symbol, String period, Instant startTime, Instant endTime, int limit) {
@@ -46,8 +62,7 @@ public class CandleQueryService {
         Instant now = Instant.now();
         Instant closedEnd = endTime.isBefore(now) ? endTime : now;
         List<CandleResponse> persistedCandles = startTime.isBefore(closedEnd)
-                ? candleQueryRepository.findRange(
-                        normalizedSymbol, candlePeriod.code(), startTime, closedEnd, safeLimit)
+                ? loadPersistedRange(normalizedSymbol, candlePeriod.code(), startTime, closedEnd, safeLimit)
                 : List.of();
         Map<Instant, CandleResponse> merged = new LinkedHashMap<>();
         persistedCandles.forEach(candle -> merged.put(candle.openTime(), candle));
@@ -68,7 +83,17 @@ public class CandleQueryService {
                 return latest;
             }
         }
+        databaseFallbacks.increment();
         return candleQueryRepository.findLatest(normalizedSymbol, candlePeriod.code());
+    }
+
+    private List<CandleResponse> loadPersistedRange(String symbol,
+                                                    String period,
+                                                    Instant startTime,
+                                                    Instant endTime,
+                                                    int limit) {
+        databaseFallbacks.increment();
+        return candleQueryRepository.findRange(symbol, period, startTime, endTime, limit);
     }
 
     private void validateRange(Instant startTime, Instant endTime) {

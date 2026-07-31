@@ -9,10 +9,13 @@ import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -65,6 +68,8 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
     /** 本地一级索引减少同节点重复序列化和候选扫描；Redis 仍负责跨节点完整性。 */
     private final ConcurrentMap<LocalKey, ConcurrentMap<Long, TriggerOrderRecord>> localOrders =
             new ConcurrentHashMap<>();
+    /** 按触发价维护有序桶，查询时只扫描命中价格区间，不再遍历全部订单。 */
+    private final ConcurrentMap<LocalKey, LocalPriceIndex> localPriceIndexes = new ConcurrentHashMap<>();
     private final ConcurrentMap<ProductLine, Boolean> localReady = new ConcurrentHashMap<>();
 
     public RedisTriggerOrderIndex(StringRedisTemplate redisTemplate, TriggerProperties properties) {
@@ -142,9 +147,6 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
                             rangeKey(productLine, symbol, "le")),
                     Long.toString(score), Integer.toString(normalizedLimit));
             Set<Long> ids = new LinkedHashSet<>();
-            if (Boolean.TRUE.equals(localReady.get(productLine))) {
-                ids.addAll(localDueCandidates(productLine, symbol, priceTicks, normalizedLimit));
-            }
             if (values != null) {
                 for (Object value : values) {
                     if (ids.size() >= normalizedLimit) {
@@ -152,6 +154,10 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
                     }
                     ids.add(Long.parseLong(value.toString()));
                 }
+            }
+            // Redis 先提供跨节点完整候选，本地索引只补齐本节点尚未同步到 Redis 的候选。
+            if (Boolean.TRUE.equals(localReady.get(productLine)) && ids.size() < normalizedLimit) {
+                ids.addAll(localDueCandidates(productLine, symbol, priceTicks, normalizedLimit - ids.size()));
             }
             return Optional.of(List.copyOf(ids));
         } catch (RuntimeException ex) {
@@ -219,8 +225,16 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
 
     private void putLocal(TriggerOrderRecord order) {
         LocalKey key = new LocalKey(order.productLine(), order.symbol());
-        localOrders.computeIfAbsent(key, ignored -> new ConcurrentHashMap<>())
-                .put(order.triggerOrderId(), order);
+        ConcurrentMap<Long, TriggerOrderRecord> orders = localOrders.computeIfAbsent(
+                key, ignored -> new ConcurrentHashMap<>());
+        LocalPriceIndex priceIndex = localPriceIndexes.computeIfAbsent(key, ignored -> new LocalPriceIndex());
+        orders.compute(order.triggerOrderId(), (ignored, previous) -> {
+            if (previous != null) {
+                priceIndex.remove(previous);
+            }
+            priceIndex.put(order);
+            return order;
+        });
     }
 
     private void removeLocal(ProductLine productLine, String symbol, long triggerOrderId) {
@@ -229,7 +243,16 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
         if (orders == null) {
             return;
         }
-        orders.remove(triggerOrderId);
+        TriggerOrderRecord previous = orders.remove(triggerOrderId);
+        if (previous != null) {
+            LocalPriceIndex priceIndex = localPriceIndexes.get(key);
+            if (priceIndex != null) {
+                priceIndex.remove(previous);
+                if (priceIndex.isEmpty()) {
+                    localPriceIndexes.remove(key, priceIndex);
+                }
+            }
+        }
         if (orders.isEmpty()) {
             localOrders.remove(key, orders);
         }
@@ -243,11 +266,14 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
         if (orders == null || orders.isEmpty()) {
             return List.of();
         }
-        return orders.values().stream()
-                .filter(order -> isOpen(order.status()))
-                .filter(order -> order.triggerCondition() == TriggerCondition.GREATER_OR_EQUAL
-                        ? order.triggerPriceTicks() <= priceTicks
-                        : order.triggerPriceTicks() >= priceTicks)
+        LocalPriceIndex priceIndex = localPriceIndexes.get(new LocalKey(productLine, symbol));
+        if (priceIndex == null) {
+            return List.of();
+        }
+        int scanLimit = Math.max(limit, Math.min(limit * 4, 8_000));
+        return priceIndex.dueIds(priceTicks, scanLimit).stream()
+                .map(orders::get)
+                .filter(order -> order != null && isOpen(order.status()))
                 .sorted((left, right) -> Long.compare(left.triggerOrderId(), right.triggerOrderId()))
                 .limit(limit)
                 .map(TriggerOrderRecord::triggerOrderId)
@@ -296,5 +322,56 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
     }
 
     private record LocalKey(ProductLine productLine, String symbol) {
+    }
+
+    /** 单个产品线和交易对的触发价有序索引。 */
+    private static final class LocalPriceIndex {
+
+        private final ConcurrentSkipListMap<Long, Set<Long>> greaterOrEqual = new ConcurrentSkipListMap<>();
+        private final ConcurrentSkipListMap<Long, Set<Long>> lessOrEqual = new ConcurrentSkipListMap<>();
+
+        private void put(TriggerOrderRecord order) {
+            ConcurrentSkipListMap<Long, Set<Long>> index = index(order.triggerCondition());
+            index.computeIfAbsent(order.triggerPriceTicks(), ignored -> new ConcurrentSkipListSet<>())
+                    .add(order.triggerOrderId());
+        }
+
+        private void remove(TriggerOrderRecord order) {
+            ConcurrentSkipListMap<Long, Set<Long>> index = index(order.triggerCondition());
+            Set<Long> ids = index.get(order.triggerPriceTicks());
+            if (ids != null && ids.remove(order.triggerOrderId()) && ids.isEmpty()) {
+                index.remove(order.triggerPriceTicks(), ids);
+            }
+        }
+
+        private List<Long> dueIds(long priceTicks, int limit) {
+            Set<Long> result = new LinkedHashSet<>();
+            addRange(result, greaterOrEqual.headMap(priceTicks, true).descendingMap(), limit);
+            if (result.size() < limit) {
+                addRange(result, lessOrEqual.tailMap(priceTicks, true), limit);
+            }
+            return new ArrayList<>(result);
+        }
+
+        private void addRange(Set<Long> result,
+                              Map<Long, Set<Long>> buckets,
+                              int limit) {
+            for (Set<Long> ids : buckets.values()) {
+                for (Long id : ids) {
+                    result.add(id);
+                    if (result.size() >= limit) {
+                        return;
+                    }
+                }
+            }
+        }
+
+        private boolean isEmpty() {
+            return greaterOrEqual.isEmpty() && lessOrEqual.isEmpty();
+        }
+
+        private ConcurrentSkipListMap<Long, Set<Long>> index(TriggerCondition condition) {
+            return condition == TriggerCondition.GREATER_OR_EQUAL ? greaterOrEqual : lessOrEqual;
+        }
     }
 }

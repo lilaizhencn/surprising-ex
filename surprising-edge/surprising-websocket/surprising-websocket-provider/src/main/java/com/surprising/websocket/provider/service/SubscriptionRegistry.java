@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.LongAdder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -26,6 +27,9 @@ public class SubscriptionRegistry {
     private final Map<String, ClientConnection> sessions = new ConcurrentHashMap<>();
     private final Map<String, Set<SubscriptionTopic>> sessionTopics = new ConcurrentHashMap<>();
     private final Map<SubscriptionTopic, Set<ClientConnection>> subscribers = new ConcurrentHashMap<>();
+    private final LongAdder fanoutBatches = new LongAdder();
+    private final LongAdder fanoutMessages = new LongAdder();
+    private final LongAdder backpressureRejections = new LongAdder();
 
     @Autowired
     public SubscriptionRegistry(ObjectMapper objectMapper, WebSocketProperties properties, MeterRegistry meterRegistry) {
@@ -102,9 +106,24 @@ public class SubscriptionRegistry {
         if (payloads == null || payloads.isEmpty()) {
             return;
         }
+        fanoutBatches.increment();
+        fanoutMessages.add(payloads.size());
         sendBatchIncludingLegacyProductSubscribers(topic, payloads, eventTime);
         if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.symbol())) {
             sendBatchIncludingLegacyProductSubscribers(topic.withSymbol(SubscriptionTopic.WILDCARD), payloads, eventTime);
+        }
+    }
+
+    /** 按事件自身时间批量编码，避免同一 Kafka 批次被拆成逐条网络写入。 */
+    public void publishTimedBatch(SubscriptionTopic topic, List<TimedPayload> events) {
+        if (events == null || events.isEmpty()) {
+            return;
+        }
+        fanoutBatches.increment();
+        fanoutMessages.add(events.size());
+        sendTimedBatchIncludingLegacyProductSubscribers(topic, events);
+        if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.symbol())) {
+            sendTimedBatchIncludingLegacyProductSubscribers(topic.withSymbol(SubscriptionTopic.WILDCARD), events);
         }
     }
 
@@ -170,6 +189,15 @@ public class SubscriptionRegistry {
         Gauge.builder("surprising.websocket.topics.active", this, SubscriptionRegistry::uniqueTopicCount)
                 .description("Unique subscribed WebSocket topics on this node")
                 .register(meterRegistry);
+        Gauge.builder("surprising.websocket.fanout.batches", fanoutBatches, LongAdder::sum)
+                .description("WebSocket Kafka 批量 fanout 次数")
+                .register(meterRegistry);
+        Gauge.builder("surprising.websocket.fanout.messages", fanoutMessages, LongAdder::sum)
+                .description("WebSocket fanout 消息数")
+                .register(meterRegistry);
+        Gauge.builder("surprising.websocket.backpressure.rejections", backpressureRejections, LongAdder::sum)
+                .description("WebSocket 背压导致的连接拒绝次数")
+                .register(meterRegistry);
     }
 
     private void send(SubscriptionTopic topic, Object payload, Instant eventTime) {
@@ -189,6 +217,34 @@ public class SubscriptionRegistry {
                     ? connection.send(messages.getFirst())
                     : connection.sendBatch(messages);
             if (!accepted) {
+                backpressureRejections.increment();
+                remove(connection.id());
+            }
+        }
+    }
+
+    private void sendTimedBatchIncludingLegacyProductSubscribers(SubscriptionTopic topic,
+                                                                  List<TimedPayload> events) {
+        sendTimedBatch(topic, events);
+        if (topic.productLine() == null) {
+            for (ProductLine productLine : ProductLine.values()) {
+                sendTimedBatch(topic.withProductLine(productLine), events);
+            }
+        }
+    }
+
+    private void sendTimedBatch(SubscriptionTopic topic, List<TimedPayload> events) {
+        Set<ClientConnection> connections = subscribers.get(topic);
+        if (connections == null || connections.isEmpty()) {
+            return;
+        }
+        List<String> messages = events.stream()
+                .map(event -> objectMapper.writeValueAsString(
+                        WsServerMessage.event(topic, event.payload(), event.eventTime())))
+                .toList();
+        for (ClientConnection connection : connections) {
+            if (!connection.sendBatch(messages)) {
+                backpressureRejections.increment();
                 remove(connection.id());
             }
         }
@@ -228,5 +284,8 @@ public class SubscriptionRegistry {
             String channel,
             int topicCount,
             int subscriberCount) {
+    }
+
+    public record TimedPayload(Object payload, Instant eventTime) {
     }
 }

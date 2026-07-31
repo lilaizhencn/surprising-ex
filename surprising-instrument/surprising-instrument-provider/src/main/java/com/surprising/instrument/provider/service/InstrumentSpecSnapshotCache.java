@@ -3,12 +3,17 @@ package com.surprising.instrument.provider.service;
 import com.surprising.instrument.api.model.IndexSourceConfig;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.RiskLimitBracket;
-import com.surprising.product.api.InstrumentSpecId;
+import com.surprising.product.api.InstrumentSpecEpoch;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.LongAdder;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -20,11 +25,42 @@ import org.springframework.stereotype.Component;
 @Component
 public class InstrumentSpecSnapshotCache {
 
-    private final ConcurrentMap<InstrumentSpecId, InstrumentResponse> snapshots = new ConcurrentHashMap<>();
+    private final ConcurrentMap<InstrumentSpecEpoch, InstrumentResponse> snapshots = new ConcurrentHashMap<>();
     private final ConcurrentMap<LegacyKey, InstrumentResponse> bySymbolAndSpec = new ConcurrentHashMap<>();
+    private final LongAdder hits = new LongAdder();
+    private final LongAdder misses = new LongAdder();
+    private final LongAdder replacements = new LongAdder();
+
+    public InstrumentSpecSnapshotCache() {
+        this(null);
+    }
+
+    @Autowired
+    public InstrumentSpecSnapshotCache(MeterRegistry meterRegistry) {
+        if (meterRegistry != null) {
+            Gauge.builder("surprising.instrument.snapshot.entries", snapshots, Map::size)
+                    .description("合约规格不可变快照数量")
+                    .register(meterRegistry);
+            Gauge.builder("surprising.instrument.snapshot.hits", hits, LongAdder::sum)
+                    .description("合约规格快照命中次数")
+                    .register(meterRegistry);
+            Gauge.builder("surprising.instrument.snapshot.misses", misses, LongAdder::sum)
+                    .description("合约规格快照未命中次数")
+                    .register(meterRegistry);
+            Gauge.builder("surprising.instrument.snapshot.replacements", replacements, LongAdder::sum)
+                    .description("同一规格代际快照替换次数，用于漂移监控")
+                    .register(meterRegistry);
+        }
+    }
 
     public Optional<InstrumentResponse> get(String symbol, long specId) {
-        return Optional.ofNullable(bySymbolAndSpec.get(new LegacyKey(normalizeSymbol(symbol), specId)));
+        InstrumentResponse value = bySymbolAndSpec.get(new LegacyKey(normalizeSymbol(symbol), specId));
+        if (value == null) {
+            misses.increment();
+        } else {
+            hits.increment();
+        }
+        return Optional.ofNullable(value);
     }
 
     public void put(InstrumentResponse response) {
@@ -32,7 +68,10 @@ public class InstrumentSpecSnapshotCache {
             return;
         }
         InstrumentResponse immutable = immutableCopy(response);
-        snapshots.put(key(immutable), immutable);
+        InstrumentResponse previous = snapshots.put(key(immutable), immutable);
+        if (previous != null && !previous.equals(immutable)) {
+            replacements.increment();
+        }
         bySymbolAndSpec.put(new LegacyKey(normalizeSymbol(immutable.symbol()), immutable.version()), immutable);
     }
 
@@ -64,8 +103,9 @@ public class InstrumentSpecSnapshotCache {
                 value.status(), value.effectiveTime(), value.createdAt(), value.updatedAt(), brackets, sources);
     }
 
-    private InstrumentSpecId key(InstrumentResponse response) {
-        return new InstrumentSpecId(response.contractType().productLine(), response.symbol(), response.version());
+    private InstrumentSpecEpoch key(InstrumentResponse response) {
+        return new InstrumentSpecEpoch(
+                response.contractType().productLine(), response.symbol(), response.version());
     }
 
     private String normalizeSymbol(String symbol) {
