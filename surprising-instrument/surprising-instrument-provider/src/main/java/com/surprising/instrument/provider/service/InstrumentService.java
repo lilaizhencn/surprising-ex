@@ -14,7 +14,6 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Instant;
 import java.util.Optional;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,16 +23,16 @@ public class InstrumentService {
     private final InstrumentStorageService storageService;
     private final InstrumentValidator instrumentValidator;
     private final InstrumentProperties properties;
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final InstrumentOutboxService outboxService;
 
     public InstrumentService(InstrumentStorageService storageService,
                              InstrumentValidator instrumentValidator,
                              InstrumentProperties properties,
-                             KafkaTemplate<String, Object> kafkaTemplate) {
+                             InstrumentOutboxService outboxService) {
         this.storageService = storageService;
         this.instrumentValidator = instrumentValidator;
         this.properties = properties;
-        this.kafkaTemplate = kafkaTemplate;
+        this.outboxService = outboxService;
     }
 
     public InstrumentResponse latest(String symbol) {
@@ -152,15 +151,19 @@ public class InstrumentService {
     }
 
     private void publish(InstrumentResponse response, InstrumentEventType eventType) {
+        Instant eventTime = Instant.now();
         InstrumentEvent event = new InstrumentEvent(response.symbol(), response.version(), response.status(),
-                eventType, Instant.now(), response);
-        kafkaTemplate.send(properties.getKafka().getEventsTopic(), response.symbol(), event);
+                eventType, eventTime, response);
+        outboxService.enqueue("INSTRUMENT", response.version(), properties.getKafka().getEventsTopic(),
+                response.symbol(), eventType.name(), event, eventTime);
     }
 
+    @Transactional
     public void publishProductLifecycleEvent(InstrumentResponse response) {
         Instant eventTime = Instant.now();
         if (response.instrumentType() == InstrumentType.DELIVERY) {
-            kafkaTemplate.send(deliverySettlementsTopic(response), response.symbol(), new DeliverySettlementEvent(
+            outboxService.enqueue("INSTRUMENT", response.version(), deliverySettlementsTopic(response),
+                    response.symbol(), "DELIVERY_SETTLEMENT", new DeliverySettlementEvent(
                     response.symbol(),
                     response.version(),
                     response.contractType(),
@@ -169,11 +172,12 @@ public class InstrumentService {
                     response.settlementMethod(),
                     response.status(),
                     eventTime,
-                    response));
+                    response), eventTime);
             return;
         }
         if (response.instrumentType() == InstrumentType.OPTION) {
-            kafkaTemplate.send(optionExercisesTopic(response), response.symbol(), new OptionExerciseEvent(
+            outboxService.enqueue("INSTRUMENT", response.version(), optionExercisesTopic(response),
+                    response.symbol(), "OPTION_EXERCISE", new OptionExerciseEvent(
                     response.symbol(),
                     response.version(),
                     response.underlyingSymbol(),
@@ -185,8 +189,18 @@ public class InstrumentService {
                     response.settlementMethod(),
                     response.status(),
                     eventTime,
-                    response));
+                    response), eventTime);
         }
+    }
+
+    /**
+     * 关闭到期品种时，把状态变更和产品结算事件写入同一个数据库事务。
+     */
+    @Transactional
+    public InstrumentResponse closeForSettlement(String symbol) {
+        InstrumentResponse closed = updateStatus(symbol, InstrumentStatus.CLOSED);
+        publishProductLifecycleEvent(closed);
+        return closed;
     }
 
     private String deliverySettlementsTopic(InstrumentResponse response) {

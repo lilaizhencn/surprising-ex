@@ -35,3 +35,11 @@ surprising:
       enabled: true
       poll-delay-ms: 1000
       batch-size: 100
+    outbox:
+      batch-size: 100
+      publish-delay-ms: 100
+      cleanup-delay-ms: 60000
+      send-timeout: 10s
+      retention: 7d
+      cleanup-batch-size: 500
+      cleanup-max-batches: 10

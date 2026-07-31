@@ -1,5 +1,6 @@
 package com.surprising.instrument.provider.config;
 
+import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.instrument")
@@ -7,6 +8,7 @@ public class InstrumentProperties {
 
     private Kafka kafka = new Kafka();
     private Lifecycle lifecycle = new Lifecycle();
+    private Outbox outbox = new Outbox();
 
     public Kafka getKafka() {
         return kafka;
@@ -22,6 +24,14 @@ public class InstrumentProperties {
 
     public void setLifecycle(Lifecycle lifecycle) {
         this.lifecycle = lifecycle;
+    }
+
+    public Outbox getOutbox() {
+        return outbox;
+    }
+
+    public void setOutbox(Outbox outbox) {
+        this.outbox = outbox;
     }
 
     public static class Kafka {
@@ -90,6 +100,72 @@ public class InstrumentProperties {
 
         public void setBatchSize(int batchSize) {
             this.batchSize = batchSize;
+        }
+    }
+
+    public static class Outbox {
+        private int batchSize = 100;
+        private long publishDelayMs = 100L;
+        private long cleanupDelayMs = 60_000L;
+        private Duration sendTimeout = Duration.ofSeconds(10);
+        private Duration retention = Duration.ofDays(7);
+        private int cleanupBatchSize = 500;
+        private int cleanupMaxBatches = 10;
+
+        public int getBatchSize() {
+            return batchSize;
+        }
+
+        public void setBatchSize(int batchSize) {
+            this.batchSize = batchSize;
+        }
+
+        public long getPublishDelayMs() {
+            return publishDelayMs;
+        }
+
+        public void setPublishDelayMs(long publishDelayMs) {
+            this.publishDelayMs = publishDelayMs;
+        }
+
+        public long getCleanupDelayMs() {
+            return cleanupDelayMs;
+        }
+
+        public void setCleanupDelayMs(long cleanupDelayMs) {
+            this.cleanupDelayMs = cleanupDelayMs;
+        }
+
+        public Duration getSendTimeout() {
+            return sendTimeout;
+        }
+
+        public void setSendTimeout(Duration sendTimeout) {
+            this.sendTimeout = sendTimeout;
+        }
+
+        public Duration getRetention() {
+            return retention;
+        }
+
+        public void setRetention(Duration retention) {
+            this.retention = retention;
+        }
+
+        public int getCleanupBatchSize() {
+            return cleanupBatchSize;
+        }
+
+        public void setCleanupBatchSize(int cleanupBatchSize) {
+            this.cleanupBatchSize = cleanupBatchSize;
+        }
+
+        public int getCleanupMaxBatches() {
+            return cleanupMaxBatches;
+        }
+
+        public void setCleanupMaxBatches(int cleanupMaxBatches) {
+            this.cleanupMaxBatches = cleanupMaxBatches;
         }
     }
 }

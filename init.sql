@@ -325,6 +325,35 @@ CREATE TABLE IF NOT EXISTS instrument_index_sources (
 CREATE INDEX IF NOT EXISTS instrument_index_sources_enabled_idx
     ON instrument_index_sources (symbol, version, enabled);
 
+CREATE SEQUENCE IF NOT EXISTS instrument_outbox_event_seq
+    AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
+
+CREATE TABLE IF NOT EXISTS instrument_outbox_events (
+    id                  BIGINT PRIMARY KEY,
+    aggregate_type      TEXT NOT NULL,
+    aggregate_id        BIGINT NOT NULL,
+    topic               TEXT NOT NULL,
+    event_key           TEXT NOT NULL,
+    event_type          TEXT NOT NULL,
+    payload             JSONB NOT NULL,
+    published_at        TIMESTAMPTZ,
+    next_attempt_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    attempts            INTEGER NOT NULL DEFAULT 0,
+    last_error          TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT instrument_outbox_attempts_non_negative CHECK (attempts >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS instrument_outbox_pending_stream_idx
+    ON instrument_outbox_events (topic, event_key, id)
+    INCLUDE (next_attempt_at)
+    WHERE published_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS instrument_outbox_published_cleanup_idx
+    ON instrument_outbox_events (published_at, id)
+    WHERE published_at IS NOT NULL;
+
 INSERT INTO instruments (
     symbol, version, instrument_type, contract_type, base_asset, quote_asset, settle_asset,
     contract_multiplier_ppm, contract_value_asset, price_tick_units, quantity_step_units,

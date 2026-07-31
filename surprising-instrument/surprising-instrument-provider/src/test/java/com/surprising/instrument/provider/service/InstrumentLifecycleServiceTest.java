@@ -33,13 +33,12 @@ class InstrumentLifecycleServiceTest {
         when(storageService.expiringContractsDue(any(Instant.class), eq(3))).thenReturn(List.of(expired));
         when(storageService.settlingContractsDue(any(Instant.class), eq(3))).thenReturn(List.of(settling));
         when(instrumentService.updateStatus("BTC-USDT-260327", InstrumentStatus.SETTLING)).thenReturn(expired);
-        when(instrumentService.updateStatus("BTC-USDT-260327-50000-C", InstrumentStatus.CLOSED)).thenReturn(closed);
+        when(instrumentService.closeForSettlement("BTC-USDT-260327-50000-C")).thenReturn(closed);
 
         new InstrumentLifecycleService(storageService, instrumentService, properties).advanceLifecycle();
 
         verify(instrumentService).updateStatus("BTC-USDT-260327", InstrumentStatus.SETTLING);
-        verify(instrumentService).updateStatus("BTC-USDT-260327-50000-C", InstrumentStatus.CLOSED);
-        verify(instrumentService).publishProductLifecycleEvent(closed);
+        verify(instrumentService).closeForSettlement("BTC-USDT-260327-50000-C");
     }
 
     @Test

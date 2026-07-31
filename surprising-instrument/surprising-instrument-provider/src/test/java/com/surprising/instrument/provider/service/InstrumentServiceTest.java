@@ -2,6 +2,7 @@ package com.surprising.instrument.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -23,21 +24,21 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.kafka.core.KafkaTemplate;
 
 class InstrumentServiceTest {
 
     @Test
     void publishesDeliverySettlementToProductTopic() {
-        KafkaTemplate<String, Object> kafkaTemplate = kafkaTemplate();
-        InstrumentService service = service(kafkaTemplate, new InstrumentProperties());
+        InstrumentOutboxService outboxService = mock(InstrumentOutboxService.class);
+        InstrumentService service = service(outboxService, new InstrumentProperties());
         InstrumentResponse instrument = delivery("BTC-USDT-260327", InstrumentStatus.CLOSED);
 
         service.publishProductLifecycleEvent(instrument);
 
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(kafkaTemplate).send(eq("surprising.linear-delivery.delivery.settlements.v1"),
-                eq("BTC-USDT-260327"), event.capture());
+        verify(outboxService).enqueue(eq("INSTRUMENT"), eq(2L),
+                eq("surprising.linear-delivery.delivery.settlements.v1"),
+                eq("BTC-USDT-260327"), eq("DELIVERY_SETTLEMENT"), event.capture(), any(Instant.class));
         assertThat(event.getValue()).isInstanceOf(DeliverySettlementEvent.class);
         DeliverySettlementEvent deliveryEvent = (DeliverySettlementEvent) event.getValue();
         assertThat(deliveryEvent.symbol()).isEqualTo("BTC-USDT-260327");
@@ -46,15 +47,16 @@ class InstrumentServiceTest {
 
     @Test
     void publishesOptionExerciseToProductTopic() {
-        KafkaTemplate<String, Object> kafkaTemplate = kafkaTemplate();
-        InstrumentService service = service(kafkaTemplate, new InstrumentProperties());
+        InstrumentOutboxService outboxService = mock(InstrumentOutboxService.class);
+        InstrumentService service = service(outboxService, new InstrumentProperties());
         InstrumentResponse instrument = option("BTC-USDT-260327-50000-C", InstrumentStatus.CLOSED);
 
         service.publishProductLifecycleEvent(instrument);
 
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(kafkaTemplate).send(eq("surprising.option.option.exercises.v1"),
-                eq("BTC-USDT-260327-50000-C"), event.capture());
+        verify(outboxService).enqueue(eq("INSTRUMENT"), eq(2L),
+                eq("surprising.option.option.exercises.v1"),
+                eq("BTC-USDT-260327-50000-C"), eq("OPTION_EXERCISE"), event.capture(), any(Instant.class));
         assertThat(event.getValue()).isInstanceOf(OptionExerciseEvent.class);
         OptionExerciseEvent optionEvent = (OptionExerciseEvent) event.getValue();
         assertThat(optionEvent.underlyingSymbol()).isEqualTo("BTC-USDT");
@@ -63,15 +65,15 @@ class InstrumentServiceTest {
 
     @Test
     void usesConfiguredLifecycleTopicOverrides() {
-        KafkaTemplate<String, Object> kafkaTemplate = kafkaTemplate();
+        InstrumentOutboxService outboxService = mock(InstrumentOutboxService.class);
         InstrumentProperties properties = new InstrumentProperties();
         properties.getKafka().setDeliverySettlementsTopic("custom.delivery.settlements");
-        InstrumentService service = service(kafkaTemplate, properties);
+        InstrumentService service = service(outboxService, properties);
 
         service.publishProductLifecycleEvent(delivery("BTC-USDT-260327", InstrumentStatus.CLOSED));
 
-        verify(kafkaTemplate).send(eq("custom.delivery.settlements"), eq("BTC-USDT-260327"),
-                org.mockito.ArgumentMatchers.any(Object.class));
+        verify(outboxService).enqueue(eq("INSTRUMENT"), eq(2L), eq("custom.delivery.settlements"),
+                eq("BTC-USDT-260327"), eq("DELIVERY_SETTLEMENT"), any(Object.class), any(Instant.class));
     }
 
     @Test
@@ -114,19 +116,14 @@ class InstrumentServiceTest {
                 .hasMessageContaining("instrument product current mismatch");
     }
 
-    private InstrumentService service(KafkaTemplate<String, Object> kafkaTemplate, InstrumentProperties properties) {
+    private InstrumentService service(InstrumentOutboxService outboxService, InstrumentProperties properties) {
         return new InstrumentService(mock(InstrumentStorageService.class), mock(InstrumentValidator.class),
-                properties, kafkaTemplate);
+                properties, outboxService);
     }
 
     private InstrumentService service(InstrumentStorageService storageService) {
         return new InstrumentService(storageService, mock(InstrumentValidator.class),
-                new InstrumentProperties(), kafkaTemplate());
-    }
-
-    @SuppressWarnings("unchecked")
-    private KafkaTemplate<String, Object> kafkaTemplate() {
-        return mock(KafkaTemplate.class);
+                new InstrumentProperties(), mock(InstrumentOutboxService.class));
     }
 
     private InstrumentResponse delivery(String symbol, InstrumentStatus status) {

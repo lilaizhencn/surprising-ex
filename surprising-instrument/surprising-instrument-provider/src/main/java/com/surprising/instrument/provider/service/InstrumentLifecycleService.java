@@ -49,8 +49,7 @@ import org.springframework.stereotype.Service;
     private void closeSettledContracts(Instant now, int batchSize) {
         for (InstrumentResponse instrument : storageService.settlingContractsDue(now, batchSize)) {
             try {
-                InstrumentResponse closed = instrumentService.updateStatus(instrument.symbol(), InstrumentStatus.CLOSED);
-                instrumentService.publishProductLifecycleEvent(closed);
+                instrumentService.closeForSettlement(instrument.symbol());
             } catch (Exception ex) {
                 log.error("Failed to close settled instrument: symbol={} version={}",
                         instrument.symbol(), instrument.version(), ex);

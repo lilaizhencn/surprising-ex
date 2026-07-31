@@ -47,6 +47,7 @@ admin API 应直接提交这些整数字段。人类可读的小数格式放在�
 ```text
 instrument-provider
   -> PostgreSQL instruments / instrument_current_versions
+  -> PostgreSQL instrument_outbox_events
   -> surprising.instrument.events.v1
   -> candlestick / price / future matching / risk local cache
 ```
@@ -126,6 +127,7 @@ producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.con
 - `instrument_symbol_sequences`
 - `instrument_risk_brackets`
 - `instrument_index_sources`
+- `instrument_outbox_events`
 
 默认已写入：
 
@@ -154,6 +156,7 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 
 - Instrument 是全系统唯一产品配置源，不要在撮合、风控、行情服务里再维护第二套 symbol 规则。
 - 查询接口无状态，可以多节点水平部署；写接口共享 PostgreSQL，通过 `instrument_symbol_sequences` 保证同 symbol 版本号单调递增。
+- instrument 版本、状态变更、交割和行权事件先与业务状态一起写入 `instrument_outbox_events`；发布器收到 Kafka ACK 后才标记成功，失败事件按指数退避重试，同一 `topic + event_key` 在多节点下保持顺序。
 - 当前版本查询先读取单表版本指针，再从 `instruments` 获取不可变版本，最后批量装配风险档位和指数源；
   不在 Repository 内执行跨表 JOIN。
 - 下游核心服务不要每笔请求查数据库，应通过本地缓存消费 instrument 快照。

@@ -47,6 +47,7 @@ Admin APIs should send these integer fields directly. Human decimal formatting b
 ```text
 instrument-provider
   -> PostgreSQL instruments / instrument_current_versions
+  -> PostgreSQL instrument_outbox_events
   -> surprising.instrument.events.v1
   -> candlestick / price / future matching / risk local cache
 ```
@@ -126,6 +127,7 @@ Root [init.sql](../init.sql) creates:
 - `instrument_symbol_sequences`
 - `instrument_risk_brackets`
 - `instrument_index_sources`
+- `instrument_outbox_events`
 
 Default markets:
 
@@ -154,6 +156,7 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 
 - Instrument is the single product configuration source. Do not keep a second symbol-rule set in matching, risk, or market-data services.
 - Query APIs are stateless and horizontally scalable. Admin writes share PostgreSQL, and `instrument_symbol_sequences` keeps per-symbol versions monotonic.
+- Instrument version, status, delivery, and exercise events commit to `instrument_outbox_events` with the business change. Publishers mark rows only after Kafka acknowledgement, retry failures with exponential backoff, and preserve per-`topic + event_key` order across nodes.
 - Current-version reads resolve a single-table version pointer, load the immutable `instruments` row, and batch-hydrate
   risk brackets and index sources; repositories do not execute cross-table joins.
 - Core downstream services should use local caches, not database reads for every request.
