@@ -97,6 +97,19 @@ public class PositionRepository {
                 normalizedPositionSide, normalizedPositionSide);
     }
 
+    public boolean existsOpen(ProductLine productLine, long userId) {
+        Boolean exists = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM account_positions
+                     WHERE product_line = ?
+                       AND user_id = ?
+                       AND signed_quantity_steps <> 0
+                )
+                """, Boolean.class, productLine.name(), userId);
+        return Boolean.TRUE.equals(exists);
+    }
+
     public List<PositionResponse> lockOpenForSettlement(String symbol, long instrumentVersion) {
         return jdbcTemplate.query("""
                 SELECT user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
@@ -198,6 +211,27 @@ public class PositionRepository {
                 """, (rs, rowNum) -> toPositionState(rs), productLine.name(), userId, symbol,
                 normalizedMarginMode.name(), normalizedPositionSide.name());
         return new LockedPosition(state, false);
+    }
+
+    public Optional<PositionState> lock(ProductLine productLine,
+                                        long userId,
+                                        String symbol,
+                                        MarginMode marginMode,
+                                        PositionSide positionSide) {
+        return jdbcTemplate.query("""
+                SELECT instrument_version, signed_quantity_steps, entry_price_ticks, entry_value_ticks,
+                       realized_pnl_units
+                  FROM account_positions
+                 WHERE product_line = ?
+                   AND user_id = ?
+                   AND symbol = ?
+                   AND margin_mode = ?
+                   AND position_side = ?
+                 FOR UPDATE
+                """, (rs, rowNum) -> toPositionState(rs), productLine.name(), userId, symbol,
+                MarginMode.defaultIfNull(marginMode).name(),
+                PositionSide.defaultIfNull(positionSide).name())
+                .stream().findFirst();
     }
 
     public long lockCurrentQuantity(ProductLine productLine,

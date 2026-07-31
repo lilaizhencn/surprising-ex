@@ -29,6 +29,26 @@ public class OpenInterestShardRepository {
                 """, productLine.name(), symbol, shardId, Timestamp.from(now));
     }
 
+    public int adjust(ProductLine productLine,
+                      String symbol,
+                      int shardId,
+                      long longDelta,
+                      long shortDelta,
+                      Instant now) {
+        return jdbcTemplate.update("""
+                UPDATE trading_symbol_open_interest_shards
+                   SET long_quantity_steps = long_quantity_steps + ?,
+                       short_quantity_steps = short_quantity_steps + ?,
+                       updated_at = ?
+                 WHERE product_line = ?
+                   AND symbol = ?
+                   AND shard_id = ?
+                   AND long_quantity_steps + ? >= 0
+                   AND short_quantity_steps + ? >= 0
+                """, longDelta, shortDelta, Timestamp.from(now), productLine.name(), symbol, shardId,
+                longDelta, shortDelta);
+    }
+
     public static int shardId(long userId) {
         return Math.floorMod(userId, SHARD_COUNT);
     }

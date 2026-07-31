@@ -21,23 +21,30 @@ Surprising Exchange account and product settlement module. The current implement
 - `PositionRepository`, `PositionMarginRepository`, `PositionModeRepository`, and
   `TradeSettlementSideRepository` each own only their position-related business table.
 - `PositionQueryService` aggregates positions, instrument settlement assets, and position margins;
-  `PositionModeCommandService` orchestrates mode changes; `PositionOpenInterestService` owns the
-  atomic cross-table position and sharded-open-interest update.
+  `PositionModeCommandService` orchestrates mode changes. `PositionOpenInterestService` calls the
+  position and sharded-open-interest single-table repositories in one transaction, so either both
+  writes commit or both roll back.
 - `SpotOrderReservationRepository` owns only spot order reservations.
   `AccountOrderReservationService` aggregates reservations, balances, settlement audit, and command
   results, while `SpotTradeSettlementService` orchestrates spot balance and ledger settlement.
 - `AdlTargetSettlementService`, `DeficitSettlementService`, and `FundingSettlementService`
-  own the atomic cross-table workflows for ADL, deficit recovery, and funding settlement.
-- `PositionCacheProjectionService` aggregates positions, margins, and instrument metadata into the
+  aggregate the single-table repositories for ADL, deficit recovery, and funding settlement. ADL
+  service code no longer contains SQL for positions, instrument versions, asset scales, margins,
+  balances, deficits, or ledgers.
+- `PositionCacheProjectionService` uses a dedicated online projection repository to build the
   final snapshot written to Redis after commit. `AccountOutboxService` orchestrates event creation,
   sequence allocation, and outbox writes; `AccountOutboxRepository` persists only the account outbox
   table.
-- Services own transaction boundaries, idempotency, lock order, and cross-table writes. The
-  existing `AccountSettlementService` remains as a compatibility facade during the incremental migration,
-  preserving public entry points and funds-transaction semantics.
+- `AccountSettlementService` is now a compatibility facade for transaction boundaries,
+  idempotency, lock order, and funds calculation; it contains no business SQL.
+- A multi-table repository is allowed only where online correctness cannot be split, and must carry
+  an explicit Chinese `不可拆原因` comment. Current exceptions are joint balance/deficit locking,
+  the single-statement balance-plus-idempotent-ledger fast path, unsettled-trade checks before a
+  position-mode switch, and the final Redis projection. None may be reused for back-office reports.
 - Financial reconciliation, order timelines, operations reports, and aggregate admin queries must
-  not grow new trading-primary queries. They belong in the compile-only, non-running
-  `surprising-finance-ops` staging module until the future finance system is redesigned.
+  never query the trading primary database. A future `surprising-finance-ops` module must use an
+  independent datasource and database, building its own projections from trading events, outbox
+  streams, or controlled CDC.
 
 ## Long Units
 

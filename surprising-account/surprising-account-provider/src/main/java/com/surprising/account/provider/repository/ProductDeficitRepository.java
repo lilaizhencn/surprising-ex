@@ -1,6 +1,8 @@
 package com.surprising.account.provider.repository;
 
 import com.surprising.account.api.model.AccountType;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalLong;
@@ -27,6 +29,19 @@ public class ProductDeficitRepository {
         return rows.isEmpty() ? OptionalLong.empty() : OptionalLong.of(rows.getFirst());
     }
 
+    public long lockUnits(long userId, AccountType accountType, String asset) {
+        return jdbcTemplate.query("""
+                SELECT deficit_units
+                  FROM account_product_deficits
+                 WHERE user_id = ?
+                   AND account_type = ?
+                   AND asset = ?
+                 FOR UPDATE
+                """, (rs, rowNum) -> rs.getLong("deficit_units"),
+                userId, accountType.name(), asset)
+                .stream().findFirst().orElse(0L);
+    }
+
     public List<ProductDeficitRow> findByUser(long userId, AccountType accountType) {
         StringBuilder sql = new StringBuilder("""
                 SELECT account_type, asset, deficit_units
@@ -43,6 +58,55 @@ public class ProductDeficitRepository {
                 AccountType.valueOf(rs.getString("account_type")),
                 rs.getString("asset"),
                 rs.getLong("deficit_units")), args.toArray());
+    }
+
+    public boolean reserve(AccountType accountType,
+                           long userId,
+                           String asset,
+                           long amountUnits,
+                           Instant now) {
+        return !jdbcTemplate.query("""
+                UPDATE account_product_deficits
+                   SET reserved_units = reserved_units + ?, updated_at = ?
+                 WHERE account_type = ? AND user_id = ? AND asset = ?
+                   AND deficit_units - reserved_units >= ?
+             RETURNING deficit_units - reserved_units
+                """, (rs, rowNum) -> rs.getLong(1), amountUnits, Timestamp.from(now), accountType.name(),
+                userId, asset, amountUnits).isEmpty();
+    }
+
+    public OptionalLong finalizeReservation(AccountType accountType,
+                                            long userId,
+                                            String asset,
+                                            long amountUnits,
+                                            Instant now) {
+        List<Long> rows = jdbcTemplate.query("""
+                UPDATE account_product_deficits
+                   SET deficit_units = deficit_units - ?,
+                       reserved_units = reserved_units - ?,
+                       updated_at = ?
+                 WHERE account_type = ? AND user_id = ? AND asset = ?
+                   AND deficit_units >= ? AND reserved_units >= ?
+             RETURNING deficit_units
+                """, (rs, rowNum) -> rs.getLong(1), amountUnits, amountUnits, Timestamp.from(now),
+                accountType.name(), userId, asset, amountUnits, amountUnits);
+        return rows.size() == 1 ? OptionalLong.of(rows.getFirst()) : OptionalLong.empty();
+    }
+
+    public OptionalLong releaseReservation(AccountType accountType,
+                                           long userId,
+                                           String asset,
+                                           long amountUnits,
+                                           Instant now) {
+        List<Long> rows = jdbcTemplate.query("""
+                UPDATE account_product_deficits
+                   SET reserved_units = reserved_units - ?, updated_at = ?
+                 WHERE account_type = ? AND user_id = ? AND asset = ?
+                   AND reserved_units >= ?
+             RETURNING deficit_units - reserved_units
+                """, (rs, rowNum) -> rs.getLong(1), amountUnits, Timestamp.from(now), accountType.name(),
+                userId, asset, amountUnits);
+        return rows.size() == 1 ? OptionalLong.of(rows.getFirst()) : OptionalLong.empty();
     }
 
     public record ProductDeficitRow(AccountType accountType, String asset, long deficitUnits) {

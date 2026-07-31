@@ -102,10 +102,55 @@ public class AccountBalanceRepository {
                 """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
     }
 
+    public long creditAvailableAndReturnEquity(long userId, String asset, long amountUnits, Instant now) {
+        ensure(userId, asset, now);
+        List<Long> rows = jdbcTemplate.query("""
+                UPDATE account_balances
+                   SET available_units = available_units + ?,
+                       updated_at = ?
+                 WHERE user_id = ?
+                   AND asset = ?
+             RETURNING available_units + locked_units
+                """, (rs, rowNum) -> rs.getLong(1), amountUnits, Timestamp.from(now), userId, asset);
+        return requireOne(rows, "account balance credit");
+    }
+
+    public long debitAvailableAndReturnEquity(long userId, String asset, long amountUnits, Instant now) {
+        List<Long> rows = jdbcTemplate.query("""
+                UPDATE account_balances
+                   SET available_units = available_units - ?,
+                       updated_at = ?
+                 WHERE user_id = ?
+                   AND asset = ?
+                   AND available_units >= ?
+             RETURNING available_units + locked_units
+                """, (rs, rowNum) -> rs.getLong(1), amountUnits, Timestamp.from(now),
+                userId, asset, amountUnits);
+        return requireOne(rows, "account balance debit");
+    }
+
+    public long equity(long userId, String asset) {
+        Long equityUnits = jdbcTemplate.queryForObject("""
+                SELECT available_units + locked_units
+                  FROM account_balances
+                 WHERE user_id = ?
+                   AND asset = ?
+                """, Long.class, userId, asset);
+        return equityUnits == null ? 0L : equityUnits;
+    }
+
     private static void requireSingleRow(int rows, String operation) {
         if (rows != 1) {
             throw new IllegalStateException(operation + " affected " + rows + " rows");
         }
+    }
+
+    private static long requireOne(List<Long> rows, String operation) {
+        if (rows == null || rows.size() != 1) {
+            throw new IllegalStateException(operation + " affected "
+                    + (rows == null ? 0 : rows.size()) + " rows");
+        }
+        return rows.getFirst();
     }
 
     public record BalanceRow(

@@ -27,30 +27,37 @@ import com.surprising.account.provider.repository.AccountDeficitRepository;
 import com.surprising.account.provider.repository.AccountInstrumentRepository;
 import com.surprising.account.provider.repository.AccountLedgerRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
+import com.surprising.account.provider.repository.AccountSettlementBalanceRepository;
 import com.surprising.account.provider.repository.AdminBalanceAdjustmentRepository;
+import com.surprising.account.provider.repository.AssetScaleRepository;
+import com.surprising.account.provider.repository.LiquidationOrderContextRepository;
 import com.surprising.account.provider.repository.OpenInterestShardRepository;
 import com.surprising.account.provider.repository.PositionMarginRepository;
+import com.surprising.account.provider.repository.PositionModeAlgoOrderRepository;
+import com.surprising.account.provider.repository.PositionModeLockRepository;
+import com.surprising.account.provider.repository.PositionModeOrderRepository;
 import com.surprising.account.provider.repository.PositionModeRepository;
+import com.surprising.account.provider.repository.PositionModeTriggerOrderRepository;
+import com.surprising.account.provider.repository.PositionModeUnsettledTradeRepository;
 import com.surprising.account.provider.repository.PositionRepository;
 import com.surprising.account.provider.repository.ProductBalanceRepository;
 import com.surprising.account.provider.repository.ProductDeficitRepository;
 import com.surprising.account.provider.repository.ProductLedgerRepository;
+import com.surprising.account.provider.repository.ProductSettlementBalanceRepository;
 import com.surprising.account.provider.repository.ProductTransferRepository;
+import com.surprising.account.provider.repository.RiskPositionSnapshotRepository;
 import com.surprising.account.provider.repository.SpotOrderReservationRepository;
 import com.surprising.account.provider.repository.TradeSettlementSideRepository;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineSql;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.math.BigInteger;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
@@ -72,7 +79,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class AccountSettlementService {
 
     private static final long PPM = 1_000_000L;
-    private final JdbcTemplate jdbcTemplate;
     private final AccountSequenceRepository sequenceRepository;
     private final LatestMarkPriceCache markPriceCache;
     private final PositionCacheAfterCommitSynchronizer positionCacheSynchronizer;
@@ -91,6 +97,11 @@ public class AccountSettlementService {
     private final PositionRepository positionRepository;
     private final PositionMarginRepository positionMarginRepository;
     private final AccountInstrumentRepository accountInstrumentRepository;
+    private final AssetScaleRepository assetScaleRepository;
+    private final RiskPositionSnapshotRepository riskPositionSnapshotRepository;
+    private final LiquidationOrderContextRepository liquidationOrderContextRepository;
+    private final AccountSettlementBalanceRepository accountSettlementBalanceRepository;
+    private final ProductSettlementBalanceRepository productSettlementBalanceRepository;
     private final PositionQueryService positionQueryService;
     private final OpenInterestShardRepository openInterestShardRepository;
     private final PositionOpenInterestService positionOpenInterestService;
@@ -126,6 +137,11 @@ public class AccountSettlementService {
                 new PositionRepository(jdbcTemplate),
                 new PositionMarginRepository(jdbcTemplate),
                 new AccountInstrumentRepository(jdbcTemplate),
+                new AssetScaleRepository(jdbcTemplate),
+                new RiskPositionSnapshotRepository(jdbcTemplate),
+                new LiquidationOrderContextRepository(jdbcTemplate),
+                new AccountSettlementBalanceRepository(jdbcTemplate),
+                new ProductSettlementBalanceRepository(jdbcTemplate),
                 null,
                 new OpenInterestShardRepository(jdbcTemplate),
                 null,
@@ -152,11 +168,15 @@ public class AccountSettlementService {
                              PositionRepository positionRepository,
                              PositionMarginRepository positionMarginRepository,
                              AccountInstrumentRepository accountInstrumentRepository,
+                             AssetScaleRepository assetScaleRepository,
+                             RiskPositionSnapshotRepository riskPositionSnapshotRepository,
+                             LiquidationOrderContextRepository liquidationOrderContextRepository,
+                             AccountSettlementBalanceRepository accountSettlementBalanceRepository,
+                             ProductSettlementBalanceRepository productSettlementBalanceRepository,
                              PositionQueryService positionQueryService,
                              OpenInterestShardRepository openInterestShardRepository,
                              PositionOpenInterestService positionOpenInterestService,
                              SpotTradeSettlementService spotTradeSettlementService) {
-        this.jdbcTemplate = jdbcTemplate;
         this.sequenceRepository = sequenceRepository;
         this.markPriceCache = markPriceCache;
         this.positionCacheSynchronizer = positionCacheSynchronizer;
@@ -192,17 +212,28 @@ public class AccountSettlementService {
         this.positionModeRepository = positionModeRepository;
         this.tradeSettlementSideRepository = tradeSettlementSideRepository;
         this.positionModeCommandService = positionModeCommandService == null
-                ? new PositionModeCommandService(positionModeRepository, new PositionModeSwitchGuard(jdbcTemplate))
+                ? new PositionModeCommandService(positionModeRepository, new PositionModeSwitchGuard(
+                        new PositionModeLockRepository(jdbcTemplate),
+                        positionRepository,
+                        new PositionModeOrderRepository(jdbcTemplate),
+                        new PositionModeTriggerOrderRepository(jdbcTemplate),
+                        new PositionModeAlgoOrderRepository(jdbcTemplate),
+                        new PositionModeUnsettledTradeRepository(jdbcTemplate)))
                 : positionModeCommandService;
         this.positionRepository = positionRepository;
         this.positionMarginRepository = positionMarginRepository;
         this.accountInstrumentRepository = accountInstrumentRepository;
+        this.assetScaleRepository = assetScaleRepository;
+        this.riskPositionSnapshotRepository = riskPositionSnapshotRepository;
+        this.liquidationOrderContextRepository = liquidationOrderContextRepository;
+        this.accountSettlementBalanceRepository = accountSettlementBalanceRepository;
+        this.productSettlementBalanceRepository = productSettlementBalanceRepository;
         this.positionQueryService = positionQueryService == null
                 ? new PositionQueryService(positionRepository, positionMarginRepository, accountInstrumentRepository)
                 : positionQueryService;
         this.openInterestShardRepository = openInterestShardRepository;
         this.positionOpenInterestService = positionOpenInterestService == null
-                ? new PositionOpenInterestService(jdbcTemplate, positionRepository, openInterestShardRepository)
+                ? new PositionOpenInterestService(positionRepository, openInterestShardRepository)
                 : positionOpenInterestService;
         this.spotTradeSettlementService = spotTradeSettlementService == null
                 ? new SpotTradeSettlementService(
@@ -686,16 +717,7 @@ public class AccountSettlementService {
                                            long amountUnits,
                                            Instant now) {
         ProductLine resolvedProductLine = productLine(productLine);
-        int balanceRows = jdbcTemplate.update("""
-                UPDATE account_balances
-                   SET available_units = available_units - ?,
-                       locked_units = locked_units + ?,
-                       updated_at = ?
-                 WHERE user_id = ?
-                   AND asset = ?
-                   AND available_units >= ?
-                """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
-        if (balanceRows != 1) {
+        if (!accountBalanceRepository.moveAvailableToLocked(userId, asset, amountUnits, now)) {
             throw new IllegalArgumentException("insufficient available balance");
         }
         int marginRows = positionMarginRepository.add(
@@ -713,17 +735,8 @@ public class AccountSettlementService {
                                                   long amountUnits,
                                                   Instant now) {
         ProductLine resolvedProductLine = productLine(productLine);
-        int balanceRows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET available_units = available_units - ?,
-                       locked_units = locked_units + ?,
-                       updated_at = ?
-                 WHERE account_type = ?
-                   AND user_id = ?
-                   AND asset = ?
-                   AND available_units >= ?
-                """, amountUnits, amountUnits, Timestamp.from(now), accountType.name(), userId, asset, amountUnits);
-        if (balanceRows != 1) {
+        if (!productBalanceRepository.moveAvailableToLocked(
+                userId, accountType, asset, amountUnits, now)) {
             throw new IllegalArgumentException("insufficient available product balance");
         }
         int marginRows = positionMarginRepository.add(
@@ -755,15 +768,7 @@ public class AccountSettlementService {
         requireSingleRow(marginRows, "isolated position margin remove");
         positionMarginRepository.deleteZero(
                 resolvedProductLine, userId, symbol, asset, MarginMode.ISOLATED, positionSide);
-        int balanceRows = jdbcTemplate.update("""
-                UPDATE account_balances
-                   SET available_units = available_units + ?,
-                       locked_units = locked_units - ?,
-                       updated_at = ?
-                 WHERE user_id = ?
-                   AND asset = ?
-                   AND locked_units >= ?
-                """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
+        int balanceRows = accountBalanceRepository.moveLockedToAvailable(userId, asset, amountUnits, now);
         if (balanceRows != 1) {
             throw new IllegalStateException("insufficient locked balance for isolated margin removal");
         }
@@ -784,16 +789,8 @@ public class AccountSettlementService {
         requireSingleRow(marginRows, "product isolated position margin remove");
         positionMarginRepository.deleteZero(
                 resolvedProductLine, userId, symbol, asset, MarginMode.ISOLATED, positionSide);
-        int balanceRows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET available_units = available_units + ?,
-                       locked_units = locked_units - ?,
-                       updated_at = ?
-                 WHERE account_type = ?
-                   AND user_id = ?
-                   AND asset = ?
-                   AND locked_units >= ?
-                """, amountUnits, amountUnits, Timestamp.from(now), accountType.name(), userId, asset, amountUnits);
+        int balanceRows = productBalanceRepository.moveLockedToAvailable(
+                userId, accountType, asset, amountUnits, now);
         if (balanceRows != 1) {
             throw new IllegalStateException("insufficient locked product balance for isolated margin removal");
         }
@@ -827,31 +824,11 @@ public class AccountSettlementService {
 
     private RiskRemovalSnapshot latestRiskRemovalSnapshot(long userId, String symbol, PositionSide positionSide,
                                                           Duration maxRiskSnapshotAge) {
-        return jdbcTemplate.query("""
-                SELECT instrument_version,
-                       signed_quantity_steps,
-                       unrealized_pnl_units,
-                       maintenance_margin_units,
-                       status,
-                       event_time
-                  FROM risk_position_snapshots
-                 WHERE user_id = ?
-                   AND symbol = ?
-                   AND margin_mode = 'ISOLATED'
-                   AND position_side = ?
-                   AND event_time >= now() - (? * INTERVAL '1 millisecond')
-                 ORDER BY event_time DESC
-                 LIMIT 1
-                """, (rs, rowNum) -> new RiskRemovalSnapshot(
-                rs.getLong("instrument_version"),
-                rs.getLong("signed_quantity_steps"),
-                rs.getLong("unrealized_pnl_units"),
-                rs.getLong("maintenance_margin_units"),
-                rs.getString("status"),
-                rs.getTimestamp("event_time").toInstant()), userId, symbol,
-                PositionSide.defaultIfNull(positionSide).name(), maxRiskSnapshotAge.toMillis())
-                .stream()
-                .findFirst()
+        return riskPositionSnapshotRepository.findLatestIsolated(
+                        userId, symbol, positionSide, maxRiskSnapshotAge)
+                .map(row -> new RiskRemovalSnapshot(
+                        row.instrumentVersion(), row.signedQuantitySteps(), row.unrealizedPnlUnits(),
+                        row.maintenanceMarginUnits(), row.status(), row.eventTime()))
                 .orElseThrow(() -> new IllegalStateException("fresh risk snapshot not found for isolated margin removal"));
     }
 
@@ -917,15 +894,10 @@ public class AccountSettlementService {
                                                      String referenceId,
                                                      String reason,
                                                      String symbol) {
-        return jdbcTemplate.update("""
-                INSERT INTO account_ledger_entries (
-                    entry_id, user_id, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, symbol, created_at
-                ) VALUES (?, ?, ?, ?, 0, 'POSITION_MARGIN_ADJUSTMENT', ?, ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, sequenceRepository.nextLedgerEntryId(),
-                userId, asset, amountUnits,
-                referenceId, reason, symbol, Timestamp.from(Instant.now()));
+        return accountLedgerRepository.insertSettlement(
+                sequenceRepository.nextLedgerEntryId(), userId, asset, amountUnits, 0L,
+                "POSITION_MARGIN_ADJUSTMENT", referenceId, reason,
+                null, null, symbol, null, Instant.now());
     }
 
     private int insertProductPositionMarginAdjustmentLedger(AccountType accountType,
@@ -935,29 +907,18 @@ public class AccountSettlementService {
                                                             String referenceId,
                                                             String reason,
                                                             String symbol) {
-        return jdbcTemplate.update("""
-                INSERT INTO account_product_ledger_entries (
-                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, symbol, created_at
-                ) VALUES (?, ?, ?, ?, ?, 0, 'POSITION_MARGIN_ADJUSTMENT', ?, ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextProductLedgerEntryId(),
-                userId, accountType.name(), asset,
-                amountUnits, referenceId, reason, symbol, Timestamp.from(Instant.now()));
+        return productLedgerRepository.insertSettlement(
+                sequenceRepository.nextProductLedgerEntryId(), userId, accountType, asset,
+                amountUnits, 0L, "POSITION_MARGIN_ADJUSTMENT", referenceId, reason,
+                symbol, Instant.now());
     }
 
     private int updatePositionMarginAdjustmentLedgerBalance(long userId,
                                                             String asset,
                                                             String referenceId,
                                                             long balanceAfterUnits) {
-        return jdbcTemplate.update("""
-                UPDATE account_ledger_entries
-                   SET balance_after_units = ?
-                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, balanceAfterUnits, referenceId, userId, asset);
+        return accountLedgerRepository.updateSettlementBalance(
+                userId, asset, "POSITION_MARGIN_ADJUSTMENT", referenceId, balanceAfterUnits);
     }
 
     private int updateProductPositionMarginAdjustmentLedgerBalance(AccountType accountType,
@@ -965,87 +926,45 @@ public class AccountSettlementService {
                                                                    String asset,
                                                                    String referenceId,
                                                                    long balanceAfterUnits) {
-        return jdbcTemplate.update("""
-                UPDATE account_product_ledger_entries
-                   SET balance_after_units = ?
-                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND account_type = ?
-                   AND asset = ?
-                """, balanceAfterUnits, referenceId, userId, accountType.name(), asset);
+        return productLedgerRepository.updateSettlementBalance(
+                userId, accountType, asset, "POSITION_MARGIN_ADJUSTMENT",
+                referenceId, balanceAfterUnits);
     }
 
     private Optional<PositionMarginAdjustmentReference> positionMarginAdjustmentReference(long userId,
                                                                                          String symbol,
                                                                                          String referenceId) {
-        return jdbcTemplate.query("""
-                SELECT asset, amount_units, reason, symbol
-                  FROM account_ledger_entries
-                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                """, (rs, rowNum) -> new PositionMarginAdjustmentReference(
-                rs.getString("asset"),
-                rs.getLong("amount_units"),
-                rs.getString("reason"),
-                rs.getString("symbol")), referenceId, userId, symbol).stream().findFirst();
+        return accountLedgerRepository.findPositionMarginAdjustmentBySymbol(userId, symbol, referenceId)
+                .map(row -> new PositionMarginAdjustmentReference(
+                        row.asset(), row.amountUnits(), row.reason(), row.symbol()));
     }
 
     private Optional<PositionMarginAdjustmentReference> positionMarginAdjustmentReferenceByAsset(long userId,
                                                                                                 String asset,
                                                                                                 String referenceId) {
-        return jdbcTemplate.query("""
-                SELECT asset, amount_units, reason, symbol
-                  FROM account_ledger_entries
-                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, (rs, rowNum) -> new PositionMarginAdjustmentReference(
-                rs.getString("asset"),
-                rs.getLong("amount_units"),
-                rs.getString("reason"),
-                rs.getString("symbol")), referenceId, userId, asset).stream().findFirst();
+        return accountLedgerRepository.findPositionMarginAdjustmentByAsset(userId, asset, referenceId)
+                .map(row -> new PositionMarginAdjustmentReference(
+                        row.asset(), row.amountUnits(), row.reason(), row.symbol()));
     }
 
     private Optional<PositionMarginAdjustmentReference> productPositionMarginAdjustmentReference(AccountType accountType,
                                                                                                  long userId,
                                                                                                  String symbol,
                                                                                                  String referenceId) {
-        return jdbcTemplate.query("""
-                SELECT asset, amount_units, reason, symbol
-                  FROM account_product_ledger_entries
-                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND account_type = ?
-                   AND symbol = ?
-                """, (rs, rowNum) -> new PositionMarginAdjustmentReference(
-                rs.getString("asset"),
-                rs.getLong("amount_units"),
-                rs.getString("reason"),
-                rs.getString("symbol")), referenceId, userId, accountType.name(), symbol).stream().findFirst();
+        return productLedgerRepository.findPositionMarginAdjustmentBySymbol(
+                        userId, accountType, symbol, referenceId)
+                .map(row -> new PositionMarginAdjustmentReference(
+                        row.asset(), row.amountUnits(), row.reason(), row.symbol()));
     }
 
     private Optional<PositionMarginAdjustmentReference> productPositionMarginAdjustmentReferenceByAsset(AccountType accountType,
                                                                                                         long userId,
                                                                                                         String asset,
                                                                                                         String referenceId) {
-        return jdbcTemplate.query("""
-                SELECT asset, amount_units, reason, symbol
-                  FROM account_product_ledger_entries
-                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND account_type = ?
-                   AND asset = ?
-                """, (rs, rowNum) -> new PositionMarginAdjustmentReference(
-                rs.getString("asset"),
-                rs.getLong("amount_units"),
-                rs.getString("reason"),
-                rs.getString("symbol")), referenceId, userId, accountType.name(), asset).stream().findFirst();
+        return productLedgerRepository.findPositionMarginAdjustmentByAsset(
+                        userId, accountType, asset, referenceId)
+                .map(row -> new PositionMarginAdjustmentReference(
+                        row.asset(), row.amountUnits(), row.reason(), row.symbol()));
     }
 
     private void requirePositionMarginAdjustmentMatches(PositionMarginAdjustmentReference existing,
@@ -1169,43 +1088,22 @@ public class AccountSettlementService {
     }
 
     public ContractSpec contractSpec(String symbol, long instrumentVersion) {
-        return jdbcTemplate.query("""
-                SELECT i.version,
-                       i.contract_type,
-                       i.settle_asset,
-                       i.notional_multiplier_units,
-                       i.price_tick_units,
-                       i.initial_margin_rate_ppm,
-                       i.maker_fee_rate_ppm,
-                       i.taker_fee_rate_ppm,
-                       ss.scale_units AS settle_scale_units
-                  FROM instruments i
-                  JOIN account_asset_scales ss
-                    ON ss.asset = i.settle_asset
-                 WHERE i.symbol = ?
-                   AND i.version = ?
-                """, (rs, rowNum) -> new ContractSpec(
-                rs.getLong("version"),
-                ContractType.valueOf(rs.getString("contract_type")),
-                rs.getString("settle_asset"),
-                rs.getLong("notional_multiplier_units"),
-                rs.getLong("price_tick_units"),
-                rs.getLong("settle_scale_units"),
-                rs.getLong("initial_margin_rate_ppm"),
-                rs.getLong("maker_fee_rate_ppm"),
-                rs.getLong("taker_fee_rate_ppm")), symbol, instrumentVersion).stream().findFirst()
-                .orElseThrow(() -> new IllegalStateException("instrument contract spec not found for "
-                        + symbol + " version " + instrumentVersion));
+        AccountInstrumentRepository.ContractInstrumentRow instrument =
+                accountInstrumentRepository.findContractSpec(symbol, instrumentVersion)
+                        .orElseThrow(() -> new IllegalStateException("instrument contract spec not found for "
+                                + symbol + " version " + instrumentVersion));
+        long scaleUnits = assetScaleRepository.findScaleUnits(instrument.settleAsset())
+                .orElseThrow(() -> new IllegalStateException("settle asset scale not found for "
+                        + instrument.settleAsset()));
+        return new ContractSpec(
+                instrument.version(), instrument.contractType(), instrument.settleAsset(),
+                instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), scaleUnits,
+                instrument.initialMarginRatePpm(), instrument.makerFeeRatePpm(),
+                instrument.takerFeeRatePpm());
     }
 
     public InstrumentType instrumentType(String symbol, long instrumentVersion) {
-        return jdbcTemplate.query("""
-                SELECT instrument_type
-                  FROM instruments
-                 WHERE symbol = ?
-                   AND version = ?
-                """, (rs, rowNum) -> InstrumentType.valueOf(rs.getString("instrument_type")),
-                symbol, instrumentVersion).stream().findFirst()
+        return accountInstrumentRepository.findInstrumentType(symbol, instrumentVersion)
                 .orElseThrow(() -> new IllegalStateException("instrument type not found for "
                         + symbol + " version " + instrumentVersion));
     }
@@ -1248,19 +1146,7 @@ public class AccountSettlementService {
     }
 
     public Optional<LiquidationFeeContext> liquidationFeeContext(long orderId, long userId, String symbol) {
-        return jdbcTemplate.query("""
-                SELECT liquidation_order_id,
-                       candidate_id,
-                       liquidation_fee_rate_ppm
-                  FROM liquidation_orders
-                 WHERE order_id = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                   AND status IN ('SUBMITTED', 'PARTIALLY_FILLED', 'FILLED')
-                """, (rs, rowNum) -> new LiquidationFeeContext(
-                rs.getLong("liquidation_order_id"),
-                rs.getLong("candidate_id"),
-                rs.getLong("liquidation_fee_rate_ppm")), orderId, userId, symbol).stream().findFirst();
+        return liquidationOrderContextRepository.findFeeContext(orderId, userId, symbol);
     }
 
     public void completeTradeSide(ProductLine productLine,
@@ -1308,26 +1194,15 @@ public class AccountSettlementService {
             if (fastSettlement.isPresent()) {
                 return;
             }
-            int ledgerRows = jdbcTemplate.update("""
-                    INSERT INTO account_ledger_entries (
-                        entry_id, user_id, asset, amount_units, balance_after_units,
-                        reference_type, reference_id, reason, created_at
-                    ) VALUES (?, ?, ?, ?, 0, 'TRADE_PNL', ?, 'REALIZED_PNL', ?)
-                    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextLedgerEntryId(),
-                    userId, asset, realizedPnlDeltaUnits,
-                    referenceId, Timestamp.from(now));
+            int ledgerRows = accountLedgerRepository.insertSettlement(
+                    sequenceRepository.nextLedgerEntryId(), userId, asset, realizedPnlDeltaUnits, 0L,
+                    "TRADE_PNL", referenceId, "REALIZED_PNL",
+                    null, null, null, null, now);
             requireSingleRow(ledgerRows, "trade pnl ledger insert");
             long balanceAfterUnits = applyAmountToBalance(normalizedType, userId, asset, symbol, marginMode,
                     realizedPnlDeltaUnits, now);
-            int ledgerRowsAfter = jdbcTemplate.update("""
-                    UPDATE account_ledger_entries
-                       SET balance_after_units = ?
-                     WHERE reference_type = 'TRADE_PNL'
-                       AND reference_id = ?
-                       AND user_id = ?
-                       AND asset = ?
-                    """, balanceAfterUnits, referenceId, userId, asset);
+            int ledgerRowsAfter = accountLedgerRepository.updateSettlementBalance(
+                    userId, asset, "TRADE_PNL", referenceId, balanceAfterUnits);
             requireSingleRow(ledgerRowsAfter, "trade pnl ledger update");
             return;
         }
@@ -1354,28 +1229,17 @@ public class AccountSettlementService {
         }
         AccountType normalizedType = requireAccountType(accountType);
         if (isLegacyPerpetualAccount(normalizedType)) {
-            int ledgerRows = jdbcTemplate.update("""
-                    INSERT INTO account_ledger_entries (
-                        entry_id, user_id, asset, amount_units, balance_after_units,
-                        reference_type, reference_id, reason, symbol, created_at
-                    ) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
-                    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextLedgerEntryId(),
-                    userId, asset, realizedPnlDeltaUnits,
-                    referenceType, referenceId, reason, symbol, Timestamp.from(now));
+            int ledgerRows = accountLedgerRepository.insertSettlement(
+                    sequenceRepository.nextLedgerEntryId(), userId, asset, realizedPnlDeltaUnits, 0L,
+                    referenceType, referenceId, reason,
+                    null, null, symbol, null, now);
             if (ledgerRows == 0) {
                 return false;
             }
             long balanceAfterUnits = applyAmountToBalance(normalizedType, userId, asset, symbol, marginMode,
                     realizedPnlDeltaUnits, now);
-            int ledgerRowsAfter = jdbcTemplate.update("""
-                    UPDATE account_ledger_entries
-                       SET balance_after_units = ?
-                     WHERE reference_type = ?
-                       AND reference_id = ?
-                       AND user_id = ?
-                       AND asset = ?
-                    """, balanceAfterUnits, referenceType, referenceId, userId, asset);
+            int ledgerRowsAfter = accountLedgerRepository.updateSettlementBalance(
+                    userId, asset, referenceType, referenceId, balanceAfterUnits);
             requireSingleRow(ledgerRowsAfter, "lifecycle pnl ledger update");
             return true;
         }
@@ -1486,26 +1350,15 @@ public class AccountSettlementService {
             if (fastSettlement.isPresent()) {
                 return;
             }
-            int ledgerRows = jdbcTemplate.update("""
-                    INSERT INTO account_ledger_entries (
-                        entry_id, user_id, asset, amount_units, balance_after_units,
-                        reference_type, reference_id, reason, trade_id, order_id, symbol, fee_rate_ppm, created_at
-                    ) VALUES (?, ?, ?, ?, 0, 'TRADE_FEE', ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextLedgerEntryId(),
-                    userId, asset, feeDeltaUnits, referenceId,
-                    reason, tradeId, orderId, symbol, feeRatePpm, Timestamp.from(now));
+            int ledgerRows = accountLedgerRepository.insertSettlement(
+                    sequenceRepository.nextLedgerEntryId(), userId, asset, feeDeltaUnits, 0L,
+                    "TRADE_FEE", referenceId, reason,
+                    tradeId, orderId, symbol, feeRatePpm, now);
             requireSingleRow(ledgerRows, "trade fee ledger insert");
             long balanceAfterUnits = applyAmountToBalance(normalizedType, userId, asset, symbol, marginMode,
                     feeDeltaUnits, now);
-            int ledgerRowsAfter = jdbcTemplate.update("""
-                    UPDATE account_ledger_entries
-                       SET balance_after_units = ?
-                     WHERE reference_type = 'TRADE_FEE'
-                       AND reference_id = ?
-                       AND user_id = ?
-                       AND asset = ?
-                    """, balanceAfterUnits, referenceId, userId, asset);
+            int ledgerRowsAfter = accountLedgerRepository.updateSettlementBalance(
+                    userId, asset, "TRADE_FEE", referenceId, balanceAfterUnits);
             requireSingleRow(ledgerRowsAfter, "trade fee ledger update");
             return;
         }
@@ -1586,15 +1439,11 @@ public class AccountSettlementService {
             return Optional.empty();
         }
         if (isLegacyPerpetualAccount(normalizedType)) {
-            int ledgerRows = jdbcTemplate.update("""
-                    INSERT INTO account_ledger_entries (
-                        entry_id, user_id, asset, amount_units, balance_after_units,
-                        reference_type, reference_id, reason, trade_id, order_id, symbol, fee_rate_ppm, created_at
-                    ) VALUES (?, ?, ?, ?, ?, 'LIQUIDATION_FEE', ?, 'COLLECT_LIQUIDATION_FEE', ?, ?, ?, ?, ?)
-                    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextLedgerEntryId(), userId, asset,
-                    Math.negateExact(debit.debitedUnits()), debit.balanceAfterUnits(), referenceId, tradeId,
-                    orderId, symbol, context.feeRatePpm(), Timestamp.from(now));
+            int ledgerRows = accountLedgerRepository.insertSettlement(
+                    sequenceRepository.nextLedgerEntryId(), userId, asset,
+                    Math.negateExact(debit.debitedUnits()), debit.balanceAfterUnits(),
+                    "LIQUIDATION_FEE", referenceId, "COLLECT_LIQUIDATION_FEE",
+                    tradeId, orderId, symbol, context.feeRatePpm(), now);
             requireSingleRow(ledgerRows, "liquidation fee ledger insert");
         } else {
             insertProductSettlementLedger(userId, normalizedType, asset, Math.negateExact(debit.debitedUnits()),
@@ -1718,57 +1567,28 @@ public class AccountSettlementService {
             releaseLegacyBalanceLock(userId, asset, amountUnits, now);
             return;
         }
-        int rows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET locked_units = locked_units - ?,
-                       available_units = available_units + ?,
-                       updated_at = ?
-                 WHERE account_type = ?
-                   AND user_id = ?
-                   AND asset = ?
-                   AND locked_units >= ?
-                """, amountUnits, amountUnits, Timestamp.from(now), accountType.name(), userId, asset, amountUnits);
+        int rows = productBalanceRepository.moveLockedToAvailable(
+                userId, accountType, asset, amountUnits, now);
         if (rows != 1) {
             throw new IllegalStateException("insufficient locked product balance for margin release");
         }
     }
 
     private void debitBalanceLock(AccountType accountType, long userId, String asset, long amountUnits, Instant now) {
-        int rows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET locked_units = locked_units - ?,
-                       updated_at = ?
-                 WHERE account_type = ?
-                   AND user_id = ?
-                   AND asset = ?
-                   AND locked_units >= ?
-                """, amountUnits, Timestamp.from(now), accountType.name(), userId, asset, amountUnits);
+        int rows = productBalanceRepository.debitLocked(userId, accountType, asset, amountUnits, now);
         if (rows != 1) {
             throw new IllegalStateException("insufficient locked product balance for option premium");
         }
     }
 
     private long productEquity(AccountType accountType, long userId, String asset) {
-        Long equityUnits = jdbcTemplate.queryForObject("""
-                SELECT b.available_units + b.locked_units - COALESCE(d.deficit_units, 0) AS equity_units
-                  FROM account_product_balances b
-             LEFT JOIN account_product_deficits d USING (account_type, user_id, asset)
-                 WHERE b.account_type = ?
-                   AND b.user_id = ?
-                   AND b.asset = ?
-                """, Long.class, accountType.name(), userId, asset);
-        return equityUnits == null ? 0L : equityUnits;
+        return Math.subtractExact(
+                productBalanceRepository.equity(userId, accountType, asset),
+                productDeficitRepository.findUnits(userId, accountType, asset).orElse(0L));
     }
 
     private void releaseLegacyBalanceLock(long userId, String asset, long amountUnits, Instant now) {
-        int rows = jdbcTemplate.update("""
-                UPDATE account_balances
-                   SET locked_units = locked_units - ?,
-                       available_units = available_units + ?,
-                       updated_at = ?
-                 WHERE user_id = ? AND asset = ?
-                   AND locked_units >= ?
-                """, amountUnits, amountUnits, Timestamp.from(now), userId, asset, amountUnits);
+        int rows = accountBalanceRepository.moveLockedToAvailable(userId, asset, amountUnits, now);
         if (rows != 1) {
             throw new IllegalStateException("insufficient locked balance for margin release");
         }
@@ -1799,16 +1619,7 @@ public class AccountSettlementService {
         if (availableDebitFastPath.isPresent()) {
             return availableDebitFastPath.get();
         }
-        jdbcTemplate.update("""
-                INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
-                VALUES (?, ?, 0, 0, ?)
-                ON CONFLICT (user_id, asset) DO NOTHING
-                """, userId, asset, Timestamp.from(now));
-        jdbcTemplate.update("""
-                INSERT INTO account_deficits (user_id, asset, deficit_units, updated_at)
-                VALUES (?, ?, 0, ?)
-                ON CONFLICT (user_id, asset) DO NOTHING
-                """, userId, asset, Timestamp.from(now));
+        accountSettlementBalanceRepository.ensure(userId, asset, now);
         availableDebitFastPath = tryApplyLegacyAvailableDebitFastPath(
                 userId, asset, normalizedMarginMode, amountUnits, now);
         if (availableDebitFastPath.isPresent()) {
@@ -1820,17 +1631,7 @@ public class AccountSettlementService {
         long maxLockedDebitUnits = lockedMargins.stream()
                 .mapToLong(PositionMargin::marginUnits)
                 .reduce(0L, Math::addExact);
-        BalanceSettlementState current = jdbcTemplate.queryForObject("""
-                SELECT b.available_units, b.locked_units, d.deficit_units, d.reserved_units
-                  FROM account_balances b
-                  JOIN account_deficits d USING (user_id, asset)
-                 WHERE b.user_id = ? AND b.asset = ?
-                 FOR UPDATE OF b, d
-        """, (rs, rowNum) -> new BalanceSettlementState(
-                rs.getLong("available_units"),
-                rs.getLong("locked_units"),
-                rs.getLong("deficit_units"),
-                rs.getLong("reserved_units")), userId, asset);
+        BalanceSettlementState current = accountSettlementBalanceRepository.lock(userId, asset);
         long availableInput = amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED
                 ? 0L
                 : current.availableUnits();
@@ -1848,16 +1649,7 @@ public class AccountSettlementService {
         }
         long lockedDebitUnits = Math.subtractExact(current.lockedUnits(), next.lockedUnits());
         reducePositionMargins(ProductLine.LINEAR_PERPETUAL, userId, asset, lockedDebitUnits, lockedMargins, now);
-        int balanceRows = jdbcTemplate.update("""
-                UPDATE account_balances
-                   SET available_units = ?,
-                       locked_units = ?,
-                       updated_at = ?
-                 WHERE user_id = ? AND asset = ?
-                """, next.availableUnits(), next.lockedUnits(), Timestamp.from(now), userId, asset);
-        requireSingleRow(balanceRows, "pnl balance update");
-        updateDeficitIfChanged(userId, asset, current.deficitUnits(), next.deficitUnits(), now,
-                "pnl deficit update");
+        accountSettlementBalanceRepository.update(userId, asset, current, next, now);
         return PnlSettlementMath.netEquityUnits(next.availableUnits(), next.lockedUnits(), next.deficitUnits());
     }
 
@@ -1874,17 +1666,7 @@ public class AccountSettlementService {
         if (availableDebitFastPath.isPresent()) {
             return availableDebitFastPath.get();
         }
-        jdbcTemplate.update("""
-                INSERT INTO account_product_balances (
-                    account_type, user_id, asset, available_units, locked_units, updated_at
-                ) VALUES (?, ?, ?, 0, 0, ?)
-                ON CONFLICT (account_type, user_id, asset) DO NOTHING
-                """, accountType.name(), userId, asset, Timestamp.from(now));
-        jdbcTemplate.update("""
-                INSERT INTO account_product_deficits (account_type, user_id, asset, deficit_units, updated_at)
-                VALUES (?, ?, ?, 0, ?)
-                ON CONFLICT (account_type, user_id, asset) DO NOTHING
-                """, accountType.name(), userId, asset, Timestamp.from(now));
+        productSettlementBalanceRepository.ensure(accountType, userId, asset, now);
         availableDebitFastPath = tryApplyProductAvailableDebitFastPath(
                 accountType, userId, asset, normalizedMarginMode, amountUnits, now);
         if (availableDebitFastPath.isPresent()) {
@@ -1897,17 +1679,8 @@ public class AccountSettlementService {
         long maxLockedDebitUnits = lockedMargins.stream()
                 .mapToLong(PositionMargin::marginUnits)
                 .reduce(0L, Math::addExact);
-        BalanceSettlementState current = jdbcTemplate.queryForObject("""
-                SELECT b.available_units, b.locked_units, d.deficit_units, d.reserved_units
-                  FROM account_product_balances b
-                  JOIN account_product_deficits d USING (account_type, user_id, asset)
-                 WHERE b.account_type = ? AND b.user_id = ? AND b.asset = ?
-                 FOR UPDATE OF b, d
-        """, (rs, rowNum) -> new BalanceSettlementState(
-                rs.getLong("available_units"),
-                rs.getLong("locked_units"),
-                rs.getLong("deficit_units"),
-                rs.getLong("reserved_units")), accountType.name(), userId, asset);
+        BalanceSettlementState current =
+                productSettlementBalanceRepository.lock(accountType, userId, asset);
         long availableInput = amountUnits < 0 && normalizedMarginMode == MarginMode.ISOLATED
                 ? 0L
                 : current.availableUnits();
@@ -1925,19 +1698,7 @@ public class AccountSettlementService {
         }
         long lockedDebitUnits = Math.subtractExact(current.lockedUnits(), next.lockedUnits());
         reducePositionMargins(resolvedProductLine, userId, asset, lockedDebitUnits, lockedMargins, now);
-        int balanceRows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET available_units = ?,
-                       locked_units = ?,
-                       updated_at = ?
-                 WHERE account_type = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, next.availableUnits(), next.lockedUnits(), Timestamp.from(now), accountType.name(), userId,
-                asset);
-        requireSingleRow(balanceRows, "product pnl balance update");
-        updateProductDeficitIfChanged(accountType, userId, asset, current.deficitUnits(), next.deficitUnits(), now,
-                "product pnl deficit update");
+        productSettlementBalanceRepository.update(accountType, userId, asset, current, next, now);
         return PnlSettlementMath.netEquityUnits(next.availableUnits(), next.lockedUnits(), next.deficitUnits());
     }
 
@@ -1961,33 +1722,14 @@ public class AccountSettlementService {
                                                                MarginMode marginMode,
                                                                long requestedDebitUnits,
                                                                Instant now) {
-        jdbcTemplate.update("""
-                INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
-                VALUES (?, ?, 0, 0, ?)
-                ON CONFLICT (user_id, asset) DO NOTHING
-                """, userId, asset, Timestamp.from(now));
-        jdbcTemplate.update("""
-                INSERT INTO account_deficits (user_id, asset, deficit_units, updated_at)
-                VALUES (?, ?, 0, ?)
-                ON CONFLICT (user_id, asset) DO NOTHING
-                """, userId, asset, Timestamp.from(now));
+        accountSettlementBalanceRepository.ensure(userId, asset, now);
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         List<PositionMargin> lockedMargins = lockPositionMargins(ProductLine.LINEAR_PERPETUAL, userId, asset, symbol,
                 normalizedMarginMode);
         long maxLockedDebitUnits = lockedMargins.stream()
                 .mapToLong(PositionMargin::marginUnits)
                 .reduce(0L, Math::addExact);
-        BalanceSettlementState current = jdbcTemplate.queryForObject("""
-                SELECT b.available_units, b.locked_units, d.deficit_units, d.reserved_units
-                  FROM account_balances b
-                  JOIN account_deficits d USING (user_id, asset)
-                 WHERE b.user_id = ? AND b.asset = ?
-                 FOR UPDATE OF b, d
-        """, (rs, rowNum) -> new BalanceSettlementState(
-                rs.getLong("available_units"),
-                rs.getLong("locked_units"),
-                rs.getLong("deficit_units"),
-                rs.getLong("reserved_units")), userId, asset);
+        BalanceSettlementState current = accountSettlementBalanceRepository.lock(userId, asset);
         long availableInput = normalizedMarginMode == MarginMode.ISOLATED ? 0L : current.availableUnits();
         long collectibleUnits = Math.min(requestedDebitUnits, Math.addExact(availableInput, maxLockedDebitUnits));
         if (collectibleUnits <= 0) {
@@ -2007,16 +1749,7 @@ public class AccountSettlementService {
         }
         long lockedDebitUnits = Math.subtractExact(current.lockedUnits(), next.lockedUnits());
         reducePositionMargins(ProductLine.LINEAR_PERPETUAL, userId, asset, lockedDebitUnits, lockedMargins, now);
-        int balanceRows = jdbcTemplate.update("""
-                UPDATE account_balances
-                   SET available_units = ?,
-                       locked_units = ?,
-                       updated_at = ?
-                 WHERE user_id = ? AND asset = ?
-                """, next.availableUnits(), next.lockedUnits(), Timestamp.from(now), userId, asset);
-        requireSingleRow(balanceRows, "liquidation fee balance update");
-        updateDeficitIfChanged(userId, asset, current.deficitUnits(), next.deficitUnits(), now,
-                "liquidation fee deficit update");
+        accountSettlementBalanceRepository.update(userId, asset, current, next, now);
         return new BalanceDebitResult(collectibleUnits,
                 PnlSettlementMath.netEquityUnits(next.availableUnits(), next.lockedUnits(), next.deficitUnits()));
     }
@@ -2028,17 +1761,7 @@ public class AccountSettlementService {
                                                                 MarginMode marginMode,
                                                                 long requestedDebitUnits,
                                                                 Instant now) {
-        jdbcTemplate.update("""
-                INSERT INTO account_product_balances (
-                    account_type, user_id, asset, available_units, locked_units, updated_at
-                ) VALUES (?, ?, ?, 0, 0, ?)
-                ON CONFLICT (account_type, user_id, asset) DO NOTHING
-                """, accountType.name(), userId, asset, Timestamp.from(now));
-        jdbcTemplate.update("""
-                INSERT INTO account_product_deficits (account_type, user_id, asset, deficit_units, updated_at)
-                VALUES (?, ?, ?, 0, ?)
-                ON CONFLICT (account_type, user_id, asset) DO NOTHING
-                """, accountType.name(), userId, asset, Timestamp.from(now));
+        productSettlementBalanceRepository.ensure(accountType, userId, asset, now);
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         ProductLine resolvedProductLine = accountType.productLine().orElse(ProductLine.LINEAR_PERPETUAL);
         List<PositionMargin> lockedMargins = lockPositionMargins(resolvedProductLine, userId, asset, symbol,
@@ -2046,17 +1769,8 @@ public class AccountSettlementService {
         long maxLockedDebitUnits = lockedMargins.stream()
                 .mapToLong(PositionMargin::marginUnits)
                 .reduce(0L, Math::addExact);
-        BalanceSettlementState current = jdbcTemplate.queryForObject("""
-                SELECT b.available_units, b.locked_units, d.deficit_units, d.reserved_units
-                  FROM account_product_balances b
-                  JOIN account_product_deficits d USING (account_type, user_id, asset)
-                 WHERE b.account_type = ? AND b.user_id = ? AND b.asset = ?
-                 FOR UPDATE OF b, d
-        """, (rs, rowNum) -> new BalanceSettlementState(
-                rs.getLong("available_units"),
-                rs.getLong("locked_units"),
-                rs.getLong("deficit_units"),
-                rs.getLong("reserved_units")), accountType.name(), userId, asset);
+        BalanceSettlementState current =
+                productSettlementBalanceRepository.lock(accountType, userId, asset);
         long availableInput = normalizedMarginMode == MarginMode.ISOLATED ? 0L : current.availableUnits();
         long collectibleUnits = Math.min(requestedDebitUnits, Math.addExact(availableInput, maxLockedDebitUnits));
         if (collectibleUnits <= 0) {
@@ -2076,19 +1790,7 @@ public class AccountSettlementService {
         }
         long lockedDebitUnits = Math.subtractExact(current.lockedUnits(), next.lockedUnits());
         reducePositionMargins(resolvedProductLine, userId, asset, lockedDebitUnits, lockedMargins, now);
-        int balanceRows = jdbcTemplate.update("""
-                UPDATE account_product_balances
-                   SET available_units = ?,
-                       locked_units = ?,
-                       updated_at = ?
-                 WHERE account_type = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, next.availableUnits(), next.lockedUnits(), Timestamp.from(now), accountType.name(), userId,
-                asset);
-        requireSingleRow(balanceRows, "product liquidation fee balance update");
-        updateProductDeficitIfChanged(accountType, userId, asset, current.deficitUnits(), next.deficitUnits(), now,
-                "product liquidation fee deficit update");
+        productSettlementBalanceRepository.update(accountType, userId, asset, current, next, now);
         return new BalanceDebitResult(collectibleUnits,
                 PnlSettlementMath.netEquityUnits(next.availableUnits(), next.lockedUnits(), next.deficitUnits()));
     }
@@ -2098,25 +1800,8 @@ public class AccountSettlementService {
                                                                 MarginMode marginMode,
                                                                 long amountUnits,
                                                                 Instant now) {
-        if (amountUnits >= 0 || marginMode != MarginMode.CROSS) {
-            return Optional.empty();
-        }
-        List<Long> rows = jdbcTemplate.query("""
-                UPDATE account_balances b
-                   SET available_units = b.available_units + ?,
-                       updated_at = ?
-                 WHERE b.user_id = ?
-                   AND b.asset = ?
-                   AND b.available_units + ? >= 0
-                 RETURNING b.available_units + b.locked_units - COALESCE((
-                       SELECT d.deficit_units
-                         FROM account_deficits d
-                        WHERE d.user_id = b.user_id
-                          AND d.asset = b.asset
-                   ), 0) AS balance_after_units
-                """, (rs, rowNum) -> rs.getLong("balance_after_units"),
-                amountUnits, Timestamp.from(now), userId, asset, amountUnits);
-        return rows == null ? Optional.empty() : rows.stream().findFirst();
+        return accountSettlementBalanceRepository.tryApplyAvailableDebit(
+                userId, asset, marginMode, amountUnits, now);
     }
 
     /**
@@ -2138,63 +1823,10 @@ public class AccountSettlementService {
                                                                     String symbol,
                                                                     Long feeRatePpm,
                                                                     Instant now) {
-        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
-        long entryId = sequenceRepository.nextLedgerEntryId();
-        Timestamp timestamp = Timestamp.from(now);
-        List<Long> rows = jdbcTemplate.query("""
-                WITH updated_balance AS (
-                    UPDATE account_balances b
-                       SET available_units = b.available_units + ?,
-                           updated_at = ?
-                     WHERE b.user_id = ?
-                       AND b.asset = ?
-                       AND NOT EXISTS (
-                           SELECT 1
-                             FROM account_ledger_entries l
-                            WHERE l.reference_type = ?
-                              AND l.reference_id = ?
-                              AND l.user_id = ?
-                              AND l.asset = ?
-                       )
-                       AND (
-                           (? < 0 AND ? = 'CROSS' AND b.available_units + ? >= 0)
-                           OR
-                           (? > 0 AND COALESCE((
-                               SELECT d.deficit_units - d.reserved_units
-                                 FROM account_deficits d
-                                WHERE d.user_id = b.user_id
-                                  AND d.asset = b.asset
-                           ), 0) = 0)
-                       )
-                 RETURNING b.available_units + b.locked_units - COALESCE((
-                           SELECT d.deficit_units
-                             FROM account_deficits d
-                            WHERE d.user_id = b.user_id
-                              AND d.asset = b.asset
-                       ), 0) AS balance_after_units
-                ),
-                inserted_ledger AS (
-                    INSERT INTO account_ledger_entries (
-                        entry_id, user_id, asset, amount_units, balance_after_units,
-                        reference_type, reference_id, reason, trade_id, order_id, symbol,
-                        fee_rate_ppm, created_at
-                    )
-                    SELECT ?, ?, ?, ?, balance_after_units,
-                           ?, ?, ?, CAST(? AS BIGINT), CAST(? AS BIGINT), CAST(? AS TEXT),
-                           CAST(? AS BIGINT), ?
-                      FROM updated_balance
-                    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    RETURNING balance_after_units
-                )
-                SELECT balance_after_units
-                  FROM inserted_ledger
-                """, (rs, rowNum) -> rs.getLong("balance_after_units"),
-                amountUnits, timestamp, userId, asset,
-                referenceType, referenceId, userId, asset,
-                amountUnits, normalizedMarginMode.name(), amountUnits, amountUnits,
-                entryId, userId, asset, amountUnits,
-                referenceType, referenceId, reason, tradeId, orderId, symbol, feeRatePpm, timestamp);
-        return rows == null ? Optional.empty() : rows.stream().findFirst();
+        return accountSettlementBalanceRepository.trySettleAvailableAndLedger(
+                sequenceRepository.nextLedgerEntryId(), userId, asset, amountUnits,
+                MarginMode.defaultIfNull(marginMode), referenceType, referenceId, reason,
+                tradeId, orderId, symbol, feeRatePpm, now);
     }
 
     private Optional<Long> tryApplyProductAvailableDebitFastPath(AccountType accountType,
@@ -2203,90 +1835,17 @@ public class AccountSettlementService {
                                                                  MarginMode marginMode,
                                                                  long amountUnits,
                                                                  Instant now) {
-        if (amountUnits >= 0 || marginMode != MarginMode.CROSS) {
-            return Optional.empty();
-        }
-        List<Long> rows = jdbcTemplate.query("""
-                UPDATE account_product_balances b
-                   SET available_units = b.available_units + ?,
-                       updated_at = ?
-                 WHERE b.account_type = ?
-                   AND b.user_id = ?
-                   AND b.asset = ?
-                   AND b.available_units + ? >= 0
-                RETURNING b.available_units + b.locked_units - COALESCE((
-                       SELECT d.deficit_units
-                         FROM account_product_deficits d
-                        WHERE d.account_type = b.account_type
-                          AND d.user_id = b.user_id
-                          AND d.asset = b.asset
-                   ), 0) AS balance_after_units
-                """, (rs, rowNum) -> rs.getLong("balance_after_units"),
-                amountUnits, Timestamp.from(now), accountType.name(), userId, asset, amountUnits);
-        return rows == null ? Optional.empty() : rows.stream().findFirst();
-    }
-
-    private void updateDeficitIfChanged(long userId,
-                                        String asset,
-                                        long currentDeficitUnits,
-                                        long nextDeficitUnits,
-                                        Instant now,
-                                        String operation) {
-        if (currentDeficitUnits == nextDeficitUnits) {
-            return;
-        }
-        int deficitRows = jdbcTemplate.update("""
-                UPDATE account_deficits
-                   SET deficit_units = ?,
-                       updated_at = ?
-                 WHERE user_id = ? AND asset = ?
-                """, nextDeficitUnits, Timestamp.from(now), userId, asset);
-        requireSingleRow(deficitRows, operation);
-    }
-
-    private void updateProductDeficitIfChanged(AccountType accountType,
-                                               long userId,
-                                               String asset,
-                                               long currentDeficitUnits,
-                                               long nextDeficitUnits,
-                                               Instant now,
-                                               String operation) {
-        if (currentDeficitUnits == nextDeficitUnits) {
-            return;
-        }
-        int deficitRows = jdbcTemplate.update("""
-                UPDATE account_product_deficits
-                   SET deficit_units = ?,
-                       updated_at = ?
-                 WHERE account_type = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, nextDeficitUnits, Timestamp.from(now), accountType.name(), userId, asset);
-        requireSingleRow(deficitRows, operation);
+        return productSettlementBalanceRepository.tryApplyAvailableDebit(
+                accountType, userId, asset, marginMode, amountUnits, now);
     }
 
     private boolean liquidationFeeReferenceExists(AccountType accountType, long userId, String asset,
                                                   String referenceId) {
         if (!isLegacyPerpetualAccount(accountType)) {
-            return jdbcTemplate.query("""
-                    SELECT 1
-                      FROM account_product_ledger_entries
-                     WHERE reference_type = 'LIQUIDATION_FEE'
-                       AND reference_id = ?
-                     AND user_id = ?
-                     AND account_type = ?
-                     AND asset = ?
-                    """, (rs, rowNum) -> 1, referenceId, userId, accountType.name(), asset)
-                    .stream().findFirst().isPresent();
+            return productLedgerRepository.exists(
+                    userId, accountType, asset, "LIQUIDATION_FEE", referenceId);
         }
-        return jdbcTemplate.query("""
-                SELECT 1
-                  FROM account_ledger_entries
-                 WHERE reference_type = 'LIQUIDATION_FEE'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, (rs, rowNum) -> 1, referenceId, userId, asset).stream().findFirst().isPresent();
+        return accountLedgerRepository.exists(userId, asset, "LIQUIDATION_FEE", referenceId);
     }
 
     private void insertProductSettlementLedger(long userId,
@@ -2298,15 +1857,9 @@ public class AccountSettlementService {
                                                String referenceId,
                                                String reason,
                                                Instant now) {
-        int rows = jdbcTemplate.update("""
-                INSERT INTO account_product_ledger_entries (
-                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextProductLedgerEntryId(),
-                userId, accountType.name(), asset,
-                amountUnits, balanceAfterUnits, referenceType, referenceId, reason, Timestamp.from(now));
+        int rows = productLedgerRepository.insertSettlement(
+                sequenceRepository.nextProductLedgerEntryId(), userId, accountType, asset,
+                amountUnits, balanceAfterUnits, referenceType, referenceId, reason, null, now);
         requireSingleRow(rows, referenceType.toLowerCase().replace('_', ' ') + " product ledger insert");
     }
 
@@ -2319,15 +1872,9 @@ public class AccountSettlementService {
                                                      String referenceId,
                                                      String reason,
                                                      Instant now) {
-        int rows = jdbcTemplate.update("""
-                INSERT INTO account_product_ledger_entries (
-                    entry_id, user_id, account_type, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                """, sequenceRepository.nextProductLedgerEntryId(),
-                userId, accountType.name(), asset,
-                amountUnits, balanceAfterUnits, referenceType, referenceId, reason, Timestamp.from(now));
+        int rows = productLedgerRepository.insertSettlement(
+                sequenceRepository.nextProductLedgerEntryId(), userId, accountType, asset,
+                amountUnits, balanceAfterUnits, referenceType, referenceId, reason, null, now);
         return rows == 1;
     }
 
@@ -2337,15 +1884,8 @@ public class AccountSettlementService {
                                                       String referenceType,
                                                       String referenceId,
                                                       long balanceAfterUnits) {
-        int rows = jdbcTemplate.update("""
-                UPDATE account_product_ledger_entries
-                   SET balance_after_units = ?
-                 WHERE reference_type = ?
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND account_type = ?
-                   AND asset = ?
-                """, balanceAfterUnits, referenceType, referenceId, userId, accountType.name(), asset);
+        int rows = productLedgerRepository.updateSettlementBalance(
+                userId, accountType, asset, referenceType, referenceId, balanceAfterUnits);
         requireSingleRow(rows, referenceType.toLowerCase().replace('_', ' ') + " product ledger update");
     }
 
@@ -2446,13 +1986,6 @@ public class AccountSettlementService {
         return accountType;
     }
 
-    private AccountType accountTypeFromNullableDbValue(String accountType) {
-        if (accountType == null || accountType.isBlank()) {
-            return AccountType.USDT_PERPETUAL;
-        }
-        return AccountType.valueOf(accountType);
-    }
-
     private boolean isLegacyPerpetualAccount(AccountType accountType) {
         return accountType == AccountType.USDT_PERPETUAL;
     }
@@ -2508,38 +2041,12 @@ public class AccountSettlementService {
             String symbol) {
     }
 
-    private Long nullableVersion(long version) {
-        return version <= 0 ? null : version;
-    }
-
-    private long longOrZero(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
-        long value = rs.getLong(column);
-        return rs.wasNull() ? 0L : value;
-    }
-
-    private Long nullableLong(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
-        long value = rs.getLong(column);
-        return rs.wasNull() ? null : value;
-    }
-
-    private String emptyToNull(String value) {
-        return value == null || value.isBlank() ? null : value.trim();
-    }
-
     private ProductLine productLine(ProductLine productLine) {
         return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
     }
 
     private AccountType accountType(ProductLine productLine) {
         return AccountType.valueOf(productLine(productLine).accountTypeCode());
-    }
-
-    private static String productLineExpression(String instrumentAlias) {
-        return ProductLineSql.contractTypeProductLineCase(instrumentAlias + ".contract_type");
-    }
-
-    private static String accountTypeExpression(String instrumentAlias) {
-        return ProductLineSql.contractTypeAccountTypeCase(instrumentAlias + ".contract_type");
     }
 
     private void requireSingleRow(int rows, String operation) {

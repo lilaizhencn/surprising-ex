@@ -17,18 +17,23 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - `PositionRepository`、`PositionMarginRepository`、`PositionModeRepository` 和
   `TradeSettlementSideRepository` 分别只负责持仓、持仓保证金、持仓模式和成交侧结算表。
 - `PositionQueryService` 聚合持仓、合约结算资产和持仓保证金查询；`PositionModeCommandService`
-  负责持仓模式切换编排；持仓与分片未平仓量的原子更新由 `PositionOpenInterestService` 负责。
+  负责持仓模式切换编排；`PositionOpenInterestService` 在同一事务中分别调用持仓与分片未平仓量
+  的单表 Repository，任一写入失败都会整体回滚。
 - `SpotOrderReservationRepository` 只负责现货订单预占表；`AccountOrderReservationService`
   聚合预占、余额、成交侧审计和指令结果，`SpotTradeSettlementService` 编排现货余额与流水结算。
-- ADL、亏空回补和资金费的跨表原子结算分别由 `AdlTargetSettlementService`、
-  `DeficitSettlementService` 和 `FundingSettlementService` 负责。
-- `PositionCacheProjectionService` 聚合持仓、保证金与合约元数据，生成提交后写入 Redis
+- ADL、亏空回补和资金费分别由 `AdlTargetSettlementService`、`DeficitSettlementService`
+  和 `FundingSettlementService` 聚合单表 Repository；ADL 的持仓、合约版本、资产精度、保证金、
+  余额、亏空和流水不再由 Service 直接写 SQL。
+- `PositionCacheProjectionService` 通过专用在线投影 Repository 生成提交后写入 Redis
   的最终状态快照；`AccountOutboxService` 编排事件、序列号和 outbox 写入，
   `AccountOutboxRepository` 只持久化账户 outbox 表。
-- 交易事务、幂等、锁顺序和跨表写入由 Service 负责；拆分期间保留 `AccountSettlementService` 兼容门面，
-  旧调用入口和资金事务语义不变，内部能力按表逐步迁出。
-- 财务对账、订单时间线、运营报表和后台聚合查询不应继续扩展交易主库查询。相关代码以后进入
-  只参与编译、不运行的 `surprising-finance-ops` 暂存模块，并在正式财务系统建设时重新设计。
+- `AccountSettlementService` 只保留交易事务、幂等、锁顺序和资金计算编排，不再包含业务 SQL。
+- 只有在线正确性无法拆分的路径允许多表 Repository，并必须写明 `不可拆原因`：
+  余额与亏空的联合锁、余额变更与幂等流水的单语句快速路径、持仓模式切换前的未结算成交检查，
+  以及 Redis 最终状态投影。这些路径都禁止复用于后台时间线、财务对账或运营报表。
+- 财务对账、订单时间线、运营报表和后台多表聚合查询不得访问交易主库。未来
+  `surprising-finance-ops` 必须配置独立数据源和独立数据库，通过交易事件、outbox 或受控 CDC
+  建立自己的查询投影；交易库 Repository 不为该模块提供跨表查询接口。
 
 ## long 单位
 

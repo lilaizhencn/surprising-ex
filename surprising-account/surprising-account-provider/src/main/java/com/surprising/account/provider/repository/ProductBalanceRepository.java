@@ -170,6 +170,44 @@ public class ProductBalanceRepository {
                 """, amountUnits, Timestamp.from(now), accountType.name(), userId, asset, amountUnits);
     }
 
+    public long creditAvailableAndReturnEquity(long userId,
+                                               AccountType accountType,
+                                               String asset,
+                                               long amountUnits,
+                                               Instant now) {
+        ensure(userId, accountType, asset, now);
+        List<Long> rows = jdbcTemplate.query("""
+                UPDATE account_product_balances
+                   SET available_units = available_units + ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+             RETURNING available_units + locked_units
+                """, (rs, rowNum) -> rs.getLong(1), amountUnits, Timestamp.from(now),
+                accountType.name(), userId, asset);
+        return requireOne(rows, "product balance credit");
+    }
+
+    public long debitAvailableAndReturnEquity(long userId,
+                                              AccountType accountType,
+                                              String asset,
+                                              long amountUnits,
+                                              Instant now) {
+        List<Long> rows = jdbcTemplate.query("""
+                UPDATE account_product_balances
+                   SET available_units = available_units - ?,
+                       updated_at = ?
+                 WHERE account_type = ?
+                   AND user_id = ?
+                   AND asset = ?
+                   AND available_units >= ?
+             RETURNING available_units + locked_units
+                """, (rs, rowNum) -> rs.getLong(1), amountUnits, Timestamp.from(now),
+                accountType.name(), userId, asset, amountUnits);
+        return requireOne(rows, "product balance debit");
+    }
+
     public long equity(long userId, AccountType accountType, String asset) {
         Long equityUnits = jdbcTemplate.queryForObject("""
                 SELECT available_units + locked_units
@@ -195,6 +233,14 @@ public class ProductBalanceRepository {
         if (rows != 1) {
             throw new IllegalStateException(operation + " affected " + rows + " rows");
         }
+    }
+
+    private static long requireOne(List<Long> rows, String operation) {
+        if (rows == null || rows.size() != 1) {
+            throw new IllegalStateException(operation + " affected "
+                    + (rows == null ? 0 : rows.size()) + " rows");
+        }
+        return rows.getFirst();
     }
 
     public record ProductBalanceRow(

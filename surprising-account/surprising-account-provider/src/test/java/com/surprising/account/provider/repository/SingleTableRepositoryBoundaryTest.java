@@ -231,6 +231,79 @@ class SingleTableRepositoryBoundaryTest {
     }
 
     @Test
+    void assetScaleRepositoryOnlyQueriesAssetScaleTable() {
+        JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
+        AssetScaleRepository repository = new AssetScaleRepository(jdbcTemplate);
+
+        repository.findScaleUnits("USDT");
+
+        String sql = capturedQuery(jdbcTemplate);
+        assertThat(sql)
+                .contains("FROM account_asset_scales")
+                .doesNotContain("instruments")
+                .doesNotContain("account_positions");
+    }
+
+    @Test
+    void riskPositionSnapshotRepositoryOnlyQueriesRiskSnapshotTable() {
+        JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
+        RiskPositionSnapshotRepository repository = new RiskPositionSnapshotRepository(jdbcTemplate);
+
+        repository.findLatestIsolated(1001L, "BTC-USDT", PositionSide.NET,
+                java.time.Duration.ofSeconds(10));
+
+        String sql = capturedQuery(jdbcTemplate);
+        assertThat(sql)
+                .contains("FROM risk_position_snapshots")
+                .doesNotContain("account_positions")
+                .doesNotContain("instruments");
+    }
+
+    @Test
+    void liquidationOrderContextRepositoryOnlyQueriesLiquidationOrderTable() {
+        JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
+        LiquidationOrderContextRepository repository = new LiquidationOrderContextRepository(jdbcTemplate);
+
+        repository.findFeeContext(9001L, 1001L, "BTC-USDT");
+
+        String sql = capturedQuery(jdbcTemplate);
+        assertThat(sql)
+                .contains("FROM liquidation_orders")
+                .doesNotContain("account_ledger_entries")
+                .doesNotContain("account_balances");
+    }
+
+    @Test
+    void positionModeOrderRepositoriesKeepTheirOwnTableBoundary() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        when(jdbcTemplate.queryForObject(any(String.class), any(Class.class), any(Object[].class)))
+                .thenReturn(false);
+
+        new PositionModeOrderRepository(jdbcTemplate)
+                .existsActive(ProductLine.LINEAR_PERPETUAL, 1001L);
+        new PositionModeTriggerOrderRepository(jdbcTemplate)
+                .existsPending(ProductLine.LINEAR_PERPETUAL, 1001L);
+        new PositionModeAlgoOrderRepository(jdbcTemplate)
+                .existsActive(ProductLine.LINEAR_PERPETUAL, 1001L);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate, org.mockito.Mockito.times(3))
+                .queryForObject(sql.capture(), any(Class.class), any(Object[].class));
+        assertThat(sql.getAllValues().get(0))
+                .contains("FROM trading_orders")
+                .doesNotContain("trading_trigger_orders")
+                .doesNotContain("trading_algo_orders");
+        assertThat(sql.getAllValues().get(1))
+                .contains("FROM trading_trigger_orders")
+                .doesNotContain("trading_orders")
+                .doesNotContain("trading_algo_orders");
+        assertThat(sql.getAllValues().get(2))
+                .contains("FROM trading_algo_orders")
+                .doesNotContain("trading_orders")
+                .doesNotContain("trading_trigger_orders");
+    }
+
+    @Test
     void openInterestShardRepositoryOnlyWritesShardTable() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);

@@ -199,6 +199,45 @@ public class PositionMarginRepository {
                 """, (rs, rowNum) -> toLockedRow(rs), productLine.name(), userId, asset);
     }
 
+    public List<PositionMarginRow> lockForFunding(ProductLine productLine,
+                                                  long userId,
+                                                  String symbol,
+                                                  String asset,
+                                                  MarginMode marginMode,
+                                                  PositionSide positionSide) {
+        MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
+        PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
+        if (normalizedMarginMode == MarginMode.ISOLATED) {
+            return jdbcTemplate.query("""
+                    SELECT symbol, asset, margin_mode, position_side, margin_units, updated_at
+                      FROM account_position_margins
+                     WHERE product_line = ?
+                       AND user_id = ?
+                       AND symbol = ?
+                       AND asset = ?
+                       AND margin_mode = ?
+                       AND position_side = ?
+                       AND margin_units > 0
+                     ORDER BY updated_at ASC, symbol ASC, margin_mode ASC, position_side ASC
+                     FOR UPDATE
+                    """, (rs, rowNum) -> toLockedRow(rs), productLine.name(), userId, symbol, asset,
+                    normalizedMarginMode.name(), normalizedPositionSide.name());
+        }
+        return jdbcTemplate.query("""
+                SELECT symbol, asset, margin_mode, position_side, margin_units, updated_at
+                  FROM account_position_margins
+                 WHERE product_line = ?
+                   AND user_id = ?
+                   AND asset = ?
+                   AND margin_mode = ?
+                   AND position_side = ?
+                   AND margin_units > 0
+                 ORDER BY updated_at ASC, symbol ASC, margin_mode ASC, position_side ASC
+                 FOR UPDATE
+                """, (rs, rowNum) -> toLockedRow(rs), productLine.name(), userId, asset,
+                normalizedMarginMode.name(), normalizedPositionSide.name());
+    }
+
     private static PositionMarginRow toRow(java.sql.ResultSet resultSet) throws java.sql.SQLException {
         return new PositionMarginRow(
                 resultSet.getString("symbol"),

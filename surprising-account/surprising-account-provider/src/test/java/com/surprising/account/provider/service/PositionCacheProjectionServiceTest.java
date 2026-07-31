@@ -27,7 +27,8 @@ class PositionCacheProjectionServiceTest {
         when(jdbcTemplate.query(anyString(), any(RowMapper.class),
                 eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET")))
                 .thenReturn(java.util.List.of(expected));
-        PositionCacheProjectionService service = new PositionCacheProjectionService(jdbcTemplate);
+        PositionCacheProjectionService service = new PositionCacheProjectionService(
+                new com.surprising.account.provider.repository.PositionCacheProjectionRepository(jdbcTemplate));
 
         PositionCacheEvent actual = service.captureFinalSnapshot(
                 ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET);

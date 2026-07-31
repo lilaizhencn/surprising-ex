@@ -124,6 +124,155 @@ public class AccountLedgerRepository {
                 """, balanceAfterUnits, referenceId, userId, asset);
     }
 
+    public int insertDeficitSettlement(long entryId,
+                                       long userId,
+                                       String asset,
+                                       long amountUnits,
+                                       long balanceAfterUnits,
+                                       String referenceType,
+                                       String referenceId,
+                                       String reason,
+                                       Instant now) {
+        return jdbcTemplate.update("""
+                INSERT INTO account_ledger_entries (
+                    entry_id, user_id, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
+                """, entryId, userId, asset, amountUnits, balanceAfterUnits, referenceType,
+                referenceId, reason, Timestamp.from(now));
+    }
+
+    public int insertFunding(long entryId,
+                             long userId,
+                             String asset,
+                             long amountUnits,
+                             String referenceId,
+                             String reason,
+                             Instant now) {
+        return jdbcTemplate.update("""
+                INSERT INTO account_ledger_entries (
+                    entry_id, user_id, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, created_at
+                ) VALUES (?, ?, ?, ?, 0, 'FUNDING', ?, ?, ?)
+                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
+                """, entryId, userId, asset, amountUnits, referenceId, reason, Timestamp.from(now));
+    }
+
+    public int updateFundingBalance(long userId,
+                                    String asset,
+                                    String referenceId,
+                                    long balanceAfterUnits) {
+        return jdbcTemplate.update("""
+                UPDATE account_ledger_entries
+                   SET balance_after_units = ?
+                 WHERE reference_type = 'FUNDING'
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, balanceAfterUnits, referenceId, userId, asset);
+    }
+
+    public int insertAdl(long entryId,
+                         long userId,
+                         String asset,
+                         long amountUnits,
+                         long balanceAfterUnits,
+                         String referenceType,
+                         String referenceId,
+                         String reason,
+                         Instant now) {
+        return jdbcTemplate.update("""
+                INSERT INTO account_ledger_entries (
+                    entry_id, user_id, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
+                """, entryId, userId, asset, amountUnits, balanceAfterUnits,
+                referenceType, referenceId, reason, Timestamp.from(now));
+    }
+
+    public int insertSettlement(long entryId,
+                                long userId,
+                                String asset,
+                                long amountUnits,
+                                long balanceAfterUnits,
+                                String referenceType,
+                                String referenceId,
+                                String reason,
+                                Long tradeId,
+                                Long orderId,
+                                String symbol,
+                                Long feeRatePpm,
+                                Instant now) {
+        return jdbcTemplate.update("""
+                INSERT INTO account_ledger_entries (
+                    entry_id, user_id, asset, amount_units, balance_after_units,
+                    reference_type, reference_id, reason, trade_id, order_id, symbol,
+                    fee_rate_ppm, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
+                """, entryId, userId, asset, amountUnits, balanceAfterUnits,
+                referenceType, referenceId, reason, tradeId, orderId, symbol, feeRatePpm,
+                Timestamp.from(now));
+    }
+
+    public int updateSettlementBalance(long userId,
+                                       String asset,
+                                       String referenceType,
+                                       String referenceId,
+                                       long balanceAfterUnits) {
+        return jdbcTemplate.update("""
+                UPDATE account_ledger_entries
+                   SET balance_after_units = ?
+                 WHERE reference_type = ?
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, balanceAfterUnits, referenceType, referenceId, userId, asset);
+    }
+
+    public Optional<PositionMarginAdjustmentRow> findPositionMarginAdjustmentBySymbol(
+            long userId, String symbol, String referenceId) {
+        return jdbcTemplate.query("""
+                SELECT asset, amount_units, reason, symbol
+                  FROM account_ledger_entries
+                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND symbol = ?
+                """, (rs, rowNum) -> new PositionMarginAdjustmentRow(
+                        rs.getString("asset"), rs.getLong("amount_units"),
+                        rs.getString("reason"), rs.getString("symbol")),
+                referenceId, userId, symbol).stream().findFirst();
+    }
+
+    public Optional<PositionMarginAdjustmentRow> findPositionMarginAdjustmentByAsset(
+            long userId, String asset, String referenceId) {
+        return jdbcTemplate.query("""
+                SELECT asset, amount_units, reason, symbol
+                  FROM account_ledger_entries
+                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, (rs, rowNum) -> new PositionMarginAdjustmentRow(
+                        rs.getString("asset"), rs.getLong("amount_units"),
+                        rs.getString("reason"), rs.getString("symbol")),
+                referenceId, userId, asset).stream().findFirst();
+    }
+
+    public boolean exists(long userId, String asset, String referenceType, String referenceId) {
+        return !jdbcTemplate.query("""
+                SELECT 1
+                  FROM account_ledger_entries
+                 WHERE reference_type = ?
+                   AND reference_id = ?
+                   AND user_id = ?
+                   AND asset = ?
+                """, (rs, rowNum) -> 1, referenceType, referenceId, userId, asset).isEmpty();
+    }
+
     private static AdminCursorPage.SortSpec createdAtSort(String sort, String idColumn) {
         AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
                 "createdAt", "created_at", idColumn, true);
@@ -142,5 +291,12 @@ public class AccountLedgerRepository {
     }
 
     public record AdjustmentReference(long amountUnits, String reason) {
+    }
+
+    public record PositionMarginAdjustmentRow(
+            String asset,
+            long amountUnits,
+            String reason,
+            String symbol) {
     }
 }

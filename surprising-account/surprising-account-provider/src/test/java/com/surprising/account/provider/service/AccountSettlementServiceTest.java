@@ -278,24 +278,24 @@ class AccountSettlementServiceTest {
                 eq("INVERSE_DELIVERY"), eq(1001L), eq("HEDGE"), any(Timestamp.class));
         verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.argThat(sql ->
                         sql.contains("FROM account_positions")
-                                && sql.contains("p.product_line = ?")
+                                && sql.contains("product_line = ?")
                                 && !sql.contains("JOIN instruments")),
-                eq(Boolean.class), eq(1001L), eq("INVERSE_DELIVERY"));
+                eq(Boolean.class), eq("INVERSE_DELIVERY"), eq(1001L));
         verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.argThat(sql ->
                         sql.contains("FROM trading_orders")
-                                && sql.contains("o.product_line = ?")
+                                && sql.contains("product_line = ?")
                                 && !sql.contains("JOIN instruments")),
-                eq(Boolean.class), eq(1001L), eq("INVERSE_DELIVERY"));
+                eq(Boolean.class), eq("INVERSE_DELIVERY"), eq(1001L));
         verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.argThat(sql ->
                         sql.contains("FROM trading_trigger_orders")
-                                && sql.contains("t.product_line = ?")
+                                && sql.contains("product_line = ?")
                                 && !sql.contains("JOIN instruments")),
-                eq(Boolean.class), eq(1001L), eq("INVERSE_DELIVERY"));
+                eq(Boolean.class), eq("INVERSE_DELIVERY"), eq(1001L));
         verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.argThat(sql ->
                         sql.contains("FROM trading_algo_orders")
-                                && sql.contains("a.product_line = ?")
+                                && sql.contains("product_line = ?")
                                 && !sql.contains("JOIN instruments")),
-                eq(Boolean.class), eq(1001L), eq("INVERSE_DELIVERY"));
+                eq(Boolean.class), eq("INVERSE_DELIVERY"), eq(1001L));
         verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.argThat(sql ->
                         sql.contains("FROM trading_match_trades")
                                 && sql.contains("mt.product_line = ?")
@@ -440,12 +440,14 @@ class AccountSettlementServiceTest {
         assertThat(response.availableUnits()).isEqualTo(900L);
         assertThat(response.lockedUnits()).isEqualTo(700L);
         verify(jdbcTemplate).update(contains("INSERT INTO account_product_ledger_entries"),
-                eq(7101L), eq(1001L), eq("USDT_DELIVERY"), eq("USDT"), eq(100L),
-                eq("iso-add-delivery"), eq("ADD_POSITION_MARGIN"), eq("BTC-USDT-260925"), any(Timestamp.class));
+                eq(7101L), eq(1001L), eq("USDT_DELIVERY"), eq("USDT"), eq(100L), eq(0L),
+                eq("POSITION_MARGIN_ADJUSTMENT"), eq("iso-add-delivery"),
+                eq("ADD_POSITION_MARGIN"), eq("BTC-USDT-260925"), any(Timestamp.class));
         verify(jdbcTemplate).update(contains("UPDATE account_product_balances"),
                 eq(100L), eq(100L), any(Timestamp.class), eq("USDT_DELIVERY"), eq(1001L), eq("USDT"), eq(100L));
         verify(jdbcTemplate).update(contains("UPDATE account_product_ledger_entries"),
-                eq(1_600L), eq("iso-add-delivery"), eq(1001L), eq("USDT_DELIVERY"), eq("USDT"));
+                eq(1_600L), eq("POSITION_MARGIN_ADJUSTMENT"), eq("iso-add-delivery"),
+                eq(1001L), eq("USDT_DELIVERY"), eq("USDT"));
         verify(jdbcTemplate, never()).update(contains("INSERT INTO account_ledger_entries"), any(Object[].class));
         verify(jdbcTemplate, never()).update(contains("UPDATE account_balances"), any(Object[].class));
     }
@@ -552,7 +554,8 @@ class AccountSettlementServiceTest {
                 eq("LINEAR_PERPETUAL"), eq(1001L), eq("BTC-USDT"), eq("USDT"), eq("ISOLATED"), eq("NET"),
                 eq(100L), any(Timestamp.class));
         verify(jdbcTemplate).update(contains("UPDATE account_ledger_entries"),
-                eq(1_600L), eq("iso-add-1"), eq(1001L), eq("USDT"));
+                eq(1_600L), eq("POSITION_MARGIN_ADJUSTMENT"), eq("iso-add-1"),
+                eq(1001L), eq("USDT"));
     }
 
     @Test
@@ -805,7 +808,8 @@ class AccountSettlementServiceTest {
                 eq(0L), eq(0L), any(Timestamp.class), eq(1001L), eq("USDT"));
         verify(jdbcTemplate, never()).update(contains("UPDATE account_deficits"), any(Object[].class));
         verify(jdbcTemplate).update(contains("INSERT INTO account_ledger_entries"),
-                eq(7001L), eq(1001L), eq("USDT"), eq(-70L), eq(0L), eq("9001:5001"),
+                eq(7001L), eq(1001L), eq("USDT"), eq(-70L), eq(0L),
+                eq("LIQUIDATION_FEE"), eq("9001:5001"), eq("COLLECT_LIQUIDATION_FEE"),
                 eq(9001L), eq(5001L), eq("BTC-USDT"), eq(3_000L), any(Timestamp.class));
     }
 
@@ -833,6 +837,8 @@ class AccountSettlementServiceTest {
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("INSERT INTO trading_symbol_open_interest_shards"), any(Object[].class)))
                 .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE trading_symbol_open_interest_shards"), any(Object[].class)))
+                .thenReturn(1);
         when(jdbcTemplate.query(contains("SELECT user_id, symbol, margin_mode"), anyRowMapper(),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"))).thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
@@ -853,7 +859,9 @@ class AccountSettlementServiceTest {
                 new PositionState(-4L, 1L, 600_000L, 25L), now);
 
         assertThat(response.signedQuantitySteps()).isEqualTo(-4L);
-        verify(jdbcTemplate).update(contains("WITH updated_position"), any(Object[].class));
+        verify(jdbcTemplate).update(contains("UPDATE account_positions"), any(Object[].class));
+        verify(jdbcTemplate).update(contains("UPDATE trading_symbol_open_interest_shards"),
+                any(Object[].class));
     }
 
     @Test
@@ -864,6 +872,8 @@ class AccountSettlementServiceTest {
                 .thenReturn(1);
         when(jdbcTemplate.update(contains("INSERT INTO trading_symbol_open_interest_shards"), any(Object[].class)))
                 .thenReturn(1);
+        when(jdbcTemplate.update(contains("UPDATE trading_symbol_open_interest_shards"), any(Object[].class)))
+                .thenReturn(1);
 
         var response = repository.updatePosition(1001L, "BTC-USDT", MarginMode.CROSS,
                 new PositionState(6L, 1L, 600_000L, 25L), -4L, now);
@@ -873,9 +883,9 @@ class AccountSettlementServiceTest {
         verify(jdbcTemplate, never()).query(contains("SELECT signed_quantity_steps"), anyRowMapper(),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"), eq("NET"));
         verify(jdbcTemplate).update(contains("VALUES (?, ?, ?, 0, 0, ?)"), any(Object[].class));
-        verify(jdbcTemplate).update(contains("UPDATE trading_symbol_open_interest_shards AS shard"),
+        verify(jdbcTemplate).update(contains("UPDATE trading_symbol_open_interest_shards"),
                 any(Object[].class));
-        verify(jdbcTemplate).update(contains("WITH updated_position"), any(Object[].class));
+        verify(jdbcTemplate).update(contains("UPDATE account_positions"), any(Object[].class));
     }
 
     @Test
@@ -909,10 +919,11 @@ class AccountSettlementServiceTest {
                 "TAKER_FEE", 500L, "BTC-USDT", MarginMode.CROSS, now);
 
         verify(jdbcTemplate).update(contains("INSERT INTO account_ledger_entries"),
-                eq(1L), eq(1001L), eq("USDT"), eq(-25L), eq("9001:5001"), eq("TAKER_FEE"),
+                eq(1L), eq(1001L), eq("USDT"), eq(-25L), eq(0L),
+                eq("TRADE_FEE"), eq("9001:5001"), eq("TAKER_FEE"),
                 eq(9001L), eq(5001L), eq("BTC-USDT"), eq(500L), any(Timestamp.class));
         verify(jdbcTemplate).update(contains("UPDATE account_ledger_entries"),
-                eq(75L), eq("9001:5001"), eq(1001L), eq("USDT"));
+                eq(75L), eq("TRADE_FEE"), eq("9001:5001"), eq(1001L), eq("USDT"));
         verify(jdbcTemplate, never()).update(contains("UPDATE account_deficits"), any(Object[].class));
         verify(jdbcTemplate, never()).update(contains("INSERT INTO account_position_margins"),
                 any(Object[].class));
@@ -976,7 +987,7 @@ class AccountSettlementServiceTest {
 
         verify(jdbcTemplate).update(contains("INSERT INTO account_product_ledger_entries"),
                 eq(7001L), eq(1001L), eq("COIN_PERPETUAL"), eq("BTC"), eq(-25L), eq(0L),
-                eq("TRADE_FEE"), eq("9001:5001"), eq("TAKER_FEE"), any(Timestamp.class));
+                eq("TRADE_FEE"), eq("9001:5001"), eq("TAKER_FEE"), isNull(), any(Timestamp.class));
         verify(jdbcTemplate).update(contains("UPDATE account_product_balances"),
                 eq(75L), eq(0L), any(Timestamp.class), eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"));
         verify(jdbcTemplate).update(contains("UPDATE account_product_ledger_entries"),
@@ -1106,16 +1117,16 @@ class AccountSettlementServiceTest {
                                               boolean hasUnsettledTrades,
                                               boolean hasActiveReservations) {
         when(jdbcTemplate.queryForObject(contains("FROM account_positions"), eq(Boolean.class),
-                eq(1001L), eq(productLine.name())))
+                eq(productLine.name()), eq(1001L)))
                 .thenReturn(hasOpenPositions);
         when(jdbcTemplate.queryForObject(contains("FROM trading_orders"), eq(Boolean.class),
-                eq(1001L), eq(productLine.name())))
+                eq(productLine.name()), eq(1001L)))
                 .thenReturn(hasOpenOrders);
         when(jdbcTemplate.queryForObject(contains("FROM trading_trigger_orders"), eq(Boolean.class),
-                eq(1001L), eq(productLine.name())))
+                eq(productLine.name()), eq(1001L)))
                 .thenReturn(hasPendingTriggers);
         when(jdbcTemplate.queryForObject(contains("FROM trading_algo_orders"), eq(Boolean.class),
-                eq(1001L), eq(productLine.name())))
+                eq(productLine.name()), eq(1001L)))
                 .thenReturn(hasActiveAlgoOrders);
         when(jdbcTemplate.queryForObject(contains("FROM trading_match_trades"), eq(Boolean.class),
                 eq(productLine.name()), eq(1001L), eq(1001L)))

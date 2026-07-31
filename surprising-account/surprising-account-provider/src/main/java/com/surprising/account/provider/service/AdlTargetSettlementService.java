@@ -1,32 +1,73 @@
 package com.surprising.account.provider.service;
 
+import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AdlTargetSettlementAccountCommand;
+import com.surprising.account.provider.model.ContractSpec;
+import com.surprising.account.provider.model.PositionState;
+import com.surprising.account.provider.repository.AccountBalanceRepository;
+import com.surprising.account.provider.repository.AccountDeficitRepository;
+import com.surprising.account.provider.repository.AccountInstrumentRepository;
+import com.surprising.account.provider.repository.AccountInstrumentRepository.ContractInstrumentRow;
+import com.surprising.account.provider.repository.AccountLedgerRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
+import com.surprising.account.provider.repository.AssetScaleRepository;
+import com.surprising.account.provider.repository.OpenInterestShardRepository;
+import com.surprising.account.provider.repository.PositionMarginRepository;
+import com.surprising.account.provider.repository.PositionRepository;
+import com.surprising.account.provider.repository.ProductBalanceRepository;
+import com.surprising.account.provider.repository.ProductDeficitRepository;
+import com.surprising.account.provider.repository.ProductLedgerRepository;
 import com.surprising.instrument.api.math.PerpetualContractMath;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.math.BigInteger;
-import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.List;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /** 在满足快照条件时结算 ADL 盈利目标侧。 */
 @Service
 public class AdlTargetSettlementService {
 
-    private static final int OPEN_INTEREST_SHARDS = 64;
-
-    private final JdbcTemplate jdbcTemplate;
     private final AccountSequenceRepository sequenceRepository;
+    private final PositionRepository positionRepository;
+    private final OpenInterestShardRepository openInterestShardRepository;
+    private final AccountInstrumentRepository instrumentRepository;
+    private final AssetScaleRepository assetScaleRepository;
+    private final PositionMarginRepository positionMarginRepository;
+    private final AccountBalanceRepository accountBalanceRepository;
+    private final ProductBalanceRepository productBalanceRepository;
+    private final AccountDeficitRepository accountDeficitRepository;
+    private final ProductDeficitRepository productDeficitRepository;
+    private final AccountLedgerRepository accountLedgerRepository;
+    private final ProductLedgerRepository productLedgerRepository;
 
-    public AdlTargetSettlementService(JdbcTemplate jdbcTemplate,
-                                      AccountSequenceRepository sequenceRepository) {
-        this.jdbcTemplate = jdbcTemplate;
+    public AdlTargetSettlementService(AccountSequenceRepository sequenceRepository,
+                                      PositionRepository positionRepository,
+                                      OpenInterestShardRepository openInterestShardRepository,
+                                      AccountInstrumentRepository instrumentRepository,
+                                      AssetScaleRepository assetScaleRepository,
+                                      PositionMarginRepository positionMarginRepository,
+                                      AccountBalanceRepository accountBalanceRepository,
+                                      ProductBalanceRepository productBalanceRepository,
+                                      AccountDeficitRepository accountDeficitRepository,
+                                      ProductDeficitRepository productDeficitRepository,
+                                      AccountLedgerRepository accountLedgerRepository,
+                                      ProductLedgerRepository productLedgerRepository) {
         this.sequenceRepository = sequenceRepository;
+        this.positionRepository = positionRepository;
+        this.openInterestShardRepository = openInterestShardRepository;
+        this.instrumentRepository = instrumentRepository;
+        this.assetScaleRepository = assetScaleRepository;
+        this.positionMarginRepository = positionMarginRepository;
+        this.accountBalanceRepository = accountBalanceRepository;
+        this.productBalanceRepository = productBalanceRepository;
+        this.accountDeficitRepository = accountDeficitRepository;
+        this.productDeficitRepository = productDeficitRepository;
+        this.accountLedgerRepository = accountLedgerRepository;
+        this.productLedgerRepository = productLedgerRepository;
     }
 
+    @Transactional
     public AdlTargetSettlementResult settle(ProductLine productLine,
                                             long targetUserId,
                                             String commandId,
@@ -35,12 +76,13 @@ public class AdlTargetSettlementService {
         if (!productLine.isFundingProduct()) {
             throw new IllegalArgumentException("ADL target settlement requires a perpetual product line");
         }
-        PositionState position;
+        AdlPosition target;
         try {
-            position = lockPosition(productLine, targetUserId, command);
+            target = lockTarget(productLine, targetUserId, command);
         } catch (StaleAdlTargetException ex) {
             return AdlTargetSettlementResult.stale();
         }
+        PositionState position = target.position();
         if (position.signedQuantitySteps() != command.expectedSignedQuantitySteps()
                 || position.entryPriceTicks() != command.expectedEntryPriceTicks()) {
             return AdlTargetSettlementResult.stale();
@@ -49,114 +91,88 @@ public class AdlTargetSettlementService {
         if (command.closeQuantitySteps() > absQuantity) {
             return AdlTargetSettlementResult.stale();
         }
+        ContractSpec spec = target.contractSpec();
         long fullProfit = Math.max(0L, PerpetualContractMath.unrealizedPnlUnits(
-                position.contractType(), position.signedQuantitySteps(), position.entryPriceTicks(),
-                command.markPriceTicks(), position.notionalMultiplierUnits(), position.priceTickUnits(),
-                position.settleScaleUnits()));
+                spec.contractType(), position.signedQuantitySteps(), position.entryPriceTicks(),
+                command.markPriceTicks(), spec.notionalMultiplierUnits(), spec.priceTickUnits(),
+                spec.settleScaleUnits()));
         long realizedProfit = proportional(fullProfit, command.closeQuantitySteps(), absQuantity);
         if (realizedProfit != command.expectedRealizedProfitUnits()
-                || command.coveredUnits() > realizedProfit) {
-            return AdlTargetSettlementResult.stale();
-        }
-        if (hasDeficit(productLine, targetUserId, command.asset())) {
+                || command.coveredUnits() > realizedProfit
+                || hasDeficit(productLine, targetUserId, command.asset())) {
             return AdlTargetSettlementResult.stale();
         }
 
         long nextAbs = Math.subtractExact(absQuantity, command.closeQuantitySteps());
         long nextSigned = position.signedQuantitySteps() > 0 ? nextAbs : Math.negateExact(nextAbs);
-        updatePosition(productLine, targetUserId, command, position, nextSigned, realizedProfit, now);
+        updatePositionAndOpenInterest(
+                productLine, targetUserId, command, position, nextSigned, realizedProfit, now);
         releasePositionMargin(productLine, targetUserId, command, absQuantity, now);
         long afterProfit = creditAvailable(productLine, targetUserId, command.asset(), realizedProfit, now);
         insertLedger(productLine, targetUserId, command.asset(), realizedProfit, afterProfit,
                 "ADL_REALIZED_PNL", commandId, "ADL_POSITION_DELEVERAGED", now);
-        long afterTransfer = debitAvailable(productLine, targetUserId, command.asset(), command.coveredUnits(), now);
+        long afterTransfer = debitAvailable(
+                productLine, targetUserId, command.asset(), command.coveredUnits(), now);
         insertLedger(productLine, targetUserId, command.asset(), Math.negateExact(command.coveredUnits()),
                 afterTransfer, "ADL_TRANSFER", commandId, "ADL_DEFICIT_TRANSFER", now);
         return new AdlTargetSettlementResult(true, realizedProfit, command.coveredUnits(), nextSigned);
     }
 
-    private PositionState lockPosition(ProductLine productLine,
-                                       long userId,
-                                       AdlTargetSettlementAccountCommand command) {
-        return jdbcTemplate.query("""
-                SELECT p.instrument_version, p.signed_quantity_steps, p.entry_price_ticks,
-                       p.entry_value_ticks, p.realized_pnl_units,
-                       i.contract_type, i.notional_multiplier_units, i.price_tick_units,
-                       s.scale_units AS settle_scale_units
-                  FROM account_positions p
-                  JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
-                  JOIN account_asset_scales s ON s.asset = i.settle_asset
-                 WHERE p.product_line = ? AND p.user_id = ? AND p.symbol = ?
-                   AND p.margin_mode = ? AND p.position_side = ?
-                   AND i.settle_asset = ?
-                 FOR UPDATE OF p
-                """, (rs, rowNum) -> new PositionState(
-                rs.getLong("instrument_version"), rs.getLong("signed_quantity_steps"),
-                rs.getLong("entry_price_ticks"), rs.getLong("entry_value_ticks"),
-                rs.getLong("realized_pnl_units"), ContractType.valueOf(rs.getString("contract_type")),
-                rs.getLong("notional_multiplier_units"), rs.getLong("price_tick_units"),
-                rs.getLong("settle_scale_units")), productLine.name(), userId, command.symbol(),
-                command.marginMode().name(), command.positionSide().name(), command.asset())
-                .stream().findFirst().orElseThrow(() -> new StaleAdlTargetException("ADL target position is missing"));
+    private AdlPosition lockTarget(ProductLine productLine,
+                                   long userId,
+                                   AdlTargetSettlementAccountCommand command) {
+        PositionState position = positionRepository.lock(
+                        productLine, userId, command.symbol(), command.marginMode(), command.positionSide())
+                .orElseThrow(() -> new StaleAdlTargetException("ADL target position is missing"));
+        ContractInstrumentRow instrument = instrumentRepository.findContractSpec(
+                        command.symbol(), position.instrumentVersion())
+                .orElseThrow(() -> new StaleAdlTargetException("ADL target instrument is missing"));
+        if (!command.asset().equals(instrument.settleAsset())) {
+            throw new StaleAdlTargetException("ADL target settle asset changed");
+        }
+        long scaleUnits = assetScaleRepository.findScaleUnits(command.asset())
+                .orElseThrow(() -> new StaleAdlTargetException("ADL target asset scale is missing"));
+        ContractSpec spec = new ContractSpec(
+                instrument.version(), instrument.contractType(), instrument.settleAsset(),
+                instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), scaleUnits,
+                instrument.initialMarginRatePpm(), instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm());
+        return new AdlPosition(position, spec);
     }
 
-    private void updatePosition(ProductLine productLine,
-                                long userId,
-                                AdlTargetSettlementAccountCommand command,
-                                PositionState position,
-                                long nextSigned,
-                                long realizedProfit,
-                                Instant now) {
+    private void updatePositionAndOpenInterest(ProductLine productLine,
+                                               long userId,
+                                               AdlTargetSettlementAccountCommand command,
+                                               PositionState position,
+                                               long nextSigned,
+                                               long realizedProfit,
+                                               Instant now) {
         long nextEntryValue = nextSigned == 0 ? 0L : Math.subtractExact(position.entryValueTicks(),
                 proportional(position.entryValueTicks(), command.closeQuantitySteps(),
                         Math.absExact(position.signedQuantitySteps())));
+        PositionState nextPosition = new PositionState(
+                nextSigned,
+                nextSigned == 0 ? 0L : position.instrumentVersion(),
+                nextSigned == 0 ? 0L : position.entryPriceTicks(),
+                nextEntryValue,
+                Math.addExact(position.realizedPnlUnits(), realizedProfit));
+        requireSingleRow(positionRepository.update(
+                productLine, userId, command.symbol(), command.marginMode(), command.positionSide(),
+                nextPosition, now), "ADL target position update");
+
         long longDelta = Math.subtractExact(
                 Math.max(nextSigned, 0L), Math.max(position.signedQuantitySteps(), 0L));
         long previousShort = position.signedQuantitySteps() < 0
                 ? Math.negateExact(position.signedQuantitySteps()) : 0L;
         long nextShort = nextSigned < 0 ? Math.negateExact(nextSigned) : 0L;
         long shortDelta = Math.subtractExact(nextShort, previousShort);
-        int shardId = Math.floorMod(userId, OPEN_INTEREST_SHARDS);
-        Timestamp updatedAt = Timestamp.from(now);
-        int rows = jdbcTemplate.update("""
-                INSERT INTO trading_symbol_open_interest_shards (
-                    product_line, symbol, shard_id, long_quantity_steps, short_quantity_steps, updated_at
-                ) VALUES (?, ?, ?, 0, 0, ?)
-                ON CONFLICT (product_line, symbol, shard_id) DO NOTHING
-                """, productLine.name(), command.symbol(), shardId, updatedAt);
-        if (rows < 0 || rows > 1) {
-            throw new IllegalStateException("unexpected ADL open interest shard seed rows: " + rows);
+        int shardId = OpenInterestShardRepository.shardId(userId);
+        int seeded = openInterestShardRepository.seed(productLine, command.symbol(), shardId, now);
+        if (seeded < 0 || seeded > 1) {
+            throw new IllegalStateException("unexpected ADL open interest shard seed rows: " + seeded);
         }
-        rows = jdbcTemplate.update("""
-                WITH updated_position AS (
-                    UPDATE account_positions
-                       SET signed_quantity_steps = ?,
-                           instrument_version = CASE WHEN ? = 0 THEN NULL ELSE instrument_version END,
-                           entry_price_ticks = CASE WHEN ? = 0 THEN 0 ELSE entry_price_ticks END,
-                           entry_value_ticks = ?,
-                           realized_pnl_units = realized_pnl_units + ?,
-                           updated_at = ?
-                     WHERE product_line = ? AND user_id = ? AND symbol = ?
-                       AND margin_mode = ? AND position_side = ?
-                       AND signed_quantity_steps = ? AND entry_price_ticks = ?
-                 RETURNING 1
-                )
-                UPDATE trading_symbol_open_interest_shards AS shard
-                   SET long_quantity_steps = shard.long_quantity_steps + ?,
-                       short_quantity_steps = shard.short_quantity_steps + ?,
-                       updated_at = ?
-                  FROM updated_position
-                 WHERE shard.product_line = ?
-                   AND shard.symbol = ?
-                   AND shard.shard_id = ?
-                   AND shard.long_quantity_steps + ? >= 0
-                   AND shard.short_quantity_steps + ? >= 0
-                """, nextSigned, nextSigned, nextSigned, nextEntryValue, realizedProfit, updatedAt,
-                productLine.name(), userId, command.symbol(), command.marginMode().name(),
-                command.positionSide().name(), position.signedQuantitySteps(), position.entryPriceTicks(),
-                longDelta, shortDelta, updatedAt, productLine.name(), command.symbol(), shardId,
-                longDelta, shortDelta);
-        requireSingleRow(rows, "ADL target position and open interest shard update");
+        requireSingleRow(openInterestShardRepository.adjust(
+                productLine, command.symbol(), shardId, longDelta, shortDelta, now),
+                "ADL target open interest shard update");
     }
 
     private void releasePositionMargin(ProductLine productLine,
@@ -164,71 +180,32 @@ public class AdlTargetSettlementService {
                                        AdlTargetSettlementAccountCommand command,
                                        long previousAbsQuantity,
                                        Instant now) {
-        List<Long> margins = jdbcTemplate.query("""
-                SELECT margin_units
-                  FROM account_position_margins
-                 WHERE product_line = ? AND user_id = ? AND symbol = ? AND asset = ?
-                   AND margin_mode = ? AND position_side = ? AND margin_units > 0
-                 FOR UPDATE
-                """, (rs, rowNum) -> rs.getLong("margin_units"), productLine.name(), userId, command.symbol(),
-                command.asset(), command.marginMode().name(), command.positionSide().name());
-        for (long marginUnits : margins) {
-            long releaseUnits = proportional(marginUnits, command.closeQuantitySteps(), previousAbsQuantity);
-            if (releaseUnits <= 0) {
-                continue;
-            }
-            ensureBalance(productLine, userId, command.asset(), now);
-            int balanceRows = usesProductAccount(productLine)
-                    ? jdbcTemplate.update("""
-                        UPDATE account_product_balances
-                           SET locked_units = locked_units - ?,
-                               available_units = available_units + ?,
-                               updated_at = ?
-                         WHERE account_type = ? AND user_id = ? AND asset = ? AND locked_units >= ?
-                        """, releaseUnits, releaseUnits, Timestamp.from(now), productLine.accountTypeCode(),
-                        userId, command.asset(), releaseUnits)
-                    : jdbcTemplate.update("""
-                        UPDATE account_balances
-                           SET locked_units = locked_units - ?,
-                               available_units = available_units + ?,
-                               updated_at = ?
-                         WHERE user_id = ? AND asset = ? AND locked_units >= ?
-                        """, releaseUnits, releaseUnits, Timestamp.from(now), userId, command.asset(), releaseUnits);
-            requireSingleRow(balanceRows, "ADL target margin balance release");
-            int marginRows = jdbcTemplate.update("""
-                    UPDATE account_position_margins
-                       SET margin_units = margin_units - ?, updated_at = ?
-                     WHERE product_line = ? AND user_id = ? AND symbol = ? AND asset = ?
-                       AND margin_mode = ? AND position_side = ? AND margin_units >= ?
-                    """, releaseUnits, Timestamp.from(now), productLine.name(), userId, command.symbol(),
-                    command.asset(), command.marginMode().name(), command.positionSide().name(), releaseUnits);
-            requireSingleRow(marginRows, "ADL target position margin release");
-            jdbcTemplate.update("""
-                    DELETE FROM account_position_margins
-                     WHERE product_line = ? AND user_id = ? AND symbol = ? AND asset = ?
-                       AND margin_mode = ? AND position_side = ? AND margin_units = 0
-                    """, productLine.name(), userId, command.symbol(), command.asset(),
-                    command.marginMode().name(), command.positionSide().name());
+        long marginUnits = positionMarginRepository.lockUnits(
+                productLine, userId, command.symbol(), command.asset(),
+                command.marginMode(), command.positionSide());
+        long releaseUnits = proportional(marginUnits, command.closeQuantitySteps(), previousAbsQuantity);
+        if (releaseUnits <= 0) {
+            return;
         }
+        int balanceRows = usesProductAccount(productLine)
+                ? productBalanceRepository.moveLockedToAvailable(
+                        userId, accountType(productLine), command.asset(), releaseUnits, now)
+                : accountBalanceRepository.moveLockedToAvailable(
+                        userId, command.asset(), releaseUnits, now);
+        requireSingleRow(balanceRows, "ADL target margin balance release");
+        requireSingleRow(positionMarginRepository.subtract(
+                productLine, userId, command.symbol(), command.asset(),
+                command.marginMode(), command.positionSide(), releaseUnits, now),
+                "ADL target position margin release");
+        positionMarginRepository.deleteZero(
+                productLine, userId, command.symbol(), command.asset(),
+                command.marginMode(), command.positionSide());
     }
 
     private boolean hasDeficit(ProductLine productLine, long userId, String asset) {
-        Long deficit = usesProductAccount(productLine)
-                ? jdbcTemplate.query("""
-                    SELECT deficit_units
-                      FROM account_product_deficits
-                     WHERE account_type = ? AND user_id = ? AND asset = ?
-                     FOR UPDATE
-                    """, (rs, rowNum) -> rs.getLong(1), productLine.accountTypeCode(), userId, asset)
-                    .stream().findFirst().orElse(0L)
-                : jdbcTemplate.query("""
-                    SELECT deficit_units
-                      FROM account_deficits
-                     WHERE user_id = ? AND asset = ?
-                     FOR UPDATE
-                    """, (rs, rowNum) -> rs.getLong(1), userId, asset)
-                    .stream().findFirst().orElse(0L);
-        return deficit > 0;
+        return usesProductAccount(productLine)
+                ? productDeficitRepository.lockUnits(userId, accountType(productLine), asset) > 0
+                : accountDeficitRepository.lockUnits(userId, asset) > 0;
     }
 
     private long creditAvailable(ProductLine productLine,
@@ -236,22 +213,11 @@ public class AdlTargetSettlementService {
                                  String asset,
                                  long amountUnits,
                                  Instant now) {
-        ensureBalance(productLine, userId, asset, now);
-        List<Long> rows = usesProductAccount(productLine)
-                ? jdbcTemplate.query("""
-                    UPDATE account_product_balances
-                       SET available_units = available_units + ?, updated_at = ?
-                     WHERE account_type = ? AND user_id = ? AND asset = ?
-                 RETURNING available_units + locked_units
-                    """, (rs, rowNum) -> rs.getLong(1), amountUnits, Timestamp.from(now),
-                    productLine.accountTypeCode(), userId, asset)
-                : jdbcTemplate.query("""
-                    UPDATE account_balances
-                       SET available_units = available_units + ?, updated_at = ?
-                     WHERE user_id = ? AND asset = ?
-                 RETURNING available_units + locked_units
-                    """, (rs, rowNum) -> rs.getLong(1), amountUnits, Timestamp.from(now), userId, asset);
-        return requireOne(rows, "ADL target profit credit");
+        return usesProductAccount(productLine)
+                ? productBalanceRepository.creditAvailableAndReturnEquity(
+                        userId, accountType(productLine), asset, amountUnits, now)
+                : accountBalanceRepository.creditAvailableAndReturnEquity(
+                        userId, asset, amountUnits, now);
     }
 
     private long debitAvailable(ProductLine productLine,
@@ -259,39 +225,11 @@ public class AdlTargetSettlementService {
                                 String asset,
                                 long amountUnits,
                                 Instant now) {
-        List<Long> rows = usesProductAccount(productLine)
-                ? jdbcTemplate.query("""
-                    UPDATE account_product_balances
-                       SET available_units = available_units - ?, updated_at = ?
-                     WHERE account_type = ? AND user_id = ? AND asset = ? AND available_units >= ?
-                 RETURNING available_units + locked_units
-                    """, (rs, rowNum) -> rs.getLong(1), amountUnits, Timestamp.from(now),
-                    productLine.accountTypeCode(), userId, asset, amountUnits)
-                : jdbcTemplate.query("""
-                    UPDATE account_balances
-                       SET available_units = available_units - ?, updated_at = ?
-                     WHERE user_id = ? AND asset = ? AND available_units >= ?
-                 RETURNING available_units + locked_units
-                    """, (rs, rowNum) -> rs.getLong(1), amountUnits, Timestamp.from(now),
-                    userId, asset, amountUnits);
-        return requireOne(rows, "ADL target transfer debit");
-    }
-
-    private void ensureBalance(ProductLine productLine, long userId, String asset, Instant now) {
-        if (usesProductAccount(productLine)) {
-            jdbcTemplate.update("""
-                    INSERT INTO account_product_balances (
-                        account_type, user_id, asset, available_units, locked_units, updated_at
-                    ) VALUES (?, ?, ?, 0, 0, ?)
-                    ON CONFLICT (account_type, user_id, asset) DO NOTHING
-                    """, productLine.accountTypeCode(), userId, asset, Timestamp.from(now));
-        } else {
-            jdbcTemplate.update("""
-                    INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
-                    VALUES (?, ?, 0, 0, ?)
-                    ON CONFLICT (user_id, asset) DO NOTHING
-                    """, userId, asset, Timestamp.from(now));
-        }
+        return usesProductAccount(productLine)
+                ? productBalanceRepository.debitAvailableAndReturnEquity(
+                        userId, accountType(productLine), asset, amountUnits, now)
+                : accountBalanceRepository.debitAvailableAndReturnEquity(
+                        userId, asset, amountUnits, now);
     }
 
     private void insertLedger(ProductLine productLine,
@@ -304,24 +242,12 @@ public class AdlTargetSettlementService {
                               String reason,
                               Instant now) {
         int rows = usesProductAccount(productLine)
-                ? jdbcTemplate.update("""
-                    INSERT INTO account_product_ledger_entries (
-                        entry_id, account_type, user_id, asset, amount_units, balance_after_units,
-                        reference_type, reference_id, reason, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-                    """, sequenceRepository.nextProductLedgerEntryId(),
-                    productLine.accountTypeCode(),
-                    userId, asset, amountUnits, balanceAfter, referenceType, commandId, reason, Timestamp.from(now))
-                : jdbcTemplate.update("""
-                    INSERT INTO account_ledger_entries (
-                        entry_id, user_id, asset, amount_units, balance_after_units,
-                        reference_type, reference_id, reason, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                    """, sequenceRepository.nextLedgerEntryId(),
-                    userId, asset, amountUnits,
-                    balanceAfter, referenceType, commandId, reason, Timestamp.from(now));
+                ? productLedgerRepository.insertAdl(
+                        sequenceRepository.nextProductLedgerEntryId(), accountType(productLine),
+                        userId, asset, amountUnits, balanceAfter, referenceType, commandId, reason, now)
+                : accountLedgerRepository.insertAdl(
+                        sequenceRepository.nextLedgerEntryId(), userId, asset, amountUnits,
+                        balanceAfter, referenceType, commandId, reason, now);
         requireSingleRow(rows, "ADL target ledger insert");
     }
 
@@ -330,13 +256,6 @@ public class AdlTargetSettlementService {
                 .multiply(BigInteger.valueOf(numerator))
                 .divide(BigInteger.valueOf(denominator))
                 .longValueExact();
-    }
-
-    private long requireOne(List<Long> rows, String operation) {
-        if (rows == null || rows.size() != 1) {
-            throw new IllegalStateException("failed to write " + operation);
-        }
-        return rows.getFirst();
     }
 
     private void requireSingleRow(int rows, String operation) {
@@ -349,16 +268,11 @@ public class AdlTargetSettlementService {
         return productLine != ProductLine.LINEAR_PERPETUAL;
     }
 
-    private record PositionState(
-            long instrumentVersion,
-            long signedQuantitySteps,
-            long entryPriceTicks,
-            long entryValueTicks,
-            long realizedPnlUnits,
-            ContractType contractType,
-            long notionalMultiplierUnits,
-            long priceTickUnits,
-            long settleScaleUnits) {
+    private AccountType accountType(ProductLine productLine) {
+        return AccountType.valueOf(productLine.accountTypeCode());
+    }
+
+    private record AdlPosition(PositionState position, ContractSpec contractSpec) {
     }
 
     public record AdlTargetSettlementResult(
