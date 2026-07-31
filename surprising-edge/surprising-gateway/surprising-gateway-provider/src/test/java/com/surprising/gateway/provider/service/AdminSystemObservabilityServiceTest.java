@@ -1,4 +1,4 @@
-package com.surprising.gateway.provider.controller;
+package com.surprising.gateway.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -20,7 +20,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
-class AdminSystemObservabilityControllerTest {
+class AdminSystemObservabilityServiceTest {
 
     @Test
     void observabilityAggregatesWebSocketMetricsAndPrometheusScrape() {
@@ -35,10 +35,10 @@ class AdminSystemObservabilityControllerTest {
         properties.setAdminRoutes(adminRoutes);
         properties.getObservability().getKafka().setEnabled(false);
 
-        AdminSystemObservabilityController controller = new AdminSystemObservabilityController(
+        AdminSystemObservabilityService service = new AdminSystemObservabilityService(
                 authService, properties, new FakeRestTemplate());
 
-        var response = controller.observability("Bearer admin");
+        var response = service.observability("Bearer admin");
 
         assertThat(response.kafka().enabled()).isFalse();
         assertThat(response.webSocket().status()).isEqualTo("UP");

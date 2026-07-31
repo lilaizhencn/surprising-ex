@@ -9,13 +9,10 @@ import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycUpdateRequest;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTag;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTagCreateRequest;
-import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.config.GatewayTraceFilter;
 import jakarta.servlet.http.HttpServletRequest;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
 import java.util.List;
+import java.util.function.Supplier;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,21 +30,12 @@ import tools.jackson.databind.ObjectMapper;
 @RequestMapping("/api/v1/admin/compliance")
 public class AdminComplianceController {
 
-    private final AuthService authService;
     private final ComplianceService complianceService;
-    private final AdminApprovalRepository adminApprovalRepository;
-    private final GatewayProperties properties;
     private final ObjectMapper objectMapper;
 
-    public AdminComplianceController(AuthService authService,
-                                     ComplianceService complianceService,
-                                     AdminApprovalRepository adminApprovalRepository,
-                                     GatewayProperties properties,
+    public AdminComplianceController(ComplianceService complianceService,
                                      ObjectMapper objectMapper) {
-        this.authService = authService;
         this.complianceService = complianceService;
-        this.adminApprovalRepository = adminApprovalRepository;
-        this.properties = properties;
         this.objectMapper = objectMapper;
     }
 
@@ -60,9 +48,9 @@ public class AdminComplianceController {
                                              @RequestParam(value = "cursor", required = false) String cursor,
                                              @RequestParam(value = "sort", required = false) String sort) {
         try {
-            authService.requireAdminPermission(authorization, "admin.compliance.read");
             AdminCursorPage.CursorPage<ComplianceUserSummary> page =
-                    complianceService.usersPage(userId, kycStatus, tagCode, limit, cursor, sort);
+                    complianceService.adminUsersPage(
+                            authorization, userId, kycStatus, tagCode, limit, cursor, sort);
             return new ComplianceUserQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                     page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {
@@ -76,13 +64,12 @@ public class AdminComplianceController {
     public ComplianceUserDetailResponse user(@RequestHeader("Authorization") String authorization,
                                              @PathVariable("userId") long userId) {
         try {
-            authService.requireAdminPermission(authorization, "admin.compliance.read");
-            AuthenticatedUser user = authService.adminUser(authorization, userId);
+            ComplianceService.AdminComplianceUserDetail detail = complianceService.adminUser(authorization, userId);
             return new ComplianceUserDetailResponse(
-                    user,
-                    complianceService.kyc(userId),
-                    complianceService.riskTags(userId, null, 200),
-                    complianceService.amlCases(userId, null, 200));
+                    detail.user(),
+                    detail.kyc(),
+                    detail.riskTags(),
+                    detail.amlCases());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -98,9 +85,9 @@ public class AdminComplianceController {
                                          @RequestParam(value = "cursor", required = false) String cursor,
                                          @RequestParam(value = "sort", required = false) String sort) {
         try {
-            authService.requireAdminPermission(authorization, "admin.compliance.read");
             AdminCursorPage.CursorPage<RiskTag> page =
-                    complianceService.riskTagsPage(userId, status, limit, cursor, sort);
+                    complianceService.adminRiskTagsPage(
+                            authorization, userId, status, limit, cursor, sort);
             return new RiskTagQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                     page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {
@@ -118,9 +105,9 @@ public class AdminComplianceController {
                                          @RequestParam(value = "cursor", required = false) String cursor,
                                          @RequestParam(value = "sort", required = false) String sort) {
         try {
-            authService.requireAdminPermission(authorization, "admin.compliance.read");
             AdminCursorPage.CursorPage<AmlCase> page =
-                    complianceService.amlCasesPage(userId, status, limit, cursor, sort);
+                    complianceService.adminAmlCasesPage(
+                            authorization, userId, status, limit, cursor, sort);
             return new AmlCaseQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                     page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {
@@ -136,10 +123,9 @@ public class AdminComplianceController {
                                 @RequestBody byte[] body,
                                 HttpServletRequest httpRequest) {
         try {
-            var principal = requireWrite(authorization, httpRequest, body);
-            authService.adminUser(authorization, userId);
             KycUpdateRequest request = readBody(body, KycUpdateRequest.class);
-            return complianceService.upsertKyc(userId, principal.userId(), request, Instant.now());
+            return withApproval(() -> complianceService.adminUpsertKyc(
+                    authorization, userId, request, requestMetadata(httpRequest), body));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -153,10 +139,9 @@ public class AdminComplianceController {
                                  @RequestBody byte[] body,
                                  HttpServletRequest httpRequest) {
         try {
-            var principal = requireWrite(authorization, httpRequest, body);
-            authService.adminUser(authorization, userId);
             RiskTagCreateRequest request = readBody(body, RiskTagCreateRequest.class);
-            return complianceService.createRiskTag(userId, principal.userId(), request, Instant.now());
+            return withApproval(() -> complianceService.adminCreateRiskTag(
+                    authorization, userId, request, requestMetadata(httpRequest), body));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -170,8 +155,8 @@ public class AdminComplianceController {
                                   @RequestBody(required = false) byte[] body,
                                   HttpServletRequest httpRequest) {
         try {
-            var principal = requireWrite(authorization, httpRequest, body);
-            return complianceService.resolveRiskTag(tagId, principal.userId(), Instant.now());
+            return withApproval(() -> complianceService.adminResolveRiskTag(
+                    authorization, tagId, requestMetadata(httpRequest), body));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -185,10 +170,9 @@ public class AdminComplianceController {
                                  @RequestBody byte[] body,
                                  HttpServletRequest httpRequest) {
         try {
-            var principal = requireWrite(authorization, httpRequest, body);
-            authService.adminUser(authorization, userId);
             AmlCaseCreateRequest request = readBody(body, AmlCaseCreateRequest.class);
-            return complianceService.createAmlCase(userId, principal.userId(), request, Instant.now());
+            return withApproval(() -> complianceService.adminCreateAmlCase(
+                    authorization, userId, request, requestMetadata(httpRequest), body));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -202,9 +186,9 @@ public class AdminComplianceController {
                                        @RequestBody byte[] body,
                                        HttpServletRequest httpRequest) {
         try {
-            var principal = requireWrite(authorization, httpRequest, body);
             AmlCaseStatusUpdateRequest request = readBody(body, AmlCaseStatusUpdateRequest.class);
-            return complianceService.updateAmlCaseStatus(caseId, principal.userId(), request, Instant.now());
+            return withApproval(() -> complianceService.adminUpdateAmlCaseStatus(
+                    authorization, caseId, request, requestMetadata(httpRequest), body));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -212,40 +196,21 @@ public class AdminComplianceController {
         }
     }
 
-    private AuthModels.JwtPrincipal requireWrite(String authorization, HttpServletRequest request, byte[] body) {
-        var principal = authService.requireAdminPermission(authorization, "admin.compliance.write");
-        requireLocalAdminApproval(principal, request, body);
-        return principal;
-    }
-
-    private void requireLocalAdminApproval(AuthModels.JwtPrincipal principal, HttpServletRequest request, byte[] body) {
-        if (!properties.getSecurity().isRequireApprovalForHighRiskAdminWrites()) {
-            return;
-        }
-        String approvalIdHeader = request.getHeader(properties.getSecurity().getAdminApprovalHeader());
-        if (approvalIdHeader == null || approvalIdHeader.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, "admin approval required");
-        }
-        long approvalId;
+    private <T> T withApproval(Supplier<T> action) {
         try {
-            approvalId = Long.parseLong(approvalIdHeader.trim());
-        } catch (NumberFormatException ex) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, "invalid admin approval id", ex);
-        }
-        try {
-            adminApprovalRepository.consumeApproved(
-                    approvalId,
-                    principal.userId(),
-                    "gateway-admin",
-                    request.getMethod(),
-                    request.getRequestURI(),
-                    request.getQueryString(),
-                    bodySha256(body),
-                    traceId(request),
-                    Instant.now());
-        } catch (IllegalArgumentException | IllegalStateException ex) {
+            return action.get();
+        } catch (AdminApprovalService.AdminApprovalRequiredException ex) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
         }
+    }
+
+    private AdminApprovalService.AdminRequestMetadata requestMetadata(HttpServletRequest request) {
+        return new AdminApprovalService.AdminRequestMetadata(
+                request.getHeader(complianceService.approvalHeaderName()),
+                request.getMethod(),
+                request.getRequestURI(),
+                request.getQueryString(),
+                traceId(request));
     }
 
     private <T> T readBody(byte[] body, Class<T> type) {
@@ -253,22 +218,6 @@ public class AdminComplianceController {
             return objectMapper.readValue(body == null ? new byte[0] : body, type);
         } catch (JacksonException ex) {
             throw new IllegalArgumentException("invalid request body", ex);
-        }
-    }
-
-    private String bodySha256(byte[] body) {
-        if (body == null || body.length == 0) {
-            return null;
-        }
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(body);
-            StringBuilder hex = new StringBuilder(digest.length * 2);
-            for (byte item : digest) {
-                hex.append(String.format("%02x", item));
-            }
-            return hex.toString();
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 is not available", ex);
         }
     }
 

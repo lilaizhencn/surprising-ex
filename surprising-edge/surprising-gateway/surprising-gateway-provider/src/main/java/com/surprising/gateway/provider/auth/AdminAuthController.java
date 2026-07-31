@@ -16,13 +16,9 @@ import com.surprising.gateway.provider.auth.AuthModels.AdminUserStatusRequest;
 import com.surprising.gateway.provider.auth.AuthModels.AdminOperationLogQueryResponse;
 import com.surprising.gateway.provider.auth.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.AuthModels.LoginLogQueryResponse;
-import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.config.GatewayTraceFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -41,20 +37,14 @@ import tools.jackson.databind.ObjectMapper;
 public class AdminAuthController {
 
     private final AuthService authService;
-    private final AdminAuditRepository adminAuditRepository;
-    private final AdminApprovalRepository adminApprovalRepository;
-    private final GatewayProperties properties;
+    private final AdminApprovalService adminApprovalService;
     private final ObjectMapper objectMapper;
 
     public AdminAuthController(AuthService authService,
-                               AdminAuditRepository adminAuditRepository,
-                               AdminApprovalRepository adminApprovalRepository,
-                               GatewayProperties properties,
+                               AdminApprovalService adminApprovalService,
                                ObjectMapper objectMapper) {
         this.authService = authService;
-        this.adminAuditRepository = adminAuditRepository;
-        this.adminApprovalRepository = adminApprovalRepository;
-        this.properties = properties;
+        this.adminApprovalService = adminApprovalService;
         this.objectMapper = objectMapper;
     }
 
@@ -209,8 +199,8 @@ public class AdminAuthController {
                                                         @RequestParam(value = "cursor", required = false) String cursor,
                                                         @RequestParam(value = "sort", required = false) String sort) {
         try {
-            authService.authenticateAdminBearer(authorization);
-            var page = adminAuditRepository.operationLogPage(adminUserId, service, method, success, limit, cursor, sort);
+            var page = adminApprovalService.operationLogs(
+                    authorization, adminUserId, service, method, success, limit, cursor, sort);
             return new AdminOperationLogQueryResponse(page.items().size(), page.items(),
                     page.nextCursor(), page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {
@@ -274,9 +264,7 @@ public class AdminAuthController {
     public AdminApprovalResponse createApproval(@RequestHeader("Authorization") String authorization,
                                                 @Valid @RequestBody AdminApprovalCreateRequest request) {
         try {
-            var principal = authService.authenticateAdminBearer(authorization);
-            return adminApprovalRepository.create(principal, request,
-                    properties.getSecurity().getAdminApprovalTtl(), Instant.now());
+            return adminApprovalService.create(authorization, request);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -294,9 +282,8 @@ public class AdminAuthController {
                                                 @RequestParam(value = "cursor", required = false) String cursor,
                                                 @RequestParam(value = "sort", required = false) String sort) {
         try {
-            authService.authenticateAdminBearer(authorization);
-            var page = adminApprovalRepository.approvalPage(
-                    status, requesterUserId, approverUserId, service, limit, cursor, sort);
+            var page = adminApprovalService.approvals(
+                    authorization, status, requesterUserId, approverUserId, service, limit, cursor, sort);
             return new AdminApprovalQueryResponse(page.items().size(), page.items(),
                     page.nextCursor(), page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {
@@ -311,9 +298,8 @@ public class AdminAuthController {
                                          @PathVariable("approvalId") long approvalId,
                                          @Valid @RequestBody(required = false) AdminApprovalDecisionRequest request) {
         try {
-            var principal = authService.authenticateAdminBearer(authorization);
-            return adminApprovalRepository.approve(approvalId, principal,
-                    request == null ? null : request.reason(), Instant.now());
+            return adminApprovalService.approve(
+                    authorization, approvalId, request == null ? null : request.reason());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -326,9 +312,8 @@ public class AdminAuthController {
                                         @PathVariable("approvalId") long approvalId,
                                         @Valid @RequestBody(required = false) AdminApprovalDecisionRequest request) {
         try {
-            var principal = authService.authenticateAdminBearer(authorization);
-            return adminApprovalRepository.reject(approvalId, principal,
-                    request == null ? null : request.reason(), Instant.now());
+            return adminApprovalService.reject(
+                    authorization, approvalId, request == null ? null : request.reason());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -345,50 +330,24 @@ public class AdminAuthController {
     }
 
     private void requireLocalAdminApproval(String authorization, HttpServletRequest request, byte[] body) {
-        if (!properties.getSecurity().isRequireApprovalForHighRiskAdminWrites()) {
-            return;
-        }
-        var principal = authService.authenticateAdminBearer(authorization);
-        String approvalIdHeader = request.getHeader(properties.getSecurity().getAdminApprovalHeader());
-        if (approvalIdHeader == null || approvalIdHeader.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, "admin approval required");
-        }
-        long approvalId;
         try {
-            approvalId = Long.parseLong(approvalIdHeader.trim());
-        } catch (NumberFormatException ex) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, "invalid admin approval id", ex);
-        }
-        try {
-            adminApprovalRepository.consumeApproved(
-                    approvalId,
-                    principal.userId(),
+            adminApprovalService.consumeLocalApproval(
+                    authorization,
                     "gateway-admin",
-                    request.getMethod(),
-                    request.getRequestURI(),
-                    request.getQueryString(),
-                    bodySha256(body),
-                    traceId(request),
-                    Instant.now());
-        } catch (IllegalArgumentException | IllegalStateException ex) {
+                    requestMetadata(request),
+                    body);
+        } catch (AdminApprovalService.AdminApprovalRequiredException ex) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
         }
     }
 
-    private String bodySha256(byte[] body) {
-        if (body == null || body.length == 0) {
-            return null;
-        }
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(body);
-            StringBuilder hex = new StringBuilder(digest.length * 2);
-            for (byte item : digest) {
-                hex.append(String.format("%02x", item));
-            }
-            return hex.toString();
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 is not available", ex);
-        }
+    private AdminApprovalService.AdminRequestMetadata requestMetadata(HttpServletRequest request) {
+        return new AdminApprovalService.AdminRequestMetadata(
+                request.getHeader(adminApprovalService.approvalHeaderName()),
+                request.getMethod(),
+                request.getRequestURI(),
+                request.getQueryString(),
+                traceId(request));
     }
 
     private String traceId(HttpServletRequest request) {

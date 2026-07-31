@@ -1,4 +1,4 @@
-package com.surprising.gateway.provider.controller;
+package com.surprising.gateway.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -18,15 +18,15 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
-class AdminSystemControllerTest {
+class AdminSystemServiceTest {
 
     @Test
     void routesExposeAdminAndPublicRoutesWithoutSecrets() {
         GatewayProperties properties = properties();
-        AdminSystemController controller = new AdminSystemController(
+        AdminSystemService service = new AdminSystemService(
                 adminAuthService(), properties, new RestTemplate());
 
-        var response = controller.routes("Bearer admin");
+        var response = service.routes("Bearer admin");
 
         assertThat(response.publicRoutes()).hasSize(1);
         assertThat(response.adminRoutes()).hasSize(1);
@@ -38,10 +38,10 @@ class AdminSystemControllerTest {
     void healthChecksActuatorHealthForConfiguredBackend() {
         GatewayProperties properties = properties();
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
-        AdminSystemController controller = new AdminSystemController(
+        AdminSystemService service = new AdminSystemService(
                 adminAuthService(), properties, restTemplate);
 
-        var response = controller.health("Bearer admin", false);
+        var response = service.health("Bearer admin", false);
 
         assertThat(response.count()).isEqualTo(1);
         assertThat(response.up()).isEqualTo(1);

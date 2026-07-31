@@ -1,7 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
-import com.surprising.gateway.provider.auth.SupportTicketRepository.CursorPage;
-import com.surprising.gateway.provider.auth.SupportTicketRepository.SupportTicketNote;
+import com.surprising.gateway.provider.auth.SupportModels.CursorPage;
+import com.surprising.gateway.provider.auth.SupportModels.SupportTicketNote;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;

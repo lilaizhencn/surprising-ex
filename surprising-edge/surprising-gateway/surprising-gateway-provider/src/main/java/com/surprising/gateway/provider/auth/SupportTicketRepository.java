@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.SupportModels.CursorPage;
+import com.surprising.gateway.provider.auth.SupportModels.SupportTicket;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -129,34 +131,4 @@ public class SupportTicketRepository {
         };
     }
 
-    public record SupportTicket(long ticketId,
-                                long userId,
-                                String status,
-                                String priority,
-                                String category,
-                                String title,
-                                Long assignedAdminUserId,
-                                long createdByUserId,
-                                Long resolvedByUserId,
-                                Instant createdAt,
-                                Instant updatedAt,
-                                Instant closedAt) {
-    }
-
-    public record SupportTicketNote(long noteId,
-                                    long ticketId,
-                                    long adminUserId,
-                                    String noteType,
-                                    String visibility,
-                                    String body,
-                                    Instant createdAt) {
-    }
-
-    public record CursorPage<T>(
-            List<T> items,
-            String nextCursor,
-            boolean hasMore,
-            String sort,
-            int limit) {
-    }
 }
