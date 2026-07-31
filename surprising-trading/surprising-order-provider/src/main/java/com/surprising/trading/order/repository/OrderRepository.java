@@ -446,6 +446,37 @@ public class OrderRepository {
         return adminCancelableOrders(userId, symbol, null, limit);
     }
 
+    public List<OrderRecord> lifecycleCancelableOrders(ProductLine productLine, String symbol, int limit) {
+        return jdbcTemplate.query("""
+                SELECT *
+                  FROM trading_orders
+                 WHERE product_line = ?
+                   AND symbol = ?
+                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED')
+                   AND remaining_quantity_steps > 0
+                 ORDER BY created_at, order_id
+                 LIMIT ?
+                 FOR UPDATE SKIP LOCKED
+                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), symbol,
+                Math.max(1, Math.min(limit, 1000)));
+    }
+
+    public boolean hasLifecycleActiveOrders(ProductLine productLine, String symbol) {
+        Boolean active = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM trading_orders
+                     WHERE product_line = ?
+                       AND symbol = ?
+                       AND status IN (
+                           'PENDING_RESERVE', 'ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED'
+                       )
+                       AND remaining_quantity_steps > 0
+                )
+                """, Boolean.class, productLine(productLine).name(), symbol);
+        return Boolean.TRUE.equals(active);
+    }
+
     public List<OrderRecord> adminCancelableOrders(Long userId, String symbol, String contractType, int limit) {
         String normalizedSymbol = emptyToNull(symbol);
         String productLine = productLineNameFromContractType(contractType);

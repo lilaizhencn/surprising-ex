@@ -47,12 +47,21 @@ public class AlgoOrderService {
     private final AlgoOrderChildRepository childRepository;
     private final OrderService orderService;
     private final OrderScheduleIndex scheduleIndex;
+    private final OrderInstrumentLifecycleFenceService lifecycleFenceService;
 
     public AlgoOrderService(TradingOrderProperties properties,
                             AlgoOrderRepository algoOrderRepository,
                             AlgoOrderChildRepository childRepository,
                             OrderService orderService) {
-        this(properties, algoOrderRepository, childRepository, orderService, OrderScheduleIndex.disabled());
+        this(properties, algoOrderRepository, childRepository, orderService, OrderScheduleIndex.disabled(), null);
+    }
+
+    public AlgoOrderService(TradingOrderProperties properties,
+                            AlgoOrderRepository algoOrderRepository,
+                            AlgoOrderChildRepository childRepository,
+                            OrderService orderService,
+                            OrderScheduleIndex scheduleIndex) {
+        this(properties, algoOrderRepository, childRepository, orderService, scheduleIndex, null);
     }
 
     @Autowired
@@ -60,12 +69,14 @@ public class AlgoOrderService {
                             AlgoOrderRepository algoOrderRepository,
                             AlgoOrderChildRepository childRepository,
                             OrderService orderService,
-                            OrderScheduleIndex scheduleIndex) {
+                            OrderScheduleIndex scheduleIndex,
+                            OrderInstrumentLifecycleFenceService lifecycleFenceService) {
         this.properties = properties;
         this.algoOrderRepository = algoOrderRepository;
         this.childRepository = childRepository;
         this.orderService = orderService;
         this.scheduleIndex = scheduleIndex;
+        this.lifecycleFenceService = lifecycleFenceService;
     }
 
     @Transactional
@@ -80,6 +91,9 @@ public class AlgoOrderService {
                 requireAlgoOrderCurrentProductLine(existingOrder);
                 return toResponse(existingOrder);
             }
+        }
+        if (lifecycleFenceService != null) {
+            lifecycleFenceService.requirePlacementAllowed(productLine, normalized.symbol());
         }
         Instant now = Instant.now();
         long algoOrderId = algoOrderRepository.nextAlgoOrderId();
@@ -189,6 +203,22 @@ public class AlgoOrderService {
                     return toResponse(order);
                 })
                 .orElseThrow(() -> new IllegalStateException("algo order not found: " + algoOrderId));
+    }
+
+    /** 到期生命周期停止后续切片，并撤销已生成的全部子订单。 */
+    @Transactional
+    public int cancelLifecycleOrders(String symbol, int limit) {
+        String normalizedSymbol = normalizeSymbol(symbol);
+        List<AlgoOrderRecord> orders = algoOrderRepository.lifecycleCancelableOrders(
+                currentProductLine(), normalizedSymbol, limit);
+        for (AlgoOrderRecord order : orders) {
+            cancelRecord(order);
+        }
+        return orders.size();
+    }
+
+    public boolean hasLifecycleActiveOrders(String symbol) {
+        return algoOrderRepository.hasLifecycleActiveOrders(currentProductLine(), normalizeSymbol(symbol));
     }
 
     public AlgoOrderQueryResponse openOrders(long userId, String symbol, int limit) {

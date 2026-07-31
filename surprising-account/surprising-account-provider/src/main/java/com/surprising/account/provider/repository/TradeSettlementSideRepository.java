@@ -5,6 +5,11 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -73,6 +78,34 @@ public class TradeSettlementSideRepository {
                 rs.getLong("consumed_units"), rs.getLong("released_units")), orderId)
                 .stream().findFirst()
                 .orElse(new MarginUsage(0L, 0L));
+    }
+
+    public Map<Long, MarginUsage> marginUsage(ProductLine productLine, List<Long> orderIds) {
+        if (orderIds == null || orderIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> uniqueIds = orderIds.stream().distinct().toList();
+        String placeholders = String.join(",", Collections.nCopies(uniqueIds.size(), "?"));
+        List<Object> parameters = new ArrayList<>();
+        parameters.add(productLine.name());
+        parameters.addAll(uniqueIds);
+        Map<Long, MarginUsage> result = new LinkedHashMap<>();
+        jdbcTemplate.query("""
+                SELECT order_id,
+                       COALESCE(SUM(order_margin_consumed_units), 0) AS consumed_units,
+                       COALESCE(SUM(order_margin_released_units), 0) AS released_units
+                  FROM account_trade_settlement_sides
+                 WHERE product_line = ?
+                   AND order_id IN (%s)
+                 GROUP BY order_id
+                """.formatted(placeholders), rs -> {
+            while (rs.next()) {
+                result.put(rs.getLong("order_id"), new MarginUsage(
+                        rs.getLong("consumed_units"), rs.getLong("released_units")));
+            }
+            return null;
+        }, parameters.toArray());
+        return Map.copyOf(result);
     }
 
     public record MarginUsage(long consumedUnits, long releasedUnits) {

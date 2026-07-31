@@ -94,6 +94,7 @@ public class AccountProperties {
         private String triggerOrderEventsTopic = "surprising.perp.trigger-order.events.v1";
         private String deliverySettlementsTopic = "surprising.linear-delivery.delivery.settlements.v1";
         private String optionExercisesTopic = "surprising.option.option.exercises.v1";
+        private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
         private int concurrency = 2;
         private int userCommandConcurrency = 32;
         private int maxPollRecords = 500;
@@ -228,6 +229,18 @@ public class AccountProperties {
 
         public boolean isOptionExercisesTopicEnabled() {
             return !productTopicsEnabled || productLine.isOptionProduct();
+        }
+
+        public String getInstrumentLifecycleDrainTopic() {
+            return instrumentLifecycleDrainTopic;
+        }
+
+        public void setInstrumentLifecycleDrainTopic(String instrumentLifecycleDrainTopic) {
+            this.instrumentLifecycleDrainTopic = instrumentLifecycleDrainTopic;
+        }
+
+        public String getInstrumentLifecycleGroupId() {
+            return productTopics().consumerGroup("account-instrument-lifecycle");
         }
 
         public int getConcurrency() {

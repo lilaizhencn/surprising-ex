@@ -63,10 +63,13 @@ Delivery futures reuse most of the perpetual path: order entry, matching, margin
 
 1. Instrument rows include `expiry_time`, `delivery_time`, and `settlement_method`.
 2. Before expiry, the symbol enters reduce-only mode and rejects new opening exposure.
-3. At expiry, matching for that symbol is stopped and open orders are canceled.
-4. A lifecycle event is published to `surprising.linear-delivery.delivery.settlements.v1`.
-5. Account settlement closes open positions at the settlement price, writes `DELIVERY_SETTLEMENT` ledger entries, releases margin, and returns position quantity to zero.
-6. Gateway, WebSocket, and admin pages display delivery status, settlement price, delivery ledger, and final balances.
+3. At expiry, instrument enters `SETTLING`; the immutable version and its Outbox event commit in one transaction.
+4. Order and trigger providers persist a symbol fence before draining algo, ordinary, and trigger orders. Matching still accepts cancellation for the retired book but rejects new placement.
+5. After order drain readiness, account verifies every reservation against applied releases and trade-side margin audit before acknowledging that frozen order funds are gone.
+6. Instrument can enter `CLOSED` only after `ORDER`, `TRIGGER`, and `ACCOUNT` acknowledgements match the same symbol, version, and product line.
+7. The delivery event is then published to `surprising.linear-delivery.delivery.settlements.v1`.
+8. Account settlement closes positions at the settlement price, writes `DELIVERY_SETTLEMENT` ledger entries, releases position margin, and returns position quantity to zero.
+9. Gateway, WebSocket, and admin pages display delivery status, settlement price, delivery ledger, and final balances.
 
 ## Options Model
 
@@ -75,9 +78,10 @@ The current options path is cash-settled European vanilla options. Early exercis
 1. Instrument rows use `VANILLA_OPTION` and store underlying, expiry, delivery time, strike, call/put type, and exercise style.
 2. Buyers pay premium; their maximum loss is the premium.
 3. Sellers post margin; portfolio margin, Greeks, and volatility-surface risk are later enhancements.
-4. At expiry, CALL payoff is `max(underlying settlement price - strike, 0)` and PUT payoff is `max(strike - underlying settlement price, 0)`.
-5. A lifecycle event is published to `surprising.option.option.exercises.v1`.
-6. Account settlement writes `OPTION_PREMIUM` and `OPTION_EXERCISE` ledger entries, releases margin, and returns position quantity to zero.
+4. Expiry first reuses the `SETTLING -> order/trigger drain -> account reservation verification -> CLOSED` barrier above.
+5. CALL payoff is `max(underlying settlement price - strike, 0)` and PUT payoff is `max(strike - underlying settlement price, 0)`.
+6. A lifecycle event is published to `surprising.option.option.exercises.v1`.
+7. Account settlement writes `OPTION_PREMIUM` and `OPTION_EXERCISE` ledger entries, releases position margin, and returns position quantity to zero.
 
 ## Topic Model
 
@@ -107,6 +111,10 @@ surprising.<product-segment>.funding.rate.v1
 surprising.<product-segment>.delivery.settlements.v1
 surprising.<product-segment>.option.exercises.v1
 ```
+
+The shared `surprising.instrument.lifecycle-drain.v1` topic is keyed by symbol and carries the
+`ORDER`, `TRIGGER`, and `ACCOUNT` readiness acknowledgements. It is an operational barrier, not an
+analytics topic or a substitute for a future isolated finance/operations database.
 
 Each product line creates only the applicable subset. See [Deployment](deployment.md) for the exact
 perpetual inventory and the 32-partition contract.

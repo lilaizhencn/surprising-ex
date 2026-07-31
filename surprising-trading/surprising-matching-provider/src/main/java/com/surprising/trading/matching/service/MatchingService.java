@@ -206,7 +206,9 @@ public class MatchingService {
             return null;
         }
         Instant now = Instant.now();
-        MatchingSymbol symbol = exchangeCoreEngine.ensureSymbol(command.symbol())
+        MatchingSymbol symbol = (command.commandType() == OrderCommandType.CANCEL
+                ? exchangeCoreEngine.ensureCancellationSymbol(command.symbol())
+                : exchangeCoreEngine.ensureSymbol(command.symbol()))
                 .orElse(null);
         if (symbol == null) {
             saveAndPublish(rejected(command, "UNKNOWN_SYMBOL", now), command, Map.of());

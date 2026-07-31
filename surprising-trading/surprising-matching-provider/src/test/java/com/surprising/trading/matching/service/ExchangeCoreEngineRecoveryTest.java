@@ -103,6 +103,7 @@ class ExchangeCoreEngineRecoveryTest {
             engine.refreshSymbols();
 
             assertThat(engine.ensureSymbol("BTC-USDT")).isEmpty();
+            assertThat(engine.ensureCancellationSymbol("BTC-USDT")).contains(matchingSymbol);
             assertThat(symbolRepository.currentTradingSymbolsCalls).hasValue(2);
             assertThat(symbolRepository.currentTradingSymbolCalls).hasValue(0);
             assertThat(symbolRepository.ensureMatchingSymbolCalls).hasValue(1);
@@ -158,6 +159,11 @@ class ExchangeCoreEngineRecoveryTest {
         public MatchingSymbol ensureMatchingSymbol(InstrumentSymbol instrument) {
             ensureMatchingSymbolCalls.incrementAndGet();
             return matchingSymbol;
+        }
+
+        @Override
+        public Optional<MatchingSymbol> existingMatchingSymbol(String symbol) {
+            return matchingSymbol.symbol().equals(symbol) ? Optional.of(matchingSymbol) : Optional.empty();
         }
     }
 

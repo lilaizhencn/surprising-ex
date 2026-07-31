@@ -63,6 +63,11 @@ public class MatchingSymbolService {
                 .map(InstrumentVersion::toInstrumentSymbol);
     }
 
+    @Transactional(readOnly = true)
+    public Optional<MatchingSymbol> existingMatchingSymbol(String symbol) {
+        return symbolRepository.find(symbol);
+    }
+
     @Transactional
     public MatchingSymbol ensureMatchingSymbol(InstrumentSymbol instrument) {
         int baseCurrencyId = ensureAsset(instrument.baseAsset());

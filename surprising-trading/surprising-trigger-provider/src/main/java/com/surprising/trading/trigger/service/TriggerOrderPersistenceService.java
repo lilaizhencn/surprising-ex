@@ -192,6 +192,15 @@ public class TriggerOrderPersistenceService {
         return triggerOrderRepository.cancel(userId, triggerOrderId, now);
     }
 
+    public List<TriggerOrderRecord> cancelForLifecycle(
+            ProductLine productLine, String symbol, int limit, Instant now) {
+        return triggerOrderRepository.cancelForLifecycle(productLine, symbol, limit, now);
+    }
+
+    public boolean hasLifecycleActiveOrders(ProductLine productLine, String symbol) {
+        return triggerOrderRepository.hasLifecycleActiveOrders(productLine, symbol);
+    }
+
     public List<TriggerOrderRecord> claimTriggered(String symbol,
                                                    long triggerPriceTicks,
                                                    long triggerSequence,

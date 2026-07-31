@@ -53,6 +53,8 @@ public class TriggerProperties {
         private String markPriceTopic = "surprising.perp.mark.price.v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
         private String triggerOrderEventsTopic = "surprising.perp.trigger-order.events.v1";
+        private String instrumentEventsTopic = "surprising.instrument.events.v1";
+        private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
         private int concurrency = 2;
         private int maxPollRecords = 500;
 
@@ -110,6 +112,26 @@ public class TriggerProperties {
 
         public void setTriggerOrderEventsTopic(String triggerOrderEventsTopic) {
             this.triggerOrderEventsTopic = triggerOrderEventsTopic;
+        }
+
+        public String getInstrumentEventsTopic() {
+            return instrumentEventsTopic;
+        }
+
+        public void setInstrumentEventsTopic(String instrumentEventsTopic) {
+            this.instrumentEventsTopic = instrumentEventsTopic;
+        }
+
+        public String getInstrumentLifecycleDrainTopic() {
+            return instrumentLifecycleDrainTopic;
+        }
+
+        public void setInstrumentLifecycleDrainTopic(String instrumentLifecycleDrainTopic) {
+            this.instrumentLifecycleDrainTopic = instrumentLifecycleDrainTopic;
+        }
+
+        public String getInstrumentLifecycleGroupId() {
+            return productTopics().consumerGroup("trigger-instrument-lifecycle");
         }
 
         public int getConcurrency() {

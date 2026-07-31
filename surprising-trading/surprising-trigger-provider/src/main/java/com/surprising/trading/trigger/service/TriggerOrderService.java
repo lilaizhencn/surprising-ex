@@ -69,6 +69,7 @@ import org.springframework.transaction.support.TransactionTemplate;
     private final TriggerOrderIndex triggerOrderIndex;
     private final TriggerOrderOutboxRepository outboxRepository;
     private final TransactionTemplate transactionTemplate;
+    private final TriggerInstrumentLifecycleFenceService lifecycleFenceService;
 
     public TriggerOrderService(TriggerOrderPersistenceService triggerOrderRepository,
                                OrderRpcApi orderRpcApi,
@@ -80,7 +81,17 @@ import org.springframework.transaction.support.TransactionTemplate;
                                OrderRpcApi orderRpcApi,
                                TriggerProperties properties,
                                TriggerOrderIndex triggerOrderIndex) {
-        this(triggerOrderRepository, orderRpcApi, properties, triggerOrderIndex, null, null);
+        this(triggerOrderRepository, orderRpcApi, properties, triggerOrderIndex, null, null, null);
+    }
+
+    public TriggerOrderService(TriggerOrderPersistenceService triggerOrderRepository,
+                               OrderRpcApi orderRpcApi,
+                               TriggerProperties properties,
+                               TriggerOrderIndex triggerOrderIndex,
+                               TriggerOrderOutboxRepository outboxRepository,
+                               PlatformTransactionManager transactionManager) {
+        this(triggerOrderRepository, orderRpcApi, properties, triggerOrderIndex,
+                outboxRepository, transactionManager, null);
     }
 
     @Autowired
@@ -89,13 +100,15 @@ import org.springframework.transaction.support.TransactionTemplate;
                                TriggerProperties properties,
                                TriggerOrderIndex triggerOrderIndex,
                                TriggerOrderOutboxRepository outboxRepository,
-                               PlatformTransactionManager transactionManager) {
+                               PlatformTransactionManager transactionManager,
+                               TriggerInstrumentLifecycleFenceService lifecycleFenceService) {
         this.triggerOrderRepository = triggerOrderRepository;
         this.orderRpcApi = orderRpcApi;
         this.properties = properties;
         this.triggerOrderIndex = triggerOrderIndex;
         this.outboxRepository = outboxRepository;
         this.transactionTemplate = transactionManager == null ? null : new TransactionTemplate(transactionManager);
+        this.lifecycleFenceService = lifecycleFenceService;
     }
 
     @Transactional
@@ -112,6 +125,9 @@ import org.springframework.transaction.support.TransactionTemplate;
             }
         }
 
+        if (lifecycleFenceService != null) {
+            lifecycleFenceService.requirePlacementAllowed(productLine, normalized.symbol());
+        }
         Instant now = Instant.now();
         if (normalized.expiresAt() != null && !normalized.expiresAt().isAfter(now)) {
             throw new IllegalArgumentException("expiresAt must be in the future");
@@ -244,6 +260,24 @@ import org.springframework.transaction.support.TransactionTemplate;
                     return toResponse(order);
                 })
                 .orElseThrow(() -> new IllegalStateException("trigger order not found: " + triggerOrderId));
+    }
+
+    /** 到期生命周期直接终止尚未完成的触发状态机。 */
+    @Transactional
+    public int cancelLifecycleOrders(String symbol, int limit) {
+        String normalizedSymbol = normalizeSymbol(symbol);
+        List<TriggerOrderRecord> canceled = triggerOrderRepository.cancelForLifecycle(
+                currentProductLine(), normalizedSymbol, limit, Instant.now());
+        for (TriggerOrderRecord order : canceled) {
+            enqueueStatusChange(order);
+            afterCommit(() -> triggerOrderIndex.remove(order));
+        }
+        return canceled.size();
+    }
+
+    public boolean hasLifecycleActiveOrders(String symbol) {
+        return triggerOrderRepository.hasLifecycleActiveOrders(
+                currentProductLine(), normalizeSymbol(symbol));
     }
 
     @Transactional

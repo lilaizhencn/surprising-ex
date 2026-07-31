@@ -63,6 +63,7 @@ surprising:
       trigger-order-events-topic: surprising.perp.trigger-order.events.v1
       delivery-settlements-topic: surprising.linear-delivery.delivery.settlements.v1
       option-exercises-topic: surprising.option.option.exercises.v1
+      instrument-lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1
       concurrency: 2
       user-command-concurrency: ${ACCOUNT_USER_COMMAND_CONCURRENCY:32}
       max-poll-records: 500

@@ -162,6 +162,7 @@ create_product_topics() {
 
 if [[ "${INCLUDE_SHARED_TOPICS}" == "true" ]]; then
   create_topic surprising.instrument.events.v1
+  create_topic surprising.instrument.lifecycle-drain.v1
   create_topic surprising.account.position.events.v1
   create_topic surprising.account.liquidation-fee.events.v1
   create_topic surprising.risk.account.events.v1

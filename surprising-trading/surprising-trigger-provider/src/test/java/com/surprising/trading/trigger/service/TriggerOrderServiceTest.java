@@ -60,8 +60,10 @@ class TriggerOrderServiceTest {
     @Test
     void placeDerivesTakeProfitCloseLongCondition() {
         TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
+        TriggerInstrumentLifecycleFenceService lifecycleFenceService =
+                mock(TriggerInstrumentLifecycleFenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
-                new TriggerProperties());
+                new TriggerProperties(), TriggerOrderIndex.disabled(), null, null, lifecycleFenceService);
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-1", "oco-1", "btc-usdt",
                 OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, 70_000L,
                 OrderType.LIMIT, TimeInForce.GTC, 69_950L, 10L, MarginMode.CROSS, null);
@@ -72,6 +74,8 @@ class TriggerOrderServiceTest {
 
         TriggerOrderResponse response = service.place(request);
 
+        verify(lifecycleFenceService).requirePlacementAllowed(
+                ProductLine.LINEAR_PERPETUAL, "BTC-USDT");
         assertThat(response.triggerOrderId()).isEqualTo(501L);
         assertThat(response.positionSide()).isEqualTo(PositionSide.NET);
         verify(repository).insert(orderCaptor.capture());

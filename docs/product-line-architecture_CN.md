@@ -63,10 +63,13 @@ OPTION:
 
 1. instrument 带 `expiry_time`、`delivery_time` 和 `settlement_method`。
 2. 到期前进入只减仓窗口，禁止新增开仓。
-3. 到期时停止对应 symbol 的撮合入口，撤销未成交挂单。
-4. lifecycle 事件发布到 `surprising.linear-delivery.delivery.settlements.v1`。
-5. account 按结算价把未平仓位现金结算为 `DELIVERY_SETTLEMENT` 流水，释放保证金，持仓归零。
-6. gateway、WebSocket 和后台展示交割状态、结算价、交割流水和最终余额。
+3. 到期时 instrument 进入 `SETTLING`，状态变更与 `instrument_outbox_events` 在同一事务提交。
+4. order 和 trigger provider 先持久化 symbol 关闭栅栏，再排空算法单、普通挂单和触发单；撮合只允许旧订单撤单，不再接受新单。
+5. order 排空确认发布后，account 逐笔核对 `ORDER_RESERVE`、`ORDER_RELEASE` 和成交侧保证金审计，确认冻结资金已全部消费或释放。
+6. instrument 只在 `ORDER`、`TRIGGER`、`ACCOUNT` 三类确认均按相同 symbol、版本和产品线持久化后进入 `CLOSED`。
+7. 交割 lifecycle 事件随后发布到 `surprising.linear-delivery.delivery.settlements.v1`。
+8. account 按结算价把未平仓位现金结算为 `DELIVERY_SETTLEMENT` 流水，释放持仓保证金，持仓归零。
+9. gateway、WebSocket 和后台展示交割状态、结算价、交割流水和最终余额。
 
 ## 期权执行模型
 
@@ -75,9 +78,10 @@ OPTION:
 1. instrument 使用 `VANILLA_OPTION`，包含标的、到期日、交割时间、行权价、看涨/看跌、行权风格。
 2. 买方成交时支付权利金，最大亏损为权利金。
 3. 卖方冻结保证金，后续可升级组合保证金和希腊值风控。
-4. 到期自动行权，CALL payoff 为 `max(标的结算价 - 行权价, 0)`，PUT payoff 为 `max(行权价 - 标的结算价, 0)`。
-5. lifecycle 事件发布到 `surprising.option.option.exercises.v1`。
-6. account 写入 `OPTION_PREMIUM` 和 `OPTION_EXERCISE` 流水，释放保证金，持仓归零。
+4. 到期先复用上述 `SETTLING -> 订单/触发单排空 -> 账户冻结核对 -> CLOSED` 屏障。
+5. 到期自动行权，CALL payoff 为 `max(标的结算价 - 行权价, 0)`，PUT payoff 为 `max(行权价 - 标的结算价, 0)`。
+6. lifecycle 事件发布到 `surprising.option.option.exercises.v1`。
+7. account 写入 `OPTION_PREMIUM` 和 `OPTION_EXERCISE` 流水，释放持仓保证金，持仓归零。
 
 ## Topic 模型
 
@@ -107,6 +111,9 @@ surprising.<product-segment>.funding.rate.v1
 surprising.<product-segment>.delivery.settlements.v1
 surprising.<product-segment>.option.exercises.v1
 ```
+
+共享的 `surprising.instrument.lifecycle-drain.v1` 使用 symbol 作为 key，承载
+`ORDER`、`TRIGGER`、`ACCOUNT` 三类到期排空确认。它不是运营查询 topic，也不能替代后续独立财务运营库。
 
 不同产品线只创建适用的 Topic。永续生产的精确清单和 32 分区约束见
 [部署文档](deployment.md)。

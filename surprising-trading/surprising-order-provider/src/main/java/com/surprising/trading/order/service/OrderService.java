@@ -92,6 +92,7 @@ public class OrderService {
     private final SpotOrderReservationRepository spotOrderReservationRepository;
     private final OutboxRepository outboxRepository;
     private final RedisOpenOrderView openOrderView;
+    private final OrderInstrumentLifecycleFenceService lifecycleFenceService;
 
     public OrderService(ObjectMapper objectMapper,
                         TradingOrderProperties properties,
@@ -106,8 +107,25 @@ public class OrderService {
                         OutboxRepository outboxRepository) {
         this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderEventRepository,
                 placementStateService,
-                orderFeeRepository,
-                orderMarginRepository, spotOrderReservationRepository, outboxRepository, null);
+                orderFeeRepository, orderMarginRepository, spotOrderReservationRepository, outboxRepository,
+                null, null);
+    }
+
+    public OrderService(ObjectMapper objectMapper,
+                        TradingOrderProperties properties,
+                        OrderValidator orderValidator,
+                        ReduceOnlyValidator reduceOnlyValidator,
+                        OrderRepository orderRepository,
+                        OrderEventRepository orderEventRepository,
+                        OrderPlacementStateService placementStateService,
+                        OrderFeeRepository orderFeeRepository,
+                        OrderMarginRepository orderMarginRepository,
+                        SpotOrderReservationRepository spotOrderReservationRepository,
+                        OutboxRepository outboxRepository,
+                        RedisOpenOrderView openOrderView) {
+        this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderEventRepository,
+                placementStateService, orderFeeRepository, orderMarginRepository, spotOrderReservationRepository,
+                outboxRepository, openOrderView, null);
     }
 
     @Autowired
@@ -122,7 +140,8 @@ public class OrderService {
                         OrderMarginRepository orderMarginRepository,
                         SpotOrderReservationRepository spotOrderReservationRepository,
                         OutboxRepository outboxRepository,
-                        RedisOpenOrderView openOrderView) {
+                        RedisOpenOrderView openOrderView,
+                        OrderInstrumentLifecycleFenceService lifecycleFenceService) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.orderValidator = orderValidator;
@@ -135,6 +154,7 @@ public class OrderService {
         this.spotOrderReservationRepository = spotOrderReservationRepository;
         this.outboxRepository = outboxRepository;
         this.openOrderView = openOrderView;
+        this.lifecycleFenceService = lifecycleFenceService;
     }
 
     @Transactional
@@ -152,6 +172,9 @@ public class OrderService {
             }
         }
 
+        if (lifecycleFenceService != null) {
+            lifecycleFenceService.requirePlacementAllowed(productLine, normalized.symbol());
+        }
         placementStateService.lockUserPositionMode(productLine, normalized.userId());
         PositionMode positionMode = placementStateService.positionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
@@ -794,6 +817,27 @@ public class OrderService {
         String symbol = normalizeSymbol(request.symbol());
         return adminCancelOrders(new AdminBatchCancelOrdersRequest(null, symbol, request.limit(), request.reason()),
                 productLine);
+    }
+
+    /**
+     * 到期生命周期只发起撤单，最终状态仍由撮合结果驱动。
+     */
+    @Transactional
+    public int requestLifecycleCancellation(String symbol, int limit) {
+        String normalizedSymbol = normalizeSymbol(symbol);
+        List<OrderRecord> orders = orderRepository.lifecycleCancelableOrders(
+                currentProductLine(), normalizedSymbol, limit);
+        int requested = 0;
+        for (OrderRecord order : orders) {
+            if (requestCancel(order, "INSTRUMENT_SETTLING").cancelRequested()) {
+                requested++;
+            }
+        }
+        return requested;
+    }
+
+    public boolean hasLifecycleActiveOrders(String symbol) {
+        return orderRepository.hasLifecycleActiveOrders(currentProductLine(), normalizeSymbol(symbol));
     }
 
     private AdminCancelOrderResult requestCancel(OrderRecord order, String reason) {

@@ -15,13 +15,16 @@ import org.springframework.stereotype.Service;
 
     private final InstrumentStorageService storageService;
     private final InstrumentService instrumentService;
+    private final InstrumentLifecycleReadinessService readinessService;
     private final InstrumentProperties properties;
 
     public InstrumentLifecycleService(InstrumentStorageService storageService,
                                       InstrumentService instrumentService,
+                                      InstrumentLifecycleReadinessService readinessService,
                                       InstrumentProperties properties) {
         this.storageService = storageService;
         this.instrumentService = instrumentService;
+        this.readinessService = readinessService;
         this.properties = properties;
     }
 
@@ -49,6 +52,10 @@ import org.springframework.stereotype.Service;
     private void closeSettledContracts(Instant now, int batchSize) {
         for (InstrumentResponse instrument : storageService.settlingContractsDue(now, batchSize)) {
             try {
+                if (!readinessService.isReady(
+                        instrument.contractType().productLine(), instrument.symbol(), instrument.version())) {
+                    continue;
+                }
                 instrumentService.closeForSettlement(instrument.symbol());
             } catch (Exception ex) {
                 log.error("Failed to close settled instrument: symbol={} version={}",

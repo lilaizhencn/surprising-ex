@@ -17,6 +17,8 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.util.backoff.FixedBackOff;
 
 /**
  * 支持安全重放的触发检测 Kafka 消费配置。
@@ -69,6 +71,16 @@ public class TriggerKafkaConfiguration {
         factory.setConsumerFactory(triggerConsumerFactory);
         factory.setConcurrency(properties.getKafka().getConcurrency());
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        return factory;
+    }
+
+    @Bean(name = "triggerInstrumentLifecycleKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String> triggerInstrumentLifecycleKafkaListenerContainerFactory(
+            ConsumerFactory<String, String> triggerConsumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(triggerConsumerFactory);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
         return factory;
     }
 }

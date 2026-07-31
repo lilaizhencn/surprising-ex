@@ -163,6 +163,33 @@ public class AlgoOrderRepository {
         return cancelableOpenOrders(userId, symbol, algoType, limit, null);
     }
 
+    public List<AlgoOrderRecord> lifecycleCancelableOrders(ProductLine productLine, String symbol, int limit) {
+        return jdbcTemplate.query("""
+                SELECT *
+                  FROM trading_algo_orders
+                 WHERE product_line = ?
+                   AND symbol = ?
+                   AND status IN ('PENDING', 'RUNNING')
+                 ORDER BY created_at, algo_order_id
+                 LIMIT ?
+                 FOR UPDATE SKIP LOCKED
+                """, (rs, rowNum) -> toAlgoRecord(rs), productLine(productLine).name(), symbol,
+                Math.max(1, Math.min(limit, 1000)));
+    }
+
+    public boolean hasLifecycleActiveOrders(ProductLine productLine, String symbol) {
+        Boolean active = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM trading_algo_orders
+                     WHERE product_line = ?
+                       AND symbol = ?
+                       AND status IN ('PENDING', 'RUNNING', 'CANCEL_REQUESTED')
+                )
+                """, Boolean.class, productLine(productLine).name(), symbol);
+        return Boolean.TRUE.equals(active);
+    }
+
     public List<AlgoOrderRecord> cancelableOpenOrders(
             long userId, String symbol, AlgoOrderType algoType, int limit, String contractType) {
         String normalizedSymbol = emptyToNull(symbol);

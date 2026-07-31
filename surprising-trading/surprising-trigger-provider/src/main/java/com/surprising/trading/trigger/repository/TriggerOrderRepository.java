@@ -403,6 +403,43 @@ public class TriggerOrderRepository {
         return findById(triggerOrderId);
     }
 
+    public List<TriggerOrderRecord> cancelForLifecycle(
+            ProductLine productLine, String symbol, int limit, Instant now) {
+        return jdbcTemplate.query("""
+                WITH candidates AS (
+                    SELECT trigger_order_id
+                      FROM trading_trigger_orders
+                     WHERE product_line = ?
+                       AND symbol = ?
+                       AND status IN ('PENDING', 'TRIGGERING')
+                     ORDER BY created_at, trigger_order_id
+                     LIMIT ?
+                     FOR UPDATE SKIP LOCKED
+                )
+                UPDATE trading_trigger_orders o
+                   SET status = 'CANCELED',
+                       reject_reason = 'INSTRUMENT_SETTLING',
+                       updated_at = ?
+                  FROM candidates c
+                 WHERE o.trigger_order_id = c.trigger_order_id
+             RETURNING o.*
+                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), symbol,
+                Math.max(1, Math.min(limit, 1000)), Timestamp.from(now));
+    }
+
+    public boolean hasLifecycleActiveOrders(ProductLine productLine, String symbol) {
+        Boolean active = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM trading_trigger_orders
+                     WHERE product_line = ?
+                       AND symbol = ?
+                       AND status IN ('PENDING', 'TRIGGERING')
+                )
+                """, Boolean.class, productLine(productLine).name(), symbol);
+        return Boolean.TRUE.equals(active);
+    }
+
     public boolean hasPendingOrders(String symbol) {
         Boolean result = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (

@@ -107,7 +107,13 @@ class OrderServiceTest {
     @Test
     void acceptedOrderEventAndCommandPayloadCarryTraceId() throws Exception {
         TraceContext.set("trace-order-1");
-        OrderService service = service();
+        OrderInstrumentLifecycleFenceService lifecycleFenceService =
+                org.mockito.Mockito.mock(OrderInstrumentLifecycleFenceService.class);
+        TradingOrderProperties properties = new TradingOrderProperties();
+        OrderService service = new OrderService(new ObjectMapper(), properties, orderValidator,
+                reduceOnlyValidator, orderRepository, orderEventRepository, placementStateService,
+                orderFeeRepository, orderMarginRepository, spotOrderReservationRepository,
+                outboxRepository, null, lifecycleFenceService);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
@@ -121,6 +127,8 @@ class OrderServiceTest {
 
         var response = service.place(request);
 
+        verify(lifecycleFenceService).requirePlacementAllowed(
+                ProductLine.LINEAR_PERPETUAL, "BTC-USDT");
         assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
         assertThat(response.positionSide()).isEqualTo(PositionSide.NET);
         assertThat(response.makerFeeRatePpm()).isEqualTo(200L);

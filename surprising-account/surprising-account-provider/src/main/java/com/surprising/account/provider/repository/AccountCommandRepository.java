@@ -5,6 +5,7 @@ import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.provider.model.AccountCommandRegistration;
 import com.surprising.account.provider.model.AccountCommandTerminalResult;
 import com.surprising.account.provider.model.PendingAccountCommand;
+import com.surprising.product.api.ProductLine;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -180,6 +181,60 @@ public class AccountCommandRepository {
         return releasedUnits == null ? 0L : releasedUnits;
     }
 
+    public boolean hasPendingOrderReservations(ProductLine productLine, String symbol) {
+        Boolean pending = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM account_commands
+                     WHERE product_line = ?
+                       AND command_type = 'ORDER_RESERVE'
+                       AND status IN ('WAITING_DEPENDENCY', 'PROCESSING')
+                       AND ((payload ->> 'payload')::jsonb ->> 'symbol') = ?
+                )
+                """, Boolean.class, productLine.name(), symbol);
+        return Boolean.TRUE.equals(pending);
+    }
+
+    /**
+     * 只从 account_commands 表汇总订单预占与已应用释放，成交消耗由 Service 从成交侧仓储聚合。
+     */
+    public List<OrderReservationSnapshot> orderReservationSnapshots(
+            ProductLine productLine, String symbol, long afterOrderId, int limit) {
+        return jdbcTemplate.query("""
+                WITH reserves AS (
+                    SELECT (((payload ->> 'payload')::jsonb ->> 'orderId')::bigint) AS order_id,
+                           (((payload ->> 'payload')::jsonb ->> 'reservedUnits')::bigint) AS reserved_units
+                      FROM account_commands
+                     WHERE product_line = ?
+                       AND command_type = 'ORDER_RESERVE'
+                       AND status = 'APPLIED'
+                       AND ((payload ->> 'payload')::jsonb ->> 'symbol') = ?
+                ),
+                releases AS (
+                    SELECT source_reference::bigint AS order_id,
+                           COALESCE(SUM((result_payload ->> 'releasedUnits')::bigint), 0) AS released_units
+                      FROM account_commands
+                     WHERE product_line = ?
+                       AND command_type = 'ORDER_RELEASE'
+                       AND status = 'APPLIED'
+                       AND result_payload ->> 'releasedUnits' IS NOT NULL
+                     GROUP BY source_reference
+                )
+                SELECT r.order_id,
+                       r.reserved_units,
+                       COALESCE(l.released_units, 0) AS released_units
+                  FROM reserves r
+                  LEFT JOIN releases l ON l.order_id = r.order_id
+                 WHERE r.order_id > ?
+                 ORDER BY r.order_id
+                 LIMIT ?
+                """, (rs, rowNum) -> new OrderReservationSnapshot(
+                        rs.getLong("order_id"),
+                        rs.getLong("reserved_units"),
+                        rs.getLong("released_units")),
+                productLine.name(), symbol, productLine.name(), afterOrderId, Math.max(1, limit));
+    }
+
     private void markTerminal(String commandId,
                               AccountCommandStatus status,
                               String resultPayload,
@@ -201,6 +256,9 @@ public class AccountCommandRepository {
         if (rows != 1) {
             throw new IllegalStateException("failed to complete account command " + commandId);
         }
+    }
+
+    public record OrderReservationSnapshot(long orderId, long reservedUnits, long releasedUnits) {
     }
 
     private AccountCommandStatus dependencyStatus(String commandId) {

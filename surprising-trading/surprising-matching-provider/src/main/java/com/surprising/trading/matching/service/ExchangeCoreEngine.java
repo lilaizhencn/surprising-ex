@@ -110,13 +110,31 @@ import org.springframework.stereotype.Service;
         return Optional.ofNullable(loadedSymbols.get(symbol));
     }
 
+    /**
+     * 撤单允许使用已经停止交易的撮合交易对，确保到期或停牌后仍能清空订单簿。
+     */
+    public Optional<MatchingSymbol> ensureCancellationSymbol(String symbol) {
+        if (symbol == null) {
+            return Optional.empty();
+        }
+        MatchingSymbol loaded = loadedSymbols.get(symbol);
+        if (loaded != null) {
+            return Optional.of(loaded);
+        }
+        return symbolService.existingMatchingSymbol(symbol).map(this::loadMatchingSymbol);
+    }
+
     private MatchingSymbol loadSymbol(InstrumentSymbol instrument) {
-        return loadedSymbols.computeIfAbsent(instrument.symbol(), ignored -> {
-            MatchingSymbol matchingSymbol = symbolService.ensureMatchingSymbol(instrument);
-            if (!instrument.symbol().equals(matchingSymbol.symbol())) {
-                throw new IllegalStateException("matching symbol mismatch for " + instrument.symbol()
-                        + ": " + matchingSymbol.symbol());
-            }
+        MatchingSymbol matchingSymbol = symbolService.ensureMatchingSymbol(instrument);
+        if (!instrument.symbol().equals(matchingSymbol.symbol())) {
+            throw new IllegalStateException("matching symbol mismatch for " + instrument.symbol()
+                    + ": " + matchingSymbol.symbol());
+        }
+        return loadMatchingSymbol(matchingSymbol);
+    }
+
+    private MatchingSymbol loadMatchingSymbol(MatchingSymbol matchingSymbol) {
+        return loadedSymbols.computeIfAbsent(matchingSymbol.symbol(), ignored -> {
             CoreSymbolSpecification spec = CoreSymbolSpecification.builder()
                     .symbolId(matchingSymbol.symbolId())
                     .type(SymbolType.CURRENCY_EXCHANGE_PAIR)
@@ -226,7 +244,7 @@ import org.springframework.stereotype.Service;
                 break;
             }
             for (RecoveredOrderBookOrder order : batch) {
-                MatchingSymbol symbol = ensureSymbol(order.symbol())
+                MatchingSymbol symbol = ensureCancellationSymbol(order.symbol())
                         .orElseThrow(() -> new IllegalStateException("cannot restore order for disabled symbol " + order.symbol()));
                 CommandResultCode result = restoreOpenOrder(order, symbol);
                 if (result != CommandResultCode.SUCCESS) {

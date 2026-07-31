@@ -16,12 +16,13 @@ BOOTSTRAP_SERVERS='<bootstrap-brokers>' \
 ./scripts/create-topics.sh
 ```
 
-This creates exactly 25 topics: 20 `surprising.linear-perp.*` topics and five shared topics. Every topic
-has exactly 32 partitions, so the line has 800 logical partitions and 2,400 replicas with RF=3.
+This creates exactly 26 topics: 20 `surprising.linear-perp.*` topics and six shared topics. Every topic
+has exactly 32 partitions, so the line has 832 logical partitions and 2,496 replicas with RF=3.
 
 | Scope | Topic suffix or full name | Partitions | Required key |
 |---|---|---:|---|
 | Shared | `surprising.instrument.events.v1` | 32 | `symbol` |
+| Shared | `surprising.instrument.lifecycle-drain.v1` | 32 | `symbol` |
 | Shared | `surprising.account.position.events.v1` | 32 | `<PRODUCT_LINE>:<userId>` |
 | Shared | `surprising.account.liquidation-fee.events.v1` | 32 | settlement asset |
 | Shared | `surprising.risk.account.events.v1` | 32 | `<userId>:<accountType>:<asset>` |
@@ -67,7 +68,7 @@ Kafka Streams state rebuild.
 Verify the deployed contract before starting providers:
 
 ```bash
-TOPIC_PATTERN='surprising\.(instrument\.events\.v1|account\.(position|liquidation-fee)\.events\.v1|risk\.(account|position)\.events\.v1|linear-perp\..*)'
+TOPIC_PATTERN='surprising\.(instrument\.(events|lifecycle-drain)\.v1|account\.(position|liquidation-fee)\.events\.v1|risk\.(account|position)\.events\.v1|linear-perp\..*)'
 kafka-topics --bootstrap-server '<bootstrap-brokers>' \
   --describe --topic "${TOPIC_PATTERN}" > /tmp/linear-perp-topics.txt
 
@@ -295,6 +296,7 @@ The root `init.sql` creates:
 - `instrument_risk_brackets`: risk tiers keyed by `(symbol, version, bracket_no)`.
 - `instrument_index_sources`: index component source config keyed by `(symbol, version, source)`.
 - `instrument_outbox_events`: durable instrument change and product-lifecycle events committed with the immutable instrument version.
+- `instrument_lifecycle_drain_acks`: idempotent order, trigger, and account readiness acknowledgements that gate expiry close.
 - `candlestick_symbols`: optional symbol registry.
 - `candlestick_candles`: OHLCV storage keyed by `(symbol, period, open_time)`.
 - `price_index_ticks`: three-day asynchronous index-price audit ticks keyed by `(symbol, sequence)`.
@@ -309,6 +311,8 @@ The root `init.sql` creates:
   mark/instrument input and durable composite position-scan cursor used for crash recovery.
 - `funding_payments`: per-user funding payments keyed by `(settlement_id, user_id)`.
 - `trading_orders`: accepted/rejected order state using long ticks and steps.
+- `trading_order_instrument_lifecycle_fences`: per-product-line symbol fence serialized with ordinary and algo placement before expiry drain acknowledgement.
+- `trading_trigger_instrument_lifecycle_fences`: per-product-line symbol fence serialized with trigger placement before expiry drain acknowledgement.
 - `trading_order_events`: order-entry audit events.
 - `trading_outbox_events`: order command/event outbox rows.
 - `trading_matching_assets` and `trading_matching_symbols`: stable exchange-core asset and symbol ids.

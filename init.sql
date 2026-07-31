@@ -354,6 +354,54 @@ CREATE INDEX IF NOT EXISTS instrument_outbox_published_cleanup_idx
     ON instrument_outbox_events (published_at, id)
     WHERE published_at IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS instrument_lifecycle_drain_acks (
+    symbol              TEXT NOT NULL,
+    instrument_version  BIGINT NOT NULL,
+    product_line        TEXT NOT NULL,
+    component           TEXT NOT NULL,
+    ready_at            TIMESTAMPTZ NOT NULL,
+    updated_at          TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (symbol, instrument_version, component),
+    CONSTRAINT instrument_lifecycle_drain_symbol_version_fk
+        FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
+    CONSTRAINT instrument_lifecycle_drain_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
+    CONSTRAINT instrument_lifecycle_drain_component_check CHECK (
+        component IN ('ORDER', 'TRIGGER', 'ACCOUNT')
+    )
+);
+
+CREATE INDEX IF NOT EXISTS instrument_lifecycle_drain_ready_idx
+    ON instrument_lifecycle_drain_acks (product_line, symbol, instrument_version);
+
+CREATE TABLE IF NOT EXISTS trading_order_instrument_lifecycle_fences (
+    product_line        TEXT NOT NULL,
+    symbol              TEXT NOT NULL,
+    instrument_version  BIGINT NOT NULL DEFAULT 0,
+    blocked             BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at          TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (product_line, symbol),
+    CONSTRAINT trading_order_instrument_lifecycle_fence_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    )
+);
+
+CREATE TABLE IF NOT EXISTS trading_trigger_instrument_lifecycle_fences (
+    product_line        TEXT NOT NULL,
+    symbol              TEXT NOT NULL,
+    instrument_version  BIGINT NOT NULL DEFAULT 0,
+    blocked             BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at          TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (product_line, symbol),
+    CONSTRAINT trading_trigger_instrument_lifecycle_fence_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    )
+);
+
 INSERT INTO instruments (
     symbol, version, instrument_type, contract_type, base_asset, quote_asset, settle_asset,
     contract_multiplier_ppm, contract_value_asset, price_tick_units, quantity_step_units,

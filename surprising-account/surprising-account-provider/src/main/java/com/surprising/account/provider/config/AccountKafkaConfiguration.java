@@ -95,8 +95,8 @@ public class AccountKafkaConfiguration {
     }
 
     /**
-     * Position projection failures are fail-closed: the partition is retried indefinitely and Redis readiness is
-     * removed by the consumer. Skipping a committed financial position event is never acceptable.
+     * 仓位投影失败时必须失败关闭：分区会无限重试，消费者同时移除 Redis 就绪标记。
+     * 已提交的资金仓位事件不能被跳过。
      */
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> accountPositionCacheKafkaListenerContainerFactory(
@@ -105,6 +105,20 @@ public class AccountKafkaConfiguration {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(accountConsumerFactory);
         factory.setConcurrency(properties.getKafka().getConcurrency());
+        factory.setBatchListener(false);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
+        return factory;
+    }
+
+    /**
+     * 到期冻结资金核对必须失败关闭，直到全部订单预占已经消费或释放。
+     */
+    @Bean(name = "accountInstrumentLifecycleKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String> accountInstrumentLifecycleKafkaListenerContainerFactory(
+            ConsumerFactory<String, String> accountConsumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(accountConsumerFactory);
         factory.setBatchListener(false);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
         factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
