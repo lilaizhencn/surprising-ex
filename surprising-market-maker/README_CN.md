@@ -67,6 +67,7 @@ curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/strategy-logs?limi
 `/strategy-logs` 读取 `market_maker_strategy_run_events`，记录 cycle 成功/失败、报价对账、IOC 交易提交/拒绝、跳过轮次、错误信息、计数器、节点 id 和 TraceId。接口支持 `limit/cursor/sort` 游标分页，排序白名单为 `createdAt.desc`、`createdAt.asc`，响应保留 `events/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。事件写入是 best-effort，不会阻断报价循环。
 
 策略运行事件与参考行情样本分别由独立 Repository 访问各自物理表，`MarketMakerService` 负责业务聚合。
+`MarketMakerLeaseRepository` 只负责 `market_maker_strategy_leases`，租约协调接口保留在 Service 层。
 
 `/strategies/{strategyId}/config` 读取和写入 `market_maker_strategy_overrides`。只支持热更新 enabled、基础报价数量、保证金模式、价差、层间距、库存上限/偏斜阈值和报价层数；账号和交易对仍由部署配置管理。请求体里为 `null` 的字段会回退到 `application.yml` 基线配置，全部可编辑字段为 `null` 会清除覆盖。
 

@@ -1,5 +1,6 @@
-package com.surprising.marketmaker.provider.service;
+package com.surprising.marketmaker.provider.repository;
 
+import com.surprising.marketmaker.provider.service.MarketMakerLeaseCoordinator;
 import com.surprising.product.api.ProductLine;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -7,12 +8,13 @@ import java.time.Instant;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+/** 只负责 {@code market_maker_strategy_leases} 表。 */
 @Repository
-public class JdbcMarketMakerLeaseCoordinator implements MarketMakerLeaseCoordinator {
+public class MarketMakerLeaseRepository implements MarketMakerLeaseCoordinator {
 
     private final JdbcTemplate jdbcTemplate;
 
-    public JdbcMarketMakerLeaseCoordinator(JdbcTemplate jdbcTemplate) {
+    public MarketMakerLeaseRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 

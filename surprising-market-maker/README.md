@@ -69,6 +69,8 @@ events into an independent database projection for attribution, reconciliation, 
 
 Strategy run events and reference-market samples use separate single-table repositories, with `MarketMakerService`
 performing business aggregation.
+`MarketMakerLeaseRepository` exclusively owns `market_maker_strategy_leases`; the coordination
+interface remains in the service layer.
 
 `/strategies/{strategyId}/config` reads and writes `market_maker_strategy_overrides`. Only enabled, base quote quantity, margin mode, spread, level spacing, inventory cap/skew, and quote levels are hot-editable; accounts and symbols remain deployment config. `null` request fields fall back to `application.yml`, and a request with all editable fields set to `null` clears the override.
 

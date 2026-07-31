@@ -12,6 +12,7 @@ import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+/** 只负责 {@code market_maker_strategy_overrides} 表。 */
 @Repository
 public class JdbcMarketMakerStrategyOverrideStore implements MarketMakerStrategyOverrideStore {
 
