@@ -3,12 +3,16 @@ package com.surprising.insurance.provider.service;
 import com.surprising.insurance.provider.config.InsuranceProperties;
 import com.surprising.insurance.provider.model.InsurancePendingCoverage;
 import com.surprising.insurance.provider.repository.InsuranceCoverageRepository;
+import com.surprising.insurance.provider.repository.InsuranceAccountCommandRepository;
 import com.surprising.insurance.provider.repository.InsuranceFundBalanceRepository;
 import com.surprising.insurance.provider.repository.InsuranceFundLedgerRepository;
 import com.surprising.insurance.provider.repository.InsurancePendingCoverageRepository;
 import com.surprising.insurance.provider.repository.InsuranceSequenceRepository;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Map;
+import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -22,6 +26,7 @@ public class InsuranceCoverageReconciler {
     private final InsuranceFundBalanceRepository balanceRepository;
     private final InsuranceFundLedgerRepository ledgerRepository;
     private final InsuranceSequenceRepository sequenceRepository;
+    private final InsuranceAccountCommandRepository accountCommandRepository;
     private final ObjectMapper objectMapper;
 
     public InsuranceCoverageReconciler(InsuranceProperties properties,
@@ -31,6 +36,19 @@ public class InsuranceCoverageReconciler {
                                        InsuranceFundLedgerRepository ledgerRepository,
                                        InsuranceSequenceRepository sequenceRepository,
                                        ObjectMapper objectMapper) {
+        this(properties, pendingCoverageRepository, coverageRepository, balanceRepository, ledgerRepository,
+                sequenceRepository, objectMapper, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public InsuranceCoverageReconciler(InsuranceProperties properties,
+                                       InsurancePendingCoverageRepository pendingCoverageRepository,
+                                       InsuranceCoverageRepository coverageRepository,
+                                       InsuranceFundBalanceRepository balanceRepository,
+                                       InsuranceFundLedgerRepository ledgerRepository,
+                                       InsuranceSequenceRepository sequenceRepository,
+                                       ObjectMapper objectMapper,
+                                       InsuranceAccountCommandRepository accountCommandRepository) {
         this.properties = properties;
         this.pendingCoverageRepository = pendingCoverageRepository;
         this.coverageRepository = coverageRepository;
@@ -38,6 +56,7 @@ public class InsuranceCoverageReconciler {
         this.ledgerRepository = ledgerRepository;
         this.sequenceRepository = sequenceRepository;
         this.objectMapper = objectMapper;
+        this.accountCommandRepository = accountCommandRepository;
     }
 
     /**
@@ -46,7 +65,12 @@ public class InsuranceCoverageReconciler {
     @Transactional
     public void reconcile() {
         Instant now = Instant.now();
-        for (InsurancePendingCoverage coverage : pendingCoverageRepository.lock(accountType(), 500)) {
+        List<InsurancePendingCoverage> pending = pendingCoverageRepository.lock(accountType(), 500);
+        Map<String, InsuranceAccountCommandRepository.CommandState> commands = accountCommandRepository == null
+                ? Map.of()
+                : accountCommandRepository.findStates(commandIds(pending));
+        for (InsurancePendingCoverage row : pending) {
+            InsurancePendingCoverage coverage = mergeCommandStates(row, commands);
             if (coverage.reserveRejected()) {
                 balanceRepository.release(
                         coverage.accountType(), coverage.asset(), coverage.coveredUnits(), now);
@@ -68,6 +92,43 @@ public class InsuranceCoverageReconciler {
                 coverageRepository.markPendingFinalize(coverage.coverageId(), now);
             }
         }
+    }
+
+    private Collection<String> commandIds(List<InsurancePendingCoverage> pending) {
+        List<String> ids = new ArrayList<>();
+        for (InsurancePendingCoverage coverage : pending) {
+            ids.add(coverage.reserveCommandId());
+            ids.add(coverage.finalizeCommandId());
+        }
+        return ids;
+    }
+
+    private InsurancePendingCoverage mergeCommandStates(
+            InsurancePendingCoverage coverage,
+            Map<String, InsuranceAccountCommandRepository.CommandState> commands) {
+        var reserve = command(commands, coverage.reserveCommandId());
+        var finalize = command(commands, coverage.finalizeCommandId());
+        String errorCode = firstNonBlank(reserve == null ? null : reserve.errorCode(),
+                finalize == null ? null : finalize.errorCode());
+        String errorMessage = firstNonBlank(reserve == null ? null : reserve.errorMessage(),
+                finalize == null ? null : finalize.errorMessage());
+        return new InsurancePendingCoverage(
+                coverage.coverageId(), coverage.accountType(), coverage.userId(), coverage.asset(),
+                coverage.coveredUnits(), coverage.reserveCommandId(), coverage.finalizeCommandId(),
+                coverage.coverageStatus(), reserve == null ? coverage.reserveStatus() : reserve.status().name(),
+                finalize == null ? coverage.finalizeStatus() : finalize.status().name(),
+                finalize == null ? coverage.finalizeResult() : finalize.resultPayload(),
+                errorCode == null ? coverage.errorCode() : errorCode,
+                errorMessage == null ? coverage.errorMessage() : errorMessage);
+    }
+
+    private String firstNonBlank(String first, String second) {
+        return first != null && !first.isBlank() ? first : second;
+    }
+
+    private InsuranceAccountCommandRepository.CommandState command(
+            Map<String, InsuranceAccountCommandRepository.CommandState> commands, String commandId) {
+        return commandId == null || commandId.isBlank() ? null : commands.get(commandId);
     }
 
     private String accountType() {

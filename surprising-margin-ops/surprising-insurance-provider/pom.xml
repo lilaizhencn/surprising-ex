@@ -17,6 +17,10 @@
     <dependencies>
         <dependency>
             <groupId>com.surprising</groupId>
+            <artifactId>surprising-instrument-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
             <artifactId>surprising-insurance-api</artifactId>
         </dependency>
         <dependency>

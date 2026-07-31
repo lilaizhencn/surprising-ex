@@ -67,10 +67,10 @@ public class TriggerOrderOutboxRepository {
                 candidates AS (
                     SELECT e.id
                       FROM trading_outbox_events e
-                      JOIN earliest first_event ON first_event.id = e.id
                      WHERE e.published_at IS NULL
                        AND e.aggregate_type = ?
                        AND e.topic = ?
+                       AND e.id IN (SELECT id FROM earliest)
                        AND e.next_attempt_at <= ?
                        AND pg_try_advisory_xact_lock(hashtext(e.topic), hashtext(e.event_key))
                      ORDER BY e.topic, e.event_key, e.id
@@ -80,8 +80,7 @@ public class TriggerOrderOutboxRepository {
                 UPDATE trading_outbox_events e
                    SET next_attempt_at = ?,
                        updated_at = ?
-                  FROM candidates c
-                 WHERE e.id = c.id
+                 WHERE e.id IN (SELECT id FROM candidates)
              RETURNING e.id, e.topic, e.event_key, e.payload::text AS payload
                 """, (rs, rowNum) -> new TriggerOutboxRecord(
                         rs.getLong("id"), rs.getString("topic"), rs.getString("event_key"),
@@ -152,8 +151,7 @@ public class TriggerOrderOutboxRepository {
                      FOR UPDATE SKIP LOCKED
                 )
                 DELETE FROM trading_outbox_events e
-                 USING candidates c
-                 WHERE e.id = c.id
+                 WHERE e.id IN (SELECT id FROM candidates)
                 """, AGGREGATE_TYPE, Timestamp.from(cutoff), Math.max(1, limit));
     }
 

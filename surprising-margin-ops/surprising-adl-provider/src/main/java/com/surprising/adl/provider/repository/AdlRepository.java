@@ -5,36 +5,43 @@ import com.surprising.adl.provider.config.AdlProperties;
 import com.surprising.adl.provider.model.AdlCandidate;
 import com.surprising.adl.provider.model.DeficitRow;
 import com.surprising.adl.provider.service.AdlMath;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.math.PerpetualContractMath;
-import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.consumer.LatestMarkPriceCache;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Duration;
-import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /**
- * 提供 ADL 在线安全决策所需的权威输入。
+ * ADL 在线决策聚合仓储。
  *
- * <p>不可拆原因：残余缺口扫描必须在同一数据库快照中同时确认账户缺口与保险基金已无可用余额；
- * 候选排序和执行前复查必须把持仓、合约参数、资产精度、逐仓保证金、账户缺口及同版本标记价组合计算。
- * 拆成单表查询会在并发结算或版本切换窗口选择错误用户或错误减仓数量。这里不提供后台时间线、资金对账或
- * 运营报表；ADL 事件查询已由单表 Repository 承担。</p>
+ * <p>合约正文和资产精度来自本 JVM 的 Instrument 快照，持仓、保证金、缺口和保险余额分别由单表
+ * Repository 读取，再在 Service 事务边界内聚合；本类不执行跨表连接。</p>
  */
 @Repository
 public class AdlRepository {
 
     private static final String DEFAULT_ACCOUNT_TYPE = "USDT_PERPETUAL";
 
-    private final JdbcTemplate jdbcTemplate;
+    private final AdlPositionRepository positionRepository;
+    private final AdlPositionMarginRepository marginRepository;
+    private final AdlProductDeficitRepository productDeficitRepository;
+    private final AdlLegacyDeficitRepository legacyDeficitRepository;
+    private final AdlInsuranceFundBalanceRepository insuranceFundRepository;
     private final AdlProperties properties;
     private final LatestMarkPriceCache markPriceCache;
+    private final InstrumentSnapshotCache snapshotCache;
 
     public AdlRepository(JdbcTemplate jdbcTemplate) {
         this(jdbcTemplate, new AdlProperties(), null);
@@ -44,55 +51,53 @@ public class AdlRepository {
         this(jdbcTemplate, properties, null);
     }
 
-    @Autowired
     public AdlRepository(JdbcTemplate jdbcTemplate,
                          AdlProperties properties,
                          LatestMarkPriceCache markPriceCache) {
-        this.jdbcTemplate = jdbcTemplate;
+        AdlProperties resolved = properties == null ? new AdlProperties() : properties;
+        this.positionRepository = new AdlPositionRepository(jdbcTemplate);
+        this.marginRepository = new AdlPositionMarginRepository(jdbcTemplate);
+        this.productDeficitRepository = new AdlProductDeficitRepository(jdbcTemplate);
+        this.legacyDeficitRepository = new AdlLegacyDeficitRepository(jdbcTemplate);
+        this.insuranceFundRepository = new AdlInsuranceFundBalanceRepository(jdbcTemplate);
+        this.properties = resolved;
+        this.markPriceCache = markPriceCache;
+        this.snapshotCache = new InstrumentSnapshotCache();
+    }
+
+    @Autowired
+    public AdlRepository(AdlPositionRepository positionRepository,
+                         AdlPositionMarginRepository marginRepository,
+                         AdlProductDeficitRepository productDeficitRepository,
+                         AdlLegacyDeficitRepository legacyDeficitRepository,
+                         AdlInsuranceFundBalanceRepository insuranceFundRepository,
+                         AdlProperties properties,
+                         LatestMarkPriceCache markPriceCache,
+                         InstrumentSnapshotCache snapshotCache) {
+        this.positionRepository = positionRepository;
+        this.marginRepository = marginRepository;
+        this.productDeficitRepository = productDeficitRepository;
+        this.legacyDeficitRepository = legacyDeficitRepository;
+        this.insuranceFundRepository = insuranceFundRepository;
         this.properties = properties == null ? new AdlProperties() : properties;
         this.markPriceCache = markPriceCache;
+        this.snapshotCache = snapshotCache;
     }
 
     /**
-     * 仅在对应资产的保险基金为空时领取已达到等待时间的缺口，确保保险基金优先吸收穿仓损失。
+     * 先锁定缺口表记录，再单表读取保险基金余额；不再通过跨表连接筛选。
      */
     public List<DeficitRow> claimResidualDeficits(int batchSize, Duration minAge) {
-        String accountType = accountType();
-        if (properties.getKafka().isProductTopicsEnabled()) {
-            return jdbcTemplate.query("""
-                    SELECT d.account_type, d.user_id, d.asset,
-                           d.deficit_units - d.reserved_units AS deficit_units
-                      FROM account_product_deficits d
-                      LEFT JOIN insurance_fund_balances f
-                        ON f.account_type = d.account_type AND f.asset = d.asset
-                     WHERE d.account_type = ?
-                       AND d.deficit_units - d.reserved_units > 0
-                       AND d.updated_at <= now() - (? * INTERVAL '1 millisecond')
-                       AND COALESCE(f.balance_units, 0) = 0
-                     ORDER BY d.updated_at ASC
-                     LIMIT ?
-                    """, (rs, rowNum) -> new DeficitRow(
-                    rs.getString("account_type"),
-                    rs.getLong("user_id"),
-                    rs.getString("asset"),
-                    rs.getLong("deficit_units")), accountType, minAge.toMillis(), batchSize);
+        List<DeficitRow> deficits = claimResidualDeficitsFromTable(
+                Math.max(1, batchSize), minAge);
+        if (deficits.isEmpty()) {
+            return List.of();
         }
-        return jdbcTemplate.query("""
-                SELECT ? AS account_type, d.user_id, d.asset,
-                       d.deficit_units - d.reserved_units AS deficit_units
-                  FROM account_deficits d
-                  LEFT JOIN insurance_fund_balances f
-                    ON f.account_type = ? AND f.asset = d.asset
-                 WHERE d.deficit_units - d.reserved_units > 0
-                   AND d.updated_at <= now() - (? * INTERVAL '1 millisecond')
-                   AND COALESCE(f.balance_units, 0) = 0
-                 ORDER BY d.updated_at ASC
-                 LIMIT ?
-                """, (rs, rowNum) -> new DeficitRow(
-                rs.getString("account_type"),
-                rs.getLong("user_id"),
-                rs.getString("asset"),
-                rs.getLong("deficit_units")), accountType, accountType, minAge.toMillis(), batchSize);
+        Map<String, Long> balances = insuranceFundRepository.findBalances(accountType(),
+                deficits.stream().map(DeficitRow::asset).distinct().toList());
+        return deficits.stream()
+                .filter(deficit -> balances.getOrDefault(deficit.asset(), 0L) == 0L)
+                .toList();
     }
 
     public List<AdlCandidate> queue(String asset, int limit, Duration maxMarkAge) {
@@ -100,44 +105,25 @@ public class AdlRepository {
     }
 
     public List<String> candidateAssets() {
-        return jdbcTemplate.query("""
-                SELECT DISTINCT i.settle_asset
-                  FROM account_positions p
-                  JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
-                 WHERE p.product_line = ? AND p.signed_quantity_steps <> 0
-                 ORDER BY i.settle_asset ASC
-                """, (rs, rowNum) -> rs.getString(1), properties.getKafka().getProductLine().name());
+        return positionRepository.open(productLine()).stream()
+                .map(this::instrument)
+                .flatMap(Optional::stream)
+                .map(InstrumentResponse::settleAsset)
+                .distinct()
+                .sorted()
+                .toList();
     }
 
-    public List<AdlCandidate> queue(String asset, long excludedUserId, int limit, Duration maxMarkAge) {
-        MarkPriceValues markPrices = freshMarkPrices(maxMarkAge, null);
-        if (markPrices.isEmpty()) {
+    public List<AdlCandidate> queue(String asset,
+                                   long excludedUserId,
+                                   int limit,
+                                   Duration maxMarkAge) {
+        Map<PositionKey, Long> marks = freshMarks(maxMarkAge, null);
+        if (marks.isEmpty()) {
             return List.of();
         }
-        int fetchLimit = Math.min(5000, Math.max(limit, limit * 5));
-        String sql = "WITH " + markPrices.cte() + "\n" + """
-                SELECT *
-                  FROM (
-                """ + candidateSelect() + """
-                       AND (? = 0 OR p.user_id <> ?)
-                  ) q
-                 ORDER BY q.user_id ASC, q.symbol ASC
-                 LIMIT ?
-                """;
-        List<Object> args = new ArrayList<>(markPrices.args());
-        args.addAll(candidateArgs(asset));
-        args.add(excludedUserId);
-        args.add(excludedUserId);
-        args.add(fetchLimit);
-        return jdbcTemplate.query(sql, (rs, rowNum) -> toCandidate(rs), args.toArray())
-                .stream()
-                .filter(candidate -> candidate.profitTicksPerStep() > 0 && candidate.unrealizedProfitUnits() > 0)
-                .sorted((left, right) -> {
-                    int score = Long.compare(right.priorityScorePpm(), left.priorityScorePpm());
-                    return score != 0 ? score : Long.compare(right.unrealizedProfitUnits(), left.unrealizedProfitUnits());
-                })
-                .limit(limit)
-                .toList();
+        List<AdlPositionRepository.PositionRow> positions = positionRepository.open(productLine());
+        return candidates(positions, asset, excludedUserId, limit, marks);
     }
 
     public Optional<AdlCandidate> lockCandidate(long userId,
@@ -146,187 +132,140 @@ public class AdlRepository {
                                                 PositionSide positionSide,
                                                 String asset,
                                                 Duration maxMarkAge) {
-        MarkPriceValues markPrices = freshMarkPrices(maxMarkAge, symbol);
-        if (markPrices.isEmpty()) {
+        AdlPositionRepository.PositionRow position = positionRepository.lock(
+                        productLine(), userId, symbol, marginMode, positionSide)
+                .orElse(null);
+        if (position == null) {
             return Optional.empty();
         }
-        String sql = "WITH " + markPrices.cte() + "\n" + candidateSelect() + """
-                   AND p.user_id = ?
-                   AND p.symbol = ?
-                   AND p.margin_mode = ?
-                   AND p.position_side = ?
-                """;
-        List<Object> args = new ArrayList<>(markPrices.args());
-        args.addAll(candidateArgs(asset));
-        args.add(userId);
-        args.add(symbol);
-        args.add(MarginMode.defaultIfNull(marginMode).name());
-        args.add(PositionSide.defaultIfNull(positionSide).name());
-        return jdbcTemplate.query(sql, (rs, rowNum) -> toCandidate(rs), args.toArray())
-                .stream()
-                .filter(candidate -> candidate.profitTicksPerStep() > 0 && candidate.unrealizedProfitUnits() > 0)
-                .findFirst();
+        Map<PositionKey, Long> marks = freshMarks(maxMarkAge, symbol);
+        if (marks.isEmpty()) {
+            return Optional.empty();
+        }
+        return candidate(position, asset, marks,
+                remainingDeficits(productLine(), asset, List.of(userId)),
+                marginRepository.find(productLine(), userId, symbol, asset,
+                        position.marginMode(), position.positionSide()).orElse(0L));
     }
 
-    public Optional<AdlCandidate> lockCandidate(long userId, String symbol, String asset, Duration maxMarkAge) {
+    public Optional<AdlCandidate> lockCandidate(long userId,
+                                                String symbol,
+                                                String asset,
+                                                Duration maxMarkAge) {
         return lockCandidate(userId, symbol, MarginMode.CROSS, PositionSide.NET, asset, maxMarkAge);
     }
 
-    private String accountType() {
-        return normalizeAccountType(properties.getKafka().getAccountType());
+    private List<AdlCandidate> candidates(List<AdlPositionRepository.PositionRow> positions,
+                                          String asset,
+                                          long excludedUserId,
+                                          int limit,
+                                          Map<PositionKey, Long> marks) {
+        List<Long> userIds = positions.stream().map(AdlPositionRepository.PositionRow::userId).distinct().toList();
+        Map<Long, Long> deficits = remainingDeficits(productLine(), asset, userIds);
+        Map<AdlPositionMarginRepository.MarginKey, Long> margins = marginRepository.findAll(productLine());
+        return positions.stream()
+                .filter(position -> position.userId() != excludedUserId)
+                .map(position -> {
+                    AdlPositionMarginRepository.MarginKey key = new AdlPositionMarginRepository.MarginKey(
+                            position.userId(), position.symbol(), asset, position.marginMode(), position.positionSide());
+                    return candidate(position, asset, marks, deficits, margins.getOrDefault(key, 0L));
+                })
+                .flatMap(Optional::stream)
+                .filter(value -> value.profitTicksPerStep() > 0 && value.unrealizedProfitUnits() > 0)
+                .sorted(Comparator.comparingLong(AdlCandidate::priorityScorePpm).reversed()
+                        .thenComparing(Comparator.comparingLong(AdlCandidate::unrealizedProfitUnits).reversed())
+                        .thenComparing(AdlCandidate::symbol))
+                .limit(Math.max(1, limit))
+                .toList();
     }
 
-    private String normalizeAccountType(String accountType) {
-        return accountType == null || accountType.isBlank()
-                ? DEFAULT_ACCOUNT_TYPE
-                : accountType.trim().toUpperCase();
+    private Optional<AdlCandidate> candidate(AdlPositionRepository.PositionRow position,
+                                             String requestedAsset,
+                                             Map<PositionKey, Long> marks,
+                                             Map<Long, Long> deficits,
+                                             long marginUnits) {
+        if (deficits.getOrDefault(position.userId(), 0L) > 0L) {
+            return Optional.empty();
+        }
+        InstrumentResponse instrument = instrument(position).orElse(null);
+        if (instrument == null || !instrument.contractType().isPerpetual()
+                || !instrument.settleAsset().equals(requestedAsset)) {
+            return Optional.empty();
+        }
+        Long markPriceTicks = marks.get(new PositionKey(position.symbol(), position.instrumentVersion()));
+        if (markPriceTicks == null) {
+            return Optional.empty();
+        }
+        long settleScaleUnits = snapshotCache.scale(productLine(), instrument.settleAsset())
+                .orElse(0L);
+        if (settleScaleUnits <= 0L) {
+            return Optional.empty();
+        }
+        long notionalUnits = PerpetualContractMath.notionalUnits(instrument.contractType(),
+                position.signedQuantitySteps(), markPriceTicks, instrument.notionalMultiplierUnits(),
+                instrument.priceTickUnits(), settleScaleUnits);
+        long profitUnits = Math.max(0L, PerpetualContractMath.unrealizedPnlUnits(instrument.contractType(),
+                position.signedQuantitySteps(), position.entryPriceTicks(), markPriceTicks,
+                instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), settleScaleUnits));
+        long absQuantitySteps = Math.absExact(position.signedQuantitySteps());
+        long profitTicksPerStep = position.signedQuantitySteps() > 0
+                ? Math.subtractExact(markPriceTicks, position.entryPriceTicks())
+                : Math.subtractExact(position.entryPriceTicks(), markPriceTicks);
+        long profitRatePpm = AdlMath.profitRatePpm(profitUnits, notionalUnits);
+        long effectiveLeveragePpm = AdlMath.effectiveLeveragePpm(notionalUnits, marginUnits);
+        long priorityScorePpm = AdlMath.priorityScorePpm(profitRatePpm, effectiveLeveragePpm);
+        return Optional.of(new AdlCandidate(
+                position.userId(), instrument.settleAsset(), position.symbol(), position.marginMode(),
+                position.positionSide(), position.signedQuantitySteps() > 0 ? AdlSide.LONG : AdlSide.SHORT,
+                position.signedQuantitySteps(), absQuantitySteps, position.entryPriceTicks(), markPriceTicks,
+                profitTicksPerStep, notionalUnits, profitUnits, marginUnits, profitRatePpm,
+                effectiveLeveragePpm, priorityScorePpm));
     }
 
-    private boolean productTopicsEnabled() {
-        return properties.getKafka().isProductTopicsEnabled();
+    private Optional<InstrumentResponse> instrument(AdlPositionRepository.PositionRow position) {
+        if (!snapshotCache.ready(productLine())) {
+            return Optional.empty();
+        }
+        return snapshotCache.version(productLine(), position.symbol(), position.instrumentVersion());
     }
 
-    private String productLine() {
-        return properties.getKafka().getProductLine().name();
-    }
-
-    private String candidateSelect() {
-        String deficitJoin = productTopicsEnabled()
-                ? """
-                  LEFT JOIN account_product_deficits d
-                    ON d.account_type = ?
-                   AND d.user_id = p.user_id
-                   AND d.asset = i.settle_asset
-                """
-                : """
-                  LEFT JOIN account_deficits d
-                    ON d.user_id = p.user_id
-                   AND d.asset = i.settle_asset
-                """;
-        String productFilter = productTopicsEnabled()
-                ? "   AND p.product_line = ?\n"
-                : "";
-        return """
-                SELECT p.user_id,
-                       i.settle_asset AS asset,
-                       p.symbol,
-                       p.margin_mode,
-                       p.position_side,
-                       i.contract_type,
-                       i.notional_multiplier_units,
-                       i.price_tick_units,
-                       ss.scale_units AS settle_scale_units,
-                       p.signed_quantity_steps,
-                       p.entry_price_ticks,
-                       pm.mark_price_ticks,
-                       COALESCE(m.margin_units, 0) AS margin_units
-                  FROM account_positions p
-                  JOIN instruments i ON i.symbol = p.symbol AND i.version = p.instrument_version
-                  JOIN account_asset_scales ss ON ss.asset = i.settle_asset
-                  JOIN mark_prices pm
-                    ON pm.symbol = p.symbol
-                   AND pm.instrument_version = p.instrument_version
-                  LEFT JOIN account_position_margins m
-                    ON m.user_id = p.user_id
-                   AND m.symbol = p.symbol
-                   AND m.asset = i.settle_asset
-                   AND m.margin_mode = p.margin_mode
-                   AND m.position_side = p.position_side
-                   AND m.product_line = p.product_line
-                %s
-                 WHERE i.settle_asset = ?
-                   AND p.signed_quantity_steps <> 0
-                   AND COALESCE(d.deficit_units, 0) = 0
-                %s
-                """.formatted(deficitJoin, productFilter);
-    }
-
-    private MarkPriceValues freshMarkPrices(Duration maxAge, String symbol) {
+    private Map<PositionKey, Long> freshMarks(Duration maxAge, String symbol) {
         if (markPriceCache == null) {
             throw new IllegalStateException("mark price cache is not configured");
         }
         List<MarkPriceEvent> snapshots = symbol == null
                 ? markPriceCache.freshSnapshots(maxAge)
                 : markPriceCache.fresh(symbol, maxAge).stream().toList();
-        if (snapshots.isEmpty()) {
-            return MarkPriceValues.empty();
-        }
-        StringBuilder values = new StringBuilder();
-        List<Object> args = new ArrayList<>(snapshots.size() * 3);
+        Map<PositionKey, Long> result = new HashMap<>();
         for (MarkPriceEvent snapshot : snapshots) {
-            if (!values.isEmpty()) {
-                values.append(", ");
-            }
-            values.append("(?::TEXT, ?::BIGINT, ?::BIGINT)");
-            args.add(snapshot.symbol());
-            args.add(snapshot.instrumentVersion());
-            args.add(snapshot.markPriceTicks());
+            result.put(new PositionKey(snapshot.symbol(), snapshot.instrumentVersion()), snapshot.markPriceTicks());
         }
-        return new MarkPriceValues("mark_prices(symbol, instrument_version, mark_price_ticks) AS (VALUES "
-                + values + ")", List.copyOf(args));
+        return Map.copyOf(result);
     }
 
-    private List<Object> candidateArgs(String asset) {
-        List<Object> args = new ArrayList<>();
-        if (productTopicsEnabled()) {
-            args.add(accountType());
-        }
-        args.add(asset);
-        if (productTopicsEnabled()) {
-            args.add(productLine());
-        }
-        return args;
+    private ProductLine productLine() {
+        return properties.getKafka().getProductLine();
     }
 
-    private record MarkPriceValues(String cte, List<Object> args) {
-
-        private static MarkPriceValues empty() {
-            return new MarkPriceValues("", List.of());
-        }
-
-        private boolean isEmpty() {
-            return args.isEmpty();
-        }
+    private List<DeficitRow> claimResidualDeficitsFromTable(int batchSize, Duration minAge) {
+        return properties.getKafka().isProductTopicsEnabled()
+                ? productDeficitRepository.claimResidual(accountType(), batchSize, minAge)
+                : legacyDeficitRepository.claimResidual(accountType(), batchSize, minAge);
     }
 
-    private AdlCandidate toCandidate(java.sql.ResultSet rs) throws java.sql.SQLException {
-        ContractType contractType = ContractType.valueOf(rs.getString("contract_type"));
-        long signedQuantity = rs.getLong("signed_quantity_steps");
-        long entryPriceTicks = rs.getLong("entry_price_ticks");
-        long markPriceTicks = rs.getLong("mark_price_ticks");
-        long notionalMultiplierUnits = rs.getLong("notional_multiplier_units");
-        long priceTickUnits = rs.getLong("price_tick_units");
-        long settleScaleUnits = rs.getLong("settle_scale_units");
-        long notionalUnits = PerpetualContractMath.notionalUnits(contractType, signedQuantity,
-                markPriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
-        long profitUnits = Math.max(0L, PerpetualContractMath.unrealizedPnlUnits(contractType, signedQuantity,
-                entryPriceTicks, markPriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits));
-        long absQuantitySteps = Math.absExact(signedQuantity);
-        long profitTicksPerStep = signedQuantity > 0
-                ? Math.subtractExact(markPriceTicks, entryPriceTicks)
-                : Math.subtractExact(entryPriceTicks, markPriceTicks);
-        long marginUnits = rs.getLong("margin_units");
-        long profitRatePpm = AdlMath.profitRatePpm(profitUnits, notionalUnits);
-        long effectiveLeveragePpm = AdlMath.effectiveLeveragePpm(notionalUnits, marginUnits);
-        long priorityScorePpm = AdlMath.priorityScorePpm(profitRatePpm, effectiveLeveragePpm);
-        return new AdlCandidate(
-                rs.getLong("user_id"),
-                rs.getString("asset"),
-                rs.getString("symbol"),
-                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                PositionSide.fromNullableDbValue(rs.getString("position_side")),
-                signedQuantity > 0 ? AdlSide.LONG : AdlSide.SHORT,
-                signedQuantity,
-                absQuantitySteps,
-                entryPriceTicks,
-                markPriceTicks,
-                profitTicksPerStep,
-                notionalUnits,
-                profitUnits,
-                marginUnits,
-                profitRatePpm,
-                effectiveLeveragePpm,
-                priorityScorePpm);
+    private Map<Long, Long> remainingDeficits(ProductLine productLine, String asset, List<Long> userIds) {
+        return properties.getKafka().isProductTopicsEnabled()
+                ? productDeficitRepository.remainingByUsers(productLine, asset, userIds)
+                : legacyDeficitRepository.remainingByUsers(productLine, asset, userIds);
     }
 
+    private String accountType() {
+        String accountType = properties.getKafka().getAccountType();
+        return accountType == null || accountType.isBlank()
+                ? DEFAULT_ACCOUNT_TYPE
+                : accountType.trim().toUpperCase();
+    }
+
+    private record PositionKey(String symbol, long instrumentVersion) {
+    }
 }

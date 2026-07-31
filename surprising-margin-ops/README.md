@@ -28,11 +28,13 @@
   在业务事务内聚合。只有费率输入、到期费率选择、结算候选、自愈关联和支付结果原子回写需要跨表；
   源码均标注“不可拆原因”，且这些查询只服务在线资金安全链路。
 - 保险基金持久化已按序列、基金余额、基金流水、缺口覆盖、产品线缺口、兼容缺口和账户 outbox 拆分，
-  `InsuranceService` 与 `InsuranceCoverageReconciler` 在事务内聚合。只有覆盖记录与 reserve/finalize
-  账户命令终态的自愈锁定查询保留跨表，并在源码标注“不可拆原因”。
+  `InsuranceService` 与 `InsuranceCoverageReconciler` 在事务内聚合。覆盖记录和 reserve/finalize
+  账户命令终态由两个单表 Repository 分别锁定读取，Service 合并结果，保险模块不使用 SQL JOIN。
 - ADL 持久化已按序列、事件、执行 saga 和账户 outbox 拆分，由 `AdlService`、
-  `AdlExecutionPersistenceService` 与 `AdlExecutionReconciler` 在业务事务内聚合。只有在线候选安全决策
-  和 saga 与账户命令终态的自愈锁定需要共享数据库快照，源码均标注“不可拆原因”。
+  `AdlExecutionPersistenceService` 与 `AdlExecutionReconciler` 在业务事务内聚合。持仓、保证金、缺口、
+  保险余额和 saga 命令状态均由单表 Repository 读取，再由 Service 聚合，ADL 模块不使用 SQL JOIN。
+- 条件单、保险基金和 ADL 启动时都通过 Instrument 内部快照 RPC 初始化本 JVM 缓存，并消费同一
+  `surprising.instrument.events.v1` 增量 Topic；合约参数和资产精度不再从交易主库实时拼接。
 - 风险模块批量消费账户持仓事件，同一具体持仓只保留最高 revision，并让每个受影响的
   `用户 + 账户类型 + 结算资产` 风险组只扫描一次。完整持仓事件已经能够定位风险组，不再额外查询
   instrument；定时 keyset 扫描继续作为安全兜底。
@@ -55,8 +57,8 @@
 - 资金费后台结算时间线、跨账户对账和运营统计同样不得在交易主库增加 JOIN；后续统一由财务运营模块的
   独立数据库投影提供。
 - 保险基金历史分析、跨用户覆盖对账和运营统计也只能进入财务运营独立数据库，不能扩展交易主库查询。
-- ADL 后台执行时间线、穿仓分摊对账和运营统计同样只能由财务运营独立数据库的事件投影提供。交易主库中的
-  ADL 跨表查询仅允许服务实时安全决策与资金一致性自愈，不能扩展为后台报表接口。
+- ADL 后台执行时间线、穿仓分摊对账和运营统计同样只能由财务运营独立数据库的事件投影提供；交易主库的
+  ADL 服务只做单表读取和事务内内存聚合，不能扩展为后台报表接口。
 - 任何模块都不能直接读取另一个模块的内存状态。
 - 原来的独立 provider jar 仍然保留，可以随时拆分部署。
 

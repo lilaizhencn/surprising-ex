@@ -33,6 +33,7 @@ surprising:
       product-line: ${PRODUCT_LINE}
       product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       position-risk-events-topic: surprising.risk.position.events.v1
+      instrument-events-topic: surprising.instrument.events.v1
       group-id: surprising-adl-risk-index-${HOSTNAME:${random.uuid}}
     redis-index:
       key-prefix: surprising:adl:v1

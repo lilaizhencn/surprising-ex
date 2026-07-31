@@ -130,6 +130,10 @@ public class TriggerProperties {
             this.instrumentEventsTopic = instrumentEventsTopic;
         }
 
+        public String getInstrumentSnapshotGroupId() {
+            return "surprising-" + productLine.topicSegment() + "-trigger-instrument-snapshot-v1";
+        }
+
         public String getInstrumentLifecycleDrainTopic() {
             return instrumentLifecycleDrainTopic;
         }
