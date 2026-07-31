@@ -2,7 +2,7 @@ package com.surprising.liquidation.provider.service;
 
 import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.liquidation.provider.model.TradingOutboxRecord;
-import com.surprising.liquidation.provider.repository.LiquidationOrderRepository;
+import com.surprising.liquidation.provider.repository.LiquidationTradingOutboxRepository;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
 import java.time.Instant;
@@ -32,17 +32,17 @@ public class TradingOutboxPublisher {
     private static final Duration CLAIM_LEASE_BUFFER = Duration.ofSeconds(5);
 
     private final LiquidationProperties properties;
-    private final LiquidationOrderRepository orderRepository;
+    private final LiquidationTradingOutboxRepository outboxRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ExecutorService publishExecutor;
     private final int maxInFlight;
     private final AtomicBoolean publishing = new AtomicBoolean(false);
 
     public TradingOutboxPublisher(LiquidationProperties properties,
-                                  LiquidationOrderRepository orderRepository,
+                                  LiquidationTradingOutboxRepository outboxRepository,
                                   @Qualifier("liquidationKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate) {
         this.properties = properties;
-        this.orderRepository = orderRepository;
+        this.outboxRepository = outboxRepository;
         this.kafkaTemplate = kafkaTemplate;
         this.maxInFlight = Math.max(1, properties.getOutbox().getMaxInFlight());
         this.publishExecutor = Executors.newFixedThreadPool(maxInFlight, threadFactory());
@@ -57,7 +57,7 @@ public class TradingOutboxPublisher {
             int remaining = Math.max(1, properties.getOutbox().getBatchSize());
             while (remaining > 0) {
                 Instant now = Instant.now();
-                var rows = orderRepository.claimPending(remaining, now.plus(claimLease(remaining)), now)
+                var rows = outboxRepository.claimPending(remaining, now.plus(claimLease(remaining)), now)
                         .stream()
                         .sorted(Comparator.comparing(TradingOutboxRecord::topic)
                                 .thenComparing(TradingOutboxRecord::eventKey)
@@ -80,7 +80,7 @@ public class TradingOutboxPublisher {
         int totalDeleted = 0;
         Instant cutoff = Instant.now().minus(properties.getOutbox().getRetention());
         for (int batch = 0; batch < Math.max(1, properties.getOutbox().getCleanupMaxBatches()); batch++) {
-            int deleted = orderRepository.deletePublishedBefore(cutoff, batchSize);
+            int deleted = outboxRepository.deletePublishedBefore(cutoff, batchSize);
             totalDeleted += deleted;
             if (deleted < batchSize) {
                 break;
@@ -135,7 +135,7 @@ public class TradingOutboxPublisher {
 
         if (!publishedIds.isEmpty()) {
             try {
-                orderRepository.markPublished(publishedIds, Instant.now());
+                outboxRepository.markPublished(publishedIds, Instant.now());
             } catch (Exception ex) {
                 log.error("Failed to batch mark {} liquidation outbox events published: {}",
                         publishedIds.size(), ex.getMessage(), ex);
@@ -159,7 +159,7 @@ public class TradingOutboxPublisher {
         log.warn("Failed to publish liquidation trading outbox id={} topic={}: {}",
                 row.id(), row.topic(), ex.getMessage());
         try {
-            orderRepository.markFailed(row.id(), ex.getMessage(), Instant.now());
+            outboxRepository.markFailed(row.id(), ex.getMessage(), Instant.now());
         } catch (Exception markEx) {
             log.error("Failed to mark liquidation outbox id={} after publish failure: {}",
                     row.id(), markEx.getMessage(), markEx);

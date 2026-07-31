@@ -11,7 +11,7 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
-/** Redis-backed priority queue with atomic lease, retry and crash recovery. */
+/** 基于 Redis 的优先队列，支持原子租约、重试和故障恢复。 */
 @Component
 public class RedisLiquidationCandidateQueue {
 

@@ -8,15 +8,17 @@ import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.liquidation.provider.model.ClaimedCandidate;
 import com.surprising.liquidation.provider.model.LiquidationPricingDecision;
 import com.surprising.liquidation.provider.model.LiquidationSizingInput;
-import com.surprising.liquidation.provider.repository.LiquidationOrderRepository;
-import com.surprising.liquidation.provider.repository.LiquidationOrderRepository.LiquidationOrderRequest;
-import com.surprising.liquidation.provider.repository.LiquidationOrderRepository.LiquidationOrderSubmission;
+import com.surprising.liquidation.provider.repository.LiquidationAdminActionRepository;
+import com.surprising.liquidation.provider.repository.LiquidationAdminActionRepository.LiquidationAdminAction;
+import com.surprising.liquidation.provider.repository.LiquidationAuditRepository;
+import com.surprising.liquidation.provider.repository.LiquidationAuditRepository.LiquidationOrderInsert;
+import com.surprising.liquidation.provider.repository.LiquidationCandidateRepository;
+import com.surprising.liquidation.provider.repository.LiquidationPositionRepository;
+import com.surprising.liquidation.provider.service.LiquidationOrderPersistenceService.LiquidationOrderRequest;
+import com.surprising.liquidation.provider.service.LiquidationOrderPersistenceService.LiquidationOrderSubmission;
 import com.surprising.liquidation.provider.repository.LiquidationRepository;
-import com.surprising.liquidation.provider.repository.LiquidationRepository.LiquidationAdminAction;
 import com.surprising.liquidation.provider.repository.LiquidationRepository.CandidateInputRequest;
 import com.surprising.liquidation.provider.repository.LiquidationRepository.CandidateInputs;
-import com.surprising.liquidation.provider.repository.LiquidationRepository.LiquidationOrderInsert;
-import com.surprising.liquidation.provider.repository.LiquidationRepository.LiquidationTimelineEvent;
 import com.surprising.liquidation.provider.repository.LiquidationSequenceRepository;
 import com.surprising.risk.api.model.LiquidationCandidateEvent;
 import com.surprising.risk.api.model.RiskStatus;
@@ -47,7 +49,11 @@ public class LiquidationService {
     private final ObjectMapper objectMapper;
     private final LiquidationProperties properties;
     private final LiquidationRepository liquidationRepository;
-    private final LiquidationOrderRepository orderRepository;
+    private final LiquidationCandidateRepository candidateRepository;
+    private final LiquidationPositionRepository positionRepository;
+    private final LiquidationAuditRepository auditRepository;
+    private final LiquidationAdminActionRepository adminActionRepository;
+    private final LiquidationOrderPersistenceService orderPersistenceService;
     private final LiquidationSequenceRepository sequenceRepository;
     private final LiquidationSizingPolicy sizingPolicy;
     private final LiquidationPriceCalculator priceCalculator;
@@ -55,14 +61,22 @@ public class LiquidationService {
     public LiquidationService(ObjectMapper objectMapper,
                               LiquidationProperties properties,
                               LiquidationRepository liquidationRepository,
-                              LiquidationOrderRepository orderRepository,
+                              LiquidationCandidateRepository candidateRepository,
+                              LiquidationPositionRepository positionRepository,
+                              LiquidationAuditRepository auditRepository,
+                              LiquidationAdminActionRepository adminActionRepository,
+                              LiquidationOrderPersistenceService orderPersistenceService,
                               LiquidationSequenceRepository sequenceRepository,
                               LiquidationSizingPolicy sizingPolicy,
                               LiquidationPriceCalculator priceCalculator) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.liquidationRepository = liquidationRepository;
-        this.orderRepository = orderRepository;
+        this.candidateRepository = candidateRepository;
+        this.positionRepository = positionRepository;
+        this.auditRepository = auditRepository;
+        this.adminActionRepository = adminActionRepository;
+        this.orderPersistenceService = orderPersistenceService;
         this.sequenceRepository = sequenceRepository;
         this.sizingPolicy = sizingPolicy;
         this.priceCalculator = priceCalculator;
@@ -99,10 +113,10 @@ public class LiquidationService {
         HashSet<Long> retrySet = new HashSet<>(retryIds);
         long marksLoaded = System.nanoTime();
         List<Long> readyIds = uniqueEvents.keySet().stream().filter(id -> !retrySet.contains(id)).toList();
-        List<ClaimedCandidate> claimed = liquidationRepository.claimCandidates(readyIds);
+        List<ClaimedCandidate> claimed = candidateRepository.claimAll(readyIds);
         long candidatesClaimed = System.nanoTime();
         Map<Long, com.surprising.liquidation.provider.model.LiquidationCloseState> closeStates =
-                liquidationRepository.lockCloseStates(claimed);
+                positionRepository.lockAll(claimed);
         long positionsLocked = System.nanoTime();
         List<CandidateInputRequest> inputRequests = claimed.stream()
                 .filter(candidate -> closeStates.containsKey(candidate.candidateId()))
@@ -125,9 +139,9 @@ public class LiquidationService {
         }
         List<LiquidationOrderRequest> requests = pending.stream().map(PendingSubmission::request).toList();
         long candidatesPrepared = System.nanoTime();
-        orderRepository.cancelOpenReduceOnlyCloseOrders(requests, this::payload);
+        orderPersistenceService.cancelOpenReduceOnlyCloseOrders(requests, this::payload);
         long closeOrdersPreempted = System.nanoTime();
-        List<LiquidationOrderSubmission> submissions = orderRepository.createReduceOnlyMarketOrders(
+        List<LiquidationOrderSubmission> submissions = orderPersistenceService.createReduceOnlyMarketOrders(
                 requests, this::payload);
         long ordersSubmitted = System.nanoTime();
         Map<Long, LiquidationOrderSubmission> submissionByCandidate = submissions.stream()
@@ -146,7 +160,7 @@ public class LiquidationService {
                     item.request().side(), item.request().quantitySteps(), LiquidationOrderStatus.SUBMITTED,
                     item.reason(), item.pricing(), Instant.now()));
         }
-        liquidationRepository.insertLiquidationOrders(audits);
+        auditRepository.insertAll(audits);
         long auditsInserted = System.nanoTime();
         if (!claimed.isEmpty() || !retryIds.isEmpty()) {
             log.info("liquidation candidate batch events={} claimed={} submitted={} retry={} "
@@ -167,7 +181,7 @@ public class LiquidationService {
             com.surprising.liquidation.provider.model.LiquidationCloseState closeState,
             CandidateInputs inputs) {
         if (closeState == null || closeState.signedQuantitySteps() == 0) {
-            liquidationRepository.markCandidate(candidate.candidateId(), "CANCELED");
+            candidateRepository.updateStatus(candidate.candidateId(), "CANCELED");
             insertAudit(candidate.candidateId(), 0L, candidate.userId(), candidate.symbol(),
                     candidate.marginMode(), candidate.positionSide(),
                     LiquidationSideResolver.closeSide(candidate.signedQuantitySteps()),
@@ -179,7 +193,7 @@ public class LiquidationService {
             throw new IllegalStateException("liquidation candidate inputs missing for " + candidate.candidateId());
         }
         if (inputs.latestRiskStatus() != RiskStatus.LIQUIDATION) {
-            liquidationRepository.markCandidate(candidate.candidateId(), "CANCELED");
+            candidateRepository.updateStatus(candidate.candidateId(), "CANCELED");
             insertAudit(candidate.candidateId(), 0L, candidate.userId(), candidate.symbol(),
                     candidate.marginMode(), candidate.positionSide(),
                     LiquidationSideResolver.closeSide(candidate.signedQuantitySteps()),
@@ -189,7 +203,7 @@ public class LiquidationService {
         }
         var pricingInput = inputs.pricingInput();
         if (pricingInput.signedQuantitySteps() != closeState.signedQuantitySteps()) {
-            liquidationRepository.markCandidate(candidate.candidateId(), "CANCELED");
+            candidateRepository.updateStatus(candidate.candidateId(), "CANCELED");
             insertAudit(candidate.candidateId(), 0L, candidate.userId(), candidate.symbol(),
                     candidate.marginMode(), candidate.positionSide(),
                     LiquidationSideResolver.closeSide(closeState.signedQuantitySteps()),
@@ -203,7 +217,7 @@ public class LiquidationService {
         var decision = sizingPolicy.decide(sizingInput, candidate.marginRatioPpm(), properties.getSizing());
         long quantitySteps = decision.quantitySteps();
         if (quantitySteps <= 0) {
-            liquidationRepository.markCandidate(candidate.candidateId(), "CANCELED");
+            candidateRepository.updateStatus(candidate.candidateId(), "CANCELED");
             insertAudit(candidate.candidateId(), 0L, candidate.userId(), candidate.symbol(), candidate.marginMode(),
                     candidate.positionSide(), side, 0L, LiquidationOrderStatus.CANCELED, decision.reason());
             return null;
@@ -222,7 +236,9 @@ public class LiquidationService {
             return;
         }
         LifecycleUpdate update = lifecycleUpdate(event);
-        liquidationRepository.updateOrderLifecycle(event.orderId(), update.orderStatus(), update.candidateStatus());
+        auditRepository.updateStatusByOrderId(event.orderId(), update.orderStatus())
+                .ifPresent(candidateId -> candidateRepository.updateProcessingStatus(
+                        candidateId, update.candidateStatus()));
     }
 
     @Scheduled(fixedDelayString = "${surprising.liquidation.settlement-reconcile-delay-ms:50}")
@@ -231,28 +247,20 @@ public class LiquidationService {
     }
 
     public LiquidationOrderQueryResponse orders(Long userId, int limit) {
-        List<LiquidationOrderResponse> rows = liquidationRepository.orders(userId, normalizeLimit(limit));
+        List<LiquidationOrderResponse> rows = auditRepository.find(userId, normalizeLimit(limit));
         return new LiquidationOrderQueryResponse(rows.size(), rows);
     }
 
     public LiquidationOrderQueryResponse orders(Long userId, int limit, String cursor, String sort) {
-        AdminCursorPage.CursorPage<LiquidationOrderResponse> page = liquidationRepository.ordersPage(userId,
+        AdminCursorPage.CursorPage<LiquidationOrderResponse> page = auditRepository.page(userId,
                 normalizeLimit(limit), cursor, sort);
         return new LiquidationOrderQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
 
     public LiquidationOrderQueryResponse ordersByCandidate(long candidateId) {
-        List<LiquidationOrderResponse> rows = liquidationRepository.ordersByCandidate(candidateId);
+        List<LiquidationOrderResponse> rows = auditRepository.findByCandidate(candidateId);
         return new LiquidationOrderQueryResponse(rows.size(), rows);
-    }
-
-    public LiquidationTimelineResponse timeline(long candidateId, int limit) {
-        Map<String, Object> candidate = liquidationRepository.candidate(candidateId)
-                .orElseThrow(() -> new IllegalArgumentException("liquidation candidate not found"));
-        List<LiquidationOrderResponse> orders = liquidationRepository.ordersByCandidate(candidateId);
-        List<LiquidationTimelineEvent> events = liquidationRepository.timeline(candidateId, limit);
-        return new LiquidationTimelineResponse(candidateId, candidate, orders, events.size(), events);
     }
 
     @Transactional
@@ -265,7 +273,7 @@ public class LiquidationService {
         Instant now = Instant.now();
         var canceled = liquidationRepository.cancelCandidateIfSafe(candidateId, now)
                 .orElseThrow(() -> new IllegalArgumentException("candidate is not cancelable"));
-        LiquidationAdminAction action = liquidationRepository.insertAdminAction(candidateId, "CANCEL_CANDIDATE",
+        LiquidationAdminAction action = adminActionRepository.insert(candidateId, "CANCEL_CANDIDATE",
                 normalizedAdminUserId, normalizedReason, now);
         return new LiquidationAdminActionResponse(canceled.candidateId(), canceled.status(), action.actionType(),
                 action.adminUserId(), action.reason(), canceled.updatedAt(), action.createdAt());
@@ -309,10 +317,10 @@ public class LiquidationService {
                              LiquidationOrderStatus status,
                              String reason,
                              LiquidationPricingDecision pricing) {
-        boolean inserted = liquidationRepository.insertLiquidationOrder(
+        boolean inserted = auditRepository.insert(new LiquidationOrderInsert(
                 sequenceRepository.nextLiquidationSequence("liquidation-order"),
                 candidateId, orderId, userId, symbol, marginMode, positionSide, side, quantitySteps, status, reason,
-                pricing, Instant.now());
+                pricing, Instant.now()));
         if (!inserted) {
             throw new IllegalStateException("failed to insert liquidation order audit");
         }
@@ -383,13 +391,6 @@ public class LiquidationService {
             throw new IllegalArgumentException("limit must be between 1 and 1000");
         }
         return limit;
-    }
-
-    public record LiquidationTimelineResponse(long candidateId,
-                                              Map<String, Object> candidate,
-                                              List<LiquidationOrderResponse> orders,
-                                              int eventCount,
-                                              List<LiquidationTimelineEvent> timeline) {
     }
 
     public record LiquidationAdminActionResponse(long candidateId,

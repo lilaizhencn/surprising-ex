@@ -12,15 +12,19 @@ import com.surprising.liquidation.provider.model.LiquidationCloseState;
 import com.surprising.liquidation.provider.model.LiquidationPricingDecision;
 import com.surprising.liquidation.provider.model.LiquidationPricingInput;
 import com.surprising.liquidation.provider.model.LiquidationSizingInput;
-import com.surprising.liquidation.provider.repository.LiquidationOrderRepository;
+import com.surprising.liquidation.provider.repository.LiquidationAdminActionRepository;
+import com.surprising.liquidation.provider.repository.LiquidationAdminActionRepository.LiquidationAdminAction;
+import com.surprising.liquidation.provider.repository.LiquidationAuditRepository;
+import com.surprising.liquidation.provider.repository.LiquidationAuditRepository.LiquidationOrderInsert;
+import com.surprising.liquidation.provider.repository.LiquidationCandidateRepository;
+import com.surprising.liquidation.provider.repository.LiquidationPositionRepository;
 import com.surprising.liquidation.provider.repository.LiquidationRepository;
 import com.surprising.liquidation.provider.repository.LiquidationRepository.CandidateInputRequest;
 import com.surprising.liquidation.provider.repository.LiquidationRepository.CandidateInputs;
 import com.surprising.liquidation.provider.repository.LiquidationRepository.CanceledCandidate;
-import com.surprising.liquidation.provider.repository.LiquidationRepository.LiquidationAdminAction;
-import com.surprising.liquidation.provider.repository.LiquidationRepository.LiquidationOrderInsert;
-import com.surprising.liquidation.provider.repository.LiquidationRepository.LiquidationTimelineEvent;
 import com.surprising.liquidation.provider.repository.LiquidationSequenceRepository;
+import com.surprising.liquidation.provider.service.LiquidationOrderPersistenceService.LiquidationOrderRequest;
+import com.surprising.liquidation.provider.service.LiquidationOrderPersistenceService.LiquidationOrderSubmission;
 import com.surprising.risk.api.model.LiquidationCandidateEvent;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.trading.api.model.OrderCommandEvent;
@@ -51,8 +55,8 @@ class LiquidationServiceTest {
         FakeLiquidationOrderRepository orderRepository = new FakeLiquidationOrderRepository();
         orderRepository.openReduceOnlyCloseOrders = 2;
         FakeSequenceRepository sequenceRepository = new FakeSequenceRepository();
-        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
-                liquidationRepository, orderRepository, sequenceRepository, new LiquidationSizingPolicy(), new LiquidationPriceCalculator());
+        LiquidationService service = service(new LiquidationProperties(), liquidationRepository,
+                orderRepository, sequenceRepository);
 
         service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
                 "USDT", 10L, 590_000L, -200_000_000L, 88_500_000L, 1_100_000L,
@@ -93,9 +97,8 @@ class LiquidationServiceTest {
         FakeLiquidationRepository liquidationRepository = new FakeLiquidationRepository();
         liquidationRepository.candidateAccountType = "USDT_DELIVERY";
         FakeLiquidationOrderRepository orderRepository = new FakeLiquidationOrderRepository();
-        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
-                liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(),
-                new LiquidationPriceCalculator());
+        LiquidationService service = service(new LiquidationProperties(), liquidationRepository,
+                orderRepository, new FakeSequenceRepository());
 
         service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
                 "USDT", 10L, 590_000L, -200_000_000L, 88_500_000L, 1_100_000L,
@@ -112,9 +115,8 @@ class LiquidationServiceTest {
         liquidationRepository.candidateSignedQuantitySteps = -10L;
         liquidationRepository.pricingSignedQuantitySteps = -10L;
         FakeLiquidationOrderRepository orderRepository = new FakeLiquidationOrderRepository();
-        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
-                liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(),
-                new LiquidationPriceCalculator());
+        LiquidationService service = service(new LiquidationProperties(), liquidationRepository,
+                orderRepository, new FakeSequenceRepository());
 
         service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT",
                 MarginMode.CROSS, PositionSide.SHORT, 8L, "USDT", -10L, 590_000L,
@@ -141,8 +143,8 @@ class LiquidationServiceTest {
         FakeLiquidationOrderRepository orderRepository = new FakeLiquidationOrderRepository();
         LiquidationProperties properties = new LiquidationProperties();
         properties.getExecution().setEnabled(false);
-        LiquidationService service = new LiquidationService(new ObjectMapper(), properties,
-                liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(), new LiquidationPriceCalculator());
+        LiquidationService service = service(properties, liquidationRepository,
+                orderRepository, new FakeSequenceRepository());
 
         assertThatThrownBy(() -> service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L,
                 2002L, "BTC-USDT", 8L, "USDT", 10L, 590_000L, -200_000_000L,
@@ -163,9 +165,8 @@ class LiquidationServiceTest {
         liquidationRepository.pendingCloseSteps = 10L;
         FakeLiquidationOrderRepository orderRepository = new FakeLiquidationOrderRepository();
         orderRepository.openReduceOnlyCloseOrders = 10;
-        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
-                liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(),
-                new LiquidationPriceCalculator());
+        LiquidationService service = service(new LiquidationProperties(), liquidationRepository,
+                orderRepository, new FakeSequenceRepository());
 
         service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
                 "USDT", 10L, 590_000L, -200_000_000L, 88_500_000L, 1_100_000L,
@@ -187,9 +188,8 @@ class LiquidationServiceTest {
         FakeLiquidationRepository liquidationRepository = new FakeLiquidationRepository();
         liquidationRepository.positionRiskStatus = RiskStatus.NORMAL;
         FakeLiquidationOrderRepository orderRepository = new FakeLiquidationOrderRepository();
-        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
-                liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(),
-                new LiquidationPriceCalculator());
+        LiquidationService service = service(new LiquidationProperties(), liquidationRepository,
+                orderRepository, new FakeSequenceRepository());
 
         service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
                 "USDT", 10L, 590_000L, -200_000_000L, 88_500_000L, 1_100_000L,
@@ -205,9 +205,8 @@ class LiquidationServiceTest {
         FakeLiquidationRepository liquidationRepository = new FakeLiquidationRepository();
         liquidationRepository.pricingSignedQuantitySteps = 8L;
         FakeLiquidationOrderRepository orderRepository = new FakeLiquidationOrderRepository();
-        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
-                liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(),
-                new LiquidationPriceCalculator());
+        LiquidationService service = service(new LiquidationProperties(), liquidationRepository,
+                orderRepository, new FakeSequenceRepository());
 
         service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L, 2002L, "BTC-USDT", 8L,
                 "USDT", 10L, 590_000L, -200_000_000L, 88_500_000L, 1_100_000L,
@@ -224,9 +223,8 @@ class LiquidationServiceTest {
         FakeLiquidationRepository liquidationRepository = new FakeLiquidationRepository();
         liquidationRepository.insertAudit = false;
         FakeLiquidationOrderRepository orderRepository = new FakeLiquidationOrderRepository();
-        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
-                liquidationRepository, orderRepository, new FakeSequenceRepository(), new LiquidationSizingPolicy(),
-                new LiquidationPriceCalculator());
+        LiquidationService service = service(new LiquidationProperties(), liquidationRepository,
+                orderRepository, new FakeSequenceRepository());
 
         assertThatThrownBy(() -> service.processCandidates(List.of(new LiquidationCandidateEvent(9401L, 9301L,
                 2002L, "BTC-USDT", 8L, "USDT", 10L, 590_000L, -200_000_000L,
@@ -240,9 +238,8 @@ class LiquidationServiceTest {
     @Test
     void marksLiquidationCompletedOnlyAfterFilledMatchResult() {
         FakeLiquidationRepository liquidationRepository = new FakeLiquidationRepository();
-        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
-                liquidationRepository, new FakeLiquidationOrderRepository(), new FakeSequenceRepository(),
-                new LiquidationSizingPolicy(), new LiquidationPriceCalculator());
+        LiquidationService service = service(new LiquidationProperties(), liquidationRepository,
+                new FakeLiquidationOrderRepository(), new FakeSequenceRepository());
 
         service.processMatchResult(new MatchResultEvent(9101L, 7001L, 2002L, "BTC-USDT", 8L,
                 OrderCommandType.PLACE, "SUCCESS", 5L, OrderStatus.FILLED,
@@ -255,9 +252,8 @@ class LiquidationServiceTest {
     @Test
     void cancelsLiquidationCandidateWhenMatchResultDoesNotFill() {
         FakeLiquidationRepository liquidationRepository = new FakeLiquidationRepository();
-        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
-                liquidationRepository, new FakeLiquidationOrderRepository(), new FakeSequenceRepository(),
-                new LiquidationSizingPolicy(), new LiquidationPriceCalculator());
+        LiquidationService service = service(new LiquidationProperties(), liquidationRepository,
+                new FakeLiquidationOrderRepository(), new FakeSequenceRepository());
 
         service.processMatchResult(new MatchResultEvent(9101L, 7002L, 2002L, "BTC-USDT", 8L,
                 OrderCommandType.PLACE, "SUCCESS", 0L, OrderStatus.CANCELED,
@@ -268,39 +264,10 @@ class LiquidationServiceTest {
     }
 
     @Test
-    void returnsAdminTimelineWithCandidateOrdersAndEvents() {
-        FakeLiquidationRepository liquidationRepository = new FakeLiquidationRepository();
-        LiquidationOrderResponse order = new LiquidationOrderResponse(6001L, 9401L, 7001L, 2002L,
-                "BTC-USDT", MarginMode.CROSS, OrderSide.SELL, 5L, 80L, 80L,
-                5_000L, 3L, LiquidationOrderStatus.SUBMITTED, "PARTIAL_LIQUIDATION",
-                Instant.parse("2026-07-01T00:00:01Z"));
-        liquidationRepository.orders.add(order);
-        liquidationRepository.timelineEvents.add(new LiquidationTimelineEvent(
-                Instant.parse("2026-07-01T00:00:00Z"), "risk", "CANDIDATE_CREATED",
-                "9401", "NEW", Map.of("candidate_id", 9401L)));
-        liquidationRepository.timelineEvents.add(new LiquidationTimelineEvent(
-                Instant.parse("2026-07-01T00:00:01Z"), "liquidation", "LIQUIDATION_AUDIT",
-                "6001", "SUBMITTED", Map.of("order_id", 7001L)));
-        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
-                liquidationRepository, new FakeLiquidationOrderRepository(), new FakeSequenceRepository(),
-                new LiquidationSizingPolicy(), new LiquidationPriceCalculator());
-
-        LiquidationService.LiquidationTimelineResponse response = service.timeline(9401L, 100);
-
-        assertThat(response.candidateId()).isEqualTo(9401L);
-        assertThat(response.candidate()).containsEntry("candidate_id", 9401L);
-        assertThat(response.orders()).containsExactly(order);
-        assertThat(response.eventCount()).isEqualTo(2);
-        assertThat(response.timeline()).extracting(LiquidationTimelineEvent::eventType)
-                .containsExactly("CANDIDATE_CREATED", "LIQUIDATION_AUDIT");
-    }
-
-    @Test
     void cancelCandidateRequiresAdminReasonAndPersistsAuditAction() {
         FakeLiquidationRepository liquidationRepository = new FakeLiquidationRepository();
-        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
-                liquidationRepository, new FakeLiquidationOrderRepository(), new FakeSequenceRepository(),
-                new LiquidationSizingPolicy(), new LiquidationPriceCalculator());
+        LiquidationService service = service(new LiquidationProperties(), liquidationRepository,
+                new FakeLiquidationOrderRepository(), new FakeSequenceRepository());
 
         LiquidationService.LiquidationAdminActionResponse response = service.cancelCandidate(9401L,
                 " admin-risk ", " margin recovered ");
@@ -324,9 +291,8 @@ class LiquidationServiceTest {
                 5_000L, 3L, LiquidationOrderStatus.SUBMITTED, "PARTIAL_LIQUIDATION",
                 Instant.parse("2026-07-01T00:00:01Z"));
         liquidationRepository.orders.add(order);
-        LiquidationService service = new LiquidationService(new ObjectMapper(), new LiquidationProperties(),
-                liquidationRepository, new FakeLiquidationOrderRepository(), new FakeSequenceRepository(),
-                new LiquidationSizingPolicy(), new LiquidationPriceCalculator());
+        LiquidationService service = service(new LiquidationProperties(), liquidationRepository,
+                new FakeLiquidationOrderRepository(), new FakeSequenceRepository());
 
         var response = service.orders(2002L, 50, "cursor-orders", "createdAt.desc");
 
@@ -340,7 +306,24 @@ class LiquidationServiceTest {
         assertThat(response.limit()).isEqualTo(50);
     }
 
+    private LiquidationService service(LiquidationProperties properties,
+                                       FakeLiquidationRepository repository,
+                                       FakeLiquidationOrderRepository orderRepository,
+                                       FakeSequenceRepository sequenceRepository) {
+        return new LiquidationService(new ObjectMapper(), properties, repository,
+                repository.candidateRepository, repository.positionRepository, repository.auditRepository,
+                repository.adminActionRepository, orderRepository, sequenceRepository,
+                new LiquidationSizingPolicy(), new LiquidationPriceCalculator());
+    }
+
     private static final class FakeLiquidationRepository extends LiquidationRepository {
+        private final FakeLiquidationCandidateRepository candidateRepository =
+                new FakeLiquidationCandidateRepository(this);
+        private final FakeLiquidationPositionRepository positionRepository =
+                new FakeLiquidationPositionRepository(this);
+        private final FakeLiquidationAuditRepository auditRepository = new FakeLiquidationAuditRepository(this);
+        private final FakeLiquidationAdminActionRepository adminActionRepository =
+                new FakeLiquidationAdminActionRepository(this);
         private long pendingCloseSteps = 4L;
         private boolean insertAudit = true;
         private long pricingSignedQuantitySteps = 10L;
@@ -353,7 +336,6 @@ class LiquidationServiceTest {
         private final List<LiquidationOrderResponse> orders = new ArrayList<>();
         private final List<LiquidationSizingInput> sizingInputs = new ArrayList<>();
         private final List<String> lifecycleUpdates = new ArrayList<>();
-        private final List<LiquidationTimelineEvent> timelineEvents = new ArrayList<>();
         private final List<Long> canceledCandidateIds = new ArrayList<>();
         private final List<LiquidationAdminAction> adminActions = new ArrayList<>();
         private int claimAttempts;
@@ -363,27 +345,11 @@ class LiquidationServiceTest {
         private int lastOrdersLimit;
         private String lastOrdersCursor;
         private String lastOrdersSort;
+        private long pendingLifecycleOrderId;
+        private LiquidationOrderStatus pendingLifecycleStatus;
 
         private FakeLiquidationRepository() {
             super(null);
-        }
-
-        @Override
-        public Optional<Map<String, Object>> candidate(long candidateId) {
-            Map<String, Object> candidate = new LinkedHashMap<>();
-            candidate.put("candidate_id", candidateId);
-            candidate.put("snapshot_id", 9301L);
-            candidate.put("user_id", 2002L);
-            candidate.put("symbol", "BTC-USDT");
-            candidate.put("margin_mode", "CROSS");
-            candidate.put("status", "NEW");
-            return Optional.of(candidate);
-        }
-
-        @Override
-        public List<LiquidationTimelineEvent> timeline(long candidateId, int limit) {
-            assertThat(candidateId).isEqualTo(9401L);
-            return timelineEvents.stream().limit(limit).toList();
         }
 
         @Override
@@ -392,20 +358,18 @@ class LiquidationServiceTest {
             return Optional.of(new CanceledCandidate(candidateId, "CANCELED", now));
         }
 
-        @Override
-        public LiquidationAdminAction insertAdminAction(long candidateId,
-                                                       String actionType,
-                                                       String adminUserId,
-                                                       String reason,
-                                                       Instant now) {
+        private LiquidationAdminAction recordAdminAction(long candidateId,
+                                                         String actionType,
+                                                         String adminUserId,
+                                                         String reason,
+                                                         Instant now) {
             LiquidationAdminAction action = new LiquidationAdminAction(5001L, candidateId, actionType,
                     adminUserId, reason, now);
             adminActions.add(action);
             return action;
         }
 
-        @Override
-        public List<ClaimedCandidate> claimCandidates(List<Long> candidateIds) {
+        private List<ClaimedCandidate> claimCandidates(List<Long> candidateIds) {
             claimAttempts += candidateIds.size();
             return candidateIds.stream().map(candidateId -> new ClaimedCandidate(candidateId, 9301L, 2002L, "BTC-USDT",
                     MarginMode.CROSS, candidatePositionSide, 8L, candidateAccountType, "USDT", candidateSignedQuantitySteps,
@@ -417,13 +381,10 @@ class LiquidationServiceTest {
             return java.util.OptionalLong.of(100L);
         }
 
-        @Override
-        public Map<Long, LiquidationCloseState> lockCloseStates(List<ClaimedCandidate> candidates) {
+        private Map<Long, LiquidationCloseState> lockCloseStates(List<ClaimedCandidate> candidates) {
             Map<Long, LiquidationCloseState> states = new LinkedHashMap<>();
             for (ClaimedCandidate candidate : candidates) {
-                lockCloseState(candidate.userId(), candidate.symbol(), candidate.marginMode(),
-                        candidate.positionSide(), candidate.instrumentVersion())
-                        .ifPresent(state -> states.put(candidate.candidateId(), state));
+                states.put(candidate.candidateId(), new LiquidationCloseState(candidateSignedQuantitySteps));
             }
             return states;
         }
@@ -433,205 +394,39 @@ class LiquidationServiceTest {
             Map<Long, CandidateInputs> inputs = new LinkedHashMap<>();
             for (CandidateInputRequest request : requests) {
                 ClaimedCandidate candidate = request.candidate();
-                RiskStatus status = candidate.marginMode() == MarginMode.CROSS
-                        ? latestRiskStatus(candidate.userId(), candidate.accountType(), candidate.settleAsset(),
-                                candidate.snapshotId())
-                        : latestRiskStatus(candidate.userId(), candidate.symbol(), candidate.marginMode(),
-                                candidate.positionSide(), candidate.instrumentVersion(), candidate.snapshotId());
+                RiskStatus status;
+                if (candidate.marginMode() == MarginMode.CROSS) {
+                    accountRiskChecks++;
+                    status = accountRiskStatus;
+                } else {
+                    positionRiskChecks++;
+                    status = positionRiskStatus;
+                }
                 LiquidationCloseState closeState = new LiquidationCloseState(candidateSignedQuantitySteps);
-                LiquidationPricingInput pricing = pricingInput(candidate.snapshotId(), candidate.userId(),
-                        candidate.symbol(), candidate.marginMode(), candidate.positionSide(),
-                        candidate.instrumentVersion(), request.markPriceTicks()).orElseThrow();
-                LiquidationSizingInput sizing = sizingInput(candidate.userId(), candidate.symbol(),
-                        candidate.marginMode(), candidate.positionSide(), candidate.instrumentVersion(),
-                        Math.absExact(candidateSignedQuantitySteps), request.markPriceTicks()).orElseThrow();
+                LiquidationPricingInput pricing = new LiquidationPricingInput(
+                        com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL,
+                        pricingSignedQuantitySteps, request.markPriceTicks(), 200L, 50L, 1L, 1L, 100_000_000L);
+                LiquidationSizingInput sizing = new LiquidationSizingInput(10L,
+                        Math.absExact(candidateSignedQuantitySteps), 40_000L, 400L, 0L);
+                sizingInputs.add(sizing);
                 inputs.put(candidate.candidateId(), new CandidateInputs(status, closeState, pricing, sizing));
             }
             return inputs;
         }
 
-        @Override
-        public RiskStatus latestRiskStatus(long userId,
-                                           String accountType,
-                                           String settleAsset,
-                                           long minimumSnapshotId) {
-            accountRiskChecks++;
-            assertThat(userId).isEqualTo(2002L);
-            assertThat(accountType).isEqualTo(candidateAccountType);
-            assertThat(settleAsset).isEqualTo("USDT");
-            assertThat(minimumSnapshotId).isEqualTo(9301L);
-            return accountRiskStatus;
-        }
-
-        @Override
-        public RiskStatus latestRiskStatus(long userId,
-                                           String symbol,
-                                           MarginMode marginMode,
-                                           PositionSide positionSide,
-                                           long instrumentVersion,
-                                           long minimumSnapshotId) {
-            positionRiskChecks++;
-            assertThat(minimumSnapshotId).isEqualTo(9301L);
-            assertThat(symbol).isEqualTo("BTC-USDT");
-            assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(positionSide).isEqualTo(candidatePositionSide);
-            assertThat(instrumentVersion).isEqualTo(8L);
-            return positionRiskStatus;
-        }
-
-        @Override
-        public Optional<LiquidationCloseState> lockCloseState(long userId, String symbol, long instrumentVersion) {
-            return lockCloseState(userId, symbol, MarginMode.CROSS, instrumentVersion);
-        }
-
-        @Override
-        public Optional<LiquidationCloseState> lockCloseState(long userId,
-                                                             String symbol,
-                                                             MarginMode marginMode,
-                                                             PositionSide positionSide,
-                                                             long instrumentVersion) {
-            assertThat(instrumentVersion).isEqualTo(8L);
-            assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(positionSide).isEqualTo(candidatePositionSide);
-            return Optional.of(new LiquidationCloseState(candidateSignedQuantitySteps));
-        }
-
-        @Override
-        public Optional<LiquidationCloseState> lockCloseState(long userId,
-                                                             String symbol,
-                                                             MarginMode marginMode,
-                                                             long instrumentVersion) {
-            return lockCloseState(userId, symbol, marginMode, PositionSide.NET, instrumentVersion);
-        }
-
-        @Override
-        public long lockOpenReduceOnlySteps(long userId, String symbol, long instrumentVersion, OrderSide closeSide) {
-            return lockOpenReduceOnlySteps(userId, symbol, MarginMode.CROSS, instrumentVersion, closeSide);
-        }
-
-        @Override
-        public long lockOpenReduceOnlySteps(long userId,
-                                            String symbol,
-                                            MarginMode marginMode,
-                                            PositionSide positionSide,
-                                            long instrumentVersion,
-                                            OrderSide closeSide) {
-            assertThat(instrumentVersion).isEqualTo(8L);
-            assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(positionSide).isEqualTo(candidatePositionSide);
-            assertThat(closeSide).isEqualTo(LiquidationSideResolver.closeSide(candidateSignedQuantitySteps));
-            return pendingCloseSteps;
-        }
-
-        @Override
-        public long lockOpenReduceOnlySteps(long userId,
-                                            String symbol,
-                                            MarginMode marginMode,
-                                            long instrumentVersion,
-                                            OrderSide closeSide) {
-            return lockOpenReduceOnlySteps(userId, symbol, marginMode, PositionSide.NET, instrumentVersion,
-                    closeSide);
-        }
-
-        @Override
-        public Optional<LiquidationSizingInput> sizingInput(long userId,
-                                                           String symbol,
-                                                           long instrumentVersion,
-                                                           long availableCloseSteps) {
-            return sizingInput(userId, symbol, MarginMode.CROSS, instrumentVersion, availableCloseSteps);
-        }
-
-        @Override
-        public Optional<LiquidationSizingInput> sizingInput(long userId,
-                                                           String symbol,
-                                                           MarginMode marginMode,
-                                                           PositionSide positionSide,
-                                                           long instrumentVersion,
-                                                           long availableCloseSteps) {
-            assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(positionSide).isEqualTo(candidatePositionSide);
-            LiquidationSizingInput input = new LiquidationSizingInput(10L, availableCloseSteps,
-                    40_000L, 400L, 0L);
-            sizingInputs.add(input);
-            return Optional.of(input);
-        }
-
-        @Override
-        public Optional<LiquidationSizingInput> sizingInput(long userId,
-                                                           String symbol,
-                                                           MarginMode marginMode,
-                                                           PositionSide positionSide,
-                                                           long instrumentVersion,
-                                                           long availableCloseSteps,
-                                                           long markPriceTicks) {
-            assertThat(markPriceTicks).isEqualTo(100L);
-            return sizingInput(userId, symbol, marginMode, positionSide, instrumentVersion, availableCloseSteps);
-        }
-
-        @Override
-        public Optional<LiquidationSizingInput> sizingInput(long userId,
-                                                           String symbol,
-                                                           MarginMode marginMode,
-                                                           long instrumentVersion,
-                                                           long availableCloseSteps) {
-            return sizingInput(userId, symbol, marginMode, PositionSide.NET, instrumentVersion,
-                    availableCloseSteps);
-        }
-
-        @Override
-        public Optional<LiquidationPricingInput> pricingInput(long snapshotId,
-                                                              long userId,
-                                                              String symbol,
-                                                              MarginMode marginMode,
-                                                              PositionSide positionSide,
-                                                              long instrumentVersion) {
-            assertThat(snapshotId).isEqualTo(9301L);
-            assertThat(userId).isEqualTo(2002L);
-            assertThat(symbol).isEqualTo("BTC-USDT");
-            assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(positionSide).isEqualTo(candidatePositionSide);
-            assertThat(instrumentVersion).isEqualTo(8L);
-            return Optional.of(new LiquidationPricingInput(
-                    com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL,
-                    pricingSignedQuantitySteps, 100L, 200L, 50L, 1L, 1L, 100_000_000L));
-        }
-
-        @Override
-        public Optional<LiquidationPricingInput> pricingInput(long snapshotId,
-                                                              long userId,
-                                                              String symbol,
-                                                              MarginMode marginMode,
-                                                              PositionSide positionSide,
-                                                              long instrumentVersion,
-                                                              long markPriceTicks) {
-            assertThat(markPriceTicks).isEqualTo(100L);
-            return pricingInput(snapshotId, userId, symbol, marginMode, positionSide, instrumentVersion);
-        }
-
-        @Override
-        public void markCandidate(long candidateId, String status) {
+        private void markCandidate(String status) {
             markedStatuses.add(status);
         }
 
-        @Override
-        public Optional<Long> updateOrderLifecycle(long orderId,
-                                                   LiquidationOrderStatus orderStatus,
-                                                   String candidateStatus) {
-            lifecycleUpdates.add(orderId + ":" + orderStatus + ":" + candidateStatus);
-            return Optional.of(9401L);
-        }
-
-        @Override
-        public List<LiquidationOrderResponse> ordersByCandidate(long candidateId) {
+        private List<LiquidationOrderResponse> ordersByCandidate(long candidateId) {
             assertThat(candidateId).isEqualTo(9401L);
             return List.copyOf(orders);
         }
 
-        @Override
-        public AdminCursorPage.CursorPage<LiquidationOrderResponse> ordersPage(Long userId,
-                                                                               int limit,
-                                                                               String cursor,
-                                                                               String sort) {
+        private AdminCursorPage.CursorPage<LiquidationOrderResponse> ordersPage(Long userId,
+                                                                                int limit,
+                                                                                String cursor,
+                                                                                String sort) {
             lastOrdersUserId = userId;
             lastOrdersLimit = limit;
             lastOrdersCursor = cursor;
@@ -640,64 +435,19 @@ class LiquidationServiceTest {
                     "createdAt.desc", limit);
         }
 
-        @Override
-        public void insertLiquidationOrders(List<LiquidationOrderInsert> inserts) {
-            for (LiquidationOrderInsert insert : inserts) {
-                boolean inserted = insertLiquidationOrder(insert.liquidationOrderId(), insert.candidateId(),
-                        insert.orderId(), insert.userId(), insert.symbol(), insert.marginMode(), insert.positionSide(),
-                        insert.side(), insert.quantitySteps(), insert.status(), insert.reason(), insert.pricing(),
-                        insert.now());
-                if (!inserted) {
-                    throw new IllegalStateException("failed to insert liquidation order audit");
-                }
-            }
-        }
-
-        @Override
-        public boolean insertLiquidationOrder(long liquidationOrderId,
-                                              long candidateId,
-                                              long orderId,
-                                              long userId,
-                                              String symbol,
-                                              OrderSide side,
-                                              long quantitySteps,
-                                              LiquidationOrderStatus status,
-                                              String reason,
-                                              Instant now) {
-            return insertLiquidationOrder(liquidationOrderId, candidateId, orderId, userId, symbol,
-                    MarginMode.CROSS, side, quantitySteps, status, reason, now);
-        }
-
-        @Override
-        public boolean insertLiquidationOrder(long liquidationOrderId,
-                                              long candidateId,
-                                              long orderId,
-                                              long userId,
-                                              String symbol,
-                                              MarginMode marginMode,
-                                              OrderSide side,
-                                              long quantitySteps,
-                                              LiquidationOrderStatus status,
-                                              String reason,
-                                              Instant now) {
-            return insertLiquidationOrder(liquidationOrderId, candidateId, orderId, userId, symbol, marginMode, side,
-                    quantitySteps, status, reason, LiquidationPricingDecision.empty(), now);
-        }
-
-        @Override
-        public boolean insertLiquidationOrder(long liquidationOrderId,
-                                              long candidateId,
-                                              long orderId,
-                                              long userId,
-                                              String symbol,
-                                              MarginMode marginMode,
-                                              PositionSide positionSide,
-                                              OrderSide side,
-                                              long quantitySteps,
-                                              LiquidationOrderStatus status,
-                                              String reason,
-                                              LiquidationPricingDecision pricing,
-                                              Instant now) {
+        private boolean insertLiquidationOrder(long liquidationOrderId,
+                                               long candidateId,
+                                               long orderId,
+                                               long userId,
+                                               String symbol,
+                                               MarginMode marginMode,
+                                               PositionSide positionSide,
+                                               OrderSide side,
+                                               long quantitySteps,
+                                               LiquidationOrderStatus status,
+                                               String reason,
+                                               LiquidationPricingDecision pricing,
+                                               Instant now) {
             if (!insertAudit) {
                 return false;
             }
@@ -711,137 +461,150 @@ class LiquidationServiceTest {
             return true;
         }
 
+    }
+
+    private static final class FakeLiquidationCandidateRepository extends LiquidationCandidateRepository {
+        private final FakeLiquidationRepository owner;
+
+        private FakeLiquidationCandidateRepository(FakeLiquidationRepository owner) {
+            super(null);
+            this.owner = owner;
+        }
+
         @Override
-        public boolean insertLiquidationOrder(long liquidationOrderId,
-                                              long candidateId,
-                                              long orderId,
-                                              long userId,
-                                              String symbol,
-                                              MarginMode marginMode,
-                                              OrderSide side,
-                                              long quantitySteps,
-                                              LiquidationOrderStatus status,
-                                              String reason,
-                                              LiquidationPricingDecision pricing,
-                                              Instant now) {
-            return insertLiquidationOrder(liquidationOrderId, candidateId, orderId, userId, symbol,
-                    marginMode, PositionSide.NET, side, quantitySteps, status, reason, pricing, now);
+        public List<ClaimedCandidate> claimAll(List<Long> candidateIds) {
+            return owner.claimCandidates(candidateIds);
+        }
+
+        @Override
+        public void updateStatus(long candidateId, String status) {
+            owner.markCandidate(status);
+        }
+
+        @Override
+        public void updateProcessingStatus(long candidateId, String status) {
+            owner.lifecycleUpdates.add(owner.pendingLifecycleOrderId + ":" + owner.pendingLifecycleStatus
+                    + ":" + status);
+            owner.pendingLifecycleOrderId = 0L;
+            owner.pendingLifecycleStatus = null;
         }
     }
 
-    private static final class FakeLiquidationOrderRepository extends LiquidationOrderRepository {
+    private static final class FakeLiquidationPositionRepository extends LiquidationPositionRepository {
+        private final FakeLiquidationRepository owner;
+
+        private FakeLiquidationPositionRepository(FakeLiquidationRepository owner) {
+            super(null, null);
+            this.owner = owner;
+        }
+
+        @Override
+        public Map<Long, LiquidationCloseState> lockAll(List<ClaimedCandidate> candidates) {
+            return owner.lockCloseStates(candidates);
+        }
+    }
+
+    private static final class FakeLiquidationAuditRepository extends LiquidationAuditRepository {
+        private final FakeLiquidationRepository owner;
+
+        private FakeLiquidationAuditRepository(FakeLiquidationRepository owner) {
+            super(null);
+            this.owner = owner;
+        }
+
+        @Override
+        public boolean insert(LiquidationOrderInsert insert) {
+            return owner.insertLiquidationOrder(insert.liquidationOrderId(), insert.candidateId(), insert.orderId(),
+                    insert.userId(), insert.symbol(), insert.marginMode(), insert.positionSide(), insert.side(),
+                    insert.quantitySteps(), insert.status(), insert.reason(), insert.pricing(), insert.now());
+        }
+
+        @Override
+        public void insertAll(List<LiquidationOrderInsert> inserts) {
+            for (LiquidationOrderInsert insert : inserts) {
+                if (!insert(insert)) {
+                    throw new IllegalStateException("failed to insert liquidation order audit");
+                }
+            }
+        }
+
+        @Override
+        public Optional<Long> updateStatusByOrderId(long orderId, LiquidationOrderStatus status) {
+            owner.pendingLifecycleOrderId = orderId;
+            owner.pendingLifecycleStatus = status;
+            return Optional.of(9401L);
+        }
+
+        @Override
+        public List<LiquidationOrderResponse> find(Long userId, int limit) {
+            return owner.orders.stream().limit(limit).toList();
+        }
+
+        @Override
+        public AdminCursorPage.CursorPage<LiquidationOrderResponse> page(
+                Long userId, int limit, String cursor, String sort) {
+            return owner.ordersPage(userId, limit, cursor, sort);
+        }
+
+        @Override
+        public List<LiquidationOrderResponse> findByCandidate(long candidateId) {
+            return owner.ordersByCandidate(candidateId);
+        }
+    }
+
+    private static final class FakeLiquidationAdminActionRepository extends LiquidationAdminActionRepository {
+        private final FakeLiquidationRepository owner;
+
+        private FakeLiquidationAdminActionRepository(FakeLiquidationRepository owner) {
+            super(null);
+            this.owner = owner;
+        }
+
+        @Override
+        public LiquidationAdminAction insert(
+                long candidateId, String actionType, String adminUserId, String reason, Instant now) {
+            return owner.recordAdminAction(candidateId, actionType, adminUserId, reason, now);
+        }
+    }
+
+    private static final class FakeLiquidationOrderRepository extends LiquidationOrderPersistenceService {
         private final List<OrderCommandEvent> commands = new ArrayList<>();
         private final List<String> preemptions = new ArrayList<>();
         private int openReduceOnlyCloseOrders;
 
         private FakeLiquidationOrderRepository() {
-            super(null, null, new LiquidationProperties());
+            super(null, null, null, null, null, null, new LiquidationProperties());
         }
 
         @Override
-        public List<LiquidationOrderRepository.LiquidationOrderSubmission> createReduceOnlyMarketOrders(
-                List<LiquidationOrderRepository.LiquidationOrderRequest> requests,
+        public List<LiquidationOrderSubmission> createReduceOnlyMarketOrders(
+                List<LiquidationOrderRequest> requests,
                 Function<Object, String> serializer) {
-            return requests.stream().map(request -> new LiquidationOrderRepository.LiquidationOrderSubmission(
-                    request.candidateId(), createReduceOnlyMarketOrder(request.candidateId(), request.userId(),
-                    request.symbol(), request.marginMode(), request.positionSide(), request.instrumentVersion(),
-                    request.side(), request.quantitySteps(), request.now(), serializer))).toList();
+            return requests.stream().map(request -> {
+                assertThat(request.marginMode()).isEqualTo(MarginMode.CROSS);
+                assertThat(request.positionSide()).isNotNull();
+                OrderCommandEvent command = new OrderCommandEvent(
+                        OrderCommandType.PLACE, 8001L, 7001L, request.userId(),
+                        "LIQ-" + request.candidateId(), request.symbol(), request.instrumentVersion(), request.side(),
+                        OrderType.MARKET, TimeInForce.IOC, 0L, request.quantitySteps(), request.marginMode(),
+                        request.positionSide(), 0L, 0L, true, false, request.now(), null);
+                commands.add(command);
+                return new LiquidationOrderSubmission(request.candidateId(), command);
+            }).toList();
         }
 
         @Override
         public int cancelOpenReduceOnlyCloseOrders(
-                List<LiquidationOrderRepository.LiquidationOrderRequest> requests,
+                List<LiquidationOrderRequest> requests,
                 Function<Object, String> serializer) {
             int canceled = 0;
-            for (LiquidationOrderRepository.LiquidationOrderRequest request : requests) {
-                canceled += cancelOpenReduceOnlyCloseOrders(request.userId(), request.symbol(), request.marginMode(),
-                        request.positionSide(), request.instrumentVersion(), request.side(), request.now(), serializer);
+            for (LiquidationOrderRequest request : requests) {
+                assertThat(request.marginMode()).isEqualTo(MarginMode.CROSS);
+                preemptions.add(request.userId() + ":" + request.symbol() + ":" + request.positionSide()
+                        + ":" + request.instrumentVersion() + ":" + request.side());
+                canceled += openReduceOnlyCloseOrders;
             }
             return canceled;
-        }
-
-        @Override
-        public int cancelOpenReduceOnlyCloseOrders(long userId,
-                                                   String symbol,
-                                                   long instrumentVersion,
-                                                   OrderSide closeSide,
-                                                   Instant now,
-                                                   Function<Object, String> serializer) {
-            return cancelOpenReduceOnlyCloseOrders(userId, symbol, MarginMode.CROSS, instrumentVersion,
-                    closeSide, now, serializer);
-        }
-
-        @Override
-        public int cancelOpenReduceOnlyCloseOrders(long userId,
-                                                   String symbol,
-                                                   MarginMode marginMode,
-                                                   PositionSide positionSide,
-                                                   long instrumentVersion,
-                                                   OrderSide closeSide,
-                                                   Instant now,
-                                                   Function<Object, String> serializer) {
-            assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            preemptions.add(userId + ":" + symbol + ":" + positionSide + ":" + instrumentVersion + ":" + closeSide);
-            return openReduceOnlyCloseOrders;
-        }
-
-        @Override
-        public int cancelOpenReduceOnlyCloseOrders(long userId,
-                                                   String symbol,
-                                                   MarginMode marginMode,
-                                                   long instrumentVersion,
-                                                   OrderSide closeSide,
-                                                   Instant now,
-                                                   Function<Object, String> serializer) {
-            return cancelOpenReduceOnlyCloseOrders(userId, symbol, marginMode, PositionSide.NET,
-                    instrumentVersion, closeSide, now, serializer);
-        }
-
-        @Override
-        public OrderCommandEvent createReduceOnlyMarketOrder(long candidateId,
-                                                             long userId,
-                                                             String symbol,
-                                                             long instrumentVersion,
-                                                             OrderSide side,
-                                                             long quantitySteps,
-                                                             Instant now,
-                                                             Function<Object, String> serializer) {
-            return createReduceOnlyMarketOrder(candidateId, userId, symbol, MarginMode.CROSS, instrumentVersion,
-                    side, quantitySteps, now, serializer);
-        }
-
-        @Override
-        public OrderCommandEvent createReduceOnlyMarketOrder(long candidateId,
-                                                             long userId,
-                                                             String symbol,
-                                                             MarginMode marginMode,
-                                                             PositionSide positionSide,
-                                                             long instrumentVersion,
-                                                             OrderSide side,
-                                                             long quantitySteps,
-                                                             Instant now,
-                                                             Function<Object, String> serializer) {
-            assertThat(marginMode).isEqualTo(MarginMode.CROSS);
-            assertThat(positionSide).isNotNull();
-            OrderCommandEvent command = new OrderCommandEvent(OrderCommandType.PLACE, 8001L, 7001L, userId,
-                    "LIQ-" + candidateId, symbol, instrumentVersion, side, OrderType.MARKET,
-                    TimeInForce.IOC, 0L, quantitySteps, marginMode, positionSide, 0L, 0L, true, false, now, null);
-            commands.add(command);
-            return command;
-        }
-
-        @Override
-        public OrderCommandEvent createReduceOnlyMarketOrder(long candidateId,
-                                                             long userId,
-                                                             String symbol,
-                                                             MarginMode marginMode,
-                                                             long instrumentVersion,
-                                                             OrderSide side,
-                                                             long quantitySteps,
-                                                             Instant now,
-                                                             Function<Object, String> serializer) {
-            return createReduceOnlyMarketOrder(candidateId, userId, symbol, marginMode, PositionSide.NET,
-                    instrumentVersion, side, quantitySteps, now, serializer);
         }
     }
 

@@ -10,7 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.liquidation.provider.model.TradingOutboxRecord;
-import com.surprising.liquidation.provider.repository.LiquidationOrderRepository;
+import com.surprising.liquidation.provider.repository.LiquidationTradingOutboxRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -22,7 +22,7 @@ class TradingOutboxPublisherTest {
     @Test
     void leasesRowsBeforeWaitingForKafkaAndMarksSuccessfulPublish() {
         LiquidationProperties properties = new LiquidationProperties();
-        LiquidationOrderRepository repository = mock(LiquidationOrderRepository.class);
+        LiquidationTradingOutboxRepository repository = mock(LiquidationTradingOutboxRepository.class);
         @SuppressWarnings("unchecked")
         KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
         TradingOutboxRecord row = new TradingOutboxRecord(91L, "surprising.perp.order.commands.v1",
@@ -43,7 +43,7 @@ class TradingOutboxPublisherTest {
     void failedPublishRemainsRetryable() {
         LiquidationProperties properties = new LiquidationProperties();
         properties.getOutbox().setBatchSize(1);
-        LiquidationOrderRepository repository = mock(LiquidationOrderRepository.class);
+        LiquidationTradingOutboxRepository repository = mock(LiquidationTradingOutboxRepository.class);
         @SuppressWarnings("unchecked")
         KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
         TradingOutboxRecord row = new TradingOutboxRecord(
@@ -65,7 +65,7 @@ class TradingOutboxPublisherTest {
         LiquidationProperties properties = new LiquidationProperties();
         properties.getOutbox().setCleanupBatchSize(2);
         properties.getOutbox().setCleanupMaxBatches(3);
-        LiquidationOrderRepository repository = mock(LiquidationOrderRepository.class);
+        LiquidationTradingOutboxRepository repository = mock(LiquidationTradingOutboxRepository.class);
         @SuppressWarnings("unchecked")
         KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
         when(repository.deletePublishedBefore(any(Instant.class), eq(2)))

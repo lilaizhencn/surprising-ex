@@ -3,7 +3,6 @@ package com.surprising.liquidation.provider.controller;
 import com.surprising.liquidation.api.model.LiquidationOrderQueryResponse;
 import com.surprising.liquidation.provider.service.LiquidationService;
 import com.surprising.liquidation.provider.service.LiquidationService.LiquidationAdminActionResponse;
-import com.surprising.liquidation.provider.service.LiquidationService.LiquidationTimelineResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -37,19 +36,6 @@ public class AdminLiquidationController {
             return liquidationService.orders(userId, limit, cursor, sort);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @GetMapping("/candidates/{candidateId}/timeline")
-    public LiquidationTimelineResponse timeline(
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @PathVariable("candidateId") long candidateId,
-            @RequestParam(value = "limit", defaultValue = "200") int limit) {
-        requireAdmin(adminUserId);
-        try {
-            return liquidationService.timeline(candidateId, limit);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         }
     }
 

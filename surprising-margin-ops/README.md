@@ -31,6 +31,14 @@ Margin-operation APIs and providers for risk, liquidation, funding, insurance, a
   transactions. `RiskRepository` retains only authoritative real-time risk inputs whose position, instrument,
   balance, deficit, reservation, and risk-bracket data must share one database snapshot; each exception is documented
   in source.
+- Liquidation persistence is also split by physical table: candidate, position lock, liquidation audit, admin action,
+  trading order, order event, trading outbox, instrument default fee, and user fee each have a dedicated repository.
+  `LiquidationService` and `LiquidationOrderPersistenceService` aggregate them transactionally so the trading order,
+  accepted event, and outbox intents commit atomically. `LiquidationRepository` retains only real-time safety queries
+  that require a shared database snapshot or an atomic state check, with each exception documented in source.
+- Liquidation candidate timelines no longer JOIN the primary trading database. A future finance-operations module
+  should consume liquidation, order, trade, and funds events into an independent query database for timelines,
+  reconciliation, and operational reports.
 - High-risk account aggregation and similar admin reports no longer query the primary trading database. A future
   finance-operations module must build event-driven projections in an independent database for cross-table queries,
   reconciliation, and operational reporting.

@@ -2798,6 +2798,7 @@ CREATE SEQUENCE IF NOT EXISTS liquidation_order_seq AS BIGINT START WITH 1 INCRE
 
 CREATE TABLE IF NOT EXISTS liquidation_orders (
     liquidation_order_id    BIGINT PRIMARY KEY,
+    product_line            TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     candidate_id            BIGINT NOT NULL,
     order_id                BIGINT NOT NULL,
     user_id                 BIGINT NOT NULL,
@@ -2815,6 +2816,9 @@ CREATE TABLE IF NOT EXISTS liquidation_orders (
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT liquidation_orders_candidate_fk
         FOREIGN KEY (candidate_id) REFERENCES risk_liquidation_candidates(candidate_id),
+    CONSTRAINT liquidation_orders_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL', 'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
     CONSTRAINT liquidation_orders_user_positive CHECK (user_id > 0),
     CONSTRAINT liquidation_orders_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT liquidation_orders_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
@@ -2835,6 +2839,34 @@ CREATE TABLE IF NOT EXISTS liquidation_orders (
     )
 );
 
+ALTER TABLE liquidation_orders
+    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+
+UPDATE liquidation_orders lo
+   SET product_line = c.product_line
+  FROM risk_liquidation_candidates c
+ WHERE c.candidate_id = lo.candidate_id
+   AND lo.product_line IS DISTINCT FROM c.product_line;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_constraint
+         WHERE conname = 'liquidation_orders_product_line_check'
+           AND conrelid = 'liquidation_orders'::regclass
+    ) THEN
+        ALTER TABLE liquidation_orders
+            ADD CONSTRAINT liquidation_orders_product_line_check CHECK (
+                product_line IN (
+                    'SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                    'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION'
+                )
+            );
+    END IF;
+END
+$$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS liquidation_orders_candidate_uidx
     ON liquidation_orders (candidate_id);
 
@@ -2843,6 +2875,12 @@ CREATE INDEX IF NOT EXISTS liquidation_orders_user_time_idx
 
 CREATE INDEX IF NOT EXISTS liquidation_orders_symbol_time_idx
     ON liquidation_orders (symbol, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS liquidation_orders_product_user_time_idx
+    ON liquidation_orders (product_line, user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS liquidation_orders_product_candidate_idx
+    ON liquidation_orders (product_line, candidate_id);
 
 CREATE TABLE IF NOT EXISTS liquidation_admin_actions (
     action_id            BIGSERIAL PRIMARY KEY,

@@ -1,7 +1,7 @@
 package com.surprising.liquidation.provider.service;
 
 import com.surprising.liquidation.provider.config.LiquidationProperties;
-import com.surprising.liquidation.provider.repository.LiquidationRepository;
+import com.surprising.liquidation.provider.repository.LiquidationCandidateRepository;
 import com.surprising.risk.api.model.LiquidationCandidateEvent;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -24,7 +24,7 @@ public class LiquidationCandidateQueueProcessor {
     private static final Logger log = LoggerFactory.getLogger(LiquidationCandidateQueueProcessor.class);
 
     private final RedisLiquidationCandidateQueue queue;
-    private final LiquidationRepository repository;
+    private final LiquidationCandidateRepository repository;
     private final LiquidationService service;
     private final LiquidationProperties properties;
     private final TaskExecutor taskExecutor;
@@ -32,7 +32,7 @@ public class LiquidationCandidateQueueProcessor {
     private volatile boolean running = true;
 
     public LiquidationCandidateQueueProcessor(RedisLiquidationCandidateQueue queue,
-                                              LiquidationRepository repository,
+                                              LiquidationCandidateRepository repository,
                                               LiquidationService service,
                                               LiquidationProperties properties,
                                               @Qualifier("liquidationCandidateTaskExecutor") TaskExecutor taskExecutor) {
@@ -65,7 +65,7 @@ public class LiquidationCandidateQueueProcessor {
     public void recoverDurableCandidates() {
         int limit = properties.getRedisIndex().getCandidateBatchSize()
                 * properties.getRedisIndex().getWorkerCount();
-        List<LiquidationCandidateEvent> candidates = repository.newCandidateEvents(limit);
+        List<LiquidationCandidateEvent> candidates = repository.findNewEvents(limit);
         if (!candidates.isEmpty()) {
             queue.offer(candidates);
             wakeWorkers();

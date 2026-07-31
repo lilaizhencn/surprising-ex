@@ -144,7 +144,7 @@ class LiquidationCandidateConsumerTest {
         private MatchResultEvent matchResult;
 
         private RecordingLiquidationService() {
-            super(null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null, null);
         }
 
         @Override
