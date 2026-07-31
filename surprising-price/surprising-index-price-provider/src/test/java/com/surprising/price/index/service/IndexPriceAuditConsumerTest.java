@@ -7,7 +7,6 @@ import static org.mockito.Mockito.verify;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.index.config.IndexPriceProperties;
-import com.surprising.price.index.repository.IndexPriceRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -19,9 +18,9 @@ class IndexPriceAuditConsumerTest {
 
     @Test
     void persistsTheSameCompleteEventFromTheBusinessTopic() throws Exception {
-        IndexPriceRepository repository = mock(IndexPriceRepository.class);
+        IndexPriceAuditService auditService = mock(IndexPriceAuditService.class);
         IndexPriceProperties properties = new IndexPriceProperties();
-        IndexPriceAuditConsumer consumer = new IndexPriceAuditConsumer(new ObjectMapper(), repository, properties);
+        IndexPriceAuditConsumer consumer = new IndexPriceAuditConsumer(new ObjectMapper(), auditService, properties);
         IndexPriceEvent event = new IndexPriceEvent("BTC-USDT", new BigDecimal("100"), 7,
                 PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), Instant.now(), List.of());
         String payload = new ObjectMapper().writeValueAsString(event);
@@ -29,6 +28,6 @@ class IndexPriceAuditConsumerTest {
         consumer.onAudit(List.of(new ConsumerRecord<>(properties.getKafka().getIndexPriceTopic(), 0, 0L,
                 event.symbol(), payload)));
 
-        verify(repository).saveBatch(eq(List.of(event)));
+        verify(auditService).saveBatch(eq(List.of(event)));
     }
 }

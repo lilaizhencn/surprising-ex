@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.PriceStatus;
+import com.surprising.price.index.service.IndexPriceAuditService;
 import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
@@ -18,14 +19,14 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-class IndexPriceRepositoryTest {
+class IndexPriceRepositoryBoundaryTest {
 
     @Test
     void savesAuditEventsInBatches() throws Exception {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         when(jdbcTemplate.batchUpdate(any(String.class), any(BatchPreparedStatementSetter.class)))
                 .thenReturn(new int[] {1});
-        IndexPriceRepository repository = new IndexPriceRepository(jdbcTemplate);
+        IndexPriceTickRepository repository = new IndexPriceTickRepository(jdbcTemplate);
 
         repository.saveBatch(List.of(event()));
 
@@ -44,9 +45,10 @@ class IndexPriceRepositoryTest {
     void deletionRemovesComponentsBeforeTheBoundedTickBatch() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(10);
-        IndexPriceRepository repository = new IndexPriceRepository(jdbcTemplate);
+        IndexPriceAuditService service = new IndexPriceAuditService(
+                jdbcTemplate, mock(IndexPriceTickRepository.class), mock(IndexPriceComponentRepository.class));
 
-        assertThat(repository.deleteAuditBefore(Instant.parse("2026-07-14T00:00:00Z"), 100)).isEqualTo(10);
+        assertThat(service.deleteBefore(Instant.parse("2026-07-14T00:00:00Z"), 100)).isEqualTo(10);
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
         assertThat(sql.getValue()).contains("deleted_components").contains("LIMIT ?");

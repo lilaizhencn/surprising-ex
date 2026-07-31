@@ -4,7 +4,8 @@ import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.index.client.ExternalSpotPriceClient;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.model.SourceQuote;
-import com.surprising.price.index.repository.IndexPriceRepository;
+import com.surprising.price.index.repository.IndexPriceLeaseRepository;
+import com.surprising.price.index.repository.IndexPriceSequenceRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -28,7 +29,8 @@ public class IndexPriceService {
     private final ExternalSpotPriceClient externalSpotPriceClient;
     private final LatestSourceQuoteStore latestSourceQuoteStore;
     private final IndexPriceCalculator indexPriceCalculator;
-    private final IndexPriceRepository indexPriceRepository;
+    private final IndexPriceLeaseRepository leaseRepository;
+    private final IndexPriceSequenceRepository sequenceRepository;
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final String nodeId;
 
@@ -37,14 +39,16 @@ public class IndexPriceService {
                              ExternalSpotPriceClient externalSpotPriceClient,
                              LatestSourceQuoteStore latestSourceQuoteStore,
                              IndexPriceCalculator indexPriceCalculator,
-                             IndexPriceRepository indexPriceRepository,
+                             IndexPriceLeaseRepository leaseRepository,
+                             IndexPriceSequenceRepository sequenceRepository,
                              @Qualifier("indexKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate) {
         this.properties = properties;
         this.indexInstrumentConfigService = indexInstrumentConfigService;
         this.externalSpotPriceClient = externalSpotPriceClient;
         this.latestSourceQuoteStore = latestSourceQuoteStore;
         this.indexPriceCalculator = indexPriceCalculator;
-        this.indexPriceRepository = indexPriceRepository;
+        this.leaseRepository = leaseRepository;
+        this.sequenceRepository = sequenceRepository;
         this.kafkaTemplate = kafkaTemplate;
         this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
     }
@@ -74,11 +78,11 @@ public class IndexPriceService {
                 .map(CompletableFuture::join)
                 .toList();
 
-        long sequence = indexPriceRepository.nextSequence(SEQUENCE_MODULE, symbol);
+        long sequence = sequenceRepository.next(SEQUENCE_MODULE, symbol);
         IndexPriceEvent event = indexPriceCalculator.calculate(symbol, sequence, symbolConfig.getMinValidSources(),
                 quotes, Instant.now());
-        // The index-price topic is the single real-time and audit stream.  In particular, publish
-        // unavailable snapshots as well so consumers cannot continue using a prior healthy price.
+        // 指数价格 Topic 同时承担实时流和审计流；不可用快照也必须发布，
+        // 防止下游继续使用上一次健康价格。
         kafkaTemplate.send(properties.getKafka().getIndexPriceTopic(), symbol, event);
     }
 
@@ -86,7 +90,7 @@ public class IndexPriceService {
         if (!properties.getCoordination().isEnabled()) {
             return true;
         }
-        return indexPriceRepository.acquireLease(SEQUENCE_MODULE, symbol, nodeId,
+        return leaseRepository.acquire(SEQUENCE_MODULE, symbol, nodeId,
                 properties.getCoordination().getLeaseDuration());
     }
 

@@ -1,24 +1,24 @@
 package com.surprising.price.mark.service;
 
 import com.surprising.price.mark.config.MarkPriceProperties;
-import com.surprising.price.mark.repository.MarkPriceRepository;
+import com.surprising.price.mark.repository.MarkPriceTickRepository;
 import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-/** Keeps the mark-price audit table bounded without issuing one unbounded delete. */
+/** 通过分批删除限制标记价审计表规模，避免单次无界删除。 */
 @Component
 public class MarkPriceAuditRetentionService {
 
     private static final Logger log = LoggerFactory.getLogger(MarkPriceAuditRetentionService.class);
 
-    private final MarkPriceRepository repository;
+    private final MarkPriceTickRepository tickRepository;
     private final MarkPriceProperties properties;
 
-    public MarkPriceAuditRetentionService(MarkPriceRepository repository, MarkPriceProperties properties) {
-        this.repository = repository;
+    public MarkPriceAuditRetentionService(MarkPriceTickRepository tickRepository, MarkPriceProperties properties) {
+        this.tickRepository = tickRepository;
         this.properties = properties;
     }
 
@@ -28,7 +28,7 @@ public class MarkPriceAuditRetentionService {
         Instant cutoff = Instant.now().minus(audit.getRetention());
         int deleted = 0;
         for (int batch = 0; batch < audit.getMaxBatchesPerRun(); batch++) {
-            int rows = repository.deleteAuditBefore(cutoff, audit.getCleanupBatchSize());
+            int rows = tickRepository.deleteBefore(cutoff, audit.getCleanupBatchSize());
             deleted += rows;
             if (rows < audit.getCleanupBatchSize()) {
                 break;

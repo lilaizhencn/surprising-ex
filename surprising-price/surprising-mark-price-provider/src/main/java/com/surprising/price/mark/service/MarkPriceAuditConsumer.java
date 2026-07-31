@@ -3,7 +3,7 @@ package com.surprising.price.mark.service;
 import com.surprising.price.api.model.MarkPricePublishedEvent;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.model.MarkPriceAuditRecord;
-import com.surprising.price.mark.repository.MarkPriceRepository;
+import com.surprising.price.mark.repository.MarkPriceTickRepository;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -13,21 +13,21 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
-/** Persists the audit stream asynchronously; no real-time consumer depends on this write. */
+/** 异步持久化审计流，实时消费链路不依赖该写入结果。 */
 @Component
 public class MarkPriceAuditConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(MarkPriceAuditConsumer.class);
 
     private final ObjectMapper objectMapper;
-    private final MarkPriceRepository repository;
+    private final MarkPriceTickRepository tickRepository;
     private final MarkPriceProperties properties;
 
     public MarkPriceAuditConsumer(ObjectMapper objectMapper,
-                                  MarkPriceRepository repository,
+                                  MarkPriceTickRepository tickRepository,
                                   MarkPriceProperties properties) {
         this.objectMapper = objectMapper;
-        this.repository = repository;
+        this.tickRepository = tickRepository;
         this.properties = properties;
     }
 
@@ -46,15 +46,14 @@ public class MarkPriceAuditConsumer {
                 }
                 auditRecords.add(new MarkPriceAuditRecord(event, record.value()));
             } catch (Exception ex) {
-                // Audit storage is asynchronous.  A permanently malformed
-                // record must not prevent later valid audit records from being
-                // persisted or keep this Kafka partition retrying forever.
+                // 审计存储属于异步链路。永久损坏的消息不能阻塞后续有效记录，
+                // 也不能让该 Kafka 分区无限重试。
                 log.warn("Discarding invalid mark price audit topic={} partition={} offset={}: {}",
                         record.topic(), record.partition(), record.offset(), ex.getMessage(), ex);
             }
         }
         if (!auditRecords.isEmpty()) {
-            repository.saveBatch(auditRecords);
+            tickRepository.saveBatch(auditRecords);
         }
     }
 

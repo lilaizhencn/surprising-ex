@@ -13,7 +13,7 @@ import java.util.concurrent.ConcurrentMap;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-/** Latest Kafka index snapshot per symbol. Audit tables are deliberately not a real-time input. */
+/** 保存每个交易对最新的 Kafka 指数快照；审计表不作为实时输入。 */
 @Component
 public class LatestIndexPriceCache {
 

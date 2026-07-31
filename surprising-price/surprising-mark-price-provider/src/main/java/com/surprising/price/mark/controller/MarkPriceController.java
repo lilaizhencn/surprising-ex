@@ -5,7 +5,7 @@ import com.surprising.price.api.model.MarkPriceQueryResponse;
 import com.surprising.price.api.model.MarkPriceResponse;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.consumer.LatestMarkPriceCache;
-import com.surprising.price.mark.repository.MarkPriceRepository;
+import com.surprising.price.mark.repository.MarkPriceTickRepository;
 import java.time.Instant;
 import org.springframework.http.HttpStatus;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -17,11 +17,11 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 public class MarkPriceController {
 
-    private final MarkPriceRepository markPriceRepository;
+    private final MarkPriceTickRepository tickRepository;
     private final LatestMarkPriceCache markPriceCache;
 
-    public MarkPriceController(MarkPriceRepository markPriceRepository, LatestMarkPriceCache markPriceCache) {
-        this.markPriceRepository = markPriceRepository;
+    public MarkPriceController(MarkPriceTickRepository tickRepository, LatestMarkPriceCache markPriceCache) {
+        this.tickRepository = tickRepository;
         this.markPriceCache = markPriceCache;
     }
 
@@ -45,7 +45,7 @@ public class MarkPriceController {
         String normalized = normalizeSymbol(symbol);
         int safeLimit = Math.min(limit, 5000);
         return new MarkPriceQueryResponse(normalized, safeLimit,
-                markPriceRepository.history(normalized, startTime, endTime, safeLimit));
+                tickRepository.history(normalized, startTime, endTime, safeLimit));
     }
 
     private String normalizeSymbol(String symbol) {

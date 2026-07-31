@@ -10,7 +10,6 @@ import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.model.BasisWindow;
 import com.surprising.price.mark.model.MarkPriceEncoding;
-import com.surprising.price.mark.repository.MarkPriceRepository;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
@@ -36,7 +35,7 @@ public class MarkPriceService {
     private final ObjectMapper objectMapper;
     private final MarkPriceProperties properties;
     private final MarkPriceCalculator markPriceCalculator;
-    private final MarkPriceRepository markPriceRepository;
+    private final MarkPriceCoordinationService coordinationService;
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final String nodeId;
 
@@ -50,12 +49,12 @@ public class MarkPriceService {
     public MarkPriceService(ObjectMapper objectMapper,
                             MarkPriceProperties properties,
                             MarkPriceCalculator markPriceCalculator,
-                            MarkPriceRepository markPriceRepository,
+                            MarkPriceCoordinationService coordinationService,
                             @Qualifier("markKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.markPriceCalculator = markPriceCalculator;
-        this.markPriceRepository = markPriceRepository;
+        this.coordinationService = coordinationService;
         this.kafkaTemplate = kafkaTemplate;
         this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
     }
@@ -136,8 +135,8 @@ public class MarkPriceService {
         BigDecimal basisAverage = window.average(now, properties.getCalculation().getBasisWindow(),
                 properties.getCalculation().getScale());
 
-        long sequence = markPriceRepository.nextSequence(SEQUENCE_MODULE, symbol);
-        MarkPriceEncoding encoding = encodings.computeIfAbsent(symbol, markPriceRepository::encoding);
+        long sequence = coordinationService.nextSequence(SEQUENCE_MODULE, symbol);
+        MarkPriceEncoding encoding = encodings.computeIfAbsent(symbol, coordinationService::encoding);
         MarkPriceEvent event = markPriceCalculator.calculate(symbol, sequence, index, book, trade,
                 fundingRates.get(symbol), basisAverage, encoding, now);
         MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, index, book, trade,
@@ -192,7 +191,7 @@ public class MarkPriceService {
         if (!properties.getCoordination().isEnabled()) {
             return true;
         }
-        return markPriceRepository.acquireLease(SEQUENCE_MODULE, symbol, nodeId,
+        return coordinationService.acquireLease(SEQUENCE_MODULE, symbol, nodeId,
                 properties.getCoordination().getLeaseDuration());
     }
 

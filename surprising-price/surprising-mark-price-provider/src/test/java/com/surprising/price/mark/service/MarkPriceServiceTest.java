@@ -20,7 +20,6 @@ import com.surprising.price.api.model.PerpTradeEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.model.MarkPriceEncoding;
-import com.surprising.price.mark.repository.MarkPriceRepository;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
@@ -35,9 +34,9 @@ class MarkPriceServiceTest {
 
     @Test
     void doesNotPublishMarkPriceWithoutFreshIndexPrice() throws Exception {
-        MarkPriceRepository repository = mock(MarkPriceRepository.class);
+        MarkPriceCoordinationService coordinationService = mock(MarkPriceCoordinationService.class);
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
-        MarkPriceService service = service(repository, kafkaTemplate);
+        MarkPriceService service = service(coordinationService, kafkaTemplate);
         ObjectMapper objectMapper = new ObjectMapper();
         Instant now = Instant.now();
 
@@ -55,9 +54,9 @@ class MarkPriceServiceTest {
 
     @Test
     void doesNotPublishMarkPriceWhenIndexStatusIsNotUsable() throws Exception {
-        MarkPriceRepository repository = mock(MarkPriceRepository.class);
+        MarkPriceCoordinationService coordinationService = mock(MarkPriceCoordinationService.class);
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
-        MarkPriceService service = service(repository, kafkaTemplate);
+        MarkPriceService service = service(coordinationService, kafkaTemplate);
         ObjectMapper objectMapper = new ObjectMapper();
         Instant now = Instant.now();
 
@@ -75,10 +74,10 @@ class MarkPriceServiceTest {
 
     @Test
     void insufficientIndexPriceReplacesPreviouslyHealthyIndexPrice() throws Exception {
-        MarkPriceRepository repository = mock(MarkPriceRepository.class);
+        MarkPriceCoordinationService coordinationService = mock(MarkPriceCoordinationService.class);
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
-        when(repository.nextSequence("price-mark", "BTC-USDT")).thenReturn(11L);
-        MarkPriceService service = service(repository, kafkaTemplate);
+        when(coordinationService.nextSequence("price-mark", "BTC-USDT")).thenReturn(11L);
+        MarkPriceService service = service(coordinationService, kafkaTemplate);
         ObjectMapper objectMapper = new ObjectMapper();
         Instant now = Instant.now();
 
@@ -94,7 +93,7 @@ class MarkPriceServiceTest {
         verify(kafkaTemplate).send(eq(properties().markPriceTopic()), eq("BTC-USDT"),
                 any(MarkPricePublishedEvent.class));
 
-        reset(repository, kafkaTemplate);
+        reset(coordinationService, kafkaTemplate);
         service.onIndexPrice(objectMapper.writeValueAsString(
                 new IndexPriceEvent("BTC-USDT", null, 2, PriceStatus.INSUFFICIENT_SOURCES, 3, 1,
                         BigDecimal.valueOf(3), now, List.of())));
@@ -105,13 +104,13 @@ class MarkPriceServiceTest {
 
     @Test
     void publishesMarkPriceAfterFreshIndexPriceArrives() throws Exception {
-        MarkPriceRepository repository = mock(MarkPriceRepository.class);
+        MarkPriceCoordinationService coordinationService = mock(MarkPriceCoordinationService.class);
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
-        when(repository.nextSequence("price-mark", "BTC-USDT")).thenReturn(11L);
-        when(repository.encoding("BTC-USDT")).thenReturn(encoding());
+        when(coordinationService.nextSequence("price-mark", "BTC-USDT")).thenReturn(11L);
+        when(coordinationService.encoding("BTC-USDT")).thenReturn(encoding());
         MarkPriceProperties properties = properties();
         MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
-                new MarkPriceCalculator(properties), repository, kafkaTemplate);
+                new MarkPriceCalculator(properties), coordinationService, kafkaTemplate);
         ObjectMapper objectMapper = new ObjectMapper();
         Instant now = Instant.now();
 
@@ -132,15 +131,15 @@ class MarkPriceServiceTest {
 
     @Test
     void publishesMarkPriceToProductSpecificTopicsWhenEnabled() throws Exception {
-        MarkPriceRepository repository = mock(MarkPriceRepository.class);
+        MarkPriceCoordinationService coordinationService = mock(MarkPriceCoordinationService.class);
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
-        when(repository.nextSequence("price-mark", "BTC-USDT")).thenReturn(11L);
-        when(repository.encoding("BTC-USDT")).thenReturn(encoding());
+        when(coordinationService.nextSequence("price-mark", "BTC-USDT")).thenReturn(11L);
+        when(coordinationService.encoding("BTC-USDT")).thenReturn(encoding());
         MarkPriceProperties properties = properties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
         MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
-                new MarkPriceCalculator(properties), repository, kafkaTemplate);
+                new MarkPriceCalculator(properties), coordinationService, kafkaTemplate);
         Instant now = Instant.now();
 
         service.onIndexPrice(new ObjectMapper().writeValueAsString(
@@ -158,13 +157,13 @@ class MarkPriceServiceTest {
 
     @Test
     void rejectsIndexPriceFromOtherProductTopicBeforePublishing() throws Exception {
-        MarkPriceRepository repository = mock(MarkPriceRepository.class);
+        MarkPriceCoordinationService coordinationService = mock(MarkPriceCoordinationService.class);
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
         MarkPriceProperties properties = properties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
         MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
-                new MarkPriceCalculator(properties), repository, kafkaTemplate);
+                new MarkPriceCalculator(properties), coordinationService, kafkaTemplate);
         String payload = new ObjectMapper().writeValueAsString(new IndexPriceEvent("BTC-USDT", BigDecimal.TEN,
                 2, PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), Instant.now(), List.of()));
 
@@ -179,13 +178,13 @@ class MarkPriceServiceTest {
 
     @Test
     void acceptsBookTickerFromCurrentProductTopic() throws Exception {
-        MarkPriceRepository repository = mock(MarkPriceRepository.class);
+        MarkPriceCoordinationService coordinationService = mock(MarkPriceCoordinationService.class);
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
         MarkPriceProperties properties = properties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
         properties.getKafka().setProductTopicsEnabled(true);
         MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
-                new MarkPriceCalculator(properties), repository, kafkaTemplate);
+                new MarkPriceCalculator(properties), coordinationService, kafkaTemplate);
         String payload = new ObjectMapper().writeValueAsString(new PerpBookTickerEvent("BTC-USDT-260925-70000-C",
                 new BigDecimal("100.00"), new BigDecimal("100.10"), 1, Instant.now()));
 
@@ -197,13 +196,13 @@ class MarkPriceServiceTest {
 
     @Test
     void rejectsFundingRateFromOtherProductTopicBeforeCaching() throws Exception {
-        MarkPriceRepository repository = mock(MarkPriceRepository.class);
+        MarkPriceCoordinationService coordinationService = mock(MarkPriceCoordinationService.class);
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
         MarkPriceProperties properties = properties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
         properties.getKafka().setProductTopicsEnabled(true);
         MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
-                new MarkPriceCalculator(properties), repository, kafkaTemplate);
+                new MarkPriceCalculator(properties), coordinationService, kafkaTemplate);
         String payload = new ObjectMapper().writeValueAsString(new PerpFundingRateEvent("BTC-USD",
                 BigDecimal.ZERO, Instant.now(), 8, 1, Instant.now()));
 
@@ -216,11 +215,12 @@ class MarkPriceServiceTest {
         verify(kafkaTemplate, never()).send(any(), any(), any());
     }
 
-    private MarkPriceService service(MarkPriceRepository repository, KafkaTemplate<String, Object> kafkaTemplate) {
+    private MarkPriceService service(MarkPriceCoordinationService coordinationService,
+                                     KafkaTemplate<String, Object> kafkaTemplate) {
         MarkPriceProperties properties = properties();
-        when(repository.encoding("BTC-USDT")).thenReturn(encoding());
-        return new MarkPriceService(new ObjectMapper(), properties, new MarkPriceCalculator(properties), repository,
-                kafkaTemplate);
+        when(coordinationService.encoding("BTC-USDT")).thenReturn(encoding());
+        return new MarkPriceService(new ObjectMapper(), properties, new MarkPriceCalculator(properties),
+                coordinationService, kafkaTemplate);
     }
 
     private MarkPriceEncoding encoding() {

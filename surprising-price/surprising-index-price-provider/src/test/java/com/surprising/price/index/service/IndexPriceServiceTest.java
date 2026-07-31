@@ -11,7 +11,8 @@ import com.surprising.price.api.model.SourceStatus;
 import com.surprising.price.index.client.ExternalSpotPriceClient;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.model.SourceQuote;
-import com.surprising.price.index.repository.IndexPriceRepository;
+import com.surprising.price.index.repository.IndexPriceLeaseRepository;
+import com.surprising.price.index.repository.IndexPriceSequenceRepository;
 import com.surprising.product.api.ProductLine;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -33,12 +34,13 @@ class IndexPriceServiceTest {
         IndexInstrumentConfigService configService = mock(IndexInstrumentConfigService.class);
         ExternalSpotPriceClient spotPriceClient = mock(ExternalSpotPriceClient.class);
         LatestSourceQuoteStore latestQuoteStore = mock(LatestSourceQuoteStore.class);
-        IndexPriceRepository repository = mock(IndexPriceRepository.class);
+        IndexPriceLeaseRepository leaseRepository = mock(IndexPriceLeaseRepository.class);
+        IndexPriceSequenceRepository sequenceRepository = mock(IndexPriceSequenceRepository.class);
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
         Instant now = Instant.now();
 
         when(configService.symbols()).thenReturn(List.of(symbol));
-        when(repository.nextSequence("price-index", "BTC-USDT-260925-70000-C")).thenReturn(77L);
+        when(sequenceRepository.next("price-index", "BTC-USDT-260925-70000-C")).thenReturn(77L);
         for (IndexPriceProperties.SourceConfig source : symbol.getSources()) {
             when(latestQuoteStore.latest("BTC-USDT-260925-70000-C", source)).thenReturn(Optional.empty());
             when(spotPriceClient.fetch(source)).thenReturn(CompletableFuture.completedFuture(
@@ -46,7 +48,8 @@ class IndexPriceServiceTest {
         }
 
         IndexPriceService service = new IndexPriceService(properties, configService, spotPriceClient,
-                latestQuoteStore, new IndexPriceCalculator(properties), repository, kafkaTemplate);
+                latestQuoteStore, new IndexPriceCalculator(properties), leaseRepository, sequenceRepository,
+                kafkaTemplate);
 
         service.pollAndPublish();
 

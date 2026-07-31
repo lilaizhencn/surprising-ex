@@ -3,7 +3,7 @@ package com.surprising.price.index.controller;
 import com.surprising.price.api.PriceApiPaths;
 import com.surprising.price.api.model.IndexPriceQueryResponse;
 import com.surprising.price.api.model.IndexPriceResponse;
-import com.surprising.price.index.repository.IndexPriceRepository;
+import com.surprising.price.index.service.IndexPriceQueryService;
 import com.surprising.price.index.service.LatestIndexPriceCache;
 import java.time.Instant;
 import org.springframework.http.HttpStatus;
@@ -16,11 +16,12 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 public class IndexPriceController {
 
-    private final IndexPriceRepository indexPriceRepository;
+    private final IndexPriceQueryService indexPriceQueryService;
     private final LatestIndexPriceCache latestIndexPriceCache;
 
-    public IndexPriceController(IndexPriceRepository indexPriceRepository, LatestIndexPriceCache latestIndexPriceCache) {
-        this.indexPriceRepository = indexPriceRepository;
+    public IndexPriceController(IndexPriceQueryService indexPriceQueryService,
+                                LatestIndexPriceCache latestIndexPriceCache) {
+        this.indexPriceQueryService = indexPriceQueryService;
         this.latestIndexPriceCache = latestIndexPriceCache;
     }
 
@@ -44,7 +45,7 @@ public class IndexPriceController {
         String normalized = normalizeSymbol(symbol);
         int safeLimit = Math.min(limit, 5000);
         return new IndexPriceQueryResponse(normalized, safeLimit,
-                indexPriceRepository.history(normalized, startTime, endTime, safeLimit));
+                indexPriceQueryService.history(normalized, startTime, endTime, safeLimit));
     }
 
     private String normalizeSymbol(String symbol) {

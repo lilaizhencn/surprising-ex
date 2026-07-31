@@ -9,7 +9,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
-/** Maintains the local latest-index cache from the same business topic used by mark price. */
+/** 从标记价共用的业务 Topic 维护本地最新指数价缓存。 */
 @Component
 public class IndexPriceKafkaConsumer {
 

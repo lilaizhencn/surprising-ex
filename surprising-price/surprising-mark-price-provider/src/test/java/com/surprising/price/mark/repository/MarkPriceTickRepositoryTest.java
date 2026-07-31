@@ -25,14 +25,14 @@ import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 @ExtendWith(MockitoExtension.class)
-class MarkPriceRepositoryTest {
+class MarkPriceTickRepositoryTest {
 
     @Mock
     private JdbcTemplate jdbcTemplate;
 
     @Test
     void saveBatchPersistsFixedPointResultAndCompleteAuditJson() throws Exception {
-        MarkPriceRepository repository = new MarkPriceRepository(jdbcTemplate);
+        MarkPriceTickRepository repository = new MarkPriceTickRepository(jdbcTemplate);
         when(jdbcTemplate.batchUpdate(any(String.class), any(BatchPreparedStatementSetter.class)))
                 .thenReturn(new int[] {1});
 
@@ -62,11 +62,11 @@ class MarkPriceRepositoryTest {
 
     @Test
     void cleanupDeletesOnlyOneBoundedBatch() {
-        MarkPriceRepository repository = new MarkPriceRepository(jdbcTemplate);
+        MarkPriceTickRepository repository = new MarkPriceTickRepository(jdbcTemplate);
         Instant cutoff = Instant.parse("2026-07-14T00:00:00Z");
         when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(250);
 
-        int deleted = repository.deleteAuditBefore(cutoff, 10_000);
+        int deleted = repository.deleteBefore(cutoff, 10_000);
 
         assertThat(deleted).isEqualTo(250);
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);

@@ -10,7 +10,7 @@ import com.surprising.price.api.model.MarkPricePublishedEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.model.MarkPriceAuditRecord;
-import com.surprising.price.mark.repository.MarkPriceRepository;
+import com.surprising.price.mark.repository.MarkPriceTickRepository;
 import com.surprising.product.api.ProductLine;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -25,7 +25,7 @@ class MarkPriceAuditConsumerTest {
     @Test
     void persistsTheCompletePublicationFromTheBusinessTopic() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
-        MarkPriceRepository repository = mock(MarkPriceRepository.class);
+        MarkPriceTickRepository repository = mock(MarkPriceTickRepository.class);
         MarkPriceProperties properties = new MarkPriceProperties();
         MarkPriceAuditConsumer consumer = new MarkPriceAuditConsumer(objectMapper, repository, properties);
         Instant now = Instant.now();
@@ -56,7 +56,7 @@ class MarkPriceAuditConsumerTest {
 
     @Test
     void discardsMalformedAuditMessageWithoutRetryingTheBatch() {
-        MarkPriceRepository repository = mock(MarkPriceRepository.class);
+        MarkPriceTickRepository repository = mock(MarkPriceTickRepository.class);
         MarkPriceProperties properties = new MarkPriceProperties();
         MarkPriceAuditConsumer consumer = new MarkPriceAuditConsumer(new ObjectMapper(), repository, properties);
 
