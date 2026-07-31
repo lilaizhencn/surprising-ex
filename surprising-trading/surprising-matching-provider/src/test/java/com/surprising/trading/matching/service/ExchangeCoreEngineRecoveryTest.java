@@ -13,7 +13,6 @@ import com.surprising.trading.matching.model.InstrumentSymbol;
 import com.surprising.trading.matching.model.MatchingSymbol;
 import com.surprising.trading.matching.model.RecoveredOrderBookOrder;
 import com.surprising.trading.matching.repository.MatchingOrderBookRecoveryRepository;
-import com.surprising.trading.matching.repository.MatchingSymbolRepository;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.cmd.CommandResultCode;
 import java.time.Instant;
@@ -129,7 +128,7 @@ class ExchangeCoreEngineRecoveryTest {
         return new ExchangeCoreEngine(properties, symbolRepository, new FakeRecoveryRepository(List.of()));
     }
 
-    private static class FakeMatchingSymbolRepository extends MatchingSymbolRepository {
+    private static class FakeMatchingSymbolRepository extends MatchingSymbolService {
         private final InstrumentSymbol instrument;
         private final MatchingSymbol matchingSymbol;
         private final AtomicInteger currentTradingSymbolsCalls = new AtomicInteger();
@@ -138,7 +137,7 @@ class ExchangeCoreEngineRecoveryTest {
         private volatile boolean active = true;
 
         FakeMatchingSymbolRepository(InstrumentSymbol instrument, MatchingSymbol matchingSymbol) {
-            super(null, null);
+            super(null, null, null, null, new MatchingProperties());
             this.instrument = instrument;
             this.matchingSymbol = matchingSymbol;
         }

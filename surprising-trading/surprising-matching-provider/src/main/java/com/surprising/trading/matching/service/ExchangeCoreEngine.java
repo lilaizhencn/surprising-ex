@@ -7,7 +7,6 @@ import com.surprising.trading.matching.model.InstrumentSymbol;
 import com.surprising.trading.matching.model.MatchingSymbol;
 import com.surprising.trading.matching.model.RecoveredOrderBookOrder;
 import com.surprising.trading.matching.repository.MatchingOrderBookRecoveryRepository;
-import com.surprising.trading.matching.repository.MatchingSymbolRepository;
 import exchange.core2.core.ExchangeApi;
 import exchange.core2.core.ExchangeCore;
 import exchange.core2.core.common.CoreSymbolSpecification;
@@ -46,7 +45,7 @@ public class ExchangeCoreEngine {
     private static final Logger log = LoggerFactory.getLogger(ExchangeCoreEngine.class);
 
     private final MatchingProperties properties;
-    private final MatchingSymbolRepository symbolRepository;
+    private final MatchingSymbolService symbolService;
     private final MatchingOrderBookRecoveryRepository recoveryRepository;
     private final ConcurrentMap<String, MatchingSymbol> loadedSymbols = new ConcurrentHashMap<>();
     private final Set<Long> createdUsers = ConcurrentHashMap.newKeySet();
@@ -56,10 +55,10 @@ public class ExchangeCoreEngine {
     private ExchangeApi api;
 
     public ExchangeCoreEngine(MatchingProperties properties,
-                              MatchingSymbolRepository symbolRepository,
+                              MatchingSymbolService symbolService,
                               MatchingOrderBookRecoveryRepository recoveryRepository) {
         this.properties = properties;
-        this.symbolRepository = symbolRepository;
+        this.symbolService = symbolService;
         this.recoveryRepository = recoveryRepository;
     }
 
@@ -97,7 +96,7 @@ public class ExchangeCoreEngine {
 
     @Scheduled(fixedDelayString = "${surprising.trading.matching.engine.initial-symbol-refresh-delay-ms:30000}")
     public void refreshSymbols() {
-        List<InstrumentSymbol> instruments = symbolRepository.currentTradingSymbols();
+        List<InstrumentSymbol> instruments = symbolService.currentTradingSymbols();
         Set<String> refreshedActiveSymbols = new HashSet<>(instruments.size());
         for (InstrumentSymbol instrument : instruments) {
             loadSymbol(instrument);
@@ -115,7 +114,7 @@ public class ExchangeCoreEngine {
 
     private MatchingSymbol loadSymbol(InstrumentSymbol instrument) {
         return loadedSymbols.computeIfAbsent(instrument.symbol(), ignored -> {
-            MatchingSymbol matchingSymbol = symbolRepository.ensureMatchingSymbol(instrument);
+            MatchingSymbol matchingSymbol = symbolService.ensureMatchingSymbol(instrument);
             if (!instrument.symbol().equals(matchingSymbol.symbol())) {
                 throw new IllegalStateException("matching symbol mismatch for " + instrument.symbol()
                         + ": " + matchingSymbol.symbol());

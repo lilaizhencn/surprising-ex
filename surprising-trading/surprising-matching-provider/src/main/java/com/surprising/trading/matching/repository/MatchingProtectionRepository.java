@@ -16,6 +16,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Repository;
 
+/** 只负责 {@code trading_orders} 表的撮合前保护查询。 */
 @Repository
 public class MatchingProtectionRepository {
 

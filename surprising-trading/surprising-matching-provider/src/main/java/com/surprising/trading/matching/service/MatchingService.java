@@ -26,7 +26,6 @@ import com.surprising.trading.matching.model.MatchingSymbol;
 import com.surprising.trading.matching.repository.MatchingOutboxRepository;
 import com.surprising.trading.matching.repository.MatchingOutboxRepository.MatchingOutboxWrite;
 import com.surprising.trading.matching.repository.MatchingProtectionRepository;
-import com.surprising.trading.matching.repository.MatchingResultRepository;
 import exchange.core2.core.common.L2MarketData;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherTradeEvent;
@@ -61,7 +60,7 @@ public class MatchingService {
     private final MatchingProperties properties;
     private final ExchangeCoreEngine exchangeCoreEngine;
     private final MatchingProtectionRepository protectionRepository;
-    private final MatchingResultRepository resultRepository;
+    private final MatchingPersistenceService persistenceService;
     private final MatchingOutboxRepository outboxRepository;
     private final OrderBookDepthPublisher depthPublisher;
     private final PublicTradePublisher tradePublisher;
@@ -72,7 +71,7 @@ public class MatchingService {
                            MatchingProperties properties,
                            ExchangeCoreEngine exchangeCoreEngine,
                            MatchingProtectionRepository protectionRepository,
-                           MatchingResultRepository resultRepository,
+                           MatchingPersistenceService persistenceService,
                            MatchingOutboxRepository outboxRepository,
                            OrderBookDepthPublisher depthPublisher,
                            PublicTradePublisher tradePublisher) {
@@ -80,7 +79,7 @@ public class MatchingService {
         this.properties = properties;
         this.exchangeCoreEngine = exchangeCoreEngine;
         this.protectionRepository = protectionRepository;
-        this.resultRepository = resultRepository;
+        this.persistenceService = persistenceService;
         this.outboxRepository = outboxRepository;
         this.depthPublisher = depthPublisher;
         this.tradePublisher = tradePublisher;
@@ -90,15 +89,15 @@ public class MatchingService {
                     MatchingProperties properties,
                     ExchangeCoreEngine exchangeCoreEngine,
                     MatchingProtectionRepository protectionRepository,
-                    MatchingResultRepository resultRepository,
+                    MatchingPersistenceService persistenceService,
                     MatchingOutboxRepository outboxRepository) {
         this(objectMapper, properties, exchangeCoreEngine, protectionRepository,
-                resultRepository, outboxRepository, OrderBookDepthPublisher.NOOP, PublicTradePublisher.NOOP);
+                persistenceService, outboxRepository, OrderBookDepthPublisher.NOOP, PublicTradePublisher.NOOP);
     }
 
     @Transactional
     public void process(OrderCommandEvent command) {
-        process(command, resultRepository.commandState(command.commandId(), command.orderId()),
+        process(command, persistenceService.commandState(command.commandId(), command.orderId()),
                 ProtectionChecks.REQUIRED, true);
     }
 
@@ -120,11 +119,12 @@ public class MatchingService {
         }
         LinkedHashMap<Long, Long> commandOrderIds = new LinkedHashMap<>(uniqueCommands.size());
         uniqueCommands.forEach((commandId, command) -> commandOrderIds.put(commandId, command.orderId()));
-        Map<Long, MatchingResultRepository.CommandState> states = resultRepository.commandStates(commandOrderIds);
+        Map<Long, MatchingPersistenceService.CommandState> states =
+                persistenceService.commandStates(commandOrderIds);
         Map<Long, ProtectionChecks> protectionChecks = batchProtectionChecks(uniqueCommands.values(), states);
         Map<String, DepthPublication> depthPublications = new LinkedHashMap<>();
         for (OrderCommandEvent command : uniqueCommands.values()) {
-            MatchingResultRepository.CommandState state = states.get(command.commandId());
+            MatchingPersistenceService.CommandState state = states.get(command.commandId());
             if (state == null) {
                 throw new IllegalStateException("matching command state missing for commandId="
                         + command.commandId());
@@ -135,8 +135,8 @@ public class MatchingService {
                 depthPublications.put(changedSymbol.symbol(), new DepthPublication(changedSymbol, Instant.now()));
             }
         }
-        // Public depth is an explicitly lossy latest-only stream. Build one final snapshot per changed symbol
-        // instead of traversing the same exchange-core book once for every command in the Kafka batch.
+        // 公共深度是允许丢失中间状态的最新值流。每个变更交易对只生成一次最终快照，
+        // 避免为同一 Kafka 批次中的每条指令重复遍历 exchange-core 订单簿。
         for (DepthPublication publication : depthPublications.values()) {
             publishOrderBookDepth(publication.symbol(), CommandResultCode.SUCCESS, publication.eventTime());
         }
@@ -144,13 +144,13 @@ public class MatchingService {
 
     private Map<Long, ProtectionChecks> batchProtectionChecks(
             Iterable<OrderCommandEvent> commands,
-            Map<Long, MatchingResultRepository.CommandState> states) {
+            Map<Long, MatchingPersistenceService.CommandState> states) {
         List<OrderCommandEvent> placements = new ArrayList<>();
         Map<String, Long> symbolVersions = new HashMap<>();
         Set<String> symbolsWithMultipleVersions = new HashSet<>();
         Map<UserSymbolKey, Integer> userSymbolCounts = new HashMap<>();
         for (OrderCommandEvent command : commands) {
-            MatchingResultRepository.CommandState state = states.get(command.commandId());
+            MatchingPersistenceService.CommandState state = states.get(command.commandId());
             if (state == null || state.resultExists() || !state.orderExists()
                     || command.commandType() != OrderCommandType.PLACE) {
                 continue;
@@ -196,7 +196,7 @@ public class MatchingService {
     }
 
     private MatchingSymbol process(OrderCommandEvent command,
-                                   MatchingResultRepository.CommandState commandState,
+                                   MatchingPersistenceService.CommandState commandState,
                                    ProtectionChecks protectionChecks,
                                    boolean publishDepth) {
         if (commandState.resultExists()) {
@@ -329,7 +329,7 @@ public class MatchingService {
             throw new IllegalStateException("one matching command cannot produce "
                     + PUBLIC_TRADE_SEQUENCE_MULTIPLIER + " or more trades");
         }
-        Map<Long, MatchedOrderSnapshot> makerSnapshots = resultRepository.orderSnapshots(
+        Map<Long, MatchedOrderSnapshot> makerSnapshots = persistenceService.orderSnapshots(
                 rawTrades.stream().map(RawTrade::matchedOrderId).toList());
         List<MatchTradeEvent> trades = new ArrayList<>(rawTrades.size());
         Map<Long, Long> makerRemainingQuantities = new HashMap<>();
@@ -424,7 +424,7 @@ public class MatchingService {
             return immediate ? OrderStatus.CANCELED : OrderStatus.ACCEPTED;
         }
         boolean completed = !trades.isEmpty() && trades.get(trades.size() - 1).takerOrderCompleted();
-        // IOC/FOK/MARKET orders are terminal even when only part of the submitted quantity traded.
+        // IOC、FOK 和 MARKET 订单即使只成交部分申报数量，也属于终态订单。
         if (completed && filledQuantity >= command.quantitySteps()) {
             return OrderStatus.FILLED;
         }
@@ -440,10 +440,10 @@ public class MatchingService {
     private void saveAndPublish(MatchResultEvent result,
                                 OrderCommandEvent orderCommand,
                                 Map<Long, OrderQuantitySnapshot> makerQuantitySnapshots) {
-        if (!resultRepository.saveResult(result)) {
+        if (!persistenceService.saveResult(result)) {
             return;
         }
-        resultRepository.applyActiveOrderStatus(result);
+        persistenceService.applyActiveOrderStatus(result);
         boolean containsInternalSelfTrade = false;
         String lastTakerFinancialCommandId = null;
         List<MatchTradeEvent> externalTrades = new ArrayList<>(result.trades().size());
@@ -468,8 +468,8 @@ public class MatchingService {
                         requireQuantitySnapshot(trade, makerQuantitySnapshots));
             }
         }
-        resultRepository.saveTrades(externalTrades);
-        resultRepository.applyMakerFills(result.trades());
+        persistenceService.saveTrades(externalTrades);
+        persistenceService.applyMakerFills(result.trades());
         enqueueActiveOrderReleaseIfRequired(outboxWrites, result, orderCommand, containsInternalSelfTrade,
                 lastTakerFinancialCommandId);
         outboxWrites.add(new MatchingOutboxWrite(

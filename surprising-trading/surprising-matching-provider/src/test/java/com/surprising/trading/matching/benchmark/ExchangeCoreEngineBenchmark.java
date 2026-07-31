@@ -10,7 +10,7 @@ import com.surprising.trading.matching.model.InstrumentSymbol;
 import com.surprising.trading.matching.model.MatchingSymbol;
 import com.surprising.trading.matching.model.RecoveredOrderBookOrder;
 import com.surprising.trading.matching.repository.MatchingOrderBookRecoveryRepository;
-import com.surprising.trading.matching.repository.MatchingSymbolRepository;
+import com.surprising.trading.matching.service.MatchingSymbolService;
 import com.surprising.trading.matching.service.ExchangeCoreEngine;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.cmd.CommandResultCode;
@@ -136,10 +136,10 @@ public final class ExchangeCoreEngineBenchmark {
         }
     }
 
-    private static final class FixedMatchingSymbolRepository extends MatchingSymbolRepository {
+    private static final class FixedMatchingSymbolRepository extends MatchingSymbolService {
 
         private FixedMatchingSymbolRepository() {
-            super(null, null);
+            super(null, null, null, null, new MatchingProperties());
         }
 
         @Override

@@ -61,8 +61,8 @@ public class MatchingCommandConsumer {
             for (ConsumerRecord<String, String> record : records) {
                 partitionAssignmentGuard.recordProcessedCommand(record.topic(), record.partition());
             }
-            // Kafka preserves record order inside every symbol-keyed partition. The bounded poll is committed only
-            // after one database transaction persists all matching results, order transitions, trades and Outbox rows.
+            // Kafka 保证同一交易对分区内的记录顺序。只有一个数据库事务完整持久化
+            // 撮合结果、订单迁移、成交和 Outbox 记录后，才提交本次有界拉取。
             processingStarted = true;
             matchingService.processBatch(commands);
         } catch (SymbolKeyMismatchException ex) {

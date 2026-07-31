@@ -3,6 +3,7 @@ package com.surprising.trading.matching.repository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+/** 只负责 PostgreSQL 原生撮合序列，不访问业务表。 */
 @Repository
 public class MatchingSequenceRepository {
 

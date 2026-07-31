@@ -13,6 +13,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+/**
+ * 恢复 exchange-core 订单簿所需的只读快照。
+ *
+ * <p>不可拆原因：启动恢复必须同时确认订单仍然开放、对应 PLACE 指令已成功落库且合约版本仍可交易；
+ * 若拆成三次查询，并发状态变化可能恢复已撤销或已停用订单，因此保留
+ * {@code trading_orders}、{@code trading_match_results}、{@code instruments} 的一致快照查询。</p>
+ */
 @Repository
 public class MatchingOrderBookRecoveryRepository {
 

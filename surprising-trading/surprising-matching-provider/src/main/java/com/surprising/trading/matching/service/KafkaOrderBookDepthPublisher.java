@@ -19,11 +19,10 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Sends public depth through a lossy, latest-only path isolated from matching business events.
+ * 通过允许丢失中间状态的最新值路径发送公共深度，并与撮合业务事件隔离。
  *
- * <p>Each symbol owns one slot. A newer snapshot replaces an unpublished older snapshot, so
- * Kafka outages cannot create an unbounded market-data backlog and one hot symbol cannot erase
- * another symbol's latest state.</p>
+ * <p>每个交易对独占一个槽位，新快照会替换尚未发布的旧快照。因此 Kafka 故障不会产生无界行情积压，
+ * 热门交易对也不会覆盖其他交易对的最新状态。</p>
  */
 @Service
 public class KafkaOrderBookDepthPublisher implements OrderBookDepthPublisher {

@@ -30,8 +30,6 @@ import com.surprising.trading.matching.repository.MatchingOrderBookRecoveryRepos
 import com.surprising.trading.matching.repository.MatchingOutboxRepository;
 import com.surprising.trading.matching.repository.MatchingOutboxRepository.MatchingOutboxWrite;
 import com.surprising.trading.matching.repository.MatchingProtectionRepository;
-import com.surprising.trading.matching.repository.MatchingResultRepository;
-import com.surprising.trading.matching.repository.MatchingSymbolRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -776,12 +774,12 @@ class MatchingServiceTest {
                 commandTime, traceId);
     }
 
-    private static final class FakeMatchingSymbolRepository extends MatchingSymbolRepository {
+    private static final class FakeMatchingSymbolRepository extends MatchingSymbolService {
         private final InstrumentSymbol instrument;
         private final MatchingSymbol matchingSymbol;
 
         private FakeMatchingSymbolRepository(InstrumentSymbol instrument, MatchingSymbol matchingSymbol) {
-            super(null, null);
+            super(null, null, null, null, new MatchingProperties());
             this.instrument = instrument;
             this.matchingSymbol = matchingSymbol;
         }
@@ -872,7 +870,7 @@ class MatchingServiceTest {
         }
     }
 
-    private static final class FakeResultRepository extends MatchingResultRepository {
+    private static final class FakeResultRepository extends MatchingPersistenceService {
         private final List<MatchResultEvent> results = new ArrayList<>();
         private final List<MatchTradeEvent> trades = new ArrayList<>();
         private final List<Long> missingOrderIds = new ArrayList<>();
@@ -887,7 +885,7 @@ class MatchingServiceTest {
         private int makerFillUpdates;
 
         private FakeResultRepository() {
-            super(null, null);
+            super(null, null, null);
         }
 
         @Override

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.matching.config.MatchingProperties;
+import com.surprising.trading.matching.service.MatchingSymbolService;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -14,9 +15,9 @@ class MatchingSymbolRepositoryTest {
     @Test
     void leavesTradingSymbolLookupUnfilteredForLegacyTopics() {
         RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-        MatchingSymbolRepository repository = new MatchingSymbolRepository(jdbcTemplate, null);
+        MatchingSymbolService service = service(jdbcTemplate, new MatchingProperties());
 
-        repository.currentTradingSymbols();
+        service.currentTradingSymbols();
 
         assertThat(jdbcTemplate.sql).contains("i.status IN ('TRADING', 'HALT')");
         assertThat(jdbcTemplate.sql).doesNotContain("SETTLING");
@@ -30,9 +31,9 @@ class MatchingSymbolRepositoryTest {
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
-        MatchingSymbolRepository repository = new MatchingSymbolRepository(jdbcTemplate, null, properties);
+        MatchingSymbolService service = service(jdbcTemplate, properties);
 
-        repository.currentTradingSymbols();
+        service.currentTradingSymbols();
 
         assertThat(jdbcTemplate.sql).contains("i.contract_type = ?");
         assertThat(jdbcTemplate.args).containsExactly("LINEAR_DELIVERY");
@@ -44,9 +45,9 @@ class MatchingSymbolRepositoryTest {
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
-        MatchingSymbolRepository repository = new MatchingSymbolRepository(jdbcTemplate, null, properties);
+        MatchingSymbolService service = service(jdbcTemplate, properties);
 
-        repository.currentTradingSymbol("BTC-USD-240927");
+        service.currentTradingSymbol("BTC-USD-240927");
 
         assertThat(jdbcTemplate.sql).contains("i.status IN ('TRADING', 'HALT')");
         assertThat(jdbcTemplate.sql).doesNotContain("SETTLING");
@@ -60,12 +61,16 @@ class MatchingSymbolRepositoryTest {
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setProductLine(ProductLine.SPOT);
         properties.getKafka().setProductTopicsEnabled(true);
-        MatchingSymbolRepository repository = new MatchingSymbolRepository(jdbcTemplate, null, properties);
+        MatchingSymbolRepository repository = new MatchingSymbolRepository(jdbcTemplate, properties);
 
-        repository.findMatchingSymbol("BTC-USDT");
+        repository.find("BTC-USDT");
 
         assertThat(jdbcTemplate.sql).contains("product_line = ?").contains("symbol = ?");
         assertThat(jdbcTemplate.args).containsExactly("SPOT", "BTC-USDT");
+    }
+
+    private MatchingSymbolService service(JdbcTemplate jdbcTemplate, MatchingProperties properties) {
+        return new MatchingSymbolService(jdbcTemplate, null, null, null, properties);
     }
 
     private static final class RecordingJdbcTemplate extends JdbcTemplate {

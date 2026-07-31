@@ -17,6 +17,7 @@ import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+/** 只负责 {@code trading_outbox_events} 表，SQL 中其他名称均为 CTE。 */
 @Repository
 public class MatchingOutboxRepository {
 

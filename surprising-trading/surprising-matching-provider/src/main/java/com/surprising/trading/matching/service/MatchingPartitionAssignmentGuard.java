@@ -81,7 +81,7 @@ public class MatchingPartitionAssignmentGuard implements ConsumerAwareRebalanceL
 
     public void requestRestart(String reason) {
         if (shutdownStarted.compareAndSet(false, true)) {
-            // exchange-core cannot safely hot-rebuild one stale symbol book inside a running JVM.
+            // exchange-core 无法在运行中的 JVM 内安全热重建单个过期交易对订单簿。
             log.error("{}; closing Spring context so orchestration restarts with a fresh DB order-book recovery",
                     reason);
             Thread shutdownThread = new Thread(applicationContext::close, "matching-rebalance-shutdown");

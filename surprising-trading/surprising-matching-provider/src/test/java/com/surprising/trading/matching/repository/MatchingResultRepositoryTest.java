@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.OrderSide;
+import com.surprising.trading.matching.service.MatchingPersistenceService;
 import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.List;
@@ -23,28 +24,26 @@ import org.springframework.jdbc.core.RowCallbackHandler;
 class MatchingResultRepositoryTest {
 
     private final JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-    private final MatchingResultRepository repository = new MatchingResultRepository(jdbcTemplate);
+    private final MatchingOrderRepository orderRepository = new MatchingOrderRepository(jdbcTemplate);
+    private final MatchingTradeRepository tradeRepository = new MatchingTradeRepository(jdbcTemplate);
 
     @Test
-    void commandStatesAreReadForTheWholePollInOneQuery() throws Exception {
-        doAnswer(invocation -> {
-            RowCallbackHandler handler = invocation.getArgument(1);
-            handler.processRow(commandStateRow(7001L, false, true));
-            handler.processRow(commandStateRow(7002L, true, true));
-            return null;
-        }).when(jdbcTemplate).query(anyString(), any(RowCallbackHandler.class), any(Object[].class));
+    void commandStatesAreAggregatedFromTwoSingleTableRepositories() {
+        MatchingResultRepository results = mock(MatchingResultRepository.class);
+        MatchingOrderRepository orders = mock(MatchingOrderRepository.class);
+        when(results.existingCommandIds(java.util.Set.of(7001L, 7002L))).thenReturn(java.util.Set.of(7002L));
+        when(orders.existingOrderIds(any())).thenReturn(java.util.Set.of(8001L, 8002L));
+        MatchingPersistenceService service = new MatchingPersistenceService(
+                results, mock(MatchingTradeRepository.class), orders);
+        java.util.LinkedHashMap<Long, Long> commands = new java.util.LinkedHashMap<>();
+        commands.put(7001L, 8001L);
+        commands.put(7002L, 8002L);
 
-        var states = repository.commandStates(java.util.Map.of(7001L, 8001L, 7002L, 8002L));
+        var states = service.commandStates(commands);
 
         assertThat(states).hasSize(2);
         assertThat(states.get(7001L).orderExists()).isTrue();
         assertThat(states.get(7002L).resultExists()).isTrue();
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), any(RowCallbackHandler.class), any(Object[].class));
-        assertThat(sql.getValue())
-                .contains("WITH input(command_id, order_id)")
-                .contains("LEFT JOIN trading_match_results")
-                .contains("LEFT JOIN trading_orders");
     }
 
     @Test
@@ -56,7 +55,7 @@ class MatchingResultRepositoryTest {
             return null;
         }).when(jdbcTemplate).query(anyString(), any(RowCallbackHandler.class), any(Object[].class));
 
-        var snapshots = repository.orderSnapshots(List.of(9001L, 9002L, 9001L));
+        var snapshots = orderRepository.snapshots(List.of(9001L, 9002L, 9001L));
 
         assertThat(snapshots).hasSize(2);
         assertThat(snapshots.get(9001L).remainingQuantitySteps()).isEqualTo(7L);
@@ -74,7 +73,7 @@ class MatchingResultRepositoryTest {
         when(jdbcTemplate.batchUpdate(anyString(), any(BatchPreparedStatementSetter.class)))
                 .thenReturn(new int[]{1, 1});
 
-        repository.saveTrades(trades);
+        tradeRepository.saveBatch(trades);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<BatchPreparedStatementSetter> setter =
@@ -93,7 +92,7 @@ class MatchingResultRepositoryTest {
         when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), any(Object[].class)))
                 .thenReturn(1);
 
-        repository.applyMakerFills(List.of(
+        orderRepository.applyMakerFills(List.of(
                 trade(1L, 2L, false, first),
                 trade(2L, 3L, true, second)));
 
@@ -120,14 +119,6 @@ class MatchingResultRepositoryTest {
         when(rs.getLong("quantity_steps")).thenReturn(quantitySteps);
         when(rs.getLong("remaining_quantity_steps")).thenReturn(remainingQuantitySteps);
         when(rs.getBoolean("reduce_only")).thenReturn(reduceOnly);
-        return rs;
-    }
-
-    private ResultSet commandStateRow(long commandId, boolean resultExists, boolean orderExists) throws Exception {
-        ResultSet rs = mock(ResultSet.class);
-        when(rs.getLong("command_id")).thenReturn(commandId);
-        when(rs.getBoolean("result_exists")).thenReturn(resultExists);
-        when(rs.getBoolean("order_exists")).thenReturn(orderExists);
         return rs;
     }
 

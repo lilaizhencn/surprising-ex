@@ -20,8 +20,8 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Batches public trades for Kafka without joining the financial transaction or database outbox.
- * Each symbol owns an independent bounded FIFO; events are never coalesced.
+ * 将公共成交批量发送到 Kafka，不接入资金事务或数据库 Outbox。
+ * 每个交易对使用独立的有界 FIFO，事件不会合并。
  */
 @Service
 public class KafkaPublicTradePublisher implements PublicTradePublisher {
