@@ -3,30 +3,26 @@ package com.surprising.price.index.service;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.index.repository.IndexPriceComponentRepository;
 import com.surprising.price.index.repository.IndexPriceTickRepository;
-import java.sql.Timestamp;
+import com.surprising.price.index.repository.IndexPriceTickRepository.TickKey;
 import java.time.Instant;
 import java.util.List;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 编排指数价格审计快照的写入和清理。
  *
- * <p>清理必须在同一 SQL 中先删除明细再删除主记录，否则外键约束下会出现部分清理或并发遗漏；
- * 因此该跨表删除保留在 Service，而两个 Repository 分别只负责各自表。</p>
+ * <p>清理由 Service 在同一事务内先锁定主记录，再删除明细和主记录；两个 Repository
+ * 始终只访问各自负责的物理表。</p>
  */
 @Service
 public class IndexPriceAuditService {
 
-    private final JdbcTemplate jdbcTemplate;
     private final IndexPriceTickRepository tickRepository;
     private final IndexPriceComponentRepository componentRepository;
 
-    public IndexPriceAuditService(JdbcTemplate jdbcTemplate,
-                                  IndexPriceTickRepository tickRepository,
+    public IndexPriceAuditService(IndexPriceTickRepository tickRepository,
                                   IndexPriceComponentRepository componentRepository) {
-        this.jdbcTemplate = jdbcTemplate;
         this.tickRepository = tickRepository;
         this.componentRepository = componentRepository;
     }
@@ -42,23 +38,11 @@ public class IndexPriceAuditService {
 
     @Transactional
     public int deleteBefore(Instant cutoff, int limit) {
-        return jdbcTemplate.update("""
-                WITH expired AS MATERIALIZED (
-                    SELECT symbol, sequence
-                      FROM price_index_ticks
-                     WHERE event_time < ?
-                     ORDER BY event_time ASC
-                     LIMIT ?
-                ), deleted_components AS (
-                    DELETE FROM price_index_components c
-                    USING expired e
-                    WHERE c.symbol = e.symbol
-                      AND c.sequence = e.sequence
-                )
-                DELETE FROM price_index_ticks t
-                USING expired e
-                WHERE t.symbol = e.symbol
-                  AND t.sequence = e.sequence
-                """, Timestamp.from(cutoff), limit);
+        List<TickKey> keys = tickRepository.findExpiredForDeletion(cutoff, limit);
+        if (keys.isEmpty()) {
+            return 0;
+        }
+        componentRepository.deleteByKeys(keys);
+        return tickRepository.deleteByKeys(keys);
     }
 }

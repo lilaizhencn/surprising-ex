@@ -2,6 +2,7 @@ package com.surprising.price.index.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -9,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.index.service.IndexPriceAuditService;
+import com.surprising.price.index.repository.IndexPriceTickRepository.TickKey;
 import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
@@ -16,6 +18,7 @@ import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -43,15 +46,49 @@ class IndexPriceRepositoryBoundaryTest {
 
     @Test
     void deletionRemovesComponentsBeforeTheBoundedTickBatch() {
-        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(10);
-        IndexPriceAuditService service = new IndexPriceAuditService(
-                jdbcTemplate, mock(IndexPriceTickRepository.class), mock(IndexPriceComponentRepository.class));
+        IndexPriceTickRepository ticks = mock(IndexPriceTickRepository.class);
+        IndexPriceComponentRepository components = mock(IndexPriceComponentRepository.class);
+        Instant cutoff = Instant.parse("2026-07-14T00:00:00Z");
+        List<TickKey> keys = List.of(new TickKey("BTC-USDT", 7L));
+        when(ticks.findExpiredForDeletion(cutoff, 100)).thenReturn(keys);
+        when(ticks.deleteByKeys(keys)).thenReturn(1);
+        IndexPriceAuditService service = new IndexPriceAuditService(ticks, components);
 
-        assertThat(service.deleteBefore(Instant.parse("2026-07-14T00:00:00Z"), 100)).isEqualTo(10);
+        assertThat(service.deleteBefore(cutoff, 100)).isEqualTo(1);
+        InOrder order = inOrder(ticks, components);
+        order.verify(ticks).findExpiredForDeletion(cutoff, 100);
+        order.verify(components).deleteByKeys(keys);
+        order.verify(ticks).deleteByKeys(keys);
+    }
+
+    @Test
+    void tickDeletionOnlyTouchesTickTable() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
+        IndexPriceTickRepository repository = new IndexPriceTickRepository(jdbcTemplate);
+
+        repository.deleteByKeys(List.of(new TickKey("BTC-USDT", 7L)));
+
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
-        assertThat(sql.getValue()).contains("deleted_components").contains("LIMIT ?");
+        assertThat(sql.getValue())
+                .contains("DELETE FROM price_index_ticks")
+                .doesNotContain("price_index_components");
+    }
+
+    @Test
+    void componentDeletionOnlyTouchesComponentTable() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
+        IndexPriceComponentRepository repository = new IndexPriceComponentRepository(jdbcTemplate);
+
+        repository.deleteByKeys(List.of(new TickKey("BTC-USDT", 7L)));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
+        assertThat(sql.getValue())
+                .contains("DELETE FROM price_index_components")
+                .doesNotContain("price_index_ticks");
     }
 
     private static IndexPriceEvent event() {

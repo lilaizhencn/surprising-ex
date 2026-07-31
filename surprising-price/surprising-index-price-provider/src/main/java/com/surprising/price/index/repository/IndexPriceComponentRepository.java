@@ -3,6 +3,7 @@ package com.surprising.price.index.repository;
 import com.surprising.price.api.model.IndexComponentSnapshot;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.SourceStatus;
+import com.surprising.price.index.repository.IndexPriceTickRepository.TickKey;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -88,6 +89,31 @@ public class IndexPriceComponentRepository {
                 timestamp(rs.getTimestamp("source_time")),
                 timestamp(rs.getTimestamp("received_at")),
                 nullableLong(rs, "latency_millis")), symbol, sequence);
+    }
+
+    public int deleteByKeys(List<TickKey> keys) {
+        if (keys == null || keys.isEmpty()) {
+            return 0;
+        }
+        List<Object> args = new ArrayList<>(keys.size() * 2);
+        return jdbcTemplate.update("""
+                DELETE FROM price_index_components
+                 WHERE (symbol, sequence) IN (%s)
+                """.formatted(tuplePredicate(keys, args)), args.toArray());
+    }
+
+    private String tuplePredicate(List<TickKey> keys, List<Object> args) {
+        StringBuilder sql = new StringBuilder();
+        for (int index = 0; index < keys.size(); index++) {
+            if (index > 0) {
+                sql.append(", ");
+            }
+            sql.append("(?, ?)");
+            TickKey key = keys.get(index);
+            args.add(key.symbol());
+            args.add(key.sequence());
+        }
+        return sql.toString();
     }
 
     private List<IndexComponentRow> rows(List<IndexPriceEvent> events) {

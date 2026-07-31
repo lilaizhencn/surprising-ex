@@ -1,51 +1,43 @@
 package com.surprising.price.index.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.surprising.price.index.config.IndexPriceProperties;
-import com.surprising.product.api.ProductLine;
+import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.springframework.dao.DataAccessException;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowCallbackHandler;
 
 class IndexInstrumentConfigServiceTest {
 
     @Test
-    void legacyInstrumentSnapshotLoadsPerpetualContracts() {
-        RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
+    void refreshUsesRepositoryAggregationSnapshot() {
         IndexPriceProperties properties = new IndexPriceProperties();
-        properties.getInstrument().setFallbackToStaticSymbols(false);
+        IndexInstrumentConfigLoader loader = mock(IndexInstrumentConfigLoader.class);
+        IndexPriceProperties.SymbolConfig symbol = new IndexPriceProperties.SymbolConfig();
+        symbol.setSymbol("BTC-USDT");
+        when(loader.load()).thenReturn(List.of(symbol));
+        IndexInstrumentConfigService service = new IndexInstrumentConfigService(properties, loader);
 
-        new IndexInstrumentConfigService(properties, jdbcTemplate).refresh();
+        service.refresh();
 
-        assertThat(jdbcTemplate.sql).contains("i.instrument_type = 'PERPETUAL'");
-        assertThat(jdbcTemplate.sql).doesNotContain("i.contract_type = ?");
-        assertThat(jdbcTemplate.args).isEmpty();
+        assertThat(service.symbols()).containsExactly(symbol);
+        verify(loader).load();
     }
 
     @Test
-    void productInstrumentSnapshotLoadsConfiguredContractType() {
-        RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
+    void disabledDatabaseSnapshotUsesStaticConfiguration() {
         IndexPriceProperties properties = new IndexPriceProperties();
-        properties.getInstrument().setFallbackToStaticSymbols(false);
-        properties.getKafka().setProductTopicsEnabled(true);
-        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getInstrument().setEnabled(false);
+        IndexPriceProperties.SymbolConfig symbol = new IndexPriceProperties.SymbolConfig();
+        symbol.setSymbol("ETH-USDT");
+        properties.setSymbols(List.of(symbol));
+        IndexInstrumentConfigLoader loader = mock(IndexInstrumentConfigLoader.class);
+        IndexInstrumentConfigService service = new IndexInstrumentConfigService(properties, loader);
 
-        new IndexInstrumentConfigService(properties, jdbcTemplate).refresh();
+        service.refresh();
 
-        assertThat(jdbcTemplate.sql).contains("i.contract_type = ?");
-        assertThat(jdbcTemplate.args).containsExactly("LINEAR_DELIVERY");
-    }
-
-    private static final class RecordingJdbcTemplate extends JdbcTemplate {
-        private String sql;
-        private Object[] args = new Object[0];
-
-        @Override
-        public void query(String sql, Object[] args, RowCallbackHandler rch) throws DataAccessException {
-            this.sql = sql;
-            this.args = args;
-        }
+        assertThat(service.symbols()).containsExactly(symbol);
     }
 }

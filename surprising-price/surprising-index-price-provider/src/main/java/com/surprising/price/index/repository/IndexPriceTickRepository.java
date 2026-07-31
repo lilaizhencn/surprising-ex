@@ -74,6 +74,47 @@ public class IndexPriceTickRepository {
                 symbol, Timestamp.from(startTime), Timestamp.from(endTime), limit);
     }
 
+    public List<TickKey> findExpiredForDeletion(Instant cutoff, int limit) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        return jdbcTemplate.query("""
+                SELECT symbol, sequence
+                  FROM price_index_ticks
+                 WHERE event_time < ?
+                 ORDER BY event_time ASC, symbol ASC, sequence ASC
+                 LIMIT ?
+                   FOR UPDATE SKIP LOCKED
+                """, (rs, rowNum) -> new TickKey(
+                rs.getString("symbol"),
+                rs.getLong("sequence")), Timestamp.from(cutoff), limit);
+    }
+
+    public int deleteByKeys(List<TickKey> keys) {
+        if (keys == null || keys.isEmpty()) {
+            return 0;
+        }
+        List<Object> args = new java.util.ArrayList<>(keys.size() * 2);
+        return jdbcTemplate.update("""
+                DELETE FROM price_index_ticks
+                 WHERE (symbol, sequence) IN (%s)
+                """.formatted(tuplePredicate(keys, args)), args.toArray());
+    }
+
+    private String tuplePredicate(List<TickKey> keys, List<Object> args) {
+        StringBuilder sql = new StringBuilder();
+        for (int index = 0; index < keys.size(); index++) {
+            if (index > 0) {
+                sql.append(", ");
+            }
+            sql.append("(?, ?)");
+            TickKey key = keys.get(index);
+            args.add(key.symbol());
+            args.add(key.sequence());
+        }
+        return sql.toString();
+    }
+
     public record IndexPriceTick(String symbol,
                                  long sequence,
                                  java.math.BigDecimal indexPrice,
@@ -81,5 +122,8 @@ public class IndexPriceTickRepository {
                                  int componentCount,
                                  int validComponentCount,
                                  Instant eventTime) {
+    }
+
+    public record TickKey(String symbol, long sequence) {
     }
 }

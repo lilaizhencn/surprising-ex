@@ -37,8 +37,17 @@ the product line, instrument version, quote-asset units, comparable ticks, seque
 `price_mark_ticks` is only the asynchronous three-day audit store and is never a business input.
 
 The symbol universe and trading rules come from `surprising-instrument`. The index provider reads
-current symbols and external index sources dynamically from `instruments + instrument_index_sources`;
-static BTC/ETH YAML sources are only a fallback before database initialization.
+`instruments`, `instrument_current_versions`, and `instrument_index_sources` through separate
+single-table repositories. `IndexInstrumentConfigLoader` aggregates them in one read-only
+repeatable-read transaction, so a version switch cannot create a mixed configuration snapshot.
+Static BTC/ETH YAML sources are only a fallback before database initialization.
+
+The same persistence boundary applies to mark-price encoding: three repositories independently read
+the current-version pointer, instrument definition, and quote-asset scale, while
+`MarkPriceEncodingService` aggregates them in a repeatable-read transaction. Audit retention is also
+service-orchestrated: it locks a bounded batch of `price_index_ticks`, deletes the corresponding
+`price_index_components`, then deletes the tick rows in one transaction. No Service contains SQL or
+direct JDBC access.
 
 ## Combined Provider Deployment
 
