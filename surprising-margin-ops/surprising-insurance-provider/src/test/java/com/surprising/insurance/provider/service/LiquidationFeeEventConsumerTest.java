@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.insurance.provider.config.InsuranceProperties;
-import com.surprising.insurance.provider.repository.InsuranceRepository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import java.time.Instant;
@@ -92,7 +91,7 @@ class LiquidationFeeEventConsumerTest {
         private LiquidationFeeSettledEvent event;
 
         private RecordingInsuranceService(InsuranceProperties properties) {
-            super(properties, new InsuranceRepository(null));
+            super(properties, null, null, null, null, null, null, null, new ObjectMapper());
         }
 
         @Override

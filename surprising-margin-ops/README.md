@@ -27,6 +27,10 @@ Margin-operation APIs and providers for risk, liquidation, funding, insurance, a
   outbox rows, with `FundingService` aggregating them transactionally. Only online safety paths for rate inputs,
   due-rate selection, settlement candidates, command recovery, and atomic payment completion retain cross-table SQL;
   each exception is documented in source.
+- Insurance persistence is split by physical table for sequences, fund balances, fund ledger, deficit coverages,
+  product-scoped deficits, legacy deficits, and account outbox rows. `InsuranceService` and
+  `InsuranceCoverageReconciler` aggregate them transactionally. Only the recovery lock that correlates coverage rows
+  with reserve/finalize command states retains cross-table SQL, with its reason documented in source.
 - Risk consumes account position events in Kafka batches, keeps only the highest revision for each exact position, and
   scans each affected user/account/settlement-asset group once. Complete position events eliminate the former
   instrument target-resolution query; scheduled keyset scans remain the safety fallback.
@@ -48,6 +52,8 @@ Margin-operation APIs and providers for risk, liquidation, funding, insurance, a
   reconciliation, and operational reporting.
 - Funding settlement timelines, cross-account reconciliation, and operational statistics must likewise be served
   from that independent finance-operations projection rather than new JOINs in the primary trading database.
+- Insurance-fund history analysis, cross-user coverage reconciliation, and operational statistics belong in the same
+  independent finance-operations database rather than expanded primary-database queries.
 - No module reads another module's in-memory state directly.
 - The original standalone provider jars remain available for split deployment.
 
