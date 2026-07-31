@@ -56,6 +56,8 @@ Surprising-EX 是基于 Java 21、PostgreSQL、Kafka 和 Redis/Valkey 的多产�
 Repository 默认只操作一张物理表，由 Service 在事务内聚合。在线交易、风控和结算链路若因一致性或原子性
 必须跨表，源码需要逐项写明中文“不可拆原因”。后台订单时间线、资金对账和运营报表不得在交易主库新增
 多表 JOIN；后续财务运营模块应消费领域事件，并使用独立数据库建立查询投影。
+CI 可运行 `./scripts/check-persistence-boundaries.sh`，拦截 Repository 之外的生产 JDBC 访问，
+以及未写中文“不可拆原因”的多表 Repository。
 
 ## 构建与本地启动
 

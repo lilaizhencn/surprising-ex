@@ -731,6 +731,11 @@ to build cross-domain user profiles. Those read models belong to a future indepe
 observability platform, populated by events, outbox records, controlled CDC, and telemetry rather than report
 queries against the trading primary database.
 
+The repository boundary is enforced by `scripts/check-persistence-boundaries.sh`. It derives the
+physical-table vocabulary from project DDL, rejects production JDBC access outside repository
+implementations, and requires every repository that references multiple physical tables to carry an
+explicit Chinese `不可拆原因` comment. This check should run in CI before module tests.
+
 `account_outbox_events` stores account-side Kafka events written inside the same transaction as the
 account state change. It carries `POSITION_UPDATED` events for WebSocket private position pushes and
 `LIQUIDATION_FEE_SETTLED` events for insurance-fund credits. Redis position snapshots are not business events and

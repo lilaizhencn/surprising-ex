@@ -58,6 +58,8 @@ Repositories operate one physical table by default, while services aggregate the
 in online trading, risk, or settlement paths requires an explicit source-level justification for consistency or
 atomicity. Admin order timelines, funds reconciliation, and operational reports must not add JOINs to the primary
 trading database; a future finance-operations module should build event-driven projections in an independent database.
+Run `./scripts/check-persistence-boundaries.sh` in CI to reject direct production JDBC access outside
+repositories and undocumented multi-table repository exceptions.
 
 ## Build and local run
 
