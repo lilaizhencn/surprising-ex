@@ -43,7 +43,6 @@ curl -X POST 'http://localhost:9096/api/v1/market-maker/run-once' \
 ```bash
 curl 'http://localhost:9096/api/v1/admin/market-maker/strategies' -H 'X-Admin-User-Id: 1001'
 curl 'http://localhost:9096/api/v1/admin/market-maker/metrics?limit=200' -H 'X-Admin-User-Id: 1001'
-curl 'http://localhost:9096/api/v1/admin/market-maker/pnl-attribution?windowHours=24&limit=200' -H 'X-Admin-User-Id: 1001'
 curl 'http://localhost:9096/api/v1/admin/market-maker/strategy-logs?limit=200&sort=createdAt.desc' -H 'X-Admin-User-Id: 1001'
 curl 'http://localhost:9096/api/v1/admin/market-maker/strategies/btc-usdt-mm-a/config' -H 'X-Admin-User-Id: 1001'
 curl -X POST 'http://localhost:9096/api/v1/admin/market-maker/strategies/btc-usdt-mm-a/config' \
@@ -57,15 +56,17 @@ admin-web 通过统一后台 gateway 调用，gateway 会把 `market-maker` 后�
 ```bash
 curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/strategies' -H 'Authorization: Bearer <admin-token>'
 curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/metrics?limit=200' -H 'Authorization: Bearer <admin-token>'
-curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/pnl-attribution?windowHours=24&limit=200' -H 'Authorization: Bearer <admin-token>'
 curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/strategy-logs?limit=200&sort=createdAt.desc' -H 'Authorization: Bearer <admin-token>'
 ```
 
 `/metrics` 聚合策略/账号/Symbol 维度的库存占用、owned live 挂单、目标报价覆盖率、缺失报价、陈旧报价、偏离目标报价、盘口价差、TraceId 和异常列表。异常类型包含 `NO_LIVE_QUOTES`、`MISSING_DESIRED_QUOTES`、`STALE_QUOTES`、`OFF_TARGET_QUOTES`、`INVENTORY_LIMIT_REACHED`、`INSTRUMENT_NOT_TRADING` 和 `METRIC_COLLECTION_FAILED`。
 
-`/pnl-attribution` 只返回部署配置中 strategy/account/symbol 范围内的只读归因行。它使用做市 `clientOrderId` 前缀归集自有订单，关联 `trading_match_trades` 统计 Maker/Taker 成交，关联 `account_ledger_entries` 中 `TRADE_FEE` 手续费流水计算净手续费，并带出当前 `account_positions` 的已实现盈亏和有符号库存快照。
+做市 PnL 归因接口已从交易主库移除。订单、成交、手续费流水和持仓的关联属于财务运营查询；后续应由
+独立财务运营模块消费领域事件，在独立数据库建立投影并提供归因、对账和运营报表。
 
 `/strategy-logs` 读取 `market_maker_strategy_run_events`，记录 cycle 成功/失败、报价对账、IOC 交易提交/拒绝、跳过轮次、错误信息、计数器、节点 id 和 TraceId。接口支持 `limit/cursor/sort` 游标分页，排序白名单为 `createdAt.desc`、`createdAt.asc`，响应保留 `events/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。事件写入是 best-effort，不会阻断报价循环。
+
+策略运行事件与参考行情样本分别由独立 Repository 访问各自物理表，`MarketMakerService` 负责业务聚合。
 
 `/strategies/{strategyId}/config` 读取和写入 `market_maker_strategy_overrides`。只支持热更新 enabled、基础报价数量、保证金模式、价差、层间距、库存上限/偏斜阈值和报价层数；账号和交易对仍由部署配置管理。请求体里为 `null` 的字段会回退到 `application.yml` 基线配置，全部可编辑字段为 `null` 会清除覆盖。
 

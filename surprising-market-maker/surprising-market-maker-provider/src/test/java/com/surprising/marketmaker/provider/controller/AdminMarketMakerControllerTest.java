@@ -10,8 +10,6 @@ import static org.mockito.Mockito.when;
 import com.surprising.marketmaker.provider.service.MarketMakerService;
 import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerAdminMetricsResponse;
 import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerMetricsTotals;
-import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerPnlAttributionResponse;
-import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerPnlAttributionTotals;
 import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerRunLogQueryResponse;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
@@ -64,25 +62,6 @@ class AdminMarketMakerControllerTest {
         verify(service).runLogs(ProductLine.LINEAR_PERPETUAL,
                 "BTC-USDT-MM-A", "BTC-USDT", 900001L, "QUOTE_RECONCILED", 50,
                 "cursor", "createdAt.asc");
-    }
-
-    @Test
-    void pnlAttributionDelegatesForAdminIdentity() {
-        MarketMakerService service = mock(MarketMakerService.class);
-        MarketMakerPnlAttributionResponse response = new MarketMakerPnlAttributionResponse(
-                Instant.EPOCH, Instant.EPOCH.minusSeconds(3600), 1,
-                new MarketMakerPnlAttributionTotals(0, 0, 0, 0, 0, 0, 0), List.of());
-        when(service.pnlAttribution(ProductLine.LINEAR_PERPETUAL,
-                "BTC-USDT-MM-A", "BTC-USDT", 900001L, 24, 100))
-                .thenReturn(response);
-        AdminMarketMakerController controller = new AdminMarketMakerController(service);
-
-        MarketMakerPnlAttributionResponse result = controller.pnlAttribution(
-                "1001", "LINEAR_PERPETUAL", null, "BTC-USDT-MM-A", "BTC-USDT", 900001L, 24, 100);
-
-        assertThat(result).isSameAs(response);
-        verify(service).pnlAttribution(ProductLine.LINEAR_PERPETUAL,
-                "BTC-USDT-MM-A", "BTC-USDT", 900001L, 24, 100);
     }
 
     private MarketMakerAdminMetricsResponse emptyMetrics() {

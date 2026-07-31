@@ -575,10 +575,10 @@ instrument tables in the primary trading database. Trading accepts only finalize
 
 - Events are keyed by strategy, symbol, account, node id, cycle sequence, event type, trace id, and creation time.
 - Event types cover cycle success/failure, quote reconciliation, IOC trade submit/reject outcomes, and skipped cycles.
-- The admin `/api/v1/admin/market-maker/strategy-logs` endpoint uses this table for run-log troubleshooting, while
-  `/api/v1/admin/market-maker/pnl-attribution` derives financial attribution from configured market-maker scopes,
-  market-maker `clientOrderId` prefixes, `trading_match_trades`, `account_ledger_entries` fee rows, and current
-  `account_positions`.
+- The admin `/api/v1/admin/market-maker/strategy-logs` endpoint uses this table for run-log troubleshooting.
+- Financial attribution no longer joins orders, trades, ledger entries, and positions in the primary trading
+  database. A future finance-operations module must consume domain events into an independent database projection
+  for attribution, reconciliation, and operational reports.
 
 `market_maker_reference_samples` stores one best-effort reference-market sample per strategy symbol cycle when an
 external order book snapshot is available:

@@ -16,13 +16,12 @@ import com.surprising.marketmaker.provider.model.QuotePlan;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
 import com.surprising.marketmaker.provider.model.StrategyConfigOverride;
 import com.surprising.marketmaker.provider.model.StrategyRuntimeState;
-import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository;
-import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.CursorPage;
-import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerPnlAttributionRecord;
-import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerPnlScope;
-import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerReferenceSampleWrite;
-import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventRecord;
-import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventWrite;
+import com.surprising.marketmaker.provider.repository.MarketMakerReferenceSampleRepository;
+import com.surprising.marketmaker.provider.repository.MarketMakerReferenceSampleRepository.MarketMakerReferenceSampleWrite;
+import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository;
+import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.CursorPage;
+import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.MarketMakerRunEventRecord;
+import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.MarketMakerRunEventWrite;
 import com.surprising.marketmaker.provider.repository.MarketMakerStrategyOverrideStore;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPriceResponse;
@@ -81,7 +80,8 @@ public class MarketMakerService {
     private final ReferenceMarketProvider referenceMarketProvider;
     private final MarketMakerLeaseCoordinator leaseCoordinator;
     private final MarketMakerStrategyOverrideStore overrideStore;
-    private final MarketMakerAdminRepository adminRepository;
+    private final MarketMakerRunEventRepository runEventRepository;
+    private final MarketMakerReferenceSampleRepository referenceSampleRepository;
     private final Map<String, StrategyRuntimeState> states = new ConcurrentHashMap<>();
     private final Map<String, Instant> lastTradeTimes = new ConcurrentHashMap<>();
     private final Map<String, OrderSide> lastTradeSides = new ConcurrentHashMap<>();
@@ -101,7 +101,7 @@ public class MarketMakerService {
                        MarketMakerStrategyOverrideStore overrideStore) {
         this(properties, instrumentRpcApi, markPriceCache, marketDataRpcApi, orderRpcApi, accountRpcApi,
                 quotePlanner, ReferenceMarketProvider.disabled(), leaseCoordinator, overrideStore,
-                new NoopMarketMakerAdminRepository());
+                new NoopMarketMakerRunEventRepository(), new NoopMarketMakerReferenceSampleRepository());
     }
 
     MarketMakerService(MarketMakerProperties properties,
@@ -113,9 +113,11 @@ public class MarketMakerService {
                        QuotePlanner quotePlanner,
                        MarketMakerLeaseCoordinator leaseCoordinator,
                        MarketMakerStrategyOverrideStore overrideStore,
-                       MarketMakerAdminRepository adminRepository) {
+                       MarketMakerRunEventRepository runEventRepository,
+                       MarketMakerReferenceSampleRepository referenceSampleRepository) {
         this(properties, instrumentRpcApi, markPriceCache, marketDataRpcApi, orderRpcApi, accountRpcApi,
-                quotePlanner, ReferenceMarketProvider.disabled(), leaseCoordinator, overrideStore, adminRepository);
+                quotePlanner, ReferenceMarketProvider.disabled(), leaseCoordinator, overrideStore,
+                runEventRepository, referenceSampleRepository);
     }
 
     @Autowired
@@ -129,7 +131,8 @@ public class MarketMakerService {
                               ReferenceMarketProvider referenceMarketProvider,
                               MarketMakerLeaseCoordinator leaseCoordinator,
                               MarketMakerStrategyOverrideStore overrideStore,
-                              MarketMakerAdminRepository adminRepository) {
+                              MarketMakerRunEventRepository runEventRepository,
+                              MarketMakerReferenceSampleRepository referenceSampleRepository) {
         this.properties = properties;
         this.instrumentRpcApi = instrumentRpcApi;
         this.markPriceCache = markPriceCache;
@@ -140,7 +143,8 @@ public class MarketMakerService {
         this.referenceMarketProvider = referenceMarketProvider;
         this.leaseCoordinator = leaseCoordinator;
         this.overrideStore = overrideStore;
-        this.adminRepository = adminRepository;
+        this.runEventRepository = runEventRepository;
+        this.referenceSampleRepository = referenceSampleRepository;
         this.nodeId = resolveNodeId(properties.getEngine().getNodeId());
         this.orderNonce = Long.toUnsignedString(System.currentTimeMillis(), 36)
                 + "-" + UUID.randomUUID().toString().substring(0, 8);
@@ -305,7 +309,7 @@ public class MarketMakerService {
                                                   int limit) {
         return new MarketMakerRunLogQueryResponse(
                 Instant.now(),
-                adminRepository.runEvents(
+                runEventRepository.find(
                         productLine,
                         normalizeOptional(strategyId),
                         symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol),
@@ -332,7 +336,7 @@ public class MarketMakerService {
                                                   int limit,
                                                   String cursor,
                                                   String sort) {
-        CursorPage<MarketMakerRunEventRecord> page = adminRepository.runEventsPage(
+        CursorPage<MarketMakerRunEventRecord> page = runEventRepository.findPage(
                 productLine,
                 normalizeOptional(strategyId),
                 symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol),
@@ -343,47 +347,6 @@ public class MarketMakerService {
                 sort);
         return new MarketMakerRunLogQueryResponse(Instant.now(), page.items(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
-    }
-
-    public MarketMakerPnlAttributionResponse pnlAttribution(String strategyId,
-                                                            String symbol,
-                                                            Long accountId,
-                                                            int windowHours,
-                                                            int limit) {
-        return pnlAttribution(null, strategyId, symbol, accountId, windowHours, limit);
-    }
-
-    public MarketMakerPnlAttributionResponse pnlAttribution(ProductLine productLine,
-                                                            String strategyId,
-                                                            String symbol,
-                                                            Long accountId,
-                                                            int windowHours,
-                                                            int limit) {
-        int boundedWindowHours = Math.max(1, Math.min(windowHours, 24 * 31));
-        int boundedLimit = Math.max(1, Math.min(limit, 500));
-        Instant until = Instant.now();
-        Instant since = until.minus(Duration.ofHours(boundedWindowHours));
-        List<MarketMakerPnlScope> scopes = pnlScopes(productLine, strategyId, symbol, accountId, boundedLimit);
-        List<MarketMakerPnlAttributionRecord> rows = adminRepository.pnlAttribution(scopes, since, until);
-        long totalTrades = rows.stream().mapToLong(MarketMakerPnlAttributionRecord::totalTrades).sum();
-        long makerTrades = rows.stream().mapToLong(MarketMakerPnlAttributionRecord::makerTrades).sum();
-        long takerTrades = rows.stream().mapToLong(MarketMakerPnlAttributionRecord::takerTrades).sum();
-        long netFeeUnits = rows.stream().mapToLong(MarketMakerPnlAttributionRecord::netFeeUnits).sum();
-        long realizedPnlUnits = rows.stream().mapToLong(MarketMakerPnlAttributionRecord::currentRealizedPnlUnits).sum();
-        long signedInventorySteps = rows.stream().mapToLong(MarketMakerPnlAttributionRecord::signedInventorySteps).sum();
-        return new MarketMakerPnlAttributionResponse(
-                until,
-                since,
-                boundedWindowHours,
-                new MarketMakerPnlAttributionTotals(
-                        rows.size(),
-                        totalTrades,
-                        makerTrades,
-                        takerTrades,
-                        netFeeUnits,
-                        realizedPnlUnits,
-                        signedInventorySteps),
-                rows);
     }
 
     private MarketMakerStrategyMetric strategyMetric(MarketMakerProperties.Strategy strategy,
@@ -532,43 +495,6 @@ public class MarketMakerService {
                 anomalies.stream().filter(item -> "WARN".equals(item.severity())).count());
     }
 
-    private List<MarketMakerPnlScope> pnlScopes(ProductLine productLine,
-                                                String strategyId,
-                                                String symbol,
-                                                Long accountId,
-                                                int limit) {
-        String requestedStrategyId = normalizeOptional(strategyId);
-        String requestedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
-        List<MarketMakerPnlScope> scopes = new ArrayList<>();
-        for (MarketMakerProperties.Strategy strategy : strategiesSnapshot(productLine)) {
-            if (requestedStrategyId != null && !strategy.getStrategyId().equalsIgnoreCase(requestedStrategyId)) {
-                continue;
-            }
-            for (String configuredSymbol : strategy.getSymbols()) {
-                String normalizedSymbol = normalizeSymbol(configuredSymbol);
-                if (requestedSymbol != null && !normalizedSymbol.equals(requestedSymbol)) {
-                    continue;
-                }
-                for (long configuredAccountId : strategy.getAccountIds()) {
-                    if (accountId != null && configuredAccountId != accountId) {
-                        continue;
-                    }
-                    scopes.add(new MarketMakerPnlScope(
-                            strategy.getStrategyId(),
-                            strategy.getProductLine(),
-                            normalizedSymbol,
-                            configuredAccountId,
-                            strategy.getMarginMode().name(),
-                            accountPrefix(strategy, normalizedSymbol, configuredAccountId)));
-                    if (scopes.size() >= limit) {
-                        return scopes;
-                    }
-                }
-            }
-        }
-        return scopes;
-    }
-
     private long effectiveMaxInventorySteps(MarketMakerProperties.Strategy strategy) {
         return strategy.getMaxInventorySteps() == null || strategy.getMaxInventorySteps() <= 0
                 ? properties.getRisk().getMaxInventorySteps()
@@ -619,7 +545,7 @@ public class MarketMakerService {
                                 String traceId,
                                 Instant createdAt) {
         try {
-            adminRepository.recordRunEvent(new MarketMakerRunEventWrite(
+            runEventRepository.record(new MarketMakerRunEventWrite(
                     strategy.getStrategyId(),
                     strategy.getProductLine(),
                     symbol,
@@ -650,7 +576,7 @@ public class MarketMakerService {
             return;
         }
         try {
-            adminRepository.recordReferenceSample(new MarketMakerReferenceSampleWrite(
+            referenceSampleRepository.record(new MarketMakerReferenceSampleWrite(
                     strategy.getStrategyId(),
                     strategy.getProductLine(),
                     symbol,
@@ -1408,22 +1334,6 @@ public class MarketMakerService {
         }
     }
 
-    public record MarketMakerPnlAttributionResponse(Instant generatedAt,
-                                                    Instant since,
-                                                    int windowHours,
-                                                    MarketMakerPnlAttributionTotals totals,
-                                                    List<MarketMakerPnlAttributionRecord> rows) {
-    }
-
-    public record MarketMakerPnlAttributionTotals(long rowCount,
-                                                  long totalTrades,
-                                                  long makerTrades,
-                                                  long takerTrades,
-                                                  long netFeeUnits,
-                                                  long currentRealizedPnlUnits,
-                                                  long signedInventorySteps) {
-    }
-
     public record MarketMakerStrategyConfigResponse(MarketMakerStrategyConfig configured,
                                                     MarketMakerStrategyConfig effective,
                                                     StrategyConfigOverride override) {
@@ -1535,42 +1445,38 @@ public class MarketMakerService {
     private record TradeTarget(long priceTicks, long availableQuantitySteps) {
     }
 
-    private static final class NoopMarketMakerAdminRepository implements MarketMakerAdminRepository {
+    private static final class NoopMarketMakerRunEventRepository implements MarketMakerRunEventRepository {
         @Override
-        public void recordRunEvent(MarketMakerRunEventWrite event) {
+        public void record(MarketMakerRunEventWrite event) {
         }
 
         @Override
-        public void recordReferenceSample(MarketMakerReferenceSampleWrite sample) {
-        }
-
-        @Override
-        public List<MarketMakerRunEventRecord> runEvents(ProductLine productLine,
-                                                         String strategyId,
-                                                         String symbol,
-                                                         Long accountId,
-                                                         String eventType,
-                                                         int limit) {
+        public List<MarketMakerRunEventRecord> find(ProductLine productLine,
+                                                    String strategyId,
+                                                    String symbol,
+                                                    Long accountId,
+                                                    String eventType,
+                                                    int limit) {
             return List.of();
         }
 
         @Override
-        public CursorPage<MarketMakerRunEventRecord> runEventsPage(ProductLine productLine,
-                                                                   String strategyId,
-                                                                   String symbol,
-                                                                   Long accountId,
-                                                                   String eventType,
-                                                                   int limit,
-                                                                   String cursor,
-                                                                   String sort) {
+        public CursorPage<MarketMakerRunEventRecord> findPage(ProductLine productLine,
+                                                              String strategyId,
+                                                              String symbol,
+                                                              Long accountId,
+                                                              String eventType,
+                                                              int limit,
+                                                              String cursor,
+                                                              String sort) {
             return new CursorPage<>(List.of(), null, false, sort, Math.max(1, limit));
         }
+    }
 
+    private static final class NoopMarketMakerReferenceSampleRepository
+            implements MarketMakerReferenceSampleRepository {
         @Override
-        public List<MarketMakerPnlAttributionRecord> pnlAttribution(List<MarketMakerPnlScope> scopes,
-                                                                    Instant since,
-                                                                    Instant until) {
-            return List.of();
+        public void record(MarketMakerReferenceSampleWrite sample) {
         }
     }
 }

@@ -5,7 +5,6 @@ import com.surprising.marketmaker.api.model.MarketMakerStrategyQueryResponse;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyResponse;
 import com.surprising.marketmaker.provider.service.MarketMakerService;
 import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerAdminMetricsResponse;
-import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerPnlAttributionResponse;
 import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerRunLogQueryResponse;
 import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerStrategyConfigResponse;
 import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerStrategyConfigUpdateRequest;
@@ -81,21 +80,6 @@ public class AdminMarketMakerController {
         requireAdmin(adminUserId);
         return marketMakerService.runLogs(productLine(productLineValue, productLineHeader),
                 strategyId, symbol, accountId, eventType, limit, cursor, sort);
-    }
-
-    @GetMapping("/pnl-attribution")
-    public MarketMakerPnlAttributionResponse pnlAttribution(
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
-            @RequestParam(value = "productLine", required = false) String productLineValue,
-            @RequestParam(value = "strategyId", required = false) String strategyId,
-            @RequestParam(value = "symbol", required = false) String symbol,
-            @RequestParam(value = "accountId", required = false) Long accountId,
-            @RequestParam(value = "windowHours", defaultValue = "24") int windowHours,
-            @RequestParam(value = "limit", defaultValue = "100") int limit) {
-        requireAdmin(adminUserId);
-        return marketMakerService.pnlAttribution(productLine(productLineValue, productLineHeader),
-                strategyId, symbol, accountId, windowHours, limit);
     }
 
     @GetMapping("/strategies/{strategyId}/config")

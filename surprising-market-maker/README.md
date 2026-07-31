@@ -43,7 +43,6 @@ Admin operations use a separate admin path and require the gateway-injected admi
 ```bash
 curl 'http://localhost:9096/api/v1/admin/market-maker/strategies' -H 'X-Admin-User-Id: 1001'
 curl 'http://localhost:9096/api/v1/admin/market-maker/metrics?limit=200' -H 'X-Admin-User-Id: 1001'
-curl 'http://localhost:9096/api/v1/admin/market-maker/pnl-attribution?windowHours=24&limit=200' -H 'X-Admin-User-Id: 1001'
 curl 'http://localhost:9096/api/v1/admin/market-maker/strategy-logs?limit=200&sort=createdAt.desc' -H 'X-Admin-User-Id: 1001'
 curl 'http://localhost:9096/api/v1/admin/market-maker/strategies/btc-usdt-mm-a/config' -H 'X-Admin-User-Id: 1001'
 curl -X POST 'http://localhost:9096/api/v1/admin/market-maker/strategies/btc-usdt-mm-a/config' \
@@ -57,15 +56,19 @@ admin-web calls through the unified admin gateway route. Gateway maps the `marke
 ```bash
 curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/strategies' -H 'Authorization: Bearer <admin-token>'
 curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/metrics?limit=200' -H 'Authorization: Bearer <admin-token>'
-curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/pnl-attribution?windowHours=24&limit=200' -H 'Authorization: Bearer <admin-token>'
 curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/strategy-logs?limit=200&sort=createdAt.desc' -H 'Authorization: Bearer <admin-token>'
 ```
 
 `/metrics` aggregates inventory usage, owned live quotes, desired quote coverage, missing quotes, stale quotes, off-target quotes, spread, trace id, and anomalies by strategy/account/symbol. Anomaly types include `NO_LIVE_QUOTES`, `MISSING_DESIRED_QUOTES`, `STALE_QUOTES`, `OFF_TARGET_QUOTES`, `INVENTORY_LIMIT_REACHED`, `INSTRUMENT_NOT_TRADING`, and `METRIC_COLLECTION_FAILED`.
 
-`/pnl-attribution` returns read-only attribution rows for configured strategy/account/symbol scopes only. It uses the market-maker `clientOrderId` prefix to collect owned orders, joins `trading_match_trades` for maker/taker fills, joins `account_ledger_entries` with `TRADE_FEE` references for net fees, and includes the current `account_positions` realized PnL and signed inventory snapshot.
+Market-maker PnL attribution has been removed from the primary trading database. Correlating orders, trades, fee
+ledger entries, and positions is a finance-operations query; a future finance-operations module should consume domain
+events into an independent database projection for attribution, reconciliation, and operational reporting.
 
 `/strategy-logs` reads `market_maker_strategy_run_events`, which records cycle success/failure, quote reconciliation, IOC trade submit/reject outcomes, skipped cycles, error messages, counters, node id, and trace id. It supports cursor paging with `limit`, `cursor`, and `sort`; supported sort values are `createdAt.desc` and `createdAt.asc`. Responses keep `events/count` and add `nextCursor`, `hasMore`, `sort`, and `limit`. Event writes are best-effort and do not block the quoting cycle.
+
+Strategy run events and reference-market samples use separate single-table repositories, with `MarketMakerService`
+performing business aggregation.
 
 `/strategies/{strategyId}/config` reads and writes `market_maker_strategy_overrides`. Only enabled, base quote quantity, margin mode, spread, level spacing, inventory cap/skew, and quote levels are hot-editable; accounts and symbols remain deployment config. `null` request fields fall back to `application.yml`, and a request with all editable fields set to `null` clears the override.
 

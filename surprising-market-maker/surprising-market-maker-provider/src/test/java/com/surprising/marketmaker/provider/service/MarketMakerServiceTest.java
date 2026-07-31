@@ -30,13 +30,12 @@ import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookLevel;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
 import com.surprising.marketmaker.provider.model.StrategyConfigOverride;
-import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository;
-import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.CursorPage;
-import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerPnlAttributionRecord;
-import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerPnlScope;
-import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerReferenceSampleWrite;
-import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventRecord;
-import com.surprising.marketmaker.provider.repository.MarketMakerAdminRepository.MarketMakerRunEventWrite;
+import com.surprising.marketmaker.provider.repository.MarketMakerReferenceSampleRepository;
+import com.surprising.marketmaker.provider.repository.MarketMakerReferenceSampleRepository.MarketMakerReferenceSampleWrite;
+import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository;
+import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.CursorPage;
+import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.MarketMakerRunEventRecord;
+import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.MarketMakerRunEventWrite;
 import com.surprising.marketmaker.provider.repository.MarketMakerStrategyOverrideStore;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PriceStatus;
@@ -136,16 +135,17 @@ class MarketMakerServiceTest {
     @Test
     void runOnceRecordsReferenceMarketSampleWhenSnapshotIsAvailable() {
         Fixtures fixtures = new Fixtures(List.of());
-        FakeAdminRepository adminRepository = new FakeAdminRepository();
+        FakeReferenceSampleRepository sampleRepository = new FakeReferenceSampleRepository();
         ReferenceOrderBookSnapshot snapshot = new ReferenceOrderBookSnapshot("BINANCE_USDM", "WEBSOCKET", "BTC-USDT",
                 List.of(new ReferenceOrderBookLevel(49_990L, 3L)),
                 List.of(new ReferenceOrderBookLevel(50_020L, 7L)),
                 Instant.parse("2026-01-01T00:00:01Z"));
-        MarketMakerService service = fixtures.service(adminRepository, (symbol, productLine, instrument) -> snapshot);
+        MarketMakerService service = fixtures.service(
+                fixtures.runEventRepository, sampleRepository, (symbol, productLine, instrument) -> snapshot);
 
         service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
 
-        assertThat(adminRepository.referenceSamples).singleElement()
+        assertThat(sampleRepository.referenceSamples).singleElement()
                 .satisfies(sample -> {
                     assertThat(sample.strategyId()).isEqualTo("btc-usdt-mm-a");
                     assertThat(sample.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
@@ -247,15 +247,15 @@ class MarketMakerServiceTest {
     @Test
     void runOnceRecordsStrategyRunEvents() {
         Fixtures fixtures = new Fixtures(List.of());
-        FakeAdminRepository adminRepository = new FakeAdminRepository();
-        MarketMakerService service = fixtures.service(adminRepository);
+        FakeRunEventRepository runEventRepository = new FakeRunEventRepository();
+        MarketMakerService service = fixtures.service(runEventRepository);
 
         service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
 
-        assertThat(adminRepository.events)
+        assertThat(runEventRepository.events)
                 .extracting(MarketMakerRunEventWrite::eventType)
                 .contains("QUOTE_RECONCILED", "CYCLE_SUCCESS");
-        assertThat(adminRepository.events)
+        assertThat(runEventRepository.events)
                 .filteredOn(event -> "QUOTE_RECONCILED".equals(event.eventType()))
                 .singleElement()
                 .satisfies(event -> {
@@ -271,10 +271,10 @@ class MarketMakerServiceTest {
     @Test
     void runLogsWithCursorDelegatesNormalizedFiltersToRepository() {
         Fixtures fixtures = new Fixtures(List.of());
-        FakeAdminRepository adminRepository = new FakeAdminRepository();
-        MarketMakerService service = fixtures.service(adminRepository);
+        FakeRunEventRepository runEventRepository = new FakeRunEventRepository();
+        MarketMakerService service = fixtures.service(runEventRepository);
         Instant createdAt = Instant.parse("2026-07-03T00:00:00Z");
-        adminRepository.runEventPage = new CursorPage<>(List.of(new MarketMakerRunEventRecord(
+        runEventRepository.runEventPage = new CursorPage<>(List.of(new MarketMakerRunEventRecord(
                 77L, "btc-usdt-mm-a", ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 900001L, "mm-test", 9L,
                 "QUOTE_RECONCILED", 2L, 1L, 0L, null, null, "trace-1", createdAt)),
                 "next", true, "createdAt.desc", 25);
@@ -288,31 +288,11 @@ class MarketMakerServiceTest {
         assertThat(response.hasMore()).isTrue();
         assertThat(response.sort()).isEqualTo("createdAt.desc");
         assertThat(response.limit()).isEqualTo(25);
-        assertThat(adminRepository.lastRunEventsPageProductLine).isEqualTo(ProductLine.LINEAR_PERPETUAL);
-        assertThat(adminRepository.lastRunEventsPageStrategyId).isEqualTo("BTC-USDT-MM-A");
-        assertThat(adminRepository.lastRunEventsPageSymbol).isEqualTo("BTC-USDT");
-        assertThat(adminRepository.lastRunEventsPageCursor).isEqualTo("cursor");
-        assertThat(adminRepository.lastRunEventsPageSort).isEqualTo("createdAt.desc");
-    }
-
-    @Test
-    void pnlAttributionUsesConfiguredStrategyScopesOnly() {
-        Fixtures fixtures = new Fixtures(List.of());
-        FakeAdminRepository adminRepository = new FakeAdminRepository();
-        MarketMakerService service = fixtures.service(adminRepository);
-
-        var response = service.pnlAttribution(ProductLine.LINEAR_PERPETUAL,
-                "btc-usdt-mm-a", "BTC-USDT", 900001L, 24, 10);
-
-        assertThat(response.totals().rowCount()).isEqualTo(1L);
-        assertThat(adminRepository.scopes).singleElement()
-                .satisfies(scope -> {
-                    assertThat(scope.strategyId()).isEqualTo("btc-usdt-mm-a");
-                    assertThat(scope.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
-                    assertThat(scope.symbol()).isEqualTo("BTC-USDT");
-                    assertThat(scope.accountId()).isEqualTo(900001L);
-                    assertThat(scope.clientOrderPrefix()).startsWith("mm-").endsWith("-900001-");
-                });
+        assertThat(runEventRepository.lastRunEventsPageProductLine).isEqualTo(ProductLine.LINEAR_PERPETUAL);
+        assertThat(runEventRepository.lastRunEventsPageStrategyId).isEqualTo("BTC-USDT-MM-A");
+        assertThat(runEventRepository.lastRunEventsPageSymbol).isEqualTo("BTC-USDT");
+        assertThat(runEventRepository.lastRunEventsPageCursor).isEqualTo("cursor");
+        assertThat(runEventRepository.lastRunEventsPageSort).isEqualTo("createdAt.desc");
     }
 
     private static String accountPrefix(ProductLine productLine, String strategyId, String symbol, long accountId) {
@@ -336,26 +316,30 @@ class MarketMakerServiceTest {
 
     private static final class Fixtures {
         private final FakeOrderRpc orderRpc;
+        private final FakeRunEventRepository runEventRepository = new FakeRunEventRepository();
+        private final FakeReferenceSampleRepository referenceSampleRepository =
+                new FakeReferenceSampleRepository();
 
         private Fixtures(List<OrderResponse> openOrders) {
             this.orderRpc = new FakeOrderRpc(openOrders);
         }
 
         private MarketMakerService service() {
-            return service(new FakeAdminRepository());
+            return service(runEventRepository, referenceSampleRepository, ReferenceMarketProvider.disabled());
         }
 
-        private MarketMakerService service(MarketMakerAdminRepository adminRepository) {
-            return service(adminRepository, ReferenceMarketProvider.disabled());
+        private MarketMakerService service(MarketMakerRunEventRepository runEventRepository) {
+            return service(runEventRepository, referenceSampleRepository, ReferenceMarketProvider.disabled());
         }
 
-        private MarketMakerService service(MarketMakerAdminRepository adminRepository,
+        private MarketMakerService service(MarketMakerRunEventRepository runEventRepository,
+                                           MarketMakerReferenceSampleRepository referenceSampleRepository,
                                            ReferenceMarketProvider referenceMarketProvider) {
             MarketMakerProperties properties = properties();
             return new MarketMakerService(properties, new FakeInstrumentRpc(), markPriceCache(),
                     new FakeMarketDataRpc(), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
                     referenceMarketProvider, (productLine, strategyId, symbol, ownerId, leaseDuration) -> true,
-                    new FakeOverrideStore(), adminRepository);
+                    new FakeOverrideStore(), runEventRepository, referenceSampleRepository);
         }
 
         private LatestMarkPriceCache markPriceCache() {
@@ -434,10 +418,8 @@ class MarketMakerServiceTest {
         }
     }
 
-    private static final class FakeAdminRepository implements MarketMakerAdminRepository {
+    private static final class FakeRunEventRepository implements MarketMakerRunEventRepository {
         private final List<MarketMakerRunEventWrite> events = new ArrayList<>();
-        private final List<MarketMakerReferenceSampleWrite> referenceSamples = new ArrayList<>();
-        private List<MarketMakerPnlScope> scopes = List.of();
         private CursorPage<MarketMakerRunEventRecord> runEventPage =
                 new CursorPage<>(List.of(), null, false, "createdAt.desc", 100);
         private String lastRunEventsPageStrategyId;
@@ -450,34 +432,29 @@ class MarketMakerServiceTest {
         private String lastRunEventsPageSort;
 
         @Override
-        public void recordRunEvent(MarketMakerRunEventWrite event) {
+        public void record(MarketMakerRunEventWrite event) {
             events.add(event);
         }
 
         @Override
-        public void recordReferenceSample(MarketMakerReferenceSampleWrite sample) {
-            referenceSamples.add(sample);
-        }
-
-        @Override
-        public List<MarketMakerRunEventRecord> runEvents(ProductLine productLine,
-                                                         String strategyId,
-                                                         String symbol,
-                                                         Long accountId,
-                                                         String eventType,
-                                                         int limit) {
+        public List<MarketMakerRunEventRecord> find(ProductLine productLine,
+                                                    String strategyId,
+                                                    String symbol,
+                                                    Long accountId,
+                                                    String eventType,
+                                                    int limit) {
             return List.of();
         }
 
         @Override
-        public CursorPage<MarketMakerRunEventRecord> runEventsPage(ProductLine productLine,
-                                                                   String strategyId,
-                                                                   String symbol,
-                                                                   Long accountId,
-                                                                   String eventType,
-                                                                   int limit,
-                                                                   String cursor,
-                                                                   String sort) {
+        public CursorPage<MarketMakerRunEventRecord> findPage(ProductLine productLine,
+                                                              String strategyId,
+                                                              String symbol,
+                                                              Long accountId,
+                                                              String eventType,
+                                                              int limit,
+                                                              String cursor,
+                                                              String sort) {
             lastRunEventsPageProductLine = productLine;
             lastRunEventsPageStrategyId = strategyId;
             lastRunEventsPageSymbol = symbol;
@@ -488,21 +465,14 @@ class MarketMakerServiceTest {
             lastRunEventsPageSort = sort;
             return runEventPage;
         }
+    }
+
+    private static final class FakeReferenceSampleRepository implements MarketMakerReferenceSampleRepository {
+        private final List<MarketMakerReferenceSampleWrite> referenceSamples = new ArrayList<>();
 
         @Override
-        public List<MarketMakerPnlAttributionRecord> pnlAttribution(List<MarketMakerPnlScope> scopes,
-                                                                    Instant since,
-                                                                    Instant until) {
-            this.scopes = List.copyOf(scopes);
-            return scopes.stream()
-                    .map(scope -> new MarketMakerPnlAttributionRecord(
-                            scope.strategyId(), scope.productLine(), scope.symbol(), scope.accountId(), scope.marginMode(),
-                            2L, 0L, 1L, 1L, 2L, 10L, 10L, 20L,
-                            "1000000", 12L, 2L, 50L, 0L,
-                            Instant.parse("2026-01-01T00:00:00Z"),
-                            Instant.parse("2026-01-01T00:00:01Z"),
-                            Instant.parse("2026-01-01T00:00:02Z")))
-                    .toList();
+        public void record(MarketMakerReferenceSampleWrite sample) {
+            referenceSamples.add(sample);
         }
     }
 
