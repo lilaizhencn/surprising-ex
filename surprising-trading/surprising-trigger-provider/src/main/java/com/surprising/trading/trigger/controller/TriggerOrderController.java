@@ -21,10 +21,10 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * REST facade for user-managed TP/SL trigger orders.
+ * 用户管理止盈止损触发单的 REST 门面。
  *
- * <p>Frontend traffic should normally reach these routes through the public gateway service name
- * {@code trading-trigger}; internal services can call the RPC API directly.</p>
+ * <p>前端流量通常通过公共网关服务名 {@code trading-trigger} 访问这些路由；
+ * 内部服务可以直接调用 RPC API。</p>
  */
 @RestController
 public class TriggerOrderController {

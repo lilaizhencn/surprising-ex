@@ -12,7 +12,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-/** Builds and keeps the Redis TP/SL index ready without making the lock part of business correctness. */
+/** 构建并维护 Redis 止盈止损索引，分布式锁不参与业务正确性判断。 */
 @Component
 public class TriggerOrderIndexCoordinator {
 

@@ -5,14 +5,12 @@ import com.surprising.trading.api.model.AdminCursorPage;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
-import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.TriggerCondition;
 import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
-import com.surprising.trading.trigger.model.TriggerPosition;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -24,10 +22,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /**
- * PostgreSQL state store for trigger orders.
+ * 触发单仓储，只负责 {@code trading_trigger_orders} 表。
  *
- * <p>Due triggers are claimed with row locks and SKIP LOCKED so multiple provider nodes can process
- * the same mark-price stream without executing one trigger order more than once.</p>
+ * <p>到期触发单通过行锁和 {@code SKIP LOCKED} 抢占，使多个节点能够并发处理同一标记价格流，
+ * 同时避免一张触发单被重复执行。</p>
  */
 @Repository
 public class TriggerOrderRepository {
@@ -36,15 +34,6 @@ public class TriggerOrderRepository {
 
     public TriggerOrderRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
-    }
-
-    public long nextSequence(String sequenceName) {
-        Number value = jdbcTemplate.queryForObject("SELECT nextval(CAST(? AS regclass))", Number.class,
-                tradingSequenceIdentifier(sequenceName));
-        if (value == null || value.longValue() <= 0) {
-            throw new IllegalStateException("failed to allocate trigger sequence " + sequenceName);
-        }
-        return value.longValue();
     }
 
     public boolean insert(TriggerOrderRecord order) {
@@ -75,145 +64,27 @@ public class TriggerOrderRepository {
                 Timestamp.from(order.updatedAt())) == 1;
     }
 
-    public void lockUserSymbolMarginScope(long userId, String symbol) {
-        lockUserSymbolMarginScope(ProductLine.LINEAR_PERPETUAL, userId, symbol);
-    }
-
-    public void lockUserSymbolMarginScope(ProductLine productLine, long userId, String symbol) {
-        jdbcTemplate.query("""
-                SELECT pg_advisory_xact_lock(hashtext('trading-margin-mode'), hashtext(?))
-                """, rs -> null, productLine(productLine).name() + ":" + userId + ":" + symbol);
-    }
-
-    public void lockUserPositionMode(long userId) {
-        lockUserPositionMode(ProductLine.LINEAR_PERPETUAL, userId);
-    }
-
-    public void lockUserPositionMode(ProductLine productLine, long userId) {
-        jdbcTemplate.query("""
-                SELECT pg_advisory_xact_lock(hashtext('position-mode'), hashtext(?))
-                """, rs -> null, productLine(productLine).name() + ":" + userId);
-    }
-
-    public PositionMode positionMode(long userId) {
-        return positionMode(ProductLine.LINEAR_PERPETUAL, userId);
-    }
-
-    public PositionMode positionMode(ProductLine productLine, long userId) {
-        String mode = jdbcTemplate.query("""
-                SELECT position_mode
-                  FROM account_position_modes
-                 WHERE product_line = ?
-                   AND user_id = ?
-                """, (rs, rowNum) -> rs.getString("position_mode"), productLine(productLine).name(), userId)
-                .stream().findFirst().orElse(null);
-        return PositionMode.fromNullableDbValue(mode);
-    }
-
     private ProductLine productLine(ProductLine productLine) {
         return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
     }
 
-    public boolean hasActiveMarginModeConflict(long userId, String symbol, MarginMode marginMode) {
-        return hasActiveMarginModeConflict(ProductLine.LINEAR_PERPETUAL, userId, symbol, marginMode);
-    }
-
-    public boolean hasActiveMarginModeConflict(ProductLine productLine, long userId, String symbol, MarginMode marginMode) {
+    public boolean hasActiveMarginModeConflict(ProductLine productLine,
+                                               long userId,
+                                               String symbol,
+                                               MarginMode marginMode) {
         String normalizedMode = MarginMode.defaultIfNull(marginMode).name();
         Boolean conflict = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
-                      FROM account_positions p
-                     WHERE p.product_line = ?
-                       AND p.user_id = ?
-                       AND p.symbol = ?
-                       AND p.margin_mode <> ?
-                       AND p.signed_quantity_steps <> 0
-                    UNION ALL
-                    SELECT 1
-                      FROM trading_orders o
-                     WHERE o.product_line = ?
-                       AND o.user_id = ?
-                       AND o.symbol = ?
-                       AND o.margin_mode <> ?
-                       AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
-                       AND o.remaining_quantity_steps > 0
-                    UNION ALL
-                    SELECT 1
-                      FROM trading_trigger_orders t
-                     WHERE t.product_line = ?
-                       AND t.user_id = ?
-                       AND t.symbol = ?
-                       AND t.margin_mode <> ?
-                       AND t.status IN ('PENDING', 'TRIGGERING')
+                      FROM trading_trigger_orders
+                     WHERE product_line = ?
+                       AND user_id = ?
+                       AND symbol = ?
+                       AND margin_mode <> ?
+                       AND status IN ('PENDING', 'TRIGGERING')
                 )
-                """, Boolean.class, productLine(productLine).name(), userId, symbol, normalizedMode,
-                productLine(productLine).name(), userId, symbol, normalizedMode,
-                productLine(productLine).name(), userId, symbol, normalizedMode);
+                """, Boolean.class, productLine(productLine).name(), userId, symbol, normalizedMode);
         return Boolean.TRUE.equals(conflict);
-    }
-
-    public Optional<TriggerPosition> lockedPosition(long userId,
-                                                    String symbol,
-                                                    MarginMode marginMode,
-                                                    PositionSide positionSide) {
-        return lockedPosition(ProductLine.LINEAR_PERPETUAL, userId, symbol, marginMode, positionSide);
-    }
-
-    public Optional<TriggerPosition> lockedPosition(ProductLine productLine,
-                                                    long userId,
-                                                    String symbol,
-                                                    MarginMode marginMode,
-                                                    PositionSide positionSide) {
-        return jdbcTemplate.query("""
-                SELECT signed_quantity_steps, instrument_version
-                  FROM account_positions
-                 WHERE product_line = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                   AND margin_mode = ?
-                   AND position_side = ?
-                 FOR UPDATE
-                """, (rs, rowNum) -> new TriggerPosition(
-                rs.getLong("signed_quantity_steps"),
-                rs.getLong("instrument_version")), productLine(productLine).name(), userId, symbol,
-                MarginMode.defaultIfNull(marginMode).name(),
-                PositionSide.defaultIfNull(positionSide).name()).stream().findFirst();
-    }
-
-    public long openReduceOnlySteps(long userId,
-                                    String symbol,
-                                    MarginMode marginMode,
-                                    PositionSide positionSide,
-                                    long instrumentVersion,
-                                    OrderSide closeSide) {
-        return openReduceOnlySteps(ProductLine.LINEAR_PERPETUAL, userId, symbol, marginMode, positionSide,
-                instrumentVersion, closeSide);
-    }
-
-    public long openReduceOnlySteps(ProductLine productLine,
-                                    long userId,
-                                    String symbol,
-                                    MarginMode marginMode,
-                                    PositionSide positionSide,
-                                    long instrumentVersion,
-                                    OrderSide closeSide) {
-        Long value = jdbcTemplate.queryForObject("""
-                SELECT COALESCE(SUM(remaining_quantity_steps), 0)
-                  FROM trading_orders
-                 WHERE product_line = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                   AND margin_mode = ?
-                   AND position_side = ?
-                   AND instrument_version = ?
-                   AND side = ?
-                   AND reduce_only = TRUE
-                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
-                """, Long.class, productLine(productLine).name(), userId, symbol,
-                MarginMode.defaultIfNull(marginMode).name(),
-                PositionSide.defaultIfNull(positionSide).name(), instrumentVersion, closeSide.name());
-        return value == null ? 0L : value;
     }
 
     public long pendingTriggerCloseSteps(long userId,
@@ -599,7 +470,7 @@ public class TriggerOrderRepository {
         args.add(Timestamp.from(now));
         args.add(Timestamp.from(now));
         return jdbcTemplate.query("""
-                -- Claim first, then update, so concurrent trigger nodes skip rows already owned by peers.
+                -- 先抢占再更新，使并发触发节点跳过已经被其他节点持有的记录。
                 WITH due AS (
                     SELECT trigger_order_id,
                            CASE
@@ -1191,10 +1062,4 @@ public class TriggerOrderRepository {
         return value.substring(0, limit);
     }
 
-    private String tradingSequenceIdentifier(String sequenceName) {
-        if (sequenceName == null || !sequenceName.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")) {
-            throw new IllegalArgumentException("invalid trading sequence name: " + sequenceName);
-        }
-        return "public.trading_" + sequenceName.toLowerCase().replace('-', '_') + "_seq";
-    }
 }

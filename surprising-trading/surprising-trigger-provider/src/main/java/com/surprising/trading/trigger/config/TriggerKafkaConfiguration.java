@@ -19,10 +19,10 @@ import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
 
 /**
- * Replay-safe Kafka consumer settings for trigger detection.
+ * 支持安全重放的触发检测 Kafka 消费配置。
  *
- * <p>Offsets are acknowledged record by record after the database state transition has completed.
- * Replayed mark events are safe because trigger rows are claimed and completed idempotently.</p>
+ * <p>数据库状态转换完成后逐条确认位点。触发单采用幂等抢占和完成逻辑，
+ * 因此重放标记价格事件不会造成重复触发。</p>
  */
 @Configuration
 public class TriggerKafkaConfiguration {

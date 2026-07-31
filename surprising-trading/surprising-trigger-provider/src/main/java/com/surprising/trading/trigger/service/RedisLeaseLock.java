@@ -7,7 +7,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
-/** Token-owned Redis lease used only to avoid duplicate index rebuild work across provider nodes. */
+/** 带所有权令牌的 Redis 租约，仅用于避免多个服务节点重复重建索引。 */
 @Component
 public class RedisLeaseLock {
 

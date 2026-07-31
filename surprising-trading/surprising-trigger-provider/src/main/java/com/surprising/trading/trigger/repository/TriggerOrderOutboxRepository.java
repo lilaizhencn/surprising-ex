@@ -15,32 +15,32 @@ import org.springframework.stereotype.Repository;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
-/** Transactional outbox for user-visible trigger-order status snapshots. */
+/** 触发单事务发件箱仓储，只负责 {@code trading_outbox_events} 表。 */
 @Repository
 public class TriggerOrderOutboxRepository {
 
     private static final String AGGREGATE_TYPE = "TRIGGER_ORDER";
 
     private final JdbcTemplate jdbcTemplate;
-    private final TriggerOrderRepository triggerOrderRepository;
+    private final TriggerSequenceRepository sequenceRepository;
     private final TriggerProperties properties;
     private final ObjectMapper objectMapper;
 
     public TriggerOrderOutboxRepository(JdbcTemplate jdbcTemplate,
-                                        TriggerOrderRepository triggerOrderRepository,
+                                        TriggerSequenceRepository sequenceRepository,
                                         TriggerProperties properties,
                                         ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
-        this.triggerOrderRepository = triggerOrderRepository;
+        this.sequenceRepository = sequenceRepository;
         this.properties = properties;
         this.objectMapper = objectMapper;
     }
 
     public TriggerOrderUpdatedEvent enqueue(TriggerOrderRecord order, TriggerOrderResponse response) {
-        long eventId = triggerOrderRepository.nextSequence("event");
+        long eventId = sequenceRepository.nextSequence("event");
         TriggerOrderUpdatedEvent event = new TriggerOrderUpdatedEvent(
                 eventId, order.productLine(), response, order.updatedAt(), order.traceId());
-        long outboxId = triggerOrderRepository.nextSequence("outbox");
+        long outboxId = sequenceRepository.nextSequence("outbox");
         int rows = jdbcTemplate.update("""
                 INSERT INTO trading_outbox_events (
                     id, aggregate_type, aggregate_id, topic, event_key, event_type,

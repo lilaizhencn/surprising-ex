@@ -24,7 +24,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-/** Publishes committed trigger-order status snapshots with at-least-once delivery. */
+/** 以至少一次语义发布已提交的触发单状态快照。 */
 @Service
 public class TriggerOrderOutboxPublisher {
 

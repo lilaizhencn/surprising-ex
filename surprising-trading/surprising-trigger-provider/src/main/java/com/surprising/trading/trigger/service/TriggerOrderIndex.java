@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Secondary lookup index for static TP/SL orders. PostgreSQL remains authoritative for every state change.
+ * 静态止盈止损单的辅助检索索引。所有状态变更仍以 PostgreSQL 为准。
  */
 public interface TriggerOrderIndex {
 

@@ -286,35 +286,28 @@ class TriggerOrderRepositoryTest {
     @SuppressWarnings({"rawtypes", "unchecked"})
     void lockUserSymbolMarginScopeUsesSharedAdvisoryLockKey() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
+        TriggerCoordinationRepository repository = new TriggerCoordinationRepository(jdbcTemplate);
 
-        repository.lockUserSymbolMarginScope(1001L, "BTC-USDT");
+        repository.lockUserSymbolMarginScope(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT");
 
         verify(jdbcTemplate).query(contains("pg_advisory_xact_lock"),
                 any(ResultSetExtractor.class), eq("LINEAR_PERPETUAL:1001:BTC-USDT"));
     }
 
     @Test
-    void activeMarginModeConflictChecksPositionsOrdersAndTriggers() {
+    void activeMarginModeConflictOnlyChecksTriggerOrders() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderRepository repository = new TriggerOrderRepository(jdbcTemplate);
-        when(jdbcTemplate.queryForObject(contains("account_positions"), eq(Boolean.class),
-                eq("LINEAR_PERPETUAL"),
-                eq(1001L), eq("BTC-USDT"), eq("CROSS"),
-                eq("LINEAR_PERPETUAL"),
-                eq(1001L), eq("BTC-USDT"), eq("CROSS"),
+        when(jdbcTemplate.queryForObject(contains("trading_trigger_orders"), eq(Boolean.class),
                 eq("LINEAR_PERPETUAL"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS")))
                 .thenReturn(true);
 
-        boolean conflict = repository.hasActiveMarginModeConflict(1001L, "BTC-USDT", MarginMode.CROSS);
+        boolean conflict = repository.hasActiveMarginModeConflict(
+                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS);
 
         assertThat(conflict).isTrue();
         verify(jdbcTemplate).queryForObject(contains("trading_trigger_orders"), eq(Boolean.class),
-                eq("LINEAR_PERPETUAL"),
-                eq(1001L), eq("BTC-USDT"), eq("CROSS"),
-                eq("LINEAR_PERPETUAL"),
-                eq(1001L), eq("BTC-USDT"), eq("CROSS"),
                 eq("LINEAR_PERPETUAL"),
                 eq(1001L), eq("BTC-USDT"), eq("CROSS"));
     }

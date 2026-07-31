@@ -203,6 +203,13 @@ Trigger-order user endpoints are also available through the gateway:
 - `POST /api/v1/trading/trigger-orders/batch-cancel`: cancel up to 50 trigger orders.
 - `POST /api/v1/trading/trigger-orders/cancel-open`: cancel the user's `PENDING` trigger orders, optionally filtered by `symbol`, up to 1000 rows per call. Rows already in `TRIGGERING` are not canceled here to avoid racing trigger execution.
 
+Trigger persistence is isolated by table. `TriggerOrderRepository`, `TriggerPositionRepository`,
+`TriggerPositionModeRepository`, `TriggerOpenOrderRepository`, and `TriggerOrderOutboxRepository`
+access only the trigger-order, position, position-mode, regular-order, and outbox tables respectively.
+`TriggerSequenceRepository` and `TriggerCoordinationRepository` use only PostgreSQL native sequences
+and advisory locks. `TriggerOrderPersistenceService` aggregates these repositories inside the business
+transaction, so placement validation no longer depends on a multi-table repository query.
+
 ## Trace Id
 
 - Public clients may send `X-Trace-Id`; otherwise gateway/order entry generates one.

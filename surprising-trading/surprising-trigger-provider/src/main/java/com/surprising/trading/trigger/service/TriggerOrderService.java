@@ -33,7 +33,6 @@ import com.surprising.trading.trigger.config.TriggerTraceContext;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import com.surprising.trading.trigger.model.TriggerPosition;
 import com.surprising.trading.trigger.repository.TriggerOrderOutboxRepository;
-import com.surprising.trading.trigger.repository.TriggerOrderRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -52,11 +51,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Owns the TP/SL trigger-order state machine.
+ * 管理止盈止损触发单状态机。
  *
- * <p>Trigger rows are passive until the sampled mark price crosses the configured level. Execution is
- * delegated back to order-provider as a reduce-only close order, so account and position state still
- * changes only through the normal order, matching, and settlement pipeline.</p>
+ * <p>在采样标记价格越过配置阈值之前，触发单保持被动状态。触发执行会委托给订单服务，
+ * 生成只减仓平仓单，因此账户和持仓状态仍只通过正常的订单、撮合和结算链路变更。</p>
  */
 @Service
 public class TriggerOrderService {
@@ -66,20 +64,20 @@ public class TriggerOrderService {
     private static final long MIN_TRAILING_CALLBACK_RATE_PPM = 1_000L;
     private static final long MAX_TRAILING_CALLBACK_RATE_PPM = 100_000L;
 
-    private final TriggerOrderRepository triggerOrderRepository;
+    private final TriggerOrderPersistenceService triggerOrderRepository;
     private final OrderRpcApi orderRpcApi;
     private final TriggerProperties properties;
     private final TriggerOrderIndex triggerOrderIndex;
     private final TriggerOrderOutboxRepository outboxRepository;
     private final TransactionTemplate transactionTemplate;
 
-    public TriggerOrderService(TriggerOrderRepository triggerOrderRepository,
+    public TriggerOrderService(TriggerOrderPersistenceService triggerOrderRepository,
                                OrderRpcApi orderRpcApi,
                                TriggerProperties properties) {
         this(triggerOrderRepository, orderRpcApi, properties, TriggerOrderIndex.disabled());
     }
 
-    public TriggerOrderService(TriggerOrderRepository triggerOrderRepository,
+    public TriggerOrderService(TriggerOrderPersistenceService triggerOrderRepository,
                                OrderRpcApi orderRpcApi,
                                TriggerProperties properties,
                                TriggerOrderIndex triggerOrderIndex) {
@@ -87,7 +85,7 @@ public class TriggerOrderService {
     }
 
     @Autowired
-    public TriggerOrderService(TriggerOrderRepository triggerOrderRepository,
+    public TriggerOrderService(TriggerOrderPersistenceService triggerOrderRepository,
                                OrderRpcApi orderRpcApi,
                                TriggerProperties properties,
                                TriggerOrderIndex triggerOrderIndex,
@@ -161,8 +159,8 @@ public class TriggerOrderService {
                 null,
                 now,
                 now);
-        // Index before insertion: a committed static TP/SL can never exist
-        // without its candidate member. A later database rollback only leaves a harmless stale candidate.
+        // 先写索引再插入数据库，确保已提交的静态止盈止损单一定存在候选索引成员。
+        // 如果随后数据库回滚，只会留下一个无害的陈旧候选成员。
         triggerOrderIndex.indexPlaced(order);
         removeIndexOnRollback(order);
         boolean inserted = triggerOrderRepository.insert(order);
@@ -454,7 +452,7 @@ public class TriggerOrderService {
                 cleanupCandidateIndex(symbol, candidateIds.get());
                 cleanupOcoIndex(claimed);
             } catch (RuntimeException ex) {
-                // Index cleanup cannot invalidate the DB claim. Stale members are rejected on the next exact claim.
+                // 索引清理不能使数据库抢占失效；陈旧成员会在下一次精确抢占时被拒绝。
                 log.warn("Trigger candidate cleanup failed line={} symbol={}: {}",
                         currentProductLine(), symbol, ex.getMessage());
             }
@@ -527,7 +525,7 @@ public class TriggerOrderService {
     private void executeTriggeredOrder(TriggerOrderRecord order) {
         try {
             TriggerTraceContext.set(order.traceId());
-            // The generated client id is stable, so retries after process or network failure are safe.
+            // 生成的客户端编号保持稳定，因此进程或网络故障后的重试是安全的。
             OrderResponse placed = orderRpcApi.place(new PlaceOrderRequest(
                     order.userId(),
                     triggeredClientOrderId(order.triggerOrderId()),
@@ -559,7 +557,7 @@ public class TriggerOrderService {
             });
             triggerOrderIndex.remove(order);
         } catch (Exception ex) {
-            // Leave the row in TRIGGERING; maintenance will reset stale rows for a later mark event.
+            // 保持 TRIGGERING 状态；维护任务会重置陈旧记录，等待后续标记价格事件重试。
             log.error("Failed to execute trigger order id={}: {}", order.triggerOrderId(), ex.getMessage(), ex);
         } finally {
             TriggerTraceContext.clear();

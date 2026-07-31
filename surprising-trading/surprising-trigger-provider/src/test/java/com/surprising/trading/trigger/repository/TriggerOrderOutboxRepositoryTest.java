@@ -28,13 +28,13 @@ class TriggerOrderOutboxRepositoryTest {
     @Test
     void enqueuePersistsFullStatusSnapshotOnTheProductTopic() throws Exception {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        TriggerOrderRepository triggerRepository = mock(TriggerOrderRepository.class);
+        TriggerSequenceRepository sequenceRepository = mock(TriggerSequenceRepository.class);
         ObjectMapper objectMapper = mock(ObjectMapper.class);
         TriggerProperties properties = new TriggerProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
         TriggerOrderOutboxRepository repository = new TriggerOrderOutboxRepository(
-                jdbcTemplate, triggerRepository, properties, objectMapper);
+                jdbcTemplate, sequenceRepository, properties, objectMapper);
         TriggerOrderRecord order = mock(TriggerOrderRecord.class);
         TriggerOrderResponse response = mock(TriggerOrderResponse.class);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
@@ -44,8 +44,8 @@ class TriggerOrderOutboxRepositoryTest {
         when(order.status()).thenReturn(TriggerOrderStatus.TRIGGERED);
         when(order.traceId()).thenReturn("trace-trigger");
         when(order.updatedAt()).thenReturn(now);
-        when(triggerRepository.nextSequence("event")).thenReturn(701L);
-        when(triggerRepository.nextSequence("outbox")).thenReturn(801L);
+        when(sequenceRepository.nextSequence("event")).thenReturn(701L);
+        when(sequenceRepository.nextSequence("outbox")).thenReturn(801L);
         when(objectMapper.writeValueAsString(any())).thenReturn("{\"eventId\":701}");
         when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
 
@@ -67,7 +67,7 @@ class TriggerOrderOutboxRepositoryTest {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerProperties properties = new TriggerProperties();
         TriggerOrderOutboxRepository repository = new TriggerOrderOutboxRepository(
-                jdbcTemplate, mock(TriggerOrderRepository.class), properties, mock(ObjectMapper.class));
+                jdbcTemplate, mock(TriggerSequenceRepository.class), properties, mock(ObjectMapper.class));
         when(jdbcTemplate.query(anyString(), anyRowMapper(), eq("TRIGGER_ORDER"),
                 eq("surprising.perp.trigger-order.events.v1"), eq("TRIGGER_ORDER"),
                 eq("surprising.perp.trigger-order.events.v1"), any(Timestamp.class), eq(25),
@@ -92,7 +92,7 @@ class TriggerOrderOutboxRepositoryTest {
     void deletesOnlyPublishedTriggerRowsInLockedBatches() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderOutboxRepository repository = new TriggerOrderOutboxRepository(
-                jdbcTemplate, mock(TriggerOrderRepository.class), new TriggerProperties(), mock(ObjectMapper.class));
+                jdbcTemplate, mock(TriggerSequenceRepository.class), new TriggerProperties(), mock(ObjectMapper.class));
         when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(7);
 
         assertThat(repository.deletePublishedBefore(Instant.parse("2026-07-01T00:00:00Z"), 100)).isEqualTo(7);
@@ -112,7 +112,7 @@ class TriggerOrderOutboxRepositoryTest {
     void marksSuccessfulTriggerPublishesInOneScopedUpdate() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         TriggerOrderOutboxRepository repository = new TriggerOrderOutboxRepository(
-                jdbcTemplate, mock(TriggerOrderRepository.class), new TriggerProperties(), mock(ObjectMapper.class));
+                jdbcTemplate, mock(TriggerSequenceRepository.class), new TriggerProperties(), mock(ObjectMapper.class));
         when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(2);
 
         repository.markPublished(List.of(801L, 802L), Instant.parse("2026-07-01T00:00:00Z"));

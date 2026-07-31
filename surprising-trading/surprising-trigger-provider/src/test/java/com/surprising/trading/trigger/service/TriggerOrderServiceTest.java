@@ -41,7 +41,6 @@ import com.surprising.trading.api.model.TriggerOrderType;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import com.surprising.trading.trigger.model.TriggerPosition;
-import com.surprising.trading.trigger.repository.TriggerOrderRepository;
 import com.surprising.trading.trigger.repository.TriggerOrderOutboxRepository;
 import java.time.Instant;
 import java.math.BigDecimal;
@@ -60,7 +59,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeDerivesTakeProfitCloseLongCondition() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-1", "oco-1", "btc-usdt",
@@ -86,7 +85,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeEnqueuesPendingSnapshotWithTheTriggerRow() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderOutboxRepository outboxRepository = mock(TriggerOrderOutboxRepository.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties(), TriggerOrderIndex.disabled(), outboxRepository, null);
@@ -110,7 +109,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeIndexesCommittedStaticTriggerCandidate() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderIndex index = mock(TriggerOrderIndex.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties(), index);
@@ -131,7 +130,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeDerivesStopLossCloseLongCondition() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "sl-long", null, "btc-usdt",
@@ -153,7 +152,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeAcceptsTrailingStopCloseLongFields() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "trail-long", null, "btc-usdt",
@@ -181,7 +180,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeRejectsTrailingStopWithoutCallbackRate() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "trail-no-callback", null,
@@ -199,7 +198,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeRejectsLimitTrailingStopExecution() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "trail-limit", null,
@@ -217,7 +216,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeDerivesStopLossCloseShortConditionInHedgeMode() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "sl-short", null, "btc-usdt",
@@ -240,7 +239,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeReturnsExistingClientTriggerOrder() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         TriggerOrderRecord existing = record(501L, TriggerOrderStatus.PENDING);
@@ -257,7 +256,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeRejectsMarginModeSwitchWhileOtherModeIsActive() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-iso", null, "BTC-USDT",
@@ -278,7 +277,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeRejectsHedgePositionSideInOneWayModeBeforePersistence() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-hedge", null, "BTC-USDT",
@@ -296,7 +295,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeRejectsTriggerOrderWithoutOpenPosition() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-empty", null, "BTC-USDT",
@@ -316,7 +315,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeRejectsTriggerSideThatWouldIncreasePosition() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-wrong-side", null, "BTC-USDT",
@@ -334,7 +333,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeRejectsWhenMultiLevelTriggersWouldExceedAvailablePosition() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "tp-too-much", null, "BTC-USDT",
@@ -352,7 +351,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeCountsSameOcoGroupByMaximumCloseQuantity() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         PlaceTriggerOrderRequest request = new PlaceTriggerOrderRequest(1001L, "sl-oco", "oco-1", "BTC-USDT",
@@ -370,7 +369,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeBatchKeepsItemFailuresIsolatedFromValidTriggerOrders() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         PlaceTriggerOrderRequest invalid = new PlaceTriggerOrderRequest(0L, "bad", null, "BTC-USDT",
@@ -397,7 +396,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void placeAtomicBatchRejectsWholeGroupWhenAnyItemFails() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         PlaceTriggerOrderRequest valid = new PlaceTriggerOrderRequest(1001L, "tp-atomic", null, "BTC-USDT",
@@ -430,7 +429,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void cancelBatchCancelsEachUserTriggerOrder() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         TriggerOrderRecord first = record(501L, TriggerOrderStatus.PENDING);
@@ -457,7 +456,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void cancelOpenOrdersCancelsOnlyPendingRepositorySelection() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         TriggerOrderRecord first = record(501L, TriggerOrderStatus.PENDING);
@@ -483,7 +482,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void cancelRejectsTriggerOrderOutsideCurrentProductLineBeforeMutating() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerProperties properties = new TriggerProperties();
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
@@ -501,7 +500,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void cancelRemovesRedisCandidateAfterAuthoritativeStateChange() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderIndex index = mock(TriggerOrderIndex.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties(), index);
@@ -518,7 +517,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void cancelLosingRaceToTriggerKeepsCandidateForStaleRetry() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderIndex index = mock(TriggerOrderIndex.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties(), index);
@@ -535,7 +534,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void closedPositionCancelsTriggersPublishesStatusAndRemovesRedisIndex() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderIndex index = mock(TriggerOrderIndex.class);
         TriggerOrderOutboxRepository outboxRepository = mock(TriggerOrderOutboxRepository.class);
         TriggerProperties properties = new TriggerProperties();
@@ -557,7 +556,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void onMarkPricePlacesReduceOnlyOrderAndMarksTriggered() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
         TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, new TriggerProperties());
         TriggerOrderRecord claimed = record(501L, TriggerOrderStatus.TRIGGERING);
@@ -579,7 +578,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void productLineModeClaimsTriggeredOrdersByContractType() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
         TriggerProperties properties = new TriggerProperties();
         properties.getKafka().setProductTopicsEnabled(true);
@@ -605,7 +604,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void onMarkPriceExecutesTrailingClaimThroughReduceOnlyOrder() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
         TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, new TriggerProperties());
         TriggerOrderRecord trailing = record(531L, OrderSide.SELL, TriggerOrderType.TRAILING_STOP,
@@ -631,7 +630,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void onMarkPriceRejectsInvalidFixedPointTicksWithoutClaiming() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
         TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, new TriggerProperties());
         assertThatThrownBy(() -> service.onMarkPrice(mark(98L, 0L)))
@@ -644,7 +643,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void onMarkPricePassesHedgePositionSideToReduceOnlyOrder() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
         TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, new TriggerProperties());
         TriggerOrderRecord claimed = record(601L, OrderSide.SELL, TriggerOrderType.TAKE_PROFIT,
@@ -668,7 +667,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void onMarkPriceExecutesMultipleClaimedLevelsIndependently() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
         TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, new TriggerProperties());
         TriggerOrderRecord firstLevel = record(701L, OrderSide.SELL, TriggerOrderType.TAKE_PROFIT,
@@ -700,7 +699,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void liquidationClosedPositionBeforeTriggerMarksFailedWithoutOpeningReversePosition() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
         TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, new TriggerProperties());
         TriggerOrderRecord claimed = record(801L, OrderSide.SELL, TriggerOrderType.STOP_LOSS,
@@ -728,7 +727,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void rejectedExecutionMarksTriggerFailed() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
         TriggerOrderService service = new TriggerOrderService(repository, orderRpcApi, new TriggerProperties());
         TriggerOrderRecord claimed = record(501L, TriggerOrderStatus.TRIGGERING);
@@ -747,7 +746,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void adminOrdersNormalizesFiltersAndMapsRows() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         TriggerOrderRecord row = record(501L, TriggerOrderStatus.PENDING);
@@ -771,7 +770,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void adminOrdersDelegatesProductLineAsContractType() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         TriggerOrderRecord row = record(501L, TriggerOrderStatus.PENDING);
@@ -790,7 +789,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void adminTimelineRejectsMismatchedProductLine() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         TriggerOrderRecord row = record(501L, TriggerOrderStatus.PENDING);
@@ -804,7 +803,7 @@ class TriggerOrderServiceTest {
 
     @Test
     void adminTimelineBuildsExecutionEvents() {
-        TriggerOrderRepository repository = mock(TriggerOrderRepository.class);
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         Instant created = Instant.parse("2026-07-01T00:00:00Z");
@@ -864,7 +863,7 @@ class TriggerOrderServiceTest {
                 sequence, PriceStatus.HEALTHY, now, now);
     }
 
-    private void stubCloseCapacity(TriggerOrderRepository repository,
+    private void stubCloseCapacity(TriggerOrderPersistenceService repository,
                                    long signedQuantitySteps,
                                    long openReduceOnlySteps,
                                    long pendingTriggerCloseSteps,
@@ -879,7 +878,7 @@ class TriggerOrderServiceTest {
                 .thenReturn(sameOcoGroupMaxSteps);
     }
 
-    private void stubNoTrailingClaim(TriggerOrderRepository repository) {
+    private void stubNoTrailingClaim(TriggerOrderPersistenceService repository) {
         when(repository.claimTrailingTriggered(anyString(), anyLong(), anyLong(), any(), anyInt(), any()))
                 .thenReturn(List.of());
     }

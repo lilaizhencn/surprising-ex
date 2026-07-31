@@ -11,7 +11,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Keeps only the newest mark price per symbol and evaluates trigger orders at a fixed one-second cadence.
+ * 每个交易对只保留最新标记价格，并按固定的一秒周期评估触发单。
  */
 @Component
 public class MarkPriceTriggerScheduler {
@@ -51,7 +51,7 @@ public class MarkPriceTriggerScheduler {
             triggerOrderService.onMarkPrice(event);
             processedSequences.merge(event.symbol(), event.sequence(), Math::max);
         } catch (RuntimeException ex) {
-            // Keep the latest sample pending so a transient database/order-provider failure is retried next second.
+            // 保留最新采样，使数据库或订单服务的瞬时故障可以在下一秒重试。
             log.error("Failed to scan latest mark price symbol={} sequence={}: {}",
                     event.symbol(), event.sequence(), ex.getMessage(), ex);
         }

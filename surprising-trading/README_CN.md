@@ -200,6 +200,13 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symb
 - `POST /api/v1/trading/trigger-orders/batch-cancel`：批量撤销条件单，最多 50 条。
 - `POST /api/v1/trading/trigger-orders/cancel-open`：撤销用户所有 `PENDING` 条件单，可按 `symbol` 过滤，单次最多 1000 条；已经进入 `TRIGGERING` 的条件单不在这里撤销，避免和触发执行抢状态。
 
+触发单持久化按表隔离：`TriggerOrderRepository`、`TriggerPositionRepository`、
+`TriggerPositionModeRepository`、`TriggerOpenOrderRepository` 和
+`TriggerOrderOutboxRepository` 分别只访问触发单、持仓、仓位模式、普通委托和 outbox 表；
+`TriggerSequenceRepository` 与 `TriggerCoordinationRepository` 只使用 PostgreSQL 原生序列和
+advisory lock，不访问业务表。`TriggerOrderPersistenceService` 在业务事务内聚合这些仓储，
+下单校验不再通过多表 Repository 查询。
+
 ## TraceId 链路追踪
 
 - 前端或 BFF 可以传 `X-Trace-Id`；未传时 gateway/order 入口会自动生成。

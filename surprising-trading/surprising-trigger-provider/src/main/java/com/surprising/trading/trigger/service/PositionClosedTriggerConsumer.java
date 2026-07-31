@@ -9,7 +9,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
-/** Reconciles the Redis trigger index after account commits a fully closed position. */
+/** 账户完成全量平仓提交后，同步修正 Redis 触发单索引。 */
 @Service
 public class PositionClosedTriggerConsumer {
 

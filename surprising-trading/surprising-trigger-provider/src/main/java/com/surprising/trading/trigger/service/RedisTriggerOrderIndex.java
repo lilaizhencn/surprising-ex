@@ -16,11 +16,11 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 /**
- * Redis sorted-set range index backed by Spring Data Redis and Lettuce.
+ * 基于 Spring Data Redis 和 Lettuce 的 Redis 有序集合区间索引。
  *
- * <p>Prices up to 2^53-1 are exact IEEE-754 integers and therefore exact Redis scores. If a product ever produces
- * a larger tick value, readiness is removed and the service deliberately falls back to PostgreSQL instead of
- * accepting an imprecise score that could miss a trigger.</p>
+ * <p>不超过 2^53-1 的价格可以由 IEEE-754 精确表示，因此可作为精确的 Redis 分值。
+ * 如果产品产生更大的价格刻度，服务会撤销索引就绪状态并回退到 PostgreSQL，
+ * 避免因分值精度不足而漏触发。</p>
  */
 @Component
 public class RedisTriggerOrderIndex implements TriggerOrderIndex {
@@ -107,7 +107,7 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
         try {
             removeStrict(productLine, symbol, triggerOrderId);
         } catch (RuntimeException ex) {
-            // A stale member is safe: PostgreSQL will reject it during the exact conditional claim.
+            // 陈旧索引成员是安全的：PostgreSQL 会在精确条件抢占时拒绝它。
             log.warn("Failed to remove stale Redis trigger member id={}: {}", triggerOrderId, ex.getMessage());
         }
     }
@@ -164,7 +164,7 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
         try {
             redisTemplate.delete(readyKey(productLine));
         } catch (RuntimeException ignored) {
-            // The next candidate lookup still falls back when Redis itself is unavailable.
+            // Redis 本身不可用时，下一次候选查询仍会回退到 PostgreSQL。
         }
     }
 
