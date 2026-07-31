@@ -6,6 +6,7 @@ import com.surprising.candlestick.provider.aggregation.CandleAggregationProcesso
 import com.surprising.candlestick.provider.aggregation.CandleSink;
 import com.surprising.candlestick.provider.aggregation.CandleSnapshot;
 import com.surprising.candlestick.provider.aggregation.CandleStores;
+import com.surprising.candlestick.provider.service.CandleHotCache;
 import com.surprising.candlestick.provider.service.PublicTradeEventMapper;
 import com.surprising.candlestick.provider.service.SymbolRegistryService;
 import com.surprising.trading.api.model.PublicTradeEvent;
@@ -84,7 +85,8 @@ public class CandlestickStreamConfiguration {
             CandlestickProperties properties,
             CandleSink candleSink,
             SymbolRegistryService symbolRegistryService,
-            PublicTradeEventMapper tradeEventMapper) {
+            PublicTradeEventMapper tradeEventMapper,
+            CandleHotCache hotCache) {
 
         Serde<PublicTradeEvent> tradeSerde = jsonSerde(PublicTradeEvent.class);
         Serde<CandleUpdatedEvent> updateSerde = jsonSerde(CandleUpdatedEvent.class);
@@ -112,7 +114,7 @@ public class CandlestickStreamConfiguration {
         KStream<String, CandleUpdatedEvent> updates = streamsBuilder
                 .stream(properties.getKafka().getTradeTopic(), Consumed.with(Serdes.String(), tradeSerde))
                 .process(() -> new CandleAggregationProcessor(properties, candleSink, symbolRegistryService,
-                                tradeEventMapper),
+                                tradeEventMapper, hotCache),
                         Named.as("candlestick-aggregator"),
                         CandleStores.CANDLE_STORE,
                         CandleStores.DIRTY_STORE,

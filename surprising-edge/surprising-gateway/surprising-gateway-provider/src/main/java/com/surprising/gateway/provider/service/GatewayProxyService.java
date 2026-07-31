@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -68,6 +69,7 @@ public class GatewayProxyService {
         this(properties, restTemplate, authService, adminAuditRepository, adminApprovalRepository, new ObjectMapper());
     }
 
+    @Autowired
     public GatewayProxyService(GatewayProperties properties,
                                RestTemplate restTemplate,
                                AuthService authService,
@@ -117,7 +119,7 @@ public class GatewayProxyService {
         }
         return ResponseEntity.status(response.getStatusCode())
                 .headers(responseHeaders)
-                .body(response.getBody());
+                .body(sanitizePublicContractFields(service, response.getBody()));
     }
 
     private ResponseEntity<byte[]> exchange(URI target,
@@ -134,6 +136,50 @@ public class GatewayProxyService {
         } catch (RestClientException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "backend request failed", ex);
         }
+    }
+
+    /**
+     * 网关是唯一面向客户端的代理边界。内部 DTO 仍保留规格标识供撮合、风控和恢复使用，
+     * 但不把这个内部生命周期字段泄露到公共 API。
+     */
+    private byte[] sanitizePublicContractFields(String service,
+                                                byte[] body) {
+        if (body == null || body.length == 0) {
+            return body;
+        }
+        String normalizedService = service == null ? "" : service.trim().toLowerCase(Locale.ROOT);
+        boolean instrumentResponse = normalizedService.equals("instrument")
+                || normalizedService.equals("instrument-admin");
+        if (!instrumentResponse && !containsJsonField(body, "instrumentVersion")) {
+            return body;
+        }
+        try {
+            Object value = objectMapper.readValue(body, Object.class);
+            removeInternalContractFields(value, instrumentResponse);
+            return objectMapper.writeValueAsBytes(value);
+        } catch (JacksonException | IllegalArgumentException ex) {
+            // 非 JSON 响应或后端返回错误正文时保持原始内容，不能因脱敏失败改变业务响应。
+            return body;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void removeInternalContractFields(Object value, boolean instrumentResponse) {
+        if (value instanceof Map<?, ?> map) {
+            Map<Object, Object> mutable = (Map<Object, Object>) map;
+            mutable.remove("instrumentVersion");
+            if (instrumentResponse) {
+                mutable.remove("version");
+            }
+            mutable.values().forEach(child -> removeInternalContractFields(child, instrumentResponse));
+        } else if (value instanceof List<?> list) {
+            list.forEach(child -> removeInternalContractFields(child, instrumentResponse));
+        }
+    }
+
+    private boolean containsJsonField(byte[] body, String fieldName) {
+        String text = new String(body, java.nio.charset.StandardCharsets.UTF_8);
+        return text.contains("\"" + fieldName + "\"");
     }
 
     public URI targetUri(String service, GatewayProperties.BackendRoute route, HttpServletRequest request) {

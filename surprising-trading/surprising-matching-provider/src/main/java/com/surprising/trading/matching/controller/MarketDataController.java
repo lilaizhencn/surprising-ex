@@ -2,6 +2,7 @@ package com.surprising.trading.matching.controller;
 
 import com.surprising.trading.api.TradingApiPaths;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
+import com.surprising.trading.api.model.PublicTradeEvent;
 import com.surprising.trading.matching.service.MatchingService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,5 +27,11 @@ public class MarketDataController {
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
+    }
+
+    @GetMapping(TradingApiPaths.MARKET_BASE_PATH + "/latest-trade")
+    public PublicTradeEvent latestTrade(@RequestParam("symbol") String symbol) {
+        return matchingService.latestPublicTrade(symbol)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "latest trade not found"));
     }
 }

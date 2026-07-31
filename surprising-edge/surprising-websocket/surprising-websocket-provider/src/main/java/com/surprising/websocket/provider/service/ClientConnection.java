@@ -2,6 +2,7 @@ package com.surprising.websocket.provider.service;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -26,6 +27,7 @@ public class ClientConnection implements AutoCloseable {
 
     private final WebSocketSession session;
     private final Long authenticatedUserId;
+    /** 有界环形队列；满载时主动断开慢连接，背压不会传回 Kafka 消费线程。 */
     private final BlockingQueue<String> outbound;
     private final Duration sendTimeout;
     private final AtomicBoolean open = new AtomicBoolean(true);
@@ -52,14 +54,32 @@ public class ClientConnection implements AutoCloseable {
     }
 
     public boolean send(String payload) {
+        return sendBatch(List.of(payload));
+    }
+
+    /** 批量投递消息，避免同一连接在一次 fanout 中反复争用队列。 */
+    public boolean sendBatch(List<String> payloads) {
         if (!open.get()) {
             return false;
         }
-        boolean accepted = outbound.offer(payload);
-        if (!accepted) {
-            close(CloseStatus.SERVICE_OVERLOAD.withReason("websocket outbound queue full"));
+        if (payloads == null || payloads.isEmpty()) {
+            return true;
         }
-        return accepted;
+        if (outbound.remainingCapacity() < payloads.size()) {
+            close(CloseStatus.SERVICE_OVERLOAD.withReason("websocket outbound queue full"));
+            return false;
+        }
+        for (String payload : payloads) {
+            if (!outbound.offer(payload)) {
+                close(CloseStatus.SERVICE_OVERLOAD.withReason("websocket outbound queue full"));
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public int queuedMessages() {
+        return outbound.size();
     }
 
     private void drain() {

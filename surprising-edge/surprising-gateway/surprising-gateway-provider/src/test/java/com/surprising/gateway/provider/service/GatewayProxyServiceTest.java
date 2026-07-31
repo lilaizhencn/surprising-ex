@@ -10,6 +10,7 @@ import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.AuthService;
 import com.surprising.product.api.ProductLine;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -57,6 +58,25 @@ class GatewayProxyServiceTest {
         assertThat(target.toString())
                 .isEqualTo("http://matching:9085/api/v1/trading/market/orderbook?symbol=BTC-USDT&depth=50");
         assertThat(properties.getRoutes().get("trading-market").isPrivateRoute()).isFalse();
+    }
+
+    @Test
+    void removesInternalContractVersionFieldsAtGatewayBoundary() {
+        GatewayProperties properties = properties();
+        properties.getRoutes().put("instrument", new GatewayProperties.BackendRoute(
+                "http://instrument:9080", "/api/v1/instruments", false));
+        CapturingRestTemplate restTemplate = new CapturingRestTemplate();
+        restTemplate.responseBody = "{\"version\":7,\"instrumentVersion\":7,\"nested\":[{\"instrumentVersion\":8}]}"
+                .getBytes(StandardCharsets.UTF_8);
+        GatewayProxyService controller = new GatewayProxyService(properties, restTemplate);
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET", "/api/v1/gateway/instrument");
+
+        ResponseEntity<byte[]> response = controller.proxy("instrument", HttpMethod.GET, request, null);
+
+        assertThat(new String(response.getBody(), StandardCharsets.UTF_8))
+                .doesNotContain("instrumentVersion")
+                .doesNotContain("version");
     }
 
     @Test
@@ -467,6 +487,7 @@ class GatewayProxyServiceTest {
     private static final class CapturingRestTemplate extends RestTemplate {
         private URI url;
         private HttpEntity<?> requestEntity;
+        private byte[] responseBody = new byte[0];
 
         @Override
         public <T> ResponseEntity<T> exchange(URI url,
@@ -475,7 +496,7 @@ class GatewayProxyServiceTest {
                                               Class<T> responseType) {
             this.url = url;
             this.requestEntity = requestEntity;
-            return ResponseEntity.ok(responseType.cast(new byte[0]));
+            return ResponseEntity.ok(responseType.cast(responseBody));
         }
     }
 

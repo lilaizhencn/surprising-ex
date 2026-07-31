@@ -40,7 +40,7 @@ public class MatchingOrderBookRecoveryRepository {
                                                                     long lastOrderId,
                                                                     int limit) {
         StringBuilder sql = new StringBuilder("""
-                SELECT o.order_id, o.user_id, o.symbol, o.side, o.time_in_force,
+                SELECT o.order_id, o.user_id, o.symbol, o.instrument_version, o.side, o.time_in_force,
                        o.price_ticks, o.remaining_quantity_steps, o.created_at
                   FROM trading_orders o
                   JOIN instruments i
@@ -80,6 +80,7 @@ public class MatchingOrderBookRecoveryRepository {
                 rs.getLong("order_id"),
                 rs.getLong("user_id"),
                 rs.getString("symbol"),
+                rs.getLong("instrument_version"),
                 OrderSide.valueOf(rs.getString("side")),
                 TimeInForce.valueOf(rs.getString("time_in_force")),
                 rs.getLong("price_ticks"),

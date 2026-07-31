@@ -62,6 +62,8 @@ public class MatchingService {
     private final MatchingProtectionRepository protectionRepository;
     private final MatchingPersistenceService persistenceService;
     private final MatchingOutboxRepository outboxRepository;
+    private final MatchingProtectionIndex protectionIndex;
+    private final LatestPublicTradeCache latestPublicTradeCache;
     private final OrderBookDepthPublisher depthPublisher;
     private final PublicTradePublisher tradePublisher;
     private final Map<String, DepthState> depthStates = new ConcurrentHashMap<>();
@@ -73,6 +75,8 @@ public class MatchingService {
                            MatchingProtectionRepository protectionRepository,
                            MatchingPersistenceService persistenceService,
                            MatchingOutboxRepository outboxRepository,
+                           MatchingProtectionIndex protectionIndex,
+                           LatestPublicTradeCache latestPublicTradeCache,
                            OrderBookDepthPublisher depthPublisher,
                            PublicTradePublisher tradePublisher) {
         this.objectMapper = objectMapper;
@@ -81,6 +85,8 @@ public class MatchingService {
         this.protectionRepository = protectionRepository;
         this.persistenceService = persistenceService;
         this.outboxRepository = outboxRepository;
+        this.protectionIndex = protectionIndex;
+        this.latestPublicTradeCache = latestPublicTradeCache;
         this.depthPublisher = depthPublisher;
         this.tradePublisher = tradePublisher;
     }
@@ -92,7 +98,20 @@ public class MatchingService {
                     MatchingPersistenceService persistenceService,
                     MatchingOutboxRepository outboxRepository) {
         this(objectMapper, properties, exchangeCoreEngine, protectionRepository,
-                persistenceService, outboxRepository, OrderBookDepthPublisher.NOOP, PublicTradePublisher.NOOP);
+                persistenceService, outboxRepository, null, null,
+                OrderBookDepthPublisher.NOOP, PublicTradePublisher.NOOP);
+    }
+
+    MatchingService(ObjectMapper objectMapper,
+                    MatchingProperties properties,
+                    ExchangeCoreEngine exchangeCoreEngine,
+                    MatchingProtectionRepository protectionRepository,
+                    MatchingPersistenceService persistenceService,
+                    MatchingOutboxRepository outboxRepository,
+                    OrderBookDepthPublisher depthPublisher,
+                    PublicTradePublisher tradePublisher) {
+        this(objectMapper, properties, exchangeCoreEngine, protectionRepository,
+                persistenceService, outboxRepository, null, null, depthPublisher, tradePublisher);
     }
 
     @Transactional
@@ -257,6 +276,10 @@ public class MatchingService {
         DepthSnapshot current = snapshot(exchangeCoreEngine.requestOrderBook(matchingSymbol, depth));
         return new OrderBookSnapshotResponse(matchingSymbol.symbol(), lastDepthSequence(matchingSymbol.symbol()),
                 depth, List.copyOf(current.bids().values()), List.copyOf(current.asks().values()), Instant.now());
+    }
+
+    public java.util.Optional<PublicTradeEvent> latestPublicTrade(String symbol) {
+        return latestPublicTradeCache == null ? java.util.Optional.empty() : latestPublicTradeCache.latest(symbol);
     }
 
     private long effectivePriceTicks(OrderCommandEvent command) {
@@ -472,6 +495,9 @@ public class MatchingService {
         }
         persistenceService.saveTrades(externalTrades);
         persistenceService.applyMakerFills(result.trades());
+        if (protectionIndex != null) {
+            protectionIndex.apply(orderCommand, result);
+        }
         enqueueActiveOrderReleaseIfRequired(outboxWrites, result, orderCommand, containsInternalSelfTrade,
                 lastTakerFinancialCommandId);
         outboxWrites.add(new MatchingOutboxWrite(
@@ -513,7 +539,7 @@ public class MatchingService {
                 int index = matchIndex.incrementAndGet();
                 long sequence = Math.addExact(
                         Math.multiplyExact(command.commandId(), PUBLIC_TRADE_SEQUENCE_MULTIPLIER), index);
-                tradePublisher.offer(new PublicTradeEvent(
+                PublicTradeEvent trade = new PublicTradeEvent(
                         command.commandId() + ":" + index,
                         sequence,
                         command.symbol(),
@@ -522,7 +548,11 @@ public class MatchingService {
                         event.price,
                         event.size,
                         eventTime,
-                        command.traceId()));
+                        command.traceId());
+                if (latestPublicTradeCache != null) {
+                    latestPublicTradeCache.put(trade);
+                }
+                tradePublisher.offer(trade);
             });
         } catch (RuntimeException error) {
             log.warn("Public trade publication isolated from financial processing symbol={} commandId={}: {}",

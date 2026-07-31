@@ -39,6 +39,7 @@ public class CandleQueryRepository {
                   FROM candlestick_candles
                  WHERE symbol = ?
                    AND period = ?
+                   AND status = 'CLOSED'
                    AND open_time >= ?
                    AND open_time < ?
                  ORDER BY open_time ASC
@@ -54,6 +55,7 @@ public class CandleQueryRepository {
                   FROM candlestick_candles
                  WHERE symbol = ?
                    AND period = ?
+                   AND status = 'CLOSED'
                  ORDER BY open_time DESC
                  LIMIT 1
                 """.formatted(SELECT_COLUMNS);

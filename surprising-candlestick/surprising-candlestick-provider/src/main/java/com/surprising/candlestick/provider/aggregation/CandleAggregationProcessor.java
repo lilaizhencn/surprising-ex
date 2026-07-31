@@ -1,9 +1,11 @@
 package com.surprising.candlestick.provider.aggregation;
 
 import com.surprising.candlestick.api.model.CandlePeriod;
+import com.surprising.candlestick.api.model.CandleStatus;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.candlestick.api.model.TradeEvent;
 import com.surprising.candlestick.provider.config.CandlestickProperties;
+import com.surprising.candlestick.provider.service.CandleHotCache;
 import com.surprising.candlestick.provider.service.PublicTradeEventMapper;
 import com.surprising.candlestick.provider.service.SymbolRegistryService;
 import com.surprising.trading.api.model.PublicTradeEvent;
@@ -37,6 +39,7 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
     private final CandleSink candleSink;
     private final SymbolRegistryService symbolRegistryService;
     private final PublicTradeEventMapper tradeEventMapper;
+    private final CandleHotCache hotCache;
     private final List<CandlePeriod> periods;
 
     private ProcessorContext<String, CandleUpdatedEvent> context;
@@ -47,11 +50,13 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
 
     public CandleAggregationProcessor(CandlestickProperties properties, CandleSink candleSink,
                                       SymbolRegistryService symbolRegistryService,
-                                      PublicTradeEventMapper tradeEventMapper) {
+                                      PublicTradeEventMapper tradeEventMapper,
+                                      CandleHotCache hotCache) {
         this.properties = properties;
         this.candleSink = candleSink;
         this.symbolRegistryService = symbolRegistryService;
         this.tradeEventMapper = tradeEventMapper;
+        this.hotCache = hotCache;
         this.periods = properties.getPeriods().stream()
                 .map(CandlePeriod::fromCode)
                 .toList();
@@ -113,6 +118,9 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
 
             CandleSnapshot snapshot = accumulator.snapshot(now, partition, offset);
             dirtyStore.put(candleKey, snapshot);
+            if (hotCache != null) {
+                hotCache.put(snapshot.toUpdatedEvent(now));
+            }
             context.forward(new Record<>(symbol, snapshot.toUpdatedEvent(now), record.timestamp()));
         }
 
@@ -148,10 +156,18 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
         int maxBatchSize = properties.getFlush().getMaxBatchSize();
         List<CandleSnapshot> batch = new ArrayList<>(maxBatchSize);
         List<String> keys = new ArrayList<>(maxBatchSize);
+        Instant flushTime = Instant.ofEpochMilli(timestamp);
         try (KeyValueIterator<String, CandleSnapshot> iterator = dirtyStore.all()) {
             while (iterator.hasNext()) {
                 KeyValue<String, CandleSnapshot> item = iterator.next();
-                batch.add(item.value);
+                CandleSnapshot snapshot = item.value;
+                // 数据库只接收已经结束的时间桶；未关闭快照留在 dirtyStore，等待下一次状态更新。
+                if (snapshot == null || snapshot.getCloseTime() == null
+                        || snapshot.getCloseTime().isAfter(flushTime)) {
+                    continue;
+                }
+                snapshot.setStatus(CandleStatus.CLOSED);
+                batch.add(snapshot);
                 keys.add(item.key);
                 if (batch.size() >= maxBatchSize) {
                     flushBatch(batch, keys);

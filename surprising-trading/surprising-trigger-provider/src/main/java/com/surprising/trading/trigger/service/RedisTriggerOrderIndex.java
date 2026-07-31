@@ -7,8 +7,12 @@ import com.surprising.trading.api.model.TriggerOrderType;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import com.surprising.trading.trigger.model.TriggerOrderRecord;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -58,6 +62,10 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
 
     private final StringRedisTemplate redisTemplate;
     private final TriggerProperties properties;
+    /** 本地一级索引减少同节点重复序列化和候选扫描；Redis 仍负责跨节点完整性。 */
+    private final ConcurrentMap<LocalKey, ConcurrentMap<Long, TriggerOrderRecord>> localOrders =
+            new ConcurrentHashMap<>();
+    private final ConcurrentMap<ProductLine, Boolean> localReady = new ConcurrentHashMap<>();
 
     public RedisTriggerOrderIndex(StringRedisTemplate redisTemplate, TriggerProperties properties) {
         this.redisTemplate = redisTemplate;
@@ -71,6 +79,7 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
             return;
         }
         try {
+            putLocal(order);
             put(order);
         } catch (RuntimeException ex) {
             markNotReady(order.productLine());
@@ -86,8 +95,10 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
             return;
         }
         if (isOpen(order.status())) {
+            putLocal(order);
             put(order);
         } else {
+            removeLocal(order.productLine(), order.symbol(), order.triggerOrderId());
             removeStrict(order.productLine(), order.symbol(), order.triggerOrderId());
         }
     }
@@ -104,6 +115,7 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
     public void remove(ProductLine productLine,
                        String symbol,
                        long triggerOrderId) {
+        removeLocal(productLine, symbol, triggerOrderId);
         try {
             removeStrict(productLine, symbol, triggerOrderId);
         } catch (RuntimeException ex) {
@@ -129,12 +141,17 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
                     List.of(rangeKey(productLine, symbol, "ge"),
                             rangeKey(productLine, symbol, "le")),
                     Long.toString(score), Integer.toString(normalizedLimit));
-            if (values == null || values.isEmpty()) {
-                return Optional.of(List.of());
+            Set<Long> ids = new LinkedHashSet<>();
+            if (Boolean.TRUE.equals(localReady.get(productLine))) {
+                ids.addAll(localDueCandidates(productLine, symbol, priceTicks, normalizedLimit));
             }
-            List<Long> ids = new ArrayList<>(values.size());
-            for (Object value : values) {
-                ids.add(Long.parseLong(value.toString()));
+            if (values != null) {
+                for (Object value : values) {
+                    if (ids.size() >= normalizedLimit) {
+                        break;
+                    }
+                    ids.add(Long.parseLong(value.toString()));
+                }
             }
             return Optional.of(List.copyOf(ids));
         } catch (RuntimeException ex) {
@@ -156,11 +173,13 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
 
     @Override
     public void markReady(ProductLine productLine) {
+        localReady.put(productLine, Boolean.TRUE);
         redisTemplate.opsForValue().set(readyKey(productLine), "1", properties.getRedisIndex().getReadyTtl());
     }
 
     @Override
     public void markNotReady(ProductLine productLine) {
+        localReady.remove(productLine);
         try {
             redisTemplate.delete(readyKey(productLine));
         } catch (RuntimeException ignored) {
@@ -196,6 +215,43 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
         if (indexed == null) {
             throw new IllegalStateException("Redis returned no result for trigger index write");
         }
+    }
+
+    private void putLocal(TriggerOrderRecord order) {
+        LocalKey key = new LocalKey(order.productLine(), order.symbol());
+        localOrders.computeIfAbsent(key, ignored -> new ConcurrentHashMap<>())
+                .put(order.triggerOrderId(), order);
+    }
+
+    private void removeLocal(ProductLine productLine, String symbol, long triggerOrderId) {
+        LocalKey key = new LocalKey(productLine, symbol);
+        ConcurrentMap<Long, TriggerOrderRecord> orders = localOrders.get(key);
+        if (orders == null) {
+            return;
+        }
+        orders.remove(triggerOrderId);
+        if (orders.isEmpty()) {
+            localOrders.remove(key, orders);
+        }
+    }
+
+    private List<Long> localDueCandidates(ProductLine productLine,
+                                          String symbol,
+                                          long priceTicks,
+                                          int limit) {
+        ConcurrentMap<Long, TriggerOrderRecord> orders = localOrders.get(new LocalKey(productLine, symbol));
+        if (orders == null || orders.isEmpty()) {
+            return List.of();
+        }
+        return orders.values().stream()
+                .filter(order -> isOpen(order.status()))
+                .filter(order -> order.triggerCondition() == TriggerCondition.GREATER_OR_EQUAL
+                        ? order.triggerPriceTicks() <= priceTicks
+                        : order.triggerPriceTicks() >= priceTicks)
+                .sorted((left, right) -> Long.compare(left.triggerOrderId(), right.triggerOrderId()))
+                .limit(limit)
+                .map(TriggerOrderRecord::triggerOrderId)
+                .toList();
     }
 
     private void removeStrict(ProductLine productLine,
@@ -237,5 +293,8 @@ public class RedisTriggerOrderIndex implements TriggerOrderIndex {
                 || properties.getRedisIndex().getLockTtl().isNegative()) {
             throw new IllegalArgumentException("trigger Redis lockTtl must be positive");
         }
+    }
+
+    private record LocalKey(ProductLine productLine, String symbol) {
     }
 }

@@ -10,9 +10,10 @@ import com.surprising.risk.provider.model.RiskInstrumentSpec;
 import com.surprising.risk.provider.repository.RiskRepository;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.stereotype.Component;
 
 /** 使用 Redis 账户输入和进程内最新标记价格计算完整风险组。 */
@@ -22,7 +23,9 @@ public class RedisRiskCalculator {
     private final LatestMarkPriceCache markPriceCache;
     private final RiskRepository repository;
     private final RiskProperties properties;
-    private final Map<InstrumentKey, RiskInstrumentSpec> specs = new ConcurrentHashMap<>();
+    /** 读取走不可变快照；规格变更只通过整体替换发布，避免计算线程看到半成品。 */
+    private final AtomicReference<Map<InstrumentKey, RiskInstrumentSpec>> specs =
+            new AtomicReference<>(Map.of());
 
     public RedisRiskCalculator(LatestMarkPriceCache markPriceCache,
                                RiskRepository repository,
@@ -65,9 +68,26 @@ public class RedisRiskCalculator {
 
     private RiskInstrumentSpec spec(String symbol, long version) {
         InstrumentKey key = new InstrumentKey(symbol, version);
-        return specs.computeIfAbsent(key, ignored -> repository.riskInstrumentSpec(symbol, version)
+        RiskInstrumentSpec cached = specs.get().get(key);
+        if (cached != null) {
+            return cached;
+        }
+        RiskInstrumentSpec loaded = repository.riskInstrumentSpec(symbol, version)
                 .orElseThrow(() -> new IllegalStateException(
-                        "risk instrument spec unavailable for " + symbol + " version " + version)));
+                        "risk instrument spec unavailable for " + symbol + " version " + version));
+        specs.updateAndGet(previous -> {
+            if (previous.containsKey(key)) {
+                return previous;
+            }
+            Map<InstrumentKey, RiskInstrumentSpec> next = new HashMap<>(previous);
+            next.put(key, loaded);
+            return Map.copyOf(next);
+        });
+        return loaded;
+    }
+
+    public int cachedSpecCount() {
+        return specs.get().size();
     }
 
     private record InstrumentKey(String symbol, long version) {

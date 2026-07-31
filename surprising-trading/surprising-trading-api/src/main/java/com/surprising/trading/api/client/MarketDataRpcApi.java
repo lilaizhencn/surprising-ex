@@ -2,6 +2,7 @@ package com.surprising.trading.api.client;
 
 import com.surprising.trading.api.TradingApiPaths;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
+import com.surprising.trading.api.model.PublicTradeEvent;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -20,4 +21,7 @@ public interface MarketDataRpcApi {
     OrderBookSnapshotResponse orderBook(@RequestParam("symbol") @NotBlank String symbol,
                                         @RequestParam(value = "depth", defaultValue = "50")
                                         @Min(1) @Max(200) int depth);
+
+    @GetMapping("/latest-trade")
+    PublicTradeEvent latestTrade(@RequestParam("symbol") @NotBlank String symbol);
 }

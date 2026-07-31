@@ -4,6 +4,7 @@ import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.trading.api.model.OrderCommandEvent;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.matching.config.MatchingProperties;
+import com.surprising.trading.matching.service.MatchingProtectionIndex;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -23,22 +24,31 @@ public class MatchingProtectionRepository {
     private final JdbcTemplate jdbcTemplate;
     private final MatchingProperties properties;
     private final LatestMarkPriceCache markPriceCache;
+    private final MatchingProtectionIndex protectionIndex;
 
     public MatchingProtectionRepository(JdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, new MatchingProperties(), null);
+        this(jdbcTemplate, new MatchingProperties(), null, null);
     }
 
     public MatchingProtectionRepository(JdbcTemplate jdbcTemplate, MatchingProperties properties) {
-        this(jdbcTemplate, properties, null);
+        this(jdbcTemplate, properties, null, null);
+    }
+
+    public MatchingProtectionRepository(JdbcTemplate jdbcTemplate,
+                                        MatchingProperties properties,
+                                        LatestMarkPriceCache markPriceCache) {
+        this(jdbcTemplate, properties, markPriceCache, null);
     }
 
     @Autowired
     public MatchingProtectionRepository(JdbcTemplate jdbcTemplate,
                                         MatchingProperties properties,
-                                        LatestMarkPriceCache markPriceCache) {
+                                        LatestMarkPriceCache markPriceCache,
+                                        MatchingProtectionIndex protectionIndex) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties;
         this.markPriceCache = markPriceCache;
+        this.protectionIndex = protectionIndex;
     }
 
     public OptionalLong latestMarkPriceTicks(String symbol, long instrumentVersion, Duration maxAge) {
@@ -56,6 +66,9 @@ public class MatchingProtectionRepository {
                                   long instrumentVersion,
                                   OrderSide side,
                                   long effectivePriceTicks) {
+        if (protectionIndex != null && protectionIndex.ready()) {
+            return protectionIndex.wouldSelfTrade(userId, symbol, instrumentVersion, side, effectivePriceTicks);
+        }
         OrderSide oppositeSide = side == OrderSide.BUY ? OrderSide.SELL : OrderSide.BUY;
         StringBuilder sql = new StringBuilder("""
                 SELECT EXISTS (
@@ -88,6 +101,9 @@ public class MatchingProtectionRepository {
     public Set<Long> commandsThatWouldSelfTrade(List<OrderCommandEvent> commands) {
         if (commands == null || commands.isEmpty()) {
             return Set.of();
+        }
+        if (protectionIndex != null && protectionIndex.ready()) {
+            return protectionIndex.commandsThatWouldSelfTrade(commands);
         }
         String values = String.join(", ", Collections.nCopies(commands.size(),
                 "(?::BIGINT, ?::BIGINT, ?::TEXT, ?::BIGINT, ?::TEXT, ?::BIGINT)"));
@@ -131,6 +147,9 @@ public class MatchingProtectionRepository {
     }
 
     public boolean hasOpenOrdersWithDifferentInstrumentVersion(String symbol, long instrumentVersion, long orderId) {
+        if (protectionIndex != null && protectionIndex.ready()) {
+            return protectionIndex.hasOpenOrdersWithDifferentInstrumentVersion(symbol, instrumentVersion, orderId);
+        }
         StringBuilder sql = new StringBuilder("""
                 SELECT EXISTS (
                     SELECT 1
@@ -153,6 +172,9 @@ public class MatchingProtectionRepository {
     public Set<Long> commandsWithOpenOrdersAtDifferentInstrumentVersion(List<OrderCommandEvent> commands) {
         if (commands == null || commands.isEmpty()) {
             return Set.of();
+        }
+        if (protectionIndex != null && protectionIndex.ready()) {
+            return protectionIndex.commandsWithOpenOrdersAtDifferentInstrumentVersion(commands);
         }
         String values = String.join(", ", Collections.nCopies(commands.size(),
                 "(?::BIGINT, ?::TEXT, ?::BIGINT, ?::BIGINT)"));

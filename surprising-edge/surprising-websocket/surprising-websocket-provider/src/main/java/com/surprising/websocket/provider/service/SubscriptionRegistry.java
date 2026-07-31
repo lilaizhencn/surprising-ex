@@ -94,9 +94,17 @@ public class SubscriptionRegistry {
     }
 
     public void publish(SubscriptionTopic topic, Object payload, Instant eventTime) {
-        sendIncludingLegacyProductSubscribers(topic, payload, eventTime);
+        publishBatch(topic, List.of(payload), eventTime);
+    }
+
+    /** 将同一 Kafka 拉取批次的事件一次性投递到每个连接的有界环形队列。 */
+    public void publishBatch(SubscriptionTopic topic, List<?> payloads, Instant eventTime) {
+        if (payloads == null || payloads.isEmpty()) {
+            return;
+        }
+        sendBatchIncludingLegacyProductSubscribers(topic, payloads, eventTime);
         if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.symbol())) {
-            sendIncludingLegacyProductSubscribers(topic.withSymbol(SubscriptionTopic.WILDCARD), payload, eventTime);
+            sendBatchIncludingLegacyProductSubscribers(topic.withSymbol(SubscriptionTopic.WILDCARD), payloads, eventTime);
         }
     }
 
@@ -165,13 +173,22 @@ public class SubscriptionRegistry {
     }
 
     private void send(SubscriptionTopic topic, Object payload, Instant eventTime) {
+        sendBatch(topic, List.of(payload), eventTime);
+    }
+
+    private void sendBatch(SubscriptionTopic topic, List<?> payloads, Instant eventTime) {
         Set<ClientConnection> connections = subscribers.get(topic);
         if (connections == null || connections.isEmpty()) {
             return;
         }
-        String message = objectMapper.writeValueAsString(WsServerMessage.event(topic, payload, eventTime));
+        List<String> messages = payloads.stream()
+                .map(payload -> objectMapper.writeValueAsString(WsServerMessage.event(topic, payload, eventTime)))
+                .toList();
         for (ClientConnection connection : connections) {
-            if (!connection.send(message)) {
+            boolean accepted = messages.size() == 1
+                    ? connection.send(messages.getFirst())
+                    : connection.sendBatch(messages);
+            if (!accepted) {
                 remove(connection.id());
             }
         }
@@ -188,6 +205,17 @@ public class SubscriptionRegistry {
         }
         for (ProductLine productLine : ProductLine.values()) {
             send(topic.withProductLine(productLine), payload, eventTime);
+        }
+    }
+
+    private void sendBatchIncludingLegacyProductSubscribers(SubscriptionTopic topic,
+                                                             List<?> payloads,
+                                                             Instant eventTime) {
+        sendBatch(topic, payloads, eventTime);
+        if (topic.productLine() == null) {
+            for (ProductLine productLine : ProductLine.values()) {
+                sendBatch(topic.withProductLine(productLine), payloads, eventTime);
+            }
         }
     }
 

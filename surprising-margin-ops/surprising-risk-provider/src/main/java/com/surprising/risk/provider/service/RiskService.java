@@ -35,6 +35,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -66,6 +68,8 @@ import tools.jackson.databind.ObjectMapper;
     private boolean projectionStarted;
     private RedisRiskStateStore.ProjectionLease projectionLease;
     private String projectionGeneration;
+    /** 事件快速路径使用的本地风险组；Redis 仍负责跨节点投影和协调。 */
+    private final ConcurrentMap<LocalGroupKey, CachedRiskGroup> localGroups = new ConcurrentHashMap<>();
 
     @Autowired
     public RiskService(ObjectMapper objectMapper,
@@ -140,8 +144,9 @@ import tools.jackson.databind.ObjectMapper;
             List<CachedRiskGroup> states = new ArrayList<>(groups.size());
             List<CachedRiskGroup> changedStates = new ArrayList<>(groups.size());
             for (RiskGroupKey key : groups) {
-                ProjectionUpdate update = refreshState(productLine, key);
+                ProjectionUpdate update = refreshState(productLine, key, false);
                 states.add(update.state());
+                localGroups.put(new LocalGroupKey(productLine, key), update.state());
                 if (update.changed()) {
                     changedStates.add(update.state());
                 }
@@ -182,14 +187,22 @@ import tools.jackson.databind.ObjectMapper;
         for (PositionUpdatedEvent event : events) {
             PositionRiskTarget target = targetFrom(event);
             groups.computeIfAbsent(target.riskGroupKey(), ignored -> new PositionEventGroup())
-                    .merge(event.revision(), target, event.traceId());
+                    .merge(event, target);
         }
         requireRedisState();
         ProductLine productLine = properties.getKafka().getProductLine();
         List<CachedRiskGroup> states = new ArrayList<>(groups.size());
         try {
             for (RiskGroupKey key : groups.keySet()) {
-                states.add(refreshState(productLine, key).state());
+                PositionEventGroup eventGroup = groups.get(key);
+                ProjectionUpdate update = refreshState(productLine, key, true);
+                CachedRiskGroup state = mergePositionEvents(update.state(), eventGroup);
+                if (state != update.state()) {
+                    CachedRiskGroup merged = state;
+                    state = stateStore.replace(productLine, key, () -> merged).state();
+                }
+                localGroups.put(new LocalGroupKey(productLine, key), state);
+                states.add(state);
             }
         } catch (RuntimeException ex) {
             invalidateProjection();
@@ -216,14 +229,46 @@ import tools.jackson.databind.ObjectMapper;
                 stateStore.markNotReady(productLine);
                 throw new IllegalStateException("Redis risk reverse index references missing group state");
             }
+            states.forEach(state -> localGroups.put(new LocalGroupKey(productLine, state.key()), state));
             evaluateBatch(states, Map.of());
         }
     }
 
-    private ProjectionUpdate refreshState(ProductLine productLine, RiskGroupKey key) {
+    private ProjectionUpdate refreshState(ProductLine productLine, RiskGroupKey key, boolean preferLocal) {
+        if (preferLocal) {
+            CachedRiskGroup local = localGroups.get(new LocalGroupKey(productLine, key));
+            if (local != null && !local.capturedAt().isBefore(
+                    Instant.now().minus(properties.getRedisState().getStateTtl()))) {
+                return new ProjectionUpdate(local, false);
+            }
+        }
         RedisRiskStateStore.ProjectionUpdate update =
                 stateStore.replace(productLine, key, () -> riskRepository.cachedRiskGroup(key));
         return new ProjectionUpdate(update.state(), update.changed());
+    }
+
+    private CachedRiskGroup mergePositionEvents(CachedRiskGroup state, PositionEventGroup eventGroup) {
+        if (eventGroup == null || eventGroup.events().isEmpty()) {
+            return state;
+        }
+        Map<PositionScope, com.surprising.risk.provider.model.CachedRiskPosition> positions = new LinkedHashMap<>();
+        for (var position : state.positions()) {
+            positions.put(new PositionScope(position.symbol(), position.marginMode(), position.positionSide()), position);
+        }
+        for (PositionUpdatedEvent event : eventGroup.events()) {
+            PositionScope scope = new PositionScope(event.symbol(), event.marginMode(), event.positionSide());
+            if (event.signedQuantitySteps() == 0L) {
+                positions.remove(scope);
+            } else {
+                String settleAsset = event.marginAsset() == null || event.marginAsset().isBlank()
+                        ? state.key().settleAsset() : event.marginAsset();
+                positions.put(scope, new com.surprising.risk.provider.model.CachedRiskPosition(
+                        event.symbol(), event.marginMode(), event.positionSide(), event.instrumentVersion(),
+                        settleAsset, event.signedQuantitySteps(), event.entryPriceTicks(), event.marginUnits()));
+            }
+        }
+        return new CachedRiskGroup(state.key(), state.walletBalanceUnits(), List.copyOf(positions.values()),
+                Instant.now());
     }
 
     private void evaluateBatch(List<CachedRiskGroup> states,
@@ -298,6 +343,7 @@ import tools.jackson.databind.ObjectMapper;
 
     synchronized void invalidateProjection() {
         ProductLine productLine = properties.getKafka().getProductLine();
+        localGroups.clear();
         try {
             stateStore.markNotReady(productLine);
         } finally {
@@ -822,23 +868,29 @@ import tools.jackson.databind.ObjectMapper;
     private record PositionScope(String symbol, MarginMode marginMode, PositionSide positionSide) {
     }
 
+    private record LocalGroupKey(ProductLine productLine, RiskGroupKey key) {
+    }
+
     private record VersionedPositionTarget(long revision, PositionRiskTarget target) {
     }
 
     private static final class PositionEventGroup {
         private final Map<PositionScope, VersionedPositionTarget> targets = new LinkedHashMap<>();
+        private final Map<PositionScope, VersionedPositionEvent> events = new LinkedHashMap<>();
         private long latestRevision;
         private String traceId;
 
-        private void merge(long revision, PositionRiskTarget target, String eventTraceId) {
+        private void merge(PositionUpdatedEvent event, PositionRiskTarget target) {
+            long revision = event.revision();
             PositionScope scope = new PositionScope(target.symbol(), target.marginMode(), target.positionSide());
             VersionedPositionTarget current = targets.get(scope);
             if (current == null || revision >= current.revision()) {
                 targets.put(scope, new VersionedPositionTarget(revision, target));
+                events.put(scope, new VersionedPositionEvent(revision, event));
             }
             if (revision >= latestRevision) {
                 latestRevision = revision;
-                traceId = eventTraceId;
+                traceId = event.traceId();
             }
         }
 
@@ -851,6 +903,15 @@ import tools.jackson.databind.ObjectMapper;
         private String traceId() {
             return traceId;
         }
+
+        private List<PositionUpdatedEvent> events() {
+            return events.values().stream()
+                    .map(VersionedPositionEvent::event)
+                    .toList();
+        }
+    }
+
+    private record VersionedPositionEvent(long revision, PositionUpdatedEvent event) {
     }
 
     public record RiskRulesResponse(int ruleCount,

@@ -103,6 +103,9 @@ PRIMARY KEY (symbol, period, open_time)
 该主键支持快速区间查询和完整快照的幂等更新。历史数据量很大时应保持逻辑表不变，使用 PostgreSQL
 原生时间分区；服务代码不需要拼接动态表名。
 
+实时未关闭 K 线只保存在 Kafka Streams/RocksDB 和进程热缓存中；该表只接收 `CLOSED` 快照以及用于重建的
+恢复数据，查询服务会把关闭历史与当前热窗口合并后返回。
+
 ## `price_index_ticks`
 
 每一行表示一份指数价格计算快照：

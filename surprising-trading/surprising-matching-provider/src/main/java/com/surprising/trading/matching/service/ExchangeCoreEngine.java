@@ -34,18 +34,20 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
-    public class ExchangeCoreEngine {
+public class ExchangeCoreEngine {
 
     private static final Logger log = LoggerFactory.getLogger(ExchangeCoreEngine.class);
 
     private final MatchingProperties properties;
     private final MatchingSymbolService symbolService;
     private final MatchingOrderBookRecoveryRepository recoveryRepository;
+    private final MatchingProtectionIndex protectionIndex;
     private final ConcurrentMap<String, MatchingSymbol> loadedSymbols = new ConcurrentHashMap<>();
     private final Set<Long> createdUsers = ConcurrentHashMap.newKeySet();
     private volatile Set<String> activeSymbols = Set.of();
@@ -56,9 +58,18 @@ import org.springframework.stereotype.Service;
     public ExchangeCoreEngine(MatchingProperties properties,
                               MatchingSymbolService symbolService,
                               MatchingOrderBookRecoveryRepository recoveryRepository) {
+        this(properties, symbolService, recoveryRepository, null);
+    }
+
+    @Autowired
+    public ExchangeCoreEngine(MatchingProperties properties,
+                              MatchingSymbolService symbolService,
+                              MatchingOrderBookRecoveryRepository recoveryRepository,
+                              MatchingProtectionIndex protectionIndex) {
         this.properties = properties;
         this.symbolService = symbolService;
         this.recoveryRepository = recoveryRepository;
+        this.protectionIndex = protectionIndex;
     }
 
     @PostConstruct
@@ -84,6 +95,9 @@ import org.springframework.stereotype.Service;
         api = exchangeCore.getApi();
         refreshSymbols();
         restoreOpenOrderBook();
+        if (protectionIndex != null && !properties.getRecovery().isOpenOrderBookRestoreEnabled()) {
+            protectionIndex.markReady();
+        }
     }
 
     @PreDestroy
@@ -251,6 +265,9 @@ import org.springframework.stereotype.Service;
                     throw new IllegalStateException("exchange-core failed to restore orderId="
                             + order.orderId() + ": " + result);
                 }
+                if (protectionIndex != null) {
+                    protectionIndex.restore(order);
+                }
                 restored++;
                 lastCreatedAt = order.createdAt();
                 lastOrderId = order.orderId();
@@ -258,6 +275,9 @@ import org.springframework.stereotype.Service;
             if (batch.size() < batchSize) {
                 break;
             }
+        }
+        if (protectionIndex != null) {
+            protectionIndex.markReady();
         }
         log.info("Restored exchange-core open order book orders={}", restored);
     }

@@ -12,6 +12,7 @@
 - [数据库设计](database.md)
 - [撮合交易对分片与容量](matching-symbol-sharding-and-capacity.md)
 - [永续合约业务与实现说明](perpetual-contract-tutorial.md)
+- [内存与无锁热点路径](in-memory-acceleration.md)
 
 ## Redis 读模型与索引
 

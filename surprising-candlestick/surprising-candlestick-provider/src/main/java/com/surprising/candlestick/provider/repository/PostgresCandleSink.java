@@ -1,5 +1,6 @@
 package com.surprising.candlestick.provider.repository;
 
+import com.surprising.candlestick.api.model.CandleStatus;
 import com.surprising.candlestick.provider.aggregation.CandleSink;
 import com.surprising.candlestick.provider.aggregation.CandleSnapshot;
 import java.sql.PreparedStatement;
@@ -58,10 +59,16 @@ public class PostgresCandleSink implements CandleSink {
         if (candles == null || candles.isEmpty()) {
             return;
         }
+        List<CandleSnapshot> closedCandles = candles.stream()
+                .filter(candle -> candle != null && candle.getStatus() == CandleStatus.CLOSED)
+                .toList();
+        if (closedCandles.isEmpty()) {
+            return;
+        }
         jdbcTemplate.batchUpdate(UPSERT_SQL, new BatchPreparedStatementSetter() {
             @Override
             public void setValues(PreparedStatement ps, int i) throws java.sql.SQLException {
-                CandleSnapshot candle = candles.get(i);
+                CandleSnapshot candle = closedCandles.get(i);
                 ps.setString(1, candle.getSymbol());
                 ps.setString(2, candle.getPeriod());
                 ps.setTimestamp(3, Timestamp.from(candle.getOpenTime()));
@@ -85,7 +92,7 @@ public class PostgresCandleSink implements CandleSink {
 
             @Override
             public int getBatchSize() {
-                return candles.size();
+                return closedCandles.size();
             }
         });
     }
