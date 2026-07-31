@@ -3,6 +3,7 @@ package com.surprising.trading.order.service;
 import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.instrument.api.InstrumentEventKeys;
 import com.surprising.trading.order.config.TradingOrderProperties;
+import com.surprising.product.api.ProductTopicNames;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
@@ -43,7 +44,7 @@ public class InstrumentOrderDrainConsumer {
     }
 
     public String topic() {
-        return properties.getKafka().getInstrumentEventsTopic();
+        return ProductTopicNames.INSTRUMENT_EVENTS_TOPIC;
     }
 
     public String groupId() {

@@ -4,6 +4,10 @@
 
 ## 当前实现模型
 
+撮合服务不再读取或写入 `trading_matching_assets`、`trading_matching_symbols`；编号由
+`MatchingSymbolService` 在 JVM 内稳定派生。已有环境中的两张旧表不会由应用自动删除，待所有节点升级并完成
+恢复验证后，再通过独立数据库变更窗口手工清理，避免回滚期间误删数据。
+
 - 订单服务通过 outbox 把 `OrderCommandEvent` 写入 order commands topic，Kafka key 使用订单的 `symbol`。
 - matching provider 使用一个共享 `@KafkaListener` 消费 order commands topic，要求 Kafka key 必须等于 payload 中的 `symbol`，保证同一 symbol 能稳定进入同一 Kafka partition。
 - Kafka partition 由单个 listener 线程串行消费，同一 symbol 的命令不再额外获取本地 stripe lock；不同 partition 可以并行进入 exchange-core。
@@ -53,7 +57,7 @@ symbolId=104 -> 104 & 3 = 0 -> shard 0
 - `surprising-trading/surprising-order-provider/src/main/java/com/surprising/trading/order/service/OutboxPublisher.java`
 - `surprising-trading/surprising-matching-provider/src/main/java/com/surprising/trading/matching/service/MatchingCommandConsumer.java`
 - `surprising-trading/surprising-matching-provider/src/main/java/com/surprising/trading/matching/service/ExchangeCoreEngine.java`
-- `surprising-trading/surprising-matching-provider/src/main/java/com/surprising/trading/matching/repository/MatchingSymbolRepository.java`
+- `surprising-trading/surprising-matching-provider/src/main/java/com/surprising/trading/matching/service/MatchingSymbolService.java`
 - Maven 依赖 `exchange.core2:exchange-core` 中的 `ExchangeCore` 和 `MatchingEngineRouter`
 
 ## 不是每个 symbol 一个消费者

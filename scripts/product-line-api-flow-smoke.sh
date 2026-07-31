@@ -3216,7 +3216,7 @@ SELECT '| ' || metric || ' | ' || count(*) || ' | ' ||
 SQL
 }
 
-stress_matching_shard_rows() {
+stress_matching_symbol_rows() {
   local product_line="$1"
   local phase="$2"
   local slug
@@ -3229,16 +3229,12 @@ WITH trades AS (
      AND trace_id LIKE 'stress-${RUN_ID}-${slug}-${phase}-%'
    GROUP BY symbol
 )
-SELECT '| ' || (s.symbol_id & (${STRESS_MATCHING_ENGINE_SHARDS} - 1)) || ' | ' ||
-       count(*) || ' | ' || sum(t.trade_count) || ' | ' ||
+SELECT '| ' || t.symbol || ' | ' || sum(t.trade_count) || ' | ' ||
        round((sum(t.trade_count)::numeric /
              GREATEST((SELECT sum(trade_count) FROM trades), 1) * 100), 3) || '% |'
   FROM trades t
-  JOIN trading_matching_symbols s
-    ON s.product_line = '${product_line}'
-   AND s.symbol = t.symbol
- GROUP BY (s.symbol_id & (${STRESS_MATCHING_ENGINE_SHARDS} - 1))
- ORDER BY (s.symbol_id & (${STRESS_MATCHING_ENGINE_SHARDS} - 1));
+ GROUP BY t.symbol
+ ORDER BY t.symbol;
 SQL
 }
 
@@ -3789,15 +3785,15 @@ PY
     echo
     echo "Open："
     echo
-    echo "| shard | active symbols | trades | share |"
-    echo "|---:|---:|---:|---:|"
-    stress_matching_shard_rows "${product_line}" "open"
+    echo "| symbol | trades | share |"
+    echo "|---|---:|---:|"
+    stress_matching_symbol_rows "${product_line}" "open"
     echo
     echo "Close："
     echo
-    echo "| shard | active symbols | trades | share |"
-    echo "|---:|---:|---:|---:|"
-    stress_matching_shard_rows "${product_line}" "close"
+    echo "| symbol | trades | share |"
+    echo "|---|---:|---:|"
+    stress_matching_symbol_rows "${product_line}" "close"
     echo
     echo "### PostgreSQL Top SQL"
     echo

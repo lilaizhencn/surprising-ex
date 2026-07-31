@@ -36,7 +36,6 @@ public class InstrumentProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
-        private String eventsTopic = "surprising.instrument.events.v1";
         private String lifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
         private String lifecycleDrainGroupId = "surprising-instrument-lifecycle-drain-v1";
         private String deliverySettlementsTopic;
@@ -48,14 +47,6 @@ public class InstrumentProperties {
 
         public void setBootstrapServers(String bootstrapServers) {
             this.bootstrapServers = bootstrapServers;
-        }
-
-        public String getEventsTopic() {
-            return eventsTopic;
-        }
-
-        public void setEventsTopic(String eventsTopic) {
-            this.eventsTopic = eventsTopic;
         }
 
         public String getLifecycleDrainTopic() {

@@ -1,8 +1,9 @@
 package com.surprising.price.index.service;
 
-import com.surprising.instrument.api.InstrumentEventKeys;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
 import com.surprising.instrument.api.model.InstrumentEvent;
+import com.surprising.product.api.ProductTopicNames;
 import com.surprising.price.index.config.IndexPriceProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -37,11 +38,8 @@ public class InstrumentSnapshotConsumer {
     public void onInstrumentEvent(ConsumerRecord<String, String> record) {
         try {
             InstrumentEvent event = objectMapper.readValue(record.value(), InstrumentEvent.class);
-            if (!InstrumentEventKeys.matches(record.key(), event)
-                    || event.resolvedProductLine() != properties.getKafka().getProductLine()
-                    || !snapshotCache.apply(event)) {
-                throw new IllegalArgumentException("Instrument 事件产品线、key 或快照不匹配");
-            }
+            InstrumentSnapshotSupport.apply(snapshotCache, record.key(), event,
+                    properties.getKafka().getProductLine(), "指数价格服务");
             configService.refresh();
         } catch (Exception ex) {
             throw new IllegalStateException("指数价格合约快照更新失败", ex);
@@ -49,7 +47,7 @@ public class InstrumentSnapshotConsumer {
     }
 
     public String topic() {
-        return properties.getKafka().getInstrumentEventsTopic();
+        return ProductTopicNames.INSTRUMENT_EVENTS_TOPIC;
     }
 
     public String groupId() {

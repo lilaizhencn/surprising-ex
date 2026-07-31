@@ -30,7 +30,6 @@ surprising:
   instrument:
     kafka:
       bootstrap-servers: localhost:9092
-      events-topic: surprising.instrument.events.v1
       lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1
       lifecycle-drain-group-id: surprising-instrument-lifecycle-drain-v1
     lifecycle:

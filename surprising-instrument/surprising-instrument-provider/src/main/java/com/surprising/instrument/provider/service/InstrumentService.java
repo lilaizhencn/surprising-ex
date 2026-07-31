@@ -176,7 +176,7 @@ public class InstrumentService {
         InstrumentEvent event = new InstrumentEvent(response.symbol(), response.version(), response.status(),
                 eventType, eventTime, response);
         outboxService.enqueue("INSTRUMENT", response.version(),
-                properties.getKafka().getEventsTopic(), InstrumentEventKeys.key(event),
+                ProductTopicNames.INSTRUMENT_EVENTS_TOPIC, InstrumentEventKeys.key(event),
                 eventType.name(), event, eventTime);
     }
 

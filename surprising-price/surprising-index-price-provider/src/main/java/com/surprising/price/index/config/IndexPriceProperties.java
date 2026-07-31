@@ -20,8 +20,6 @@ public class IndexPriceProperties {
     private Fiat fiat = new Fiat();
     private Coordination coordination = new Coordination();
     private Audit audit = new Audit();
-    private Instrument instrument = new Instrument();
-    private List<SymbolConfig> symbols = new ArrayList<>();
 
     /** 启动时拒绝未隔离的指数价格 Topic 配置。 */
     @PostConstruct
@@ -85,28 +83,11 @@ public class IndexPriceProperties {
         this.audit = audit;
     }
 
-    public Instrument getInstrument() {
-        return instrument;
-    }
-
-    public void setInstrument(Instrument instrument) {
-        this.instrument = instrument;
-    }
-
-    public List<SymbolConfig> getSymbols() {
-        return symbols;
-    }
-
-    public void setSymbols(List<SymbolConfig> symbols) {
-        this.symbols = symbols;
-    }
-
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
         private boolean productTopicsEnabled;
         private String indexPriceTopic = "surprising.perp.index.price.v1";
-        private String instrumentEventsTopic = "surprising.instrument.events.v1";
         private String groupId = "surprising-index-price-v1";
         private String cacheGroupId = "surprising-index-price-cache-local";
         private int concurrency = 2;
@@ -142,14 +123,6 @@ public class IndexPriceProperties {
 
         public void setIndexPriceTopic(String indexPriceTopic) {
             this.indexPriceTopic = indexPriceTopic;
-        }
-
-        public String getInstrumentEventsTopic() {
-            return instrumentEventsTopic;
-        }
-
-        public void setInstrumentEventsTopic(String instrumentEventsTopic) {
-            this.instrumentEventsTopic = instrumentEventsTopic;
         }
 
         public String getInstrumentSnapshotGroupId() {
@@ -300,6 +273,7 @@ public class IndexPriceProperties {
 
     public static class WebSocket {
         private boolean enabled = true;
+        private long refreshDelayMs = 30000L;
         private Duration idleTimeout = Duration.ofSeconds(20);
         private Duration reconnectInitialDelay = Duration.ofSeconds(1);
         private Duration reconnectMaxDelay = Duration.ofSeconds(30);
@@ -311,6 +285,14 @@ public class IndexPriceProperties {
 
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
+        }
+
+        public long getRefreshDelayMs() {
+            return refreshDelayMs;
+        }
+
+        public void setRefreshDelayMs(long refreshDelayMs) {
+            this.refreshDelayMs = refreshDelayMs;
         }
 
         public Duration getIdleTimeout() {
@@ -582,36 +564,6 @@ public class IndexPriceProperties {
 
         public void setMaxBatchesPerRun(int maxBatchesPerRun) {
             this.maxBatchesPerRun = maxBatchesPerRun;
-        }
-    }
-
-    public static class Instrument {
-        private boolean enabled = true;
-        private long refreshDelayMs = 30000L;
-        private boolean fallbackToStaticSymbols = true;
-
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
-
-        public long getRefreshDelayMs() {
-            return refreshDelayMs;
-        }
-
-        public void setRefreshDelayMs(long refreshDelayMs) {
-            this.refreshDelayMs = refreshDelayMs;
-        }
-
-        public boolean isFallbackToStaticSymbols() {
-            return fallbackToStaticSymbols;
-        }
-
-        public void setFallbackToStaticSymbols(boolean fallbackToStaticSymbols) {
-            this.fallbackToStaticSymbols = fallbackToStaticSymbols;
         }
     }
 

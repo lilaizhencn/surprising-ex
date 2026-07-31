@@ -1,6 +1,5 @@
 package com.surprising.trading.matching.task;
 
-import com.surprising.trading.matching.service.ExchangeCoreEngine;
 import com.surprising.trading.matching.service.KafkaOrderBookDepthPublisher;
 import com.surprising.trading.matching.service.KafkaPublicTradePublisher;
 import com.surprising.trading.matching.service.MatchingOutboxPublisher;
@@ -13,24 +12,16 @@ import org.springframework.stereotype.Component;
 @Component
 public class MatchingMaintenanceTask {
 
-    private final ExchangeCoreEngine exchangeCoreEngine;
     private final KafkaOrderBookDepthPublisher depthPublisher;
     private final KafkaPublicTradePublisher tradePublisher;
     private final MatchingOutboxPublisher outboxPublisher;
 
-    public MatchingMaintenanceTask(ExchangeCoreEngine exchangeCoreEngine,
-                                   KafkaOrderBookDepthPublisher depthPublisher,
+    public MatchingMaintenanceTask(KafkaOrderBookDepthPublisher depthPublisher,
                                    KafkaPublicTradePublisher tradePublisher,
                                    MatchingOutboxPublisher outboxPublisher) {
-        this.exchangeCoreEngine = exchangeCoreEngine;
         this.depthPublisher = depthPublisher;
         this.tradePublisher = tradePublisher;
         this.outboxPublisher = outboxPublisher;
-    }
-
-    @Scheduled(fixedDelayString = "${surprising.trading.matching.engine.initial-symbol-refresh-delay-ms:30000}")
-    public void refreshSymbols() {
-        exchangeCoreEngine.refreshSymbols();
     }
 
     @Scheduled(fixedDelayString = "${surprising.trading.matching.market-data.publish-delay-ms:5}")

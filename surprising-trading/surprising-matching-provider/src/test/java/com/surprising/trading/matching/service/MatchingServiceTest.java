@@ -779,7 +779,7 @@ class MatchingServiceTest {
         private final MatchingSymbol matchingSymbol;
 
         private FakeMatchingSymbolRepository(InstrumentSymbol instrument, MatchingSymbol matchingSymbol) {
-            super(null, null, null, new MatchingProperties(), null);
+            super(new MatchingProperties(), null);
             this.instrument = instrument;
             this.matchingSymbol = matchingSymbol;
         }

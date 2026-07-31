@@ -34,8 +34,8 @@ Kafka `MarkPriceEvent`；事件直接携带产品线、instrument 版本、quote
 
 合约清单和交易规则来自 `surprising-instrument`。指数价格 provider 启动时通过内部聚合 RPC 加载本产品线
 完整 JVM 快照，运行中消费 `surprising.instrument.events.v1` 增量更新；`IndexInstrumentConfigLoader`
-只从本地快照读取合约正文、当前版本和指数源配置。`application.yml` 中的静态 BTC/ETH 源仅作为
-明确关闭 Instrument 配置时的静态运行模式。
+只从本地快照读取合约正文、当前版本和指数源配置。指数服务不再支持 YAML 静态 symbol 或数据库兜底，
+快照未就绪时拒绝启动行情流量。
 
 标记价格编码遵循同一边界：当前版本、合约正文和报价资产精度统一由本地不可变快照读取。
 指数审计保留任务也由 Service 编排：先锁定一批
@@ -199,10 +199,8 @@ markPrice = clamp(rawMark, indexPrice * (1 - clampRatio), indexPrice * (1 + clam
 | `surprising.price.index.calculation.outlier-threshold` | `0.01` | 指数成分偏离中位数超过 1% 时剔除。 |
 | `surprising.price.index.calculation.min-valid-sources` | `3` | 每个 symbol 最少有效外部源数量。 |
 | `surprising.price.index.web-socket.idle-timeout` | `20s` | 外部 WS 无任何帧超过该时间后重连。 |
+| `surprising.price.index.web-socket.refresh-delay-ms` | `30000` | 外部 WS 连接和订阅刷新周期。 |
 | `surprising.price.index.web-socket.reconnect-max-delay` | `30s` | 外部 WS 最大重连退避。 |
-| `surprising.price.index.instrument.enabled` | `true` | 从 `surprising-instrument` 数据表动态读取 symbol 和指数源。 |
-| `surprising.price.index.instrument.refresh-delay-ms` | `30000` | instrument 快照刷新周期。 |
-| `surprising.price.index.instrument.fallback-to-static-symbols` | `true` | instrument 表为空或不可用时使用 YAML 静态 symbol。 |
 | `surprising.price.index.coordination.lease-duration` | `15s` | 指数价格 symbol 租约时长。 |
 | `surprising.price.index.fiat.refresh-delay-ms` | `3600000` | 法币汇率刷新周期。 |
 | `surprising.price.index.fiat.stable-coin.refresh-delay-ms` | `10000` | USDT/USD 稳定币桥接刷新周期。 |

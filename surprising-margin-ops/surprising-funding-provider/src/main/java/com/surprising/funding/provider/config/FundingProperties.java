@@ -67,7 +67,6 @@ public class FundingProperties {
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
         private boolean productTopicsEnabled;
         private String fundingRateTopic = "surprising.perp.funding.rate.v1";
-        private String instrumentEventsTopic = "surprising.instrument.events.v1";
         private String cacheGroupId = "surprising-funding-rate-cache-local";
         private int concurrency = 1;
         private int commandResultsConcurrency = 4;
@@ -109,14 +108,6 @@ public class FundingProperties {
 
         public void setFundingRateTopic(String fundingRateTopic) {
             this.fundingRateTopic = fundingRateTopic;
-        }
-
-        public String getInstrumentEventsTopic() {
-            return instrumentEventsTopic;
-        }
-
-        public void setInstrumentEventsTopic(String instrumentEventsTopic) {
-            this.instrumentEventsTopic = instrumentEventsTopic;
         }
 
         public String getInstrumentSnapshotGroupId() {

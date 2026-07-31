@@ -85,10 +85,6 @@ public class MarkPriceProperties {
         return !kafka.productTopicsEnabled || kafka.productLine.isFundingProduct();
     }
 
-    public String instrumentEventsTopic() {
-        return "surprising.instrument.events.v1";
-    }
-
     public String markPriceTopic() {
         return kafka.productTopicsEnabled ? productTopics().markPriceTopic() : topics.getMarkPriceTopic();
     }

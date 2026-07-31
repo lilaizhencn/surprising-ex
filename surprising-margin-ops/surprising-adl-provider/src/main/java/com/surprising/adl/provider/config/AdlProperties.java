@@ -42,7 +42,6 @@ public class AdlProperties {
         private boolean productTopicsEnabled;
         private String bootstrapServers = "localhost:9092";
         private String positionRiskEventsTopic = "surprising.risk.position.events.v1";
-        private String instrumentEventsTopic = "surprising.instrument.events.v1";
         private String groupId = "surprising-adl-risk-index-v1";
 
         public ProductLine getProductLine() {
@@ -70,8 +69,6 @@ public class AdlProperties {
             return productTopicsEnabled ? productTopics().positionRiskEventsTopic() : positionRiskEventsTopic;
         }
         public void setPositionRiskEventsTopic(String positionRiskEventsTopic) { this.positionRiskEventsTopic = positionRiskEventsTopic; }
-        public String getInstrumentEventsTopic() { return instrumentEventsTopic; }
-        public void setInstrumentEventsTopic(String instrumentEventsTopic) { this.instrumentEventsTopic = instrumentEventsTopic; }
         public String getInstrumentSnapshotGroupId() {
             return "surprising-" + productLine.topicSegment() + "-adl-instrument-snapshot-v1";
         }

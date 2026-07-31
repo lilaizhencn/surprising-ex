@@ -60,7 +60,6 @@ surprising:
         risk-engines: ${MATCHING_RISK_SHARDS:2}
         order-book-depth-for-post-only: 1
         order-book-depth-levels: 50
-        initial-symbol-refresh-delay-ms: 30000
       recovery:
         open-order-book-restore-enabled: true
         open-order-batch-size: 10000

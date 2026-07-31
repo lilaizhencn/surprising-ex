@@ -2,6 +2,7 @@ package com.surprising.insurance.provider.service;
 
 import com.surprising.insurance.provider.config.InsuranceProperties;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
 import com.surprising.instrument.api.client.InstrumentRpcApi;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
@@ -27,13 +28,6 @@ public class InstrumentSnapshotInitializer {
     @PostConstruct
     public void initialize() {
         var productLine = properties.getKafka().getProductLine();
-        var snapshot = instrumentRpcApi.snapshot(productLine);
-        if (snapshot == null || snapshot.productLine() != productLine) {
-            throw new IllegalStateException("保险基金服务合约快照产品线不匹配: " + productLine);
-        }
-        snapshotCache.replace(productLine, snapshot.instruments(), snapshot.assetScales());
-        if (!snapshotCache.ready(productLine)) {
-            throw new IllegalStateException("保险基金服务合约快照为空，拒绝启动资金流量: " + productLine);
-        }
+        InstrumentSnapshotSupport.initialize(instrumentRpcApi, snapshotCache, productLine, "保险基金服务");
     }
 }

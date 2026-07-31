@@ -211,7 +211,6 @@ public class MatchingProperties {
         private int riskEngines = 2;
         private int orderBookDepthForPostOnly = 1;
         private int orderBookDepthLevels = 50;
-        private int initialSymbolRefreshDelayMs = 30000;
 
         public String getExchangeId() {
             return exchangeId;
@@ -261,13 +260,6 @@ public class MatchingProperties {
             this.orderBookDepthLevels = orderBookDepthLevels;
         }
 
-        public int getInitialSymbolRefreshDelayMs() {
-            return initialSymbolRefreshDelayMs;
-        }
-
-        public void setInitialSymbolRefreshDelayMs(int initialSymbolRefreshDelayMs) {
-            this.initialSymbolRefreshDelayMs = initialSymbolRefreshDelayMs;
-        }
     }
 
     public static class Recovery {

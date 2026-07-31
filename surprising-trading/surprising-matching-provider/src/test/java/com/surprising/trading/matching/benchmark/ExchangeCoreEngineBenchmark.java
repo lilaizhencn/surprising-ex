@@ -139,7 +139,7 @@ public final class ExchangeCoreEngineBenchmark {
     private static final class FixedMatchingSymbolRepository extends MatchingSymbolService {
 
         private FixedMatchingSymbolRepository() {
-            super(null, null, null, new MatchingProperties(), null);
+            super(new MatchingProperties(), null);
         }
 
         @Override

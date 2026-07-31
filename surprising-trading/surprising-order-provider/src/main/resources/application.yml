@@ -50,7 +50,6 @@ surprising:
         account-command-results-concurrency: ${ORDER_ACCOUNT_COMMAND_RESULTS_CONCURRENCY:32}
         order-commands-topic: surprising.perp.order.commands.v1
         order-events-topic: surprising.perp.order.events.v1
-        instrument-events-topic: surprising.instrument.events.v1
         instrument-lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1
       redis-index:
         key-prefix: surprising:order:v1

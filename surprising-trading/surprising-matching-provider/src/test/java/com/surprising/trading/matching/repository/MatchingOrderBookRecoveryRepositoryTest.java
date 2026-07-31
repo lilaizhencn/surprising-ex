@@ -19,7 +19,7 @@ class MatchingOrderBookRecoveryRepositoryTest {
 
         repository.recoverableOpenOrdersAfter(Instant.EPOCH, 0L, 100);
 
-        assertThat(jdbcTemplate.sql).contains("i.status IN ('TRADING', 'HALT')");
+        assertThat(jdbcTemplate.sql).doesNotContain("JOIN instruments");
         assertThat(jdbcTemplate.sql).doesNotContain("SETTLING");
         assertThat(jdbcTemplate.sql).doesNotContain("i.contract_type = ?");
         assertThat(jdbcTemplate.sql).doesNotContain("o.product_line = ?");

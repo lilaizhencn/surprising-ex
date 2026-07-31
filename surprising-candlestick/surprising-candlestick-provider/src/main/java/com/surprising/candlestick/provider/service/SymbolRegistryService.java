@@ -3,6 +3,7 @@ package com.surprising.candlestick.provider.service;
 import com.surprising.candlestick.provider.aggregation.CandleKey;
 import com.surprising.candlestick.provider.config.CandlestickProperties;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
 import com.surprising.instrument.api.client.InstrumentRpcApi;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
@@ -32,14 +33,7 @@ public class SymbolRegistryService {
     @PostConstruct
     public void initialize() {
         var productLine = properties.getKafka().getProductLine();
-        var snapshot = instrumentRpcApi.snapshot(productLine);
-        if (snapshot == null || snapshot.productLine() != productLine) {
-            throw new IllegalStateException("K 线服务合约快照产品线不匹配: " + productLine);
-        }
-        snapshotCache.replace(productLine, snapshot.instruments(), snapshot.assetScales());
-        if (!snapshotCache.ready(productLine)) {
-            throw new IllegalStateException("K 线服务合约快照为空，拒绝启动行情流量: " + productLine);
-        }
+        InstrumentSnapshotSupport.initialize(instrumentRpcApi, snapshotCache, productLine, "K 线服务");
         refresh();
     }
 

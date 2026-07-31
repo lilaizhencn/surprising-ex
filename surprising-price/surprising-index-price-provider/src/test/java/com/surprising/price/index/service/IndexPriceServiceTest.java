@@ -30,7 +30,6 @@ class IndexPriceServiceTest {
         properties.getKafka().setProductLine(ProductLine.OPTION);
         properties.getKafka().setProductTopicsEnabled(true);
         IndexPriceProperties.SymbolConfig symbol = symbol("BTC-USDT-260925-70000-C");
-        properties.setSymbols(List.of(symbol));
         IndexInstrumentConfigService configService = mock(IndexInstrumentConfigService.class);
         ExternalSpotPriceClient spotPriceClient = mock(ExternalSpotPriceClient.class);
         LatestSourceQuoteStore latestQuoteStore = mock(LatestSourceQuoteStore.class);
@@ -61,7 +60,6 @@ class IndexPriceServiceTest {
         IndexPriceProperties properties = new IndexPriceProperties();
         properties.getCoordination().setEnabled(false);
         properties.getCalculation().setMinValidSources(3);
-        properties.getInstrument().setEnabled(false);
         return properties;
     }
 

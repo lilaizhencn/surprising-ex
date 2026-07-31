@@ -319,16 +319,17 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 `surprising-matching-provider` 启动时通过 Instrument 内部聚合 RPC 加载本产品线 JVM 快照，从快照中筛选 `TRADING`
 symbol，并为 exchange-core 建立稳定的 `symbolId`、asset/currency id：
 
-- symbol 和 asset 映射只在定时 symbol 刷新阶段加载。command 热路径读取原子替换的内存活跃 symbol 快照，不再逐单查询 instrument、matching symbol 或 matching asset 表。
+- symbol 和 asset 映射只在启动及 Instrument Kafka 增量事件到达时加载。command 热路径读取内存活跃 symbol 快照，不再逐单查询 instrument、matching symbol 或 matching asset 表。
 - symbol 从当前可交易集合移除后，会在下一次成功刷新后拒绝新 command。为保证已有订单簿安全，其 exchange-core 注册仍保留在当前进程内，但新 command 已无法访问。
-- 撮合结果、成交、订单状态、撮合资产和撮合交易对分别使用单表 Repository；跨表事务由
-  `MatchingPersistenceService`、`MatchingSymbolService` 聚合。合约正文、当前版本和可交易状态统一从
+- 撮合结果、成交、订单状态分别使用单表 Repository；跨表事务由
+  `MatchingPersistenceService` 聚合。合约正文、当前版本和可交易状态统一从
   本地 JVM 快照读取，运行中由 Instrument Kafka 增量事件更新。
 - 启动订单簿恢复只联合读取订单与撮合结果业务状态，合约状态由 JVM 快照校验，不再 JOIN 合约表；
   源码中文注释说明了该多表业务查询的不可拆原因。
 
-- `trading_matching_assets`
-- `trading_matching_symbols`
+撮合资产和交易对编号不再持久化到数据库，由 `MatchingSymbolService` 按产品线和标准化名称稳定哈希派生，
+并以 JVM 反向索引检测编号碰撞。历史订单和恢复数据仍使用 symbol 字符串，不依赖旧映射表。
+已部署数据库中的旧映射表不会由应用自动删除，完成全量升级和恢复验证后再安排独立数据库变更窗口清理。
 
 symbol 在 exchange-core 内注册为 `CURRENCY_EXCHANGE_PAIR`。这是有意设计：exchange-core 在这里只作为确定性的 long 订单簿和撮合器使用；合约保证金、交易手续费、强平、资金费率、保险基金和 ADL 都由外围服务负责。
 
@@ -488,8 +489,6 @@ curl 'http://localhost:9084/api/v1/trading/orders/open?userId=1001&symbol=BTC-US
 - `trading_trigger_orders`
 - `trading_outbox_events`
 - `account_position_margins`
-- `trading_matching_assets`
-- `trading_matching_symbols`
 - `trading_match_results`
 - `trading_match_trades`
 

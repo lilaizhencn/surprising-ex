@@ -2,6 +2,9 @@ package com.surprising.product.api;
 
 public record ProductTopicNames(ProductLine productLine, String namespace) {
 
+    /** Instrument 是全局事实源，所有产品线共享同一个配置事件 Topic。 */
+    public static final String INSTRUMENT_EVENTS_TOPIC = "surprising.instrument.events.v1";
+
     public ProductTopicNames {
         if (productLine == null) {
             throw new IllegalArgumentException("productLine is required");
@@ -63,12 +66,10 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("candle.events");
     }
 
-    /**
-     * 产品线隔离的 Instrument 配置事件 Topic。
-     */
+    /** 全局 Instrument 配置事件 Topic；产品线由事件载荷和本地快照隔离。 */
     public String instrumentEventsTopic() {
         // Instrument 配置是全局事实源，所有产品线共用一个事件 Topic，靠 key 和 payload 隔离产品线。
-        return "surprising.instrument.events.v1";
+        return INSTRUMENT_EVENTS_TOPIC;
     }
 
     public String accountPositionEventsTopic() {

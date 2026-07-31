@@ -814,8 +814,6 @@ CREATE SEQUENCE IF NOT EXISTS trading_command_seq AS BIGINT START WITH 1 INCREME
 CREATE SEQUENCE IF NOT EXISTS trading_outbox_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_spot_reservation_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_fee_schedule_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
-CREATE SEQUENCE IF NOT EXISTS trading_matching_symbol_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
-CREATE SEQUENCE IF NOT EXISTS trading_matching_asset_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 CREATE SEQUENCE IF NOT EXISTS trading_trigger_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 CREATE SEQUENCE IF NOT EXISTS trading_algo_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 
@@ -1605,80 +1603,6 @@ CREATE INDEX IF NOT EXISTS trading_outbox_aggregate_idx
 CREATE INDEX IF NOT EXISTS trading_outbox_events_trace_idx
     ON trading_outbox_events ((payload ->> 'traceId'))
     WHERE payload ? 'traceId';
-
-CREATE TABLE IF NOT EXISTS trading_matching_assets (
-    asset               TEXT PRIMARY KEY,
-    asset_id            INTEGER NOT NULL UNIQUE,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT trading_matching_assets_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
-    CONSTRAINT trading_matching_assets_asset_id_positive CHECK (asset_id > 0)
-);
-
-CREATE TABLE IF NOT EXISTS trading_matching_symbols (
-    product_line        TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
-    symbol              TEXT PRIMARY KEY,
-    symbol_id           INTEGER NOT NULL UNIQUE,
-    base_asset          TEXT NOT NULL,
-    quote_asset         TEXT NOT NULL,
-    settle_asset        TEXT NOT NULL,
-    base_currency_id    INTEGER NOT NULL,
-    quote_currency_id   INTEGER NOT NULL,
-    enabled             BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT trading_matching_symbols_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
-    CONSTRAINT trading_matching_symbols_product_line_check CHECK (
-        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-    ),
-    CONSTRAINT trading_matching_symbols_symbol_id_positive CHECK (symbol_id > 0),
-    CONSTRAINT trading_matching_symbols_base_asset_fk
-        FOREIGN KEY (base_asset) REFERENCES trading_matching_assets(asset),
-    CONSTRAINT trading_matching_symbols_quote_asset_fk
-        FOREIGN KEY (quote_asset) REFERENCES trading_matching_assets(asset),
-    CONSTRAINT trading_matching_symbols_settle_asset_fk
-        FOREIGN KEY (settle_asset) REFERENCES trading_matching_assets(asset)
-);
-
-ALTER TABLE trading_matching_symbols
-    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
-
-UPDATE trading_matching_symbols s
-   SET product_line = CASE i.contract_type
-       WHEN 'SPOT' THEN 'SPOT'
-       WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-       WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-       WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-       WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-       WHEN 'VANILLA_OPTION' THEN 'OPTION'
-       ELSE s.product_line
-   END
-  FROM instruments i
-  JOIN instrument_current_versions c
-    ON c.symbol = i.symbol AND c.version = i.version
- WHERE i.symbol = s.symbol;
-
-ALTER TABLE trading_matching_symbols
-    DROP CONSTRAINT IF EXISTS trading_matching_symbols_pkey;
-
-ALTER TABLE trading_matching_symbols
-    DROP CONSTRAINT IF EXISTS trading_matching_symbols_product_line_check;
-
-ALTER TABLE trading_matching_symbols
-    ADD CONSTRAINT trading_matching_symbols_product_line_check CHECK (
-        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-    );
-
-ALTER TABLE trading_matching_symbols
-    ADD CONSTRAINT trading_matching_symbols_pkey PRIMARY KEY (product_line, symbol);
-
-DROP INDEX IF EXISTS trading_matching_symbols_enabled_idx;
-CREATE INDEX IF NOT EXISTS trading_matching_symbols_enabled_idx
-    ON trading_matching_symbols (product_line, enabled, symbol_id);
-
-CREATE INDEX IF NOT EXISTS trading_matching_symbols_symbol_idx
-    ON trading_matching_symbols (symbol);
 
 CREATE TABLE IF NOT EXISTS trading_match_results (
     command_id              BIGINT PRIMARY KEY,

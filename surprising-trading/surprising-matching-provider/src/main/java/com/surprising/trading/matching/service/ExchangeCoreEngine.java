@@ -35,11 +35,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.DependsOn;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
+@DependsOn("instrumentSnapshotInitializer")
 public class ExchangeCoreEngine {
 
     private static final Logger log = LoggerFactory.getLogger(ExchangeCoreEngine.class);

@@ -1,9 +1,10 @@
 package com.surprising.funding.provider.service;
 
 import com.surprising.funding.provider.config.FundingProperties;
-import com.surprising.instrument.api.InstrumentEventKeys;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
 import com.surprising.instrument.api.model.InstrumentEvent;
+import com.surprising.product.api.ProductTopicNames;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
@@ -30,18 +31,15 @@ public class InstrumentSnapshotConsumer {
     public void onInstrumentEvent(ConsumerRecord<String, String> record) {
         try {
             InstrumentEvent event = objectMapper.readValue(record.value(), InstrumentEvent.class);
-            if (!InstrumentEventKeys.matches(record.key(), event)
-                    || event.resolvedProductLine() != properties.getKafka().getProductLine()
-                    || !snapshotCache.apply(event)) {
-                throw new IllegalArgumentException("资金费合约事件产品线、key 或快照不匹配");
-            }
+            InstrumentSnapshotSupport.apply(snapshotCache, record.key(), event,
+                    properties.getKafka().getProductLine(), "资金费服务");
         } catch (Exception ex) {
             throw new IllegalStateException("资金费合约快照更新失败", ex);
         }
     }
 
     public String topic() {
-        return properties.getKafka().getInstrumentEventsTopic();
+        return ProductTopicNames.INSTRUMENT_EVENTS_TOPIC;
     }
 
     public String groupId() {

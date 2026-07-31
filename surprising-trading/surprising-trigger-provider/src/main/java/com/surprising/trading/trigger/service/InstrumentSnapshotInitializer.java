@@ -1,6 +1,7 @@
 package com.surprising.trading.trigger.service;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
 import com.surprising.instrument.api.client.InstrumentRpcApi;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import jakarta.annotation.PostConstruct;
@@ -27,13 +28,6 @@ public class InstrumentSnapshotInitializer {
     @PostConstruct
     public void initialize() {
         var productLine = properties.getKafka().getProductLine();
-        var snapshot = instrumentRpcApi.snapshot(productLine);
-        if (snapshot == null || snapshot.productLine() != productLine) {
-            throw new IllegalStateException("条件单服务合约快照产品线不匹配: " + productLine);
-        }
-        snapshotCache.replace(productLine, snapshot.instruments(), snapshot.assetScales());
-        if (!snapshotCache.ready(productLine)) {
-            throw new IllegalStateException("条件单服务合约快照为空，拒绝启动条件单流量: " + productLine);
-        }
+        InstrumentSnapshotSupport.initialize(instrumentRpcApi, snapshotCache, productLine, "条件单服务");
     }
 }

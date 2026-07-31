@@ -160,7 +160,6 @@ public class MarketMakerProperties {
     /** 合约快照事件的消费配置。市场做市只在本地快照上读取合约规格。 */
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
-        private String instrumentEventsTopic = "surprising.instrument.events.v1";
         private String instrumentSnapshotGroupId = "surprising-market-maker-instrument-snapshot-v1";
 
         public String getBootstrapServers() {
@@ -169,14 +168,6 @@ public class MarketMakerProperties {
 
         public void setBootstrapServers(String bootstrapServers) {
             this.bootstrapServers = bootstrapServers;
-        }
-
-        public String getInstrumentEventsTopic() {
-            return instrumentEventsTopic;
-        }
-
-        public void setInstrumentEventsTopic(String instrumentEventsTopic) {
-            this.instrumentEventsTopic = instrumentEventsTopic;
         }
 
         public String getInstrumentSnapshotGroupId() {

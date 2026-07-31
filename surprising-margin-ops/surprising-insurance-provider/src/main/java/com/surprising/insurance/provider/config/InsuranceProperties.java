@@ -40,7 +40,6 @@ public class InsuranceProperties {
         private boolean productTopicsEnabled;
         private String groupId = "surprising-insurance-v1";
         private String liquidationFeeEventsTopic = "surprising.account.liquidation-fee.events.v1";
-        private String instrumentEventsTopic = "surprising.instrument.events.v1";
         private int concurrency = 2;
         private int maxPollRecords = 500;
 
@@ -84,14 +83,6 @@ public class InsuranceProperties {
 
         public void setLiquidationFeeEventsTopic(String liquidationFeeEventsTopic) {
             this.liquidationFeeEventsTopic = liquidationFeeEventsTopic;
-        }
-
-        public String getInstrumentEventsTopic() {
-            return instrumentEventsTopic;
-        }
-
-        public void setInstrumentEventsTopic(String instrumentEventsTopic) {
-            this.instrumentEventsTopic = instrumentEventsTopic;
         }
 
         public String getInstrumentSnapshotGroupId() {

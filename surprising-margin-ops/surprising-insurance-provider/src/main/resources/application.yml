@@ -34,7 +34,6 @@ surprising:
       product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       group-id: surprising-insurance-v1
       liquidation-fee-events-topic: surprising.account.liquidation-fee.events.v1
-      instrument-events-topic: surprising.instrument.events.v1
       concurrency: 2
       max-poll-records: 500
     coverage:

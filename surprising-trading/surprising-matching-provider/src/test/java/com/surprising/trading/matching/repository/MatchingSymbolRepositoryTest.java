@@ -1,7 +1,6 @@
 package com.surprising.trading.matching.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.verify;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.ContractType;
@@ -14,9 +13,8 @@ import com.surprising.trading.matching.service.MatchingSymbolService;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
 
-class MatchingSymbolRepositoryTest {
+class MatchingSymbolServiceTest {
 
     @Test
     void leavesTradingSymbolLookupUnfilteredForLegacyTopics() {
@@ -54,22 +52,24 @@ class MatchingSymbolRepositoryTest {
     }
 
     @Test
-    void findsMatchingSymbolWithinCurrentProductLine() {
-        RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
+    void derivesStableMatchingIdsFromInstrumentSnapshot() {
         MatchingProperties properties = new MatchingProperties();
-        properties.getKafka().setProductLine(ProductLine.SPOT);
-        properties.getKafka().setProductTopicsEnabled(true);
-        MatchingSymbolRepository repository = new MatchingSymbolRepository(jdbcTemplate, properties);
+        InstrumentSnapshotCache cache = cache(ProductLine.LINEAR_PERPETUAL,
+                instrument("BTC-USDT", 1L));
+        MatchingSymbolService service = service(properties, cache);
+        MatchingSymbolService restartedService = service(properties, cache);
 
-        repository.find("BTC-USDT");
+        var first = service.ensureMatchingSymbol(new com.surprising.trading.matching.model.InstrumentSymbol(
+                "BTC-USDT", "BTC", "USDT", "USDT"));
+        var second = restartedService.ensureMatchingSymbol(new com.surprising.trading.matching.model.InstrumentSymbol(
+                "BTC-USDT", "BTC", "USDT", "USDT"));
 
-        assertThat(jdbcTemplate.sql).contains("product_line = ?").contains("symbol = ?");
-        assertThat(jdbcTemplate.args).containsExactly("SPOT", "BTC-USDT");
+        assertThat(second).isEqualTo(first);
+        assertThat(service.existingMatchingSymbol("BTC-USDT")).contains(first);
     }
 
     private MatchingSymbolService service(MatchingProperties properties, InstrumentSnapshotCache cache) {
-        return new MatchingSymbolService(
-                null, null, null, properties, cache);
+        return new MatchingSymbolService(properties, cache);
     }
 
     private InstrumentSnapshotCache cache(ProductLine productLine, InstrumentResponse... instruments) {
@@ -93,15 +93,4 @@ class MatchingSymbolRepositoryTest {
                 InstrumentStatus.TRADING, now, now, now, List.of(), List.of());
     }
 
-    private static final class RecordingJdbcTemplate extends JdbcTemplate {
-        private String sql;
-        private Object[] args = new Object[0];
-
-        @Override
-        public <T> List<T> query(String sql, org.springframework.jdbc.core.RowMapper<T> rowMapper, Object... args) {
-            this.sql = sql;
-            this.args = args == null ? new Object[0] : args;
-            return List.of();
-        }
-    }
 }
