@@ -4,77 +4,63 @@ import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.InstrumentSymbol;
 import com.surprising.trading.matching.model.MatchingSymbol;
 import com.surprising.trading.matching.repository.MatchingAssetRepository;
+import com.surprising.trading.matching.repository.MatchingInstrumentCurrentVersionRepository;
+import com.surprising.trading.matching.repository.MatchingInstrumentRepository;
+import com.surprising.trading.matching.repository.MatchingInstrumentRepository.InstrumentVersion;
 import com.surprising.trading.matching.repository.MatchingSequenceRepository;
 import com.surprising.trading.matching.repository.MatchingSymbolRepository;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 聚合合约快照、撮合资产和撮合交易对。
- *
- * <p>不可拆原因：启用交易对必须让 {@code instrument_current_versions} 指针与
- * {@code instruments} 版本正文在同一 SQL 快照中校验状态和产品线。拆成两次查询会在版本切换时
- * 短暂加载已停用版本，因此该 JOIN 保留在 Service；两个撮合 Repository 仍各自只访问一张表。</p>
+ * 当前版本与品种正文通过两个单表 Repository 读取，并由只读可重复读事务保证同一快照。
  */
 @Service
 public class MatchingSymbolService {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final MatchingInstrumentRepository instrumentRepository;
+    private final MatchingInstrumentCurrentVersionRepository currentVersionRepository;
     private final MatchingAssetRepository assetRepository;
     private final MatchingSymbolRepository symbolRepository;
     private final MatchingSequenceRepository sequenceRepository;
     private final MatchingProperties properties;
 
-    public MatchingSymbolService(JdbcTemplate jdbcTemplate,
+    public MatchingSymbolService(MatchingInstrumentRepository instrumentRepository,
+                                 MatchingInstrumentCurrentVersionRepository currentVersionRepository,
                                  MatchingAssetRepository assetRepository,
                                  MatchingSymbolRepository symbolRepository,
                                  MatchingSequenceRepository sequenceRepository,
                                  MatchingProperties properties) {
-        this.jdbcTemplate = jdbcTemplate;
+        this.instrumentRepository = instrumentRepository;
+        this.currentVersionRepository = currentVersionRepository;
         this.assetRepository = assetRepository;
         this.symbolRepository = symbolRepository;
         this.sequenceRepository = sequenceRepository;
         this.properties = properties;
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public List<InstrumentSymbol> currentTradingSymbols() {
-        StringBuilder sql = new StringBuilder("""
-                SELECT i.symbol, i.base_asset, i.quote_asset, i.settle_asset
-                  FROM instruments i
-                  JOIN instrument_current_versions c
-                    ON c.symbol = i.symbol AND c.version = i.version
-                 WHERE i.status IN ('TRADING', 'HALT')
-                """);
-        List<Object> args = new ArrayList<>();
-        productContractTypeFilter().ifPresent(contractType -> {
-            sql.append("   AND i.contract_type = ?\n");
-            args.add(contractType);
-        });
-        sql.append(" ORDER BY i.symbol ASC");
-        return jdbcTemplate.query(sql.toString(), instrumentMapper(), args.toArray());
+        Map<String, Long> currentVersions = currentVersionRepository.findAll();
+        return instrumentRepository.findTradingVersions(productContractTypeFilter().orElse(null)).stream()
+                .filter(instrument -> currentVersions.getOrDefault(instrument.symbol(), -1L)
+                        == instrument.version())
+                .map(InstrumentVersion::toInstrumentSymbol)
+                .toList();
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Optional<InstrumentSymbol> currentTradingSymbol(String symbol) {
-        StringBuilder sql = new StringBuilder("""
-                SELECT i.symbol, i.base_asset, i.quote_asset, i.settle_asset
-                  FROM instruments i
-                  JOIN instrument_current_versions c
-                    ON c.symbol = i.symbol AND c.version = i.version
-                 WHERE i.symbol = ? AND i.status IN ('TRADING', 'HALT')
-                """);
-        List<Object> args = new ArrayList<>();
-        args.add(symbol);
-        productContractTypeFilter().ifPresent(contractType -> {
-            sql.append("   AND i.contract_type = ?\n");
-            args.add(contractType);
-        });
-        return jdbcTemplate.query(sql.toString(), instrumentMapper(), args.toArray()).stream().findFirst();
+        return currentVersionRepository.findVersion(symbol)
+                .flatMap(version -> instrumentRepository.findTrading(
+                        symbol, version, productContractTypeFilter().orElse(null)))
+                .map(InstrumentVersion::toInstrumentSymbol);
     }
 
     @Transactional
@@ -109,13 +95,5 @@ public class MatchingSymbolService {
         return kafka.isProductTopicsEnabled()
                 ? Optional.of(kafka.getProductLine().contractTypeCode())
                 : Optional.empty();
-    }
-
-    private RowMapper<InstrumentSymbol> instrumentMapper() {
-        return (rs, rowNum) -> new InstrumentSymbol(
-                rs.getString("symbol"),
-                rs.getString("base_asset"),
-                rs.getString("quote_asset"),
-                rs.getString("settle_asset"));
     }
 }

@@ -1,58 +1,71 @@
 package com.surprising.trading.matching.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.matching.config.MatchingProperties;
+import com.surprising.trading.matching.repository.MatchingInstrumentRepository.InstrumentVersion;
 import com.surprising.trading.matching.service.MatchingSymbolService;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
 
 class MatchingSymbolRepositoryTest {
 
     @Test
     void leavesTradingSymbolLookupUnfilteredForLegacyTopics() {
-        RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-        MatchingSymbolService service = service(jdbcTemplate, new MatchingProperties());
+        MatchingInstrumentRepository instrumentRepository = mock(MatchingInstrumentRepository.class);
+        MatchingInstrumentCurrentVersionRepository currentVersionRepository =
+                mock(MatchingInstrumentCurrentVersionRepository.class);
+        when(currentVersionRepository.findAll()).thenReturn(Map.of("BTC-USDT", 2L));
+        when(instrumentRepository.findTradingVersions(null)).thenReturn(List.of(
+                instrument("BTC-USDT", 1L),
+                instrument("BTC-USDT", 2L)));
+        MatchingSymbolService service = service(
+                instrumentRepository, currentVersionRepository, new MatchingProperties());
 
-        service.currentTradingSymbols();
-
-        assertThat(jdbcTemplate.sql).contains("i.status IN ('TRADING', 'HALT')");
-        assertThat(jdbcTemplate.sql).doesNotContain("SETTLING");
-        assertThat(jdbcTemplate.sql).doesNotContain("i.contract_type = ?");
-        assertThat(jdbcTemplate.args).isEmpty();
+        assertThat(service.currentTradingSymbols())
+                .extracting(com.surprising.trading.matching.model.InstrumentSymbol::symbol)
+                .containsExactly("BTC-USDT");
+        verify(instrumentRepository).findTradingVersions(null);
     }
 
     @Test
     void filtersTradingSymbolsByProductLineWhenProductTopicsAreEnabled() {
-        RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
+        MatchingInstrumentRepository instrumentRepository = mock(MatchingInstrumentRepository.class);
+        MatchingInstrumentCurrentVersionRepository currentVersionRepository =
+                mock(MatchingInstrumentCurrentVersionRepository.class);
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
-        MatchingSymbolService service = service(jdbcTemplate, properties);
+        when(currentVersionRepository.findAll()).thenReturn(Map.of());
+        MatchingSymbolService service = service(instrumentRepository, currentVersionRepository, properties);
 
         service.currentTradingSymbols();
 
-        assertThat(jdbcTemplate.sql).contains("i.contract_type = ?");
-        assertThat(jdbcTemplate.args).containsExactly("LINEAR_DELIVERY");
+        verify(instrumentRepository).findTradingVersions("LINEAR_DELIVERY");
     }
 
     @Test
     void filtersSingleSymbolLookupByProductLineWhenProductTopicsAreEnabled() {
-        RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
+        MatchingInstrumentRepository instrumentRepository = mock(MatchingInstrumentRepository.class);
+        MatchingInstrumentCurrentVersionRepository currentVersionRepository =
+                mock(MatchingInstrumentCurrentVersionRepository.class);
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
-        MatchingSymbolService service = service(jdbcTemplate, properties);
+        when(currentVersionRepository.findVersion("BTC-USD-240927")).thenReturn(Optional.of(7L));
+        when(instrumentRepository.findTrading("BTC-USD-240927", 7L, "INVERSE_DELIVERY"))
+                .thenReturn(Optional.of(instrument("BTC-USD-240927", 7L)));
+        MatchingSymbolService service = service(instrumentRepository, currentVersionRepository, properties);
 
-        service.currentTradingSymbol("BTC-USD-240927");
-
-        assertThat(jdbcTemplate.sql).contains("i.status IN ('TRADING', 'HALT')");
-        assertThat(jdbcTemplate.sql).doesNotContain("SETTLING");
-        assertThat(jdbcTemplate.sql).contains("i.symbol = ?").contains("i.contract_type = ?");
-        assertThat(jdbcTemplate.args).containsExactly("BTC-USD-240927", "INVERSE_DELIVERY");
+        assertThat(service.currentTradingSymbol("BTC-USD-240927")).isPresent();
+        verify(instrumentRepository).findTrading("BTC-USD-240927", 7L, "INVERSE_DELIVERY");
     }
 
     @Test
@@ -69,8 +82,15 @@ class MatchingSymbolRepositoryTest {
         assertThat(jdbcTemplate.args).containsExactly("SPOT", "BTC-USDT");
     }
 
-    private MatchingSymbolService service(JdbcTemplate jdbcTemplate, MatchingProperties properties) {
-        return new MatchingSymbolService(jdbcTemplate, null, null, null, properties);
+    private MatchingSymbolService service(MatchingInstrumentRepository instrumentRepository,
+                                          MatchingInstrumentCurrentVersionRepository currentVersionRepository,
+                                          MatchingProperties properties) {
+        return new MatchingSymbolService(
+                instrumentRepository, currentVersionRepository, null, null, null, properties);
+    }
+
+    private InstrumentVersion instrument(String symbol, long version) {
+        return new InstrumentVersion(symbol, version, "BTC", "USDT", "USDT");
     }
 
     private static final class RecordingJdbcTemplate extends JdbcTemplate {
@@ -78,7 +98,7 @@ class MatchingSymbolRepositoryTest {
         private Object[] args = new Object[0];
 
         @Override
-        public <T> List<T> query(String sql, RowMapper<T> rowMapper, Object... args) {
+        public <T> List<T> query(String sql, org.springframework.jdbc.core.RowMapper<T> rowMapper, Object... args) {
             this.sql = sql;
             this.args = args == null ? new Object[0] : args;
             return List.of();

@@ -322,8 +322,9 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - symbol 和 asset 映射只在定时 symbol 刷新阶段加载。command 热路径读取原子替换的内存活跃 symbol 快照，不再逐单查询 instrument、matching symbol 或 matching asset 表。
 - symbol 从当前可交易集合移除后，会在下一次成功刷新后拒绝新 command。为保证已有订单簿安全，其 exchange-core 注册仍保留在当前进程内，但新 command 已无法访问。
 - 撮合结果、成交、订单状态、撮合资产和撮合交易对分别使用单表 Repository；跨表事务由
-  `MatchingPersistenceService`、`MatchingSymbolService` 聚合。只有启动订单簿恢复保留一致快照 JOIN，
-  并在源码中文注释中说明不可拆原因。
+  `MatchingPersistenceService`、`MatchingSymbolService` 聚合；`instruments` 与
+  `instrument_current_versions` 也分别由单表 Repository 读取，当前版本筛选在可重复读事务中完成。
+  只有启动订单簿恢复保留一致快照 JOIN，并在源码中文注释中说明不可拆原因。
 
 - `trading_matching_assets`
 - `trading_matching_symbols`

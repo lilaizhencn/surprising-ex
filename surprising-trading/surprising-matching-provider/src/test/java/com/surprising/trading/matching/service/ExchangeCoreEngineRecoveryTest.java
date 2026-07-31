@@ -137,7 +137,7 @@ class ExchangeCoreEngineRecoveryTest {
         private volatile boolean active = true;
 
         FakeMatchingSymbolRepository(InstrumentSymbol instrument, MatchingSymbol matchingSymbol) {
-            super(null, null, null, null, new MatchingProperties());
+            super(null, null, null, null, null, new MatchingProperties());
             this.instrument = instrument;
             this.matchingSymbol = matchingSymbol;
         }

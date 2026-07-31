@@ -330,8 +330,10 @@ Production product topics are fixed at `32` partitions and keyed by symbol. All 
 - Symbol and asset mappings are loaded during the scheduled symbol refresh. The command hot path reads an atomically replaced in-memory active-symbol snapshot and does not query instrument, matching-symbol, or matching-asset tables per order.
 - A symbol removed from the current tradable set is rejected after the next successful refresh. Its exchange-core registration remains process-local for existing book safety but is no longer reachable by new commands.
 - Matching results, trades, order state, matching assets, and matching symbols use separate single-table repositories.
-  `MatchingPersistenceService` and `MatchingSymbolService` aggregate them. Only startup order-book recovery keeps a
-  consistent-snapshot join, with the non-splittable reason documented in the source.
+  `instruments` and `instrument_current_versions` also use separate repositories.
+  `MatchingPersistenceService` and `MatchingSymbolService` aggregate them; current-version selection runs in a
+  repeatable-read transaction. Only startup order-book recovery keeps a consistent-snapshot join, with the
+  non-splittable reason documented in the source.
 
 - `trading_matching_assets`
 - `trading_matching_symbols`
