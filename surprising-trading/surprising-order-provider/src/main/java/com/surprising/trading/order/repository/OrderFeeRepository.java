@@ -7,7 +7,8 @@ import com.surprising.trading.api.model.FeeScheduleSourceType;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineSql;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -23,8 +24,8 @@ import org.springframework.stereotype.Repository;
 /**
  * 订单费率仓储。
  *
- * <p>不可拆原因：下单费率快照必须把 instrument 基础费率与生效中的用户费率按优先级一次解析；
- * 分次读取遇到费率启停或 instrument 版本切换时，会把不同时间点的费率组合到同一订单。
+ * <p>不可拆原因：下单费率快照必须把 JVM 合约基础费率与生效中的用户费率按优先级一次解析；
+ * 分次读取遇到费率启停或合约版本切换时，会把不同时间点的费率组合到同一订单。
  * 其余费率计划读写均只操作 {@code trading_fee_schedules} 表。</p>
  */
 @Repository
@@ -43,63 +44,99 @@ public class OrderFeeRepository {
             new AdminCursorPage.SortSpec("effectiveTime", "effective_time", "fee_schedule_id", false));
 
     private final JdbcTemplate jdbcTemplate;
+    private final InstrumentSnapshotCache snapshotCache;
+    private final TradingOrderProperties properties;
 
     public OrderFeeRepository(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, null, new TradingOrderProperties());
+    }
+
+    /** 保留旧构造签名；运行时产品线由配置属性明确限定。 */
+    public OrderFeeRepository(JdbcTemplate jdbcTemplate, InstrumentSnapshotCache snapshotCache) {
+        this(jdbcTemplate, snapshotCache, new TradingOrderProperties());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public OrderFeeRepository(JdbcTemplate jdbcTemplate,
+                              InstrumentSnapshotCache snapshotCache,
+                              TradingOrderProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
+        this.snapshotCache = snapshotCache;
+        this.properties = properties;
     }
 
     public Optional<OrderFeeSnapshot> snapshot(long userId, String symbol, long instrumentVersion, Instant now) {
+        ProductLine configuredProductLine = properties == null ? null : properties.getKafka().getProductLine();
+        return snapshot(configuredProductLine, userId, symbol, instrumentVersion, now);
+    }
+
+    /**
+     * 按明确产品线读取费率；产品线由订单入口传入，避免同名合约在不同产品线之间串用。
+     */
+    public Optional<OrderFeeSnapshot> snapshot(ProductLine requestedProductLine,
+                                               long userId,
+                                               String symbol,
+                                               long instrumentVersion,
+                                               Instant now) {
+        if (snapshotCache == null) {
+            return Optional.empty();
+        }
+        ProductLine snapshotProductLine = null;
+        com.surprising.instrument.api.model.InstrumentResponse instrument = null;
+        List<ProductLine> candidates = requestedProductLine == null
+                ? List.of(ProductLine.values()) : List.of(requestedProductLine);
+        for (ProductLine candidate : candidates) {
+            var found = snapshotCache.version(candidate, symbol, instrumentVersion);
+            if (found.isPresent()) {
+                snapshotProductLine = candidate;
+                instrument = found.get();
+                break;
+            }
+        }
+        if (instrument == null || snapshotProductLine == null) {
+            return Optional.empty();
+        }
+        final ProductLine productLine = snapshotProductLine;
+        final var instrumentSnapshot = instrument;
         return jdbcTemplate.query("""
-                WITH instrument_fee AS (
-                    SELECT maker_fee_rate_ppm,
-                           taker_fee_rate_ppm,
-                           %s AS product_line
-                      FROM instruments
-                     WHERE symbol = ?
-                       AND version = ?
-                ),
-                active_user_fee AS (
-                    SELECT maker_fee_rate_ppm,
-                           taker_fee_rate_ppm,
-                           source_type,
-                           CASE WHEN symbol = ? THEN 0 ELSE 1 END AS priority,
-                           CASE
-                               WHEN symbol IS NULL THEN source_type || '_GLOBAL'
-                               ELSE source_type || '_SYMBOL'
-                           END AS source,
-                           CASE source_type
-                               WHEN 'RISK_OVERRIDE' THEN 0
-                               WHEN 'USER_OVERRIDE' THEN 1
-                               WHEN 'PROMOTION' THEN 2
-                               WHEN 'MARKET_MAKER' THEN 3
-                               WHEN 'VIP' THEN 4
-                               ELSE 5
-                           END AS source_priority,
-                           effective_time,
-                           fee_schedule_id
-                      FROM trading_fee_schedules
-                     WHERE user_id = ?
-                       AND product_line = (SELECT product_line FROM instrument_fee)
-                       AND status = 'ACTIVE'
-                       AND (symbol = ? OR symbol IS NULL)
-                       AND effective_time <= ?
-                       AND (expire_time IS NULL OR expire_time > ?)
-                     ORDER BY priority ASC, source_priority ASC, effective_time DESC, fee_schedule_id DESC
-                     LIMIT 1
-                )
-                SELECT COALESCE(u.maker_fee_rate_ppm, i.maker_fee_rate_ppm) AS maker_fee_rate_ppm,
-                       COALESCE(u.taker_fee_rate_ppm, i.taker_fee_rate_ppm) AS taker_fee_rate_ppm,
-                       i.product_line,
-                       COALESCE(u.source, 'INSTRUMENT') AS source
-                  FROM instrument_fee i
-             LEFT JOIN active_user_fee u ON TRUE
-                """.formatted(ProductLineSql.contractTypeProductLineCase("contract_type")),
-                (rs, rowNum) -> new OrderFeeSnapshot(
-                ProductLine.valueOf(rs.getString("product_line")),
-                rs.getLong("maker_fee_rate_ppm"),
-                rs.getLong("taker_fee_rate_ppm"),
-                rs.getString("source")), symbol, instrumentVersion, symbol, userId, symbol,
-                Timestamp.from(now), Timestamp.from(now)).stream().findFirst();
+                SELECT maker_fee_rate_ppm,
+                       taker_fee_rate_ppm,
+                       source_type,
+                       CASE WHEN symbol = ? THEN 0 ELSE 1 END AS priority,
+                       CASE
+                           WHEN symbol IS NULL THEN source_type || '_GLOBAL'
+                           ELSE source_type || '_SYMBOL'
+                       END AS source,
+                       CASE source_type
+                           WHEN 'RISK_OVERRIDE' THEN 0
+                           WHEN 'USER_OVERRIDE' THEN 1
+                           WHEN 'PROMOTION' THEN 2
+                           WHEN 'MARKET_MAKER' THEN 3
+                           WHEN 'VIP' THEN 4
+                           ELSE 5
+                       END AS source_priority,
+                       effective_time,
+                       fee_schedule_id
+                  FROM trading_fee_schedules
+                 WHERE user_id = ?
+                   AND product_line = ?
+                   AND status = 'ACTIVE'
+                   AND (symbol = ? OR symbol IS NULL)
+                   AND effective_time <= ?
+                   AND (expire_time IS NULL OR expire_time > ?)
+                 ORDER BY priority ASC, source_priority ASC, effective_time DESC, fee_schedule_id DESC
+                 LIMIT 1
+                """, (rs, rowNum) -> {
+            Long maker = rs.getObject("maker_fee_rate_ppm", Long.class);
+            Long taker = rs.getObject("taker_fee_rate_ppm", Long.class);
+            return new OrderFeeSnapshot(productLine,
+                    maker == null ? instrumentSnapshot.makerFeeRatePpm() : maker,
+                    taker == null ? instrumentSnapshot.takerFeeRatePpm() : taker,
+                    maker == null && taker == null ? "INSTRUMENT" : rs.getString("source"));
+        }, symbol, userId, productLine.name(), symbol, Timestamp.from(now), Timestamp.from(now))
+                .stream().findFirst()
+                .or(() -> Optional.of(new OrderFeeSnapshot(productLine, instrumentSnapshot.makerFeeRatePpm(),
+                        instrumentSnapshot.takerFeeRatePpm(), "INSTRUMENT")));
     }
 
     public void upsertSchedule(FeeScheduleUpsertRequest request, long feeScheduleId, Instant now) {

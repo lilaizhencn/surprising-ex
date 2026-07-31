@@ -7,7 +7,7 @@ import java.util.OptionalLong;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** 账户资产精度单表仓储。 */
+/** 账户资产精度快照仓储。 */
 @Repository
 public class AssetScaleRepository {
 
@@ -29,21 +29,13 @@ public class AssetScaleRepository {
     }
 
     public OptionalLong findScaleUnits(String asset) {
-        if (snapshotCache != null) {
-            ProductLine productLine = properties.getKafka().getProductLine();
-            if (snapshotCache.initialized(productLine)) {
-                return snapshotCache.scale(productLine, asset)
-                        .map(OptionalLong::of)
-                        .orElseGet(OptionalLong::empty);
-            }
+        if (snapshotCache == null) {
+            return OptionalLong.empty();
         }
-        return jdbcTemplate.query("""
-                SELECT scale_units
-                  FROM account_asset_scales
-                 WHERE asset = ?
-                """, (rs, rowNum) -> rs.getLong("scale_units"), asset)
-                .stream()
-                .mapToLong(Long::longValue)
-                .findFirst();
+        ProductLine productLine = properties.getKafka().getProductLine();
+        if (!snapshotCache.initialized(productLine)) {
+            throw new IllegalStateException("账户资产精度 JVM 快照尚未就绪");
+        }
+        return snapshotCache.scale(productLine, asset).map(OptionalLong::of).orElseGet(OptionalLong::empty);
     }
 }

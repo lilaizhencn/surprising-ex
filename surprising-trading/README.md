@@ -316,14 +316,16 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
 ## exchange-core 撮合
 
-`surprising-matching-provider` 启动时从 instrument 当前版本加载 `TRADING` symbol，并为 exchange-core 建立稳定的 `symbolId`、asset/currency id：
+`surprising-matching-provider` 启动时通过 Instrument 内部聚合 RPC 加载本产品线 JVM 快照，从快照中筛选 `TRADING`
+symbol，并为 exchange-core 建立稳定的 `symbolId`、asset/currency id：
 
 - symbol 和 asset 映射只在定时 symbol 刷新阶段加载。command 热路径读取原子替换的内存活跃 symbol 快照，不再逐单查询 instrument、matching symbol 或 matching asset 表。
 - symbol 从当前可交易集合移除后，会在下一次成功刷新后拒绝新 command。为保证已有订单簿安全，其 exchange-core 注册仍保留在当前进程内，但新 command 已无法访问。
 - 撮合结果、成交、订单状态、撮合资产和撮合交易对分别使用单表 Repository；跨表事务由
-  `MatchingPersistenceService`、`MatchingSymbolService` 聚合；`instruments` 与
-  `instrument_current_versions` 也分别由单表 Repository 读取，当前版本筛选在可重复读事务中完成。
-  只有启动订单簿恢复保留一致快照 JOIN，并在源码中文注释中说明不可拆原因。
+  `MatchingPersistenceService`、`MatchingSymbolService` 聚合。合约正文、当前版本和可交易状态统一从
+  本地 JVM 快照读取，运行中由 Instrument Kafka 增量事件更新。
+- 启动订单簿恢复只联合读取订单与撮合结果业务状态，合约状态由 JVM 快照校验，不再 JOIN 合约表；
+  源码中文注释说明了该多表业务查询的不可拆原因。
 
 - `trading_matching_assets`
 - `trading_matching_symbols`

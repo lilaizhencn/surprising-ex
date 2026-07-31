@@ -1,5 +1,6 @@
 package com.surprising.trading.matching.repository;
 
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.matching.config.MatchingProperties;
@@ -16,24 +17,31 @@ import org.springframework.stereotype.Repository;
 /**
  * 恢复 exchange-core 订单簿所需的只读快照。
  *
- * <p>不可拆原因：启动恢复必须同时确认订单仍然开放、对应 PLACE 指令已成功落库且合约版本仍可交易；
- * 若拆成三次查询，并发状态变化可能恢复已撤销或已停用订单，因此保留
- * {@code trading_orders}、{@code trading_match_results}、{@code instruments} 的一致快照查询。</p>
+ * <p>不可拆原因：启动恢复需要同时读取订单及撮合结果权威状态；合约是否可交易由本地不可变快照校验，
+ * 避免恢复流程直接读取合约表。</p>
  */
 @Repository
 public class MatchingOrderBookRecoveryRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final MatchingProperties properties;
+    private final InstrumentSnapshotCache snapshotCache;
 
     public MatchingOrderBookRecoveryRepository(JdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, new MatchingProperties());
+        this(jdbcTemplate, new MatchingProperties(), null);
+    }
+
+    public MatchingOrderBookRecoveryRepository(JdbcTemplate jdbcTemplate, MatchingProperties properties) {
+        this(jdbcTemplate, properties, null);
     }
 
     @Autowired
-    public MatchingOrderBookRecoveryRepository(JdbcTemplate jdbcTemplate, MatchingProperties properties) {
+    public MatchingOrderBookRecoveryRepository(JdbcTemplate jdbcTemplate,
+                                               MatchingProperties properties,
+                                               InstrumentSnapshotCache snapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties;
+        this.snapshotCache = snapshotCache;
     }
 
     public List<RecoveredOrderBookOrder> recoverableOpenOrdersAfter(Instant lastCreatedAt,
@@ -43,10 +51,7 @@ public class MatchingOrderBookRecoveryRepository {
                 SELECT o.order_id, o.user_id, o.symbol, o.instrument_version, o.side, o.time_in_force,
                        o.price_ticks, o.remaining_quantity_steps, o.created_at
                   FROM trading_orders o
-                  JOIN instruments i
-                    ON i.symbol = o.symbol AND i.version = o.instrument_version
-                 WHERE i.status IN ('TRADING', 'HALT')
-                   AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                 WHERE o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                    AND o.order_type = 'LIMIT'
                    AND o.time_in_force IN ('GTC', 'GTX')
                    AND o.remaining_quantity_steps > 0
@@ -76,7 +81,7 @@ public class MatchingOrderBookRecoveryRepository {
         args.add(Timestamp.from(lastCreatedAt));
         args.add(lastOrderId);
         args.add(Math.max(1, limit));
-        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new RecoveredOrderBookOrder(
+        List<RecoveredOrderBookOrder> candidates = jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new RecoveredOrderBookOrder(
                 rs.getLong("order_id"),
                 rs.getLong("user_id"),
                 rs.getString("symbol"),
@@ -87,6 +92,21 @@ public class MatchingOrderBookRecoveryRepository {
                 rs.getLong("remaining_quantity_steps"),
                 rs.getTimestamp("created_at").toInstant()),
                 args.toArray());
+        if (snapshotCache == null) {
+            // 兼容不加载 Spring 快照组件的旧单元测试；正式运行时启动初始化保证快照存在。
+            return candidates.stream().limit(Math.max(1, limit)).toList();
+        }
+        if (!snapshotCache.initialized(properties.getKafka().getProductLine())) {
+            throw new IllegalStateException("撮合合约 JVM 快照尚未就绪");
+        }
+        var productLine = properties.getKafka().getProductLine();
+        return candidates.stream()
+                .filter(order -> snapshotCache.version(productLine, order.symbol(), order.instrumentVersion())
+                        .map(instrument -> instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.TRADING
+                                || instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.HALT)
+                        .orElse(false))
+                .limit(Math.max(1, limit))
+                .toList();
     }
 
     private Optional<String> productLineFilter() {

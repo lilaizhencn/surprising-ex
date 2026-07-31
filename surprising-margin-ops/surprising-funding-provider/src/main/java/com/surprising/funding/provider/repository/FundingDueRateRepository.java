@@ -2,6 +2,7 @@ package com.surprising.funding.provider.repository;
 
 import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.provider.config.FundingProperties;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.product.api.ProductLine;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -21,27 +22,32 @@ public class FundingDueRateRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final FundingProperties properties;
+    private final InstrumentSnapshotCache snapshotCache;
 
     public FundingDueRateRepository(JdbcTemplate jdbcTemplate, FundingProperties properties) {
+        this(jdbcTemplate, properties, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public FundingDueRateRepository(JdbcTemplate jdbcTemplate,
+                                    FundingProperties properties,
+                                    InstrumentSnapshotCache snapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties;
+        this.snapshotCache = snapshotCache;
     }
 
     public List<FundingRateResponse> findDue(Instant now, int limit) {
-        List<Object> args = new ArrayList<>();
-        args.add(Timestamp.from(now));
-        String productCondition = fundingInstrumentCondition(args, "i");
-        args.add(limit);
-        return jdbcTemplate.query("""
+        ProductLine productLine = properties.getKafka().isProductTopicsEnabled()
+                ? properties.getKafka().getProductLine() : ProductLine.LINEAR_PERPETUAL;
+        if (snapshotCache == null || !snapshotCache.initialized(productLine) || !productLine.isFundingProduct()) {
+            return List.of();
+        }
+        List<FundingRateResponse> rows = jdbcTemplate.query("""
                 SELECT DISTINCT ON (r.symbol, r.funding_time) r.*
                   FROM funding_rate_ticks r
-                  JOIN instrument_current_versions c
-                    ON c.symbol = r.symbol
-                  JOIN instruments i
-                    ON i.symbol = c.symbol AND i.version = c.version
                  WHERE r.funding_time <= ?
                    AND r.status = 'FINAL'
-                   AND %s
                    AND NOT EXISTS (
                        SELECT 1
                          FROM funding_settlements s
@@ -51,19 +57,10 @@ public class FundingDueRateRepository {
                    )
                  ORDER BY r.symbol, r.funding_time, r.sequence DESC
                  LIMIT ?
-                """.formatted(productCondition), (rs, rowNum) -> FundingRateRepository.toRate(rs),
-                args.toArray());
-    }
-
-    private String fundingInstrumentCondition(List<Object> args, String alias) {
-        ProductLine productLine = properties.getKafka().getProductLine();
-        if (properties.getKafka().isProductTopicsEnabled()) {
-            if (!productLine.isFundingProduct()) {
-                return "1 = 0";
-            }
-            args.add(productLine.contractTypeCode());
-            return alias + ".contract_type = ?";
-        }
-        return alias + ".instrument_type = 'PERPETUAL'";
+                """, (rs, rowNum) -> FundingRateRepository.toRate(rs), Timestamp.from(now), limit);
+        return rows.stream()
+                .filter(rate -> snapshotCache.current(productLine, rate.symbol()).isPresent())
+                .limit(Math.max(1, limit))
+                .toList();
     }
 }

@@ -1,5 +1,8 @@
 package com.surprising.trading.order.repository;
 
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.model.InstrumentType;
+import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
@@ -19,17 +22,30 @@ public class SpotOrderReservationRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final MarkPriceLookup markPriceLookup;
+    private final TradingOrderProperties properties;
+    private final InstrumentSnapshotCache snapshotCache;
 
     public SpotOrderReservationRepository(JdbcTemplate jdbcTemplate, OrderRepository orderRepository) {
-        this(jdbcTemplate, orderRepository, (symbol, version, maxAge) -> java.util.OptionalLong.empty());
+        this(jdbcTemplate, orderRepository, (symbol, version, maxAge) -> java.util.OptionalLong.empty(),
+                new TradingOrderProperties(), null);
+    }
+
+    public SpotOrderReservationRepository(JdbcTemplate jdbcTemplate,
+                                          OrderRepository orderRepository,
+                                          MarkPriceLookup markPriceLookup) {
+        this(jdbcTemplate, orderRepository, markPriceLookup, new TradingOrderProperties(), null);
     }
 
     @Autowired
     public SpotOrderReservationRepository(JdbcTemplate jdbcTemplate,
                                           OrderRepository orderRepository,
-                                          MarkPriceLookup markPriceLookup) {
+                                          MarkPriceLookup markPriceLookup,
+                                          TradingOrderProperties properties,
+                                          InstrumentSnapshotCache snapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.markPriceLookup = markPriceLookup;
+        this.properties = properties;
+        this.snapshotCache = snapshotCache;
     }
 
     public Optional<SpotReservationRequirement> requirement(String symbol,
@@ -41,38 +57,29 @@ public class SpotOrderReservationRepository {
                                                             long marketMaxSlippagePpm,
                                                             long marketMaxMarkAgeMs,
                                                             OrderFeeSnapshot feeSnapshot) {
+        if (snapshotCache == null || properties == null) {
+            return Optional.empty();
+        }
+        var productLine = properties.getKafka().getProductLine();
+        var instrument = snapshotCache.version(productLine, symbol, instrumentVersion)
+                .filter(value -> value.instrumentType() == InstrumentType.SPOT
+                        && value.contractType() == com.surprising.instrument.api.model.ContractType.SPOT)
+                .orElseThrow(() -> new IllegalArgumentException("现货合约快照不存在: " + symbol + "@" + instrumentVersion));
         Long markPriceTicks = markPriceLookup.latestMarkPriceTicks(symbol, instrumentVersion, marketMaxMarkAgeMs)
                 .stream().boxed().findFirst().orElse(null);
-        return jdbcTemplate.query("""
-                SELECT i.base_asset,
-                       i.quote_asset,
-                       i.quantity_step_units,
-                       i.notional_multiplier_units,
-                       pm.mark_ticks
-                  FROM instruments i
-                 CROSS JOIN (SELECT CAST(? AS bigint) AS mark_ticks) pm
-                 WHERE i.symbol = ?
-                   AND i.version = ?
-                   AND i.instrument_type = 'SPOT'
-                   AND i.contract_type = 'SPOT'
-                   AND (? <> 'MARKET' OR pm.mark_ticks IS NOT NULL)
-                """, (rs, rowNum) -> {
-            long markTicks = rs.getLong("mark_ticks");
-            Long nullableMarkTicks = rs.wasNull() ? null : markTicks;
-            if (side == OrderSide.SELL) {
-                long baseUnits = multiplyToLong(quantitySteps, rs.getLong("quantity_step_units"));
-                return new SpotReservationRequirement(rs.getString("base_asset"), baseUnits);
-            }
-            long effectivePriceTicks = orderType == OrderType.MARKET
-                    ? OrderMarginMath.upperBoundPriceTicks(orderType, priceTicks, nullableMarkTicks,
-                    marketMaxSlippagePpm)
-                    : priceTicks;
-            long notionalUnits = multiplyToLong(effectivePriceTicks, quantitySteps,
-                    rs.getLong("notional_multiplier_units"));
-            long feeUnits = feeUnits(notionalUnits, feeSnapshot);
-            return new SpotReservationRequirement(rs.getString("quote_asset"),
-                    Math.addExact(notionalUnits, feeUnits));
-        }, markPriceTicks, symbol, instrumentVersion, orderType.name()).stream().findFirst();
+        if (orderType == OrderType.MARKET && markPriceTicks == null) {
+            return Optional.empty();
+        }
+        if (side == OrderSide.SELL) {
+            long baseUnits = multiplyToLong(quantitySteps, instrument.quantityStepUnits());
+            return Optional.of(new SpotReservationRequirement(instrument.baseAsset(), baseUnits));
+        }
+        long effectivePriceTicks = orderType == OrderType.MARKET
+                ? OrderMarginMath.upperBoundPriceTicks(orderType, priceTicks, markPriceTicks, marketMaxSlippagePpm)
+                : priceTicks;
+        long notionalUnits = multiplyToLong(effectivePriceTicks, quantitySteps, instrument.notionalMultiplierUnits());
+        long feeUnits = feeUnits(notionalUnits, feeSnapshot);
+        return Optional.of(new SpotReservationRequirement(instrument.quoteAsset(), Math.addExact(notionalUnits, feeUnits)));
     }
 
     private long feeUnits(long notionalUnits, OrderFeeSnapshot feeSnapshot) {

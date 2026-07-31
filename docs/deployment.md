@@ -445,8 +445,9 @@ surprising:
       source: INSTRUMENT
 ```
 
-该模式下，`surprising-instrument` 在当前 `instruments` 快照中发布新交易对后，K 线服务开始处理。
-指数价格服务也从 `instruments + instrument_index_sources` 读取当前交易对和指数源。
+该模式下，K 线和指数价格服务启动时通过 Instrument 内部聚合 RPC 加载本产品线 JVM 快照，
+并消费 `surprising.instrument.events.v1` 增量事件；快照更新后，K 线服务开始处理新交易对，
+指数价格服务同步刷新指数源配置，不再从主库读取合约表。
 
 ## K 线 API
 

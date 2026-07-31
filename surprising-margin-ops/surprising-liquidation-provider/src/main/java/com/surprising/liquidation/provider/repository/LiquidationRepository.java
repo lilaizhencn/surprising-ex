@@ -1,5 +1,6 @@
 package com.surprising.liquidation.provider.repository;
 
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.liquidation.provider.config.LiquidationProperties;
@@ -31,8 +32,8 @@ import org.springframework.stereotype.Repository;
 /**
  * 强平执行一致性仓储。
  *
- * <p>不可拆原因：候选输入必须在同一数据库快照中同时核验风险状态、持仓、挂单和合约参数；
- * 完成候选与取消候选必须在同一事务中联动检查强平订单状态，避免资金与持仓状态发生竞态。
+ * <p>不可拆原因：候选输入从数据库读取风险状态、持仓和挂单等业务状态，再使用本地不可变合约快照补齐合约参数；
+ * 完成候选与取消候选仍在同一事务中联动检查强平订单状态，避免资金与持仓状态发生竞态。
  * 本仓储只服务实时强平安全链路，不承载后台时间线、资金对账或运营报表查询。
  */
 @Repository
@@ -43,22 +44,31 @@ public class LiquidationRepository {
     private final JdbcTemplate jdbcTemplate;
     private final LiquidationProperties properties;
     private final LatestMarkPriceCache markPriceCache;
+    private final InstrumentSnapshotCache snapshotCache;
 
     public LiquidationRepository(JdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, new LiquidationProperties(), null);
+        this(jdbcTemplate, new LiquidationProperties(), null, null);
     }
 
     public LiquidationRepository(JdbcTemplate jdbcTemplate, LiquidationProperties properties) {
-        this(jdbcTemplate, properties, null);
+        this(jdbcTemplate, properties, null, null);
+    }
+
+    public LiquidationRepository(JdbcTemplate jdbcTemplate,
+                                 LiquidationProperties properties,
+                                 LatestMarkPriceCache markPriceCache) {
+        this(jdbcTemplate, properties, markPriceCache, null);
     }
 
     @Autowired
     public LiquidationRepository(JdbcTemplate jdbcTemplate,
                                  LiquidationProperties properties,
-                                 LatestMarkPriceCache markPriceCache) {
+                                 LatestMarkPriceCache markPriceCache,
+                                 InstrumentSnapshotCache snapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties == null ? new LiquidationProperties() : properties;
         this.markPriceCache = markPriceCache;
+        this.snapshotCache = snapshotCache;
     }
 
     public Map<Long, CandidateInputs> candidateInputs(List<CandidateInputRequest> requests) {
@@ -90,6 +100,10 @@ public class LiquidationRepository {
                     VALUES %s
                 )
                 SELECT r.candidate_id,
+                       r.product_line,
+                       r.symbol,
+                       r.instrument_version,
+                       r.settle_asset,
                        COALESCE(latest_position.status, latest_account.status) AS latest_status,
                        p.signed_quantity_steps AS current_signed_quantity_steps,
                        ps.signed_quantity_steps AS snapshot_signed_quantity_steps,
@@ -99,12 +113,7 @@ public class LiquidationRepository {
                                THEN ps.position_margin_units + ps.unrealized_pnl_units
                            ELSE acc.equity_units
                        END AS equity_units,
-                       ps.maintenance_margin_units,
-                       i.contract_type,
-                       i.notional_multiplier_units,
-                       i.price_tick_units,
-                       ss.scale_units AS settle_scale_units,
-                       COALESCE(bracket.floors, ARRAY[]::bigint[]) AS bracket_floors
+                       ps.maintenance_margin_units
                   FROM requested r
                   JOIN account_positions p
                     ON p.user_id = r.user_id
@@ -128,11 +137,6 @@ public class LiquidationRepository {
                    AND acc.user_id = ps.user_id
                    AND acc.product_line = ps.product_line
                    AND acc.settle_asset = ps.settle_asset
-                  JOIN instruments i
-                    ON i.symbol = r.symbol
-                   AND i.version = r.instrument_version
-                  JOIN account_asset_scales ss
-                    ON ss.asset = i.settle_asset
              LEFT JOIN LATERAL (
                     SELECT s.status
                       FROM risk_account_snapshots s
@@ -159,36 +163,37 @@ public class LiquidationRepository {
                      ORDER BY s.snapshot_id DESC
                      LIMIT 1
                 ) latest_position ON TRUE
-             LEFT JOIN LATERAL (
-                    SELECT array_agg(b.notional_floor_units ORDER BY b.notional_floor_units) AS floors
-                      FROM instrument_risk_brackets b
-                     WHERE b.symbol = r.symbol
-                       AND b.version = r.instrument_version
-                ) bracket ON TRUE
                 """.formatted(values), (rs, rowNum) -> {
             String latestStatus = rs.getString("latest_status");
             if (latestStatus == null) {
                 throw new IllegalStateException("risk snapshot missing for liquidation candidate "
                         + rs.getLong("candidate_id"));
             }
-            ContractType contractType = ContractType.valueOf(rs.getString("contract_type"));
+            if (snapshotCache == null) {
+                throw new IllegalStateException("强平合约 JVM 快照尚未配置");
+            }
+            ProductLine productLine = ProductLine.valueOf(rs.getString("product_line"));
+            String candidateSymbol = rs.getString("symbol");
+            var instrument = snapshotCache.version(productLine, candidateSymbol,
+                            rs.getLong("instrument_version"))
+                    .orElseThrow(() -> new IllegalStateException("强平合约快照不存在: " + candidateSymbol));
+            if (!instrument.settleAsset().equals(rs.getString("settle_asset"))) {
+                throw new IllegalStateException("强平合约结算资产与风险快照不一致: " + rs.getString("symbol"));
+            }
+            long settleScaleUnits = snapshotCache.scale(productLine, instrument.settleAsset())
+                    .orElseThrow(() -> new IllegalStateException("强平结算资产精度快照不存在: " + instrument.settleAsset()));
+            ContractType contractType = instrument.contractType();
             long currentSignedQuantity = rs.getLong("current_signed_quantity_steps");
             long markPriceTicks = rs.getLong("mark_price_ticks");
-            long notionalMultiplierUnits = rs.getLong("notional_multiplier_units");
-            long priceTickUnits = rs.getLong("price_tick_units");
-            long settleScaleUnits = rs.getLong("settle_scale_units");
+            long notionalMultiplierUnits = instrument.notionalMultiplierUnits();
+            long priceTickUnits = instrument.priceTickUnits();
             long notionalUnits = PerpetualContractMath.notionalUnits(contractType, currentSignedQuantity,
                     markPriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits);
             long notionalPerStepUnits = Math.max(1L, PerpetualContractMath.notionalPerStepUnits(contractType,
                     markPriceTicks, notionalMultiplierUnits, priceTickUnits, settleScaleUnits));
-            long bracketFloor = 0L;
-            Object[] floors = (Object[]) rs.getArray("bracket_floors").getArray();
-            for (Object floor : floors) {
-                long value = ((Number) floor).longValue();
-                if (value <= notionalUnits) {
-                    bracketFloor = Math.max(bracketFloor, value);
-                }
-            }
+            long bracketFloor = instrument.riskLimitBrackets() == null ? 0L : instrument.riskLimitBrackets().stream()
+                    .filter(bracket -> bracket.notionalFloorUnits() <= notionalUnits)
+                    .mapToLong(bracket -> bracket.notionalFloorUnits()).max().orElse(0L);
             LiquidationPricingInput pricing = new LiquidationPricingInput(contractType,
                     rs.getLong("snapshot_signed_quantity_steps"), markPriceTicks, rs.getLong("equity_units"),
                     rs.getLong("maintenance_margin_units"), notionalMultiplierUnits, priceTickUnits,

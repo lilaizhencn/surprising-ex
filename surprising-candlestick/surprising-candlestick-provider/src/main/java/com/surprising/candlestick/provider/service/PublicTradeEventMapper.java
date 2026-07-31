@@ -118,21 +118,19 @@ public class PublicTradeEventMapper {
             return new InstrumentScale(instrument.priceTickUnits(), instrument.quantityStepUnits(),
                     baseScaleUnits, quoteScaleUnits);
         }
-        InstrumentDefinition instrument = instrumentRepository.find(key.symbol(), key.instrumentVersion())
-                .orElseThrow(() -> new IllegalArgumentException("instrument scale not found for "
-                        + key.symbol() + " version " + key.instrumentVersion()));
-        long baseScaleUnits = requireScaleUnits(instrument.baseAsset());
-        long quoteScaleUnits = requireScaleUnits(instrument.quoteAsset());
-        return new InstrumentScale(
-                instrument.priceTickUnits(),
-                instrument.quantityStepUnits(),
-                baseScaleUnits,
-                quoteScaleUnits);
-    }
-
-    private long requireScaleUnits(String asset) {
-        return assetScaleRepository.findScaleUnits(asset)
-                .orElseThrow(() -> new IllegalArgumentException("asset scale not found for " + asset));
+        // 兼容不加载 Spring 快照组件的纯单元测试；正式运行时必定走上面的 JVM 快照。
+        if (snapshotCache == null) {
+            InstrumentDefinition instrument = instrumentRepository.find(key.symbol(), key.instrumentVersion())
+                    .orElseThrow(() -> new IllegalArgumentException("instrument scale not found for "
+                            + key.symbol() + " version " + key.instrumentVersion()));
+            long baseScaleUnits = assetScaleRepository.findScaleUnits(instrument.baseAsset())
+                    .orElseThrow(() -> new IllegalArgumentException("asset scale not found for " + instrument.baseAsset()));
+            long quoteScaleUnits = assetScaleRepository.findScaleUnits(instrument.quoteAsset())
+                    .orElseThrow(() -> new IllegalArgumentException("asset scale not found for " + instrument.quoteAsset()));
+            return new InstrumentScale(instrument.priceTickUnits(), instrument.quantityStepUnits(),
+                    baseScaleUnits, quoteScaleUnits);
+        }
+        throw new IllegalStateException("K 线合约 JVM 快照尚未就绪");
     }
 
     private BigDecimal toDecimal(long steps, long unitSize, long scaleUnits) {

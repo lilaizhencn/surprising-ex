@@ -1,8 +1,10 @@
 package com.surprising.trading.order.repository;
 
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.model.InstrumentResponse;
+import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineSql;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
@@ -19,7 +21,7 @@ import org.springframework.stereotype.Repository;
 /**
  * 订单保证金与风险限额快照仓储。
  *
- * <p>不可拆原因：下单校验必须在一条 SQL 的一致快照中读取 instrument、风险档位、资产精度、
+ * <p>不可拆原因：下单校验使用本地合约、风险档位和资产精度快照，并在一条 SQL 的一致快照中读取
  * 杠杆、持仓、开放订单和全市场未平仓量；拆成多条语句会在并发成交或撤单期间形成混合快照，
  * 可能造成少冻结或突破持仓上限。这里属于交易热路径风险校验，不是后台报表查询。</p>
  */
@@ -30,17 +32,30 @@ public class OrderMarginRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final MarkPriceLookup markPriceLookup;
+    private final TradingOrderProperties properties;
+    private final InstrumentSnapshotCache snapshotCache;
 
     public OrderMarginRepository(JdbcTemplate jdbcTemplate, OrderRepository orderRepository) {
-        this(jdbcTemplate, orderRepository, (symbol, version, maxAge) -> java.util.OptionalLong.empty());
+        this(jdbcTemplate, orderRepository, (symbol, version, maxAge) -> java.util.OptionalLong.empty(),
+                new TradingOrderProperties(), null);
+    }
+
+    public OrderMarginRepository(JdbcTemplate jdbcTemplate,
+                                 OrderRepository orderRepository,
+                                 MarkPriceLookup markPriceLookup) {
+        this(jdbcTemplate, orderRepository, markPriceLookup, new TradingOrderProperties(), null);
     }
 
     @Autowired
     public OrderMarginRepository(JdbcTemplate jdbcTemplate,
                                  OrderRepository orderRepository,
-                                 MarkPriceLookup markPriceLookup) {
+                                 MarkPriceLookup markPriceLookup,
+                                 TradingOrderProperties properties,
+                                 InstrumentSnapshotCache snapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.markPriceLookup = markPriceLookup;
+        this.properties = properties;
+        this.snapshotCache = snapshotCache;
     }
 
     public Optional<MarginRequirement> requirement(String symbol,
@@ -68,6 +83,14 @@ public class OrderMarginRepository {
                                                    long quantitySteps,
                                                    long marketMaxSlippagePpm,
                                                    long marketMaxMarkAgeMs) {
+        if (snapshotCache == null || properties == null) {
+            return Optional.empty();
+        }
+        var productLine = properties.getKafka().getProductLine();
+        InstrumentResponse instrument = snapshotCache.version(productLine, symbol, instrumentVersion)
+                .orElseThrow(() -> new IllegalArgumentException("下单合约快照不存在: " + symbol + "@" + instrumentVersion));
+        long snapshotSettleScaleUnits = snapshotCache.scale(productLine, instrument.settleAsset())
+                .orElseThrow(() -> new IllegalArgumentException("结算资产精度快照不存在: " + instrument.settleAsset()));
         String sql = """
                 SELECT i.contract_type,
                        i.settle_asset AS asset,
@@ -78,37 +101,43 @@ public class OrderMarginRepository {
                        i.max_position_notional_units,
                        i.user_open_interest_limit_rate_ppm,
                        i.user_open_interest_limit_floor_units,
-                       ss.scale_units AS settle_scale_units,
+                       i.settle_scale_units,
                        ls.leverage_ppm,
                        COALESCE(p.signed_quantity_steps, 0) AS current_signed_quantity_steps,
                        COALESCE(o.pending_same_side_steps, 0) AS pending_same_side_steps,
                        COALESCE(oi.open_quantity_steps, 0) AS symbol_open_quantity_steps,
                        pm.mark_ticks
-                  FROM instruments i
-                  JOIN instrument_current_versions c
-                    ON c.symbol = i.symbol AND c.version = i.version
-                  JOIN account_asset_scales ss
-                    ON ss.asset = i.settle_asset
+                  FROM (SELECT CAST(? AS text) AS symbol,
+                               CAST(? AS text) AS contract_type,
+                               CAST(? AS text) AS settle_asset,
+                               CAST(? AS bigint) AS notional_multiplier_units,
+                               CAST(? AS bigint) AS price_tick_units,
+                               CAST(? AS bigint) AS initial_margin_rate_ppm,
+                               CAST(? AS bigint) AS max_leverage_ppm,
+                               CAST(? AS bigint) AS max_position_notional_units,
+                               CAST(? AS bigint) AS user_open_interest_limit_rate_ppm,
+                               CAST(? AS bigint) AS user_open_interest_limit_floor_units,
+                               CAST(? AS bigint) AS settle_scale_units) i
              LEFT JOIN trading_symbol_open_interest oi
-                    ON oi.product_line = %s
+                    ON oi.product_line = '%s'
                    AND oi.symbol = i.symbol
              LEFT JOIN trading_leverage_settings ls
-                    ON ls.user_id = ?
+                   ON ls.user_id = ?
                    AND ls.symbol = i.symbol
                    AND ls.margin_mode = ?
-                   AND ls.product_line = %s
+                   AND ls.product_line = '%s'
              LEFT JOIN account_positions p
                     ON p.user_id = ?
                    AND p.symbol = i.symbol
                    AND p.margin_mode = ?
                    AND p.position_side = ?
-                   AND p.product_line = %s
+                   AND p.product_line = '%s'
                   LEFT JOIN LATERAL (
                       SELECT COALESCE(SUM(o.remaining_quantity_steps), 0) AS pending_same_side_steps
                         FROM trading_orders o
                        WHERE o.user_id = ?
                          AND o.symbol = i.symbol
-                         AND o.product_line = %s
+                         AND o.product_line = '%s'
                          AND o.margin_mode = ?
                          AND o.position_side = ?
                          AND o.side = ?
@@ -116,13 +145,8 @@ public class OrderMarginRepository {
                          AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
                   ) o ON TRUE
                  CROSS JOIN (SELECT CAST(? AS bigint) AS mark_ticks) pm
-                 WHERE i.symbol = ?
-                   AND i.version = ?
-                   AND (? <> 'MARKET' OR pm.mark_ticks IS NOT NULL)
-                """.formatted(ProductLineSql.contractTypeProductLineCase("i.contract_type"),
-                ProductLineSql.contractTypeProductLineCase("i.contract_type"),
-                ProductLineSql.contractTypeProductLineCase("i.contract_type"),
-                ProductLineSql.contractTypeProductLineCase("i.contract_type"));
+                 WHERE (? <> 'MARKET' OR pm.mark_ticks IS NOT NULL)
+                """.formatted(productLine.name(), productLine.name(), productLine.name(), productLine.name());
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
         Long markPriceTicks = markPriceLookup.latestMarkPriceTicks(symbol, instrumentVersion,
@@ -172,7 +196,7 @@ public class OrderMarginRepository {
                         instrumentMaxLeveragePpm, instrumentInitialMarginRatePpm);
             }
             // 用户杠杆可按 instrument 保存，但每笔订单仍必须满足当前生效风险档位。
-            RiskBracket bracket = riskBracket(symbol, instrumentVersion, projectedPositionNotionalUnits)
+            RiskBracket bracket = riskBracket(instrument, projectedPositionNotionalUnits)
                     .orElse(new RiskBracket(instrumentMaxLeveragePpm, instrumentInitialMarginRatePpm,
                             maxPositionNotionalUnits));
             if (projectedPositionNotionalUnits > bracket.notionalCapUnits()) {
@@ -211,9 +235,13 @@ public class OrderMarginRepository {
             }
             return new MarginRequirement(accountType, rs.getString("asset"), initialMarginUnits, null,
                     selectedLeveragePpm, bracket.maxLeveragePpm(), effectiveInitialMarginRatePpm);
-        }, userId, normalizedMarginMode.name(), userId, normalizedMarginMode.name(), normalizedPositionSide.name(),
-                userId, normalizedMarginMode.name(), normalizedPositionSide.name(), side.name(),
-                markPriceTicks, symbol, instrumentVersion, orderType.name()).stream().findFirst();
+        }, instrument.symbol(), instrument.contractType().name(), instrument.settleAsset(),
+                instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.initialMarginRatePpm(),
+                instrument.maxLeveragePpm(), instrument.maxPositionNotionalUnits(),
+                instrument.userOpenInterestLimitRatePpm(), instrument.userOpenInterestLimitFloorUnits(),
+                snapshotSettleScaleUnits, userId, normalizedMarginMode.name(), userId, normalizedMarginMode.name(),
+                normalizedPositionSide.name(), userId, normalizedMarginMode.name(), normalizedPositionSide.name(),
+                side.name(), markPriceTicks, orderType.name()).stream().findFirst();
     }
 
     public Optional<MarginRequirement> requirement(String symbol,
@@ -290,20 +318,12 @@ public class OrderMarginRepository {
         return contractType.productLine().accountTypeCode();
     }
 
-    private Optional<RiskBracket> riskBracket(String symbol, long instrumentVersion, long notionalUnits) {
-        return jdbcTemplate.query("""
-                SELECT max_leverage_ppm, initial_margin_rate_ppm, notional_cap_units
-                  FROM instrument_risk_brackets
-                 WHERE symbol = ?
-                   AND version = ?
-                   AND notional_floor_units <= ?
-                 ORDER BY notional_floor_units DESC
-                 LIMIT 1
-                """, (rs, rowNum) -> new RiskBracket(
-                rs.getLong("max_leverage_ppm"),
-                rs.getLong("initial_margin_rate_ppm"),
-                rs.getLong("notional_cap_units")), symbol, instrumentVersion, notionalUnits)
-                .stream().findFirst();
+    private Optional<RiskBracket> riskBracket(InstrumentResponse instrument, long notionalUnits) {
+        return instrument.riskLimitBrackets() == null ? Optional.empty() : instrument.riskLimitBrackets().stream()
+                .filter(bracket -> bracket.notionalFloorUnits() <= notionalUnits)
+                .max(java.util.Comparator.comparingLong(bracket -> bracket.notionalFloorUnits()))
+                .map(bracket -> new RiskBracket(bracket.maxLeveragePpm(), bracket.initialMarginRatePpm(),
+                        bracket.notionalCapUnits()));
     }
 
     private Long nullableLong(java.sql.ResultSet rs, String column)

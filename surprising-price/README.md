@@ -32,13 +32,13 @@ Surprising Exchange 合约指数价格和标记价格模块。
 Kafka `MarkPriceEvent`；事件直接携带产品线、instrument 版本、quote asset units、可比较 ticks、sequence
 和时间戳。`price_mark_ticks` 只是异步写入、保留 3 天的审计表，不能作为实时业务输入。
 
-合约清单和交易规则来自 `surprising-instrument`。指数价格 provider 分别通过三个单表 Repository
-读取 `instruments`、`instrument_current_versions` 和 `instrument_index_sources`，
-再由 `IndexInstrumentConfigLoader` 在只读可重复读事务中聚合，避免版本切换期间拼出混合快照。
-`application.yml` 中的静态 BTC/ETH 源仅作为数据库未初始化时的兜底。
+合约清单和交易规则来自 `surprising-instrument`。指数价格 provider 启动时通过内部聚合 RPC 加载本产品线
+完整 JVM 快照，运行中消费 `surprising.instrument.events.v1` 增量更新；`IndexInstrumentConfigLoader`
+只从本地快照读取合约正文、当前版本和指数源配置。`application.yml` 中的静态 BTC/ETH 源仅作为
+明确关闭 Instrument 配置时的静态运行模式。
 
-标记价格编码遵循同一边界：当前版本指针、合约正文和报价资产精度分别由单表 Repository 读取，
-`MarkPriceEncodingService` 在可重复读事务中聚合。指数审计保留任务也由 Service 编排：先锁定一批
+标记价格编码遵循同一边界：当前版本、合约正文和报价资产精度统一由本地不可变快照读取。
+指数审计保留任务也由 Service 编排：先锁定一批
 `price_index_ticks`，再删除对应的 `price_index_components`，最后删除主记录，全部处于同一事务。
 Service 不包含 SQL，也不直接依赖 JDBC。
 

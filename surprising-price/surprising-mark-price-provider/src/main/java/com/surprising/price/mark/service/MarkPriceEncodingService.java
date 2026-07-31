@@ -6,15 +6,12 @@ import com.surprising.price.mark.model.MarkPriceEncoding;
 import com.surprising.price.mark.repository.MarkAssetScaleRepository;
 import com.surprising.price.mark.repository.MarkInstrumentCurrentVersionRepository;
 import com.surprising.price.mark.repository.MarkInstrumentRepository;
-import com.surprising.price.mark.repository.MarkInstrumentRepository.MarkInstrument;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Isolation;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 读取标记价格定点编码参数。
  *
- * <p>当前版本、合约正文和资产精度由三个单表 Repository 读取，并在可重复读事务中聚合。</p>
+ * <p>当前版本、合约正文和资产精度统一来自本进程不可变合约快照。</p>
  */
 @Service
 public class MarkPriceEncodingService {
@@ -45,28 +42,15 @@ public class MarkPriceEncodingService {
         this.snapshotCache = snapshotCache;
     }
 
-    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public MarkPriceEncoding encoding(String symbol) {
-        if (snapshotCache != null && snapshotCache.initialized(properties.getKafka().getProductLine())) {
-            var instrument = snapshotCache.current(properties.getKafka().getProductLine(), symbol)
-                    .orElseThrow(() -> notFound(symbol));
-            long quoteScaleUnits = snapshotCache.scale(properties.getKafka().getProductLine(), instrument.quoteAsset())
-                    .orElseThrow(() -> notFound(symbol));
-            return new MarkPriceEncoding(instrument.version(), quoteScaleUnits, instrument.priceTickUnits());
+        if (snapshotCache == null || !snapshotCache.initialized(properties.getKafka().getProductLine())) {
+            throw new IllegalStateException("标记价格合约 JVM 快照尚未就绪");
         }
-        long version = currentVersionRepository.findVersion(symbol)
+        var instrument = snapshotCache.current(properties.getKafka().getProductLine(), symbol)
                 .orElseThrow(() -> notFound(symbol));
-        MarkInstrument instrument = instrumentRepository.find(symbol, version, contractType())
-                .orElseThrow(() -> notFound(symbol));
-        long quoteScaleUnits = assetScaleRepository.findScaleUnits(instrument.quoteAsset())
+        long quoteScaleUnits = snapshotCache.scale(properties.getKafka().getProductLine(), instrument.quoteAsset())
                 .orElseThrow(() -> notFound(symbol));
         return new MarkPriceEncoding(instrument.version(), quoteScaleUnits, instrument.priceTickUnits());
-    }
-
-    private String contractType() {
-        return properties.getKafka().isProductTopicsEnabled()
-                ? properties.getKafka().getProductLine().contractTypeCode()
-                : null;
     }
 
     private IllegalStateException notFound(String symbol) {

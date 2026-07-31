@@ -1,66 +1,70 @@
 package com.surprising.trading.matching.repository;
 
 import com.surprising.trading.matching.model.InstrumentSymbol;
-import java.util.ArrayList;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.trading.matching.config.MatchingProperties;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /**
- * 只负责 {@code instruments} 表。
+ * 只负责从本地不可变合约快照提供撮合合约定义。
  */
 @Repository
 public class MatchingInstrumentRepository {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final InstrumentSnapshotCache snapshotCache;
+    private final MatchingProperties properties;
 
     public MatchingInstrumentRepository(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+        this(null, null);
+    }
+
+    @Autowired
+    public MatchingInstrumentRepository(InstrumentSnapshotCache snapshotCache,
+                                        MatchingProperties properties) {
+        this.snapshotCache = snapshotCache;
+        this.properties = properties;
     }
 
     public List<InstrumentVersion> findTradingVersions(String contractType) {
-        List<Object> args = new ArrayList<>();
-        String productCondition = "";
-        if (contractType != null) {
-            productCondition = "   AND contract_type = ?\n";
-            args.add(contractType);
+        if (snapshotCache == null || properties == null) {
+            return List.of();
         }
-        return jdbcTemplate.query("""
-                SELECT symbol, version, base_asset, quote_asset, settle_asset
-                  FROM instruments
-                 WHERE status IN ('TRADING', 'HALT')
-                %s
-                 ORDER BY symbol ASC, version ASC
-                """.formatted(productCondition), (rs, rowNum) -> toVersion(rs), args.toArray());
+        var productLine = properties.getKafka().getProductLine();
+        if (!snapshotCache.initialized(productLine)) {
+            return List.of();
+        }
+        return snapshotCache.current(productLine).stream()
+                .filter(MatchingInstrumentRepository::trading)
+                .filter(value -> contractType == null
+                        || value.contractType().productLine().contractTypeCode().equals(contractType))
+                .map(MatchingInstrumentRepository::toVersion)
+                .toList();
     }
 
     public Optional<InstrumentVersion> findTrading(String symbol, long version, String contractType) {
-        List<Object> args = new ArrayList<>(List.of(symbol, version));
-        String productCondition = "";
-        if (contractType != null) {
-            productCondition = "   AND contract_type = ?\n";
-            args.add(contractType);
+        if (snapshotCache == null || properties == null) {
+            return Optional.empty();
         }
-        return jdbcTemplate.query("""
-                SELECT symbol, version, base_asset, quote_asset, settle_asset
-                  FROM instruments
-                 WHERE symbol = ?
-                   AND version = ?
-                   AND status IN ('TRADING', 'HALT')
-                %s
-                """.formatted(productCondition), (rs, rowNum) -> toVersion(rs), args.toArray())
-                .stream()
-                .findFirst();
+        var productLine = properties.getKafka().getProductLine();
+        return snapshotCache.version(productLine, symbol, version)
+                .filter(MatchingInstrumentRepository::trading)
+                .filter(value -> contractType == null
+                        || value.contractType().productLine().contractTypeCode().equals(contractType))
+                .map(MatchingInstrumentRepository::toVersion);
     }
 
-    private InstrumentVersion toVersion(java.sql.ResultSet rs) throws java.sql.SQLException {
-        return new InstrumentVersion(
-                rs.getString("symbol"),
-                rs.getLong("version"),
-                rs.getString("base_asset"),
-                rs.getString("quote_asset"),
-                rs.getString("settle_asset"));
+    private static InstrumentVersion toVersion(com.surprising.instrument.api.model.InstrumentResponse value) {
+        return new InstrumentVersion(value.symbol(), value.version(), value.baseAsset(), value.quoteAsset(),
+                value.settleAsset());
+    }
+
+    private static boolean trading(com.surprising.instrument.api.model.InstrumentResponse value) {
+        return value.status() == com.surprising.instrument.api.model.InstrumentStatus.TRADING
+                || value.status() == com.surprising.instrument.api.model.InstrumentStatus.HALT;
     }
 
     public record InstrumentVersion(

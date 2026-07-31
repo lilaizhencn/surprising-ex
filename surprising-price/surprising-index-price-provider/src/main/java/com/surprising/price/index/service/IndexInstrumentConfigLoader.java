@@ -3,60 +3,63 @@ package com.surprising.price.index.service;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.IndexSourceConfig;
-import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.price.index.repository.IndexInstrumentCurrentVersionRepository;
 import com.surprising.price.index.repository.IndexInstrumentKey;
 import com.surprising.price.index.repository.IndexInstrumentRepository;
 import com.surprising.price.index.repository.IndexInstrumentRepository.IndexInstrument;
 import com.surprising.price.index.repository.IndexInstrumentSourceRepository;
 import com.surprising.price.index.repository.IndexInstrumentSourceRepository.IndexSource;
+import com.surprising.instrument.api.model.InstrumentResponse;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Isolation;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 在同一个可重复读快照中聚合合约正文、当前版本指针和指数源配置。
+ * 从本地不可变合约快照统一读取合约正文、当前版本和指数源配置。
  */
 @Service
 public class IndexInstrumentConfigLoader {
 
     private final IndexPriceProperties properties;
+    private final InstrumentSnapshotCache snapshotCache;
     private final IndexInstrumentRepository instrumentRepository;
     private final IndexInstrumentCurrentVersionRepository currentVersionRepository;
     private final IndexInstrumentSourceRepository sourceRepository;
-    private final InstrumentSnapshotCache snapshotCache;
 
+    /** 兼容旧测试构造方式；运行时不会使用这些数据库仓储。 */
     public IndexInstrumentConfigLoader(IndexPriceProperties properties,
                                        IndexInstrumentRepository instrumentRepository,
                                        IndexInstrumentCurrentVersionRepository currentVersionRepository,
                                        IndexInstrumentSourceRepository sourceRepository) {
-        this(properties, instrumentRepository, currentVersionRepository, sourceRepository, null);
+        this.properties = properties;
+        this.snapshotCache = null;
+        this.instrumentRepository = instrumentRepository;
+        this.currentVersionRepository = currentVersionRepository;
+        this.sourceRepository = sourceRepository;
     }
 
     @org.springframework.beans.factory.annotation.Autowired
     public IndexInstrumentConfigLoader(IndexPriceProperties properties,
-                                       IndexInstrumentRepository instrumentRepository,
-                                       IndexInstrumentCurrentVersionRepository currentVersionRepository,
-                                       IndexInstrumentSourceRepository sourceRepository,
                                        InstrumentSnapshotCache snapshotCache) {
         this.properties = properties;
-        this.instrumentRepository = instrumentRepository;
-        this.currentVersionRepository = currentVersionRepository;
-        this.sourceRepository = sourceRepository;
         this.snapshotCache = snapshotCache;
+        this.instrumentRepository = null;
+        this.currentVersionRepository = null;
+        this.sourceRepository = null;
     }
 
-    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public List<IndexPriceProperties.SymbolConfig> load() {
-        if (snapshotCache != null && snapshotCache.initialized(properties.getKafka().getProductLine())) {
-            return snapshotCache.current(properties.getKafka().getProductLine()).stream()
+        var productLine = properties.getKafka().getProductLine();
+        if (snapshotCache != null && snapshotCache.initialized(productLine)) {
+            return snapshotCache.current(productLine).stream()
                     .filter(instrument -> instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.TRADING)
                     .map(this::toSymbol)
                     .filter(symbol -> !symbol.getSources().isEmpty())
                     .toList();
+        }
+        if (snapshotCache != null) {
+            throw new IllegalStateException("指数价格合约 JVM 快照尚未就绪");
         }
         Map<String, Long> currentVersions = currentVersionRepository.findAll();
         List<IndexInstrument> instruments = instrumentRepository.findTradingVersions(contractType()).stream()
@@ -73,8 +76,7 @@ public class IndexInstrumentConfigLoader {
 
     private String contractType() {
         return properties.getKafka().isProductTopicsEnabled()
-                ? properties.getKafka().getProductLine().contractTypeCode()
-                : null;
+                ? properties.getKafka().getProductLine().contractTypeCode() : null;
     }
 
     private IndexPriceProperties.SymbolConfig toSymbol(IndexInstrument instrument, List<IndexSource> sources) {
@@ -141,6 +143,7 @@ public class IndexInstrumentConfigLoader {
         source.setWeight(ppm(row.weightPpm(), BigDecimal.ONE));
         return source;
     }
+
 
     private BigDecimal ppm(long value, BigDecimal fallback) {
         return value > 0 ? BigDecimal.valueOf(value, 6) : fallback;

@@ -15,12 +15,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 聚合合约快照、撮合资产和撮合交易对。
- * 当前版本与品种正文通过两个单表 Repository 读取，并由只读可重复读事务保证同一快照。
+ * 合约正文和当前版本统一来自本进程不可变快照。
  */
 @Service
 public class MatchingSymbolService {
@@ -60,37 +59,41 @@ public class MatchingSymbolService {
         this.snapshotCache = snapshotCache;
     }
 
-    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public List<InstrumentSymbol> currentTradingSymbols() {
-        if (snapshotCache != null && snapshotCache.initialized(properties.getKafka().getProductLine())) {
-            return snapshotCache.current(properties.getKafka().getProductLine()).stream()
-                    .filter(instrument -> instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.TRADING
-                            || instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.HALT)
-                    .map(instrument -> new InstrumentSymbol(instrument.symbol(), instrument.baseAsset(),
-                            instrument.quoteAsset(), instrument.settleAsset()))
+        if (snapshotCache == null) {
+            Map<String, Long> currentVersions = currentVersionRepository.findAll();
+            return instrumentRepository.findTradingVersions(productContractTypeFilter().orElse(null)).stream()
+                    .filter(instrument -> currentVersions.getOrDefault(instrument.symbol(), -1L)
+                            == instrument.version())
+                    .map(InstrumentVersion::toInstrumentSymbol)
                     .toList();
         }
-        Map<String, Long> currentVersions = currentVersionRepository.findAll();
-        return instrumentRepository.findTradingVersions(productContractTypeFilter().orElse(null)).stream()
-                .filter(instrument -> currentVersions.getOrDefault(instrument.symbol(), -1L)
-                        == instrument.version())
-                .map(InstrumentVersion::toInstrumentSymbol)
+        if (!snapshotCache.initialized(properties.getKafka().getProductLine())) {
+            throw new IllegalStateException("撮合合约 JVM 快照尚未就绪");
+        }
+        return snapshotCache.current(properties.getKafka().getProductLine()).stream()
+                .filter(instrument -> instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.TRADING
+                        || instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.HALT)
+                .map(instrument -> new InstrumentSymbol(instrument.symbol(), instrument.baseAsset(),
+                        instrument.quoteAsset(), instrument.settleAsset()))
                 .toList();
     }
 
-    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Optional<InstrumentSymbol> currentTradingSymbol(String symbol) {
-        if (snapshotCache != null && snapshotCache.initialized(properties.getKafka().getProductLine())) {
-            return snapshotCache.current(properties.getKafka().getProductLine(), symbol)
-                    .filter(instrument -> instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.TRADING
-                            || instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.HALT)
-                    .map(instrument -> new InstrumentSymbol(instrument.symbol(), instrument.baseAsset(),
-                            instrument.quoteAsset(), instrument.settleAsset()));
+        if (snapshotCache == null) {
+            return currentVersionRepository.findVersion(symbol)
+                    .flatMap(version -> instrumentRepository.findTrading(
+                            symbol, version, productContractTypeFilter().orElse(null)))
+                    .map(InstrumentVersion::toInstrumentSymbol);
         }
-        return currentVersionRepository.findVersion(symbol)
-                .flatMap(version -> instrumentRepository.findTrading(
-                        symbol, version, productContractTypeFilter().orElse(null)))
-                .map(InstrumentVersion::toInstrumentSymbol);
+        if (!snapshotCache.initialized(properties.getKafka().getProductLine())) {
+            throw new IllegalStateException("撮合合约 JVM 快照尚未就绪");
+        }
+        return snapshotCache.current(properties.getKafka().getProductLine(), symbol)
+                .filter(instrument -> instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.TRADING
+                        || instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.HALT)
+                .map(instrument -> new InstrumentSymbol(instrument.symbol(), instrument.baseAsset(),
+                        instrument.quoteAsset(), instrument.settleAsset()));
     }
 
     @Transactional(readOnly = true)
@@ -131,4 +134,5 @@ public class MatchingSymbolService {
                 ? Optional.of(kafka.getProductLine().contractTypeCode())
                 : Optional.empty();
     }
+
 }

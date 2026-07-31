@@ -113,18 +113,7 @@ public class RedisRiskCalculator {
             });
             return loaded;
         }
-        RiskInstrumentSpec loaded = repository.riskInstrumentSpec(symbol, version)
-                .orElseThrow(() -> new IllegalStateException(
-                        "risk instrument spec unavailable for " + symbol + " version " + version));
-        specs.updateAndGet(previous -> {
-            if (previous.containsKey(key)) {
-                return previous;
-            }
-            Map<InstrumentKey, RiskInstrumentSpec> next = new HashMap<>(previous);
-            next.put(key, loaded);
-            return Map.copyOf(next);
-        });
-        return loaded;
+        throw new IllegalStateException("风控合约 JVM 快照尚未就绪");
     }
 
     public int cachedSpecCount() {

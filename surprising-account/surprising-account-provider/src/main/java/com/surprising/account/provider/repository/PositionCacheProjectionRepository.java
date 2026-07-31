@@ -1,6 +1,8 @@
 package com.surprising.account.provider.repository;
 
 import com.surprising.account.api.model.PositionCacheEvent;
+import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
@@ -11,7 +13,7 @@ import org.springframework.stereotype.Repository;
 /**
  * 读取 Redis 持仓投影所需的权威最终状态。
  *
- * <p>不可拆原因：缓存 revision、持仓、合约结算资产和逐仓保证金必须在同一数据库快照中组合，
+ * <p>不可拆原因：缓存 revision、持仓和逐仓保证金在数据库快照中组合，合约结算资产由本地不可变快照补齐，
  * 否则事务提交后的 Redis 投影可能混用不同版本的持仓与保证金。该查询只服务在线缓存重建和
  * 最终状态同步，不提供后台时间线、资金对账或运营报表。</p>
  */
@@ -19,9 +21,22 @@ import org.springframework.stereotype.Repository;
 public class PositionCacheProjectionRepository {
 
     private final JdbcTemplate jdbcTemplate;
+    private final AccountProperties properties;
+    private final InstrumentSnapshotCache snapshotCache;
 
     public PositionCacheProjectionRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
+        this.properties = new AccountProperties();
+        this.snapshotCache = null;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public PositionCacheProjectionRepository(JdbcTemplate jdbcTemplate,
+                                             AccountProperties properties,
+                                             InstrumentSnapshotCache snapshotCache) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.properties = properties;
+        this.snapshotCache = snapshotCache;
     }
 
     public List<PositionCacheEvent> page(ProductLine productLine,
@@ -41,15 +56,12 @@ public class PositionCacheProjectionRepository {
                        p.entry_price_ticks,
                        p.entry_value_ticks,
                        p.realized_pnl_units,
-                       COALESCE(m.asset, i.settle_asset, '') AS margin_asset,
+                       COALESCE(m.asset, '') AS margin_asset,
                        COALESCE(m.margin_units, 0) AS margin_units,
                        p.updated_at AS position_updated_at,
                        COALESCE(m.updated_at, p.updated_at) AS margin_updated_at,
                        GREATEST(p.cache_revision, COALESCE(m.cache_revision, 0)) AS revision
                   FROM account_positions p
-                  LEFT JOIN instruments i
-                    ON i.symbol = p.symbol
-                   AND i.version = p.instrument_version
                   LEFT JOIN LATERAL (
                       SELECT MIN(pm.asset) AS asset,
                              COALESCE(SUM(pm.margin_units), 0)::BIGINT AS margin_units,
@@ -89,14 +101,11 @@ public class PositionCacheProjectionRepository {
                        p.entry_price_ticks,
                        p.entry_value_ticks,
                        p.realized_pnl_units,
-                       COALESCE(m.asset, i.settle_asset, '') AS margin_asset,
+                       COALESCE(m.asset, '') AS margin_asset,
                        COALESCE(m.margin_units, 0) AS margin_units,
                        p.updated_at AS position_updated_at,
                        COALESCE(m.updated_at, p.updated_at) AS margin_updated_at
                   FROM account_positions p
-                  LEFT JOIN instruments i
-                    ON i.symbol = p.symbol
-                   AND i.version = p.instrument_version
                   LEFT JOIN LATERAL (
                       SELECT MIN(pm.asset) AS asset,
                              COALESCE(SUM(pm.margin_units), 0)::BIGINT AS margin_units,
@@ -127,6 +136,13 @@ public class PositionCacheProjectionRepository {
     private PositionCacheEvent toEvent(java.sql.ResultSet rs) throws java.sql.SQLException {
         long revision = rs.getLong("revision");
         Number version = (Number) rs.getObject("instrument_version");
+        String marginAsset = rs.getString("margin_asset");
+        if ((marginAsset == null || marginAsset.isBlank()) && version != null
+                && snapshotCache != null && snapshotCache.initialized(ProductLine.valueOf(rs.getString("product_line")))) {
+            marginAsset = snapshotCache.version(ProductLine.valueOf(rs.getString("product_line")),
+                            rs.getString("symbol"), version.longValue())
+                    .map(value -> value.settleAsset()).orElse("");
+        }
         return new PositionCacheEvent(
                 revision,
                 ProductLine.valueOf(rs.getString("product_line")),
@@ -139,7 +155,7 @@ public class PositionCacheProjectionRepository {
                 rs.getLong("entry_price_ticks"),
                 rs.getLong("entry_value_ticks"),
                 rs.getLong("realized_pnl_units"),
-                rs.getString("margin_asset"),
+                marginAsset,
                 rs.getLong("margin_units"),
                 rs.getTimestamp("position_updated_at").toInstant(),
                 rs.getTimestamp("margin_updated_at").toInstant(),

@@ -3,17 +3,13 @@ package com.surprising.liquidation.provider.repository;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineSql;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** 合约默认费率仓储，只负责 {@code instruments} 表。 */
+/** 合约默认费率仓储，只负责从本地不可变合约快照提供费率。 */
 @Repository
 public class LiquidationInstrumentFeeRepository {
 
@@ -38,44 +34,15 @@ public class LiquidationInstrumentFeeRepository {
         if (requests == null || requests.isEmpty()) {
             return Map.of();
         }
-        if (snapshotCache != null) {
-            ProductLine productLine = properties.getKafka().getProductLine();
-            if (snapshotCache.initialized(productLine)) {
-                return requests.stream()
-                        .map(request -> snapshotCache.version(productLine, request.symbol(),
-                                        request.instrumentVersion())
-                                .map(instrument -> new InstrumentFee(request.candidateId(), productLine,
-                                        instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm())))
-                        .flatMap(Optional::stream)
-                        .collect(Collectors.toMap(InstrumentFee::candidateId, fee -> fee));
-            }
+        ProductLine productLine = properties.getKafka().getProductLine();
+        if (snapshotCache == null || !snapshotCache.initialized(productLine)) {
+            throw new IllegalStateException("强平合约 JVM 快照尚未就绪");
         }
-        String values = String.join(", ", Collections.nCopies(requests.size(), "(?, ?, ?)"));
-        List<Object> args = new ArrayList<>(requests.size() * 3);
-        for (InstrumentFeeRequest request : requests) {
-            args.add(request.candidateId());
-            args.add(request.symbol());
-            args.add(request.instrumentVersion());
-        }
-        String sql = """
-                WITH requested(candidate_id, symbol, instrument_version) AS (
-                    VALUES %s
-                )
-                SELECT r.candidate_id,
-                       i.maker_fee_rate_ppm,
-                       i.taker_fee_rate_ppm,
-                       %s AS product_line
-                  FROM requested r
-                  JOIN instruments i
-                    ON i.symbol = r.symbol
-                   AND i.version = r.instrument_version
-                """.formatted(values, ProductLineSql.contractTypeProductLineCase("i.contract_type"));
-        return jdbcTemplate.query(sql, (rs, rowNum) -> new InstrumentFee(
-                        rs.getLong("candidate_id"),
-                        ProductLine.valueOf(rs.getString("product_line")),
-                        rs.getLong("maker_fee_rate_ppm"),
-                        rs.getLong("taker_fee_rate_ppm")), args.toArray())
-                .stream()
+        return requests.stream()
+                .map(request -> snapshotCache.version(productLine, request.symbol(), request.instrumentVersion())
+                        .map(instrument -> new InstrumentFee(request.candidateId(), productLine,
+                                instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm())))
+                .flatMap(java.util.Optional::stream)
                 .collect(Collectors.toMap(InstrumentFee::candidateId, fee -> fee));
     }
 

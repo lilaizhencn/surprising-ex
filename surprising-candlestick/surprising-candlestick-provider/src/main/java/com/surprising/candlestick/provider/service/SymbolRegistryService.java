@@ -84,24 +84,28 @@ import org.springframework.stereotype.Service;
                 symbolRepository.findEnabledSymbols().stream()
                         .map(CandleKey::normalizeSymbol)
                         .forEach(symbols::add);
-            } else {
-                if (snapshotCache != null && snapshotCache.initialized(properties.getKafka().getProductLine())) {
-                    snapshotCache.current(properties.getKafka().getProductLine()).stream()
+            } else if (snapshotCache != null && snapshotCache.initialized(properties.getKafka().getProductLine())) {
+                snapshotCache.current(properties.getKafka().getProductLine()).stream()
                         .filter(instrument -> instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.PRE_TRADING
                                 || instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.TRADING
                                 || instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.HALT)
                         .map(com.surprising.instrument.api.model.InstrumentResponse::symbol)
                         .map(CandleKey::normalizeSymbol)
                         .forEach(symbols::add);
-                } else {
-                    Map<String, Long> currentVersions = currentVersionRepository.findAll();
-                    eligibleInstrumentVersions().stream()
-                            .filter(instrument -> currentVersions.getOrDefault(instrument.symbol(), -1L)
-                                    == instrument.version())
-                            .map(InstrumentVersion::symbol)
-                            .map(CandleKey::normalizeSymbol)
-                            .forEach(symbols::add);
-                }
+            } else if (snapshotCache == null) {
+                Map<String, Long> currentVersions = currentVersionRepository.findAll();
+                List<InstrumentVersion> versions = properties.getKafka().isProductTopicsEnabled()
+                        ? instrumentRepository.findEnabledVersionsByContractType(
+                        properties.getKafka().getProductLine().contractTypeCode())
+                        : instrumentRepository.findEnabledPerpetualVersions();
+                versions.stream()
+                        .filter(instrument -> currentVersions.getOrDefault(instrument.symbol(), -1L)
+                                == instrument.version())
+                        .map(InstrumentVersion::symbol)
+                        .map(CandleKey::normalizeSymbol)
+                        .forEach(symbols::add);
+            } else {
+                throw new IllegalStateException("K 线合约 JVM 快照尚未就绪");
             }
             enabledSymbols = Set.copyOf(symbols);
         } catch (Exception ex) {
@@ -116,11 +120,4 @@ import org.springframework.stereotype.Service;
         return enabledSymbols.contains(CandleKey.normalizeSymbol(symbol));
     }
 
-    private List<InstrumentVersion> eligibleInstrumentVersions() {
-        if (properties.getKafka().isProductTopicsEnabled()) {
-            return instrumentRepository.findEnabledVersionsByContractType(
-                    properties.getKafka().getProductLine().contractTypeCode());
-        }
-        return instrumentRepository.findEnabledPerpetualVersions();
-    }
 }

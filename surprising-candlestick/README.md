@@ -19,11 +19,12 @@ K 线服务按多节点部署设计，采用分区化行情数据流水线：
 - Kafka Streams 使用 RocksDB state store 保存热 K 线状态、成交幂等状态、待落库 dirty snapshot、每个 symbol 的最新 sequence。
 - PostgreSQL 只接收周期性的完整快照 upsert。服务不会在每笔成交时读取数据库 K 线行。
 - 合约 K 线变更事件发送到 `surprising.linear-perp.candle.events.v1`，websocket/行情推送服务应独立消费这个 Topic。
-- 启用交易对从 `surprising-instrument` 的 `instruments` 当前版本读取。
-- 数据访问按物理表拆分：`instruments`、`instrument_current_versions`、`account_asset_scales`、
-  兼容模式的 `candlestick_symbols` 和 K 线表分别由单表 Repository 负责。`SymbolRegistryService`
-  在内存中合并可交易版本与当前版本，`PublicTradeEventMapper` 在服务层组合品种精度和资产精度，
-  不再在 Service 中执行 SQL 或跨表 JOIN。
+- 启用交易对启动时通过 Instrument 内部聚合 RPC 加载本产品线完整 JVM 快照，运行中消费
+  `surprising.instrument.events.v1` 增量更新；`SymbolRegistryService` 和 `PublicTradeEventMapper`
+  只从本地快照读取合约正文、版本和资产精度。
+- 兼容模式的 `candlestick_symbols` 和 K 线表仍分别由单表 Repository 负责；行情热路径不再读取
+  `instruments`、`instrument_current_versions` 或 `account_asset_scales`，也不在 Service 中执行
+  合约参数 SQL 或跨表 JOIN。
 
 ## 多节点核心机制
 
