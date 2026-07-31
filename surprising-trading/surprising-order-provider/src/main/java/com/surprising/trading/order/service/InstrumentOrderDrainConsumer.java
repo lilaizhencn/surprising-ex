@@ -1,6 +1,7 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.instrument.api.model.InstrumentEvent;
+import com.surprising.instrument.api.InstrumentEventKeys;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -32,7 +33,7 @@ public class InstrumentOrderDrainConsumer {
                 throw new IllegalArgumentException("instrument Topic 不匹配: " + record.topic());
             }
             InstrumentEvent event = objectMapper.readValue(record.value(), InstrumentEvent.class);
-            if (!event.symbol().equals(record.key())) {
+            if (!InstrumentEventKeys.matches(record.key(), event)) {
                 throw new IllegalArgumentException("instrument 事件必须使用 symbol 作为 Kafka key");
             }
             drainService.drain(event);

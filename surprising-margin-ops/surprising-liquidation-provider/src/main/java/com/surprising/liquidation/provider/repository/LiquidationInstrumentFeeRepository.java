@@ -1,11 +1,14 @@
 package com.surprising.liquidation.provider.repository;
 
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineSql;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -15,14 +18,37 @@ import org.springframework.stereotype.Repository;
 public class LiquidationInstrumentFeeRepository {
 
     private final JdbcTemplate jdbcTemplate;
+    private final LiquidationProperties properties;
+    private final InstrumentSnapshotCache snapshotCache;
 
     public LiquidationInstrumentFeeRepository(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, new LiquidationProperties(), null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public LiquidationInstrumentFeeRepository(JdbcTemplate jdbcTemplate,
+                                              LiquidationProperties properties,
+                                              InstrumentSnapshotCache snapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
+        this.properties = properties == null ? new LiquidationProperties() : properties;
+        this.snapshotCache = snapshotCache;
     }
 
     public Map<Long, InstrumentFee> findAll(List<InstrumentFeeRequest> requests) {
         if (requests == null || requests.isEmpty()) {
             return Map.of();
+        }
+        if (snapshotCache != null) {
+            ProductLine productLine = properties.getKafka().getProductLine();
+            if (snapshotCache.initialized(productLine)) {
+                return requests.stream()
+                        .map(request -> snapshotCache.version(productLine, request.symbol(),
+                                        request.instrumentVersion())
+                                .map(instrument -> new InstrumentFee(request.candidateId(), productLine,
+                                        instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm())))
+                        .flatMap(Optional::stream)
+                        .collect(Collectors.toMap(InstrumentFee::candidateId, fee -> fee));
+            }
         }
         String values = String.join(", ", Collections.nCopies(requests.size(), "(?, ?, ?)"));
         List<Object> args = new ArrayList<>(requests.size() * 3);

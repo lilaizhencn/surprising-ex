@@ -125,6 +125,19 @@ public class InstrumentRepository {
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toResponse(rs), args.toArray());
     }
 
+    /** 返回产品线下全部历史版本，供下游处理旧持仓和旧订单的快照恢复。 */
+    public List<InstrumentResponse> listByProductLine(ProductLine productLine) {
+        if (productLine == null) {
+            return List.of();
+        }
+        return jdbcTemplate.query("""
+                SELECT *
+                  FROM instruments
+                 WHERE contract_type = ?
+                 ORDER BY symbol ASC, version ASC
+                """, (rs, rowNum) -> toResponse(rs), productLine.contractTypeCode());
+    }
+
     public InstrumentPage listPage(List<InstrumentVersionKey> currentVersions,
                                    InstrumentType type,
                                    InstrumentStatus status,

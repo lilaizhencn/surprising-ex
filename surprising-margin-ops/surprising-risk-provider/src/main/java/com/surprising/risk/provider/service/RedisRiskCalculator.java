@@ -2,6 +2,8 @@ package com.surprising.risk.provider.service;
 
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.consumer.LatestMarkPriceCache;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.product.api.InstrumentSpecEpoch;
 import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.model.CachedRiskGroup;
@@ -24,6 +26,7 @@ public class RedisRiskCalculator {
     private final LatestMarkPriceCache markPriceCache;
     private final RiskRepository repository;
     private final RiskProperties properties;
+    private final InstrumentSnapshotCache snapshotCache;
     /** 读取走不可变快照；规格变更只通过整体替换发布，避免计算线程看到半成品。 */
     private final AtomicReference<Map<InstrumentKey, RiskInstrumentSpec>> specs =
             new AtomicReference<>(Map.of());
@@ -31,9 +34,18 @@ public class RedisRiskCalculator {
     public RedisRiskCalculator(LatestMarkPriceCache markPriceCache,
                                RiskRepository repository,
                                RiskProperties properties) {
+        this(markPriceCache, repository, properties, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public RedisRiskCalculator(LatestMarkPriceCache markPriceCache,
+                               RiskRepository repository,
+                               RiskProperties properties,
+                               InstrumentSnapshotCache snapshotCache) {
         this.markPriceCache = markPriceCache;
         this.repository = repository;
         this.properties = properties;
+        this.snapshotCache = snapshotCache;
     }
 
     public List<CalculatedPositionRisk> calculate(CachedRiskGroup group) {
@@ -73,6 +85,33 @@ public class RedisRiskCalculator {
         RiskInstrumentSpec cached = specs.get().get(key);
         if (cached != null) {
             return cached;
+        }
+        if (snapshotCache != null && snapshotCache.initialized(properties.getKafka().getProductLine())) {
+            InstrumentResponse instrument = snapshotCache.version(
+                            properties.getKafka().getProductLine(), symbol, version)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "合约快照不存在: " + symbol + " version " + version));
+            long settleScale = snapshotCache.scale(properties.getKafka().getProductLine(), instrument.settleAsset())
+                    .orElseThrow(() -> new IllegalStateException(
+                            "合约结算资产精度不存在: " + instrument.settleAsset()));
+            RiskInstrumentSpec loaded = new RiskInstrumentSpec(
+                    instrument.symbol(), instrument.version(), instrument.contractType(), instrument.settleAsset(),
+                    instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), settleScale,
+                    instrument.maintenanceMarginRatePpm(), instrument.riskLimitBrackets() == null
+                            ? List.of()
+                            : instrument.riskLimitBrackets().stream()
+                            .map(bracket -> new com.surprising.risk.provider.model.RiskMaintenanceBracket(
+                                    bracket.notionalFloorUnits(), bracket.maintenanceMarginRatePpm()))
+                            .toList());
+            specs.updateAndGet(previous -> {
+                if (previous.containsKey(key)) {
+                    return previous;
+                }
+                Map<InstrumentKey, RiskInstrumentSpec> next = new HashMap<>(previous);
+                next.put(key, loaded);
+                return Map.copyOf(next);
+            });
+            return loaded;
         }
         RiskInstrumentSpec loaded = repository.riskInstrumentSpec(symbol, version)
                 .orElseThrow(() -> new IllegalStateException(

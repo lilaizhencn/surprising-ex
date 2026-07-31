@@ -5,7 +5,9 @@ import com.surprising.candlestick.api.model.TradeSide;
 import com.surprising.candlestick.provider.aggregation.CandleKey;
 import com.surprising.candlestick.provider.repository.CandlestickAssetScaleRepository;
 import com.surprising.candlestick.provider.repository.CandlestickInstrumentRepository;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.candlestick.provider.repository.CandlestickInstrumentRepository.InstrumentDefinition;
+import com.surprising.candlestick.provider.config.CandlestickProperties;
 import com.surprising.trading.api.model.PublicTradeEvent;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -23,12 +25,42 @@ public class PublicTradeEventMapper {
 
     private final CandlestickInstrumentRepository instrumentRepository;
     private final CandlestickAssetScaleRepository assetScaleRepository;
+    private final InstrumentSnapshotCache snapshotCache;
+    private final com.surprising.product.api.ProductLine productLine;
     private final Map<InstrumentKey, InstrumentScale> scales = new ConcurrentHashMap<>();
 
     public PublicTradeEventMapper(CandlestickInstrumentRepository instrumentRepository,
                                   CandlestickAssetScaleRepository assetScaleRepository) {
+        this(instrumentRepository, assetScaleRepository, null, com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
+    }
+
+    public PublicTradeEventMapper(CandlestickInstrumentRepository instrumentRepository,
+                                  CandlestickAssetScaleRepository assetScaleRepository,
+                                  InstrumentSnapshotCache snapshotCache) {
+        this(instrumentRepository, assetScaleRepository, snapshotCache,
+                com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public PublicTradeEventMapper(CandlestickInstrumentRepository instrumentRepository,
+                                  CandlestickAssetScaleRepository assetScaleRepository,
+                                  InstrumentSnapshotCache snapshotCache,
+                                  CandlestickProperties properties) {
+        this(instrumentRepository, assetScaleRepository, snapshotCache,
+                properties == null || properties.getKafka() == null
+                        ? com.surprising.product.api.ProductLine.LINEAR_PERPETUAL
+                        : properties.getKafka().getProductLine());
+    }
+
+    private PublicTradeEventMapper(CandlestickInstrumentRepository instrumentRepository,
+                                   CandlestickAssetScaleRepository assetScaleRepository,
+                                   InstrumentSnapshotCache snapshotCache,
+                                   com.surprising.product.api.ProductLine productLine) {
         this.instrumentRepository = instrumentRepository;
         this.assetScaleRepository = assetScaleRepository;
+        this.snapshotCache = snapshotCache;
+        this.productLine = productLine == null
+                ? com.surprising.product.api.ProductLine.LINEAR_PERPETUAL : productLine;
     }
 
     public TradeEvent toTradeEvent(PublicTradeEvent publicTrade) {
@@ -72,6 +104,20 @@ public class PublicTradeEventMapper {
     }
 
     private InstrumentScale loadScale(InstrumentKey key) {
+        if (snapshotCache != null && snapshotCache.initialized(productLine)) {
+            var instrument = snapshotCache.version(productLine,
+                            key.symbol(), key.instrumentVersion())
+                    .orElseThrow(() -> new IllegalArgumentException("instrument scale not found for "
+                            + key.symbol() + " version " + key.instrumentVersion()));
+            long baseScaleUnits = snapshotCache.scale(productLine,
+                    instrument.baseAsset()).orElseThrow(() -> new IllegalArgumentException(
+                    "asset scale not found for " + instrument.baseAsset()));
+            long quoteScaleUnits = snapshotCache.scale(productLine,
+                    instrument.quoteAsset()).orElseThrow(() -> new IllegalArgumentException(
+                    "asset scale not found for " + instrument.quoteAsset()));
+            return new InstrumentScale(instrument.priceTickUnits(), instrument.quantityStepUnits(),
+                    baseScaleUnits, quoteScaleUnits);
+        }
         InstrumentDefinition instrument = instrumentRepository.find(key.symbol(), key.instrumentVersion())
                 .orElseThrow(() -> new IllegalArgumentException("instrument scale not found for "
                         + key.symbol() + " version " + key.instrumentVersion()));

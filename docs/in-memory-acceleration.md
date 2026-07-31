@@ -24,9 +24,17 @@ RocksDB changelog、Kafka 事件和数据库关闭快照共同组成恢复链路
 
 ## 合约与风控配置
 
-`InstrumentStorageService` 启动时按四条产品线预热当前规格，完整组装风险档位、指数源和精度后一次性发布到 `InstrumentSpecSnapshotCache`。`InstrumentSpecId` 是内部不可变身份，键中必须包含产品线、symbol 和规格序号，防止同名合约串线。
+Instrument Service 通过统一聚合 Service 组装合约正文、风险档位、指数源和资产精度。各业务模块启动时调用
+`GET /internal/v1/instruments/snapshot`，将结果加载到本模块自己的 `InstrumentSnapshotCache`；运行中消费
+`surprising.instrument.events.v1`，按 `PRODUCT_LINE:SYMBOL` key 和版本号校验后以 `AtomicReference` 整体替换。
+下单、撮合、账户、风控、指数价、标记价、K 线和做市热路径只读本 JVM 快照，数据库仅保留 Instrument 写入、
+启动恢复和审计回源边界。
 
-`RedisRiskCalculator` 使用不可变快照和 `AtomicReference` 整体替换，风控计算命中缓存时不查库；未命中时才回源并发布新快照。当前数据库字段和 Kafka 字段仍保留 `instrumentVersion` 兼容读取，网关会移除该内部字段，不能直接删除历史数据列或旧事件。
+资金费率发布已同样从 JVM 快照读取 funding 参数和资产精度；资金费结算候选只从数据库读取持仓与游标，
+再用同一快照完成合约计算。涉及持仓、余额和结算幂等的事务性 JOIN 仍保留在主库，不能改成非原子多次读取。
+
+`RedisRiskCalculator` 使用不可变快照和 `AtomicReference` 整体替换，风控计算不为规格参数查询数据库；
+`instrumentVersion` 仍是历史订单、持仓和 Kafka 事件的内部兼容字段，不能直接删除。
 
 ## Trigger 与风险组
 

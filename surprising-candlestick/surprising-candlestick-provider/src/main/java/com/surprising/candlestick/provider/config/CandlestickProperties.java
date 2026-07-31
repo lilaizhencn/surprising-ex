@@ -89,6 +89,7 @@ public class CandlestickProperties {
         private boolean productTopicsEnabled;
         private String tradeTopic = "surprising.perp.match.trades.v1";
         private String candleTopic = "surprising.perp.candle.events.v1";
+        private String instrumentEventsTopic = "surprising.instrument.events.v1";
         private String applicationId = "surprising-candlestick-v1";
 
         public String getBootstrapServers() {
@@ -129,6 +130,18 @@ public class CandlestickProperties {
 
         public void setCandleTopic(String candleTopic) {
             this.candleTopic = candleTopic;
+        }
+
+        public String getInstrumentEventsTopic() {
+            return instrumentEventsTopic;
+        }
+
+        public void setInstrumentEventsTopic(String instrumentEventsTopic) {
+            this.instrumentEventsTopic = instrumentEventsTopic;
+        }
+
+        public String getInstrumentSnapshotGroupId() {
+            return "surprising-" + productLine.topicSegment() + "-candlestick-instrument-snapshot-v1";
         }
 
         public String getApplicationId() {

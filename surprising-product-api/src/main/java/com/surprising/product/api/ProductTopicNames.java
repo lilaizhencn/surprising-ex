@@ -63,6 +63,14 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("candle.events");
     }
 
+    /**
+     * 产品线隔离的 Instrument 配置事件 Topic。
+     */
+    public String instrumentEventsTopic() {
+        // Instrument 配置是全局事实源，所有产品线共用一个事件 Topic，靠 key 和 payload 隔离产品线。
+        return "surprising.instrument.events.v1";
+    }
+
     public String accountPositionEventsTopic() {
         return topic("account.position.events");
     }

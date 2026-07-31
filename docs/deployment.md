@@ -21,7 +21,7 @@ RF=3 时共 832 个逻辑分区、2,496 个副本。
 
 | 范围 | Topic 后缀或完整名称 | 分区数 | 必须使用的 Key |
 |---|---|---:|---|
-| 共享 | `surprising.instrument.events.v1` | 32 | `symbol` |
+| 共享 | `surprising.instrument.events.v1` | 32 | `PRODUCT_LINE:SYMBOL` |
 | 共享 | `surprising.instrument.lifecycle-drain.v1` | 32 | `symbol` |
 | 共享 | `surprising.account.position.events.v1` | 32 | `<PRODUCT_LINE>:<userId>` |
 | 共享 | `surprising.account.liquidation-fee.events.v1` | 32 | 结算资产 |

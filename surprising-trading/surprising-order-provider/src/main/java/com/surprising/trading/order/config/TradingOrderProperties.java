@@ -151,6 +151,9 @@ public class TradingOrderProperties {
         public String getInstrumentLifecycleGroupId() {
             return productTopics().consumerGroup("order-instrument-lifecycle");
         }
+        public String getInstrumentSnapshotGroupId() {
+            return productTopics().consumerGroup("order-instrument-snapshot");
+        }
         public String getOpenOrderViewGroupId() { return openOrderViewGroupId; }
         public void setOpenOrderViewGroupId(String openOrderViewGroupId) { this.openOrderViewGroupId = openOrderViewGroupId; }
 

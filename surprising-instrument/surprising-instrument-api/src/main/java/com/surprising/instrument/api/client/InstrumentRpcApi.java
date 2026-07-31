@@ -3,6 +3,7 @@ package com.surprising.instrument.api.client;
 import com.surprising.instrument.api.InstrumentApiPaths;
 import com.surprising.instrument.api.model.InstrumentQueryResponse;
 import com.surprising.instrument.api.model.InstrumentResponse;
+import com.surprising.instrument.api.model.InstrumentSnapshotResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.product.api.ProductLine;
@@ -14,7 +15,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 @FeignClient(
         name = "surprising-instrument-provider",
         contextId = "instrumentRpcApi",
-        path = InstrumentApiPaths.BASE_PATH,
+        path = InstrumentApiPaths.INTERNAL_BASE_PATH,
         url = "${surprising.clients.instrument.base-url:http://localhost:9080}")
 public interface InstrumentRpcApi {
 
@@ -38,4 +39,7 @@ public interface InstrumentRpcApi {
     InstrumentQueryResponse list(@RequestParam(value = "productLine", required = false) ProductLine productLine,
                                  @RequestParam(value = "type", required = false) InstrumentType type,
                                  @RequestParam(value = "status", required = false) InstrumentStatus status);
+
+    @GetMapping("/snapshot")
+    InstrumentSnapshotResponse snapshot(@RequestParam("productLine") ProductLine productLine);
 }

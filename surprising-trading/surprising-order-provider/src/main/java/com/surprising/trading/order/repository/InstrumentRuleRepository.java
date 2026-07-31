@@ -1,7 +1,9 @@
 package com.surprising.trading.order.repository;
 
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
+import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.InstrumentRuleLookup;
@@ -20,19 +22,30 @@ public class InstrumentRuleRepository implements InstrumentRuleLookup {
 
     private final JdbcTemplate jdbcTemplate;
     private final TradingOrderProperties properties;
+    private final InstrumentSnapshotCache snapshotCache;
 
     public InstrumentRuleRepository(JdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, new TradingOrderProperties());
+        this(jdbcTemplate, new TradingOrderProperties(), null);
+    }
+
+    public InstrumentRuleRepository(JdbcTemplate jdbcTemplate, TradingOrderProperties properties) {
+        this(jdbcTemplate, properties, null);
     }
 
     @Autowired
-    public InstrumentRuleRepository(JdbcTemplate jdbcTemplate, TradingOrderProperties properties) {
+    public InstrumentRuleRepository(JdbcTemplate jdbcTemplate,
+                                    TradingOrderProperties properties,
+                                    InstrumentSnapshotCache snapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties;
+        this.snapshotCache = snapshotCache;
     }
 
     @Override
     public Optional<InstrumentRule> currentRule(String symbol) {
+        if (snapshotCache != null && snapshotCache.initialized(properties.getKafka().getProductLine())) {
+            return snapshotCache.current(properties.getKafka().getProductLine(), symbol).map(this::toRule);
+        }
         // instrument 负责 exchange-core 使用的精确 long 单位换算。
         // 不可拆原因：当前版本指针与版本规则必须在同一条 SQL 中解析；若分两次读取，
         // 版本切换可能使订单使用已经失效的 tick、数量步长或保证金参数。
@@ -91,6 +104,17 @@ public class InstrumentRuleRepository implements InstrumentRuleLookup {
                 rs.getLong("notional_multiplier_units"),
                 rs.getLong("max_leverage_ppm"),
                 rs.getLong("initial_margin_rate_ppm")), args.toArray()).stream().findFirst();
+    }
+
+    private InstrumentRule toRule(InstrumentResponse value) {
+        return new InstrumentRule(value.symbol(), value.version(), value.status().name(), value.instrumentType(),
+                value.contractType(), value.baseAsset(), value.quoteAsset(), value.settleAsset(),
+                value.supportedOrderTypes() == null ? Set.of() : Set.copyOf(value.supportedOrderTypes()),
+                value.supportedTimeInForce() == null ? Set.of() : Set.copyOf(value.supportedTimeInForce()),
+                value.marketOrderEnabled(), value.postOnlyEnabled(), value.reduceOnlyEnabled(),
+                value.quantityStepUnits(), value.minQuantitySteps(), value.maxQuantitySteps(),
+                value.minNotionalUnits(), value.maxNotionalUnits(), value.notionalMultiplierUnits(),
+                value.maxLeveragePpm(), value.initialMarginRatePpm());
     }
 
     private Set<String> csv(String value) {

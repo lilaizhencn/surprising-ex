@@ -2,11 +2,14 @@ package com.surprising.funding.provider.repository;
 
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.model.FundingRateInput;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import java.sql.Timestamp;
 import java.time.Duration;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -25,19 +28,32 @@ public class FundingRateInputRepository {
     private final JdbcTemplate jdbcTemplate;
     private final FundingProperties properties;
     private final LatestMarkPriceCache markPriceCache;
+    private final InstrumentSnapshotCache snapshotCache;
 
     public FundingRateInputRepository(JdbcTemplate jdbcTemplate,
                                       FundingProperties properties,
                                       LatestMarkPriceCache markPriceCache) {
+        this(jdbcTemplate, properties, markPriceCache, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public FundingRateInputRepository(JdbcTemplate jdbcTemplate,
+                                      FundingProperties properties,
+                                      LatestMarkPriceCache markPriceCache,
+                                      InstrumentSnapshotCache snapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties;
         this.markPriceCache = markPriceCache;
+        this.snapshotCache = snapshotCache;
     }
 
     public List<FundingRateInput> find(Duration maxMarkAge) {
         MarkPriceValues markPrices = freshMarkPrices(maxMarkAge);
         if (markPrices.isEmpty()) {
             return List.of();
+        }
+        if (snapshotCache != null && snapshotCache.initialized(properties.getKafka().getProductLine())) {
+            return fromSnapshot(markPriceCache.freshSnapshots(maxMarkAge));
         }
         List<Object> args = new ArrayList<>(markPrices.args());
         String productCondition = fundingInstrumentCondition(args, "i");
@@ -70,6 +86,31 @@ public class FundingRateInputRepository {
                 rs.getLong("funding_rate_cap_ppm"),
                 rs.getInt("funding_interval_hours"),
                 rs.getTimestamp("event_time").toInstant()), args.toArray());
+    }
+
+    private List<FundingRateInput> fromSnapshot(List<MarkPriceEvent> markPrices) {
+        ProductLine productLine = properties.getKafka().getProductLine();
+        if (!productLine.isFundingProduct()) {
+            return List.of();
+        }
+        List<FundingRateInput> result = new ArrayList<>(markPrices.size());
+        for (MarkPriceEvent mark : markPrices) {
+            var instrument = snapshotCache.version(productLine, mark.symbol(), mark.instrumentVersion()).orElse(null);
+            if (instrument == null || instrument.status() != InstrumentStatus.TRADING
+                    || instrument.fundingIntervalHours() <= 0 || mark.markPrice() == null
+                    || mark.indexPrice() == null
+                    || mark.indexPrice().signum() <= 0) {
+                continue;
+            }
+            long premium = mark.markPrice().subtract(mark.indexPrice())
+                    .multiply(java.math.BigDecimal.valueOf(1_000_000L))
+                    .divide(mark.indexPrice(), 0, RoundingMode.HALF_UP)
+                    .longValueExact();
+            result.add(new FundingRateInput(mark.symbol(), mark.sequence(), premium,
+                    instrument.interestRatePpm(), instrument.fundingRateFloorPpm(),
+                    instrument.fundingRateCapPpm(), instrument.fundingIntervalHours(), mark.eventTime()));
+        }
+        return List.copyOf(result);
     }
 
     private MarkPriceValues freshMarkPrices(Duration maxAge) {

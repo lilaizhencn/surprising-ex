@@ -1,8 +1,12 @@
 package com.surprising.account.provider.repository;
 
+import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.account.provider.model.SpotInstrumentSpec;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
+import com.surprising.instrument.api.model.InstrumentResponse;
+import com.surprising.product.api.ProductLine;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -11,12 +15,38 @@ import org.springframework.stereotype.Repository;
 public class AccountInstrumentRepository {
 
     private final JdbcTemplate jdbcTemplate;
+    private final AccountProperties properties;
+    private final InstrumentSnapshotCache snapshotCache;
 
     public AccountInstrumentRepository(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, new AccountProperties(), null, false);
+    }
+
+    public AccountInstrumentRepository(JdbcTemplate jdbcTemplate, AccountProperties properties) {
+        this(jdbcTemplate, properties, null, false);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AccountInstrumentRepository(JdbcTemplate jdbcTemplate,
+                                       AccountProperties properties,
+                                       InstrumentSnapshotCache snapshotCache) {
+        this(jdbcTemplate, properties, snapshotCache, true);
+    }
+
+    private AccountInstrumentRepository(JdbcTemplate jdbcTemplate,
+                                        AccountProperties properties,
+                                        InstrumentSnapshotCache snapshotCache,
+                                        boolean springManaged) {
         this.jdbcTemplate = jdbcTemplate;
+        this.properties = properties;
+        this.snapshotCache = snapshotCache;
     }
 
     public Optional<String> findSettleAsset(String symbol, long instrumentVersion) {
+        Optional<InstrumentResponse> cached = cached(symbol, instrumentVersion);
+        if (cached != null) {
+            return cached.map(InstrumentResponse::settleAsset);
+        }
         return jdbcTemplate.query("""
                 SELECT settle_asset
                   FROM instruments
@@ -27,6 +57,13 @@ public class AccountInstrumentRepository {
     }
 
     public Optional<SpotInstrumentSpec> findSpotSpec(String symbol, long instrumentVersion) {
+        Optional<InstrumentResponse> cached = cached(symbol, instrumentVersion);
+        if (cached != null) {
+            return cached.filter(value -> value.instrumentType() == InstrumentType.SPOT
+                            && value.contractType() == ContractType.SPOT)
+                    .map(value -> new SpotInstrumentSpec(value.version(), value.baseAsset(), value.quoteAsset(),
+                            value.quantityStepUnits(), value.notionalMultiplierUnits()));
+        }
         return jdbcTemplate.query("""
                 SELECT version, base_asset, quote_asset, quantity_step_units, notional_multiplier_units
                   FROM instruments
@@ -44,6 +81,13 @@ public class AccountInstrumentRepository {
     }
 
     public Optional<ContractInstrumentRow> findContractSpec(String symbol, long instrumentVersion) {
+        Optional<InstrumentResponse> cached = cached(symbol, instrumentVersion);
+        if (cached != null) {
+            return cached.filter(value -> value.contractType() != ContractType.SPOT)
+                    .map(value -> new ContractInstrumentRow(value.version(), value.contractType(), value.settleAsset(),
+                            value.notionalMultiplierUnits(), value.priceTickUnits(), value.initialMarginRatePpm(),
+                            value.makerFeeRatePpm(), value.takerFeeRatePpm()));
+        }
         return jdbcTemplate.query("""
                 SELECT version, contract_type, settle_asset, notional_multiplier_units,
                        price_tick_units, initial_margin_rate_ppm, maker_fee_rate_ppm,
@@ -64,6 +108,10 @@ public class AccountInstrumentRepository {
     }
 
     public Optional<InstrumentType> findInstrumentType(String symbol, long instrumentVersion) {
+        Optional<InstrumentResponse> cached = cached(symbol, instrumentVersion);
+        if (cached != null) {
+            return cached.map(InstrumentResponse::instrumentType);
+        }
         return jdbcTemplate.query("""
                 SELECT instrument_type
                   FROM instruments
@@ -72,6 +120,17 @@ public class AccountInstrumentRepository {
                 """, (rs, rowNum) -> InstrumentType.valueOf(rs.getString("instrument_type")),
                         symbol, instrumentVersion)
                 .stream().findFirst();
+    }
+
+    private Optional<InstrumentResponse> cached(String symbol, long version) {
+        if (snapshotCache == null) {
+            return null;
+        }
+        ProductLine productLine = properties.getKafka().getProductLine();
+        if (!snapshotCache.initialized(productLine)) {
+            return null;
+        }
+        return snapshotCache.version(productLine, symbol, version);
     }
 
     public record ContractInstrumentRow(

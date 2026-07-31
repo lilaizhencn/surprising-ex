@@ -85,6 +85,10 @@ public class MarkPriceProperties {
         return !kafka.productTopicsEnabled || kafka.productLine.isFundingProduct();
     }
 
+    public String instrumentEventsTopic() {
+        return "surprising.instrument.events.v1";
+    }
+
     public String markPriceTopic() {
         return kafka.productTopicsEnabled ? productTopics().markPriceTopic() : topics.getMarkPriceTopic();
     }
@@ -143,6 +147,10 @@ public class MarkPriceProperties {
 
         public int getMaxPollRecords() {
             return maxPollRecords;
+        }
+
+        public String getInstrumentSnapshotGroupId() {
+            return "surprising-" + productLine.topicSegment() + "-mark-instrument-snapshot-v1";
         }
 
         public void setMaxPollRecords(int maxPollRecords) {

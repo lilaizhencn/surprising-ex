@@ -48,13 +48,14 @@ instrument-provider
   -> PostgreSQL instruments / instrument_current_versions
   -> PostgreSQL instrument_outbox_events
   -> surprising.instrument.events.v1
-  -> candlestick / price / future matching / risk local cache
+  -> 各业务 JVM 的不可变合约快照（order / matching / account / risk / price / candlestick / market-maker）
 ```
 
 当前已接入：
 
-- `surprising-candlestick-provider` strict 模式从 `instruments` 当前版本读取启用 symbol。
-- `surprising-index-price-provider` 从 `instruments + instrument_index_sources` 动态读取 symbol 和指数源；`application.yml` 中的静态 BTC/ETH 配置只作为数据库未初始化时的兜底。
+- 下游服务启动时通过 `GET /internal/v1/instruments/snapshot?productLine=...` 一次性加载完整聚合快照。
+- Instrument 变更通过 `surprising.instrument.events.v1` 广播；每个产品线使用独立 consumer group，在本 JVM 内原子替换快照。
+- 下单、撮合、账户、风控、指数价、标记价、K 线和做市热路径只读 JVM 快照；数据库仅用于 Instrument 服务写入、启动恢复和审计回源。
 
 ## 状态语义
 
@@ -82,6 +83,13 @@ curl 'http://localhost:9080/api/v1/instruments/version?symbol=BTC-USDT&version=1
 
 ```bash
 curl 'http://localhost:9080/api/v1/instruments/list?type=PERPETUAL&status=TRADING'
+```
+
+服务间初始化（业务模块使用内部入口，不应由网关公开）：
+
+```bash
+curl -H 'X-Product-Line: LINEAR_PERPETUAL' \
+  'http://localhost:9080/internal/v1/instruments/snapshot'
 ```
 
 后台分页查询当前产品：
@@ -113,7 +121,8 @@ curl -X POST 'http://localhost:9080/api/v1/instruments/admin/BTC-USDT/status?sta
 surprising.instrument.events.v1
 ```
 
-事件 key 使用 `symbol`。事件内容包含新版本的完整 `InstrumentResponse` 快照，下游可以直接替换本地缓存。
+事件 key 使用 `PRODUCT_LINE:SYMBOL`，兼容消费旧的 `SYMBOL` key。事件内容包含产品线、序列和完整
+`InstrumentResponse` 快照，下游通过版本和更新时间丢弃旧事件，再以不可变引用整体替换本地缓存。
 producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.connection=5`，让合约版本变更事件和交易、价格链路保持一致的可靠 Kafka 基线。
 
 ## 数据库
@@ -158,9 +167,8 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 - instrument 版本、状态变更、交割和行权事件先与业务状态一起写入 `instrument_outbox_events`；发布器收到 Kafka ACK 后才标记成功，失败事件按指数退避重试，同一 `topic + event_key` 在多节点下保持顺序。
 - 到期版本进入 `SETTLING` 后，order/trigger provider 会先写数据库关闭栅栏再排空订单；account 在订单排空后核对预占、成交消耗和释放。只有相同版本的 `ORDER`、`TRIGGER`、`ACCOUNT` 确认全部写入 `instrument_lifecycle_drain_acks`，调度器才允许进入 `CLOSED` 并发布交割或行权事件。
 - 生命周期清理确认使用共享 topic `surprising.instrument.lifecycle-drain.v1`，以 symbol 为 key；重复确认按 `(symbol, instrument_version, component)` 幂等。
-- 当前版本查询先读取单表版本指针，再从 `instruments` 获取不可变版本，最后批量装配风险档位和指数源；
-  不在 Repository 内执行跨表 JOIN。
-- 下游核心服务不要每笔请求查数据库，应通过本地缓存消费 instrument 快照。
+- Instrument Service 才负责聚合主表、当前版本指针、风险档位、指数源和资产精度；单表 Repository 不执行跨表 JOIN。
+- 下游核心服务启动时加载快照，运行中消费 Kafka 增量事件；不要在每笔请求、撮合或风控计算时查询主库。
 - 修改 tick/step、杠杆、状态时必须生成新版本，不能原地覆盖历史版本。
 - 修改 instrument 默认 maker/taker 手续费率也必须生成新版本。已接受订单继续使用 `trading_orders` 上的费率快照；旧持仓继续使用开仓时绑定的合约数学版本。
 - 影响撮合和风控的配置变更需要审批流、审计日志和灰度生效时间。

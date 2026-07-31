@@ -21,6 +21,7 @@ import com.surprising.instrument.api.client.InstrumentRpcApi;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentQueryResponse;
 import com.surprising.instrument.api.model.InstrumentResponse;
+import com.surprising.instrument.api.model.InstrumentSnapshotResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.marketmaker.api.model.MarketMakerRunRequest;
@@ -71,6 +72,7 @@ import com.surprising.trading.api.model.PlaceAlgoOrderRequest;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
+import com.surprising.trading.api.model.PublicTradeEvent;
 import com.surprising.trading.api.model.TestOrderResponse;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.client.MarketDataRpcApi;
@@ -594,6 +596,11 @@ class MarketMakerServiceTest {
                     List.of(new OrderBookLevel(49_990L, 100L, 1L)),
                     List.of(new OrderBookLevel(50_010L, 100L, 1L)), now);
         }
+
+        @Override
+        public PublicTradeEvent latestTrade(String symbol) {
+            return null;
+        }
     }
 
     private static final class FakeInstrumentRpc implements InstrumentRpcApi {
@@ -617,6 +624,11 @@ class MarketMakerServiceTest {
         @Override
         public InstrumentQueryResponse list(ProductLine productLine, InstrumentType type, InstrumentStatus status) {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public InstrumentSnapshotResponse snapshot(ProductLine productLine) {
+            return new InstrumentSnapshotResponse(productLine, 1L, "test", List.of(latest("BTC-USDT")));
         }
     }
 

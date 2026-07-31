@@ -3,6 +3,7 @@ package com.surprising.marketmaker.provider.service;
 import com.surprising.account.api.client.AccountRpcApi;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.instrument.api.client.InstrumentRpcApi;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.marketmaker.api.model.MarketMakerRunRequest;
@@ -71,6 +72,7 @@ import org.springframework.stereotype.Service;
 
     private final MarketMakerProperties properties;
     private final InstrumentRpcApi instrumentRpcApi;
+    private final InstrumentSnapshotCache instrumentSnapshotCache;
     private final LatestMarkPriceCache markPriceCache;
     private final MarketDataRpcApi marketDataRpcApi;
     private final OrderRpcApi orderRpcApi;
@@ -100,7 +102,7 @@ import org.springframework.stereotype.Service;
                        MarketMakerStrategyOverrideStore overrideStore) {
         this(properties, instrumentRpcApi, markPriceCache, marketDataRpcApi, orderRpcApi, accountRpcApi,
                 quotePlanner, ReferenceMarketProvider.disabled(), leaseCoordinator, overrideStore,
-                new NoopMarketMakerRunEventRepository(), new NoopMarketMakerReferenceSampleRepository());
+                new NoopMarketMakerRunEventRepository(), new NoopMarketMakerReferenceSampleRepository(), null);
     }
 
     MarketMakerService(MarketMakerProperties properties,
@@ -116,7 +118,25 @@ import org.springframework.stereotype.Service;
                        MarketMakerReferenceSampleRepository referenceSampleRepository) {
         this(properties, instrumentRpcApi, markPriceCache, marketDataRpcApi, orderRpcApi, accountRpcApi,
                 quotePlanner, ReferenceMarketProvider.disabled(), leaseCoordinator, overrideStore,
-                runEventRepository, referenceSampleRepository);
+                runEventRepository, referenceSampleRepository, null);
+    }
+
+    /** 保留测试和本地调用使用的旧构造方式，生产环境由 Spring 注入快照缓存。 */
+    public MarketMakerService(MarketMakerProperties properties,
+                              InstrumentRpcApi instrumentRpcApi,
+                              LatestMarkPriceCache markPriceCache,
+                              MarketDataRpcApi marketDataRpcApi,
+                              OrderRpcApi orderRpcApi,
+                              AccountRpcApi accountRpcApi,
+                              QuotePlanner quotePlanner,
+                              ReferenceMarketProvider referenceMarketProvider,
+                              MarketMakerLeaseCoordinator leaseCoordinator,
+                              MarketMakerStrategyOverrideStore overrideStore,
+                              MarketMakerRunEventRepository runEventRepository,
+                              MarketMakerReferenceSampleRepository referenceSampleRepository) {
+        this(properties, instrumentRpcApi, markPriceCache, marketDataRpcApi, orderRpcApi, accountRpcApi,
+                quotePlanner, referenceMarketProvider, leaseCoordinator, overrideStore,
+                runEventRepository, referenceSampleRepository, null);
     }
 
     @Autowired
@@ -131,9 +151,11 @@ import org.springframework.stereotype.Service;
                               MarketMakerLeaseCoordinator leaseCoordinator,
                               MarketMakerStrategyOverrideStore overrideStore,
                               MarketMakerRunEventRepository runEventRepository,
-                              MarketMakerReferenceSampleRepository referenceSampleRepository) {
+                              MarketMakerReferenceSampleRepository referenceSampleRepository,
+                              InstrumentSnapshotCache instrumentSnapshotCache) {
         this.properties = properties;
         this.instrumentRpcApi = instrumentRpcApi;
+        this.instrumentSnapshotCache = instrumentSnapshotCache;
         this.markPriceCache = markPriceCache;
         this.marketDataRpcApi = marketDataRpcApi;
         this.orderRpcApi = orderRpcApi;
@@ -158,6 +180,16 @@ import org.springframework.stereotype.Service;
 
     public MarketMakerStrategyQueryResponse strategies() {
         return strategies(null);
+    }
+
+    private InstrumentResponse currentInstrument(ProductLine productLine, String symbol) {
+        if (instrumentSnapshotCache != null && productLine != null
+                && instrumentSnapshotCache.initialized(productLine)) {
+            return instrumentSnapshotCache.current(productLine, symbol)
+                    .orElseThrow(() -> new IllegalStateException("合约快照中不存在品种: " + productLine + "/" + symbol));
+        }
+        // 仅兼容未启用 Spring 快照组件的单元测试；生产路径由 JVM 快照提供数据。
+        return instrumentRpcApi.latest(symbol, productLine);
     }
 
     public MarketMakerStrategyQueryResponse strategies(ProductLine productLine) {
@@ -382,7 +414,7 @@ import org.springframework.stereotype.Service;
                     .filter(this::isLive)
                     .toList();
             long staleOwned = ownedLive.stream().filter(order -> isStale(order, now)).count();
-            InstrumentResponse instrument = instrumentRpcApi.latest(symbol);
+            InstrumentResponse instrument = currentInstrument(productLine, symbol);
             OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
                     properties.getQuoting().getOrderBookDepth());
             MarkPriceResponse markPrice = latestMarkPrice(symbol, instrument.version());
@@ -634,7 +666,7 @@ import org.springframework.stereotype.Service;
             }
             Instant now = Instant.now();
             try {
-                InstrumentResponse instrument = instrumentRpcApi.latest(symbol);
+                InstrumentResponse instrument = currentInstrument(strategy.getProductLine(), symbol);
                 requireTradable(instrument, strategy.getProductLine());
                 OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
                         properties.getQuoting().getOrderBookDepth());

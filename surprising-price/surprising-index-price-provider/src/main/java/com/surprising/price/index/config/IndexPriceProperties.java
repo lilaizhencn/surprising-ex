@@ -106,6 +106,7 @@ public class IndexPriceProperties {
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
         private boolean productTopicsEnabled;
         private String indexPriceTopic = "surprising.perp.index.price.v1";
+        private String instrumentEventsTopic = "surprising.instrument.events.v1";
         private String groupId = "surprising-index-price-v1";
         private String cacheGroupId = "surprising-index-price-cache-local";
         private int concurrency = 2;
@@ -141,6 +142,18 @@ public class IndexPriceProperties {
 
         public void setIndexPriceTopic(String indexPriceTopic) {
             this.indexPriceTopic = indexPriceTopic;
+        }
+
+        public String getInstrumentEventsTopic() {
+            return instrumentEventsTopic;
+        }
+
+        public void setInstrumentEventsTopic(String instrumentEventsTopic) {
+            this.instrumentEventsTopic = instrumentEventsTopic;
+        }
+
+        public String getInstrumentSnapshotGroupId() {
+            return "surprising-" + productLine.topicSegment() + "-index-instrument-snapshot-v1";
         }
 
         public String getGroupId() {

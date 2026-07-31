@@ -69,6 +69,16 @@ public class MarkKafkaConfiguration {
         return factory;
     }
 
+    @Bean(name = "instrumentSnapshotKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String> instrumentSnapshotKafkaListenerContainerFactory(
+            @Qualifier("markConsumerFactory") ConsumerFactory<String, String> consumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory);
+        factory.setCommonErrorHandler(new DefaultErrorHandler(
+                new FixedBackOff(1_000L, FixedBackOff.UNLIMITED_ATTEMPTS)));
+        return factory;
+    }
+
     @Bean
     public ConsumerFactory<String, String> markAuditConsumerFactory(MarkPriceProperties properties) {
         Map<String, Object> config = new HashMap<>();

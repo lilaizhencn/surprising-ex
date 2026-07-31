@@ -60,6 +60,16 @@ public class IndexKafkaProducerConfiguration {
         return factory;
     }
 
+    @Bean(name = "indexInstrumentSnapshotKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String> indexInstrumentSnapshotKafkaListenerContainerFactory(
+            @Qualifier("indexPriceCacheConsumerFactory") ConsumerFactory<String, String> consumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory);
+        factory.setCommonErrorHandler(new DefaultErrorHandler(
+                new FixedBackOff(1_000L, FixedBackOff.UNLIMITED_ATTEMPTS)));
+        return factory;
+    }
+
     @Bean
     public ConsumerFactory<String, String> indexAuditConsumerFactory(IndexPriceProperties properties) {
         return consumerFactory(properties, properties.getKafka().getGroupId() + "-audit-writer", "earliest");

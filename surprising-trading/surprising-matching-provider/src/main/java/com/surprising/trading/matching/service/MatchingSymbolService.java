@@ -1,5 +1,6 @@
 package com.surprising.trading.matching.service;
 
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.model.InstrumentSymbol;
 import com.surprising.trading.matching.model.MatchingSymbol;
@@ -30,6 +31,7 @@ public class MatchingSymbolService {
     private final MatchingSymbolRepository symbolRepository;
     private final MatchingSequenceRepository sequenceRepository;
     private final MatchingProperties properties;
+    private final InstrumentSnapshotCache snapshotCache;
 
     public MatchingSymbolService(MatchingInstrumentRepository instrumentRepository,
                                  MatchingInstrumentCurrentVersionRepository currentVersionRepository,
@@ -37,16 +39,37 @@ public class MatchingSymbolService {
                                  MatchingSymbolRepository symbolRepository,
                                  MatchingSequenceRepository sequenceRepository,
                                  MatchingProperties properties) {
+        this(instrumentRepository, currentVersionRepository, assetRepository, symbolRepository,
+                sequenceRepository, properties, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public MatchingSymbolService(MatchingInstrumentRepository instrumentRepository,
+                                 MatchingInstrumentCurrentVersionRepository currentVersionRepository,
+                                 MatchingAssetRepository assetRepository,
+                                 MatchingSymbolRepository symbolRepository,
+                                 MatchingSequenceRepository sequenceRepository,
+                                 MatchingProperties properties,
+                                 InstrumentSnapshotCache snapshotCache) {
         this.instrumentRepository = instrumentRepository;
         this.currentVersionRepository = currentVersionRepository;
         this.assetRepository = assetRepository;
         this.symbolRepository = symbolRepository;
         this.sequenceRepository = sequenceRepository;
         this.properties = properties;
+        this.snapshotCache = snapshotCache;
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public List<InstrumentSymbol> currentTradingSymbols() {
+        if (snapshotCache != null && snapshotCache.initialized(properties.getKafka().getProductLine())) {
+            return snapshotCache.current(properties.getKafka().getProductLine()).stream()
+                    .filter(instrument -> instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.TRADING
+                            || instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.HALT)
+                    .map(instrument -> new InstrumentSymbol(instrument.symbol(), instrument.baseAsset(),
+                            instrument.quoteAsset(), instrument.settleAsset()))
+                    .toList();
+        }
         Map<String, Long> currentVersions = currentVersionRepository.findAll();
         return instrumentRepository.findTradingVersions(productContractTypeFilter().orElse(null)).stream()
                 .filter(instrument -> currentVersions.getOrDefault(instrument.symbol(), -1L)
@@ -57,6 +80,13 @@ public class MatchingSymbolService {
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Optional<InstrumentSymbol> currentTradingSymbol(String symbol) {
+        if (snapshotCache != null && snapshotCache.initialized(properties.getKafka().getProductLine())) {
+            return snapshotCache.current(properties.getKafka().getProductLine(), symbol)
+                    .filter(instrument -> instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.TRADING
+                            || instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.HALT)
+                    .map(instrument -> new InstrumentSymbol(instrument.symbol(), instrument.baseAsset(),
+                            instrument.quoteAsset(), instrument.settleAsset()));
+        }
         return currentVersionRepository.findVersion(symbol)
                 .flatMap(version -> instrumentRepository.findTrading(
                         symbol, version, productContractTypeFilter().orElse(null)))

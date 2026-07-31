@@ -7,6 +7,7 @@ import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.api.model.RiskLimitBracket;
 import com.surprising.instrument.provider.repository.InstrumentCurrentVersionRepository;
+import com.surprising.instrument.provider.repository.InstrumentAssetScaleRepository;
 import com.surprising.instrument.provider.repository.InstrumentIndexSourceRepository;
 import com.surprising.instrument.provider.repository.InstrumentProductCurrentVersionRepository;
 import com.surprising.instrument.provider.repository.InstrumentRepository;
@@ -46,6 +47,7 @@ public class InstrumentStorageService {
     private final InstrumentRiskBracketRepository riskBracketRepository;
     private final InstrumentIndexSourceRepository indexSourceRepository;
     private final InstrumentSpecSnapshotCache specSnapshotCache;
+    private final InstrumentAssetScaleRepository assetScaleRepository;
 
     public InstrumentStorageService(InstrumentRepository instrumentRepository,
                                     InstrumentSequenceRepository sequenceRepository,
@@ -54,7 +56,18 @@ public class InstrumentStorageService {
                                     InstrumentRiskBracketRepository riskBracketRepository,
                                     InstrumentIndexSourceRepository indexSourceRepository) {
         this(instrumentRepository, sequenceRepository, currentVersionRepository, productCurrentVersionRepository,
-                riskBracketRepository, indexSourceRepository, null);
+                riskBracketRepository, indexSourceRepository, null, null);
+    }
+
+    public InstrumentStorageService(InstrumentRepository instrumentRepository,
+                                    InstrumentSequenceRepository sequenceRepository,
+                                    InstrumentCurrentVersionRepository currentVersionRepository,
+                                    InstrumentProductCurrentVersionRepository productCurrentVersionRepository,
+                                    InstrumentRiskBracketRepository riskBracketRepository,
+                                    InstrumentIndexSourceRepository indexSourceRepository,
+                                    InstrumentSpecSnapshotCache specSnapshotCache) {
+        this(instrumentRepository, sequenceRepository, currentVersionRepository, productCurrentVersionRepository,
+                riskBracketRepository, indexSourceRepository, specSnapshotCache, null);
     }
 
     @Autowired
@@ -64,7 +77,8 @@ public class InstrumentStorageService {
                                     InstrumentProductCurrentVersionRepository productCurrentVersionRepository,
                                     InstrumentRiskBracketRepository riskBracketRepository,
                                     InstrumentIndexSourceRepository indexSourceRepository,
-                                    InstrumentSpecSnapshotCache specSnapshotCache) {
+                                    InstrumentSpecSnapshotCache specSnapshotCache,
+                                    InstrumentAssetScaleRepository assetScaleRepository) {
         this.instrumentRepository = instrumentRepository;
         this.sequenceRepository = sequenceRepository;
         this.currentVersionRepository = currentVersionRepository;
@@ -72,6 +86,7 @@ public class InstrumentStorageService {
         this.riskBracketRepository = riskBracketRepository;
         this.indexSourceRepository = indexSourceRepository;
         this.specSnapshotCache = specSnapshotCache;
+        this.assetScaleRepository = assetScaleRepository;
     }
 
     /** 启动时预热当前产品线规格，后续风控和撮合读取不再为同一规格反复查库。 */
@@ -145,6 +160,11 @@ public class InstrumentStorageService {
         return enrich(instrumentRepository.list(productCurrentVersionRepository.findAll(productLine), type, status));
     }
 
+    /** 返回产品线全部版本，确保旧持仓、旧订单重启后仍能命中同一规格。 */
+    public List<InstrumentResponse> listAllVersions(ProductLine productLine) {
+        return productLine == null ? List.of() : enrich(instrumentRepository.listByProductLine(productLine));
+    }
+
     public InstrumentRepository.InstrumentPage listPage(InstrumentType type,
                                                         InstrumentStatus status,
                                                         int limit,
@@ -183,6 +203,10 @@ public class InstrumentStorageService {
     public List<InstrumentResponse> settlingContractsDue(Instant now, int limit) {
         List<InstrumentVersionKey> keys = productCurrentVersionRepository.findAll(EXPIRING_PRODUCT_LINES);
         return enrich(instrumentRepository.settlingContractsDue(keys, now, limit));
+    }
+
+    public Map<String, Long> assetScales() {
+        return assetScaleRepository == null ? Map.of() : assetScaleRepository.findAll();
     }
 
     private InstrumentRepository.InstrumentPage enrich(InstrumentRepository.InstrumentPage page) {

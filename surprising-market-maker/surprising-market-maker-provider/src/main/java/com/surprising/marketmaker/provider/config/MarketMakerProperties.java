@@ -59,6 +59,9 @@ public class MarketMakerProperties {
     @Valid
     private List<Strategy> strategies = new ArrayList<>();
 
+    @Valid
+    private Kafka kafka = new Kafka();
+
     public Engine getEngine() {
         return engine;
     }
@@ -115,6 +118,14 @@ public class MarketMakerProperties {
         this.strategies = strategies;
     }
 
+    public Kafka getKafka() {
+        return kafka;
+    }
+
+    public void setKafka(Kafka kafka) {
+        this.kafka = kafka == null ? new Kafka() : kafka;
+    }
+
     public static class Engine {
         private boolean enabled;
         @Min(50)
@@ -143,6 +154,37 @@ public class MarketMakerProperties {
 
         public void setNodeId(String nodeId) {
             this.nodeId = nodeId;
+        }
+    }
+
+    /** 合约快照事件的消费配置。市场做市只在本地快照上读取合约规格。 */
+    public static class Kafka {
+        private String bootstrapServers = "localhost:9092";
+        private String instrumentEventsTopic = "surprising.instrument.events.v1";
+        private String instrumentSnapshotGroupId = "surprising-market-maker-instrument-snapshot-v1";
+
+        public String getBootstrapServers() {
+            return bootstrapServers;
+        }
+
+        public void setBootstrapServers(String bootstrapServers) {
+            this.bootstrapServers = bootstrapServers;
+        }
+
+        public String getInstrumentEventsTopic() {
+            return instrumentEventsTopic;
+        }
+
+        public void setInstrumentEventsTopic(String instrumentEventsTopic) {
+            this.instrumentEventsTopic = instrumentEventsTopic;
+        }
+
+        public String getInstrumentSnapshotGroupId() {
+            return instrumentSnapshotGroupId;
+        }
+
+        public void setInstrumentSnapshotGroupId(String instrumentSnapshotGroupId) {
+            this.instrumentSnapshotGroupId = instrumentSnapshotGroupId;
         }
     }
 

@@ -250,6 +250,9 @@ public class AccountProperties {
         public String getInstrumentLifecycleGroupId() {
             return productTopics().consumerGroup("account-instrument-lifecycle");
         }
+        public String getInstrumentSnapshotGroupId() {
+            return productTopics().consumerGroup("account-instrument-snapshot");
+        }
 
         public int getConcurrency() {
             return concurrency;

@@ -1,10 +1,12 @@
 package com.surprising.instrument.provider.service;
 
 import com.surprising.instrument.api.model.InstrumentEvent;
+import com.surprising.instrument.api.InstrumentEventKeys;
 import com.surprising.instrument.api.model.InstrumentEventType;
 import com.surprising.instrument.api.model.InstrumentQueryResponse;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
+import com.surprising.instrument.api.model.InstrumentSnapshotResponse;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
@@ -12,7 +14,11 @@ import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.instrument.provider.config.InstrumentProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductTopicNames;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -74,6 +80,21 @@ public class InstrumentService {
     public InstrumentQueryResponse list(ProductLine productLine, InstrumentType type, InstrumentStatus status) {
         var rows = storageService.list(productLine, type, status);
         return new InstrumentQueryResponse(rows.size(), rows);
+    }
+
+    /**
+     * 返回指定产品线的完整合约快照，供其他服务启动初始化和缓存修复使用。
+     */
+    @Transactional(readOnly = true)
+    public InstrumentSnapshotResponse snapshot(ProductLine productLine) {
+        if (productLine == null) {
+            throw new IllegalArgumentException("productLine is required");
+        }
+        var rows = storageService.listAllVersions(productLine);
+        var assetScales = storageService.assetScales();
+        long sequence = rows.stream().mapToLong(InstrumentResponse::version).max().orElse(0L);
+        return new InstrumentSnapshotResponse(productLine, sequence,
+                snapshotChecksum(productLine, rows, assetScales), rows, assetScales);
     }
 
     public InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status, int limit, String cursor, String sort) {
@@ -154,8 +175,9 @@ public class InstrumentService {
         Instant eventTime = Instant.now();
         InstrumentEvent event = new InstrumentEvent(response.symbol(), response.version(), response.status(),
                 eventType, eventTime, response);
-        outboxService.enqueue("INSTRUMENT", response.version(), properties.getKafka().getEventsTopic(),
-                response.symbol(), eventType.name(), event, eventTime);
+        outboxService.enqueue("INSTRUMENT", response.version(),
+                properties.getKafka().getEventsTopic(), InstrumentEventKeys.key(event),
+                eventType.name(), event, eventTime);
     }
 
     @Transactional
@@ -224,5 +246,26 @@ public class InstrumentService {
             throw new IllegalArgumentException("invalid symbol: " + symbol);
         }
         return symbol.trim().toUpperCase();
+    }
+
+    private String snapshotChecksum(ProductLine productLine,
+                                    java.util.List<InstrumentResponse> rows,
+                                    java.util.Map<String, Long> assetScales) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            digest.update(productLine.name().getBytes(StandardCharsets.UTF_8));
+            rows.stream()
+                    .sorted(Comparator.comparing(InstrumentResponse::symbol)
+                            .thenComparingLong(InstrumentResponse::version))
+                    .forEach(row -> digest.update((row.symbol() + "|" + row.version() + "|"
+                            + row.status() + "|" + row.updatedAt() + "\n").getBytes(StandardCharsets.UTF_8)));
+            assetScales.entrySet().stream()
+                    .sorted(java.util.Map.Entry.comparingByKey())
+                    .forEach(entry -> digest.update((entry.getKey() + "=" + entry.getValue() + "\n")
+                            .getBytes(StandardCharsets.UTF_8)));
+            return java.util.HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("JVM 不支持 SHA-256", ex);
+        }
     }
 }

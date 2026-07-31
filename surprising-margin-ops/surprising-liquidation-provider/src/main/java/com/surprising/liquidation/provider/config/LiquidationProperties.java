@@ -74,6 +74,8 @@ public class LiquidationProperties {
         private String matchResultsTopic = "surprising.perp.match.results.v1";
         private String orderCommandsTopic = "surprising.perp.order.commands.v1";
         private String orderEventsTopic = "surprising.perp.order.events.v1";
+        private String instrumentEventsTopic = "surprising.instrument.events.v1";
+        private String instrumentSnapshotGroupId = "surprising-liquidation-instrument-snapshot-v1";
         private int candidateConcurrency = 32;
         private int matchResultConcurrency = 8;
         private int maxPollRecords = 500;
@@ -140,6 +142,22 @@ public class LiquidationProperties {
 
         public void setOrderEventsTopic(String orderEventsTopic) {
             this.orderEventsTopic = orderEventsTopic;
+        }
+
+        public String getInstrumentEventsTopic() {
+            return instrumentEventsTopic;
+        }
+
+        public void setInstrumentEventsTopic(String instrumentEventsTopic) {
+            this.instrumentEventsTopic = instrumentEventsTopic;
+        }
+
+        public String getInstrumentSnapshotGroupId() {
+            return instrumentSnapshotGroupId;
+        }
+
+        public void setInstrumentSnapshotGroupId(String instrumentSnapshotGroupId) {
+            this.instrumentSnapshotGroupId = instrumentSnapshotGroupId;
         }
 
         public int getCandidateConcurrency() {

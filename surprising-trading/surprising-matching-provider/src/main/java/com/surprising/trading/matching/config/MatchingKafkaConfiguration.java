@@ -126,4 +126,15 @@ public class MatchingKafkaConfiguration {
         factory.getContainerProperties().setConsumerRebalanceListener(partitionAssignmentGuard);
         return factory;
     }
+
+    @Bean(name = "matchingInstrumentSnapshotKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String> matchingInstrumentSnapshotKafkaListenerContainerFactory(
+            ConsumerFactory<String, String> matchingConsumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(matchingConsumerFactory);
+        factory.setCommonErrorHandler(new org.springframework.kafka.listener.DefaultErrorHandler(
+                new org.springframework.util.backoff.FixedBackOff(1_000L, Long.MAX_VALUE)));
+        return factory;
+    }
 }

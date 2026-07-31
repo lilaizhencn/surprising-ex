@@ -70,4 +70,13 @@ public class RiskKafkaConfiguration {
         factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
         return factory;
     }
+
+    @Bean(name = "riskInstrumentSnapshotKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String> riskInstrumentSnapshotKafkaListenerContainerFactory(
+            @Qualifier("riskConsumerFactory") ConsumerFactory<String, String> riskConsumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(riskConsumerFactory);
+        factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
+        return factory;
+    }
 }
