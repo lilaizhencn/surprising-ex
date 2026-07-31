@@ -12,14 +12,9 @@ Local integration tests use the Homebrew PostgreSQL instance on `localhost:5432`
 
 ## Admin gateway tables
 
-`gateway_admin_export_jobs` stores approved CSV export jobs. `gateway_admin_query_tasks` stores
-allowlisted long-running admin JSON query tasks, including status, query params, result JSON, row
-count, byte size, error message, expiry time, archive time, and archive reason. Expired query-task
-results can be cleared while retaining task metadata for audit and capacity tracking. Allowlisted
-query types include system latency/backlog checks plus order, trigger-order, and match-trade audit
-searches.
-`gateway_admin_operation_logs.duration_ms` stores admin gateway proxy request duration for audit
-exports and p50/p95/p99 system latency metrics.
+`gateway_admin_operation_logs.duration_ms` stores admin gateway proxy request duration as local
+security-audit evidence. Cross-table metrics, exports, and long-running report queries are not
+stored in the gateway; they belong to the independent finance-operations database.
 
 ## `instruments`
 
@@ -631,10 +626,11 @@ The `trading_trigger_orders_trace_idx`, `trading_order_events_trace_idx`,
 `trading_match_results_trace_idx`, `trading_match_trades_trace_idx`,
 `trading_outbox_events_trace_idx`, `account_outbox_events_trace_idx`,
 `gateway_admin_operation_logs_trace_idx`, and
-`gateway_admin_approval_requests_consumed_trace_idx` indexes support the admin
-TraceId lookup endpoint `/api/v1/admin/traces/{traceId}`.
-`gateway_admin_operation_logs.duration_ms` stores admin gateway proxy request duration for audit exports
-and p50/p95/p99 system latency metrics.
+`gateway_admin_approval_requests_consumed_trace_idx` indexes preserve correlation keys that a future
+independent operations database may ingest through events or controlled CDC. The gateway does not
+JOIN these primary tables into a TraceId timeline.
+`gateway_admin_operation_logs.duration_ms` stores admin gateway proxy request duration as audit
+evidence that can be projected into the independent operations database.
 The same side-specific versions are used for contract math, while maker/taker fee ppm comes from the
 required fee fields stored on `trading_match_trades`.
 
@@ -711,16 +707,10 @@ Back-office balance and product-balance adjustments also keep a dedicated operat
 `account_admin_balance_adjustments`. The ledger rows remain the source of funds truth, while this
 admin table stores `admin_user_id`, `admin_username`, adjustment kind, account type, reference id,
 amount, balance-after value, and timestamp for back-office traceability.
-Gateway account-asset report snapshots are stored separately in
-`gateway_admin_account_asset_snapshots`. They are generated from account balances and
-`price_exchange_rates` for admin reporting; they are not an account ledger and must not be used as
-the source of funds truth.
-Snapshots can be generated manually through `/api/v1/admin/reports/account-assets/snapshots` or
-automatically by the gateway account-asset snapshot scheduler. Scheduled runs compare the generated
-snapshot with the previous day by `account_type + asset`; differences above configured thresholds
-raise `SYSTEM` alert events with metric key `ACCOUNT_ASSET_SNAPSHOT_DIFF_PPM`.
-Saved snapshot queries use keyset pagination over `snapshot_date`, `total_value`, and `snapshot_id`;
-`gateway_account_asset_snapshots_page_idx` supports the admin report paging path.
+Account valuation, reconciliation, daily snapshots, order timelines, and operations reports are not
+stored or queried by the trading gateway. A future `surprising-finance-ops` module must use a
+separate datasource and physical database, populate read models from domain events, outbox events,
+or controlled CDC, and never execute report JOINs against the primary trading database.
 
 Gateway support operations use two local admin tables:
 

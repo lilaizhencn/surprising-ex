@@ -697,24 +697,3 @@ surprising:
         retry-delay: ${ADMIN_ALERT_DELIVERY_WORKER_RETRY_DELAY:30s}
         claim-lease: ${ADMIN_ALERT_DELIVERY_WORKER_CLAIM_LEASE:2m}
         max-error-message-length: 500
-    query-tasks:
-      max-active-per-user: ${ADMIN_QUERY_TASK_MAX_ACTIVE_PER_USER:3}
-      max-active-global: ${ADMIN_QUERY_TASK_MAX_ACTIVE_GLOBAL:25}
-      max-created-per-user-in-window: ${ADMIN_QUERY_TASK_MAX_CREATED_PER_USER_IN_WINDOW:20}
-      creation-window: ${ADMIN_QUERY_TASK_CREATION_WINDOW:1h}
-      max-retained-result-bytes: ${ADMIN_QUERY_TASK_MAX_RETAINED_RESULT_BYTES:50000000}
-      archive-expired-on-create: ${ADMIN_QUERY_TASK_ARCHIVE_EXPIRED_ON_CREATE:true}
-      archive-batch-size: ${ADMIN_QUERY_TASK_ARCHIVE_BATCH_SIZE:500}
-    reports:
-      account-asset-snapshots:
-        scheduler-enabled: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_SCHEDULER_ENABLED:true}
-        initial-delay-ms: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_INITIAL_DELAY_MS:15000}
-        poll-delay-ms: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_POLL_DELAY_MS:60000}
-        valuation-asset: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_VALUATION_ASSET:USDT}
-        snapshot-hour-utc: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_HOUR_UTC:0}
-        snapshot-minute-utc: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_MINUTE_UTC:5}
-        snapshot-date-offset-days: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_DATE_OFFSET_DAYS:1}
-        discrepancy-threshold-ppm: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_DISCREPANCY_THRESHOLD_PPM:100000}
-        discrepancy-min-absolute-value: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_DISCREPANCY_MIN_ABSOLUTE_VALUE:0}
-        discrepancy-limit: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_DISCREPANCY_LIMIT:20}
-        discrepancy-severity: ${ADMIN_ACCOUNT_ASSET_SNAPSHOT_DISCREPANCY_SEVERITY:WARN}

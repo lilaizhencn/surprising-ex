@@ -3462,22 +3462,13 @@ VALUES
     ('admin.approvals.read', 'Read approvals', 'View admin approval requests.'),
     ('admin.approvals.write', 'Write approvals', 'Create, approve, reject and consume admin approvals.'),
     ('admin.system.read', 'Read system state', 'View configured routes and backend health.'),
-    ('admin.traces.read', 'Read TraceId timelines', 'View cross-module TraceId timelines for incident investigation.'),
-    ('admin.market.read', 'Read market health', 'View index source, mark price and candlestick freshness metrics.'),
     ('admin.alerts.read', 'Read alerts', 'View admin alert rules and alert events.'),
     ('admin.alerts.write', 'Write alerts', 'Create, update, evaluate and acknowledge admin alerts.'),
-    ('admin.trading.read', 'Read trading operations', 'View trading operation metrics and aggregated order flow.'),
-    ('admin.reports.read', 'Read admin reports', 'View account asset valuation and back-office reports.'),
-    ('admin.reports.write', 'Write admin reports', 'Generate account asset report snapshots.'),
     ('admin.security.mfa', 'Manage own MFA', 'Enroll, confirm and disable own admin TOTP MFA.'),
     ('admin.support.read', 'Read support console', 'View read-only customer support user overviews.'),
     ('admin.support.write', 'Write support tickets', 'Create and update customer support tickets and internal notes.'),
     ('admin.compliance.read', 'Read compliance', 'View KYC, AML cases and risk tags.'),
     ('admin.compliance.write', 'Write compliance', 'Update KYC, AML cases and risk tags.'),
-    ('admin.exports.read', 'Read exports', 'View and download admin export jobs.'),
-    ('admin.exports.write', 'Write exports', 'Create admin export jobs.'),
-    ('admin.queries.read', 'Read query tasks', 'View long-running admin query tasks and results.'),
-    ('admin.queries.write', 'Write query tasks', 'Create controlled long-running admin query tasks.'),
     ('admin.permissions.read', 'Read permissions', 'View roles, permission catalog and role assignments.'),
     ('admin.permissions.write', 'Write permissions', 'Replace role permission assignments.'),
     ('admin.gateway.*.read', 'Read admin gateway services', 'Read through any configured admin gateway service.'),
@@ -3514,20 +3505,11 @@ SELECT r.role_id, p.permission_id
       'admin.approvals.read',
       'admin.approvals.write',
       'admin.system.read',
-      'admin.traces.read',
-      'admin.market.read',
       'admin.alerts.read',
       'admin.alerts.write',
-      'admin.trading.read',
-      'admin.reports.read',
-      'admin.reports.write',
       'admin.security.mfa',
       'admin.compliance.read',
       'admin.compliance.write',
-      'admin.exports.read',
-      'admin.exports.write',
-      'admin.queries.read',
-      'admin.queries.write',
       'admin.permissions.read',
       'admin.support.write',
       'admin.gateway.*.read',
@@ -3821,137 +3803,6 @@ CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_service_time_idx
 CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_consumed_trace_idx
     ON gateway_admin_approval_requests (consumed_trace_id)
     WHERE consumed_trace_id IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS gateway_admin_export_jobs (
-    export_id              BIGSERIAL PRIMARY KEY,
-    requested_by_user_id   BIGINT NOT NULL REFERENCES gateway_users(user_id),
-    requested_by_username  TEXT NOT NULL,
-    export_type            TEXT NOT NULL,
-    status                 TEXT NOT NULL DEFAULT 'PENDING',
-    format                 TEXT NOT NULL DEFAULT 'CSV',
-    query_params           TEXT,
-    file_name              TEXT,
-    content_type           TEXT,
-    row_count              INTEGER NOT NULL DEFAULT 0,
-    byte_size              BIGINT NOT NULL DEFAULT 0,
-    result_content         TEXT,
-    error_message          TEXT,
-    requested_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
-    started_at             TIMESTAMPTZ,
-    finished_at            TIMESTAMPTZ,
-    expires_at             TIMESTAMPTZ NOT NULL DEFAULT now() + interval '7 days',
-    CONSTRAINT gateway_admin_export_jobs_type_check CHECK (
-        export_type IN (
-            'USERS', 'LOGIN_LOGS', 'ADMIN_OPERATIONS', 'COMPLIANCE_USERS',
-            'ORDERS', 'TRIGGER_ORDERS', 'MATCH_TRADES',
-            'ACCOUNT_BALANCES', 'PRODUCT_BALANCES', 'POSITIONS',
-            'ACCOUNT_LEDGER', 'PRODUCT_LEDGER', 'PRODUCT_TRANSFERS', 'ACCOUNT_ADJUSTMENTS'
-        )
-    ),
-    CONSTRAINT gateway_admin_export_jobs_status_check CHECK (
-        status IN ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED')
-    ),
-    CONSTRAINT gateway_admin_export_jobs_format_check CHECK (format = 'CSV'),
-    CONSTRAINT gateway_admin_export_jobs_row_count_non_negative CHECK (row_count >= 0),
-    CONSTRAINT gateway_admin_export_jobs_byte_size_non_negative CHECK (byte_size >= 0)
-);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_export_jobs_requester_time_idx
-    ON gateway_admin_export_jobs (requested_by_user_id, requested_at DESC);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_export_jobs_status_time_idx
-    ON gateway_admin_export_jobs (status, requested_at DESC);
-
-CREATE TABLE IF NOT EXISTS gateway_admin_query_tasks (
-    query_task_id         BIGSERIAL PRIMARY KEY,
-    requested_by_user_id  BIGINT NOT NULL REFERENCES gateway_users(user_id),
-    requested_by_username TEXT NOT NULL,
-    query_type            TEXT NOT NULL,
-    status                TEXT NOT NULL DEFAULT 'PENDING',
-    query_params          TEXT,
-    result_json           TEXT,
-    row_count             INTEGER NOT NULL DEFAULT 0,
-    byte_size             BIGINT NOT NULL DEFAULT 0,
-    error_message         TEXT,
-    requested_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    started_at            TIMESTAMPTZ,
-    finished_at           TIMESTAMPTZ,
-    expires_at            TIMESTAMPTZ NOT NULL DEFAULT now() + interval '3 days',
-    archived_at           TIMESTAMPTZ,
-    archive_reason        TEXT,
-    CONSTRAINT gateway_admin_query_tasks_type_check CHECK (
-        query_type IN (
-            'SYSTEM_OPERATION_LATENCY', 'OUTBOX_BACKLOG',
-            'APPROVAL_BACKLOG', 'ALERT_DELIVERY_FAILURES',
-            'ORDER_AUDIT_SEARCH', 'TRIGGER_ORDER_AUDIT_SEARCH',
-            'MATCH_TRADE_AUDIT_SEARCH'
-        )
-    ),
-    CONSTRAINT gateway_admin_query_tasks_status_check CHECK (
-        status IN ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'ARCHIVED')
-    ),
-    CONSTRAINT gateway_admin_query_tasks_row_count_non_negative CHECK (row_count >= 0),
-    CONSTRAINT gateway_admin_query_tasks_byte_size_non_negative CHECK (byte_size >= 0)
-);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_query_tasks_requester_time_idx
-    ON gateway_admin_query_tasks (requested_by_user_id, requested_at DESC);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_query_tasks_status_time_idx
-    ON gateway_admin_query_tasks (status, requested_at DESC);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_query_tasks_type_time_idx
-    ON gateway_admin_query_tasks (query_type, requested_at DESC);
-
-CREATE TABLE IF NOT EXISTS gateway_admin_account_asset_snapshots (
-    snapshot_id             BIGSERIAL PRIMARY KEY,
-    snapshot_date           DATE NOT NULL,
-    valuation_asset         TEXT NOT NULL,
-    account_type            TEXT NOT NULL,
-    asset                   TEXT NOT NULL,
-    total_available_units   NUMERIC(38, 0) NOT NULL,
-    total_locked_units      NUMERIC(38, 0) NOT NULL,
-    total_equity_units      NUMERIC(38, 0) NOT NULL,
-    valuation_rate          NUMERIC(38, 18),
-    total_value             NUMERIC(38, 18),
-    valuation_source        TEXT NOT NULL,
-    rate_updated_at         TIMESTAMPTZ,
-    source_updated_at       TIMESTAMPTZ,
-    user_count              BIGINT NOT NULL,
-    balance_count           BIGINT NOT NULL,
-    created_by_user_id      BIGINT REFERENCES gateway_users(user_id),
-    created_by_username     TEXT,
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT gateway_account_asset_snapshots_valuation_asset_check CHECK (valuation_asset ~ '^[A-Z0-9]{2,20}$'),
-    CONSTRAINT gateway_account_asset_snapshots_asset_check CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
-    CONSTRAINT gateway_account_asset_snapshots_account_type_check CHECK (
-        account_type IN ('BASIC', 'FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
-                         'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
-    ),
-    CONSTRAINT gateway_account_asset_snapshots_counts_check CHECK (user_count >= 0 AND balance_count >= 0)
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS gateway_account_asset_snapshots_uidx
-    ON gateway_admin_account_asset_snapshots (snapshot_date, valuation_asset, account_type, asset);
-
-DO $$
-BEGIN
-    IF to_regclass('public.gateway_admin_account_asset_snapshots') IS NOT NULL THEN
-        ALTER TABLE gateway_admin_account_asset_snapshots
-            DROP CONSTRAINT IF EXISTS gateway_account_asset_snapshots_account_type_check;
-        ALTER TABLE gateway_admin_account_asset_snapshots
-            ADD CONSTRAINT gateway_account_asset_snapshots_account_type_check CHECK (
-                account_type IN ('BASIC', 'FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
-                                 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
-            );
-    END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS gateway_account_asset_snapshots_date_idx
-    ON gateway_admin_account_asset_snapshots (snapshot_date DESC, valuation_asset, account_type, asset);
-
-CREATE INDEX IF NOT EXISTS gateway_account_asset_snapshots_page_idx
-    ON gateway_admin_account_asset_snapshots (snapshot_date DESC, total_value DESC NULLS LAST, snapshot_id DESC);
 
 CREATE TABLE IF NOT EXISTS gateway_admin_alert_rules (
     alert_rule_id          BIGSERIAL PRIMARY KEY,

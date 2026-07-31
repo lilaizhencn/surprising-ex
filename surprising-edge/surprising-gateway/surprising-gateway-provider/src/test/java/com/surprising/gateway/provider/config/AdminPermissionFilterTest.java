@@ -75,34 +75,6 @@ class AdminPermissionFilterTest {
     }
 
     @Test
-    void mapsExportsReadToExportsReadPermission() throws ServletException, IOException {
-        AuthService authService = authService();
-        AdminPermissionFilter filter = new AdminPermissionFilter(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/admin/exports");
-        request.addHeader("Authorization", "Bearer admin");
-        MockHttpServletResponse response = new MockHttpServletResponse();
-
-        filter.doFilter(request, response, new MockFilterChain());
-
-        assertThat(response.getStatus()).isEqualTo(200);
-        verify(authService).requireAdminPermission("Bearer admin", "admin.exports.read");
-    }
-
-    @Test
-    void mapsQueryTaskWriteToQueriesWritePermission() throws ServletException, IOException {
-        AuthService authService = authService();
-        AdminPermissionFilter filter = new AdminPermissionFilter(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/admin/query-tasks");
-        request.addHeader("Authorization", "Bearer admin");
-        MockHttpServletResponse response = new MockHttpServletResponse();
-
-        filter.doFilter(request, response, new MockFilterChain());
-
-        assertThat(response.getStatus()).isEqualTo(200);
-        verify(authService).requireAdminPermission("Bearer admin", "admin.queries.write");
-    }
-
-    @Test
     void mapsSupportOverviewToSupportReadPermission() throws ServletException, IOException {
         AuthService authService = authService();
         AdminPermissionFilter filter = new AdminPermissionFilter(authService);
@@ -128,62 +100,6 @@ class AdminPermissionFilterTest {
 
         assertThat(response.getStatus()).isEqualTo(200);
         verify(authService).requireAdminPermission("Bearer admin", "admin.support.write");
-    }
-
-    @Test
-    void mapsTradingMetricsToTradingReadPermission() throws ServletException, IOException {
-        AuthService authService = authService();
-        AdminPermissionFilter filter = new AdminPermissionFilter(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/admin/trading/metrics");
-        request.addHeader("Authorization", "Bearer admin");
-        MockHttpServletResponse response = new MockHttpServletResponse();
-
-        filter.doFilter(request, response, new MockFilterChain());
-
-        assertThat(response.getStatus()).isEqualTo(200);
-        verify(authService).requireAdminPermission("Bearer admin", "admin.trading.read");
-    }
-
-    @Test
-    void mapsMarketHealthToMarketReadPermission() throws ServletException, IOException {
-        AuthService authService = authService();
-        AdminPermissionFilter filter = new AdminPermissionFilter(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/admin/market/health");
-        request.addHeader("Authorization", "Bearer admin");
-        MockHttpServletResponse response = new MockHttpServletResponse();
-
-        filter.doFilter(request, response, new MockFilterChain());
-
-        assertThat(response.getStatus()).isEqualTo(200);
-        verify(authService).requireAdminPermission("Bearer admin", "admin.market.read");
-    }
-
-    @Test
-    void mapsAccountAssetReportSnapshotWriteToReportsWritePermission() throws ServletException, IOException {
-        AuthService authService = authService();
-        AdminPermissionFilter filter = new AdminPermissionFilter(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/admin/reports/account-assets/snapshots");
-        request.addHeader("Authorization", "Bearer admin");
-        MockHttpServletResponse response = new MockHttpServletResponse();
-
-        filter.doFilter(request, response, new MockFilterChain());
-
-        assertThat(response.getStatus()).isEqualTo(200);
-        verify(authService).requireAdminPermission("Bearer admin", "admin.reports.write");
-    }
-
-    @Test
-    void mapsTraceLookupToTracesReadPermission() throws ServletException, IOException {
-        AuthService authService = authService();
-        AdminPermissionFilter filter = new AdminPermissionFilter(authService);
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/admin/traces/trace-123");
-        request.addHeader("Authorization", "Bearer admin");
-        MockHttpServletResponse response = new MockHttpServletResponse();
-
-        filter.doFilter(request, response, new MockFilterChain());
-
-        assertThat(response.getStatus()).isEqualTo(200);
-        verify(authService).requireAdminPermission("Bearer admin", "admin.traces.read");
     }
 
     @Test
@@ -218,21 +134,9 @@ class AdminPermissionFilterTest {
                 .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));
         org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.compliance.write"))
                 .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));
-        org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.exports.read"))
-                .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));
-        org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.queries.write"))
-                .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));
         org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.support.read"))
                 .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));
         org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.support.write"))
-                .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));
-        org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.trading.read"))
-                .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));
-        org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.market.read"))
-                .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));
-        org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.reports.write"))
-                .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));
-        org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.traces.read"))
                 .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));
         org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.alerts.write"))
                 .thenReturn(new JwtPrincipal(7L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));

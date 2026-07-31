@@ -69,20 +69,8 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
         if (path.startsWith("/system")) {
             return "admin.system.read";
         }
-        if (path.startsWith("/traces")) {
-            return "admin.traces.read";
-        }
         if (path.startsWith("/alerts")) {
             return "admin.alerts." + (read ? "read" : "write");
-        }
-        if (path.startsWith("/market")) {
-            return "admin.market." + (read ? "read" : "write");
-        }
-        if (path.startsWith("/trading")) {
-            return "admin.trading." + (read ? "read" : "write");
-        }
-        if (path.startsWith("/reports")) {
-            return "admin.reports." + (read ? "read" : "write");
         }
         if (path.startsWith("/security/mfa")) {
             return "admin.security.mfa";
@@ -92,12 +80,6 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
         }
         if (path.startsWith("/compliance")) {
             return "admin.compliance." + (read ? "read" : "write");
-        }
-        if (path.startsWith("/exports")) {
-            return "admin.exports." + (read ? "read" : "write");
-        }
-        if (path.startsWith("/query-tasks")) {
-            return "admin.queries." + (read ? "read" : "write");
         }
         if (path.startsWith("/roles") || path.startsWith("/permissions")) {
             return "admin.permissions." + (read ? "read" : "write");
