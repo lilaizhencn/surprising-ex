@@ -3,7 +3,6 @@ package com.surprising.instrument.provider.service;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.provider.config.InstrumentProperties;
-import com.surprising.instrument.provider.repository.InstrumentRepository;
 import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,14 +14,14 @@ public class InstrumentLifecycleService {
 
     private static final Logger log = LoggerFactory.getLogger(InstrumentLifecycleService.class);
 
-    private final InstrumentRepository instrumentRepository;
+    private final InstrumentStorageService storageService;
     private final InstrumentService instrumentService;
     private final InstrumentProperties properties;
 
-    public InstrumentLifecycleService(InstrumentRepository instrumentRepository,
+    public InstrumentLifecycleService(InstrumentStorageService storageService,
                                       InstrumentService instrumentService,
                                       InstrumentProperties properties) {
-        this.instrumentRepository = instrumentRepository;
+        this.storageService = storageService;
         this.instrumentService = instrumentService;
         this.properties = properties;
     }
@@ -39,7 +38,7 @@ public class InstrumentLifecycleService {
     }
 
     private void markExpiredContractsSettling(Instant now, int batchSize) {
-        for (InstrumentResponse instrument : instrumentRepository.expiringContractsDue(now, batchSize)) {
+        for (InstrumentResponse instrument : storageService.expiringContractsDue(now, batchSize)) {
             try {
                 instrumentService.updateStatus(instrument.symbol(), InstrumentStatus.SETTLING);
             } catch (Exception ex) {
@@ -50,7 +49,7 @@ public class InstrumentLifecycleService {
     }
 
     private void closeSettledContracts(Instant now, int batchSize) {
-        for (InstrumentResponse instrument : instrumentRepository.settlingContractsDue(now, batchSize)) {
+        for (InstrumentResponse instrument : storageService.settlingContractsDue(now, batchSize)) {
             try {
                 InstrumentResponse closed = instrumentService.updateStatus(instrument.symbol(), InstrumentStatus.CLOSED);
                 instrumentService.publishProductLifecycleEvent(closed);

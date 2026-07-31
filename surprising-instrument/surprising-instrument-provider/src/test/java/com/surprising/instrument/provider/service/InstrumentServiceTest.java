@@ -17,7 +17,6 @@ import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.instrument.api.model.OptionExerciseStyle;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.instrument.provider.config.InstrumentProperties;
-import com.surprising.instrument.provider.repository.InstrumentRepository;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
@@ -77,24 +76,25 @@ class InstrumentServiceTest {
 
     @Test
     void latestAcceptsMatchingProductLine() {
-        InstrumentRepository repository = mock(InstrumentRepository.class);
-        InstrumentService service = service(repository);
+        InstrumentStorageService storageService = mock(InstrumentStorageService.class);
+        InstrumentService service = service(storageService);
         InstrumentResponse instrument = option("BTC-USDT-260327-50000-C", InstrumentStatus.TRADING);
-        when(repository.latest("BTC-USDT-260327-50000-C", ProductLine.OPTION)).thenReturn(Optional.of(instrument));
+        when(storageService.latest("BTC-USDT-260327-50000-C", ProductLine.OPTION))
+                .thenReturn(Optional.of(instrument));
 
         InstrumentResponse response = service.latest("BTC-USDT-260327-50000-C", ProductLine.OPTION);
 
         assertThat(response).isSameAs(instrument);
-        verify(repository).latest("BTC-USDT-260327-50000-C", ProductLine.OPTION);
+        verify(storageService).latest("BTC-USDT-260327-50000-C", ProductLine.OPTION);
     }
 
     @Test
     void latestRejectsMismatchedProductLine() {
-        InstrumentRepository repository = mock(InstrumentRepository.class);
-        InstrumentService service = service(repository);
-        when(repository.latest("BTC-USDT-260327", ProductLine.LINEAR_PERPETUAL))
+        InstrumentStorageService storageService = mock(InstrumentStorageService.class);
+        InstrumentService service = service(storageService);
+        when(storageService.latest("BTC-USDT-260327", ProductLine.LINEAR_PERPETUAL))
                 .thenReturn(Optional.empty());
-        when(repository.latest("BTC-USDT-260327"))
+        when(storageService.latest("BTC-USDT-260327"))
                 .thenReturn(Optional.of(delivery("BTC-USDT-260327", InstrumentStatus.TRADING)));
 
         assertThatThrownBy(() -> service.latest("BTC-USDT-260327", ProductLine.LINEAR_PERPETUAL))
@@ -104,9 +104,9 @@ class InstrumentServiceTest {
 
     @Test
     void latestRejectsCorruptProductCurrentVersion() {
-        InstrumentRepository repository = mock(InstrumentRepository.class);
-        InstrumentService service = service(repository);
-        when(repository.latest("BTC-USDT-260327", ProductLine.OPTION))
+        InstrumentStorageService storageService = mock(InstrumentStorageService.class);
+        InstrumentService service = service(storageService);
+        when(storageService.latest("BTC-USDT-260327", ProductLine.OPTION))
                 .thenReturn(Optional.of(delivery("BTC-USDT-260327", InstrumentStatus.TRADING)));
 
         assertThatThrownBy(() -> service.latest("BTC-USDT-260327", ProductLine.OPTION))
@@ -115,12 +115,12 @@ class InstrumentServiceTest {
     }
 
     private InstrumentService service(KafkaTemplate<String, Object> kafkaTemplate, InstrumentProperties properties) {
-        return new InstrumentService(mock(InstrumentRepository.class), mock(InstrumentValidator.class),
+        return new InstrumentService(mock(InstrumentStorageService.class), mock(InstrumentValidator.class),
                 properties, kafkaTemplate);
     }
 
-    private InstrumentService service(InstrumentRepository repository) {
-        return new InstrumentService(repository, mock(InstrumentValidator.class),
+    private InstrumentService service(InstrumentStorageService storageService) {
+        return new InstrumentService(storageService, mock(InstrumentValidator.class),
                 new InstrumentProperties(), kafkaTemplate());
     }
 

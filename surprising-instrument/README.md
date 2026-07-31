@@ -21,6 +21,8 @@ Instrument configuration module for Surprising Exchange. It is the product-rule 
 - Index components: external spot source REST/WS config, weights, USD/USDT conversion rules.
 - Versioning: every change creates a new `version`; `instrument_current_versions` switches the current snapshot.
 - Multi-node safety: `instrument_symbol_sequences` atomically allocates versions per symbol and prevents version conflicts during concurrent admin requests.
+- Storage boundary: each repository accesses one table only. `InstrumentStorageService` aggregates the immutable version,
+  global/product current pointers, risk brackets, and index sources, with batched detail hydration.
 
 ## Long Unit Model
 
@@ -120,6 +122,7 @@ Root [init.sql](../init.sql) creates:
 
 - `instruments`
 - `instrument_current_versions`
+- `instrument_product_current_versions`
 - `instrument_symbol_sequences`
 - `instrument_risk_brackets`
 - `instrument_index_sources`
@@ -151,6 +154,8 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 
 - Instrument is the single product configuration source. Do not keep a second symbol-rule set in matching, risk, or market-data services.
 - Query APIs are stateless and horizontally scalable. Admin writes share PostgreSQL, and `instrument_symbol_sequences` keeps per-symbol versions monotonic.
+- Current-version reads resolve a single-table version pointer, load the immutable `instruments` row, and batch-hydrate
+  risk brackets and index sources; repositories do not execute cross-table joins.
 - Core downstream services should use local caches, not database reads for every request.
 - Tick/step, leverage, and status changes must create a new version instead of overwriting history.
 - Instrument default maker/taker fee-rate changes also create a new version. Accepted orders keep the fee snapshot stored on `trading_orders`; old positions keep the contract-math version they were opened with.

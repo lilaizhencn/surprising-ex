@@ -21,6 +21,8 @@ Surprising Exchange 产品基础配置模块。它是现货、永续、交割和
 - 指数价格成分源：外部现货源 REST/WS 配置、权重、USD/USDT 换算规则。
 - 版本管理：每次变更生成新 `version`，通过 `instrument_current_versions` 切换当前版本。
 - 多节点安全：`instrument_symbol_sequences` 为同一个 symbol 原子分配版本号，避免多个 admin 请求并发时 version 冲突。
+- 存储边界：每个 Repository 只访问一张表；`InstrumentStorageService` 在事务内聚合主版本、
+  全局/产品线当前版本指针、风险档位和指数源，并对附属配置执行批量补全。
 
 ## long 单位模型
 
@@ -120,6 +122,7 @@ producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.con
 
 - `instruments`
 - `instrument_current_versions`
+- `instrument_product_current_versions`
 - `instrument_symbol_sequences`
 - `instrument_risk_brackets`
 - `instrument_index_sources`
@@ -151,6 +154,8 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 
 - Instrument 是全系统唯一产品配置源，不要在撮合、风控、行情服务里再维护第二套 symbol 规则。
 - 查询接口无状态，可以多节点水平部署；写接口共享 PostgreSQL，通过 `instrument_symbol_sequences` 保证同 symbol 版本号单调递增。
+- 当前版本查询先读取单表版本指针，再从 `instruments` 获取不可变版本，最后批量装配风险档位和指数源；
+  不在 Repository 内执行跨表 JOIN。
 - 下游核心服务不要每笔请求查数据库，应通过本地缓存消费 instrument 快照。
 - 修改 tick/step、杠杆、状态时必须生成新版本，不能原地覆盖历史版本。
 - 修改 instrument 默认 maker/taker 手续费率也必须生成新版本。已接受订单继续使用 `trading_orders` 上的费率快照；旧持仓继续使用开仓时绑定的合约数学版本。

@@ -10,7 +10,6 @@ import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.instrument.provider.config.InstrumentProperties;
-import com.surprising.instrument.provider.repository.InstrumentRepository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Instant;
@@ -22,23 +21,23 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class InstrumentService {
 
-    private final InstrumentRepository instrumentRepository;
+    private final InstrumentStorageService storageService;
     private final InstrumentValidator instrumentValidator;
     private final InstrumentProperties properties;
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    public InstrumentService(InstrumentRepository instrumentRepository,
+    public InstrumentService(InstrumentStorageService storageService,
                              InstrumentValidator instrumentValidator,
                              InstrumentProperties properties,
                              KafkaTemplate<String, Object> kafkaTemplate) {
-        this.instrumentRepository = instrumentRepository;
+        this.storageService = storageService;
         this.instrumentValidator = instrumentValidator;
         this.properties = properties;
         this.kafkaTemplate = kafkaTemplate;
     }
 
     public InstrumentResponse latest(String symbol) {
-        return instrumentRepository.latest(normalizeSymbol(symbol))
+        return storageService.latest(normalizeSymbol(symbol))
                 .orElseThrow(() -> new IllegalStateException("instrument not found: " + symbol));
     }
 
@@ -47,7 +46,7 @@ public class InstrumentService {
         if (productLine == null) {
             return latest(normalizedSymbol);
         }
-        Optional<InstrumentResponse> productCurrent = instrumentRepository.latest(normalizedSymbol, productLine);
+        Optional<InstrumentResponse> productCurrent = storageService.latest(normalizedSymbol, productLine);
         if (productCurrent.isPresent()) {
             InstrumentResponse response = productCurrent.get();
             if (response.contractType().productLine() == productLine) {
@@ -64,22 +63,22 @@ public class InstrumentService {
     }
 
     public InstrumentResponse version(String symbol, long version) {
-        return instrumentRepository.version(normalizeSymbol(symbol), version)
+        return storageService.version(normalizeSymbol(symbol), version)
                 .orElseThrow(() -> new IllegalStateException("instrument version not found: " + symbol + ":" + version));
     }
 
     public InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status) {
-        var rows = instrumentRepository.list(type, status);
+        var rows = storageService.list(type, status);
         return new InstrumentQueryResponse(rows.size(), rows);
     }
 
     public InstrumentQueryResponse list(ProductLine productLine, InstrumentType type, InstrumentStatus status) {
-        var rows = instrumentRepository.list(productLine, type, status);
+        var rows = storageService.list(productLine, type, status);
         return new InstrumentQueryResponse(rows.size(), rows);
     }
 
     public InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status, int limit, String cursor, String sort) {
-        var page = instrumentRepository.listPage(type, status, limit, cursor, sort);
+        var page = storageService.listPage(type, status, limit, cursor, sort);
         return new InstrumentQueryResponse(page.instruments().size(), page.instruments(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
@@ -90,7 +89,7 @@ public class InstrumentService {
                                         int limit,
                                         String cursor,
                                         String sort) {
-        var page = instrumentRepository.listPage(productLine, type, status, limit, cursor, sort);
+        var page = storageService.listPage(productLine, type, status, limit, cursor, sort);
         return new InstrumentQueryResponse(page.instruments().size(), page.instruments(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
@@ -100,7 +99,7 @@ public class InstrumentService {
     }
 
     public InstrumentQueryResponse versions(String symbol, ProductLine productLine, int limit, String cursor, String sort) {
-        var page = instrumentRepository.versionsPage(normalizeSymbol(symbol), productLine, limit, cursor, sort);
+        var page = storageService.versionsPage(normalizeSymbol(symbol), productLine, limit, cursor, sort);
         return new InstrumentQueryResponse(page.instruments().size(), page.instruments(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
@@ -114,11 +113,11 @@ public class InstrumentService {
         instrumentValidator.validate(request);
         String symbol = normalizeSymbol(request.symbol());
         Instant now = Instant.now();
-        long version = instrumentRepository.nextVersion(symbol);
-        instrumentRepository.insert(symbol, version, request, now);
-        instrumentRepository.setCurrentVersion(request.contractType().productLine(), symbol, version, now);
-        instrumentRepository.setCurrentVersion(symbol, version, now);
-        InstrumentResponse response = instrumentRepository.version(symbol, version)
+        long version = storageService.nextVersion(symbol);
+        storageService.insert(symbol, version, request, now);
+        storageService.setCurrentVersion(request.contractType().productLine(), symbol, version, now);
+        storageService.setCurrentVersion(symbol, version, now);
+        InstrumentResponse response = storageService.version(symbol, version)
                 .orElseThrow(() -> new IllegalStateException("instrument insert failed: " + symbol));
         publish(response, eventType);
         return response;

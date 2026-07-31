@@ -2,17 +2,14 @@ package com.surprising.instrument.provider.repository;
 
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.ContractSettlementMethod;
-import com.surprising.instrument.api.model.IndexSourceConfig;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.api.model.OptionExerciseStyle;
 import com.surprising.instrument.api.model.OptionType;
-import com.surprising.instrument.api.model.RiskLimitBracket;
 import com.surprising.product.api.ProductLine;
 import java.nio.charset.StandardCharsets;
-import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -21,10 +18,10 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
-import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+/** 只负责 {@code instruments} 表。 */
 @Repository
 public class InstrumentRepository {
 
@@ -47,21 +44,6 @@ public class InstrumentRepository {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
-    private static final String INSERT_BRACKET_SQL = """
-            INSERT INTO instrument_risk_brackets (
-                symbol, version, bracket_no, notional_floor_units, notional_cap_units,
-                max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """;
-
-    private static final String INSERT_SOURCE_SQL = """
-            INSERT INTO instrument_index_sources (
-                symbol, version, source, enabled, base_url, path, source_symbol, parser,
-                quote_currency, target_quote_currency, conversion_base_url, conversion_path,
-                conversion_parser, conversion_mode, conversion_operation, fallback_weight_multiplier_ppm,
-                websocket_enabled, websocket_url, websocket_subscribe_message, websocket_parser, weight_ppm
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """;
     private static final int MAX_PAGE_LIMIT = 1000;
     private static final InstrumentSort INSTRUMENT_SYMBOL_ASC =
             new InstrumentSort("symbol.asc", "symbol", "i.symbol", false);
@@ -81,21 +63,6 @@ public class InstrumentRepository {
 
     public InstrumentRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
-    }
-
-    public long nextVersion(String symbol) {
-        Long version = jdbcTemplate.queryForObject("""
-                INSERT INTO instrument_symbol_sequences (symbol, version, updated_at)
-                VALUES (?, COALESCE((SELECT MAX(i.version) FROM instruments i WHERE i.symbol = ?), 0) + 1, now())
-                ON CONFLICT (symbol) DO UPDATE SET
-                    version = instrument_symbol_sequences.version + 1,
-                    updated_at = now()
-                RETURNING version
-                """, Long.class, symbol, symbol);
-        if (version == null) {
-            throw new IllegalStateException("Failed to allocate instrument version for " + symbol);
-        }
-        return version;
     }
 
     public void insert(String symbol, long version, InstrumentUpsertRequest request, Instant now) {
@@ -119,50 +86,6 @@ public class InstrumentRepository {
                 enumName(request.optionType()), enumName(request.optionExerciseStyle()),
                 enumName(request.settlementMethod()),
                 request.status().name(), Timestamp.from(effectiveTime), Timestamp.from(now), Timestamp.from(now));
-        insertBrackets(symbol, version, request.riskLimitBrackets());
-        insertSources(symbol, version, request.indexSources());
-    }
-
-    public void setCurrentVersion(String symbol, long version, Instant now) {
-        jdbcTemplate.update("""
-                INSERT INTO instrument_current_versions (symbol, version, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT (symbol) DO UPDATE SET
-                    version = EXCLUDED.version,
-                    updated_at = EXCLUDED.updated_at
-                """, symbol, version, Timestamp.from(now));
-    }
-
-    public void setCurrentVersion(ProductLine productLine, String symbol, long version, Instant now) {
-        jdbcTemplate.update("""
-                INSERT INTO instrument_product_current_versions (product_line, symbol, version, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (product_line, symbol) DO UPDATE SET
-                    version = EXCLUDED.version,
-                    updated_at = EXCLUDED.updated_at
-                """, productLine.name(), symbol, version, Timestamp.from(now));
-    }
-
-    public Optional<InstrumentResponse> latest(String symbol) {
-        String sql = """
-                SELECT i.*
-                  FROM instruments i
-                  JOIN instrument_current_versions c
-                    ON c.symbol = i.symbol AND c.version = i.version
-                 WHERE i.symbol = ?
-                """;
-        return jdbcTemplate.query(sql, (rs, rowNum) -> toResponse(rs), symbol).stream().findFirst();
-    }
-
-    public Optional<InstrumentResponse> latest(String symbol, ProductLine productLine) {
-        String sql = """
-                SELECT i.*
-                  FROM instruments i
-                  JOIN instrument_product_current_versions c
-                    ON c.product_line = ? AND c.symbol = i.symbol AND c.version = i.version
-                 WHERE i.symbol = ?
-                """;
-        return jdbcTemplate.query(sql, (rs, rowNum) -> toResponse(rs), productLine.name(), symbol).stream().findFirst();
     }
 
     public Optional<InstrumentResponse> version(String symbol, long version) {
@@ -170,18 +93,26 @@ public class InstrumentRepository {
                 (rs, rowNum) -> toResponse(rs), symbol, version).stream().findFirst();
     }
 
-    public List<InstrumentResponse> list(InstrumentType type, InstrumentStatus status) {
-        return list(null, type, status);
+    public long maxVersion(String symbol) {
+        Long version = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(MAX(version), 0) FROM instruments WHERE symbol = ?",
+                Long.class, symbol);
+        return version == null ? 0L : version;
     }
 
-    public List<InstrumentResponse> list(ProductLine productLine, InstrumentType type, InstrumentStatus status) {
+    public List<InstrumentResponse> list(List<InstrumentVersionKey> currentVersions,
+                                         InstrumentType type,
+                                         InstrumentStatus status) {
+        if (currentVersions == null || currentVersions.isEmpty()) {
+            return List.of();
+        }
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
                 SELECT i.*
                   FROM instruments i
+                 WHERE 1 = 1
                 """);
-        appendCurrentVersionJoin(sql, args, productLine);
-        sql.append(" WHERE 1 = 1\n");
+        appendVersionKeys(sql, args, currentVersions);
         if (type != null) {
             sql.append(" AND i.instrument_type = ?");
             args.add(type.name());
@@ -194,11 +125,7 @@ public class InstrumentRepository {
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toResponse(rs), args.toArray());
     }
 
-    public InstrumentPage listPage(InstrumentType type, InstrumentStatus status, int limit, String cursor, String sort) {
-        return listPage(null, type, status, limit, cursor, sort);
-    }
-
-    public InstrumentPage listPage(ProductLine productLine,
+    public InstrumentPage listPage(List<InstrumentVersionKey> currentVersions,
                                    InstrumentType type,
                                    InstrumentStatus status,
                                    int limit,
@@ -206,14 +133,17 @@ public class InstrumentRepository {
                                    String sort) {
         int safeLimit = limit(limit);
         InstrumentSort sortSpec = parseInstrumentSort(sort);
+        if (currentVersions == null || currentVersions.isEmpty()) {
+            return new InstrumentPage(List.of(), null, false, sortSpec.token(), safeLimit);
+        }
         InstrumentCursor decodedCursor = decodeInstrumentCursor(cursor);
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
                 SELECT i.*
                   FROM instruments i
+                 WHERE 1 = 1
                 """);
-        appendCurrentVersionJoin(sql, args, productLine);
-        sql.append(" WHERE 1 = 1\n");
+        appendVersionKeys(sql, args, currentVersions);
         if (type != null) {
             sql.append(" AND i.instrument_type = ?");
             args.add(type.name());
@@ -263,114 +193,64 @@ public class InstrumentRepository {
         return page(fetchedRows, safeLimit, sortSpec.token(), row -> encodeVersionCursor(row.version()));
     }
 
-    public List<InstrumentResponse> expiringContractsDue(Instant now, int limit) {
-        return jdbcTemplate.query("""
+    public List<InstrumentResponse> expiringContractsDue(List<InstrumentVersionKey> currentVersions,
+                                                         Instant now,
+                                                         int limit) {
+        if (currentVersions == null || currentVersions.isEmpty()) {
+            return List.of();
+        }
+        List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("""
                 SELECT i.*
                   FROM instruments i
-                  JOIN instrument_product_current_versions c
-                    ON c.symbol = i.symbol AND c.version = i.version
                  WHERE i.instrument_type IN ('DELIVERY', 'OPTION')
-                   AND c.product_line IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
                    AND i.status IN ('PRE_TRADING', 'TRADING', 'HALT')
                    AND i.expiry_time IS NOT NULL
                    AND i.expiry_time <= ?
-                 ORDER BY i.expiry_time ASC, i.symbol ASC
-                 LIMIT ?
-                """, (rs, rowNum) -> toResponse(rs), Timestamp.from(now), limit(limit));
+                """);
+        args.add(Timestamp.from(now));
+        appendVersionKeys(sql, args, currentVersions);
+        sql.append(" ORDER BY i.expiry_time ASC, i.symbol ASC LIMIT ?");
+        args.add(limit(limit));
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toResponse(rs), args.toArray());
     }
 
-    public List<InstrumentResponse> settlingContractsDue(Instant now, int limit) {
-        return jdbcTemplate.query("""
+    public List<InstrumentResponse> settlingContractsDue(List<InstrumentVersionKey> currentVersions,
+                                                         Instant now,
+                                                         int limit) {
+        if (currentVersions == null || currentVersions.isEmpty()) {
+            return List.of();
+        }
+        List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("""
                 SELECT i.*
                   FROM instruments i
-                  JOIN instrument_product_current_versions c
-                    ON c.symbol = i.symbol AND c.version = i.version
                  WHERE i.instrument_type IN ('DELIVERY', 'OPTION')
-                   AND c.product_line IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
                    AND i.status = 'SETTLING'
                    AND i.delivery_time IS NOT NULL
                    AND i.delivery_time <= ?
-                 ORDER BY i.delivery_time ASC, i.symbol ASC
-                 LIMIT ?
-                """, (rs, rowNum) -> toResponse(rs), Timestamp.from(now), limit(limit));
-    }
-
-    private void appendCurrentVersionJoin(StringBuilder sql, List<Object> args, ProductLine productLine) {
-        if (productLine == null) {
-            sql.append("""
-                  JOIN instrument_current_versions c
-                    ON c.symbol = i.symbol AND c.version = i.version
                 """);
-            return;
-        }
-        sql.append("""
-                  JOIN instrument_product_current_versions c
-                    ON c.product_line = ? AND c.symbol = i.symbol AND c.version = i.version
-                """);
-        args.add(productLine.name());
+        args.add(Timestamp.from(now));
+        appendVersionKeys(sql, args, currentVersions);
+        sql.append(" ORDER BY i.delivery_time ASC, i.symbol ASC LIMIT ?");
+        args.add(limit(limit));
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toResponse(rs), args.toArray());
     }
 
-    private void insertBrackets(String symbol, long version, List<RiskLimitBracket> brackets) {
-        if (brackets == null || brackets.isEmpty()) {
-            return;
+    private void appendVersionKeys(StringBuilder sql,
+                                   List<Object> args,
+                                   List<InstrumentVersionKey> currentVersions) {
+        sql.append(" AND (i.symbol, i.version) IN (");
+        for (int index = 0; index < currentVersions.size(); index++) {
+            if (index > 0) {
+                sql.append(", ");
+            }
+            sql.append("(?, ?)");
+            InstrumentVersionKey key = currentVersions.get(index);
+            args.add(key.symbol());
+            args.add(key.version());
         }
-        jdbcTemplate.batchUpdate(INSERT_BRACKET_SQL, new BatchPreparedStatementSetter() {
-            @Override
-            public void setValues(PreparedStatement ps, int i) throws java.sql.SQLException {
-                RiskLimitBracket bracket = brackets.get(i);
-                ps.setString(1, symbol);
-                ps.setLong(2, version);
-                ps.setInt(3, bracket.bracketNo());
-                ps.setLong(4, bracket.notionalFloorUnits());
-                ps.setLong(5, bracket.notionalCapUnits());
-                ps.setLong(6, bracket.maxLeveragePpm());
-                ps.setLong(7, bracket.initialMarginRatePpm());
-                ps.setLong(8, bracket.maintenanceMarginRatePpm());
-            }
-
-            @Override
-            public int getBatchSize() {
-                return brackets.size();
-            }
-        });
-    }
-
-    private void insertSources(String symbol, long version, List<IndexSourceConfig> sources) {
-        if (sources == null || sources.isEmpty()) {
-            return;
-        }
-        jdbcTemplate.batchUpdate(INSERT_SOURCE_SQL, new BatchPreparedStatementSetter() {
-            @Override
-            public void setValues(PreparedStatement ps, int i) throws java.sql.SQLException {
-                IndexSourceConfig source = sources.get(i);
-                ps.setString(1, symbol);
-                ps.setLong(2, version);
-                ps.setString(3, source.source());
-                ps.setBoolean(4, source.enabled());
-                ps.setString(5, source.baseUrl());
-                ps.setString(6, source.path());
-                ps.setString(7, source.sourceSymbol());
-                ps.setString(8, source.parser());
-                ps.setString(9, defaultText(source.quoteCurrency(), "USDT"));
-                ps.setString(10, defaultText(source.targetQuoteCurrency(), "USDT"));
-                ps.setString(11, source.conversionBaseUrl());
-                ps.setString(12, source.conversionPath());
-                ps.setString(13, source.conversionParser());
-                ps.setString(14, defaultText(source.conversionMode(), "DISCOUNT"));
-                ps.setString(15, defaultText(source.conversionOperation(), "MULTIPLY"));
-                ps.setLong(16, positiveOrDefault(source.fallbackWeightMultiplierPpm(), 500_000L));
-                ps.setBoolean(17, source.websocketEnabled());
-                ps.setString(18, source.websocketUrl());
-                ps.setString(19, source.websocketSubscribeMessage());
-                ps.setString(20, source.websocketParser());
-                ps.setLong(21, source.weightPpm());
-            }
-
-            @Override
-            public int getBatchSize() {
-                return sources.size();
-            }
-        });
+        sql.append(")");
     }
 
     private InstrumentResponse toResponse(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -425,52 +305,8 @@ public class InstrumentRepository {
                 rs.getTimestamp("effective_time").toInstant(),
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant(),
-                riskLimitBrackets(symbol, version),
-                indexSources(symbol, version));
-    }
-
-    private List<RiskLimitBracket> riskLimitBrackets(String symbol, long version) {
-        return jdbcTemplate.query("""
-                SELECT bracket_no, notional_floor_units, notional_cap_units, max_leverage_ppm,
-                       initial_margin_rate_ppm, maintenance_margin_rate_ppm
-                  FROM instrument_risk_brackets
-                 WHERE symbol = ? AND version = ?
-                 ORDER BY bracket_no ASC
-                """, (rs, rowNum) -> new RiskLimitBracket(
-                rs.getInt("bracket_no"),
-                rs.getLong("notional_floor_units"),
-                rs.getLong("notional_cap_units"),
-                rs.getLong("max_leverage_ppm"),
-                rs.getLong("initial_margin_rate_ppm"),
-                rs.getLong("maintenance_margin_rate_ppm")), symbol, version);
-    }
-
-    private List<IndexSourceConfig> indexSources(String symbol, long version) {
-        return jdbcTemplate.query("""
-                SELECT *
-                  FROM instrument_index_sources
-                 WHERE symbol = ? AND version = ?
-                 ORDER BY source ASC
-                """, (rs, rowNum) -> new IndexSourceConfig(
-                rs.getString("source"),
-                rs.getBoolean("enabled"),
-                rs.getString("base_url"),
-                rs.getString("path"),
-                rs.getString("source_symbol"),
-                rs.getString("parser"),
-                rs.getString("quote_currency"),
-                rs.getString("target_quote_currency"),
-                rs.getString("conversion_base_url"),
-                rs.getString("conversion_path"),
-                rs.getString("conversion_parser"),
-                rs.getString("conversion_mode"),
-                rs.getString("conversion_operation"),
-                rs.getLong("fallback_weight_multiplier_ppm"),
-                rs.getBoolean("websocket_enabled"),
-                rs.getString("websocket_url"),
-                rs.getString("websocket_subscribe_message"),
-                rs.getString("websocket_parser"),
-                rs.getLong("weight_ppm")), symbol, version);
+                List.of(),
+                List.of());
     }
 
     private InstrumentPage page(List<InstrumentResponse> fetchedRows,
@@ -631,14 +467,6 @@ public class InstrumentRepository {
             throws java.sql.SQLException {
         String value = rs.getString(column);
         return value == null ? null : Enum.valueOf(type, value);
-    }
-
-    private String defaultText(String value, String fallback) {
-        return value == null || value.isBlank() ? fallback : value;
-    }
-
-    private long positiveOrDefault(long value, long fallback) {
-        return value > 0 ? value : fallback;
     }
 
     public record InstrumentPage(List<InstrumentResponse> instruments,

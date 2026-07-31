@@ -15,7 +15,6 @@ import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.OptionExerciseStyle;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.instrument.provider.config.InstrumentProperties;
-import com.surprising.instrument.provider.repository.InstrumentRepository;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -24,19 +23,19 @@ class InstrumentLifecycleServiceTest {
 
     @Test
     void advancesExpiredAndSettledContractsIndependently() {
-        InstrumentRepository repository = mock(InstrumentRepository.class);
+        InstrumentStorageService storageService = mock(InstrumentStorageService.class);
         InstrumentService instrumentService = mock(InstrumentService.class);
         InstrumentProperties properties = new InstrumentProperties();
         properties.getLifecycle().setBatchSize(3);
         InstrumentResponse expired = delivery("BTC-USDT-260327", InstrumentStatus.TRADING);
         InstrumentResponse settling = option("BTC-USDT-260327-50000-C", InstrumentStatus.SETTLING);
         InstrumentResponse closed = option("BTC-USDT-260327-50000-C", InstrumentStatus.CLOSED);
-        when(repository.expiringContractsDue(any(Instant.class), eq(3))).thenReturn(List.of(expired));
-        when(repository.settlingContractsDue(any(Instant.class), eq(3))).thenReturn(List.of(settling));
+        when(storageService.expiringContractsDue(any(Instant.class), eq(3))).thenReturn(List.of(expired));
+        when(storageService.settlingContractsDue(any(Instant.class), eq(3))).thenReturn(List.of(settling));
         when(instrumentService.updateStatus("BTC-USDT-260327", InstrumentStatus.SETTLING)).thenReturn(expired);
         when(instrumentService.updateStatus("BTC-USDT-260327-50000-C", InstrumentStatus.CLOSED)).thenReturn(closed);
 
-        new InstrumentLifecycleService(repository, instrumentService, properties).advanceLifecycle();
+        new InstrumentLifecycleService(storageService, instrumentService, properties).advanceLifecycle();
 
         verify(instrumentService).updateStatus("BTC-USDT-260327", InstrumentStatus.SETTLING);
         verify(instrumentService).updateStatus("BTC-USDT-260327-50000-C", InstrumentStatus.CLOSED);
@@ -45,15 +44,17 @@ class InstrumentLifecycleServiceTest {
 
     @Test
     void skipsLifecycleWhenDisabled() {
-        InstrumentRepository repository = mock(InstrumentRepository.class);
+        InstrumentStorageService storageService = mock(InstrumentStorageService.class);
         InstrumentService instrumentService = mock(InstrumentService.class);
         InstrumentProperties properties = new InstrumentProperties();
         properties.getLifecycle().setEnabled(false);
 
-        new InstrumentLifecycleService(repository, instrumentService, properties).advanceLifecycle();
+        new InstrumentLifecycleService(storageService, instrumentService, properties).advanceLifecycle();
 
-        verify(repository, never()).expiringContractsDue(any(Instant.class), org.mockito.ArgumentMatchers.anyInt());
-        verify(repository, never()).settlingContractsDue(any(Instant.class), org.mockito.ArgumentMatchers.anyInt());
+        verify(storageService, never()).expiringContractsDue(any(Instant.class),
+                org.mockito.ArgumentMatchers.anyInt());
+        verify(storageService, never()).settlingContractsDue(any(Instant.class),
+                org.mockito.ArgumentMatchers.anyInt());
     }
 
     private InstrumentResponse delivery(String symbol, InstrumentStatus status) {
