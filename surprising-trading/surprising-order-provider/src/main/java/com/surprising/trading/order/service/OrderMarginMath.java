@@ -6,9 +6,9 @@ import com.surprising.trading.api.model.OrderType;
 import java.math.BigInteger;
 
 /**
- * Initial-margin formulas for order admission.
- * All public inputs and outputs are exchange-core compatible long units; BigInteger is used only
- * inside multiplication/division steps so oversized configurations fail instead of overflowing.
+ * 订单准入使用的初始保证金公式。
+ * 全部公开输入输出均使用与 exchange-core 兼容的 long 单位；BigInteger 只用于乘除中间步骤，
+ * 使超大配置明确失败而不是发生溢出。
  */
 public final class OrderMarginMath {
 

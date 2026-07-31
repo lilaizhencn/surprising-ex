@@ -10,7 +10,7 @@ import java.util.Optional;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-/** Redis ZSET implementation. Scores are epoch milliseconds, exactly representable as Redis doubles. */
+/** Redis ZSET 实现，分值为纪元毫秒，可由 Redis double 精确表示。 */
 @Component
 public class RedisOrderScheduleIndex implements OrderScheduleIndex {
     private final StringRedisTemplate redis;

@@ -19,10 +19,6 @@ import com.surprising.trading.api.model.AdminCancelBySymbolRequest;
 import com.surprising.trading.api.model.AdminCancelOrderResult;
 import com.surprising.trading.api.model.AdminCancelOrdersResponse;
 import com.surprising.trading.api.model.AdminCancelOrdersPreviewResponse;
-import com.surprising.trading.api.model.AdminMatchResultQueryResponse;
-import com.surprising.trading.api.model.AdminMatchTradeQueryResponse;
-import com.surprising.trading.api.model.AdminOrderEventQueryResponse;
-import com.surprising.trading.api.model.AdminOrderTimelineResponse;
 import com.surprising.trading.api.model.BatchCancelOrdersRequest;
 import com.surprising.trading.api.model.BatchAmendOrdersRequest;
 import com.surprising.trading.api.model.BatchPlaceOrderRequest;
@@ -56,6 +52,7 @@ import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.model.ValidationResult;
 import com.surprising.trading.order.repository.OrderFeeRepository;
+import com.surprising.trading.order.repository.OrderEventRepository;
 import com.surprising.trading.order.repository.OrderMarginRepository;
 import com.surprising.trading.order.repository.OrderRepository;
 import com.surprising.trading.order.repository.OutboxRepository;
@@ -88,6 +85,8 @@ public class OrderService {
     private final OrderValidator orderValidator;
     private final ReduceOnlyValidator reduceOnlyValidator;
     private final OrderRepository orderRepository;
+    private final OrderEventRepository orderEventRepository;
+    private final OrderPlacementStateService placementStateService;
     private final OrderFeeRepository orderFeeRepository;
     private final OrderMarginRepository orderMarginRepository;
     private final SpotOrderReservationRepository spotOrderReservationRepository;
@@ -99,11 +98,15 @@ public class OrderService {
                         OrderValidator orderValidator,
                         ReduceOnlyValidator reduceOnlyValidator,
                         OrderRepository orderRepository,
+                        OrderEventRepository orderEventRepository,
+                        OrderPlacementStateService placementStateService,
                         OrderFeeRepository orderFeeRepository,
                         OrderMarginRepository orderMarginRepository,
                         SpotOrderReservationRepository spotOrderReservationRepository,
                         OutboxRepository outboxRepository) {
-        this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderFeeRepository,
+        this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderEventRepository,
+                placementStateService,
+                orderFeeRepository,
                 orderMarginRepository, spotOrderReservationRepository, outboxRepository, null);
     }
 
@@ -113,6 +116,8 @@ public class OrderService {
                         OrderValidator orderValidator,
                         ReduceOnlyValidator reduceOnlyValidator,
                         OrderRepository orderRepository,
+                        OrderEventRepository orderEventRepository,
+                        OrderPlacementStateService placementStateService,
                         OrderFeeRepository orderFeeRepository,
                         OrderMarginRepository orderMarginRepository,
                         SpotOrderReservationRepository spotOrderReservationRepository,
@@ -123,6 +128,8 @@ public class OrderService {
         this.orderValidator = orderValidator;
         this.reduceOnlyValidator = reduceOnlyValidator;
         this.orderRepository = orderRepository;
+        this.orderEventRepository = orderEventRepository;
+        this.placementStateService = placementStateService;
         this.orderFeeRepository = orderFeeRepository;
         this.orderMarginRepository = orderMarginRepository;
         this.spotOrderReservationRepository = spotOrderReservationRepository;
@@ -135,7 +142,7 @@ public class OrderService {
         PlaceOrderRequest normalized = normalize(request);
         String traceId = TraceContext.currentOrCreate();
         ProductLine productLine = currentProductLine();
-        // clientOrderId is the public idempotency key. Replays return the first persisted result.
+        // clientOrderId 是公开幂等键，重放请求直接返回第一次持久化的结果。
         if (hasClientOrderId(normalized)) {
             var existing = orderRepository.findByClientOrderId(productLine, normalized.userId(), normalized.clientOrderId());
             if (existing.isPresent()) {
@@ -145,10 +152,10 @@ public class OrderService {
             }
         }
 
-        orderRepository.lockUserPositionMode(productLine, normalized.userId());
-        PositionMode positionMode = orderRepository.positionMode(productLine, normalized.userId());
+        placementStateService.lockUserPositionMode(productLine, normalized.userId());
+        PositionMode positionMode = placementStateService.positionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
-        orderRepository.lockUserSymbolMarginScope(productLine, normalized.userId(), normalized.symbol());
+        placementStateService.lockUserSymbolMarginScope(productLine, normalized.userId(), normalized.symbol());
         Instant now = Instant.now();
         ValidationResult validation = validateMarginMode(productLine, normalized);
         if (validation.accepted()) {
@@ -260,10 +267,10 @@ public class OrderService {
     public TestOrderResponse test(PlaceOrderRequest request) {
         PlaceOrderRequest normalized = normalize(request);
         ProductLine productLine = currentProductLine();
-        orderRepository.lockUserPositionMode(productLine, normalized.userId());
-        PositionMode positionMode = orderRepository.positionMode(productLine, normalized.userId());
+        placementStateService.lockUserPositionMode(productLine, normalized.userId());
+        PositionMode positionMode = placementStateService.positionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
-        orderRepository.lockUserSymbolMarginScope(productLine, normalized.userId(), normalized.symbol());
+        placementStateService.lockUserSymbolMarginScope(productLine, normalized.userId(), normalized.symbol());
         ValidationResult validation = validateMarginMode(productLine, normalized);
         if (!validation.accepted()) {
             return testRejected(validation, "MARGIN_MODE");
@@ -320,8 +327,8 @@ public class OrderService {
             throw new IllegalStateException("order has no open quantity to amend");
         }
 
-        orderRepository.lockUserPositionMode(productLine, original.userId());
-        orderRepository.lockUserSymbolMarginScope(productLine, original.userId(), original.symbol());
+        placementStateService.lockUserPositionMode(productLine, original.userId());
+        placementStateService.lockUserSymbolMarginScope(productLine, original.userId(), original.symbol());
         long replacementPriceTicks = normalized.priceTicks() == null ? original.priceTicks() : normalized.priceTicks();
         long replacementQuantitySteps = normalized.quantitySteps() == null
                 ? original.remainingQuantitySteps()
@@ -383,13 +390,13 @@ public class OrderService {
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
         ProductLine productLine = currentProductLine();
-        orderRepository.lockUserPositionMode(productLine, request.userId());
-        PositionMode positionMode = orderRepository.positionMode(productLine, request.userId());
+        placementStateService.lockUserPositionMode(productLine, request.userId());
+        PositionMode positionMode = placementStateService.positionMode(productLine, request.userId());
         if (PositionMode.defaultIfNull(positionMode) == PositionMode.HEDGE && !positionSide.isHedgeSide()) {
             throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
         }
-        orderRepository.lockUserSymbolMarginScope(productLine, request.userId(), symbol);
-        ReduceOnlyPosition position = orderRepository.lockedPosition(productLine, request.userId(), symbol, marginMode,
+        placementStateService.lockUserSymbolMarginScope(productLine, request.userId(), symbol);
+        ReduceOnlyPosition position = placementStateService.lockedPosition(productLine, request.userId(), symbol, marginMode,
                         positionSide)
                 .orElseThrow(() -> new IllegalStateException("open position not found"));
         if (position.signedQuantitySteps() == 0L) {
@@ -518,7 +525,7 @@ public class OrderService {
     private ValidationResult validateMarginMode(ProductLine productLine, PlaceOrderRequest request) {
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         if (!request.reduceOnly()
-                && orderRepository.hasActiveMarginModeConflict(productLine, request.userId(), request.symbol(),
+                && placementStateService.hasActiveMarginModeConflict(productLine, request.userId(), request.symbol(),
                         marginMode)) {
             return ValidationResult.reject("margin mode switch requires closing positions and open orders first");
         }
@@ -695,77 +702,6 @@ public class OrderService {
         return new OrderQueryResponse(rows.size(), rows, page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
-    public AdminOrderEventQueryResponse adminOrderEvents(long orderId, int limit) {
-        requireOrderId(orderId);
-        requireTimelineLimit(limit);
-        var events = orderRepository.orderEvents(orderId, limit);
-        return new AdminOrderEventQueryResponse(events.size(), events);
-    }
-
-    public AdminMatchResultQueryResponse adminMatchResults(long orderId, int limit) {
-        requireOrderId(orderId);
-        requireTimelineLimit(limit);
-        var results = orderRepository.matchResults(orderId, limit);
-        return new AdminMatchResultQueryResponse(results.size(), results);
-    }
-
-    public AdminMatchTradeQueryResponse adminMatchTrades(Long userId, Long orderId, String symbol, int limit) {
-        return adminMatchTrades(userId, orderId, symbol, limit, null, null, null);
-    }
-
-    public AdminMatchTradeQueryResponse adminMatchTrades(Long userId,
-                                                         Long orderId,
-                                                         String symbol,
-                                                         int limit,
-                                                         String cursor,
-                                                         String sort) {
-        return adminMatchTrades(userId, orderId, symbol, limit, cursor, sort, null);
-    }
-
-    public AdminMatchTradeQueryResponse adminMatchTrades(Long userId,
-                                                         Long orderId,
-                                                         String symbol,
-                                                         int limit,
-                                                         String cursor,
-                                                         String sort,
-                                                         ProductLine productLine) {
-        if (userId != null && userId <= 0) {
-            throw new IllegalArgumentException("userId must be positive");
-        }
-        if (orderId != null && orderId <= 0) {
-            throw new IllegalArgumentException("orderId must be positive");
-        }
-        if (limit < 1 || limit > 1000) {
-            throw new IllegalArgumentException("limit must be in [1, 1000]");
-        }
-        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
-        String contractType = contractType(productLine);
-        var page = contractType == null
-                ? orderRepository.matchTradePage(userId, orderId, normalizedSymbol, limit, cursor, sort)
-                : orderRepository.matchTradePage(userId, orderId, normalizedSymbol, limit, contractType, cursor, sort);
-        return new AdminMatchTradeQueryResponse(page.items().size(), page.items(),
-                page.nextCursor(), page.hasMore(), page.sort(), page.limit());
-    }
-
-    public AdminOrderTimelineResponse adminOrderTimeline(long orderId) {
-        return adminOrderTimeline(orderId, null);
-    }
-
-    public AdminOrderTimelineResponse adminOrderTimeline(long orderId, ProductLine productLine) {
-        requireOrderId(orderId);
-        OrderRecord order = orderRepository.findByOrderId(orderId)
-                .orElseThrow(() -> new IllegalStateException("order not found: " + orderId));
-        requireOrderProductLine(order, productLine);
-        String contractType = contractType(productLine);
-        return new AdminOrderTimelineResponse(
-                toResponse(order),
-                orderRepository.orderEvents(orderId, 1000),
-                orderRepository.matchResults(orderId, 1000),
-                contractType == null
-                        ? orderRepository.matchTrades(null, orderId, null, 1000)
-                        : orderRepository.matchTrades(null, orderId, null, contractType, 1000));
-    }
-
     @Transactional
     public AdminCancelOrderResult adminCancelOrder(long orderId, String reason) {
         return adminCancelOrder(orderId, reason, null);
@@ -883,9 +819,10 @@ public class OrderService {
     }
 
     /**
-     * Owns order-side cleanup after the account single writer publishes a durable position snapshot.
-     * Replays are safe because requestCancel is conditional and CANCEL_REQUESTED orders are retained
-     * in the capacity calculation until matching acknowledges their cancellation.
+     * 账户单写者发布持久化仓位快照后，由订单侧负责清理只减仓订单。
+     *
+     * <p>撤单更新带状态条件，并且撮合确认撤单前 {@code CANCEL_REQUESTED} 订单仍参与容量计算，
+     * 因此重复消费仓位事件不会重复生成有效撤单。</p>
      */
     @Transactional
     public void onPositionUpdated(PositionUpdatedEvent event) {
@@ -893,7 +830,7 @@ public class OrderService {
             throw new IllegalArgumentException("position event product line does not match order provider");
         }
         String symbol = normalizeSymbol(event.symbol());
-        orderRepository.lockUserSymbolMarginScope(event.productLine(), event.userId(), symbol);
+        placementStateService.lockUserSymbolMarginScope(event.productLine(), event.userId(), symbol);
         List<OrderRecord> orders = orderRepository.lockOpenReduceOnlyOrders(
                 event.productLine(), event.userId(), symbol, event.positionSide(), event.eventTime());
         if (orders.isEmpty()) {
@@ -1097,7 +1034,7 @@ public class OrderService {
                         OrderCommandType.PLACE.name(), payload(command), consumedAt));
             }
         }
-        orderRepository.insertEvents(orderEvents);
+        orderEventRepository.insertAll(orderEvents);
         outboxRepository.enqueueBatch(outboxWrites);
     }
 
@@ -1142,7 +1079,7 @@ public class OrderService {
                                            Instant now,
                                            String traceId,
                                            long commandId) {
-        // The future exchange-core matching provider should treat commandId/orderId as its idempotency keys.
+        // 后续 exchange-core 撮合服务必须将 commandId/orderId 作为幂等键。
         return new OrderCommandEvent(
                 commandType,
                 commandId,
@@ -1207,7 +1144,7 @@ public class OrderService {
                                    String traceId) {
         long eventId = orderRepository.nextSequence("event");
         OrderEvent event = orderEvent(order, eventType, reason, now, traceId, eventId);
-        orderRepository.insertEvent(event);
+        orderEventRepository.insert(event);
         outboxRepository.enqueue("ORDER", order.orderId(), properties.getKafka().getOrderEventsTopic(),
                 order.symbol(), eventType.name(), payload(event), now);
     }
@@ -1372,12 +1309,6 @@ public class OrderService {
     private void requireOrderId(long orderId) {
         if (orderId <= 0) {
             throw new IllegalArgumentException("orderId must be positive");
-        }
-    }
-
-    private void requireTimelineLimit(int limit) {
-        if (limit < 1 || limit > 1000) {
-            throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
     }
 

@@ -9,7 +9,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-/** Rebuilds Redis schedule indexes under a token-owned lease; DB scanning remains the safe fallback. */
+/** 在令牌租约保护下重建 Redis 调度索引，数据库扫描始终作为安全回退路径。 */
 @Component
 public class OrderScheduleIndexCoordinator {
     private final TradingOrderProperties properties;

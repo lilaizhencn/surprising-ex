@@ -7,10 +7,6 @@ import com.surprising.trading.api.model.AdminCancelOrderRequest;
 import com.surprising.trading.api.model.AdminCancelOrderResult;
 import com.surprising.trading.api.model.AdminCancelOrdersResponse;
 import com.surprising.trading.api.model.AdminCancelOrdersPreviewResponse;
-import com.surprising.trading.api.model.AdminMatchResultQueryResponse;
-import com.surprising.trading.api.model.AdminMatchTradeQueryResponse;
-import com.surprising.trading.api.model.AdminOrderEventQueryResponse;
-import com.surprising.trading.api.model.AdminOrderTimelineResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.order.service.OrderService;
 import jakarta.validation.Valid;
@@ -50,69 +46,6 @@ public class AdminOrderController {
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
             return orderService.adminOrders(userId, symbol, status, orderId, limit, cursor, sort, productLine);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @GetMapping("/orders/{orderId}/events")
-    public AdminOrderEventQueryResponse events(
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @PathVariable("orderId") long orderId,
-            @RequestParam(value = "limit", defaultValue = "100") int limit) {
-        requireAdmin(adminUserId);
-        try {
-            return orderService.adminOrderEvents(orderId, limit);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @GetMapping("/orders/{orderId}/match-results")
-    public AdminMatchResultQueryResponse matchResults(
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @PathVariable("orderId") long orderId,
-            @RequestParam(value = "limit", defaultValue = "100") int limit) {
-        requireAdmin(adminUserId);
-        try {
-            return orderService.adminMatchResults(orderId, limit);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @GetMapping("/orders/{orderId}/timeline")
-    public AdminOrderTimelineResponse timeline(
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
-            @RequestParam(value = "productLine", required = false) String productLineValue,
-            @PathVariable("orderId") long orderId) {
-        requireAdmin(adminUserId);
-        try {
-            ProductLine productLine = productLine(productLineValue, productLineHeader);
-            return orderService.adminOrderTimeline(orderId, productLine);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
-    }
-
-    @GetMapping("/orders/trades")
-    public AdminMatchTradeQueryResponse trades(
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestHeader(value = "X-Product-Line", required = false) String productLineHeader,
-            @RequestParam(value = "productLine", required = false) String productLineValue,
-            @RequestParam(value = "userId", required = false) Long userId,
-            @RequestParam(value = "orderId", required = false) Long orderId,
-            @RequestParam(value = "symbol", required = false) String symbol,
-            @RequestParam(value = "limit", defaultValue = "100") int limit,
-            @RequestParam(value = "cursor", required = false) String cursor,
-            @RequestParam(value = "sort", required = false) String sort) {
-        requireAdmin(adminUserId);
-        try {
-            ProductLine productLine = productLine(productLineValue, productLineHeader);
-            return orderService.adminMatchTrades(userId, orderId, symbol, limit, cursor, sort, productLine);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

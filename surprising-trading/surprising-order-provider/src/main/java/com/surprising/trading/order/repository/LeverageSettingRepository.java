@@ -87,7 +87,7 @@ public class LeverageSettingRepository {
                                                      MarginMode marginMode,
                                                      long maxLeveragePpm,
                                                      long initialMarginRatePpm) {
-        // A missing user setting means "use the product default", capped by the instrument max leverage.
+        // 缺少用户设置表示使用产品默认值，同时仍受 instrument 最大杠杆限制。
         long leveragePpm = Math.min(OrderLeverageMath.leveragePpmFromInitialMarginRate(initialMarginRatePpm),
                 maxLeveragePpm);
         long effectiveInitialMarginRatePpm = Math.max(initialMarginRatePpm,

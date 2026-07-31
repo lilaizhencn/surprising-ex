@@ -177,7 +177,7 @@ public class OrderValidator {
         long minExecutionNotionalUnits;
         long maxExecutionNotionalUnits;
         try {
-            // Reject overflow instead of wrapping notional and accepting an unsafe order.
+            // 数值溢出时直接拒单，避免名义价值回绕后错误接受不安全订单。
             minExecutionNotionalUnits = notionalUnits(request, rule, lowerPriceTicks);
             maxExecutionNotionalUnits = lowerPriceTicks == upperPriceTicks
                     ? minExecutionNotionalUnits

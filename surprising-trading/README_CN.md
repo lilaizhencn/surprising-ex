@@ -90,7 +90,16 @@ account 的 `position-mode` API 切换到 `HEDGE`。`ONE_WAY` 使用 `positionSi
 - VIP 档位接口：`POST /api/v1/admin/trading/fees/tiers` 新增/更新档位规则，`GET /api/v1/admin/trading/fees/tiers` 查询规则，`POST /api/v1/admin/trading/fees/tiers/refresh?userId=...` 重算单个用户，`POST /api/v1/admin/trading/fees/tiers/refresh-active` 重算活跃用户，`GET /api/v1/admin/trading/fees/tiers/users/{userId}` 查询当前档位。
   档位查询支持 `limit/cursor/sort` 游标分页，排序白名单为 `priority.desc`、`priority.asc`，响应保留 `tiers/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。
 
-后台订单审计接口使用 `/api/v1/admin/trading` 前缀，并由 gateway 的 `/api/v1/admin/gateway/trading-orders` 与 `/api/v1/admin/gateway/trading-trigger` 后台安全域转发。`GET /orders`、`GET /trigger-orders` 和 `GET /orders/trades` 均支持 `limit/cursor/sort` 游标分页，响应保留 `orders` 或 `trades` 字段，并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。订单/条件单列表支持 `createdAt.desc`、`createdAt.asc`，成交列表支持 `eventTime.desc`、`eventTime.asc`。
+后台订单审计接口使用 `/api/v1/admin/trading` 前缀，并由 gateway 的
+`/api/v1/admin/gateway/trading-orders` 与 `/api/v1/admin/gateway/trading-trigger`
+后台安全域转发。当前交易服务只保留直接读取单表的 `GET /orders` 和
+`GET /trigger-orders` 列表；订单事件、撮合结果、成交明细和聚合时间线接口不再从交易主库提供。
+这些跨表后台查询、资金对账和运营报表必须由未来财务运营系统消费事件投影，并连接独立数据库实现。
+
+订单入口的持久化边界按物理表拆分：`OrderRepository` 只操作 `trading_orders`，
+`OrderEventRepository` 只操作 `trading_order_events`，仓位、仓位模式、触发单和算法单状态分别由各自
+单表 Repository 查询，`OrderPlacementStateService` 在业务事务内聚合冲突校验和锁协调。
+PostgreSQL advisory lock 不访问业务表，由 `OrderCoordinationRepository` 独立负责。
 - 定时 VIP 刷新会计算用户 30 日 maker+taker 成交名义价值和账户资产估值，单位统一为 USD/USDT 最小单位，然后把命中的档位写回 `trading_fee_schedules`，作为用户全局 `VIP` 费率。稳定币余额按 1:1 计算；非稳定币余额用活跃 `baseAsset-USDT/USD` 合约的最新 mark price 估值，没有 mark price 时不计入。
 - 业务查询：`GET /api/v1/trading/fees/effective?userId=...&symbol=...` 返回当前最终 maker/taker ppm 和来源，例如 `INSTRUMENT`、`VIP_SYMBOL`。
 - 订单接受时会把最终 `maker_fee_rate_ppm`、`taker_fee_rate_ppm` 写入 `trading_orders`。后续用户 VIP 等级或活动费率变化，不会重解释已接受挂单。

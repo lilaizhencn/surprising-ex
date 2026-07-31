@@ -230,7 +230,7 @@ public class OutboxPublisher {
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
         } catch (Exception ignored) {
-            // Inspect every future below so the first failed stream row remains the retry boundary.
+            // 检查下方全部 Future，使首个失败的流记录保持为重试边界。
         }
     }
 

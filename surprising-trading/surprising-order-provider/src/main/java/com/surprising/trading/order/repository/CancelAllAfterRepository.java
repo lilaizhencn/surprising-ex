@@ -82,7 +82,7 @@ public class CancelAllAfterRepository {
                 Timestamp.from(now));
     }
 
-    /** Exact PostgreSQL confirmation for a Redis ZSET candidate. */
+    /** 对 Redis ZSET 候选执行精确的 PostgreSQL 权威确认。 */
     public Optional<CancelAllAfterTimer> claimDueTimer(ProductLine productLine,
                                                         long userId,
                                                         String symbolScope,

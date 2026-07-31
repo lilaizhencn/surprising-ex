@@ -8,7 +8,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-/** Rebuilds a generation-isolated open-order projection before making Redis reads available. */
+/** 先重建按代隔离的活跃订单投影，再开放 Redis 读取。 */
 @Component
 public class OpenOrderViewCoordinator {
     private final TradingOrderProperties properties;

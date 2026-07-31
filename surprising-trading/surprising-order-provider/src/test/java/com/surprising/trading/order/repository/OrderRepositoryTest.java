@@ -166,7 +166,7 @@ class OrderRepositoryTest {
     @SuppressWarnings({"rawtypes", "unchecked"})
     void lockUserSymbolMarginScopeUsesProductScopedAdvisoryLockKey() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
-        OrderRepository repository = new OrderRepository(jdbcTemplate);
+        OrderCoordinationRepository repository = new OrderCoordinationRepository(jdbcTemplate);
 
         repository.lockUserSymbolMarginScope(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT");
 
@@ -175,13 +175,10 @@ class OrderRepositoryTest {
     }
 
     @Test
-    void activeMarginModeConflictChecksPositionsOrdersAndTriggers() {
+    void activeMarginModeConflictOnlyChecksTradingOrders() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         OrderRepository repository = new OrderRepository(jdbcTemplate);
-        when(jdbcTemplate.queryForObject(contains("account_positions"), eq(Boolean.class),
-                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
-                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
-                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
+        when(jdbcTemplate.queryForObject(contains("trading_orders"), eq(Boolean.class),
                 eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED")))
                 .thenReturn(true);
 
@@ -189,15 +186,8 @@ class OrderRepositoryTest {
                 "BTC-USDT", MarginMode.ISOLATED);
 
         assertThat(conflict).isTrue();
-        verify(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.argThat(sql ->
-                        sql.contains("p.product_line = ?")
-                                && sql.contains("o.product_line = ?")
-                                && sql.contains("t.product_line = ?")
-                                && sql.contains("a.product_line = ?")),
+        verify(jdbcTemplate).queryForObject(contains("FROM trading_orders"),
                 eq(Boolean.class),
-                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
-                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
-                eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED"),
                 eq("LINEAR_DELIVERY"), eq(1001L), eq("BTC-USDT"), eq("ISOLATED"));
     }
 
@@ -205,7 +195,7 @@ class OrderRepositoryTest {
     @SuppressWarnings({"rawtypes", "unchecked"})
     void lockedPositionScopesByProductLine() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
-        OrderRepository repository = new OrderRepository(jdbcTemplate);
+        OrderPositionRepository repository = new OrderPositionRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
                 .thenReturn(java.util.List.of());
 
@@ -301,21 +291,4 @@ class OrderRepositoryTest {
                 .doesNotContain("FROM instruments i");
     }
 
-    @Test
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    void matchTradePageFiltersByProductLineWhenContractTypeProvided() {
-        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
-        OrderRepository repository = new OrderRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
-                .thenReturn(java.util.List.of());
-
-        repository.matchTradePage(1001L, 9001L, "BTC-USDT", 25,
-                "VANILLA_OPTION", null, "eventTime.desc");
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), any(Object[].class));
-        assertThat(sql.getValue())
-                .contains("product_line = ?")
-                .doesNotContain("JOIN instruments i");
-    }
 }

@@ -16,7 +16,7 @@ public class TraceIdFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        // ThreadLocal is only used inside this HTTP request; Kafka payloads carry traceId explicitly.
+        // ThreadLocal 只在当前 HTTP 请求内使用，Kafka 载荷会显式携带 traceId。
         String traceId = TraceContext.normalizeOrCreate(request.getHeader(TraceContext.TRACE_ID_HEADER));
         TraceContext.set(traceId);
         response.setHeader(TraceContext.TRACE_ID_HEADER, traceId);

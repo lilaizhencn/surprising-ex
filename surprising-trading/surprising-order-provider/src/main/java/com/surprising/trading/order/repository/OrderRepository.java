@@ -1,23 +1,14 @@
 package com.surprising.trading.order.repository;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.model.AdminMatchResultResponse;
-import com.surprising.trading.api.model.AdminMatchTradeResponse;
 import com.surprising.trading.api.model.AdminCursorPage;
-import com.surprising.trading.api.model.AdminOrderEventResponse;
 import com.surprising.trading.api.model.MarginMode;
-import com.surprising.trading.api.model.OrderCommandType;
-import com.surprising.trading.api.model.OrderEvent;
-import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
-import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.model.OrderRecord;
-import com.surprising.trading.order.model.ReduceOnlyPosition;
-import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -29,9 +20,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.stereotype.Repository;
 
+/**
+ * 普通订单仓储，只负责 {@code trading_orders} 表。
+ *
+ * <p>订单号、事件号和命令号使用 PostgreSQL 原生序列分配，不读取其他业务表，
+ * 用于避免基于计数表分配编号时产生行锁热点。</p>
+ */
 @Repository
 public class OrderRepository {
 
@@ -53,7 +49,7 @@ public class OrderRepository {
     }
 
     public long nextSequence(String sequenceName) {
-        // PostgreSQL native sequences avoid the row-lock hotspot created by table based counters.
+        // PostgreSQL 原生序列可避免基于计数表分配编号时产生行锁热点。
         Long value = jdbcTemplate.queryForObject("SELECT nextval(CAST(? AS regclass))", Long.class,
                 tradingSequenceIdentifier(sequenceName));
         if (value == null) {
@@ -90,43 +86,8 @@ public class OrderRepository {
         return rows == 1;
     }
 
-    public void lockUserPositionMode(long userId) {
-        lockUserPositionMode(ProductLine.LINEAR_PERPETUAL, userId);
-    }
-
-    public void lockUserPositionMode(ProductLine productLine, long userId) {
-        jdbcTemplate.query("""
-                SELECT pg_advisory_xact_lock(hashtext('position-mode'), hashtext(?))
-                """, rs -> null, productLine(productLine).name() + ":" + userId);
-    }
-
-    public PositionMode positionMode(long userId) {
-        return positionMode(ProductLine.LINEAR_PERPETUAL, userId);
-    }
-
-    public PositionMode positionMode(ProductLine productLine, long userId) {
-        String mode = jdbcTemplate.query("""
-                SELECT position_mode
-                  FROM account_position_modes
-                 WHERE product_line = ?
-                   AND user_id = ?
-                """, (rs, rowNum) -> rs.getString("position_mode"), productLine(productLine).name(), userId)
-                .stream().findFirst().orElse(null);
-        return PositionMode.fromNullableDbValue(mode);
-    }
-
     private ProductLine productLine(ProductLine productLine) {
         return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
-    }
-
-    public void lockUserSymbolMarginScope(long userId, String symbol) {
-        lockUserSymbolMarginScope(ProductLine.LINEAR_PERPETUAL, userId, symbol);
-    }
-
-    public void lockUserSymbolMarginScope(ProductLine productLine, long userId, String symbol) {
-        jdbcTemplate.query("""
-                SELECT pg_advisory_xact_lock(hashtext('trading-margin-mode'), hashtext(?))
-                """, rs -> null, productLine(productLine).name() + ":" + userId + ":" + symbol);
     }
 
     public boolean hasActiveMarginModeConflict(long userId, String symbol, MarginMode marginMode) {
@@ -142,47 +103,20 @@ public class OrderRepository {
         Boolean conflict = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1
-                      FROM account_positions p
-                     WHERE p.product_line = ?
-                       AND p.user_id = ?
-                       AND p.symbol = ?
-                       AND p.margin_mode <> ?
-                       AND p.signed_quantity_steps <> 0
-                    UNION ALL
-                    SELECT 1
-                      FROM trading_orders o
-                     WHERE o.product_line = ?
-                       AND o.user_id = ?
-                       AND o.symbol = ?
-                       AND o.margin_mode <> ?
-                       AND o.status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
-                       AND o.remaining_quantity_steps > 0
-                    UNION ALL
-                    SELECT 1
-                      FROM trading_trigger_orders t
-                     WHERE t.product_line = ?
-                       AND t.user_id = ?
-                       AND t.symbol = ?
-                       AND t.margin_mode <> ?
-                       AND t.status IN ('PENDING', 'TRIGGERING')
-                    UNION ALL
-                    SELECT 1
-                      FROM trading_algo_orders a
-                     WHERE a.product_line = ?
-                       AND a.user_id = ?
-                       AND a.symbol = ?
-                       AND a.margin_mode <> ?
-                       AND a.status IN ('PENDING', 'RUNNING', 'CANCEL_REQUESTED')
+                      FROM trading_orders
+                     WHERE product_line = ?
+                       AND user_id = ?
+                       AND symbol = ?
+                       AND margin_mode <> ?
+                       AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                       AND remaining_quantity_steps > 0
                 )
-                """, Boolean.class, resolvedProductLine, userId, symbol, normalizedMode,
-                resolvedProductLine, userId, symbol, normalizedMode,
-                resolvedProductLine, userId, symbol, normalizedMode,
-                resolvedProductLine, userId, symbol, normalizedMode);
+                """, Boolean.class, resolvedProductLine, userId, symbol, normalizedMode);
         return Boolean.TRUE.equals(conflict);
     }
 
     public boolean requestCancel(long orderId, Instant now) {
-        // Conditional update prevents concurrent cancel requests from producing duplicate cancel commands.
+        // 条件更新可防止并发撤单请求生成重复的撤单命令。
         int rows = jdbcTemplate.update("""
                 UPDATE trading_orders
                    SET status = 'CANCEL_REQUESTED',
@@ -295,52 +229,6 @@ public class OrderRepository {
         return Map.copyOf(updated);
     }
 
-    public void insertEvent(OrderEvent event) {
-        int rows = jdbcTemplate.update("""
-                INSERT INTO trading_order_events (
-                    event_id, order_id, user_id, symbol, event_type, status, reason, trace_id, event_time
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (event_id) DO NOTHING
-                """, event.eventId(), event.orderId(), event.userId(), event.symbol(),
-                event.eventType().name(), event.status().name(), event.reason(), event.traceId(),
-                Timestamp.from(event.eventTime()));
-        if (rows != 1) {
-            throw new IllegalStateException("failed to insert order event " + event.eventId());
-        }
-    }
-
-    public void insertEvents(List<OrderEvent> events) {
-        if (events == null || events.isEmpty()) {
-            return;
-        }
-        int[] rows = jdbcTemplate.batchUpdate("""
-                INSERT INTO trading_order_events (
-                    event_id, order_id, user_id, symbol, event_type, status, reason, trace_id, event_time
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (event_id) DO NOTHING
-                """, new BatchPreparedStatementSetter() {
-            @Override
-            public void setValues(PreparedStatement statement, int index) throws java.sql.SQLException {
-                OrderEvent event = events.get(index);
-                statement.setLong(1, event.eventId());
-                statement.setLong(2, event.orderId());
-                statement.setLong(3, event.userId());
-                statement.setString(4, event.symbol());
-                statement.setString(5, event.eventType().name());
-                statement.setString(6, event.status().name());
-                statement.setString(7, event.reason());
-                statement.setString(8, event.traceId());
-                statement.setTimestamp(9, Timestamp.from(event.eventTime()));
-            }
-
-            @Override
-            public int getBatchSize() {
-                return events.size();
-            }
-        });
-        requireCompleteBatch(rows, events.size(), "order events");
-    }
-
     public Optional<OrderRecord> findByOrderId(long orderId) {
         return jdbcTemplate.query("SELECT * FROM trading_orders WHERE order_id = ?",
                 (rs, rowNum) -> toRecord(rs), orderId).stream().findFirst();
@@ -435,7 +323,7 @@ public class OrderRepository {
                 PositionSide.defaultIfNull(positionSide).name(), Timestamp.from(createdNoLaterThan));
     }
 
-    /** Stable keyset scan used only to rebuild the optional Redis open-order read model. */
+    /** 稳定的键集扫描，仅用于重建可选的 Redis 活跃订单读模型。 */
     public List<Long> activeOpenOrderUsers(ProductLine productLine, long afterUserId, int limit) {
         return jdbcTemplate.query("""
                 SELECT DISTINCT user_id
@@ -449,7 +337,7 @@ public class OrderRepository {
                 Math.max(1, Math.min(limit, 5_000)));
     }
 
-    /** Stable keyset scan used only to rebuild the Redis open-order read model. */
+    /** 稳定的键集扫描，仅用于重建 Redis 活跃订单读模型。 */
     public List<OrderRecord> activeOrdersForOpenOrderView(ProductLine productLine,
                                                            long userId,
                                                            long afterOrderId,
@@ -577,34 +465,6 @@ public class OrderRepository {
                 productLine, productLine, safeLimit);
     }
 
-    public Optional<ReduceOnlyPosition> lockedPosition(long userId,
-                                                       String symbol,
-                                                       MarginMode marginMode,
-                                                       PositionSide positionSide) {
-        return lockedPosition(ProductLine.LINEAR_PERPETUAL, userId, symbol, marginMode, positionSide);
-    }
-
-    public Optional<ReduceOnlyPosition> lockedPosition(ProductLine productLine,
-                                                       long userId,
-                                                       String symbol,
-                                                       MarginMode marginMode,
-                                                       PositionSide positionSide) {
-        return jdbcTemplate.query("""
-                SELECT signed_quantity_steps, instrument_version
-                  FROM account_positions
-                 WHERE product_line = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                   AND margin_mode = ?
-                   AND position_side = ?
-                 FOR UPDATE
-                """, (rs, rowNum) -> new ReduceOnlyPosition(
-                rs.getLong("signed_quantity_steps"),
-                rs.getLong("instrument_version")), productLine(productLine).name(), userId, symbol,
-                MarginMode.defaultIfNull(marginMode).name(),
-                PositionSide.defaultIfNull(positionSide).name()).stream().findFirst();
-    }
-
     public CancelableOrderImpact adminCancelableImpact(Long userId, String symbol) {
         return adminCancelableImpact(userId, symbol, null);
     }
@@ -629,140 +489,6 @@ public class OrderRepository {
                 rs.getInt("buy_orders"),
                 rs.getInt("sell_orders")), userId, userId, normalizedSymbol, normalizedSymbol,
                 productLine, productLine);
-    }
-
-    public List<AdminOrderEventResponse> orderEvents(long orderId, int limit) {
-        int safeLimit = Math.max(1, Math.min(limit, 1000));
-        return jdbcTemplate.query("""
-                SELECT event_id, order_id, user_id, symbol, event_type, status, reason, trace_id,
-                       event_time, created_at
-                  FROM trading_order_events
-                 WHERE order_id = ?
-                 ORDER BY event_time ASC, event_id ASC
-                 LIMIT ?
-                """, (rs, rowNum) -> new AdminOrderEventResponse(
-                rs.getLong("event_id"),
-                rs.getLong("order_id"),
-                rs.getLong("user_id"),
-                rs.getString("symbol"),
-                OrderEventType.valueOf(rs.getString("event_type")),
-                OrderStatus.valueOf(rs.getString("status")),
-                rs.getString("reason"),
-                rs.getString("trace_id"),
-                rs.getTimestamp("event_time").toInstant(),
-                rs.getTimestamp("created_at").toInstant()), orderId, safeLimit);
-    }
-
-    public List<AdminMatchResultResponse> matchResults(long orderId, int limit) {
-        int safeLimit = Math.max(1, Math.min(limit, 1000));
-        return jdbcTemplate.query("""
-                SELECT command_id, order_id, user_id, symbol, instrument_version, command_type,
-                       result_code, filled_quantity_steps, order_status, trace_id, event_time, created_at
-                  FROM trading_match_results
-                 WHERE order_id = ?
-                 ORDER BY event_time ASC, command_id ASC
-                 LIMIT ?
-                """, (rs, rowNum) -> new AdminMatchResultResponse(
-                rs.getLong("command_id"),
-                rs.getLong("order_id"),
-                rs.getLong("user_id"),
-                rs.getString("symbol"),
-                rs.getLong("instrument_version"),
-                OrderCommandType.valueOf(rs.getString("command_type")),
-                rs.getString("result_code"),
-                rs.getLong("filled_quantity_steps"),
-                OrderStatus.valueOf(rs.getString("order_status")),
-                rs.getString("trace_id"),
-                rs.getTimestamp("event_time").toInstant(),
-                rs.getTimestamp("created_at").toInstant()), orderId, safeLimit);
-    }
-
-    public List<AdminMatchTradeResponse> matchTrades(Long userId, Long orderId, String symbol, int limit) {
-        return matchTradePage(userId, orderId, symbol, limit, null, null).items();
-    }
-
-    public List<AdminMatchTradeResponse> matchTrades(
-            Long userId, Long orderId, String symbol, String contractType, int limit) {
-        return matchTradePage(userId, orderId, symbol, limit, contractType, null, null).items();
-    }
-
-    public AdminCursorPage.CursorPage<AdminMatchTradeResponse> matchTradePage(Long userId,
-                                                                              Long orderId,
-                                                                              String symbol,
-                                                                              int limit,
-                                                                              String cursor,
-                                                                              String sort) {
-        return matchTradePage(userId, orderId, symbol, limit, null, cursor, sort);
-    }
-
-    public AdminCursorPage.CursorPage<AdminMatchTradeResponse> matchTradePage(Long userId,
-                                                                              Long orderId,
-                                                                              String symbol,
-                                                                              int limit,
-                                                                              String contractType,
-                                                                              String cursor,
-                                                                              String sort) {
-        String normalizedSymbol = emptyToNull(symbol);
-        String productLine = productLineNameFromContractType(contractType);
-        int safeLimit = AdminCursorPage.limit(limit, 1000);
-        AdminCursorPage.SortSpec eventTimeDesc = new AdminCursorPage.SortSpec(
-                "eventTime", "event_time", "trade_id", true);
-        AdminCursorPage.SortSpec eventTimeAsc = new AdminCursorPage.SortSpec(
-                "eventTime", "event_time", "trade_id", false);
-        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(
-                sort, eventTimeDesc, List.of(eventTimeDesc, eventTimeAsc));
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
-        List<Object> args = new ArrayList<>();
-        args.add(userId);
-        args.add(userId);
-        args.add(userId);
-        args.add(orderId);
-        args.add(orderId);
-        args.add(orderId);
-        args.add(normalizedSymbol);
-        args.add(normalizedSymbol);
-        args.add(productLine);
-        args.add(productLine);
-        AdminCursorPage.addCursorArgs(args, decodedCursor);
-        args.add(safeLimit + 1);
-        List<AdminMatchTradeResponse> rows = jdbcTemplate.query("""
-                SELECT trade_id, command_id, symbol, taker_order_id, taker_user_id, taker_side,
-                       taker_margin_mode, taker_position_side, maker_order_id, maker_user_id, maker_margin_mode,
-                       maker_position_side,
-                       price_ticks, quantity_steps, taker_order_completed, maker_order_completed,
-                       trace_id, event_time, created_at
-                  FROM trading_match_trades
-                 WHERE (CAST(? AS text) IS NULL OR taker_user_id = ? OR maker_user_id = ?)
-                   AND (CAST(? AS text) IS NULL OR taker_order_id = ? OR maker_order_id = ?)
-                   AND (CAST(? AS text) IS NULL OR symbol = ?)
-                   AND (CAST(? AS text) IS NULL OR product_line = ?)
-                %s
-                 ORDER BY %s %s, %s %s
-                 LIMIT ?
-                """.formatted(AdminCursorPage.seekCondition(sortSpec, decodedCursor),
-                        sortSpec.column(), sortSpec.directionSql(), sortSpec.idColumn(), sortSpec.directionSql()),
-                (rs, rowNum) -> new AdminMatchTradeResponse(
-                rs.getLong("trade_id"),
-                rs.getLong("command_id"),
-                rs.getString("symbol"),
-                rs.getLong("taker_order_id"),
-                rs.getLong("taker_user_id"),
-                OrderSide.valueOf(rs.getString("taker_side")),
-                MarginMode.fromNullableDbValue(rs.getString("taker_margin_mode")),
-                PositionSide.fromNullableDbValue(rs.getString("taker_position_side")),
-                rs.getLong("maker_order_id"),
-                rs.getLong("maker_user_id"),
-                MarginMode.fromNullableDbValue(rs.getString("maker_margin_mode")),
-                PositionSide.fromNullableDbValue(rs.getString("maker_position_side")),
-                rs.getLong("price_ticks"),
-                rs.getLong("quantity_steps"),
-                rs.getBoolean("taker_order_completed"),
-                rs.getBoolean("maker_order_completed"),
-                rs.getString("trace_id"),
-                rs.getTimestamp("event_time").toInstant(),
-                rs.getTimestamp("created_at").toInstant()), args.toArray());
-        return AdminCursorPage.page(rows, safeLimit, sortSpec, AdminMatchTradeResponse::eventTime,
-                AdminMatchTradeResponse::tradeId);
     }
 
     private OrderRecord toRecord(java.sql.ResultSet rs) throws java.sql.SQLException {

@@ -171,7 +171,7 @@ public class OrderMarginRepository {
                         "position notional exceeds open interest limit", configuredLeveragePpm == null ? 0L : configuredLeveragePpm,
                         instrumentMaxLeveragePpm, instrumentInitialMarginRatePpm);
             }
-            // User leverage can be saved at instrument level, but each order must still respect the active risk tier.
+            // 用户杠杆可按 instrument 保存，但每笔订单仍必须满足当前生效风险档位。
             RiskBracket bracket = riskBracket(symbol, instrumentVersion, projectedPositionNotionalUnits)
                     .orElse(new RiskBracket(instrumentMaxLeveragePpm, instrumentInitialMarginRatePpm,
                             maxPositionNotionalUnits));

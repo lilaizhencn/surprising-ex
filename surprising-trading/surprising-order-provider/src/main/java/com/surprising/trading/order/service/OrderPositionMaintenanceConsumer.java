@@ -10,8 +10,7 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Moves reduce-only order maintenance to the order module. The account module only publishes its
- * durable position state and never updates trading order tables.
+ * 只减仓订单维护由订单模块负责。账户模块只发布持久化仓位状态，不更新交易订单表。
  */
 @Service
 public class OrderPositionMaintenanceConsumer {

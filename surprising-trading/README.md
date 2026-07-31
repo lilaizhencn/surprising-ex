@@ -93,7 +93,18 @@ positions/margins, risk snapshots, liquidation, funding, ADL, and WebSocket even
 - Admin APIs: `POST /api/v1/admin/trading/fees/schedules` creates or updates schedules, `POST /api/v1/admin/trading/fees/schedules/{feeScheduleId}/disable` disables a schedule, and `GET /api/v1/admin/trading/fees/schedules` lists schedules. Schedule lists support cursor paging with `limit`, `cursor`, and `sort`; supported sort values are `updatedAt.desc`, `updatedAt.asc`, `createdAt.desc`, `createdAt.asc`, `effectiveTime.desc`, and `effectiveTime.asc`. Responses keep `schedules/count` and add `nextCursor`, `hasMore`, `sort`, and `limit`.
 - VIP tier APIs: `POST /api/v1/admin/trading/fees/tiers` upserts tier rules, `GET /api/v1/admin/trading/fees/tiers` lists rules, `POST /api/v1/admin/trading/fees/tiers/refresh?userId=...` recalculates one user, `POST /api/v1/admin/trading/fees/tiers/refresh-active` recalculates active users, and `GET /api/v1/admin/trading/fees/tiers/users/{userId}` returns the current assignment. Tier lists support cursor paging with `limit`, `cursor`, and `sort`; supported sort values are `priority.desc` and `priority.asc`. Responses keep `tiers/count` and add `nextCursor`, `hasMore`, `sort`, and `limit`.
 
-Admin order-audit APIs use the `/api/v1/admin/trading` prefix and are reached through the gateway admin security domains `/api/v1/admin/gateway/trading-orders` and `/api/v1/admin/gateway/trading-trigger`. `GET /orders`, `GET /trigger-orders`, and `GET /orders/trades` support `limit`, `cursor`, and `sort`; responses keep the original `orders` or `trades` field and additionally return `nextCursor`, `hasMore`, `sort`, and `limit`. Order and trigger-order lists support `createdAt.desc` and `createdAt.asc`; match-trade lists support `eventTime.desc` and `eventTime.asc`.
+Admin order-audit APIs use the `/api/v1/admin/trading` prefix and are reached through the gateway admin
+security domains `/api/v1/admin/gateway/trading-orders` and `/api/v1/admin/gateway/trading-trigger`.
+The trading runtime now exposes only the single-table `GET /orders` and `GET /trigger-orders` lists.
+Order events, match results, trade details, and aggregate timelines are no longer queried from the primary
+trading database. A future finance-operations system must build these cross-table views, reconciliation, and
+reports from event projections in its own database.
+
+Order-entry persistence is split by physical table: `OrderRepository` owns only `trading_orders`,
+`OrderEventRepository` owns only `trading_order_events`, and position, position-mode, trigger-order, and
+algo-order state use dedicated single-table repositories. `OrderPlacementStateService` aggregates those
+checks inside the business transaction. `OrderCoordinationRepository` owns PostgreSQL advisory locks and
+does not access a business table.
 - The scheduled VIP refresher computes each user's 30-day maker+taker filled notional and total account asset value in USD/USDT units, then writes the selected tier back to `trading_fee_schedules` as a user-global `VIP` schedule. Stable balances count 1:1; non-stable balances use the latest mark price for an active `baseAsset-USDT/USD` instrument and are ignored if no mark is available.
 - Runtime query: `GET /api/v1/trading/fees/effective?userId=...&symbol=...` returns the current maker/taker ppm and source, such as `INSTRUMENT` or `VIP_SYMBOL`.
 - Order admission writes the final `maker_fee_rate_ppm` and `taker_fee_rate_ppm` to `trading_orders`. Later VIP or promotion changes do not reinterpret already accepted resting orders.

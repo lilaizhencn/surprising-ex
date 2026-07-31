@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
-/** Replayable Redis time index; PostgreSQL remains authoritative for all state transitions. */
+/** 可重放的 Redis 时间索引；全部状态迁移仍以 PostgreSQL 为权威。 */
 public interface OrderScheduleIndex {
     void synchronizeTimer(ProductLine productLine, CancelAllAfterTimer timer);
     void removeTimer(ProductLine productLine, long userId, String symbolScope);

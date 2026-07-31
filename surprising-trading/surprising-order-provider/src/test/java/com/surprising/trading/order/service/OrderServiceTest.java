@@ -49,6 +49,7 @@ import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.model.ValidationResult;
 import com.surprising.trading.order.repository.OrderFeeRepository;
+import com.surprising.trading.order.repository.OrderEventRepository;
 import com.surprising.trading.order.repository.OrderMarginRepository;
 import com.surprising.trading.order.repository.OrderRepository;
 import com.surprising.trading.order.repository.OutboxRepository;
@@ -79,6 +80,12 @@ class OrderServiceTest {
 
     @Mock
     private OrderRepository orderRepository;
+
+    @Mock
+    private OrderEventRepository orderEventRepository;
+
+    @Mock
+    private OrderPlacementStateService placementStateService;
 
     @Mock
     private OrderFeeRepository orderFeeRepository;
@@ -119,7 +126,7 @@ class OrderServiceTest {
         assertThat(response.makerFeeRatePpm()).isEqualTo(200L);
         assertThat(response.takerFeeRatePpm()).isEqualTo(500L);
         ArgumentCaptor<OrderEvent> eventCaptor = ArgumentCaptor.forClass(OrderEvent.class);
-        verify(orderRepository).insertEvent(eventCaptor.capture());
+        verify(orderEventRepository).insert(eventCaptor.capture());
         assertThat(eventCaptor.getValue().traceId()).isEqualTo("trace-order-1");
 
         ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
@@ -187,7 +194,7 @@ class OrderServiceTest {
 
         service.onPositionUpdated(event);
 
-        verify(orderRepository).lockUserSymbolMarginScope(
+        verify(placementStateService).lockUserSymbolMarginScope(
                 ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT");
         verify(orderRepository).requestCancel(9102L, eventTime);
         verify(orderRepository).requestCancel(9103L, eventTime);
@@ -253,7 +260,7 @@ class OrderServiceTest {
         assertThat(completionCaptor.getValue())
                 .allSatisfy(completion -> assertThat(completion.completedAt()).isAfterOrEqualTo(beforeConsume));
         ArgumentCaptor<List<OrderEvent>> eventsCaptor = ArgumentCaptor.forClass(List.class);
-        verify(orderRepository).insertEvents(eventsCaptor.capture());
+        verify(orderEventRepository).insertAll(eventsCaptor.capture());
         assertThat(eventsCaptor.getValue()).extracting(OrderEvent::eventType)
                 .containsExactly(OrderEventType.ACCEPTED, OrderEventType.REJECTED);
         ArgumentCaptor<List<OutboxRepository.OrderOutboxWrite>> outboxCaptor = ArgumentCaptor.forClass(List.class);
@@ -388,7 +395,7 @@ class OrderServiceTest {
     @Test
     void openingOrderRejectsMarginModeSwitchWhileOtherModeIsActive() {
         OrderService service = service();
-        when(orderRepository.hasActiveMarginModeConflict(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
+        when(placementStateService.hasActiveMarginModeConflict(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
                 MarginMode.ISOLATED))
                 .thenReturn(true);
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
@@ -404,7 +411,8 @@ class OrderServiceTest {
         assertThat(response.rejectReason())
                 .isEqualTo("margin mode switch requires closing positions and open orders first");
         assertThat(response.marginMode()).isEqualTo(MarginMode.ISOLATED);
-        verify(orderRepository).lockUserSymbolMarginScope(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT");
+        verify(placementStateService).lockUserSymbolMarginScope(
+                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT");
         verify(orderValidator, never()).validate(any());
         verify(orderFeeRepository, never()).snapshot(anyLong(), anyString(), anyLong(), any());
         verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
@@ -423,7 +431,8 @@ class OrderServiceTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("positionSide LONG/SHORT requires HEDGE position mode");
 
-        verify(orderRepository, never()).lockUserSymbolMarginScope(any(ProductLine.class), anyLong(), anyString());
+        verify(placementStateService, never()).lockUserSymbolMarginScope(
+                any(ProductLine.class), anyLong(), anyString());
         verify(orderRepository, never()).insert(any());
         verify(outboxRepository, never()).enqueue(anyString(), anyLong(), anyString(), anyString(), anyString(),
                 anyString(), any());
@@ -432,7 +441,7 @@ class OrderServiceTest {
     @Test
     void hedgeOpeningOrderCarriesPositionSideAndReservesHedgeMargin() throws Exception {
         OrderService service = service();
-        when(orderRepository.positionMode(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(PositionMode.HEDGE);
+        when(placementStateService.positionMode(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(PositionMode.HEDGE);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
@@ -469,7 +478,7 @@ class OrderServiceTest {
     @Test
     void hedgeClosingOrderIsNormalizedToReduceOnlyWithoutOpeningMarginReservation() {
         OrderService service = service();
-        when(orderRepository.positionMode(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(PositionMode.HEDGE);
+        when(placementStateService.positionMode(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(PositionMode.HEDGE);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
@@ -543,8 +552,10 @@ class OrderServiceTest {
 
         assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
         assertThat(response.reduceOnly()).isTrue();
-        verify(orderRepository).lockUserSymbolMarginScope(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT");
-        verify(orderRepository, never()).hasActiveMarginModeConflict(any(ProductLine.class), anyLong(), anyString(),
+        verify(placementStateService).lockUserSymbolMarginScope(
+                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT");
+        verify(placementStateService, never()).hasActiveMarginModeConflict(
+                any(ProductLine.class), anyLong(), anyString(),
                 any());
         verify(orderRepository).nextSequence("command");
     }
@@ -684,7 +695,7 @@ class OrderServiceTest {
     @Test
     void closePositionPlacesReduceOnlyMarketIocForLockedLongPosition() {
         OrderService service = service();
-        when(orderRepository.lockedPosition(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
+        when(placementStateService.lockedPosition(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
                 PositionSide.NET))
                 .thenReturn(Optional.of(new ReduceOnlyPosition(12L, 7L)));
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
@@ -709,14 +720,15 @@ class OrderServiceTest {
         verify(orderRepository).insert(orderCaptor.capture());
         assertThat(orderCaptor.getValue().clientOrderId()).isEqualTo("close-long");
         assertThat(orderCaptor.getValue().priceTicks()).isZero();
-        verify(orderRepository, times(2)).lockUserSymbolMarginScope(ProductLine.LINEAR_PERPETUAL, 1001L,
+        verify(placementStateService, times(2)).lockUserSymbolMarginScope(
+                ProductLine.LINEAR_PERPETUAL, 1001L,
                 "BTC-USDT");
     }
 
     @Test
     void closePositionLocksPositionInsideCurrentProductLine() {
         OrderService service = service(ProductLine.LINEAR_DELIVERY);
-        when(orderRepository.lockedPosition(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT", MarginMode.CROSS,
+        when(placementStateService.lockedPosition(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT", MarginMode.CROSS,
                 PositionSide.NET))
                 .thenReturn(Optional.of(new ReduceOnlyPosition(-9L, 17L)));
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(17L));
@@ -737,11 +749,13 @@ class OrderServiceTest {
         ArgumentCaptor<OrderRecord> orderCaptor = ArgumentCaptor.forClass(OrderRecord.class);
         verify(orderRepository).insert(orderCaptor.capture());
         assertThat(orderCaptor.getValue().productLine()).isEqualTo(ProductLine.LINEAR_DELIVERY);
-        verify(orderRepository, times(2)).lockUserSymbolMarginScope(ProductLine.LINEAR_DELIVERY, 1001L,
+        verify(placementStateService, times(2)).lockUserSymbolMarginScope(
+                ProductLine.LINEAR_DELIVERY, 1001L,
                 "BTC-USDT");
-        verify(orderRepository).lockedPosition(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT",
+        verify(placementStateService).lockedPosition(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT",
                 MarginMode.CROSS, PositionSide.NET);
-        verify(orderRepository, never()).lockedPosition(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
+        verify(placementStateService, never()).lockedPosition(
+                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
                 MarginMode.CROSS, PositionSide.NET);
     }
 
@@ -816,7 +830,7 @@ class OrderServiceTest {
         assertThat(response.cancelRequested()).isTrue();
         assertThat(response.order().status()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
         ArgumentCaptor<OrderEvent> eventCaptor = ArgumentCaptor.forClass(OrderEvent.class);
-        verify(orderRepository).insertEvent(eventCaptor.capture());
+        verify(orderEventRepository).insert(eventCaptor.capture());
         assertThat(eventCaptor.getValue().eventType()).isEqualTo(OrderEventType.CANCEL_REQUESTED);
         assertThat(eventCaptor.getValue().reason()).isEqualTo("admin cancel: risk operation");
         ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
@@ -852,7 +866,7 @@ class OrderServiceTest {
         verify(orderRepository).adminCancelableOrders(null, "BTC-USDT", 2);
         verify(orderRepository).requestCancel(eq(9001L), any());
         verify(orderRepository).requestCancel(eq(9002L), any());
-        verify(orderRepository, times(2)).insertEvent(any());
+        verify(orderEventRepository, times(2)).insert(any());
         verify(outboxRepository, times(4)).enqueue(eq("ORDER"), anyLong(), anyString(), eq("BTC-USDT"),
                 anyString(), anyString(), any());
     }
@@ -916,31 +930,6 @@ class OrderServiceTest {
     }
 
     @Test
-    void adminMatchTradesDelegatesCursorAndSort() {
-        OrderService service = service();
-        var trade = new com.surprising.trading.api.model.AdminMatchTradeResponse(
-                7001L, 8001L, "BTC-USDT", 9001L, 1001L, OrderSide.BUY, MarginMode.CROSS,
-                9002L, 1002L, MarginMode.CROSS, 65_000L, 3L, true, false,
-                "trace-trade", Instant.parse("2026-07-01T00:00:00Z"),
-                Instant.parse("2026-07-01T00:00:01Z"));
-        when(orderRepository.matchTradePage(1001L, 9001L, "BTC-USDT", 25,
-                "cursor-1", "eventTime.asc"))
-                .thenReturn(new AdminCursorPage.CursorPage<>(java.util.List.of(trade),
-                        "cursor-2", true, "eventTime.asc", 25));
-
-        var response = service.adminMatchTrades(1001L, 9001L, "btc-usdt", 25,
-                "cursor-1", "eventTime.asc");
-
-        assertThat(response.trades()).extracting("tradeId").containsExactly(7001L);
-        assertThat(response.nextCursor()).isEqualTo("cursor-2");
-        assertThat(response.hasMore()).isTrue();
-        assertThat(response.sort()).isEqualTo("eventTime.asc");
-        assertThat(response.limit()).isEqualTo(25);
-        verify(orderRepository).matchTradePage(1001L, 9001L, "BTC-USDT", 25,
-                "cursor-1", "eventTime.asc");
-    }
-
-    @Test
     void adminCancelOrderRejectsMismatchedProductLine() {
         OrderService service = service();
         OrderRecord accepted = order(9001L, "cancel-wrong-product", OrderStatus.ACCEPTED, null);
@@ -996,7 +985,8 @@ class OrderServiceTest {
 
     private OrderService service(TradingOrderProperties properties) {
         return new OrderService(new ObjectMapper(), properties, orderValidator,
-                reduceOnlyValidator, orderRepository, orderFeeRepository, orderMarginRepository,
+                reduceOnlyValidator, orderRepository, orderEventRepository, placementStateService,
+                orderFeeRepository, orderMarginRepository,
                 spotOrderReservationRepository, outboxRepository);
     }
 

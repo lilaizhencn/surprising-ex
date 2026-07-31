@@ -14,11 +14,11 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Redis projection for a user's active orders.
+ * 用户活跃订单的 Redis 投影。
  *
- * <p>Every per-user key shares the {@code {ProductLine:userId}} Cluster hash tag. PostgreSQL is
- * authoritative: an unreadable, stale, or incomplete projection makes callers use PostgreSQL.
- * The revision hash retains terminal tombstones so delayed Kafka messages cannot resurrect an order.
+ * <p>每个用户键共享 {@code {ProductLine:userId}} Cluster hash tag。PostgreSQL 是权威数据源：
+ * 投影不可读、过期或不完整时，调用方必须回退 PostgreSQL。
+ * revision Hash 保留终态墓碑，避免延迟 Kafka 消息复活已终结订单。</p>
  */
 @Component
 public class RedisOpenOrderView {
@@ -67,7 +67,7 @@ public class RedisOpenOrderView {
         this.properties = properties == null ? new TradingOrderProperties() : properties;
     }
 
-    /** Starts a new product-line epoch; user keys become readable only after this epoch is ready. */
+    /** 启动新的产品线代；只有该代就绪后，用户键才可读取。 */
     public long startRebuild(ProductLine line) {
         markNotReady(line);
         Long epoch = redis.opsForValue().increment(epochKey(line));
@@ -94,7 +94,7 @@ public class RedisOpenOrderView {
         }
     }
 
-    /** Clears one user only when it belongs to an older epoch; safe to repeat while rebuilding. */
+    /** 仅当用户数据属于旧代时清理；重建期间可安全重复执行。 */
     public void initializeUser(ProductLine line, long userId, long epoch) {
         requireEpoch(epoch);
         redis.execute(INITIALIZE_USER, userKeys(line, userId), Long.toString(epoch), ttlMillis());
@@ -110,7 +110,7 @@ public class RedisOpenOrderView {
             throw ex;
         }
         if (epoch == null) {
-            // Startup rebuild is the recovery path. Do not acknowledge a partial projection as ready.
+            // 启动重建是恢复路径，不能把不完整投影标记为就绪。
             return;
         }
         try {
@@ -300,7 +300,7 @@ public class RedisOpenOrderView {
         try {
             markNotReady(line);
         } catch (RuntimeException ignored) {
-            // The original Redis failure is more useful to the Kafka retry path.
+            // 原始 Redis 异常对 Kafka 重试路径更有诊断价值。
         }
     }
 

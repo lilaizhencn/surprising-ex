@@ -3,7 +3,7 @@ package com.surprising.trading.order.repository;
 import java.math.BigInteger;
 
 /**
- * Converts leverage ppm and margin-rate ppm without floating-point arithmetic.
+ * 不使用浮点运算转换杠杆 ppm 和保证金率 ppm。
  */
 public final class OrderLeverageMath {
 

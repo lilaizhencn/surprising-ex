@@ -15,7 +15,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
-/** Projects both order lifecycle and matching results after their database writers have committed. */
+/** 在数据库写事务提交后，将订单生命周期和撮合结果投影到读模型。 */
 @Service
 public class OpenOrderViewConsumer {
 

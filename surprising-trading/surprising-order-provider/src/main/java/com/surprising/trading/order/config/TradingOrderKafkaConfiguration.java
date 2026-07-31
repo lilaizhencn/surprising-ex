@@ -40,7 +40,7 @@ public class TradingOrderKafkaConfiguration {
         return new KafkaTemplate<>(orderProducerFactory);
     }
 
-    /** Used by the replayable open-order read model; every lifecycle event is still re-read from PostgreSQL. */
+    /** 供可重放的活跃订单读模型使用；每个生命周期事件仍会从 PostgreSQL 重新读取权威订单。 */
     @Bean
     public ConsumerFactory<String, String> orderOpenViewConsumerFactory(TradingOrderProperties properties) {
         Map<String, Object> config = new HashMap<>();
@@ -64,8 +64,8 @@ public class TradingOrderKafkaConfiguration {
     }
 
     /**
-     * Reservation results are keyed by productLine:userId. One consumer per topic partition lets different users
-     * progress concurrently while Kafka continues to serialize every command result for the same user.
+     * 资金预占结果以 productLine:userId 为键。每个 Topic 分区使用一个消费者，使不同用户可以并发推进，
+     * 同时由 Kafka 保证同一用户的全部指令结果串行。
      */
     @Bean(name = "orderAccountCommandResultKafkaListenerContainerFactory")
     public ConcurrentKafkaListenerContainerFactory<String, String> orderAccountCommandResultKafkaListenerContainerFactory(
