@@ -1791,6 +1791,17 @@ CREATE SEQUENCE IF NOT EXISTS account_liquidation_fee_event_seq AS BIGINT START 
 CREATE SEQUENCE IF NOT EXISTS account_command_result_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_command_retry_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_user_command_outbox_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+CREATE SEQUENCE IF NOT EXISTS account_risk_wallet_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+
+CREATE TABLE IF NOT EXISTS account_risk_state_revisions (
+    product_line TEXT NOT NULL,
+    user_id      BIGINT NOT NULL,
+    revision     BIGINT NOT NULL,
+    updated_at   TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (product_line, user_id),
+    CONSTRAINT account_risk_state_revisions_user_positive CHECK (user_id > 0),
+    CONSTRAINT account_risk_state_revisions_revision_positive CHECK (revision > 0)
+);
 
 CREATE TABLE IF NOT EXISTS account_asset_scales (
     asset               TEXT PRIMARY KEY,

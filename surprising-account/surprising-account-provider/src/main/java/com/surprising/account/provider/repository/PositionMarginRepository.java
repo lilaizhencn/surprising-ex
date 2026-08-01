@@ -6,7 +6,9 @@ import com.surprising.trading.api.model.PositionSide;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.LinkedHashMap;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -57,6 +59,23 @@ public class PositionMarginRepository {
                 MarginMode.defaultIfNull(marginMode).name(),
                 PositionSide.defaultIfNull(positionSide).name())
                 .stream().findFirst();
+    }
+
+    /** 汇总一个用户永续隔离仓位的保证金，查询只触及 account_position_margins 单表。 */
+    public Map<String, Long> sumOpenIsolatedByAsset(ProductLine productLine, long userId) {
+        return jdbcTemplate.query("""
+                SELECT asset, COALESCE(SUM(margin_units), 0) AS margin_units
+                  FROM account_position_margins
+                 WHERE product_line = ?
+                   AND user_id = ?
+                   AND margin_mode = 'ISOLATED'
+                   AND margin_units > 0
+                 GROUP BY asset
+                """, (rs, rowNum) -> Map.entry(rs.getString("asset"), rs.getLong("margin_units")),
+                productLine.name(), userId)
+                .stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        Map.Entry::getKey, Map.Entry::getValue, Math::addExact, LinkedHashMap::new));
     }
 
     public long lockUnits(ProductLine productLine,

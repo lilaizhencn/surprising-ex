@@ -17,12 +17,14 @@ import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountCommandRegistration;
 import com.surprising.account.provider.repository.AccountCommandRepository;
+import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
@@ -40,7 +42,9 @@ public class AccountUserCommandProcessor {
     private final AccountOrderReservationService orderReservationService;
     private final AccountService accountService;
     private final PositionCacheAfterCommitSynchronizer positionCacheSynchronizer;
+    private final AccountRiskWalletSnapshotService riskWalletSnapshotService;
 
+    /** 保留测试和旧调用方构造签名；未注入风险钱包发布器时不改变原有命令语义。 */
     public AccountUserCommandProcessor(ObjectMapper objectMapper,
                                        AccountProperties properties,
                                        AccountCommandRepository commandRepository,
@@ -52,6 +56,24 @@ public class AccountUserCommandProcessor {
                                        AccountOrderReservationService orderReservationService,
                                        AccountService accountService,
                                        PositionCacheAfterCommitSynchronizer positionCacheSynchronizer) {
+        this(objectMapper, properties, commandRepository, outboxService, adlTargetSettlementService,
+                deficitSettlementService, fundingSettlementService, accountSettlementService,
+                orderReservationService, accountService, positionCacheSynchronizer, null);
+    }
+
+    @Autowired
+    public AccountUserCommandProcessor(ObjectMapper objectMapper,
+                                       AccountProperties properties,
+                                       AccountCommandRepository commandRepository,
+                                       AccountOutboxService outboxService,
+                                       AdlTargetSettlementService adlTargetSettlementService,
+                                       DeficitSettlementService deficitSettlementService,
+                                       FundingSettlementService fundingSettlementService,
+                                       AccountSettlementService accountSettlementService,
+                                       AccountOrderReservationService orderReservationService,
+                                       AccountService accountService,
+                                       PositionCacheAfterCommitSynchronizer positionCacheSynchronizer,
+                                       AccountRiskWalletSnapshotService riskWalletSnapshotService) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.commandRepository = commandRepository;
@@ -63,6 +85,7 @@ public class AccountUserCommandProcessor {
         this.orderReservationService = orderReservationService;
         this.accountService = accountService;
         this.positionCacheSynchronizer = positionCacheSynchronizer;
+        this.riskWalletSnapshotService = riskWalletSnapshotService;
     }
 
     @Transactional
@@ -128,6 +151,11 @@ public class AccountUserCommandProcessor {
         try {
             resultPayload = dispatch(command);
             Instant completedAt = Instant.now();
+            if (riskWalletSnapshotService != null && command.productLine() == ProductLine.LINEAR_PERPETUAL
+                    && command.commandType() != com.surprising.account.api.model.AccountUserCommandType.POSITION_MODE_UPDATE) {
+                riskWalletSnapshotService.publish(command.productLine(), command.userId(),
+                        properties.getKafka().getRiskWalletEventsTopic(), completedAt, command.traceId());
+            }
             commandRepository.markApplied(command.commandId(), resultPayload, completedAt);
             enqueueCommandResultIfObserved(command,
                     AccountCommandStatus.APPLIED, resultPayload, null, null, completedAt);

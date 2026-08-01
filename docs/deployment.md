@@ -16,8 +16,8 @@ BOOTSTRAP_SERVERS='<bootstrap-brokers>' \
 ./scripts/create-topics.sh
 ```
 
-该命令创建 20 个 `surprising.linear-perp.*` Topic 和 6 个共享 Topic。每个 Topic 固定 32 个分区，
-RF=3 时共 832 个逻辑分区、2,496 个副本。
+该命令创建产品线 Topic 和共享 Topic。每个 Topic 固定 32 个分区；具体清单以脚本输出为准，
+RF=3 时按实际 Topic 数量计算副本。
 
 | 范围 | Topic 后缀或完整名称 | 分区数 | 必须使用的 Key |
 |---|---|---:|---|
@@ -41,6 +41,7 @@ RF=3 时共 832 个逻辑分区、2,496 个副本。
 | 产品线 | `funding.rate.v1` | 32 | `symbol` |
 | 产品线 | `account.position.events.v1` | 32 | `<PRODUCT_LINE>:<userId>` |
 | 产品线 | `account.liquidation-fee.events.v1` | 32 | 结算资产 |
+| 产品线 | `account.risk-wallet.events.v1` | 32 | `<PRODUCT_LINE>:<userId>` |
 | 产品线 | `risk.account.events.v1` | 32 | `<userId>:<accountType>:<asset>` |
 | 产品线 | `risk.position.events.v1` | 32 | `symbol` |
 | 产品线 | `liquidation.candidates.v1` | 32 | `symbol` |

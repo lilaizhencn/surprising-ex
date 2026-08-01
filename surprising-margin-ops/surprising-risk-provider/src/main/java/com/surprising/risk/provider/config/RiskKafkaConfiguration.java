@@ -71,6 +71,20 @@ public class RiskKafkaConfiguration {
         return factory;
     }
 
+    /** 账户钱包快照使用独立消费组，避免持仓分区重试阻塞余额快照。 */
+    @Bean(name = "riskAccountWalletKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String> riskAccountWalletKafkaListenerContainerFactory(
+            @Qualifier("riskConsumerFactory") ConsumerFactory<String, String> riskConsumerFactory,
+            RiskProperties properties) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(riskConsumerFactory);
+        factory.setConcurrency(properties.getKafka().getConcurrency());
+        factory.setBatchListener(true);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
+        factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
+        return factory;
+    }
+
     @Bean(name = "riskInstrumentSnapshotKafkaListenerContainerFactory")
     public ConcurrentKafkaListenerContainerFactory<String, String> riskInstrumentSnapshotKafkaListenerContainerFactory(
             @Qualifier("riskConsumerFactory") ConsumerFactory<String, String> riskConsumerFactory) {

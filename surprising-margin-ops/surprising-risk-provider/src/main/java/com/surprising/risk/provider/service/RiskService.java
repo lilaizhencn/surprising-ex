@@ -1,6 +1,7 @@
 package com.surprising.risk.provider.service;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.account.api.model.AccountRiskWalletUpdatedEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.risk.api.model.AdminCursorPage;
 import com.surprising.risk.api.model.LiquidationCandidateEvent;
@@ -198,12 +199,14 @@ import tools.jackson.databind.ObjectMapper;
         try {
             for (RiskGroupKey key : groups.keySet()) {
                 PositionEventGroup eventGroup = groups.get(key);
-                ProjectionUpdate update = refreshState(productLine, key, true);
-                CachedRiskGroup state = mergePositionEvents(update.state(), eventGroup);
-                if (state != update.state()) {
-                    CachedRiskGroup merged = state;
-                    state = stateStore.replace(productLine, key, () -> merged).state();
-                }
+                refreshState(productLine, key, true);
+                CachedRiskGroup state = stateStore.replace(productLine, key, () -> {
+                    CachedRiskGroup current = stateStore.read(productLine, key);
+                    if (current == null) {
+                        throw new IllegalStateException("Redis 风险组快照缺失: " + key);
+                    }
+                    return mergePositionEvents(current, eventGroup);
+                }).state();
                 localGroups.put(new LocalGroupKey(productLine, key), state);
                 states.add(state);
             }
@@ -212,6 +215,61 @@ import tools.jackson.databind.ObjectMapper;
             throw ex;
         }
         evaluateBatch(states, groups);
+        if (initialProjectionComplete) {
+            stateStore.markReady(productLine);
+        }
+    }
+
+    /**
+     * 账户余额、订单冻结、欠款或隔离保证金变化后的钱包快照快速路径。
+     * 事件已经由账户单写者在同一事务中计算完成，风险服务不再回查账户库或 trading_orders。
+     */
+    public void scanAccountWalletUpdates(List<AccountRiskWalletUpdatedEvent> events) {
+        if (!properties.getCalculation().isEnabled() || events == null || events.isEmpty()) {
+            return;
+        }
+        Map<RiskGroupKey, AccountRiskWalletUpdatedEvent> latest = new LinkedHashMap<>();
+        ProductLine productLine = properties.getKafka().getProductLine();
+        for (AccountRiskWalletUpdatedEvent event : events) {
+            if (event.productLine() != productLine) {
+                throw new IllegalArgumentException("风险钱包事件产品线不一致");
+            }
+            RiskGroupKey key = new RiskGroupKey(event.userId(), event.accountType(), event.settleAsset());
+            AccountRiskWalletUpdatedEvent previous = latest.putIfAbsent(key, event);
+            if (previous != null && event.accountRevision() > previous.accountRevision()) {
+                latest.put(key, event);
+            } else if (previous != null && event.accountRevision() == previous.accountRevision()
+                    && event.walletBalanceUnits() != previous.walletBalanceUnits()) {
+                throw new IllegalStateException("同一账户修订号对应多个风险钱包值: " + key);
+            }
+        }
+        requireRedisState();
+        if (!stateStore.ready(productLine)) {
+            throw new IllegalStateException("风险 JVM/Redis 快照尚未完成恢复，暂停钱包事件计算");
+        }
+        List<CachedRiskGroup> states = new ArrayList<>(latest.size());
+        try {
+            for (Map.Entry<RiskGroupKey, AccountRiskWalletUpdatedEvent> entry : latest.entrySet()) {
+                RiskGroupKey key = entry.getKey();
+                AccountRiskWalletUpdatedEvent event = entry.getValue();
+                refreshState(productLine, key, true);
+                CachedRiskGroup state = stateStore.replace(productLine, key, () -> {
+                    CachedRiskGroup current = stateStore.read(productLine, key);
+                    if (current == null) {
+                        throw new IllegalStateException("Redis 风险组快照缺失: " + key);
+                    }
+                    return event.accountRevision() > current.walletRevision()
+                            ? current.withWallet(event.walletBalanceUnits(), event.accountRevision(), Instant.now())
+                            : current;
+                }).state();
+                localGroups.put(new LocalGroupKey(productLine, key), state);
+                states.add(state);
+            }
+        } catch (RuntimeException ex) {
+            invalidateProjection();
+            throw ex;
+        }
+        evaluateBatch(states, Map.of());
         if (initialProjectionComplete) {
             stateStore.markReady(productLine);
         }
@@ -277,8 +335,8 @@ import tools.jackson.databind.ObjectMapper;
                         event.revision()));
             }
         }
-        return new CachedRiskGroup(state.key(), state.walletBalanceUnits(), List.copyOf(positions.values()),
-                Instant.now());
+        return new CachedRiskGroup(state.key(), state.walletBalanceUnits(), state.walletRevision(),
+                List.copyOf(positions.values()), Instant.now());
     }
 
     private void evaluateBatch(List<CachedRiskGroup> states,

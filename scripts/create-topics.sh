@@ -142,6 +142,7 @@ create_product_topics() {
       create_topic "${prefix}.account.position.events.v1"
       create_topic "${prefix}.account.open-interest.events.v1"
       create_topic "${prefix}.account.liquidation-fee.events.v1"
+      create_topic "${prefix}.account.risk-wallet.events.v1"
       create_topic "${prefix}.risk.account.events.v1"
       create_topic "${prefix}.risk.position.events.v1"
       create_topic "${prefix}.liquidation.candidates.v1"

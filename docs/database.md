@@ -242,6 +242,10 @@ risk-provider 将完整账户风险组从 PostgreSQL 投影到 Redis，并维护
 PostgreSQL 权威状态。所有合约名义价值、盈亏和保证金计算统一使用精确整数
 `PerpetualContractMath`，禁止读取标记价格审计表。
 
+账户单写者在永续命令事务内发布 `account.risk-wallet.events.v1`，事件携带用户修订号和完整钱包值。
+该值已经扣除穿仓欠款、逐仓持仓保证金和逐仓未成交订单冻结；risk-provider 只消费事件更新 JVM/Redis
+风险组。`account_risk_state_revisions` 仅用于保证同一用户事件的单调顺序，不是第二个资金事实源。
+
 风险持仓事件和标记价事件在本地风险组快照仍新鲜时直接复用 JVM/Redis 状态；定时扫描继续承担启动重建
 和投影失效后的恢复核对。强平候选输入优先使用候选事件保存的风险值以及已锁定持仓，数据库只补查
 最新风险状态，候选完成和取消仍保留事务校验。

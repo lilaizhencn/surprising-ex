@@ -100,6 +100,7 @@ public class AccountProperties {
         private String positionEventsTopic = "surprising.account.position.events.v1";
         private String openInterestEventsTopic = "surprising.account.open-interest.events.v1";
         private String liquidationFeeEventsTopic = "surprising.account.liquidation-fee.events.v1";
+        private String riskWalletEventsTopic = "surprising.account.risk-wallet.events.v1";
         private String triggerOrderEventsTopic = "surprising.perp.trigger-order.events.v1";
         private String deliverySettlementsTopic = "surprising.linear-delivery.delivery.settlements.v1";
         private String optionExercisesTopic = "surprising.option.option.exercises.v1";
@@ -186,6 +187,14 @@ public class AccountProperties {
 
         public void setLiquidationFeeEventsTopic(String liquidationFeeEventsTopic) {
             this.liquidationFeeEventsTopic = liquidationFeeEventsTopic;
+        }
+
+        public String getRiskWalletEventsTopic() {
+            return productTopicsEnabled ? productTopics().accountRiskWalletEventsTopic() : riskWalletEventsTopic;
+        }
+
+        public void setRiskWalletEventsTopic(String riskWalletEventsTopic) {
+            this.riskWalletEventsTopic = riskWalletEventsTopic;
         }
 
         public String getUserCommandsTopic() {
