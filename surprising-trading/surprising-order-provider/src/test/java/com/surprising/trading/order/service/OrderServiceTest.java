@@ -620,6 +620,43 @@ class OrderServiceTest {
     }
 
     @Test
+    void placeBatchChainsAccountRevisionAndDependencyForSameUser() throws Exception {
+        OrderService service = service();
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
+        when(orderRepository.nextSequence("order")).thenReturn(9002L, 9003L);
+        when(orderRepository.nextSequence("event")).thenReturn(9100L, 9101L);
+        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
+                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
+                anyLong()))
+                .thenReturn(Optional.of(new MarginRequirement("USDT_PERPETUAL", "USDT", 100L)));
+        when(placementStateService.accountRevision(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(5L);
+
+        PlaceOrderRequest first = request("batch-revision-1");
+        PlaceOrderRequest second = new PlaceOrderRequest(1001L, "batch-revision-2", "BTC-USDT", OrderSide.BUY,
+                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, MarginMode.CROSS, PositionSide.NET,
+                false, false);
+
+        var response = service.placeBatch(new BatchPlaceOrderRequest(List.of(first, second)));
+
+        assertThat(response.completed()).isEqualTo(2);
+        ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
+        verify(outboxRepository, times(2)).enqueue(eq("ORDER"), anyLong(), anyString(), eq("LINEAR_PERPETUAL:1001"),
+                eq("ORDER_RESERVE"), payloadCaptor.capture(), any());
+        ObjectMapper mapper = new ObjectMapper();
+        AccountUserCommand firstCommand = mapper.readValue(payloadCaptor.getAllValues().get(0), AccountUserCommand.class);
+        AccountUserCommand secondCommand = mapper.readValue(payloadCaptor.getAllValues().get(1), AccountUserCommand.class);
+        OrderReserveAccountCommand firstReserve = mapper.readValue(firstCommand.payload(), OrderReserveAccountCommand.class);
+        OrderReserveAccountCommand secondReserve = mapper.readValue(secondCommand.payload(), OrderReserveAccountCommand.class);
+        assertThat(firstReserve.expectedAccountRevision()).isEqualTo(5L);
+        assertThat(secondReserve.expectedAccountRevision()).isEqualTo(6L);
+        assertThat(firstCommand.dependsOnCommandId()).isNull();
+        assertThat(secondCommand.dependsOnCommandId()).isEqualTo("ORDER_RESERVE:LINEAR_PERPETUAL:9002");
+    }
+
+    @Test
     void amendOrderRequestsCancelAndPlacesReplacementOrder() {
         TraceContext.set("trace-amend-1");
         OrderService service = service();

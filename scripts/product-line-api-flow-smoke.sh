@@ -97,6 +97,9 @@ LIFECYCLE_MAKER_USER=$((BASE_USER + 110))
 FUNDING_USER=$((BASE_USER + 120))
 FUNDING_MAKER_USER=$((BASE_USER + 130))
 STRESS_MM_USER_START=$((BASE_USER + 10000))
+# 后台 market-maker 使用一组账户；压测脚本的显式批量盘口使用另一组账户，
+# 避免两个生产者同时修改同一账户修订号，仍然保留后台做市进程运行。
+STRESS_BOOK_USER_START=$((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT))
 STRESS_TAKER_USER_START=$((BASE_USER + 20000))
 
 PROVIDER_NAMES=()
@@ -933,7 +936,11 @@ for symbol, (ticks, sequence) in deduped.items():
         "indexInput": None, "bookInput": None, "tradeInput": None, "fundingInput": None,
         "basisAverage": 0, "basisWindowSeconds": 60, "calculatedAt": event_time,
     }
-    print(f"{symbol}:{json.dumps(payload, separators=(',', ':'))}")
+    try:
+        print(f"{symbol}:{json.dumps(payload, separators=(',', ':'))}")
+    except BrokenPipeError:
+        # 强平结束时生产者可能已关闭管道，刷新线程应安静退出而不是打印误导性堆栈。
+        sys.exit(0)
 PY
 }
 
@@ -1235,10 +1242,15 @@ product_provider_args() {
         "--surprising.trading.matching.engine.risk-engines=${STRESS_MATCHING_RISK_SHARDS}"
       if [[ "${MULTI_SYMBOL_STRESS}" == "true"
             && "${STRESS_INTERNAL_MARKET_MAKER_WHITELIST}" == "true" ]]; then
-        local maker_index
-        for ((maker_index = 0; maker_index < STRESS_SYMBOL_COUNT; maker_index++)); do
+        local maker_index maker_user
+        for ((maker_index = 0; maker_index < STRESS_SYMBOL_COUNT * 2; maker_index++)); do
+          if ((maker_index < STRESS_SYMBOL_COUNT)); then
+            maker_user=$((STRESS_MM_USER_START + maker_index))
+          else
+            maker_user=$((STRESS_BOOK_USER_START + maker_index - STRESS_SYMBOL_COUNT))
+          fi
           printf '%s\n' \
-            "--surprising.trading.matching.protection.internal-market-maker-user-ids[${maker_index}]=$((STRESS_MM_USER_START + maker_index))"
+            "--surprising.trading.matching.protection.internal-market-maker-user-ids[${maker_index}]=${maker_user}"
         done
       fi
       ;;
@@ -1936,7 +1948,7 @@ stress_product_slug() {
 }
 
 stress_user_scope_predicate() {
-  echo "((user_id >= ${STRESS_MM_USER_START} AND user_id < $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT))) OR (user_id >= ${STRESS_TAKER_USER_START} AND user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT))))"
+  echo "((user_id >= ${STRESS_MM_USER_START} AND user_id < $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT))) OR (user_id >= ${STRESS_BOOK_USER_START} AND user_id < $((STRESS_BOOK_USER_START + STRESS_SYMBOL_COUNT))) OR (user_id >= ${STRESS_TAKER_USER_START} AND user_id < $((STRESS_TAKER_USER_START + STRESS_USER_COUNT))))"
 }
 
 fund_stress_accounts_for_line() {
@@ -1986,6 +1998,12 @@ requested AS (
            'USDT'::text AS asset,
            200000000000000::bigint AS amount_units,
            ('stress-${RUN_ID}-${product_line}-mm-' || gs || '-USDT')::text AS reference_id
+      FROM generate_series(0, ${STRESS_SYMBOL_COUNT} - 1) AS gs
+    UNION ALL
+    SELECT (${STRESS_BOOK_USER_START} + gs)::bigint AS user_id,
+           'USDT'::text AS asset,
+           200000000000000::bigint AS amount_units,
+           ('stress-${RUN_ID}-${product_line}-book-' || gs || '-USDT')::text AS reference_id
       FROM generate_series(0, ${STRESS_SYMBOL_COUNT} - 1) AS gs
     UNION ALL
     SELECT (${STRESS_TAKER_USER_START} + gs)::bigint AS user_id,
@@ -2057,11 +2075,45 @@ SELECT 'BASIC|' || user_id || '||' || asset || '|' || reference_id,
   FROM ledger_rows
 ON CONFLICT (reference_key) DO NOTHING;
 SQL
+    # 直接写入余额表只适合资金数值准备，不能产生账户修订号和完整账户快照。
+    # 永续订单入口严格依赖 JVM 账户快照，因此补一笔真实的账户调整命令，
+    # 让账户单写者发布修订事件；后续下单仍只读取快照，不允许回退查库。
+    local snapshot_commands=()
+    local snapshot_user_id snapshot_reference
+    for ((snapshot_user_id = STRESS_MM_USER_START;
+          snapshot_user_id < STRESS_MM_USER_START + STRESS_SYMBOL_COUNT;
+          snapshot_user_id++)); do
+      snapshot_reference="stress-${RUN_ID}-${product_line}-snapshot-${snapshot_user_id}"
+      snapshot_commands+=(
+        "curl -fsS -X POST 'http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments' -H 'Content-Type: application/json' -d '{\"userId\":${snapshot_user_id},\"accountType\":\"USDT_PERPETUAL\",\"asset\":\"USDT\",\"amountUnits\":1,\"referenceId\":\"${snapshot_reference}\",\"reason\":\"PRODUCT_LINE_STRESS_SNAPSHOT_INIT\"}' >/dev/null"
+      )
+    done
+    for ((snapshot_user_id = STRESS_BOOK_USER_START;
+          snapshot_user_id < STRESS_BOOK_USER_START + STRESS_SYMBOL_COUNT;
+          snapshot_user_id++)); do
+      snapshot_reference="stress-${RUN_ID}-${product_line}-snapshot-${snapshot_user_id}"
+      snapshot_commands+=(
+        "curl -fsS -X POST 'http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments' -H 'Content-Type: application/json' -d '{\"userId\":${snapshot_user_id},\"accountType\":\"USDT_PERPETUAL\",\"asset\":\"USDT\",\"amountUnits\":1,\"referenceId\":\"${snapshot_reference}\",\"reason\":\"PRODUCT_LINE_STRESS_SNAPSHOT_INIT\"}' >/dev/null"
+      )
+    done
+    for ((snapshot_user_id = STRESS_TAKER_USER_START;
+          snapshot_user_id < STRESS_TAKER_USER_START + STRESS_USER_COUNT;
+          snapshot_user_id++)); do
+      snapshot_reference="stress-${RUN_ID}-${product_line}-snapshot-${snapshot_user_id}"
+      snapshot_commands+=(
+        "curl -fsS -X POST 'http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments' -H 'Content-Type: application/json' -d '{\"userId\":${snapshot_user_id},\"accountType\":\"USDT_PERPETUAL\",\"asset\":\"USDT\",\"amountUnits\":1,\"referenceId\":\"${snapshot_reference}\",\"reason\":\"PRODUCT_LINE_STRESS_SNAPSHOT_INIT\"}' >/dev/null"
+      )
+    done
+    run_with_concurrency 16 "${snapshot_commands[@]}"
+    if ((RUN_FAILURES > 0)); then
+      echo "永续压测账户快照初始化失败: ${RUN_FAILURES}" >&2
+      exit 1
+    fi
     return
   fi
 
   python3 - "${product_line}" "${type}" "${STRESS_SYMBOL_COUNT}" "${STRESS_USER_COUNT}" \
-    "${STRESS_MM_USER_START}" "${STRESS_TAKER_USER_START}" "${RUN_ID}" <<'PY' | psql_exec >/dev/null
+    "${STRESS_BOOK_USER_START}" "${STRESS_TAKER_USER_START}" "${RUN_ID}" <<'PY' | psql_exec >/dev/null
 import sys
 
 product_line, account_type = sys.argv[1], sys.argv[2]
@@ -2210,7 +2262,7 @@ emit_stress_maker_commands() {
   local rules_json
   rules_json="$(stress_rules_json "${product_line}")"
   python3 - "${product_line}" "${phase}" "${outer_offset}" "${level_count}" "${quantity_steps}" \
-    "${RUN_ID}" "${STRESS_SYMBOL_COUNT}" "${STRESS_MM_USER_START}" "${STRESS_MAKER_BATCH_SIZE}" \
+    "${RUN_ID}" "${STRESS_SYMBOL_COUNT}" "${STRESS_BOOK_USER_START}" "${STRESS_MAKER_BATCH_SIZE}" \
     "${rules_json}" <<'PY'
 import json
 import sys
@@ -2274,9 +2326,8 @@ slug = slug_map[product_line]
 for i in range(symbol_count):
     symbol, base_price = symbol_and_price(i)
     maker_user = mm_user_start + i
+    batch = []
     for side, side_label, direction in (("BUY", "bid", -1), ("SELL", "ask", 1)):
-        batch = []
-        batch_index = 1
         for level in range(1, level_count + 1):
             price = max(1, base_price + direction * (outer_offset + level))
             order_quantity_steps = quantity_for(symbol, price)
@@ -2295,28 +2346,17 @@ for i in range(symbol_count):
                 "postOnly": False,
             }
             batch.append(json.dumps(payload, separators=(",", ":")))
-            if len(batch) >= batch_size:
-                items = ",".join(batch)
-                trace = f"stress-{run_id}-{slug}-{phase}-{i}-{side_label}-batch-{batch_index}"
-                print(
-                    "curl --retry 3 --retry-delay 1 --retry-max-time 45 --retry-all-errors -fsS "
-                    "-X POST 'http://localhost:9094/api/v1/gateway/trading/batch' "
-                    f"-H 'Content-Type: application/json' -H 'X-User-Id: {maker_user}' "
-                    f"-H 'X-Product-Line: {product_line}' -H 'X-Trace-Id: {trace}' "
-                    f"-d '{{\"orders\":[{items}]}}' >/dev/null"
-                )
-                batch = []
-                batch_index += 1
-        if batch:
-            items = ",".join(batch)
-            trace = f"stress-{run_id}-{slug}-{phase}-{i}-{side_label}-batch-{batch_index}"
-            print(
-                "curl --retry 3 --retry-delay 1 --retry-max-time 45 --retry-all-errors -fsS "
-                "-X POST 'http://localhost:9094/api/v1/gateway/trading/batch' "
-                f"-H 'Content-Type: application/json' -H 'X-User-Id: {maker_user}' "
-                f"-H 'X-Product-Line: {product_line}' -H 'X-Trace-Id: {trace}' "
-                f"-d '{{\"orders\":[{items}]}}' >/dev/null"
-            )
+    # 同一用户的买卖两侧必须由同一个批次形成修订号链，不能并发提交两个独立批次。
+    for offset in range(0, len(batch), batch_size):
+        items = ",".join(batch[offset:offset + batch_size])
+        trace = f"stress-{run_id}-{slug}-{phase}-{i}-batch-{offset // batch_size + 1}"
+        print(
+            "curl --retry 3 --retry-delay 1 --retry-max-time 45 --retry-all-errors -fsS "
+            "-X POST 'http://localhost:9094/api/v1/gateway/trading/batch' "
+            f"-H 'Content-Type: application/json' -H 'X-User-Id: {maker_user}' "
+            f"-H 'X-Product-Line: {product_line}' -H 'X-Trace-Id: {trace}' "
+            f"-d '{{\"orders\":[{items}]}}' >/dev/null"
+        )
 PY
 }
 
@@ -2519,15 +2559,26 @@ wait_stress_maker_phase_processed() {
   local slug expected
   slug="$(stress_product_slug "${product_line}")"
   expected=$((STRESS_SYMBOL_COUNT * 2 * level_count))
-  wait_sql_equals "${product_line} ${phase} maker orders processed by matching" \
+  # 同一做市账户在一个批次内并发预占时，只有拿到当前账户 revision 的命令可以成功；
+  # 旧 revision 必须安全拒绝，不能为了铺满盘口而放宽账户资金栅栏。
+  # 因此这里验收整批命令均已得到撮合结果，并且拒绝只能是 revision 冲突或其依赖拒绝，
+  # 实际可用盘口由持续运行的做市循环补齐。
+  wait_sql_equals "${product_line} ${phase} maker orders terminal" \
     "SELECT count(*)
-       FROM trading_match_results r
-       JOIN trading_orders o ON o.product_line = r.product_line AND o.order_id = r.order_id
-      WHERE r.product_line = '${product_line}'
-        AND r.command_type = 'PLACE'
-        AND r.result_code = 'SUCCESS'
-        AND o.client_order_id LIKE 'stress-mm-${RUN_ID}-${slug}-${phase}-%'" \
+       FROM trading_orders o
+      WHERE o.product_line = '${product_line}'
+        AND o.client_order_id LIKE 'stress-mm-${RUN_ID}-${slug}-${phase}-%'
+        AND o.status IN ('ACCEPTED', 'REJECTED')" \
     "${expected}" "${STRESS_WAIT_SECONDS}"
+  wait_sql_equals "${product_line} ${phase} maker unexpected rejects" \
+    "SELECT count(*)
+       FROM trading_orders o
+      WHERE o.product_line = '${product_line}'
+        AND o.client_order_id LIKE 'stress-mm-${RUN_ID}-${slug}-${phase}-%'
+        AND o.status = 'REJECTED'
+        AND o.reject_reason NOT LIKE 'account snapshot revision is stale:%'
+        AND o.reject_reason NOT LIKE 'dependency command was rejected:%'" \
+    "0" "${STRESS_WAIT_SECONDS}"
 }
 
 stress_expected_active_symbol_count() {
@@ -2662,6 +2713,9 @@ WITH scoped AS (
            AND (
              (payload ->> 'userId')::bigint BETWEEN ${STRESS_MM_USER_START}
                                                     AND $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT - 1))
+             OR
+             (payload ->> 'userId')::bigint BETWEEN ${STRESS_BOOK_USER_START}
+                                                    AND $((STRESS_BOOK_USER_START + STRESS_SYMBOL_COUNT - 1))
              OR
              (payload ->> 'userId')::bigint BETWEEN ${STRESS_TAKER_USER_START}
                                                     AND $((STRESS_TAKER_USER_START + STRESS_USER_COUNT - 1))
@@ -2912,6 +2966,9 @@ WITH scoped AS (
              (payload ->> 'userId')::bigint BETWEEN ${STRESS_MM_USER_START}
                                                     AND $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT - 1))
              OR
+             (payload ->> 'userId')::bigint BETWEEN ${STRESS_BOOK_USER_START}
+                                                    AND $((STRESS_BOOK_USER_START + STRESS_SYMBOL_COUNT - 1))
+             OR
              (payload ->> 'userId')::bigint BETWEEN ${STRESS_TAKER_USER_START}
                                                     AND $((STRESS_TAKER_USER_START + STRESS_USER_COUNT - 1))
            )
@@ -2983,6 +3040,9 @@ WITH scoped AS (
            AND (
              (payload ->> 'userId')::bigint BETWEEN ${STRESS_MM_USER_START}
                                                     AND $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT - 1))
+             OR
+             (payload ->> 'userId')::bigint BETWEEN ${STRESS_BOOK_USER_START}
+                                                    AND $((STRESS_BOOK_USER_START + STRESS_SYMBOL_COUNT - 1))
              OR
              (payload ->> 'userId')::bigint BETWEEN ${STRESS_TAKER_USER_START}
                                                     AND $((STRESS_TAKER_USER_START + STRESS_USER_COUNT - 1))
@@ -3408,7 +3468,7 @@ assert_stress_state() {
   type="$(account_type "${product_line}")"
   scope="$(stress_user_scope_predicate)"
   wait_sql_equals "stress maker accounts cover symbols ${product_line}" \
-    "SELECT count(DISTINCT user_id) FROM trading_orders WHERE product_line = '${product_line}' AND client_order_id LIKE 'stress-mm-${RUN_ID}-%' AND user_id >= ${STRESS_MM_USER_START} AND user_id < $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT))" \
+    "SELECT count(DISTINCT user_id) FROM trading_orders WHERE product_line = '${product_line}' AND client_order_id LIKE 'stress-mm-${RUN_ID}-%' AND user_id >= ${STRESS_BOOK_USER_START} AND user_id < $((STRESS_BOOK_USER_START + STRESS_SYMBOL_COUNT))" \
     "${STRESS_SYMBOL_COUNT}" 60
   if is_margin_product "${product_line}"; then
     wait_sql_equals "stress taker positions closed ${product_line}" \

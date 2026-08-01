@@ -29,6 +29,7 @@ import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.CancelOrderRequest;
+import com.surprising.trading.api.model.BatchPlaceOrderRequest;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
@@ -691,6 +692,7 @@ public class MarketMakerService {
         long submitted = 0L;
         long rejected = 0L;
         int maxOpenOrders = properties.getQuoting().getMaxOpenOrdersPerAccountSymbol();
+        List<DesiredQuote> missingQuotes = new ArrayList<>();
         for (DesiredQuote quote : plan.quotes()) {
             if (kept.size() >= maxOpenOrders) {
                 break;
@@ -698,12 +700,76 @@ public class MarketMakerService {
             if (hasLiveQuote(kept, quote, accountPrefix)) {
                 continue;
             }
-            OrderResponse response = place(strategy, accountId, symbol, quote, cycleSequence);
-            if (response.status() == OrderStatus.REJECTED) {
-                rejected++;
-            } else {
-                submitted++;
-                kept.add(response);
+            missingQuotes.add(quote);
+            kept.add(null);
+        }
+        if (!missingQuotes.isEmpty()) {
+            List<PlaceOrderRequest> requests = missingQuotes.stream()
+                    .map(quote -> quoteRequest(strategy, accountId, symbol, quote, cycleSequence))
+                    .toList();
+            try {
+                var batch = orderRpcApi.placeBatch(new BatchPlaceOrderRequest(requests));
+                if (batch == null) {
+                    // 兼容旧的嵌入式调用方；生产 Feign 实现始终返回批量结果。
+                    for (DesiredQuote quote : missingQuotes) {
+                        OrderResponse response = orderRpcApi.place(
+                                quoteRequest(strategy, accountId, symbol, quote, cycleSequence));
+                        if (response == null || response.status() == OrderStatus.REJECTED) {
+                            rejected++;
+                            continue;
+                        }
+                        submitted++;
+                        int placeholder = kept.indexOf(null);
+                        if (placeholder >= 0) {
+                            kept.set(placeholder, response);
+                        } else {
+                            kept.add(response);
+                        }
+                    }
+                    return new ReconcileResult(submitted, canceled, rejected);
+                }
+                for (int i = 0; i < requests.size(); i++) {
+                    int resultIndex = i;
+                    var item = batch.results().stream()
+                            .filter(result -> result.index() == resultIndex)
+                            .findFirst()
+                            .orElse(null);
+                    OrderResponse response = item == null ? null : item.order();
+                    if (item == null || !item.success() || response == null
+                            || response.status() == OrderStatus.REJECTED) {
+                        rejected++;
+                        continue;
+                    }
+                    submitted++;
+                    // 占位元素只用于限制本周期的最大报价数，成功后替换为真实订单。
+                    int placeholder = kept.indexOf(null);
+                    if (placeholder >= 0) {
+                        kept.set(placeholder, response);
+                    } else {
+                        kept.add(response);
+                    }
+                }
+            } catch (UnsupportedOperationException ex) {
+                // 兼容尚未实现批量 RPC 的嵌入式调用方；线上订单服务提供批量接口。
+                for (DesiredQuote quote : missingQuotes) {
+                    OrderResponse response = orderRpcApi.place(
+                            quoteRequest(strategy, accountId, symbol, quote, cycleSequence));
+                    if (response == null || response.status() == OrderStatus.REJECTED) {
+                        rejected++;
+                        continue;
+                    }
+                    submitted++;
+                    int placeholder = kept.indexOf(null);
+                    if (placeholder >= 0) {
+                        kept.set(placeholder, response);
+                    } else {
+                        kept.add(response);
+                    }
+                }
+            } catch (RuntimeException ex) {
+                // 批量请求失败时只跳过当前账户的报价，不能让一个账户阻断其他产品线。
+                // 下一周期会重新读取 JVM 快照并重试；资金校验仍由下单与账户单写者严格执行。
+                rejected += requests.size();
             }
         }
         return new ReconcileResult(submitted, canceled, rejected);
@@ -751,13 +817,20 @@ public class MarketMakerService {
                                 String symbol,
                                 DesiredQuote quote,
                                 long cycleSequence) {
+        return orderRpcApi.place(quoteRequest(strategy, accountId, symbol, quote, cycleSequence));
+    }
+
+    private PlaceOrderRequest quoteRequest(MarketMakerProperties.Strategy strategy,
+                                           long accountId,
+                                           String symbol,
+                                           DesiredQuote quote,
+                                           long cycleSequence) {
         String accountPrefix = accountPrefix(strategy, symbol, accountId);
         String clientOrderId = quotePrefix(accountPrefix, quote.side(), quote.level())
                 + cycleSequence + "-" + orderNonce;
-        PlaceOrderRequest request = new PlaceOrderRequest(accountId, clientOrderId, symbol, quote.side(),
+        return new PlaceOrderRequest(accountId, clientOrderId, symbol, quote.side(),
                 OrderType.LIMIT, TimeInForce.GTX, quote.priceTicks(), quote.quantitySteps(),
                 strategy.getMarginMode(), PositionSide.NET, false, true);
-        return orderRpcApi.place(request);
     }
 
     private void maybeTrade(MarketMakerProperties.Strategy strategy,

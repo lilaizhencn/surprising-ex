@@ -60,6 +60,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -173,6 +174,13 @@ public class OrderService {
 
     @Transactional
     public OrderResponse place(PlaceOrderRequest request) {
+        return place(request, null);
+    }
+
+    /**
+     * 批量下单使用同一用户的账户修订号序列；普通单笔下单仍严格读取当前 JVM 快照。
+     */
+    private OrderResponse place(PlaceOrderRequest request, BatchReservationSequence sequence) {
         PlaceOrderRequest normalized = normalize(request);
         String traceId = TraceContext.currentOrCreate();
         ProductLine productLine = currentProductLine();
@@ -222,7 +230,7 @@ public class OrderService {
         long orderId = orderRepository.nextSequence("order");
         ReservationPlan reservationPlan = ReservationPlan.none();
         if (validation.accepted() && (!normalized.reduceOnly() || requiresReduceOnlyFunds(normalized, validation))) {
-            reservationPlan = planOpeningFunds(normalized, orderId, validation, feeSnapshot);
+            reservationPlan = planOpeningFunds(normalized, orderId, validation, feeSnapshot, sequence);
             if (!reservationPlan.accepted()) {
                 validation = ValidationResult.reject(reservationPlan.rejectReason(),
                         validation.instrumentVersion(), validation.instrumentType(), validation.contractType());
@@ -279,7 +287,7 @@ public class OrderService {
                 : status == OrderStatus.PENDING_RESERVE ? OrderEventType.RESERVE_PENDING : OrderEventType.ACCEPTED;
         enqueueOrderEvent(order, eventType, validation.rejectReason(), now, traceId);
         if (status == OrderStatus.PENDING_RESERVE) {
-            enqueueAccountReservation(order, reservationPlan.command(), now, traceId);
+            enqueueAccountReservation(order, reservationPlan.command(), reservationPlan.dependsOnCommandId(), now, traceId);
         } else if (validation.accepted()) {
             enqueueCommand(order, OrderCommandType.PLACE, now, traceId);
         }
@@ -291,9 +299,10 @@ public class OrderService {
         List<PlaceOrderRequest> orders = request == null ? List.of() : request.orders();
         requireBatchSize(orders.size(), 20, "orders");
         List<OrderBatchItemResponse> results = new ArrayList<>();
+        BatchReservationSequence sequence = new BatchReservationSequence();
         for (int i = 0; i < orders.size(); i++) {
             try {
-                OrderResponse order = place(orders.get(i));
+                OrderResponse order = place(orders.get(i), sequence);
                 results.add(new OrderBatchItemResponse(i, true, "completed", order));
             } catch (IllegalArgumentException | IllegalStateException ex) {
                 results.add(new OrderBatchItemResponse(i, false, ex.getMessage(), null));
@@ -463,11 +472,12 @@ public class OrderService {
     private ReservationPlan planOpeningFunds(PlaceOrderRequest request,
                                              long orderId,
                                              ValidationResult validation,
-                                             OrderFeeSnapshot feeSnapshot) {
+                                             OrderFeeSnapshot feeSnapshot,
+                                             BatchReservationSequence sequence) {
         if (validation.instrumentType() == InstrumentType.SPOT) {
             return planSpotReservation(request, orderId, validation.instrumentVersion(), feeSnapshot);
         }
-        return planDerivativeReservation(request, orderId, validation.instrumentVersion());
+        return planDerivativeReservation(request, orderId, validation.instrumentVersion(), sequence);
     }
 
     private ReservationPlan planSpotReservation(PlaceOrderRequest request,
@@ -493,7 +503,8 @@ public class OrderService {
 
     private ReservationPlan planDerivativeReservation(PlaceOrderRequest request,
                                                       long orderId,
-                                                      long instrumentVersion) {
+                                                      long instrumentVersion,
+                                                      BatchReservationSequence sequence) {
         var requirement = orderMarginRepository.requirement(
                 request.symbol(), instrumentVersion, request.userId(), request.marginMode(), request.positionSide(), request.side(),
                 request.orderType(), request.priceTicks(), request.quantitySteps(),
@@ -514,12 +525,16 @@ public class OrderService {
         } catch (IllegalArgumentException ex) {
             return ReservationPlan.reject("unsupported margin account type " + requirement.get().accountType());
         }
+        ReservationSequenceSlot slot = sequence == null
+                ? new ReservationSequenceSlot(
+                placementStateService.accountRevision(currentProductLine(), request.userId()), null)
+                : sequence.next(currentProductLine(), request.userId(), orderId,
+                placementStateService.accountRevision(currentProductLine(), request.userId()));
         return ReservationPlan.accept(new OrderReserveAccountCommand(
                 orderId, request.symbol(), request.side(), OrderReservationKind.DERIVATIVE_MARGIN, accountType,
                 requirement.get().asset(), request.marginMode(), request.positionSide(),
                 request.quantitySteps(), request.reduceOnly(),
-                requirement.get().initialMarginUnits(),
-                placementStateService.accountRevision(currentProductLine(), request.userId())));
+                requirement.get().initialMarginUnits(), slot.expectedAccountRevision()), slot.dependsOnCommandId());
     }
 
     private TestOrderResponse dryRunOpeningFunds(PlaceOrderRequest request,
@@ -1103,6 +1118,7 @@ public class OrderService {
 
     private void enqueueAccountReservation(OrderRecord order,
                                            OrderReserveAccountCommand reservation,
+                                           String dependsOnCommandId,
                                            Instant now,
                                            String traceId) {
         AccountUserCommand command = new AccountUserCommand(
@@ -1113,7 +1129,7 @@ public class OrderService {
                 AccountUserCommandType.ORDER_RESERVE,
                 "ORDER",
                 String.valueOf(order.orderId()),
-                null,
+                dependsOnCommandId,
                 payload(reservation),
                 now,
                 traceId);
@@ -1238,22 +1254,55 @@ public class OrderService {
         }
     }
 
-    private record ReservationPlan(OrderReserveAccountCommand command, String rejectReason) {
+    private record ReservationPlan(OrderReserveAccountCommand command,
+                                   String rejectReason,
+                                   String dependsOnCommandId) {
 
         private static ReservationPlan none() {
-            return new ReservationPlan(null, null);
+            return new ReservationPlan(null, null, null);
         }
 
         private static ReservationPlan accept(OrderReserveAccountCommand command) {
-            return new ReservationPlan(command, null);
+            return new ReservationPlan(command, null, null);
+        }
+
+        private static ReservationPlan accept(OrderReserveAccountCommand command, String dependsOnCommandId) {
+            return new ReservationPlan(command, null, dependsOnCommandId);
         }
 
         private static ReservationPlan reject(String reason) {
-            return new ReservationPlan(null, reason);
+            return new ReservationPlan(null, reason, null);
         }
 
         private boolean accepted() {
             return rejectReason == null || rejectReason.isBlank();
+        }
+    }
+
+    private record ReservationSequenceSlot(long expectedAccountRevision, String dependsOnCommandId) {
+    }
+
+    /**
+     * 批量请求内按用户建立账户单写者的修订号链；链外并发命令仍会触发严格修订号冲突。
+     */
+    private final class BatchReservationSequence {
+        private final Map<Long, Long> baseRevisions = new HashMap<>();
+        private final Map<Long, Integer> counts = new HashMap<>();
+        private final Map<Long, String> previousCommands = new HashMap<>();
+
+        private ReservationSequenceSlot next(ProductLine productLine,
+                                              long userId,
+                                              long orderId,
+                                              long currentRevision) {
+            if (currentRevision <= 0L) {
+                return new ReservationSequenceSlot(0L, null);
+            }
+            long base = baseRevisions.computeIfAbsent(userId, ignored -> currentRevision);
+            int index = counts.getOrDefault(userId, 0);
+            String dependency = previousCommands.get(userId);
+            counts.put(userId, index + 1);
+            previousCommands.put(userId, reservationCommandId(productLine, orderId));
+            return new ReservationSequenceSlot(Math.addExact(base, index), dependency);
         }
     }
 

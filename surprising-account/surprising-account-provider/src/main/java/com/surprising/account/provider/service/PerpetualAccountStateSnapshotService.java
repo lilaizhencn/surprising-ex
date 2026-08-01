@@ -42,8 +42,9 @@ public class PerpetualAccountStateSnapshotService {
     private final AccountOutboxRepository outboxRepository;
     private final ObjectMapper objectMapper;
 
-    /** 保留旧测试和嵌入式调用方构造签名；只有 RPC 初始化才需要修订号仓储。 */
-    @Autowired
+    /**
+     * 保留旧测试和嵌入式调用方构造签名；生产 Spring 容器必须使用下面包含修订号仓储的构造函数。
+     */
     public PerpetualAccountStateSnapshotService(AccountBalanceRepository balanceRepository,
                                                 AccountDeficitRepository deficitRepository,
                                                 AccountOrderLockRepository orderLockRepository,
@@ -57,6 +58,7 @@ public class PerpetualAccountStateSnapshotService {
                 positionRepository, positionModeRepository, sequenceRepository, null, outboxRepository, objectMapper);
     }
 
+    @Autowired
     public PerpetualAccountStateSnapshotService(AccountBalanceRepository balanceRepository,
                                                 AccountDeficitRepository deficitRepository,
                                                 AccountOrderLockRepository orderLockRepository,
