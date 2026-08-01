@@ -167,6 +167,11 @@ public class AccountOrderReservationService {
         SpotOrderReservationRepository.SpotReservationRow reservation =
                 spotReservationRepository.lock(orderId).orElse(null);
         if (reservation == null) {
+            // 成交结算可能已经把预占推进到 SETTLED/RELEASED，随后到达的撤单释放
+            // 只需视为已完成，不能因查不到活动行让 Kafka 命令反复失败。
+            if (spotReservationRepository.exists(orderId)) {
+                return 0L;
+            }
             if (reservationExpected) {
                 throw new IllegalStateException("missing spot reservation for order " + orderId);
             }

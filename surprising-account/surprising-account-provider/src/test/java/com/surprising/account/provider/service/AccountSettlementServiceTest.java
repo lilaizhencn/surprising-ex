@@ -406,7 +406,10 @@ class AccountSettlementServiceTest {
 
     @Test
     void productPositionMarginAdjustmentUsesProductBalanceAndLedger() throws Exception {
-        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(
+                jdbcTemplate, sequenceRepository, null, null,
+                AccountSettlementServiceTestFactory.instrument("BTC-USDT-260925", 7L,
+                        ProductLine.LINEAR_DELIVERY));
         when(sequenceRepository.nextProductLedgerEntryId()).thenReturn(7101L);
         when(jdbcTemplate.query(contains("FROM account_product_ledger_entries"), anyRowMapper(),
                 eq("iso-add-delivery"), eq(1001L), eq("USDT_DELIVERY"), eq("BTC-USDT-260925")))
@@ -519,7 +522,10 @@ class AccountSettlementServiceTest {
 
     @Test
     void addIsolatedPositionMarginMovesAvailableToLockedAndPositionMargin() throws Exception {
-        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(
+                jdbcTemplate, sequenceRepository, null, null,
+                AccountSettlementServiceTestFactory.instrument("BTC-USDT", 7L,
+                        ProductLine.LINEAR_PERPETUAL));
         when(sequenceRepository.nextLedgerEntryId()).thenReturn(10L);
         when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
                 eq("iso-add-1"), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
@@ -560,7 +566,10 @@ class AccountSettlementServiceTest {
 
     @Test
     void removeIsolatedPositionMarginRequiresFreshRiskBuffer() throws Exception {
-        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(
+                jdbcTemplate, sequenceRepository, null, null,
+                AccountSettlementServiceTestFactory.instrument("BTC-USDT", 7L,
+                        ProductLine.LINEAR_PERPETUAL));
         when(sequenceRepository.nextLedgerEntryId()).thenReturn(11L);
         when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
                 eq("iso-remove-1"), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());
@@ -599,7 +608,10 @@ class AccountSettlementServiceTest {
 
     @Test
     void removeIsolatedPositionMarginRejectsUnsafeRiskAfterRemoval() throws Exception {
-        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(jdbcTemplate, sequenceRepository);
+        AccountSettlementService repository = AccountSettlementServiceTestFactory.create(
+                jdbcTemplate, sequenceRepository, null, null,
+                AccountSettlementServiceTestFactory.instrument("BTC-USDT", 7L,
+                        ProductLine.LINEAR_PERPETUAL));
         when(sequenceRepository.nextLedgerEntryId()).thenReturn(12L);
         when(jdbcTemplate.query(contains("reference_type = 'POSITION_MARGIN_ADJUSTMENT'"), anyRowMapper(),
                 eq("iso-remove-risky"), eq(1001L), eq("BTC-USDT"))).thenReturn(List.of());

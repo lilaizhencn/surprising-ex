@@ -45,6 +45,13 @@ public class SpotOrderReservationRepository {
                 .stream().findFirst();
     }
 
+    /** 查询订单是否已有终态预占记录，用于成交结算与撤单释放并发到达时的幂等收敛。 */
+    public boolean exists(long orderId) {
+        return Boolean.TRUE.equals(jdbcTemplate.queryForObject(
+                "SELECT EXISTS (SELECT 1 FROM account_spot_order_reservations WHERE order_id = ?)",
+                Boolean.class, orderId));
+    }
+
     public Optional<SpotReservationRow> lock(long orderId, long userId, String symbol) {
         return jdbcTemplate.query("""
                 SELECT user_id, symbol, side, asset, reserved_units, settled_units, released_units

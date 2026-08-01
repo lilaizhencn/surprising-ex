@@ -17,6 +17,7 @@ import com.surprising.trading.order.repository.OrderTriggerStateRepository;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 /** 在订单业务事务内聚合持仓、仓位模式、普通订单、触发单和算法单的单表状态查询。 */
@@ -60,8 +61,8 @@ public class OrderPlacementStateService {
                                       OrderRepository orderRepository,
                                       OrderTriggerStateRepository triggerRepository,
                                       OrderAlgoStateRepository algoRepository,
-                                      PerpetualAccountStateSnapshotCache accountStateSnapshotCache,
-                                      PerpetualAccountStateRpcApi accountStateRpcApi) {
+                                      @Nullable PerpetualAccountStateSnapshotCache accountStateSnapshotCache,
+                                      @Nullable PerpetualAccountStateRpcApi accountStateRpcApi) {
         this.coordinationRepository = coordinationRepository;
         this.positionModeRepository = positionModeRepository;
         this.positionRepository = positionRepository;

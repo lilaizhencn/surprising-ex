@@ -588,7 +588,7 @@ public class MatchingService {
                 AccountUserCommandType.TRADE_SIDE_SETTLE,
                 "MATCHING",
                 properties.getKafka().getProductLine().name() + ":" + trade.symbol() + ":" + trade.tradeId(),
-                null,
+                reservationDependency(orderIdFor(role, trade), quantitySnapshot),
                 payload(side),
                 trade.eventTime(),
                 trade.traceId());
@@ -703,6 +703,23 @@ public class MatchingService {
     private String tradeSideCommandId(MatchTradeEvent trade, TradeParticipantRole role, long userId) {
         return "TRADE:" + properties.getKafka().getProductLine().name() + ":" + trade.symbol()
                 + ":" + trade.tradeId() + ":" + role.name() + ":" + userId;
+    }
+
+    /**
+     * 账户预占必须先于成交结算提交；没有预占的减仓成交不设置不存在的依赖。
+     */
+    private String reservationDependency(long orderId, OrderQuantitySnapshot quantitySnapshot) {
+        if (quantitySnapshot == null || quantitySnapshot.reservationAccountType() == null
+                || quantitySnapshot.reservationAsset() == null
+                || quantitySnapshot.reservationAsset().isBlank()
+                || quantitySnapshot.reservedUnits() <= 0L) {
+            return null;
+        }
+        return "ORDER_RESERVE:" + properties.getKafka().getProductLine().name() + ":" + orderId;
+    }
+
+    private static long orderIdFor(TradeParticipantRole role, MatchTradeEvent trade) {
+        return role == TradeParticipantRole.TAKER ? trade.takerOrderId() : trade.makerOrderId();
     }
 
     private AccountType accountType(String value) {

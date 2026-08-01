@@ -27,7 +27,13 @@ import com.surprising.account.provider.repository.TradeSettlementSideRepository;
 import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.InstrumentResponse;
+import com.surprising.instrument.api.model.InstrumentStatus;
+import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.product.api.ProductLine;
+import java.time.Instant;
+import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -56,6 +62,23 @@ final class AccountSettlementServiceTestFactory {
                                            AccountSequenceRepository sequenceRepository,
                                            LatestMarkPriceCache markPriceCache,
                                            PositionCacheAfterCommitSynchronizer positionCacheSynchronizer) {
+        return create(jdbcTemplate, sequenceRepository, markPriceCache, positionCacheSynchronizer, List.of());
+    }
+
+    static AccountSettlementService create(JdbcTemplate jdbcTemplate,
+                                           AccountSequenceRepository sequenceRepository,
+                                           LatestMarkPriceCache markPriceCache,
+                                           PositionCacheAfterCommitSynchronizer positionCacheSynchronizer,
+                                           InstrumentResponse... instruments) {
+        return create(jdbcTemplate, sequenceRepository, markPriceCache, positionCacheSynchronizer,
+                instruments == null ? List.of() : List.of(instruments));
+    }
+
+    private static AccountSettlementService create(JdbcTemplate jdbcTemplate,
+                                                   AccountSequenceRepository sequenceRepository,
+                                                   LatestMarkPriceCache markPriceCache,
+                                                   PositionCacheAfterCommitSynchronizer positionCacheSynchronizer,
+                                                   List<InstrumentResponse> instruments) {
         AccountLedgerRepository accountLedgers = new AccountLedgerRepository(jdbcTemplate);
         ProductLedgerRepository productLedgers = new ProductLedgerRepository(jdbcTemplate);
         AdminBalanceAdjustmentRepository adminAdjustments =
@@ -71,7 +94,12 @@ final class AccountSettlementServiceTestFactory {
         PositionMarginRepository positionMargins = new PositionMarginRepository(jdbcTemplate);
         AccountProperties accountProperties = new AccountProperties();
         InstrumentSnapshotCache snapshotCache = new InstrumentSnapshotCache();
-        snapshotCache.replace(ProductLine.LINEAR_PERPETUAL, java.util.List.of(), java.util.Map.of());
+        for (ProductLine productLine : ProductLine.values()) {
+            List<InstrumentResponse> lineInstruments = instruments.stream()
+                    .filter(value -> value.contractType().productLine() == productLine)
+                    .toList();
+            snapshotCache.replace(productLine, lineInstruments, java.util.Map.of());
+        }
         RiskPositionSnapshotRepository riskSnapshots = new RiskPositionSnapshotRepository(jdbcTemplate);
         LiquidationOrderContextRepository liquidationContexts =
                 new LiquidationOrderContextRepository(jdbcTemplate);
@@ -145,5 +173,25 @@ final class AccountSettlementServiceTestFactory {
                 openInterestShards,
                 positionOpenInterest,
                 spotSettlement);
+    }
+
+    static InstrumentResponse instrument(String symbol, long version, ProductLine productLine) {
+        ContractType contractType = ContractType.valueOf(productLine.contractTypeCode());
+        InstrumentType instrumentType = switch (productLine) {
+            case SPOT -> InstrumentType.SPOT;
+            case LINEAR_PERPETUAL, INVERSE_PERPETUAL -> InstrumentType.PERPETUAL;
+            case LINEAR_DELIVERY, INVERSE_DELIVERY -> InstrumentType.DELIVERY;
+            case OPTION -> InstrumentType.OPTION;
+        };
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        return new InstrumentResponse(symbol, version, instrumentType, contractType,
+                "BTC", "USDT", "USDT", 1_000_000L, "USDT",
+                1L, 1L, 1L, 100_000L, 1L, 1_000_000_000L, 1L,
+                1, 3, List.of("LIMIT"), List.of("GTC"), true, true, true,
+                100_000_000L, 10_000L, 5_000L, 2L, 5L,
+                500_000_000_000_000L, 300_000L, 25_000_000_000_000L,
+                8, 0L, 100_000L, -100_000L, 1_000_000_000L, 1,
+                null, null, null, null, null, null, null,
+                InstrumentStatus.TRADING, now, now, now, List.of(), List.of());
     }
 }
