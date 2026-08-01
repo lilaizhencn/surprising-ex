@@ -675,8 +675,11 @@ public class AccountService {
                 command.settlementPriceTicks(), spec);
         long ledgerDeltaUnits = lifecycleLedgerDeltaUnits(command.referenceType(),
                 command.settlementPriceTicks(), spec, position, change);
+        // 账本引用必须使用稳定的生命周期键，不能直接复用带产品线前缀的命令 ID。
+        String lifecycleReferenceId = lifecycleReferenceId(command.referenceType(), command.symbol(),
+                position.instrumentVersion(), position);
         boolean applied = accountSettlementService.settleLifecyclePnl(
-                derivativeAccountType(spec), userId, spec.settleAsset(), command.referenceType(), commandId,
+                derivativeAccountType(spec), userId, spec.settleAsset(), command.referenceType(), lifecycleReferenceId,
                 command.reason(), command.symbol(), position.marginMode(), ledgerDeltaUnits, command.eventTime());
         if (!applied) {
             return findPosition(productLine, userId, command.symbol(),
