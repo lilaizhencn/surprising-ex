@@ -38,6 +38,19 @@ Redis 是查询投影，不应承担资金条件判断。迁移后保留 Redis �
 避免不同 Kafka 消费线程或不同节点用旧的另一半字段覆盖新状态。钱包事件的 `accountRevision` 只接受
 更大的修订号；相同事件重放是幂等的。
 
+#### Redis 持仓投影、风控和强平的影响
+
+这次永续迁移不会删除 Redis 持仓投影，也不会把 Redis 变成资金事实源。三者的边界必须保持如下：
+
+| 组件 | 现在的作用 | 永续迁移后的作用 | 不能做的事 |
+| --- | --- | --- | --- |
+| `RedisPositionCache` / `PositionCacheProjectionConsumer` | 消费 `PositionUpdatedEvent`，按持仓键和 revision 做 Lua CAS，提供查询投影 | 继续作为 API、WebSocket 和后台查询的低延迟读模型；从账户 canonical 事件重建 | 不能决定可用余额、可平数量或是否允许强平；Redis 异常不能被解释为零仓位 |
+| `PositionSnapshotCache` | 风控、强平、订单各自维护的 JVM 持仓读模型，旧 revision 不覆盖新状态 | 作为各模块实时计算输入；事件缺失、产品线不符或快照未就绪时 fail-closed | 不能在没有版本栅栏时单独批准资金变更 |
+| `RedisRiskStateStore` | 风险组状态、反向索引、租约和重建协调 | 继续承担跨节点协调、租约、恢复投影；风险计算直接使用本节点 JVM 风险组 | 不能在本地快照缺失时回查数据库拼装风险组 |
+| `LiquidationService` 的持仓查询 | 当前仍用候选 claim、`account_positions FOR UPDATE` 和风险快照 JOIN 做最终安全复核 | 账户版本栅栏上线后改为发送带 `positionRevision` 的强平账户命令；账户单写者原子拒绝旧候选 | 在版本栅栏完成前删除数据库最终行锁或 JOIN |
+
+因此，Redis 清空、节点重启、Kafka 重放或投影延迟只会影响查询可用性和计算 readiness，不得改变账户余额、持仓或强平事实。迁移顺序必须是“账户事件/版本栅栏 → JVM 快照 → 影子对账 → 强平命令切换”，不能先删 Redis 或先删除强平数据库复核。
+
 ### 2.3 风控
 
 [`RiskService`](../surprising-margin-ops/surprising-risk-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java) 已有 `localGroups`，但 `scanPositionUpdates` 在本地组缺失或过期时仍通过 `RedisRiskStateStore` 和 `RiskRepository.cachedRiskGroup` 恢复；`scanMarkPrice` 通过 Redis 反向索引找到风险组，再从 Redis 批量读取状态。风险快照、风险事件和强平候选在数据库事务中落库。
