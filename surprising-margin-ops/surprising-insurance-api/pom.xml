@@ -17,7 +17,7 @@
     <dependencies>
         <dependency>
             <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-starter-openfeign</artifactId>
+            <artifactId>spring-cloud-openfeign-core</artifactId>
         </dependency>
         <dependency>
             <groupId>jakarta.validation</groupId>
