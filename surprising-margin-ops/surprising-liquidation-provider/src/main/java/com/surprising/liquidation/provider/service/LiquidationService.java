@@ -1,5 +1,6 @@
 package com.surprising.liquidation.provider.service;
 
+import com.surprising.account.api.cache.PositionSnapshotCache;
 import com.surprising.liquidation.api.model.AdminCursorPage;
 import com.surprising.liquidation.api.model.LiquidationOrderQueryResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderResponse;
@@ -35,6 +36,7 @@ import java.util.HashSet;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
@@ -56,6 +58,7 @@ import tools.jackson.databind.ObjectMapper;
     private final LiquidationSequenceRepository sequenceRepository;
     private final LiquidationSizingPolicy sizingPolicy;
     private final LiquidationPriceCalculator priceCalculator;
+    private final PositionSnapshotCache positionSnapshotCache;
 
     public LiquidationService(ObjectMapper objectMapper,
                               LiquidationProperties properties,
@@ -68,6 +71,24 @@ import tools.jackson.databind.ObjectMapper;
                               LiquidationSequenceRepository sequenceRepository,
                               LiquidationSizingPolicy sizingPolicy,
                               LiquidationPriceCalculator priceCalculator) {
+        this(objectMapper, properties, liquidationRepository, candidateRepository, positionRepository,
+                auditRepository, adminActionRepository, orderPersistenceService, sequenceRepository, sizingPolicy,
+                priceCalculator, null);
+    }
+
+    @Autowired
+    public LiquidationService(ObjectMapper objectMapper,
+                              LiquidationProperties properties,
+                              LiquidationRepository liquidationRepository,
+                              LiquidationCandidateRepository candidateRepository,
+                              LiquidationPositionRepository positionRepository,
+                              LiquidationAuditRepository auditRepository,
+                              LiquidationAdminActionRepository adminActionRepository,
+                              LiquidationOrderPersistenceService orderPersistenceService,
+                              LiquidationSequenceRepository sequenceRepository,
+                              LiquidationSizingPolicy sizingPolicy,
+                              LiquidationPriceCalculator priceCalculator,
+                              PositionSnapshotCache positionSnapshotCache) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.liquidationRepository = liquidationRepository;
@@ -79,6 +100,7 @@ import tools.jackson.databind.ObjectMapper;
         this.sequenceRepository = sequenceRepository;
         this.sizingPolicy = sizingPolicy;
         this.priceCalculator = priceCalculator;
+        this.positionSnapshotCache = positionSnapshotCache;
     }
 
     @Transactional
@@ -114,8 +136,21 @@ import tools.jackson.databind.ObjectMapper;
         List<Long> readyIds = uniqueEvents.keySet().stream().filter(id -> !retrySet.contains(id)).toList();
         List<ClaimedCandidate> claimed = candidateRepository.claimAll(readyIds);
         long candidatesClaimed = System.nanoTime();
+        List<ClaimedCandidate> activeCandidates = claimed.stream()
+                .filter(candidate -> !knownStalePosition(candidate))
+                .toList();
+        claimed.stream()
+                .filter(candidate -> !activeCandidates.contains(candidate))
+                .forEach(candidate -> {
+                    candidateRepository.updateStatus(candidate.candidateId(), "CANCELED");
+                    insertAudit(candidate.candidateId(), 0L, candidate.userId(), candidate.symbol(),
+                            candidate.marginMode(), candidate.positionSide(),
+                            LiquidationSideResolver.closeSide(candidate.signedQuantitySteps()),
+                            LiquidationSideResolver.closeQuantity(candidate.signedQuantitySteps()),
+                            LiquidationOrderStatus.CANCELED, "STALE_POSITION_SNAPSHOT");
+                });
         Map<Long, com.surprising.liquidation.provider.model.LiquidationCloseState> closeStates =
-                positionRepository.lockAll(claimed);
+                positionRepository.lockAll(activeCandidates);
         long positionsLocked = System.nanoTime();
         List<CandidateInputRequest> inputRequests = claimed.stream()
                 .filter(candidate -> closeStates.containsKey(candidate.candidateId()))
@@ -125,8 +160,8 @@ import tools.jackson.databind.ObjectMapper;
                 .toList();
         Map<Long, CandidateInputs> inputs = liquidationRepository.candidateInputs(inputRequests);
         long inputsLoaded = System.nanoTime();
-        List<PendingSubmission> pending = new java.util.ArrayList<>(claimed.size());
-        for (ClaimedCandidate candidate : claimed) {
+        List<PendingSubmission> pending = new java.util.ArrayList<>(activeCandidates.size());
+        for (ClaimedCandidate candidate : activeCandidates) {
             Long markPriceTicks = markPrices.get(new InstrumentKey(candidate.symbol(), candidate.instrumentVersion()));
             if (markPriceTicks == null) {
                 throw new IllegalStateException("captured mark price missing for " + candidate.symbol());
@@ -174,6 +209,17 @@ import tools.jackson.databind.ObjectMapper;
                     elapsedMillis(ordersSubmitted, auditsInserted), elapsedMillis(batchStarted, auditsInserted));
         }
         return new CandidateBatchResult(retryIds);
+    }
+
+    /** 只有确认本地快照已经领先候选版本时才短路，快照缺失或落后仍交给原有数据库复核。 */
+    private boolean knownStalePosition(ClaimedCandidate candidate) {
+        if (positionSnapshotCache == null) {
+            return false;
+        }
+        return positionSnapshotCache.position(candidate.userId(), candidate.symbol(), candidate.marginMode(),
+                        candidate.positionSide())
+                .map(current -> current.revision() > candidate.positionRevision())
+                .orElse(false);
     }
 
     private PendingSubmission prepareClaimedCandidate(
