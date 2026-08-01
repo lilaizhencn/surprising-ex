@@ -213,9 +213,11 @@ public class AccountOutboxRepository {
         if (!kafka.isProductTopicsEnabled()) {
             return;
         }
-        sql.append("   AND ").append(alias).append(".topic IN (?, ?, ?, ?)\n");
+        sql.append("   AND ").append(alias).append(".topic IN (?, ?, ?, ?, ?, ?)\n");
         args.add(kafka.getPositionEventsTopic());
+        args.add(kafka.getOpenInterestEventsTopic());
         args.add(kafka.getLiquidationFeeEventsTopic());
+        args.add(kafka.getRiskWalletEventsTopic());
         args.add(kafka.getCommandResultsTopic());
         args.add(kafka.getUserCommandsTopic());
     }
