@@ -51,7 +51,6 @@ import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.model.ValidationResult;
-import com.surprising.trading.order.repository.OrderFeeRepository;
 import com.surprising.trading.order.repository.OrderEventRepository;
 import com.surprising.trading.order.repository.OrderMarginRepository;
 import com.surprising.trading.order.repository.OrderRepository;
@@ -87,12 +86,12 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final OrderEventRepository orderEventRepository;
     private final OrderPlacementStateService placementStateService;
-    private final OrderFeeRepository orderFeeRepository;
     private final OrderMarginRepository orderMarginRepository;
     private final SpotOrderReservationRepository spotOrderReservationRepository;
     private final OutboxRepository outboxRepository;
     private final RedisOpenOrderView openOrderView;
     private final OrderInstrumentLifecycleFenceService lifecycleFenceService;
+    private final OrderFeeSnapshotLookup feeSnapshotLookup;
 
     public OrderService(ObjectMapper objectMapper,
                         TradingOrderProperties properties,
@@ -101,14 +100,13 @@ public class OrderService {
                         OrderRepository orderRepository,
                         OrderEventRepository orderEventRepository,
                         OrderPlacementStateService placementStateService,
-                        OrderFeeRepository orderFeeRepository,
                         OrderMarginRepository orderMarginRepository,
                         SpotOrderReservationRepository spotOrderReservationRepository,
                         OutboxRepository outboxRepository) {
         this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderEventRepository,
                 placementStateService,
-                orderFeeRepository, orderMarginRepository, spotOrderReservationRepository, outboxRepository,
-                null, null);
+                orderMarginRepository, spotOrderReservationRepository, outboxRepository,
+                null, null, null);
     }
 
     public OrderService(ObjectMapper objectMapper,
@@ -118,14 +116,30 @@ public class OrderService {
                         OrderRepository orderRepository,
                         OrderEventRepository orderEventRepository,
                         OrderPlacementStateService placementStateService,
-                        OrderFeeRepository orderFeeRepository,
                         OrderMarginRepository orderMarginRepository,
                         SpotOrderReservationRepository spotOrderReservationRepository,
                         OutboxRepository outboxRepository,
                         RedisOpenOrderView openOrderView) {
         this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderEventRepository,
-                placementStateService, orderFeeRepository, orderMarginRepository, spotOrderReservationRepository,
-                outboxRepository, openOrderView, null);
+                placementStateService, orderMarginRepository, spotOrderReservationRepository,
+                outboxRepository, openOrderView, null, null);
+    }
+
+    public OrderService(ObjectMapper objectMapper,
+                        TradingOrderProperties properties,
+                        OrderValidator orderValidator,
+                        ReduceOnlyValidator reduceOnlyValidator,
+                        OrderRepository orderRepository,
+                        OrderEventRepository orderEventRepository,
+                        OrderPlacementStateService placementStateService,
+                        OrderMarginRepository orderMarginRepository,
+                        SpotOrderReservationRepository spotOrderReservationRepository,
+                        OutboxRepository outboxRepository,
+                        RedisOpenOrderView openOrderView,
+                        OrderInstrumentLifecycleFenceService lifecycleFenceService) {
+        this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderEventRepository,
+                placementStateService, orderMarginRepository, spotOrderReservationRepository,
+                outboxRepository, openOrderView, lifecycleFenceService, null);
     }
 
     @Autowired
@@ -136,12 +150,12 @@ public class OrderService {
                         OrderRepository orderRepository,
                         OrderEventRepository orderEventRepository,
                         OrderPlacementStateService placementStateService,
-                        OrderFeeRepository orderFeeRepository,
                         OrderMarginRepository orderMarginRepository,
                         SpotOrderReservationRepository spotOrderReservationRepository,
                         OutboxRepository outboxRepository,
                         RedisOpenOrderView openOrderView,
-                        OrderInstrumentLifecycleFenceService lifecycleFenceService) {
+                        OrderInstrumentLifecycleFenceService lifecycleFenceService,
+                        OrderFeeSnapshotLookup feeSnapshotLookup) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.orderValidator = orderValidator;
@@ -149,12 +163,12 @@ public class OrderService {
         this.orderRepository = orderRepository;
         this.orderEventRepository = orderEventRepository;
         this.placementStateService = placementStateService;
-        this.orderFeeRepository = orderFeeRepository;
         this.orderMarginRepository = orderMarginRepository;
         this.spotOrderReservationRepository = spotOrderReservationRepository;
         this.outboxRepository = outboxRepository;
         this.openOrderView = openOrderView;
         this.lifecycleFenceService = lifecycleFenceService;
+        this.feeSnapshotLookup = feeSnapshotLookup;
     }
 
     @Transactional
@@ -195,7 +209,9 @@ public class OrderService {
         }
         OrderFeeSnapshot feeSnapshot = rejectedFeeSnapshot();
         if (validation.accepted()) {
-            var resolvedFeeSnapshot = orderFeeRepository.snapshot(normalized.userId(), normalized.symbol(),
+            var resolvedFeeSnapshot = feeSnapshotLookup == null
+                    ? java.util.Optional.<OrderFeeSnapshot>empty()
+                    : feeSnapshotLookup.lookup(productLine, normalized.userId(), normalized.symbol(),
                     validation.instrumentVersion(), now);
             if (resolvedFeeSnapshot.isEmpty()) {
                 validation = ValidationResult.reject("fee schedule unavailable", validation.instrumentVersion());
@@ -310,7 +326,9 @@ public class OrderService {
             validation = ValidationResult.ok(reduceOnlyValidation.instrumentVersion(),
                     validation.instrumentType(), validation.contractType());
         }
-        var resolvedFeeSnapshot = orderFeeRepository.snapshot(normalized.userId(), normalized.symbol(),
+        var resolvedFeeSnapshot = feeSnapshotLookup == null
+                ? java.util.Optional.<OrderFeeSnapshot>empty()
+                : feeSnapshotLookup.lookup(productLine, normalized.userId(), normalized.symbol(),
                 validation.instrumentVersion(), Instant.now());
         if (resolvedFeeSnapshot.isEmpty()) {
             return new TestOrderResponse(false, "fee schedule unavailable", validation.instrumentVersion(),

@@ -6,6 +6,7 @@ import com.surprising.trading.api.model.FeeScheduleQueryResponse;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
+import com.surprising.trading.api.model.FeeScheduleSnapshotResponse;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.service.TradingFeeService;
 import org.springframework.http.HttpStatus;
@@ -27,7 +28,8 @@ public class TradingFeeController {
         this.tradingFeeService = tradingFeeService;
     }
 
-    @GetMapping(TradingApiPaths.FEE_BASE_PATH + "/effective")
+    @GetMapping({TradingApiPaths.FEE_BASE_PATH + "/effective",
+            TradingApiPaths.INTERNAL_FEE_BASE_PATH + "/effective"})
     public EffectiveTradingFeeResponse effective(@RequestParam("userId") long userId,
                                                  @RequestParam("symbol") String symbol,
                                                  @RequestParam(value = "instrumentVersion", defaultValue = "0")
@@ -43,6 +45,16 @@ public class TradingFeeController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
+        }
+    }
+
+    /** 其他模块启动初始化使用的唯一完整费率快照入口。 */
+    @GetMapping(TradingApiPaths.INTERNAL_FEE_BASE_PATH + "/snapshot")
+    public FeeScheduleSnapshotResponse snapshot(@RequestParam("productLine") ProductLine productLine) {
+        try {
+            return tradingFeeService.snapshot(productLine);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
     }
 

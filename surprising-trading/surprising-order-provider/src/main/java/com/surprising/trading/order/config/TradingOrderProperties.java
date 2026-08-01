@@ -67,6 +67,7 @@ public class TradingOrderProperties {
         private String matchResultsTopic = "surprising.perp.match.results.v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
         private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
+        private String feeScheduleEventsTopic = "surprising.perp.fee.schedule.events.v1";
         private String openOrderViewGroupId = "surprising-order-open-view-v1";
         private String positionMaintenanceGroupId = "surprising-order-position-maintenance-v1";
         private int accountCommandResultsConcurrency = 32;
@@ -143,11 +144,20 @@ public class TradingOrderProperties {
         public void setInstrumentLifecycleDrainTopic(String instrumentLifecycleDrainTopic) {
             this.instrumentLifecycleDrainTopic = instrumentLifecycleDrainTopic;
         }
+        public String getFeeScheduleEventsTopic() {
+            return productTopicsEnabled ? productTopics().feeScheduleEventsTopic() : feeScheduleEventsTopic;
+        }
+        public void setFeeScheduleEventsTopic(String feeScheduleEventsTopic) {
+            this.feeScheduleEventsTopic = feeScheduleEventsTopic;
+        }
         public String getInstrumentLifecycleGroupId() {
             return productTopics().consumerGroup("order-instrument-lifecycle");
         }
         public String getInstrumentSnapshotGroupId() {
             return productTopics().consumerGroup("order-instrument-snapshot");
+        }
+        public String getFeeScheduleSnapshotGroupId() {
+            return productTopics().consumerGroup("order-fee-snapshot");
         }
         public String getOpenOrderViewGroupId() { return openOrderViewGroupId; }
         public void setOpenOrderViewGroupId(String openOrderViewGroupId) { this.openOrderViewGroupId = openOrderViewGroupId; }

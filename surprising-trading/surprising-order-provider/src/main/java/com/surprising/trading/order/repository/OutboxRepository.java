@@ -134,7 +134,7 @@ public class OutboxRepository {
                            ) AS head_event_type
                       FROM trading_outbox_events event
                      WHERE event.published_at IS NULL
-                       AND event.aggregate_type = 'ORDER'
+                       AND event.aggregate_type IN ('ORDER', 'FEE_SCHEDULE')
                 """);
         appendTopicScope(sql, "event", args);
         sql.append("""
@@ -260,7 +260,7 @@ public class OutboxRepository {
                 WITH candidates AS (
                     SELECT id
                       FROM trading_outbox_events
-                     WHERE aggregate_type = 'ORDER'
+                     WHERE aggregate_type IN ('ORDER', 'FEE_SCHEDULE')
                        AND published_at < ?
                      ORDER BY published_at ASC, id ASC
                      LIMIT ?
@@ -299,26 +299,31 @@ public class OutboxRepository {
         if (!kafka.isProductTopicsEnabled()) {
             return;
         }
-        sql.append("   AND ").append(alias).append(".topic IN (?, ?, ?)\n");
+        sql.append("   AND ").append(alias).append(".topic IN (?, ?, ?, ?)\n");
         args.add(kafka.getOrderEventsTopic());
         args.add(kafka.getOrderCommandsTopic());
         args.add(kafka.getAccountUserCommandsTopic());
+        args.add(kafka.getFeeScheduleEventsTopic());
     }
 
     private void requireCurrentProductTopic(String aggregateType, String topic) {
         TradingOrderProperties.Kafka kafka = properties.getKafka();
-        if (!kafka.isProductTopicsEnabled() || !"ORDER".equals(aggregateType)) {
+        if (!kafka.isProductTopicsEnabled()) {
             return;
         }
         String orderEventsTopic = kafka.getOrderEventsTopic();
         String orderCommandsTopic = kafka.getOrderCommandsTopic();
         String accountUserCommandsTopic = kafka.getAccountUserCommandsTopic();
-        if (!orderEventsTopic.equals(topic)
-                && !orderCommandsTopic.equals(topic)
-                && !accountUserCommandsTopic.equals(topic)) {
+        String feeScheduleEventsTopic = kafka.getFeeScheduleEventsTopic();
+        boolean orderAggregate = "ORDER".equals(aggregateType)
+                && (orderEventsTopic.equals(topic) || orderCommandsTopic.equals(topic)
+                || accountUserCommandsTopic.equals(topic));
+        boolean feeAggregate = "FEE_SCHEDULE".equals(aggregateType)
+                && feeScheduleEventsTopic.equals(topic);
+        if (!orderAggregate && !feeAggregate) {
             throw new IllegalStateException("trading outbox topic must match current product line: expected one of ["
                     + orderEventsTopic + ", " + orderCommandsTopic + ", " + accountUserCommandsTopic
-                    + "] actual=" + topic);
+                    + ", " + feeScheduleEventsTopic + "] actual=" + topic);
         }
     }
 

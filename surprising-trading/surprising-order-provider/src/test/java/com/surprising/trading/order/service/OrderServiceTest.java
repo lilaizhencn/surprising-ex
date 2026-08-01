@@ -48,7 +48,6 @@ import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.model.ValidationResult;
-import com.surprising.trading.order.repository.OrderFeeRepository;
 import com.surprising.trading.order.repository.OrderEventRepository;
 import com.surprising.trading.order.repository.OrderMarginRepository;
 import com.surprising.trading.order.repository.OrderRepository;
@@ -88,7 +87,7 @@ class OrderServiceTest {
     private OrderPlacementStateService placementStateService;
 
     @Mock
-    private OrderFeeRepository orderFeeRepository;
+    private OrderFeeSnapshotLookup feeSnapshotLookup;
 
     @Mock
     private OrderMarginRepository orderMarginRepository;
@@ -112,15 +111,15 @@ class OrderServiceTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         OrderService service = new OrderService(new ObjectMapper(), properties, orderValidator,
                 reduceOnlyValidator, orderRepository, orderEventRepository, placementStateService,
-                orderFeeRepository, orderMarginRepository, spotOrderReservationRepository,
-                outboxRepository, null, lifecycleFenceService);
+                orderMarginRepository, spotOrderReservationRepository,
+                outboxRepository, null, lifecycleFenceService, feeSnapshotLookup);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
         when(orderRepository.nextSequence("command")).thenReturn(9200L);
         when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         PlaceOrderRequest request = new PlaceOrderRequest(1001L, null, "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, true, false);
@@ -160,7 +159,7 @@ class OrderServiceTest {
         when(orderRepository.findByClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "dup-1"))
                 .thenReturn(Optional.empty(), Optional.of(existing));
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.insert(any(OrderRecord.class))).thenReturn(false);
@@ -217,7 +216,7 @@ class OrderServiceTest {
         OrderService service = service();
         when(orderRepository.findByClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "no-margin")).thenReturn(Optional.empty());
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
@@ -283,7 +282,7 @@ class OrderServiceTest {
     void missingFeeScheduleRejectsOrderBeforeMarginReservation() {
         OrderService service = service();
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.empty());
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
@@ -302,7 +301,7 @@ class OrderServiceTest {
     void leverageRiskLimitRejectsInsertedOrderWithoutPublishingCommand() {
         OrderService service = service();
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
@@ -324,7 +323,7 @@ class OrderServiceTest {
     void isolatedMarginOrdersReserveIsolatedMarginAndPublishCommand() {
         OrderService service = service();
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
@@ -357,7 +356,7 @@ class OrderServiceTest {
     void coinPerpetualOrdersReserveCoinPerpetualProductAccount() {
         OrderService service = service();
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USD"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USD"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
@@ -382,7 +381,7 @@ class OrderServiceTest {
     void spotOrderReservesSpotBalanceWithoutUsingPerpetualMargin() {
         OrderService service = service();
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(11L, InstrumentType.SPOT));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(11L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(11L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
@@ -422,7 +421,7 @@ class OrderServiceTest {
         verify(placementStateService).lockUserSymbolMarginScope(
                 ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT");
         verify(orderValidator, never()).validate(any());
-        verify(orderFeeRepository, never()).snapshot(anyLong(), anyString(), anyLong(), any());
+        verify(feeSnapshotLookup, never()).lookup(any(), anyLong(), anyString(), anyLong(), any());
         verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
                 anyLong(), anyLong(), anyLong(), anyLong());
         verify(orderRepository, never()).nextSequence("command");
@@ -451,7 +450,7 @@ class OrderServiceTest {
         OrderService service = service();
         when(placementStateService.positionMode(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(PositionMode.HEDGE);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
@@ -489,7 +488,7 @@ class OrderServiceTest {
         when(placementStateService.positionMode(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(PositionMode.HEDGE);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
@@ -520,7 +519,7 @@ class OrderServiceTest {
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L, InstrumentType.PERPETUAL,
                 ContractType.VANILLA_OPTION));
         when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT-260925-70000-C"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT-260925-70000-C"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
@@ -546,7 +545,7 @@ class OrderServiceTest {
         OrderService service = service();
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
@@ -572,7 +571,7 @@ class OrderServiceTest {
     void testOrderDryRunDoesNotPersistReserveOrPublish() {
         OrderService service = service();
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
                 eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
@@ -597,7 +596,7 @@ class OrderServiceTest {
         OrderService service = service();
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
@@ -635,7 +634,7 @@ class OrderServiceTest {
         when(orderRepository.nextSequence("command")).thenReturn(9200L, 9201L);
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
         when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
@@ -676,7 +675,7 @@ class OrderServiceTest {
         when(orderRepository.nextSequence("command")).thenReturn(9200L, 9201L);
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
         when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
@@ -708,7 +707,7 @@ class OrderServiceTest {
                 .thenReturn(Optional.of(new ReduceOnlyPosition(12L, 7L)));
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
@@ -741,7 +740,7 @@ class OrderServiceTest {
                 .thenReturn(Optional.of(new ReduceOnlyPosition(-9L, 17L)));
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(17L));
         when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(17L));
-        when(orderFeeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(17L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(17L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
         when(orderRepository.nextSequence("order")).thenReturn(9002L);
         when(orderRepository.nextSequence("event")).thenReturn(9100L);
@@ -994,8 +993,8 @@ class OrderServiceTest {
     private OrderService service(TradingOrderProperties properties) {
         return new OrderService(new ObjectMapper(), properties, orderValidator,
                 reduceOnlyValidator, orderRepository, orderEventRepository, placementStateService,
-                orderFeeRepository, orderMarginRepository,
-                spotOrderReservationRepository, outboxRepository);
+                orderMarginRepository,
+                spotOrderReservationRepository, outboxRepository, null, null, feeSnapshotLookup);
     }
 
     private PlaceOrderRequest request(String clientOrderId) {

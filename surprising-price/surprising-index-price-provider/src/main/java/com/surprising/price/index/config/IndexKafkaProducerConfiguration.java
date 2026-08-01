@@ -2,6 +2,8 @@ package com.surprising.price.index.config;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Collection;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -17,6 +19,7 @@ import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.ConsumerAwareRebalanceListener;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.JsonSerializer;
 import org.springframework.util.backoff.FixedBackOff;
@@ -46,7 +49,7 @@ public class IndexKafkaProducerConfiguration {
 
     @Bean
     public ConsumerFactory<String, String> indexPriceCacheConsumerFactory(IndexPriceProperties properties) {
-        return consumerFactory(properties, properties.getKafka().getCacheGroupId(), "earliest");
+        return consumerFactory(properties, properties.getKafka().getCacheGroupId(), "latest");
     }
 
     @Bean
@@ -57,6 +60,16 @@ public class IndexKafkaProducerConfiguration {
         factory.setConsumerFactory(consumerFactory);
         factory.setConcurrency(Math.max(1, properties.getKafka().getConcurrency()));
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.getContainerProperties().setConsumerRebalanceListener(new ConsumerAwareRebalanceListener() {
+            @Override
+            public void onPartitionsAssigned(Consumer<?, ?> consumer,
+                                              Collection<org.apache.kafka.common.TopicPartition> partitions) {
+                if (consumer != null && partitions != null && !partitions.isEmpty()) {
+                    // 指数价缓存只接受重启后的实时数据，不能用旧消息覆盖当前市场状态。
+                    consumer.seekToEnd(partitions);
+                }
+            }
+        });
         return factory;
     }
 

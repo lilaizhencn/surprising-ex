@@ -65,7 +65,8 @@ import tools.jackson.databind.ObjectMapper;
     }
 
     void onIndexPrice(String payload) {
-        parse(payload, IndexPriceEvent.class, "index price", event -> indexPrices.put(event.symbol(), event));
+        parse(payload, IndexPriceEvent.class, "index price", event -> indexPrices.compute(event.symbol(),
+                (ignored, current) -> current == null || newer(event, current) ? event : current));
     }
 
     @KafkaListener(topics = "#{__listener.bookTickerTopic()}", groupId = "#{__listener.groupId()}")
@@ -224,6 +225,13 @@ import tools.jackson.databind.ObjectMapper;
 
     private boolean fresh(Instant eventTime, Instant now) {
         return eventTime != null && Duration.between(eventTime, now).compareTo(properties.getCalculation().getMaxInputAge()) <= 0;
+    }
+
+    private boolean newer(IndexPriceEvent candidate, IndexPriceEvent current) {
+        return candidate.sequence() > current.sequence()
+                || candidate.sequence() == current.sequence()
+                && candidate.eventTime() != null
+                && (current.eventTime() == null || candidate.eventTime().isAfter(current.eventTime()));
     }
 
     private String resolveNodeId(String configured) {

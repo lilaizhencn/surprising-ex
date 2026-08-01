@@ -33,10 +33,12 @@ class TradingFeeServiceTest {
         OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
         OrderRepository orderRepository = mock(OrderRepository.class);
         InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
-        TradingFeeService service = new TradingFeeService(feeRepository, orderRepository, instrumentRuleLookup);
+        OrderFeeSnapshotLookup feeSnapshotLookup = mock(OrderFeeSnapshotLookup.class);
+        TradingFeeService service = new TradingFeeService(feeRepository, orderRepository, instrumentRuleLookup,
+                feeSnapshotLookup);
 
         when(instrumentRuleLookup.currentRule("BTC-USDT")).thenReturn(Optional.of(rule(7L)));
-        when(feeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(-50L, 350L, "VIP_SYMBOL")));
 
         var response = service.effectiveFee(1001L, "btc-usdt", 0L);
@@ -55,9 +57,11 @@ class TradingFeeServiceTest {
         OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
         OrderRepository orderRepository = mock(OrderRepository.class);
         InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
-        TradingFeeService service = new TradingFeeService(feeRepository, orderRepository, instrumentRuleLookup);
+        OrderFeeSnapshotLookup feeSnapshotLookup = mock(OrderFeeSnapshotLookup.class);
+        TradingFeeService service = new TradingFeeService(feeRepository, orderRepository, instrumentRuleLookup,
+                feeSnapshotLookup);
 
-        when(feeRepository.snapshot(eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(ProductLine.INVERSE_PERPETUAL,
                         -50L, 350L, "VIP_SYMBOL")));
 

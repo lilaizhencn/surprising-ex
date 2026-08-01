@@ -12,6 +12,7 @@ import com.surprising.trading.api.model.FeeScheduleSourceType;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
 import java.sql.ResultSet;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -22,95 +23,17 @@ class OrderFeeRepositoryTest {
 
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
-    void resolvesInstrumentDefaultFeeWhenNoUserOverrideExists() throws Exception {
+    void loadsAllSchedulesForStartupSnapshotOnly() throws Exception {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         OrderFeeRepository repository = new OrderFeeRepository(jdbcTemplate);
-        when(jdbcTemplate.query(contains("WITH instrument_fee"), any(RowMapper.class),
-                eq("BTC-USDT"), eq(1L), eq("BTC-USDT"), eq(1001L),
-                eq("BTC-USDT"), any(), any())).thenAnswer(invocation -> {
+        when(jdbcTemplate.query(contains("FROM trading_fee_schedules"), any(RowMapper.class),
+                eq(ProductLine.LINEAR_PERPETUAL.name()))).thenAnswer(invocation -> {
                     RowMapper mapper = invocation.getArgument(1);
-                    return List.of(mapper.mapRow(row(200L, 500L, "INSTRUMENT"), 0));
+                    return List.of(mapper.mapRow(row(7L, ProductLine.LINEAR_PERPETUAL, 200L, "BTC-USDT",
+                            200L, 500L, "VIP"), 0));
                 });
 
-        var snapshot = repository.snapshot(1001L, "BTC-USDT", 1L,
-                Instant.parse("2026-07-01T00:00:00Z"));
-
-        assertThat(snapshot).isPresent();
-        assertThat(snapshot.orElseThrow().productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
-        assertThat(snapshot.orElseThrow().makerFeeRatePpm()).isEqualTo(200L);
-        assertThat(snapshot.orElseThrow().takerFeeRatePpm()).isEqualTo(500L);
-        assertThat(snapshot.orElseThrow().source()).isEqualTo("INSTRUMENT");
-    }
-
-    @Test
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    void userSymbolFeeOverrideWinsOverInstrumentDefault() throws Exception {
-        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        OrderFeeRepository repository = new OrderFeeRepository(jdbcTemplate);
-        when(jdbcTemplate.query(contains("WITH instrument_fee"), any(RowMapper.class),
-                eq("BTC-USDT"), eq(1L), eq("BTC-USDT"), eq(1001L),
-                eq("BTC-USDT"), any(), any())).thenAnswer(invocation -> {
-                    RowMapper mapper = invocation.getArgument(1);
-                    return List.of(mapper.mapRow(row(-100L, 400L, "VIP_SYMBOL"), 0));
-                });
-
-        var snapshot = repository.snapshot(1001L, "BTC-USDT", 1L,
-                Instant.parse("2026-07-01T00:00:00Z"));
-
-        assertThat(snapshot).isPresent();
-        assertThat(snapshot.orElseThrow().makerFeeRatePpm()).isEqualTo(-100L);
-        assertThat(snapshot.orElseThrow().takerFeeRatePpm()).isEqualTo(400L);
-        assertThat(snapshot.orElseThrow().source()).isEqualTo("VIP_SYMBOL");
-    }
-
-    @Test
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    void sourcePriorityWinsBeforeEffectiveTimeForUserSchedules() throws Exception {
-        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        OrderFeeRepository repository = new OrderFeeRepository(jdbcTemplate);
-        when(jdbcTemplate.query(contains("source_priority ASC"), any(RowMapper.class),
-                eq("BTC-USDT"), eq(1L), eq("BTC-USDT"), eq(1001L),
-                eq("BTC-USDT"), any(), any())).thenAnswer(invocation -> {
-                    RowMapper mapper = invocation.getArgument(1);
-                    return List.of(mapper.mapRow(row(0L, 0L, "RISK_OVERRIDE_GLOBAL"), 0));
-                });
-
-        var snapshot = repository.snapshot(1001L, "BTC-USDT", 1L,
-                Instant.parse("2026-07-01T00:00:00Z"));
-
-        assertThat(snapshot).isPresent();
-        assertThat(snapshot.orElseThrow().source()).isEqualTo("RISK_OVERRIDE_GLOBAL");
-    }
-
-    @Test
-    void missingInstrumentReturnsEmptySnapshot() {
-        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        OrderFeeRepository repository = new OrderFeeRepository(jdbcTemplate);
-        when(jdbcTemplate.query(contains("WITH instrument_fee"), any(RowMapper.class),
-                eq("BTC-USDT"), eq(1L), eq("BTC-USDT"), eq(1001L),
-                eq("BTC-USDT"), any(), any())).thenReturn(List.of());
-
-        assertThat(repository.snapshot(1001L, "BTC-USDT", 1L,
-                Instant.parse("2026-07-01T00:00:00Z"))).isEmpty();
-    }
-
-    @Test
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    void resolvesProductLineFromInstrumentFee() throws Exception {
-        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        OrderFeeRepository repository = new OrderFeeRepository(jdbcTemplate);
-        when(jdbcTemplate.query(contains("AND product_line = (SELECT product_line FROM instrument_fee)"),
-                any(RowMapper.class), eq("BTC-USDT"), eq(1L), eq("BTC-USDT"), eq(1001L),
-                eq("BTC-USDT"), any(), any())).thenAnswer(invocation -> {
-                    RowMapper mapper = invocation.getArgument(1);
-                    return List.of(mapper.mapRow(row(ProductLine.INVERSE_DELIVERY, 120L, 420L, "VIP_SYMBOL"), 0));
-                });
-
-        var snapshot = repository.snapshot(1001L, "BTC-USDT", 1L,
-                Instant.parse("2026-07-01T00:00:00Z"));
-
-        assertThat(snapshot).isPresent();
-        assertThat(snapshot.orElseThrow().productLine()).isEqualTo(ProductLine.INVERSE_DELIVERY);
+        assertThat(repository.loadSnapshotSchedules(ProductLine.LINEAR_PERPETUAL)).hasSize(1);
     }
 
     @Test
@@ -133,19 +56,29 @@ class OrderFeeRepositoryTest {
                 .hasMessageContaining("makerFeeRatePpm cannot exceed takerFeeRatePpm");
     }
 
-    private ResultSet row(long makerFeeRatePpm, long takerFeeRatePpm, String source) throws Exception {
-        return row(ProductLine.LINEAR_PERPETUAL, makerFeeRatePpm, takerFeeRatePpm, source);
-    }
-
-    private ResultSet row(ProductLine productLine,
+    private ResultSet row(long id,
+                          ProductLine productLine,
+                          long userId,
+                          String symbol,
                           long makerFeeRatePpm,
                           long takerFeeRatePpm,
                           String source) throws Exception {
         ResultSet rs = mock(ResultSet.class);
+        when(rs.getLong("fee_schedule_id")).thenReturn(id);
         when(rs.getString("product_line")).thenReturn(productLine.name());
+        when(rs.getLong("user_id")).thenReturn(userId);
+        when(rs.getString("symbol")).thenReturn(symbol);
         when(rs.getLong("maker_fee_rate_ppm")).thenReturn(makerFeeRatePpm);
         when(rs.getLong("taker_fee_rate_ppm")).thenReturn(takerFeeRatePpm);
-        when(rs.getString("source")).thenReturn(source);
+        when(rs.getString("source_type")).thenReturn(source);
+        when(rs.getString("tier_code")).thenReturn("VIP1");
+        when(rs.getString("reason")).thenReturn("test");
+        when(rs.getString("status")).thenReturn(FeeScheduleStatus.ACTIVE.name());
+        Timestamp effective = Timestamp.from(Instant.parse("2026-07-01T00:00:00Z"));
+        when(rs.getTimestamp("effective_time")).thenReturn(effective);
+        when(rs.getTimestamp("expire_time")).thenReturn(null);
+        when(rs.getTimestamp("created_at")).thenReturn(effective);
+        when(rs.getTimestamp("updated_at")).thenReturn(effective);
         return rs;
     }
 }

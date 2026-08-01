@@ -11,10 +11,9 @@ import com.surprising.liquidation.provider.repository.LiquidationOrderRepository
 import com.surprising.liquidation.provider.repository.LiquidationSequenceRepository;
 import com.surprising.liquidation.provider.repository.LiquidationTradingOutboxRepository;
 import com.surprising.liquidation.provider.repository.LiquidationTradingOutboxRepository.NewOutboxEvent;
-import com.surprising.liquidation.provider.repository.LiquidationUserFeeRepository;
-import com.surprising.liquidation.provider.repository.LiquidationUserFeeRepository.UserFee;
-import com.surprising.liquidation.provider.repository.LiquidationUserFeeRepository.UserFeeRequest;
 import com.surprising.product.api.ProductLine;
+import com.surprising.trading.api.cache.FeeScheduleSnapshotCache;
+import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderCommandEvent;
 import com.surprising.trading.api.model.OrderCommandType;
@@ -48,7 +47,7 @@ public class LiquidationOrderPersistenceService {
     private final LiquidationOrderEventRepository eventRepository;
     private final LiquidationTradingOutboxRepository outboxRepository;
     private final LiquidationInstrumentSnapshotService instrumentSnapshotService;
-    private final LiquidationUserFeeRepository userFeeRepository;
+    private final FeeScheduleSnapshotCache feeScheduleSnapshotCache;
     private final LiquidationSequenceRepository sequenceRepository;
     private final LiquidationProperties properties;
 
@@ -57,14 +56,14 @@ public class LiquidationOrderPersistenceService {
             LiquidationOrderEventRepository eventRepository,
             LiquidationTradingOutboxRepository outboxRepository,
             LiquidationInstrumentSnapshotService instrumentSnapshotService,
-            LiquidationUserFeeRepository userFeeRepository,
+            FeeScheduleSnapshotCache feeScheduleSnapshotCache,
             LiquidationSequenceRepository sequenceRepository,
             LiquidationProperties properties) {
         this.orderRepository = orderRepository;
         this.eventRepository = eventRepository;
         this.outboxRepository = outboxRepository;
         this.instrumentSnapshotService = instrumentSnapshotService;
-        this.userFeeRepository = userFeeRepository;
+        this.feeScheduleSnapshotCache = feeScheduleSnapshotCache;
         this.sequenceRepository = sequenceRepository;
         this.properties = properties;
     }
@@ -165,15 +164,15 @@ public class LiquidationOrderPersistenceService {
         }
         Map<Long, LiquidationOrderRequest> requestByCandidate = new HashMap<>();
         requests.forEach(request -> requestByCandidate.put(request.candidateId(), request));
-        Map<Long, UserFee> overrides = userFeeRepository.findBestActive(defaults.values().stream()
-                .map(fee -> {
-                    LiquidationOrderRequest request = requestByCandidate.get(fee.candidateId());
-                    return new UserFeeRequest(fee.candidateId(), request.userId(), request.symbol(),
-                            fee.productLine(), request.now());
-                }).toList());
         Map<Long, FeeSnapshot> snapshots = new HashMap<>(defaults.size());
         defaults.forEach((candidateId, fee) -> {
-            UserFee override = overrides.get(candidateId);
+            LiquidationOrderRequest request = requestByCandidate.get(candidateId);
+            if (request == null) {
+                throw new IllegalStateException("强平候选请求不存在：" + candidateId);
+            }
+            FeeScheduleResponse override = feeScheduleSnapshotCache == null ? null
+                    : feeScheduleSnapshotCache.effective(fee.productLine(), request.userId(), request.symbol(),
+                    request.now()).orElse(null);
             snapshots.put(candidateId, override == null
                     ? new FeeSnapshot(fee.productLine(), fee.makerFeeRatePpm(), fee.takerFeeRatePpm())
                     : new FeeSnapshot(fee.productLine(), override.makerFeeRatePpm(), override.takerFeeRatePpm()));

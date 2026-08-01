@@ -72,6 +72,11 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return INSTRUMENT_EVENTS_TOPIC;
     }
 
+    /** 产品线隔离的费率配置事件 Topic。 */
+    public String feeScheduleEventsTopic() {
+        return topic("fee.schedule.events");
+    }
+
     public String accountPositionEventsTopic() {
         return topic("account.position.events");
     }

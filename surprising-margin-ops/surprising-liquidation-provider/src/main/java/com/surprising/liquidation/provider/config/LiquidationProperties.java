@@ -74,6 +74,7 @@ public class LiquidationProperties {
         private String matchResultsTopic = "surprising.perp.match.results.v1";
         private String orderCommandsTopic = "surprising.perp.order.commands.v1";
         private String orderEventsTopic = "surprising.perp.order.events.v1";
+        private String feeScheduleEventsTopic = "surprising.perp.fee.schedule.events.v1";
         private String instrumentSnapshotGroupId = "surprising-liquidation-instrument-snapshot-v1";
         private int candidateConcurrency = 32;
         private int matchResultConcurrency = 8;
@@ -143,12 +144,24 @@ public class LiquidationProperties {
             this.orderEventsTopic = orderEventsTopic;
         }
 
+        public String getFeeScheduleEventsTopic() {
+            return productTopicsEnabled ? productTopics().feeScheduleEventsTopic() : feeScheduleEventsTopic;
+        }
+
+        public void setFeeScheduleEventsTopic(String feeScheduleEventsTopic) {
+            this.feeScheduleEventsTopic = feeScheduleEventsTopic;
+        }
+
         public String getInstrumentSnapshotGroupId() {
             return instrumentSnapshotGroupId;
         }
 
         public void setInstrumentSnapshotGroupId(String instrumentSnapshotGroupId) {
             this.instrumentSnapshotGroupId = instrumentSnapshotGroupId;
+        }
+
+        public String getFeeScheduleSnapshotGroupId() {
+            return productTopics().consumerGroup("liquidation-fee-snapshot");
         }
 
         public int getCandidateConcurrency() {

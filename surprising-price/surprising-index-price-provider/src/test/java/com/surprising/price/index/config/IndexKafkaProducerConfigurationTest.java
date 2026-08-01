@@ -4,9 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.support.serializer.JsonSerializer;
 
@@ -46,5 +49,19 @@ class IndexKafkaProducerConfigurationTest {
         assertThat(config).containsEntry(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
         assertThat(config).containsEntry(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
         assertThat(config).containsEntry(JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
+    }
+
+    @Test
+    void cacheConsumerStartsFromLatestAndDoesNotReplayOldIndexPrices() {
+        IndexPriceProperties properties = new IndexPriceProperties();
+        properties.getKafka().setBootstrapServers("kafka-index:9092");
+
+        var factory = (DefaultKafkaConsumerFactory<String, String>)
+                new IndexKafkaProducerConfiguration().indexPriceCacheConsumerFactory(properties);
+
+        assertThat(factory.getConfigurationProperties())
+                .containsEntry(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest")
+                .containsEntry(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false)
+                .containsEntry(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
     }
 }

@@ -2,6 +2,8 @@ package com.surprising.price.mark.config;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Collection;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -17,6 +19,7 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.ConsumerAwareRebalanceListener;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.JsonSerializer;
 import org.springframework.util.backoff.FixedBackOff;
@@ -66,6 +69,16 @@ public class MarkKafkaConfiguration {
         factory.setConsumerFactory(markConsumerFactory);
         factory.setConcurrency(properties.getKafka().getConcurrency());
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.getContainerProperties().setConsumerRebalanceListener(new ConsumerAwareRebalanceListener() {
+            @Override
+            public void onPartitionsAssigned(Consumer<?, ?> consumer,
+                                              Collection<org.apache.kafka.common.TopicPartition> partitions) {
+                if (consumer != null && partitions != null && !partitions.isEmpty()) {
+                    // 标记价计算输入只接受重启后的实时数据，避免用历史盘口或指数价重算。
+                    consumer.seekToEnd(partitions);
+                }
+            }
+        });
         return factory;
     }
 

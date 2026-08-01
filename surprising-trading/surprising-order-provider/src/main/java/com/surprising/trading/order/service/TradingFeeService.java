@@ -5,13 +5,17 @@ import com.surprising.trading.api.model.FeeScheduleQueryResponse;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
+import com.surprising.trading.api.model.FeeScheduleSnapshotResponse;
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
+import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.InstrumentRuleLookup;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.repository.OrderFeeRepository;
 import com.surprising.trading.order.repository.OrderRepository;
 import java.time.Instant;
+import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,13 +27,36 @@ public class TradingFeeService {
     private final OrderFeeRepository orderFeeRepository;
     private final OrderRepository orderRepository;
     private final InstrumentRuleLookup instrumentRuleLookup;
+    private final OrderFeeSnapshotLookup feeSnapshotLookup;
+    private final FeeScheduleEventPublisher eventPublisher;
+    private final TradingOrderProperties properties;
 
     public TradingFeeService(OrderFeeRepository orderFeeRepository,
                              OrderRepository orderRepository,
                              InstrumentRuleLookup instrumentRuleLookup) {
+        this(orderFeeRepository, orderRepository, instrumentRuleLookup, null, null, null);
+    }
+
+    public TradingFeeService(OrderFeeRepository orderFeeRepository,
+                             OrderRepository orderRepository,
+                             InstrumentRuleLookup instrumentRuleLookup,
+                             OrderFeeSnapshotLookup feeSnapshotLookup) {
+        this(orderFeeRepository, orderRepository, instrumentRuleLookup, feeSnapshotLookup, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public TradingFeeService(OrderFeeRepository orderFeeRepository,
+                             OrderRepository orderRepository,
+                             InstrumentRuleLookup instrumentRuleLookup,
+                             OrderFeeSnapshotLookup feeSnapshotLookup,
+                             FeeScheduleEventPublisher eventPublisher,
+                             TradingOrderProperties properties) {
         this.orderFeeRepository = orderFeeRepository;
         this.orderRepository = orderRepository;
         this.instrumentRuleLookup = instrumentRuleLookup;
+        this.feeSnapshotLookup = feeSnapshotLookup;
+        this.eventPublisher = eventPublisher;
+        this.properties = properties;
     }
 
     public EffectiveTradingFeeResponse effectiveFee(long userId, String symbol, long instrumentVersion) {
@@ -46,7 +73,9 @@ public class TradingFeeService {
         String normalizedSymbol = normalizeSymbol(symbol);
         long resolvedVersion = instrumentVersion > 0 ? instrumentVersion : currentVersion(normalizedSymbol);
         Instant now = Instant.now();
-        OrderFeeSnapshot snapshot = orderFeeRepository.snapshot(userId, normalizedSymbol, resolvedVersion, now)
+        OrderFeeSnapshot snapshot = (feeSnapshotLookup == null
+                ? java.util.Optional.<OrderFeeSnapshot>empty()
+                : feeSnapshotLookup.lookup(productLine, userId, normalizedSymbol, resolvedVersion, now))
                 .orElseThrow(() -> new IllegalStateException("fee schedule unavailable"));
         if (productLine != null && snapshot.productLine() != productLine) {
             throw new IllegalStateException("fee schedule unavailable for productLine: " + productLine);
@@ -58,6 +87,7 @@ public class TradingFeeService {
     @Transactional
     public FeeScheduleResponse upsertSchedule(FeeScheduleUpsertRequest request) {
         OrderFeeRepository.validateSchedule(request);
+        requireCurrentProductLine(request.productLine());
         long feeScheduleId = request.feeScheduleId() == null
                 ? orderRepository.nextSequence("fee-schedule")
                 : request.feeScheduleId();
@@ -66,8 +96,12 @@ public class TradingFeeService {
         }
         Instant now = Instant.now();
         orderFeeRepository.upsertSchedule(request, feeScheduleId, now);
-        return orderFeeRepository.findSchedule(feeScheduleId)
+        FeeScheduleResponse response = orderFeeRepository.findSchedule(feeScheduleId)
                 .orElseThrow(() -> new IllegalStateException("fee schedule upsert failed: " + feeScheduleId));
+        if (eventPublisher != null) {
+            eventPublisher.publish(response);
+        }
+        return response;
     }
 
     @Transactional
@@ -80,9 +114,26 @@ public class TradingFeeService {
         if (feeScheduleId <= 0) {
             throw new IllegalArgumentException("feeScheduleId must be positive");
         }
-        orderFeeRepository.disableSchedule(feeScheduleId, productLine, Instant.now());
-        return orderFeeRepository.findSchedule(feeScheduleId, productLine)
+        requireCurrentProductLine(productLine);
+        boolean changed = orderFeeRepository.disableSchedule(feeScheduleId, productLine, Instant.now());
+        FeeScheduleResponse response = orderFeeRepository.findSchedule(feeScheduleId, productLine)
                 .orElseThrow(() -> new IllegalStateException("fee schedule not found: " + feeScheduleId));
+        if (changed && eventPublisher != null) {
+            eventPublisher.publish(response);
+        }
+        return response;
+    }
+
+    /** 唯一内部 RPC 的启动快照查询；其他模块不直接读取费率表。 */
+    public FeeScheduleSnapshotResponse snapshot(ProductLine productLine) {
+        if (productLine == null) {
+            throw new IllegalArgumentException("productLine is required");
+        }
+        requireCurrentProductLine(productLine);
+        List<FeeScheduleResponse> schedules = orderFeeRepository.loadSnapshotSchedules(productLine);
+        long sequence = schedules.stream().mapToLong(FeeScheduleResponse::feeScheduleId).max().orElse(0L);
+        return new FeeScheduleSnapshotResponse(productLine, sequence,
+                Integer.toHexString(schedules.hashCode()), schedules);
     }
 
     public FeeScheduleQueryResponse querySchedules(long userId, String symbol, FeeScheduleStatus status, int limit) {
@@ -94,6 +145,7 @@ public class TradingFeeService {
                                                    String symbol,
                                                    FeeScheduleStatus status,
                                                    int limit) {
+        requireCurrentProductLine(productLine);
         return orderFeeRepository.querySchedules(productLine, userId, normalizeOptionalSymbol(symbol), status,
                 limit <= 0 ? DEFAULT_LIMIT : limit);
     }
@@ -115,6 +167,7 @@ public class TradingFeeService {
                                                    int limit,
                                                    String cursor,
                                                    String sort) {
+        requireCurrentProductLine(productLine);
         return orderFeeRepository.querySchedulesPage(productLine, userId, normalizeOptionalSymbol(symbol), status,
                 limit <= 0 ? DEFAULT_LIMIT : limit, cursor, sort);
     }
@@ -123,6 +176,12 @@ public class TradingFeeService {
         InstrumentRule rule = instrumentRuleLookup.currentRule(symbol)
                 .orElseThrow(() -> new IllegalStateException("instrument not found: " + symbol));
         return rule.version();
+    }
+
+    private void requireCurrentProductLine(ProductLine requested) {
+        if (properties != null && properties.getKafka().isProductTopicsEnabled()) {
+            ProductLineConfiguration.requireSame(properties.getKafka().getProductLine(), requested, "trading fee");
+        }
     }
 
     private String normalizeSymbol(String symbol) {

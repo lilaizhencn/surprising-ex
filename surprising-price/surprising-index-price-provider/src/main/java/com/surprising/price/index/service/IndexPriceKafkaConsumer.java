@@ -33,15 +33,20 @@ public class IndexPriceKafkaConsumer {
             containerFactory = "indexPriceCacheKafkaListenerContainerFactory")
     public void onIndexPrice(ConsumerRecord<String, String> record) {
         try {
+            if (properties.getKafka().isProductTopicsEnabled()
+                    && !indexPriceTopic().equals(record.topic())) {
+                throw new IllegalArgumentException("index price topic must match current product line: expected="
+                        + indexPriceTopic() + " actual=" + record.topic());
+            }
             IndexPriceEvent event = objectMapper.readValue(record.value(), IndexPriceEvent.class);
             if (record.key() == null || !record.key().equals(event.symbol())) {
                 throw new IllegalArgumentException("index price Kafka key must match payload symbol");
             }
             cache.update(event);
         } catch (Exception ex) {
-            log.error("Failed to cache index price topic={} partition={} offset={}: {}",
+            // 无法修复的历史或损坏消息直接丢弃，不能阻塞后续实时指数价。
+            log.warn("Discarding invalid index price topic={} partition={} offset={}: {}",
                     record.topic(), record.partition(), record.offset(), ex.getMessage(), ex);
-            throw new IllegalStateException("failed to cache index price", ex);
         }
     }
 

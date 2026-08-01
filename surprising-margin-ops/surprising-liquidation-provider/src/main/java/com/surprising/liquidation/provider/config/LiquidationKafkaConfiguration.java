@@ -59,6 +59,15 @@ public class LiquidationKafkaConfiguration {
     }
 
     @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, String> liquidationFeeScheduleSnapshotKafkaListenerContainerFactory(
+            @Qualifier("liquidationConsumerFactory") ConsumerFactory<String, String> liquidationConsumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(liquidationConsumerFactory);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        return factory;
+    }
+
+    @Bean
     public ProducerFactory<String, String> liquidationProducerFactory(LiquidationProperties properties) {
         Map<String, Object> config = new HashMap<>();
         config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());

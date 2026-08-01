@@ -16,10 +16,10 @@ import com.surprising.liquidation.provider.repository.LiquidationOrderRepository
 import com.surprising.liquidation.provider.repository.LiquidationOrderRepository.OpenReduceOnlyOrder;
 import com.surprising.liquidation.provider.repository.LiquidationOrderRepository.OrderScope;
 import com.surprising.liquidation.provider.repository.LiquidationTradingOutboxRepository.NewOutboxEvent;
-import com.surprising.liquidation.provider.repository.LiquidationUserFeeRepository.UserFee;
 import com.surprising.liquidation.provider.service.LiquidationOrderPersistenceService;
 import com.surprising.liquidation.provider.service.LiquidationOrderPersistenceService.LiquidationOrderRequest;
 import com.surprising.product.api.ProductLine;
+import com.surprising.trading.api.cache.FeeScheduleSnapshotCache;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
@@ -100,35 +100,18 @@ class LiquidationOrderRepositoryTest {
     }
 
     @Test
-    void userFeeRepositoryOnlyReadsFeeScheduleTable() {
-        LiquidationUserFeeRepository repository = new LiquidationUserFeeRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Object[].class))).thenReturn(List.of());
-
-        repository.findBestActive(List.of(new LiquidationUserFeeRepository.UserFeeRequest(
-                9401L, 2002L, "BTC-USDT", ProductLine.LINEAR_PERPETUAL, NOW)));
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), any(Object[].class));
-        assertThat(sql.getValue())
-                .contains("JOIN trading_fee_schedules f")
-                .contains("WHEN 'RISK_OVERRIDE' THEN 0")
-                .doesNotContain("JOIN instruments");
-    }
-
-    @Test
     void persistenceServiceAggregatesSingleTableRepositories() {
         LiquidationOrderRepository orders = mock(LiquidationOrderRepository.class);
         LiquidationOrderEventRepository events = mock(LiquidationOrderEventRepository.class);
         LiquidationTradingOutboxRepository outbox = mock(LiquidationTradingOutboxRepository.class);
         LiquidationInstrumentSnapshotService instrumentFees = mock(LiquidationInstrumentSnapshotService.class);
-        LiquidationUserFeeRepository userFees = mock(LiquidationUserFeeRepository.class);
+        FeeScheduleSnapshotCache feeSchedules = mock(FeeScheduleSnapshotCache.class);
         LiquidationSequenceRepository sequences = mock(LiquidationSequenceRepository.class);
         LiquidationProperties properties = new LiquidationProperties();
         LiquidationOrderPersistenceService service = new LiquidationOrderPersistenceService(
-                orders, events, outbox, instrumentFees, userFees, sequences, properties);
+                orders, events, outbox, instrumentFees, feeSchedules, sequences, properties);
         when(instrumentFees.findAll(any())).thenReturn(Map.of(9401L,
                 new InstrumentFee(9401L, ProductLine.LINEAR_PERPETUAL, 200L, 500L)));
-        when(userFees.findBestActive(any())).thenReturn(Map.of(9401L, new UserFee(9401L, 100L, 300L)));
         when(sequences.nextTradingSequence("order")).thenReturn(7001L);
         when(sequences.nextTradingSequence("event")).thenReturn(7002L);
         when(sequences.nextTradingSequence("command")).thenReturn(7003L);
@@ -145,8 +128,8 @@ class LiquidationOrderRepositoryTest {
         ArgumentCaptor<List<NewLiquidationOrder>> orderRows = listCaptor();
         verify(orders).insertAll(orderRows.capture());
         assertThat(orderRows.getValue()).singleElement().satisfies(order -> {
-            assertThat(order.makerFeeRatePpm()).isEqualTo(100L);
-            assertThat(order.takerFeeRatePpm()).isEqualTo(300L);
+            assertThat(order.makerFeeRatePpm()).isEqualTo(200L);
+            assertThat(order.takerFeeRatePpm()).isEqualTo(500L);
         });
         verify(events).insertAll(any());
         ArgumentCaptor<List<NewOutboxEvent>> outboxRows = listCaptor();
@@ -162,7 +145,7 @@ class LiquidationOrderRepositoryTest {
         LiquidationSequenceRepository sequences = mock(LiquidationSequenceRepository.class);
         LiquidationOrderPersistenceService service = new LiquidationOrderPersistenceService(
                 orders, events, outbox, mock(LiquidationInstrumentSnapshotService.class),
-                mock(LiquidationUserFeeRepository.class), sequences, new LiquidationProperties());
+                mock(FeeScheduleSnapshotCache.class), sequences, new LiquidationProperties());
         when(orders.lockOpenReduceOnlyCloseOrders(any())).thenReturn(List.of(new OpenReduceOnlyOrder(
                 101L, 2002L, "reduce-101", "BTC-USDT", 8L, OrderSide.SELL, OrderType.LIMIT,
                 TimeInForce.GTC, 88_000L, 3L, MarginMode.CROSS, PositionSide.NET, OrderStatus.ACCEPTED,
