@@ -304,14 +304,37 @@ import tools.jackson.databind.ObjectMapper;
             }
             CachedRiskGroup projected = stateStore.read(productLine, key);
             if (projected == null) {
-                stateStore.markNotReady(productLine);
-                throw new IllegalStateException("Redis 风险组快照缺失，暂停实时风险计算: " + key);
+                /*
+                 * 新账户的首笔持仓事件可能先于后台对账扫描到达。此时不能用零值
+                 * 组继续计算，也不能让 Kafka 分区永久卡在同一条消息上；从已提交
+                 * 的业务投影恢复一次完整风险组，再合并当前事件。该查询只用于
+                 * JVM/Redis 快照缺失的启动恢复窗口，正常事件路径仍只读快照。
+                 */
+                CachedRiskGroup recovered = recoverMissingGroup(productLine, key);
+                return new ProjectionUpdate(recovered, true);
             }
             return new ProjectionUpdate(projected, false);
         }
         RedisRiskStateStore.ProjectionUpdate update =
                 stateStore.replace(productLine, key, () -> riskRepository.cachedRiskGroup(key));
         return new ProjectionUpdate(update.state(), update.changed());
+    }
+
+    private CachedRiskGroup recoverMissingGroup(ProductLine productLine, RiskGroupKey key) {
+        log.warn("风险组 JVM/Redis 快照缺失，执行一次已提交业务状态恢复: productLine={}, key={}",
+                productLine, key);
+        RedisRiskStateStore.ProjectionUpdate recovered = stateStore.replace(productLine, key, () -> {
+            CachedRiskGroup current = stateStore.read(productLine, key);
+            if (current != null) {
+                return current;
+            }
+            CachedRiskGroup authoritative = riskRepository.cachedRiskGroup(key);
+            if (authoritative == null || !key.equals(authoritative.key())) {
+                throw new IllegalStateException("无法恢复风险组权威快照: " + key);
+            }
+            return authoritative;
+        });
+        return recovered.state();
     }
 
     private CachedRiskGroup mergePositionEvents(CachedRiskGroup state, PositionEventGroup eventGroup) {

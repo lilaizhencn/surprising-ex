@@ -40,6 +40,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -215,6 +216,41 @@ class RiskServiceTest {
         assertThat(riskRepository.calculateCalls).isEqualTo(1);
         assertThat(riskRepository.savedAccounts).isEqualTo(1);
         assertThat(outboxRepository.enqueued).isZero();
+        assertThat(transactionManager.commits).isEqualTo(1);
+    }
+
+    @Test
+    void positionEventRecoversMissingRiskGroupFromCommittedProjection() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        riskRepository.positions = List.of();
+        RiskProperties properties = new RiskProperties();
+        FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
+        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        RedisRiskStateStore stateStore = mock(RedisRiskStateStore.class);
+        RedisRiskCalculator calculator = mock(RedisRiskCalculator.class);
+        AtomicReference<CachedRiskGroup> stored = new AtomicReference<>();
+        when(stateStore.ready(any(ProductLine.class))).thenReturn(true);
+        when(stateStore.read(any(ProductLine.class), any(RiskGroupKey.class)))
+                .thenAnswer(invocation -> stored.get());
+        when(stateStore.replace(any(ProductLine.class), any(RiskGroupKey.class), any()))
+                .thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    java.util.function.Supplier<CachedRiskGroup> supplier = invocation.getArgument(2);
+                    CachedRiskGroup state = supplier.get();
+                    stored.set(state);
+                    return new RedisRiskStateStore.ProjectionUpdate(state, true);
+                });
+        when(calculator.calculate(any(CachedRiskGroup.class))).thenReturn(List.of());
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                riskRepository.persistence, new FakeRiskSequenceRepository(), outboxRepository, null,
+                transactionManager, stateStore, calculator);
+
+        service.scanPositionUpdates(List.of(
+                positionEvent(31L, 2002L, "BTC-USDT", 7L, "USDT", "trace-recovery")));
+
+        assertThat(riskRepository.cachedRiskGroupCalls).isEqualTo(1);
+        assertThat(stored.get()).isNotNull();
+        assertThat(stored.get().key()).isEqualTo(new RiskGroupKey(2002L, "USDT"));
         assertThat(transactionManager.commits).isEqualTo(1);
     }
 
@@ -551,6 +587,7 @@ class RiskServiceTest {
         private boolean returnInsertedCandidate;
         private boolean failCandidateBatch;
         private int calculateCalls;
+        private int cachedRiskGroupCalls;
         private int riskGroupCalls;
         private final List<Integer> riskGroupLimits = new ArrayList<>();
         private long walletBalanceUnits;
@@ -590,6 +627,7 @@ class RiskServiceTest {
 
         @Override
         public CachedRiskGroup cachedRiskGroup(RiskGroupKey key) {
+            cachedRiskGroupCalls++;
             return new CachedRiskGroup(key, walletBalanceUnits, List.of(), Instant.now());
         }
 
