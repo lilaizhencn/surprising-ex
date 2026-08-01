@@ -3,12 +3,12 @@ package com.surprising.trading.matching.service;
 import com.surprising.trading.api.model.PublicTradeEvent;
 import com.surprising.trading.matching.config.MatchingProperties;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
@@ -26,7 +26,6 @@ import tools.jackson.databind.ObjectMapper;
     public class KafkaPublicTradePublisher implements PublicTradePublisher {
 
     static final int BATCH_SIZE = 2_000;
-    static final int MAX_PER_SYMBOL_PER_BATCH = 256;
     static final int MAX_QUEUED_PER_SYMBOL = 10_000;
     static final int MAX_IN_FLIGHT = 4_096;
 
@@ -35,6 +34,7 @@ import tools.jackson.databind.ObjectMapper;
     private final ObjectMapper objectMapper;
     private final MatchingProperties properties;
     private final KafkaTemplate<String, String> kafkaTemplate;
+    private final Executor dispatchExecutor = ForkJoinPool.commonPool();
     private final ConcurrentMap<String, SymbolQueue> symbolQueues = new ConcurrentHashMap<>();
     private final Queue<String> readySymbols = new ConcurrentLinkedQueue<>();
     private final AtomicInteger queued = new AtomicInteger();
@@ -72,7 +72,7 @@ import tools.jackson.databind.ObjectMapper;
                 queued.decrementAndGet();
                 dropped.incrementAndGet();
             }
-            if (!symbolQueue.active) {
+            if (!symbolQueue.sending && !symbolQueue.active) {
                 symbolQueue.active = true;
                 readySymbols.offer(symbol);
             }
@@ -81,7 +81,8 @@ import tools.jackson.databind.ObjectMapper;
 
     public void publishPending() {
         int remaining = Math.min(BATCH_SIZE, availableInFlight());
-        while (remaining > 0) {
+        int attempts = 0;
+        while (remaining > 0 && attempts++ < BATCH_SIZE) {
             String symbol = readySymbols.poll();
             if (symbol == null) {
                 return;
@@ -90,12 +91,9 @@ import tools.jackson.databind.ObjectMapper;
             if (symbolQueue == null) {
                 continue;
             }
-            List<PublicTradeEvent> batch = drain(symbol, symbolQueue, remaining);
-            if (batch.isEmpty()) {
-                continue;
+            if (dispatch(symbol, symbolQueue)) {
+                remaining--;
             }
-            remaining -= batch.size();
-            batch.forEach(event -> send(symbol, symbolQueue, event));
         }
     }
 
@@ -104,62 +102,115 @@ import tools.jackson.databind.ObjectMapper;
                 queued.get(), inFlight.get(), symbolQueues.size());
     }
 
-    private List<PublicTradeEvent> drain(String symbol, SymbolQueue symbolQueue, int remaining) {
-        int limit = Math.min(remaining, MAX_PER_SYMBOL_PER_BATCH);
-        List<PublicTradeEvent> batch = new ArrayList<>(limit);
-        synchronized (symbolQueue) {
-            while (batch.size() < limit && !symbolQueue.events.isEmpty()) {
-                batch.add(symbolQueue.events.removeFirst());
-                queued.decrementAndGet();
+    /**
+     * 每个交易对只允许一个发送中的事件，确保失败重试不会越过已经发送的后续成交。
+     * 不同交易对仍然可以通过全局 in-flight 上限并行发送。
+     */
+    private boolean dispatch(String symbol, SymbolQueue symbolQueue) {
+        if (!tryAcquireInFlight()) {
+            synchronized (symbolQueue) {
+                activateIfNeeded(symbol, symbolQueue);
             }
-            if (symbolQueue.events.isEmpty()) {
-                symbolQueue.active = false;
-            } else {
-                readySymbols.offer(symbol);
-            }
+            return false;
         }
-        return batch;
+        PublicTradeEvent event;
+        synchronized (symbolQueue) {
+            if (symbolQueue.sending || symbolQueue.events.isEmpty()) {
+                inFlight.decrementAndGet();
+                if (symbolQueue.events.isEmpty()) {
+                    symbolQueue.active = false;
+                }
+                return false;
+            }
+            event = symbolQueue.events.removeFirst();
+            queued.decrementAndGet();
+            symbolQueue.sending = true;
+            symbolQueue.active = false;
+        }
+        send(symbol, symbolQueue, event);
+        return true;
     }
 
     private int availableInFlight() {
         return Math.max(0, MAX_IN_FLIGHT - inFlight.get());
     }
 
+    private boolean tryAcquireInFlight() {
+        while (true) {
+            int current = inFlight.get();
+            if (current >= MAX_IN_FLIGHT) {
+                return false;
+            }
+            if (inFlight.compareAndSet(current, current + 1)) {
+                return true;
+            }
+        }
+    }
+
     private void send(String symbol, SymbolQueue symbolQueue, PublicTradeEvent event) {
-        inFlight.incrementAndGet();
         try {
             String payload = objectMapper.writeValueAsString(event);
             kafkaTemplate.send(properties.getKafka().getMatchTradesTopic(), symbol, payload)
                     .whenComplete((ignored, error) -> {
                         inFlight.decrementAndGet();
+                        synchronized (symbolQueue) {
+                            symbolQueue.sending = false;
+                            if (error != null) {
+                                retryLocked(symbol, symbolQueue, event);
+                            }
+                        }
                         if (error == null) {
                             sent.incrementAndGet();
                         } else {
                             recordFailure(symbol, error);
-                            retry(symbol, symbolQueue, event);
                         }
+                        dispatchNextAsync(symbol, symbolQueue);
                     });
         } catch (Exception error) {
             inFlight.decrementAndGet();
+            synchronized (symbolQueue) {
+                symbolQueue.sending = false;
+                retryLocked(symbol, symbolQueue, event);
+            }
             recordFailure(symbol, error);
-            retry(symbol, symbolQueue, event);
+            dispatchNextAsync(symbol, symbolQueue);
         }
     }
 
     /** 发送失败时将成交放回该交易对队首，避免临时 Kafka 元数据故障造成永久丢失。 */
-    private void retry(String symbol, SymbolQueue symbolQueue, PublicTradeEvent event) {
+    private void retryLocked(String symbol, SymbolQueue symbolQueue, PublicTradeEvent event) {
+        if (!symbolQueue.events.isEmpty() && symbolQueue.events.peekFirst() == event) {
+            return;
+        }
+        symbolQueue.events.addFirst(event);
+        queued.incrementAndGet();
+        while (symbolQueue.events.size() > MAX_QUEUED_PER_SYMBOL) {
+            symbolQueue.events.removeLast();
+            queued.decrementAndGet();
+            dropped.incrementAndGet();
+        }
+    }
+
+    /** 当前事件完成后立即发送同交易对的下一个事件，避免等待下一轮定时任务。 */
+    private void dispatchNext(String symbol, SymbolQueue symbolQueue) {
         synchronized (symbolQueue) {
-            symbolQueue.events.addFirst(event);
-            queued.incrementAndGet();
-            while (symbolQueue.events.size() > MAX_QUEUED_PER_SYMBOL) {
-                symbolQueue.events.removeLast();
-                queued.decrementAndGet();
-                dropped.incrementAndGet();
+            if (symbolQueue.sending || symbolQueue.events.isEmpty()) {
+                symbolQueue.active = false;
+                return;
             }
-            if (!symbolQueue.active) {
-                symbolQueue.active = true;
-                readySymbols.offer(symbol);
-            }
+        }
+        dispatch(symbol, symbolQueue);
+    }
+
+    /** 使用异步跳板，避免测试替身或本地 Kafka 立即完成时递归发送耗尽调用栈。 */
+    private void dispatchNextAsync(String symbol, SymbolQueue symbolQueue) {
+        dispatchExecutor.execute(() -> dispatchNext(symbol, symbolQueue));
+    }
+
+    private void activateIfNeeded(String symbol, SymbolQueue symbolQueue) {
+        if (!symbolQueue.sending && !symbolQueue.active && !symbolQueue.events.isEmpty()) {
+            symbolQueue.active = true;
+            readySymbols.offer(symbol);
         }
     }
 
@@ -174,6 +225,7 @@ import tools.jackson.databind.ObjectMapper;
     private static final class SymbolQueue {
         private final ArrayDeque<PublicTradeEvent> events = new ArrayDeque<>();
         private boolean active;
+        private boolean sending;
     }
 
     public record PublisherStats(long offered,

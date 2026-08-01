@@ -23,7 +23,7 @@ class KafkaPublicTradePublisherTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void preservesEveryQueuedTradeInPerSymbolFifoOrder() {
+    void preservesEveryQueuedTradeInPerSymbolFifoOrder() throws Exception {
         KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
         when(kafkaTemplate.send(anyString(), anyString(), anyString()))
                 .thenReturn(CompletableFuture.completedFuture(null));
@@ -34,15 +34,18 @@ class KafkaPublicTradePublisherTest {
         publisher.offer(trade("BTC-USDT", 2L));
         publisher.offer(trade("ETH-USDT", 3L));
         publisher.publishPending();
+        awaitSent(publisher, 3L);
 
         ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
         verify(kafkaTemplate, times(3)).send(
                 org.mockito.ArgumentMatchers.eq("surprising.perp.match.trades.v1"),
                 key.capture(), payload.capture());
-        assertThat(key.getAllValues()).containsExactly("BTC-USDT", "BTC-USDT", "ETH-USDT");
         List<PublicTradeEvent> events = payload.getAllValues().stream().map(this::read).toList();
-        assertThat(events).extracting(PublicTradeEvent::sequence).containsExactly(1L, 2L, 3L);
+        assertThat(events.stream().filter(event -> event.symbol().equals("BTC-USDT"))
+                .map(PublicTradeEvent::sequence)).containsExactly(1L, 2L);
+        assertThat(events.stream().filter(event -> event.symbol().equals("ETH-USDT"))
+                .map(PublicTradeEvent::sequence)).containsExactly(3L);
         assertThat(publisher.stats().offered()).isEqualTo(3L);
         assertThat(publisher.stats().dropped()).isZero();
         assertThat(publisher.stats().sent()).isEqualTo(3L);
@@ -51,7 +54,7 @@ class KafkaPublicTradePublisherTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void dropsOnlyTheOldestTradeAfterOneSymbolExceedsItsBoundedFifo() {
+    void dropsOnlyTheOldestTradeAfterOneSymbolExceedsItsBoundedFifo() throws Exception {
         KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
         when(kafkaTemplate.send(anyString(), anyString(), anyString()))
                 .thenReturn(CompletableFuture.completedFuture(null));
@@ -66,16 +69,17 @@ class KafkaPublicTradePublisherTest {
         assertThat(publisher.stats().queued()).isEqualTo(KafkaPublicTradePublisher.MAX_QUEUED_PER_SYMBOL);
 
         publisher.publishPending();
+        awaitSent(publisher, KafkaPublicTradePublisher.BATCH_SIZE);
 
         ArgumentCaptor<String> firstPayload = ArgumentCaptor.forClass(String.class);
-        verify(kafkaTemplate, times(KafkaPublicTradePublisher.BATCH_SIZE))
+        verify(kafkaTemplate, org.mockito.Mockito.atLeast(KafkaPublicTradePublisher.BATCH_SIZE))
                 .send(anyString(), anyString(), firstPayload.capture());
         assertThat(read(firstPayload.getAllValues().get(0)).sequence()).isEqualTo(2L);
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void retriesTradeAfterKafkaSendFailure() {
+    void retriesTradeAfterKafkaSendFailure() throws Exception {
         KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
         CompletableFuture<SendResult<String, String>> failed = new CompletableFuture<>();
         when(kafkaTemplate.send(anyString(), anyString(), anyString()))
@@ -87,12 +91,54 @@ class KafkaPublicTradePublisherTest {
         publisher.offer(trade("BTC-USDT", 1L));
         publisher.publishPending();
         failed.completeExceptionally(new IllegalStateException("Kafka 元数据尚未就绪"));
-        publisher.publishPending();
+        awaitSent(publisher, 1L);
 
         verify(kafkaTemplate, times(2)).send(anyString(), anyString(), anyString());
         assertThat(publisher.stats().sent()).isEqualTo(1L);
         assertThat(publisher.stats().sendFailed()).isEqualTo(1L);
         assertThat(publisher.stats().queued()).isZero();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void doesNotSendLaterTradeBeforeEarlierTradeRetryCompletes() throws Exception {
+        KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+        CompletableFuture<SendResult<String, String>> first = new CompletableFuture<>();
+        when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+                .thenReturn(first)
+                .thenReturn(CompletableFuture.completedFuture(null));
+        KafkaPublicTradePublisher publisher = new KafkaPublicTradePublisher(
+                new ObjectMapper(), new MatchingProperties(), kafkaTemplate);
+
+        publisher.offer(trade("BTC-USDT", 1L));
+        publisher.offer(trade("BTC-USDT", 2L));
+        publisher.publishPending();
+        verify(kafkaTemplate, times(1)).send(anyString(), anyString(), anyString());
+
+        first.completeExceptionally(new IllegalStateException("Kafka 元数据尚未就绪"));
+        awaitSendCount(kafkaTemplate, 3);
+        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
+        verify(kafkaTemplate, times(3)).send(anyString(), anyString(), payload.capture());
+        assertThat(payload.getAllValues().stream().map(this::read)
+                .map(PublicTradeEvent::sequence)).containsExactly(1L, 1L, 2L);
+    }
+
+    private void awaitSent(KafkaPublicTradePublisher publisher, long expected) throws InterruptedException {
+        long deadline = System.nanoTime() + 2_000_000_000L;
+        while (publisher.stats().sent() < expected && System.nanoTime() < deadline) {
+            Thread.sleep(5L);
+        }
+        assertThat(publisher.stats().sent()).isGreaterThanOrEqualTo(expected);
+    }
+
+    private void awaitSendCount(KafkaTemplate<String, String> kafkaTemplate, int expected)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + 2_000_000_000L;
+        while (org.mockito.Mockito.mockingDetails(kafkaTemplate).getInvocations().size() < expected
+                && System.nanoTime() < deadline) {
+            Thread.sleep(5L);
+        }
+        verify(kafkaTemplate, times(expected)).send(anyString(), anyString(), anyString());
     }
 
     private PublicTradeEvent trade(String symbol, long sequence) {

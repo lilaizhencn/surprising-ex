@@ -80,6 +80,21 @@ class AccountUserCommandProcessorTest {
     }
 
     @Test
+    void conflictingDuplicateIsRejectedBeforeAnyFundsMutation() {
+        AccountUserCommand command = reserveCommand("order-reserve:90011", null);
+        when(commandRepository.register(eq(command), any(), any()))
+                .thenThrow(new IllegalStateException("conflicting duplicate account command"));
+
+        assertThatThrownBy(() -> process(command))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("conflicting duplicate");
+
+        verifyNoInteractions(reservationService, outboxService);
+        verify(commandRepository, never()).markApplied(any(), any(), any());
+        verify(commandRepository, never()).markRejected(any(), any(), any(), any(), any());
+    }
+
+    @Test
     void missingDependencyWaitsWithoutApplyingFunds() {
         AccountUserCommand command = reserveCommand("order-reserve:9002", "funds-transfer:1001");
         when(commandRepository.register(eq(command), any(), any()))
