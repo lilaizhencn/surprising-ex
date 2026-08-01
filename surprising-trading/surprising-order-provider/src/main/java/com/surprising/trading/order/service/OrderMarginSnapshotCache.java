@@ -25,6 +25,7 @@ public class OrderMarginSnapshotCache {
     private final ConcurrentMap<LeverageKey, LeverageValue> leverages = new ConcurrentHashMap<>();
     private final ConcurrentMap<Long, OrderValue> orders = new ConcurrentHashMap<>();
     private final ConcurrentMap<OrderScope, Long> pending = new ConcurrentHashMap<>();
+    private final ConcurrentMap<ReduceOnlyScope, Long> pendingReduceOnly = new ConcurrentHashMap<>();
     private final Set<ProductLine> readyLines = ConcurrentHashMap.newKeySet();
 
     public void markNotReady(ProductLine productLine) {
@@ -43,6 +44,7 @@ public class OrderMarginSnapshotCache {
         readyLines.remove(productLine);
         orders.entrySet().removeIf(entry -> entry.getValue().productLine() == productLine);
         pending.keySet().removeIf(key -> key.productLine() == productLine);
+        pendingReduceOnly.keySet().removeIf(key -> key.productLine() == productLine);
     }
 
     public void markReady(ProductLine productLine) {
@@ -110,7 +112,7 @@ public class OrderMarginSnapshotCache {
                 order.positionSide(), order.instrumentVersion());
         putDefaultLeverageIfAbsent(order.productLine(), order.userId(), order.symbol(), order.marginMode());
         OrderValue next = new OrderValue(order.productLine(), order.userId(), order.symbol(), order.marginMode(),
-                order.positionSide(), order.side(), order.reduceOnly(), order.status().name(),
+                order.positionSide(), order.instrumentVersion(), order.side(), order.reduceOnly(), order.status().name(),
                 order.remainingQuantitySteps(), order.revision());
         orders.compute(order.orderId(), (ignored, previous) -> {
             if (previous != null && previous.revision() > next.revision()) {
@@ -118,10 +120,38 @@ public class OrderMarginSnapshotCache {
             }
             if (previous != null) {
                 adjustPending(previous, -1L);
+                adjustPendingReduceOnly(previous, -1L);
             }
             adjustPending(next, 1L);
+            adjustPendingReduceOnly(next, 1L);
             return next;
         });
+    }
+
+    /**
+     * 读取只减仓校验需要的持仓和未完成只减仓数量。
+     *
+     * <p>返回空值表示该产品线快照尚未就绪，调用方必须拒绝请求，不能再回查
+     * account_positions 或 trading_orders。</p>
+     */
+    public Optional<ReduceOnlySnapshot> lookupReduceOnly(ProductLine productLine,
+                                                         long userId,
+                                                         String symbol,
+                                                         MarginMode marginMode,
+                                                         PositionSide positionSide,
+                                                         OrderSide closeSide) {
+        if (!ready(productLine)) {
+            return Optional.empty();
+        }
+        PositionKey positionKey = new PositionKey(productLine, userId, symbol, marginMode, positionSide);
+        PositionValue position = positions.get(positionKey);
+        if (position == null) {
+            return Optional.empty();
+        }
+        ReduceOnlyScope scope = new ReduceOnlyScope(productLine, userId, symbol, marginMode, positionSide,
+                position.instrumentVersion(), closeSide);
+        return Optional.of(new ReduceOnlySnapshot(position.instrumentVersion(), position.signedQuantitySteps(),
+                pendingReduceOnly.getOrDefault(scope, 0L)));
     }
 
     public void putLeverage(ProductLine productLine,
@@ -182,9 +212,25 @@ public class OrderMarginSnapshotCache {
         });
     }
 
+    private void adjustPendingReduceOnly(OrderValue order, long multiplier) {
+        if (!isOpen(order) || !order.reduceOnly() || order.instrumentVersion() <= 0L) {
+            return;
+        }
+        ReduceOnlyScope scope = new ReduceOnlyScope(order.productLine(), order.userId(), order.symbol(),
+                order.marginMode(), order.positionSide(), order.instrumentVersion(), order.side());
+        long delta = Math.multiplyExact(order.remainingQuantitySteps(), multiplier);
+        pendingReduceOnly.compute(scope, (ignored, current) -> {
+            long value = Math.addExact(current == null ? 0L : current, delta);
+            return value <= 0L ? null : value;
+        });
+    }
+
     private boolean isPending(OrderValue order) {
+        return isOpen(order) && !order.reduceOnly();
+    }
+
+    private boolean isOpen(OrderValue order) {
         return order.remainingQuantitySteps() > 0L
-                && !order.reduceOnly()
                 && ("ACCEPTED".equals(order.status()) || "PARTIALLY_FILLED".equals(order.status())
                 || "CANCEL_REQUESTED".equals(order.status()));
     }
@@ -193,6 +239,11 @@ public class OrderMarginSnapshotCache {
                                  long currentSignedQuantitySteps,
                                  long pendingSameSideSteps,
                                  Long configuredLeveragePpm) {
+    }
+
+    public record ReduceOnlySnapshot(long instrumentVersion,
+                                     long signedQuantitySteps,
+                                     long pendingReduceOnlySteps) {
     }
 
     private record PositionKey(ProductLine productLine, long userId, String symbol,
@@ -214,6 +265,17 @@ public class OrderMarginSnapshotCache {
         }
     }
 
+    private record ReduceOnlyScope(ProductLine productLine, long userId, String symbol,
+                                   MarginMode marginMode, PositionSide positionSide,
+                                   long instrumentVersion, OrderSide side) {
+        private ReduceOnlyScope {
+            symbol = symbol == null ? "" : symbol.trim().toUpperCase();
+            marginMode = MarginMode.defaultIfNull(marginMode);
+            positionSide = PositionSide.defaultIfNull(positionSide);
+            side = side == null ? OrderSide.BUY : side;
+        }
+    }
+
     private record LeverageKey(ProductLine productLine, long userId, String symbol, MarginMode marginMode) {
         private LeverageKey {
             symbol = symbol == null ? "" : symbol.trim().toUpperCase();
@@ -228,7 +290,8 @@ public class OrderMarginSnapshotCache {
     }
 
     private record OrderValue(ProductLine productLine, long userId, String symbol, MarginMode marginMode,
-                              PositionSide positionSide, com.surprising.trading.api.model.OrderSide side,
+                              PositionSide positionSide, long instrumentVersion,
+                              com.surprising.trading.api.model.OrderSide side,
                               boolean reduceOnly, String status, long remainingQuantitySteps, long revision) {
         private OrderValue {
             symbol = symbol == null ? "" : symbol.trim().toUpperCase();

@@ -3,11 +3,16 @@ package com.surprising.trading.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
+import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
+import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
+import com.surprising.trading.order.model.OrderRecord;
+import java.time.Instant;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.ReduceOnlyPositionLookup;
@@ -67,6 +72,29 @@ class ReduceOnlyValidatorTest {
 
         assertThat(result.accepted()).isTrue();
         assertThat(result.instrumentVersion()).isEqualTo(1L);
+    }
+
+    @Test
+    void perpetualUsesJvmSnapshotAndFailsClosedBeforeItCanQueryDatabase() {
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        OrderMarginSnapshotCache cache = new OrderMarginSnapshotCache();
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        cache.applyPosition(new PositionUpdatedEvent(5L, 5L, 1001L, "BTC-USDT", 1L,
+                MarginMode.CROSS, PositionSide.NET, 10L, 60_000L, 0L, now, "trace"));
+        cache.applyOrder(new OrderRecord(88L, ProductLine.LINEAR_PERPETUAL, 1001L, "close-1", "BTC-USDT", 1L,
+                OrderSide.SELL, OrderType.MARKET, TimeInForce.IOC, 0L, 2L, 0L, 2L, MarginMode.CROSS,
+                PositionSide.NET, 0L, 0L, true, false, null, null, 0L, OrderStatus.ACCEPTED, null, now, now, 1L));
+
+        ReduceOnlyValidator notReady = new ReduceOnlyValidator(null, properties, cache);
+        assertThat(notReady.validate(request(OrderSide.SELL, 1L)).rejectReason())
+                .isEqualTo("reduce-only position snapshot unavailable");
+
+        cache.markReady(ProductLine.LINEAR_PERPETUAL);
+        ReduceOnlyValidator validator = new ReduceOnlyValidator(lookup(10L, 2L), properties, cache);
+        assertThat(validator.validate(request(OrderSide.SELL, 8L)).accepted()).isTrue();
+        assertThat(validator.validate(request(OrderSide.SELL, 9L)).rejectReason())
+                .isEqualTo("reduce-only quantity exceeds available position");
     }
 
     private PlaceOrderRequest request(OrderSide side, long quantitySteps) {

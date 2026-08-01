@@ -14,15 +14,23 @@ public class ReduceOnlyValidator {
 
     private final ReduceOnlyPositionLookup positionLookup;
     private final TradingOrderProperties properties;
+    private final OrderMarginSnapshotCache marginSnapshotCache;
 
     public ReduceOnlyValidator(ReduceOnlyPositionLookup positionLookup) {
-        this(positionLookup, new TradingOrderProperties());
+        this(positionLookup, new TradingOrderProperties(), null);
+    }
+
+    public ReduceOnlyValidator(ReduceOnlyPositionLookup positionLookup, TradingOrderProperties properties) {
+        this(positionLookup, properties, null);
     }
 
     @Autowired
-    public ReduceOnlyValidator(ReduceOnlyPositionLookup positionLookup, TradingOrderProperties properties) {
+    public ReduceOnlyValidator(ReduceOnlyPositionLookup positionLookup,
+                               TradingOrderProperties properties,
+                               OrderMarginSnapshotCache marginSnapshotCache) {
         this.positionLookup = positionLookup;
         this.properties = properties;
+        this.marginSnapshotCache = marginSnapshotCache;
     }
 
     public ValidationResult validate(PlaceOrderRequest request) {
@@ -30,6 +38,22 @@ public class ReduceOnlyValidator {
             return ValidationResult.ok();
         }
         ProductLine productLine = currentProductLine();
+        if (marginSnapshotCache != null && productLine == ProductLine.LINEAR_PERPETUAL) {
+            if (!marginSnapshotCache.ready(productLine)) {
+                return ValidationResult.reject("reduce-only position snapshot unavailable");
+            }
+            var cached = marginSnapshotCache.lookupReduceOnly(productLine, request.userId(), request.symbol(),
+                    request.marginMode(), request.positionSide(), request.side());
+            if (cached.isEmpty()) {
+                return ValidationResult.reject("reduce-only requires an open position");
+            }
+            ValidationResult cacheDecision = validateSnapshot(request, cached.get());
+            if (!cacheDecision.accepted()) {
+                return cacheDecision;
+            }
+            // 过渡阶段仍由数据库行锁完成最终校验，防止订单事件尚未传播时重复占用平仓容量。
+            // 账户版本栅栏上线后再删除这一次最终复核。
+        }
         var position = positionLookup.lockedPosition(productLine, request.userId(), request.symbol(),
                 request.marginMode(), request.positionSide()).orElse(null);
         long signedQuantity = position == null ? 0L : position.signedQuantitySteps();
@@ -55,8 +79,32 @@ public class ReduceOnlyValidator {
         return ValidationResult.ok(position.instrumentVersion());
     }
 
+    private ValidationResult validateSnapshot(PlaceOrderRequest request,
+                                               OrderMarginSnapshotCache.ReduceOnlySnapshot snapshot) {
+        long signedQuantity = snapshot.signedQuantitySteps();
+        if (signedQuantity == 0L) {
+            return ValidationResult.reject("reduce-only requires an open position");
+        }
+        if (snapshot.instrumentVersion() <= 0L) {
+            return ValidationResult.reject("reduce-only position instrument version is missing");
+        }
+        OrderSide closeSide = signedQuantity > 0L ? OrderSide.SELL : OrderSide.BUY;
+        if (request.side() != closeSide) {
+            return ValidationResult.reject("reduce-only side does not reduce current position");
+        }
+        long available = Math.subtractExact(Math.absExact(signedQuantity), snapshot.pendingReduceOnlySteps());
+        if (available <= 0L) {
+            return ValidationResult.reject("no reducible quantity is available");
+        }
+        if (request.quantitySteps() > available) {
+            return ValidationResult.reject("reduce-only quantity exceeds available position");
+        }
+        return ValidationResult.ok(snapshot.instrumentVersion());
+    }
+
     private ProductLine currentProductLine() {
         TradingOrderProperties.Kafka kafka = properties == null ? null : properties.getKafka();
         return kafka == null ? ProductLine.LINEAR_PERPETUAL : kafka.getProductLine();
     }
+
 }
