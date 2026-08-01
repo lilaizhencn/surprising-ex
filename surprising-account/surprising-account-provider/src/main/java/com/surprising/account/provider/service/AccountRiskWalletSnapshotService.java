@@ -124,7 +124,11 @@ public class AccountRiskWalletSnapshotService {
             assets.add(instrument.settleAsset());
         });
         assets.addAll(marginByAsset.keySet());
-        assets.addAll(orderLockByAsset.keySet());
+        // 只有已经存在隔离持仓的资产才进入风险组。单独挂单尚未成交时不应创建
+        // 一个没有持仓的风险组，否则风险服务会因找不到初始持仓快照而持续重试。
+        orderLockByAsset.keySet().stream()
+                .filter(assets::contains)
+                .forEach(assets::add);
         Map<String, Long> result = new LinkedHashMap<>();
         for (String asset : assets) {
             long wallet = balanceByAsset.getOrDefault(asset, 0L);
