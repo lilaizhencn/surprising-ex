@@ -6,6 +6,7 @@ import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.account.provider.repository.AccountBalanceRepository;
 import com.surprising.account.provider.repository.AccountCommandRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
+import com.surprising.account.provider.repository.AccountRiskStateRevisionRepository;
 import com.surprising.account.provider.repository.ProductBalanceRepository;
 import com.surprising.account.provider.repository.SpotOrderReservationRepository;
 import com.surprising.account.provider.repository.TradeSettlementSideRepository;
@@ -22,6 +23,7 @@ public class AccountOrderReservationService {
     private final SpotOrderReservationRepository spotReservationRepository;
     private final TradeSettlementSideRepository tradeSettlementSideRepository;
     private final AccountCommandRepository accountCommandRepository;
+    private final AccountRiskStateRevisionRepository riskStateRevisionRepository;
 
     public AccountOrderReservationService(AccountSequenceRepository sequenceRepository,
                                           AccountBalanceRepository accountBalanceRepository,
@@ -29,12 +31,25 @@ public class AccountOrderReservationService {
                                           SpotOrderReservationRepository spotReservationRepository,
                                           TradeSettlementSideRepository tradeSettlementSideRepository,
                                           AccountCommandRepository accountCommandRepository) {
+        this(sequenceRepository, accountBalanceRepository, productBalanceRepository, spotReservationRepository,
+                tradeSettlementSideRepository, accountCommandRepository, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AccountOrderReservationService(AccountSequenceRepository sequenceRepository,
+                                          AccountBalanceRepository accountBalanceRepository,
+                                          ProductBalanceRepository productBalanceRepository,
+                                          SpotOrderReservationRepository spotReservationRepository,
+                                          TradeSettlementSideRepository tradeSettlementSideRepository,
+                                          AccountCommandRepository accountCommandRepository,
+                                          AccountRiskStateRevisionRepository riskStateRevisionRepository) {
         this.sequenceRepository = sequenceRepository;
         this.accountBalanceRepository = accountBalanceRepository;
         this.productBalanceRepository = productBalanceRepository;
         this.spotReservationRepository = spotReservationRepository;
         this.tradeSettlementSideRepository = tradeSettlementSideRepository;
         this.accountCommandRepository = accountCommandRepository;
+        this.riskStateRevisionRepository = riskStateRevisionRepository;
     }
 
     public boolean reserve(ProductLine productLine,
@@ -42,6 +57,7 @@ public class AccountOrderReservationService {
                            OrderReserveAccountCommand command,
                            Instant now) {
         requireAccountScope(productLine, command.accountType());
+        requireExpectedAccountRevision(productLine, userId, command);
         if (command.reservationKind() == OrderReservationKind.SPOT_ASSET) {
             if (command.accountType() != AccountType.SPOT) {
                 throw new IllegalStateException("spot reservation requires SPOT account");
@@ -52,6 +68,24 @@ public class AccountOrderReservationService {
             throw new IllegalStateException("derivative reservation requires margin account");
         }
         return reserveDerivative(userId, command, now);
+    }
+
+    private void requireExpectedAccountRevision(ProductLine productLine,
+                                                long userId,
+                                                OrderReserveAccountCommand command) {
+        if (command.expectedAccountRevision() <= 0L) {
+            return;
+        }
+        if (riskStateRevisionRepository == null) {
+            throw new AccountCommandRejectedException("ACCOUNT_REVISION_UNAVAILABLE",
+                    "account revision fence is not configured");
+        }
+        long currentRevision = riskStateRevisionRepository.current(productLine, userId);
+        if (currentRevision != command.expectedAccountRevision()) {
+            throw new AccountCommandRejectedException("ACCOUNT_REVISION_CONFLICT",
+                    "account snapshot revision is stale: expected=" + command.expectedAccountRevision()
+                            + " actual=" + currentRevision);
+        }
     }
 
     public long release(ProductLine productLine,

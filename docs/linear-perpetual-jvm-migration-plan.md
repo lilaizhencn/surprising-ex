@@ -350,7 +350,7 @@ PRODUCT_LINES=LINEAR_PERPETUAL ./scripts/product-line-funds-reconcile.sh
 2. 已增加 `PerpetualAccountStateUpdatedEvent` 和 `PerpetualAccountStateSnapshotCache` 的基础协议；当前事件由数据库事务组合生成，仍属于影子迁移层，尚未用于放行资金操作。
 3. 将 `PositionUpdatedEvent` 的全局缓存 revision 与用户账户 revision 分离，建立可检测的用户事件连续性；账户完整状态事件已经复用同一 `accountRevision`。
 4. 已让风险和强平模块使用独立消费组接收完整账户状态事件，并维护各自的影子 JVM 快照；当前尚未把该快照作为放行资金或强平的唯一依据，启动恢复就绪协议完成后再切换。
-5. 已接入订单模块的永续完整账户状态消费和持仓模式快照读取；模式快照未追赶到 Kafka 高水位或缺少用户状态时拒绝下单，不回查账户模式表。余额/冻结仍由账户单写者异步确认，账户预占版本栅栏尚未切换。
+5. 已接入订单模块的永续完整账户状态消费和持仓模式快照读取；模式快照未追赶到 Kafka 高水位或缺少用户状态时拒绝下单，不回查账户模式表。永续订单预占现在携带 `expectedAccountRevision`，账户单写者在冻结前校验当前 revision，过期命令直接拒绝，避免旧快照错误冻结；余额/冻结事实仍由账户单写者确认。
 6. 每完成一个子模块执行对应 Maven 测试、`check-*` 边界脚本和永续资金核对，独立提交。
 
 ## 10. 永续真实业务演练门禁

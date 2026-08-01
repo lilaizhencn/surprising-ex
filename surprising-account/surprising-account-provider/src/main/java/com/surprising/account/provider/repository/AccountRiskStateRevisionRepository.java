@@ -37,4 +37,18 @@ public class AccountRiskStateRevisionRepository {
         }
         return revision;
     }
+
+    /** 读取用户当前账户修订号；不存在的用户视为零，供订单冻结版本栅栏使用。 */
+    public long current(ProductLine productLine, long userId) {
+        if (productLine == null || userId <= 0L) {
+            throw new IllegalArgumentException("productLine and userId are required");
+        }
+        Long revision = jdbcTemplate.queryForObject("""
+                SELECT COALESCE((SELECT revision
+                                   FROM account_risk_state_revisions
+                                  WHERE product_line = ?
+                                    AND user_id = ?), 0)
+                """, Long.class, productLine.name(), userId);
+        return revision == null ? 0L : revision;
+    }
 }

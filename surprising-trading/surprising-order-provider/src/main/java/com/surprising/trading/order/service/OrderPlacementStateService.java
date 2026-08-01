@@ -73,6 +73,19 @@ public class OrderPlacementStateService {
         return positionModeRepository.positionMode(line, userId);
     }
 
+    /** 返回订单计算所依据的永续账户修订号；非永续或影子快照未启用时返回零。 */
+    public long accountRevision(ProductLine line, long userId) {
+        if (line != ProductLine.LINEAR_PERPETUAL || accountStateSnapshotCache == null) {
+            return 0L;
+        }
+        if (!accountStateSnapshotCache.ready()) {
+            throw new IllegalStateException("永续账户状态快照尚未就绪");
+        }
+        return accountStateSnapshotCache.state(userId)
+                .map(com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent::accountRevision)
+                .orElseThrow(() -> new IllegalStateException("永续用户账户状态快照不存在: " + userId));
+    }
+
     public Optional<ReduceOnlyPosition> lockedPosition(ProductLine line, long userId, String symbol,
                                                        MarginMode mode, PositionSide side) {
         return positionRepository.lockedPosition(line, userId, symbol, mode, side);

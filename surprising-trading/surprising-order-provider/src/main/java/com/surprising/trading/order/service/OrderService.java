@@ -518,7 +518,8 @@ public class OrderService {
                 orderId, request.symbol(), request.side(), OrderReservationKind.DERIVATIVE_MARGIN, accountType,
                 requirement.get().asset(), request.marginMode(), request.positionSide(),
                 request.quantitySteps(), request.reduceOnly(),
-                requirement.get().initialMarginUnits()));
+                requirement.get().initialMarginUnits(),
+                placementStateService.accountRevision(currentProductLine(), request.userId())));
     }
 
     private TestOrderResponse dryRunOpeningFunds(PlaceOrderRequest request,

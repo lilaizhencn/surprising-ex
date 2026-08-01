@@ -12,6 +12,7 @@ import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.account.provider.repository.AccountBalanceRepository;
 import com.surprising.account.provider.repository.AccountCommandRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
+import com.surprising.account.provider.repository.AccountRiskStateRevisionRepository;
 import com.surprising.account.provider.repository.ProductBalanceRepository;
 import com.surprising.account.provider.repository.SpotOrderReservationRepository;
 import com.surprising.account.provider.repository.TradeSettlementSideRepository;
@@ -29,6 +30,7 @@ class AccountOrderReservationServiceTest {
     private ProductBalanceRepository productBalanceRepository;
     private TradeSettlementSideRepository tradeSettlementSideRepository;
     private AccountCommandRepository accountCommandRepository;
+    private AccountRiskStateRevisionRepository riskStateRevisionRepository;
     private AccountOrderReservationService service;
 
     @BeforeEach
@@ -39,13 +41,14 @@ class AccountOrderReservationServiceTest {
         SpotOrderReservationRepository spotReservationRepository = mock(SpotOrderReservationRepository.class);
         tradeSettlementSideRepository = mock(TradeSettlementSideRepository.class);
         accountCommandRepository = mock(AccountCommandRepository.class);
+        riskStateRevisionRepository = mock(AccountRiskStateRevisionRepository.class);
         service = new AccountOrderReservationService(
                 sequenceRepository,
                 accountBalanceRepository,
                 productBalanceRepository,
                 spotReservationRepository,
                 tradeSettlementSideRepository,
-                accountCommandRepository);
+                accountCommandRepository, riskStateRevisionRepository);
     }
 
     @Test
@@ -100,6 +103,22 @@ class AccountOrderReservationServiceTest {
                 Instant.parse("2026-07-19T00:00:00Z")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("does not match product line");
+    }
+
+    @Test
+    void rejectsReservationWhenAccountSnapshotRevisionIsStale() {
+        when(riskStateRevisionRepository.current(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(8L);
+        OrderReserveAccountCommand command = new OrderReserveAccountCommand(
+                9001L, "BTC-USDT", OrderSide.BUY, OrderReservationKind.DERIVATIVE_MARGIN,
+                AccountType.USDT_PERPETUAL, "USDT", MarginMode.CROSS, PositionSide.NET,
+                10L, false, 100L, 7L);
+
+        assertThatThrownBy(() -> service.reserve(
+                ProductLine.LINEAR_PERPETUAL, 1001L, command,
+                Instant.parse("2026-07-19T00:00:00Z")))
+                .isInstanceOf(AccountCommandRejectedException.class)
+                .hasMessageContaining("stale");
+        org.mockito.Mockito.verifyNoInteractions(accountBalanceRepository);
     }
 
     private static OrderReserveAccountCommand derivativeCommand() {
