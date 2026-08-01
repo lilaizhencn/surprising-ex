@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.account.api.cache.PositionSnapshotCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.risk.provider.config.RiskProperties;
 import java.util.List;
@@ -31,6 +32,22 @@ class PositionRiskTriggerConsumerTest {
         verify(riskService).scanPositionUpdates(events.capture());
         assertThat(events.getValue()).extracting(PositionUpdatedEvent::symbol)
                 .containsExactly("BTC-USDT", "ETH-USDT");
+    }
+
+    @Test
+    void advancesLocalSnapshotOnlyAfterRiskScanSucceeds() throws Exception {
+        RiskService riskService = mock(RiskService.class);
+        PositionSnapshotCache cache = new PositionSnapshotCache(ProductLine.LINEAR_PERPETUAL);
+        PositionRiskTriggerConsumer consumer = new PositionRiskTriggerConsumer(new ObjectMapper(), riskService,
+                new RiskProperties(), cache);
+        PositionUpdatedEvent event = new ObjectMapper().readValue(
+                positionPayload(ProductLine.LINEAR_PERPETUAL, "BTC-USDT"), PositionUpdatedEvent.class);
+
+        consumer.onPositionUpdated(List.of(record(event.partitionKey(), positionPayload(
+                ProductLine.LINEAR_PERPETUAL, "BTC-USDT"))));
+
+        assertThat(cache.position(event.userId(), event.symbol(), event.marginMode(), event.positionSide()))
+                .contains(event);
     }
 
     @Test

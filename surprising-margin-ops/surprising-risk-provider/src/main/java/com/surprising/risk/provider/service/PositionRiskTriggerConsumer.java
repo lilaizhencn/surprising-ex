@@ -1,7 +1,9 @@
 package com.surprising.risk.provider.service;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.account.api.cache.PositionSnapshotCache;
 import com.surprising.risk.provider.config.RiskProperties;
+import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -20,16 +22,27 @@ public class PositionRiskTriggerConsumer {
     private final ObjectMapper objectMapper;
     private final RiskService riskService;
     private final RiskProperties properties;
+    private final PositionSnapshotCache snapshotCache;
 
     public PositionRiskTriggerConsumer(ObjectMapper objectMapper, RiskService riskService) {
-        this(objectMapper, riskService, new RiskProperties());
+        this(objectMapper, riskService, new RiskProperties(),
+                new PositionSnapshotCache(ProductLine.LINEAR_PERPETUAL));
+    }
+
+    public PositionRiskTriggerConsumer(ObjectMapper objectMapper, RiskService riskService, RiskProperties properties) {
+        this(objectMapper, riskService, properties,
+                new PositionSnapshotCache(properties.getKafka().getProductLine()));
     }
 
     @Autowired
-    public PositionRiskTriggerConsumer(ObjectMapper objectMapper, RiskService riskService, RiskProperties properties) {
+    public PositionRiskTriggerConsumer(ObjectMapper objectMapper,
+                                       RiskService riskService,
+                                       RiskProperties properties,
+                                       PositionSnapshotCache snapshotCache) {
         this.objectMapper = objectMapper;
         this.riskService = riskService;
         this.properties = properties;
+        this.snapshotCache = snapshotCache;
     }
 
     /**
@@ -53,6 +66,12 @@ public class PositionRiskTriggerConsumer {
                 events.add(event);
             }
             riskService.scanPositionUpdates(events);
+            for (PositionUpdatedEvent event : events) {
+                PositionSnapshotCache.ApplyResult result = snapshotCache.apply(event);
+                if (result == PositionSnapshotCache.ApplyResult.PRODUCT_LINE_MISMATCH) {
+                    throw new IllegalArgumentException("风险持仓 JVM 快照产品线不一致");
+                }
+            }
         } catch (Exception ex) {
             int recordCount = records == null ? 0 : records.size();
             log.error("Failed to process position risk trigger batch records={}: {}",
