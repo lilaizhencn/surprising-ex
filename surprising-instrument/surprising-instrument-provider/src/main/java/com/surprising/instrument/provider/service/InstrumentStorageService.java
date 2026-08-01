@@ -15,15 +15,12 @@ import com.surprising.instrument.provider.repository.InstrumentRiskBracketReposi
 import com.surprising.instrument.provider.repository.InstrumentSequenceRepository;
 import com.surprising.instrument.provider.repository.InstrumentVersionKey;
 import com.surprising.product.api.ProductLine;
-import jakarta.annotation.PostConstruct;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -35,8 +32,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class InstrumentStorageService {
 
-    private static final Logger log = LoggerFactory.getLogger(InstrumentStorageService.class);
-
     private static final Set<ProductLine> EXPIRING_PRODUCT_LINES = Set.of(
             ProductLine.LINEAR_DELIVERY, ProductLine.INVERSE_DELIVERY, ProductLine.OPTION);
 
@@ -46,7 +41,6 @@ public class InstrumentStorageService {
     private final InstrumentProductCurrentVersionRepository productCurrentVersionRepository;
     private final InstrumentRiskBracketRepository riskBracketRepository;
     private final InstrumentIndexSourceRepository indexSourceRepository;
-    private final InstrumentSpecSnapshotCache specSnapshotCache;
     private final InstrumentAssetScaleRepository assetScaleRepository;
 
     public InstrumentStorageService(InstrumentRepository instrumentRepository,
@@ -56,18 +50,7 @@ public class InstrumentStorageService {
                                     InstrumentRiskBracketRepository riskBracketRepository,
                                     InstrumentIndexSourceRepository indexSourceRepository) {
         this(instrumentRepository, sequenceRepository, currentVersionRepository, productCurrentVersionRepository,
-                riskBracketRepository, indexSourceRepository, null, null);
-    }
-
-    public InstrumentStorageService(InstrumentRepository instrumentRepository,
-                                    InstrumentSequenceRepository sequenceRepository,
-                                    InstrumentCurrentVersionRepository currentVersionRepository,
-                                    InstrumentProductCurrentVersionRepository productCurrentVersionRepository,
-                                    InstrumentRiskBracketRepository riskBracketRepository,
-                                    InstrumentIndexSourceRepository indexSourceRepository,
-                                    InstrumentSpecSnapshotCache specSnapshotCache) {
-        this(instrumentRepository, sequenceRepository, currentVersionRepository, productCurrentVersionRepository,
-                riskBracketRepository, indexSourceRepository, specSnapshotCache, null);
+                riskBracketRepository, indexSourceRepository, null);
     }
 
     @Autowired
@@ -77,7 +60,6 @@ public class InstrumentStorageService {
                                     InstrumentProductCurrentVersionRepository productCurrentVersionRepository,
                                     InstrumentRiskBracketRepository riskBracketRepository,
                                     InstrumentIndexSourceRepository indexSourceRepository,
-                                    InstrumentSpecSnapshotCache specSnapshotCache,
                                     InstrumentAssetScaleRepository assetScaleRepository) {
         this.instrumentRepository = instrumentRepository;
         this.sequenceRepository = sequenceRepository;
@@ -85,27 +67,7 @@ public class InstrumentStorageService {
         this.productCurrentVersionRepository = productCurrentVersionRepository;
         this.riskBracketRepository = riskBracketRepository;
         this.indexSourceRepository = indexSourceRepository;
-        this.specSnapshotCache = specSnapshotCache;
         this.assetScaleRepository = assetScaleRepository;
-    }
-
-    /** 启动时预热当前产品线规格，后续风控和撮合读取不再为同一规格反复查库。 */
-    @PostConstruct
-    void warmCurrentSnapshots() {
-        if (specSnapshotCache == null) {
-            return;
-        }
-        try {
-            for (ProductLine productLine : ProductLine.values()) {
-                List<InstrumentVersionKey> keys = productCurrentVersionRepository.findAll(productLine);
-                if (!keys.isEmpty()) {
-                    enrich(instrumentRepository.list(keys, null, null));
-                }
-            }
-        } catch (RuntimeException ex) {
-            // 数据库短暂不可用时允许服务启动，首次读取会走同样的回源逻辑。
-            log.warn("合约规格内存预热失败，将在首次读取时回源数据库: {}", ex.getMessage());
-        }
     }
 
     public long nextVersion(String symbol) {
@@ -138,12 +100,6 @@ public class InstrumentStorageService {
     }
 
     public Optional<InstrumentResponse> version(String symbol, long version) {
-        if (specSnapshotCache != null) {
-            Optional<InstrumentResponse> cached = specSnapshotCache.get(symbol, version);
-            if (cached.isPresent()) {
-                return cached;
-            }
-        }
         return instrumentRepository.version(symbol, version).map(this::enrich);
     }
 
@@ -232,9 +188,6 @@ public class InstrumentStorageService {
                         brackets.getOrDefault(key(instrument), List.of()),
                         sources.getOrDefault(key(instrument), List.of())))
                 .toList();
-        if (specSnapshotCache != null) {
-            enriched.forEach(specSnapshotCache::put);
-        }
         return enriched;
     }
 

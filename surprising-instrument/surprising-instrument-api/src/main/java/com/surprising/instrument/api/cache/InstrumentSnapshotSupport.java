@@ -40,7 +40,7 @@ public final class InstrumentSnapshotSupport {
                              ProductLine productLine,
                              String serviceName) {
         if (!InstrumentEventKeys.matches(recordKey, event)
-                || event.resolvedProductLine() != productLine
+                || event.productLine() != productLine
                 || !snapshotCache.apply(event)) {
             throw new IllegalArgumentException(serviceName + "合约事件产品线、key 或快照不匹配");
         }

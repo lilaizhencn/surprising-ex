@@ -18,6 +18,7 @@ import com.surprising.account.api.model.ProductBalanceResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.instrument.api.client.InstrumentRpcApi;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentQueryResponse;
 import com.surprising.instrument.api.model.InstrumentResponse;
@@ -338,10 +339,13 @@ class MarketMakerServiceTest {
                                            MarketMakerReferenceSampleRepository referenceSampleRepository,
                                            ReferenceMarketProvider referenceMarketProvider) {
             MarketMakerProperties properties = properties();
-            return new MarketMakerService(properties, new FakeInstrumentRpc(), markPriceCache(),
+            InstrumentSnapshotCache snapshotCache = new InstrumentSnapshotCache();
+            snapshotCache.replace(ProductLine.LINEAR_PERPETUAL,
+                    List.of(new FakeInstrumentRpc().latest("BTC-USDT", ProductLine.LINEAR_PERPETUAL)));
+            return new MarketMakerService(properties, markPriceCache(),
                     new FakeMarketDataRpc(), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
                     referenceMarketProvider, (productLine, strategyId, symbol, ownerId, leaseDuration) -> true,
-                    new FakeOverrideStore(), runEventRepository, referenceSampleRepository);
+                    new FakeOverrideStore(), runEventRepository, referenceSampleRepository, snapshotCache);
         }
 
         private LatestMarkPriceCache markPriceCache() {

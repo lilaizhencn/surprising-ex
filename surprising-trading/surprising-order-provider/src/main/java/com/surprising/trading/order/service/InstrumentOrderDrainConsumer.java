@@ -35,7 +35,7 @@ public class InstrumentOrderDrainConsumer {
             }
             InstrumentEvent event = objectMapper.readValue(record.value(), InstrumentEvent.class);
             if (!InstrumentEventKeys.matches(record.key(), event)) {
-                throw new IllegalArgumentException("instrument 事件必须使用 symbol 作为 Kafka key");
+                throw new IllegalArgumentException("instrument 事件必须使用 PRODUCT_LINE:SYMBOL 作为 Kafka key");
             }
             drainService.drain(event);
         } catch (Exception ex) {

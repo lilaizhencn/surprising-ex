@@ -2,7 +2,6 @@ package com.surprising.marketmaker.provider.service;
 
 import com.surprising.account.api.client.AccountRpcApi;
 import com.surprising.account.api.model.PositionResponse;
-import com.surprising.instrument.api.client.InstrumentRpcApi;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
@@ -65,13 +64,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
-    public class MarketMakerService {
+public class MarketMakerService {
 
     private static final Logger log = LoggerFactory.getLogger(MarketMakerService.class);
     private static final Set<OrderStatus> LIVE_STATUSES = EnumSet.of(OrderStatus.ACCEPTED, OrderStatus.PARTIALLY_FILLED);
 
     private final MarketMakerProperties properties;
-    private final InstrumentRpcApi instrumentRpcApi;
     private final InstrumentSnapshotCache instrumentSnapshotCache;
     private final LatestMarkPriceCache markPriceCache;
     private final MarketDataRpcApi marketDataRpcApi;
@@ -91,57 +89,8 @@ import org.springframework.stereotype.Service;
     private final String nodeId;
     private final String orderNonce;
 
-    MarketMakerService(MarketMakerProperties properties,
-                       InstrumentRpcApi instrumentRpcApi,
-                       LatestMarkPriceCache markPriceCache,
-                       MarketDataRpcApi marketDataRpcApi,
-                       OrderRpcApi orderRpcApi,
-                       AccountRpcApi accountRpcApi,
-                       QuotePlanner quotePlanner,
-                       MarketMakerLeaseCoordinator leaseCoordinator,
-                       MarketMakerStrategyOverrideStore overrideStore) {
-        this(properties, instrumentRpcApi, markPriceCache, marketDataRpcApi, orderRpcApi, accountRpcApi,
-                quotePlanner, ReferenceMarketProvider.disabled(), leaseCoordinator, overrideStore,
-                new NoopMarketMakerRunEventRepository(), new NoopMarketMakerReferenceSampleRepository(), null);
-    }
-
-    MarketMakerService(MarketMakerProperties properties,
-                       InstrumentRpcApi instrumentRpcApi,
-                       LatestMarkPriceCache markPriceCache,
-                       MarketDataRpcApi marketDataRpcApi,
-                       OrderRpcApi orderRpcApi,
-                       AccountRpcApi accountRpcApi,
-                       QuotePlanner quotePlanner,
-                       MarketMakerLeaseCoordinator leaseCoordinator,
-                       MarketMakerStrategyOverrideStore overrideStore,
-                       MarketMakerRunEventRepository runEventRepository,
-                       MarketMakerReferenceSampleRepository referenceSampleRepository) {
-        this(properties, instrumentRpcApi, markPriceCache, marketDataRpcApi, orderRpcApi, accountRpcApi,
-                quotePlanner, ReferenceMarketProvider.disabled(), leaseCoordinator, overrideStore,
-                runEventRepository, referenceSampleRepository, null);
-    }
-
-    /** 保留测试和本地调用使用的旧构造方式，生产环境由 Spring 注入快照缓存。 */
-    public MarketMakerService(MarketMakerProperties properties,
-                              InstrumentRpcApi instrumentRpcApi,
-                              LatestMarkPriceCache markPriceCache,
-                              MarketDataRpcApi marketDataRpcApi,
-                              OrderRpcApi orderRpcApi,
-                              AccountRpcApi accountRpcApi,
-                              QuotePlanner quotePlanner,
-                              ReferenceMarketProvider referenceMarketProvider,
-                              MarketMakerLeaseCoordinator leaseCoordinator,
-                              MarketMakerStrategyOverrideStore overrideStore,
-                              MarketMakerRunEventRepository runEventRepository,
-                              MarketMakerReferenceSampleRepository referenceSampleRepository) {
-        this(properties, instrumentRpcApi, markPriceCache, marketDataRpcApi, orderRpcApi, accountRpcApi,
-                quotePlanner, referenceMarketProvider, leaseCoordinator, overrideStore,
-                runEventRepository, referenceSampleRepository, null);
-    }
-
     @Autowired
     public MarketMakerService(MarketMakerProperties properties,
-                              InstrumentRpcApi instrumentRpcApi,
                               LatestMarkPriceCache markPriceCache,
                               MarketDataRpcApi marketDataRpcApi,
                               OrderRpcApi orderRpcApi,
@@ -154,7 +103,6 @@ import org.springframework.stereotype.Service;
                               MarketMakerReferenceSampleRepository referenceSampleRepository,
                               InstrumentSnapshotCache instrumentSnapshotCache) {
         this.properties = properties;
-        this.instrumentRpcApi = instrumentRpcApi;
         this.instrumentSnapshotCache = instrumentSnapshotCache;
         this.markPriceCache = markPriceCache;
         this.marketDataRpcApi = marketDataRpcApi;
@@ -183,13 +131,12 @@ import org.springframework.stereotype.Service;
     }
 
     private InstrumentResponse currentInstrument(ProductLine productLine, String symbol) {
-        if (instrumentSnapshotCache != null && productLine != null
-                && instrumentSnapshotCache.initialized(productLine)) {
-            return instrumentSnapshotCache.current(productLine, symbol)
-                    .orElseThrow(() -> new IllegalStateException("合约快照中不存在品种: " + productLine + "/" + symbol));
+        if (productLine == null || instrumentSnapshotCache == null
+                || !instrumentSnapshotCache.initialized(productLine)) {
+            throw new IllegalStateException("做市合约 JVM 快照尚未就绪: " + productLine);
         }
-        // 仅兼容未启用 Spring 快照组件的单元测试；生产路径由 JVM 快照提供数据。
-        return instrumentRpcApi.latest(symbol, productLine);
+        return instrumentSnapshotCache.current(productLine, symbol)
+                .orElseThrow(() -> new IllegalStateException("合约快照中不存在品种: " + productLine + "/" + symbol));
     }
 
     public MarketMakerStrategyQueryResponse strategies(ProductLine productLine) {

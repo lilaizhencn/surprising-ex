@@ -34,7 +34,7 @@ Instrument Service 通过统一聚合 Service 组装合约正文、风险档位�
 再用同一快照完成合约计算。涉及持仓、余额和结算幂等的事务性组合仍保留在主库事务边界，不能改成非原子多次写入。
 
 `RedisRiskCalculator` 使用不可变快照和 `AtomicReference` 整体替换，风控计算不为规格参数查询数据库；
-`instrumentVersion` 仍是历史订单、持仓和 Kafka 事件的内部兼容字段，不能直接删除。
+`instrumentVersion` 是历史订单、持仓和 Kafka 事件定位开仓规格的内部字段，不能删除。
 
 ## Trigger 与风险组
 
@@ -52,11 +52,13 @@ Instrument Service 通过统一聚合 Service 组装合约正文、风险档位�
 每个 `ClientConnection` 使用有界内存 FIFO（环形队列语义）和独立虚拟线程发送。`SubscriptionRegistry.publishBatch` 将同一批事件一次性编码和入队；队列满或发送超时只关闭当前慢连接，不阻塞 Kafka 消费线程和其他连接。公共行情多节点仍必须使用不同 Kafka consumer group，产品线 topic 和订阅键不能混用。
 高频公共行情使用 `webSocketKafkaBatchListenerContainerFactory` 批量拉取，按订阅主题分组后调用 `publishTimedBatch`；私有事件保留逐条确认。K 线的部分状态继续由合并器限频，避免丢失关闭事件。
 
-## 指标与规格代际迁移
+## 指标与规格版本
 
 K 线热缓存、合约规格快照和 WebSocket 注册表暴露命中、未命中、替换、批量 fanout 和背压拒绝指标。替换次数可作为规格快照漂移告警信号，背压拒绝必须结合慢连接 ID 排查，不能通过无限增大队列掩盖问题。
 
-`InstrumentSpecEpoch` 是 `InstrumentSpecId` 的内部代际别名，迁移阶段与旧 `instrumentVersion` 数值保持一一对应。数据库列、历史 Kafka 事件和内部计算模型暂不删除；新缓存键优先使用 `productLine + symbol + epoch`，公共网关继续过滤旧内部字段。完成全链路双读、回放和账务核对后，才能安排旧字段下线。
+合约规格统一使用 `productLine + symbol + version` 作为 JVM 快照的内部定位键。`version` 是规格生命周期序号，
+历史订单、持仓和 Kafka 事件必须保留它，才能在重启、结算和风险重算时复原开仓时的精确规格。
+Instrument 事件只接受完整字段，不再兼容缺少产品线、序列或使用仅 SYMBOL key 的旧消息。
 
 ## 部署与故障处理
 

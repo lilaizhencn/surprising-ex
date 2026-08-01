@@ -4,7 +4,7 @@ import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.InstrumentResponse;
-import com.surprising.product.api.InstrumentSpecEpoch;
+import com.surprising.product.api.InstrumentSpecKey;
 import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.model.CachedRiskGroup;
 import com.surprising.risk.provider.model.CachedRiskPosition;
@@ -80,7 +80,7 @@ public class RedisRiskCalculator {
     }
 
     private RiskInstrumentSpec spec(String symbol, long version) {
-        InstrumentKey key = new InstrumentKey(new InstrumentSpecEpoch(
+        InstrumentKey key = new InstrumentKey(new InstrumentSpecKey(
                 properties.getKafka().getProductLine(), symbol, version));
         RiskInstrumentSpec cached = specs.get().get(key);
         if (cached != null) {
@@ -120,6 +120,6 @@ public class RedisRiskCalculator {
         return specs.get().size();
     }
 
-    private record InstrumentKey(InstrumentSpecEpoch epoch) {
+    private record InstrumentKey(InstrumentSpecKey versionKey) {
     }
 }

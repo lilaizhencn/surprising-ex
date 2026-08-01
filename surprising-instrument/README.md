@@ -121,7 +121,7 @@ curl -X POST 'http://localhost:9080/api/v1/instruments/admin/BTC-USDT/status?sta
 surprising.instrument.events.v1
 ```
 
-事件 key 使用 `PRODUCT_LINE:SYMBOL`，兼容消费旧的 `SYMBOL` key。事件内容包含产品线、序列和完整
+事件 key 固定使用 `PRODUCT_LINE:SYMBOL`，事件内容必须包含产品线、序列和完整
 `InstrumentResponse` 快照，下游通过版本和更新时间丢弃旧事件，再以不可变引用整体替换本地缓存。
 producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.connection=5`，让合约版本变更事件和交易、价格链路保持一致的可靠 Kafka 基线。
 

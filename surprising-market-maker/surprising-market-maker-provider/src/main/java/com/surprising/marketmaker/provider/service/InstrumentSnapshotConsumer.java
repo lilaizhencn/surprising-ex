@@ -31,11 +31,8 @@ public class InstrumentSnapshotConsumer {
     public void onInstrumentEvent(ConsumerRecord<String, String> record) {
         try {
             InstrumentEvent event = objectMapper.readValue(record.value(), InstrumentEvent.class);
-            if (event.resolvedProductLine() == null) {
-                throw new IllegalArgumentException("做市合约事件产品线或 key 不匹配");
-            }
             InstrumentSnapshotSupport.apply(snapshotCache, record.key(), event,
-                    event.resolvedProductLine(), "做市服务");
+                    event.productLine(), "做市服务");
         } catch (Exception ex) {
             throw new IllegalStateException("做市合约快照更新失败", ex);
         }

@@ -19,14 +19,16 @@ public final class InstrumentEventKeys {
     }
 
     public static String key(InstrumentEvent event) {
-        ProductLine productLine = event == null ? null : event.resolvedProductLine();
-        return key(productLine, event == null ? null : event.symbol());
+        if (event == null) {
+            throw new IllegalArgumentException("event is required");
+        }
+        return key(event.productLine(), event.symbol());
     }
 
     public static boolean matches(String key, InstrumentEvent event) {
         if (event == null || key == null) {
             return false;
         }
-        return key.equals(key(event)) || key.equals(event.symbol());
+        return key.equals(key(event));
     }
 }

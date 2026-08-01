@@ -17,7 +17,7 @@ Surprising-EX 是基于 Java 21、PostgreSQL、Kafka 和 Redis/Valkey 的多产�
 - risk-provider 在 Redis 维护完整风险组和 `symbol + instrumentVersion -> group` 反向索引；标记价更新
   只计算受影响的风险组，PostgreSQL 在同一事务内批量写风险快照、强平 candidate 和 candidate Outbox，
   liquidation 执行前仍重新校验并锁定 PostgreSQL 权威状态。内部规格缓存已引入
-  `productLine + symbol + epoch` 代际键，旧字段仍由兼容层双读。
+  `productLine + symbol + version` 规格键，历史订单和持仓继续使用同一内部版本号定位规格。
 - 风险持仓事件和标记价事件优先复用本 JVM/Redis 风险组快照；定时扫描仍承担恢复核对职责。
   强平候选输入直接使用候选事件中的风险值和持仓锁结果，只查询最新风险状态，避免重复读取持仓和账户快照。
 - 强平 candidate 进入同 hash-tag 的 Redis 优先队列，由 Lua 原子完成去重、lease 和延迟重试；worker

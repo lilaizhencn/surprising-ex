@@ -49,7 +49,7 @@ public class InstrumentOrderDrainService {
 
     public void drain(InstrumentEvent event) {
         if (event.status() != InstrumentStatus.SETTLING
-                || event.snapshot().contractType().productLine() != properties.getKafka().getProductLine()) {
+                || event.productLine() != properties.getKafka().getProductLine()) {
             return;
         }
         if (lifecycleFenceService != null) {

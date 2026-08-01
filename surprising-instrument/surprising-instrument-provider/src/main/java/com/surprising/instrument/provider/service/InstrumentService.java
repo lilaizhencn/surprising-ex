@@ -174,7 +174,7 @@ public class InstrumentService {
     private void publish(InstrumentResponse response, InstrumentEventType eventType) {
         Instant eventTime = Instant.now();
         InstrumentEvent event = new InstrumentEvent(response.symbol(), response.version(), response.status(),
-                eventType, eventTime, response);
+                eventType, eventTime, response, response.contractType().productLine(), response.version());
         outboxService.enqueue("INSTRUMENT", response.version(),
                 ProductTopicNames.INSTRUMENT_EVENTS_TOPIC, InstrumentEventKeys.key(event),
                 eventType.name(), event, eventTime);

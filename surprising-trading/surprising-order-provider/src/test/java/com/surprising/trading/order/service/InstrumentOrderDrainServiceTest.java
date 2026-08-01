@@ -6,9 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentEvent;
-import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.config.TradingOrderProperties;
@@ -71,12 +69,10 @@ class InstrumentOrderDrainServiceTest {
 
     private InstrumentEvent event() {
         InstrumentEvent event = mock(InstrumentEvent.class);
-        InstrumentResponse snapshot = mock(InstrumentResponse.class);
-        when(snapshot.contractType()).thenReturn(ContractType.LINEAR_DELIVERY);
         when(event.status()).thenReturn(InstrumentStatus.SETTLING);
         when(event.symbol()).thenReturn("BTC-USDT-260327");
         when(event.version()).thenReturn(2L);
-        when(event.snapshot()).thenReturn(snapshot);
+        when(event.productLine()).thenReturn(ProductLine.LINEAR_DELIVERY);
         return event;
     }
 
