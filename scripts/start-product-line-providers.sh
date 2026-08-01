@@ -6,7 +6,7 @@ ACTION="${ACTION:-start}"
 PRODUCT_LINE="${PRODUCT_LINE:?必须显式设置 PRODUCT_LINE，例如 SPOT、LINEAR_PERPETUAL、LINEAR_DELIVERY 或 OPTION}"
 PRODUCT_TOPICS_ENABLED="${PRODUCT_TOPICS_ENABLED:-true}"
 PORT_OFFSET="${PORT_OFFSET:-0}"
-SERVICES="${SERVICES:-candlestick index-price mark-price trading-entry matching account margin-ops edge}"
+SERVICES="${SERVICES:-instrument candlestick index-price mark-price trading-entry matching account margin-ops edge}"
 BUILD_SERVICES="${BUILD_SERVICES:-false}"
 WAIT_HEALTH="${WAIT_HEALTH:-true}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-180}"
@@ -43,6 +43,7 @@ validate_port_offset() {
 
 module_for() {
   case "$1" in
+    instrument) echo "surprising-instrument/surprising-instrument-provider" ;;
     candlestick) echo "surprising-candlestick/surprising-candlestick-provider" ;;
     price) echo "surprising-price/surprising-price-provider" ;;
     index-price) echo "surprising-price/surprising-index-price-provider" ;;
@@ -75,6 +76,7 @@ artifact_for() {
 
 base_port_for() {
   case "$1" in
+    instrument) echo 9080 ;;
     candlestick) echo 9081 ;;
     price) echo 9082 ;;
     index-price) echo 9082 ;;
@@ -166,6 +168,10 @@ service_env() {
   local service="$1"
   local slug="$2"
   case "${service}" in
+    instrument)
+      printf '%s\n' \
+        "SURPRISING_INSTRUMENT_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}"
+      ;;
     candlestick)
       printf '%s\n' \
         "SURPRISING_CANDLESTICK_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
@@ -410,6 +416,11 @@ start_service() {
 
 validate_product_line "${PRODUCT_LINE}"
 validate_port_offset
+
+# 所有业务模块都依赖 instrument JVM 快照；启动时即使调用方只指定了部分服务，也必须先启动它。
+if [[ "${ACTION}" == "start" ]] && ! service_requested instrument; then
+  SERVICES="instrument ${SERVICES}"
+fi
 
 PRODUCT_SLUG="$(product_slug "${PRODUCT_LINE}")"
 if [[ -z "${LOG_DIR}" ]]; then
