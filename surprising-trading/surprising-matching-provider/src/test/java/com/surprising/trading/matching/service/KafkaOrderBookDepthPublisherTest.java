@@ -92,6 +92,28 @@ class KafkaOrderBookDepthPublisherTest {
         assertThat(publisher.stats().coalesced()).isEqualTo(1);
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void retriesLatestSnapshotAfterKafkaSendFailure() {
+        MatchingProperties properties = new MatchingProperties();
+        KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+        CompletableFuture<SendResult<String, String>> failed = new CompletableFuture<>();
+        when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+                .thenReturn(failed)
+                .thenReturn(CompletableFuture.completedFuture(null));
+        KafkaOrderBookDepthPublisher publisher = new KafkaOrderBookDepthPublisher(
+                new ObjectMapper(), properties, kafkaTemplate);
+
+        publisher.offer(snapshot("BTC-USDT", 1L, 10L));
+        publisher.publishPending();
+        failed.completeExceptionally(new IllegalStateException("Kafka 元数据尚未就绪"));
+        publisher.publishPending();
+
+        verify(kafkaTemplate, times(2)).send(anyString(), anyString(), anyString());
+        assertThat(publisher.stats().sent()).isEqualTo(1L);
+        assertThat(publisher.stats().sendFailed()).isEqualTo(1L);
+    }
+
     private OrderBookDepthEvent snapshot(String symbol, long sequence, long quantity) {
         return new OrderBookDepthEvent(symbol, sequence, Math.max(0L, sequence - 1L),
                 OrderBookDepthUpdateType.SNAPSHOT, 50,

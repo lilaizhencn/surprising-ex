@@ -16,6 +16,7 @@ import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.support.SendResult;
 import tools.jackson.databind.ObjectMapper;
 
 class KafkaPublicTradePublisherTest {
@@ -70,6 +71,28 @@ class KafkaPublicTradePublisherTest {
         verify(kafkaTemplate, times(KafkaPublicTradePublisher.BATCH_SIZE))
                 .send(anyString(), anyString(), firstPayload.capture());
         assertThat(read(firstPayload.getAllValues().get(0)).sequence()).isEqualTo(2L);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void retriesTradeAfterKafkaSendFailure() {
+        KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+        CompletableFuture<SendResult<String, String>> failed = new CompletableFuture<>();
+        when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+                .thenReturn(failed)
+                .thenReturn(CompletableFuture.completedFuture(null));
+        KafkaPublicTradePublisher publisher = new KafkaPublicTradePublisher(
+                new ObjectMapper(), new MatchingProperties(), kafkaTemplate);
+
+        publisher.offer(trade("BTC-USDT", 1L));
+        publisher.publishPending();
+        failed.completeExceptionally(new IllegalStateException("Kafka 元数据尚未就绪"));
+        publisher.publishPending();
+
+        verify(kafkaTemplate, times(2)).send(anyString(), anyString(), anyString());
+        assertThat(publisher.stats().sent()).isEqualTo(1L);
+        assertThat(publisher.stats().sendFailed()).isEqualTo(1L);
+        assertThat(publisher.stats().queued()).isZero();
     }
 
     private PublicTradeEvent trade(String symbol, long sequence) {

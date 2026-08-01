@@ -109,14 +109,21 @@ import tools.jackson.databind.ObjectMapper;
                             sent.incrementAndGet();
                         } else {
                             recordFailure(symbol, error);
+                            retryLatest(slot, event);
                         }
                         rescheduleOrDeactivate(symbol, slot);
                     });
         } catch (Exception error) {
             inFlight.decrementAndGet();
             recordFailure(symbol, error);
+            retryLatest(slot, event);
             rescheduleOrDeactivate(symbol, slot);
         }
+    }
+
+    /** 公共深度允许合并中间态，但发送失败时必须保留失败时的最新快照。 */
+    private void retryLatest(SymbolSlot slot, OrderBookDepthEvent event) {
+        slot.latest.compareAndSet(null, event);
     }
 
     private boolean tryAcquire(int maxInFlight) {

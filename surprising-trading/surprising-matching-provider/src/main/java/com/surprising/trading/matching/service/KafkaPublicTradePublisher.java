@@ -95,7 +95,7 @@ import tools.jackson.databind.ObjectMapper;
                 continue;
             }
             remaining -= batch.size();
-            batch.forEach(this::send);
+            batch.forEach(event -> send(symbol, symbolQueue, event));
         }
     }
 
@@ -125,22 +125,41 @@ import tools.jackson.databind.ObjectMapper;
         return Math.max(0, MAX_IN_FLIGHT - inFlight.get());
     }
 
-    private void send(PublicTradeEvent event) {
+    private void send(String symbol, SymbolQueue symbolQueue, PublicTradeEvent event) {
         inFlight.incrementAndGet();
         try {
             String payload = objectMapper.writeValueAsString(event);
-            kafkaTemplate.send(properties.getKafka().getMatchTradesTopic(), event.symbol(), payload)
+            kafkaTemplate.send(properties.getKafka().getMatchTradesTopic(), symbol, payload)
                     .whenComplete((ignored, error) -> {
                         inFlight.decrementAndGet();
                         if (error == null) {
                             sent.incrementAndGet();
                         } else {
-                            recordFailure(event.symbol(), error);
+                            recordFailure(symbol, error);
+                            retry(symbol, symbolQueue, event);
                         }
                     });
         } catch (Exception error) {
             inFlight.decrementAndGet();
-            recordFailure(event.symbol(), error);
+            recordFailure(symbol, error);
+            retry(symbol, symbolQueue, event);
+        }
+    }
+
+    /** 发送失败时将成交放回该交易对队首，避免临时 Kafka 元数据故障造成永久丢失。 */
+    private void retry(String symbol, SymbolQueue symbolQueue, PublicTradeEvent event) {
+        synchronized (symbolQueue) {
+            symbolQueue.events.addFirst(event);
+            queued.incrementAndGet();
+            while (symbolQueue.events.size() > MAX_QUEUED_PER_SYMBOL) {
+                symbolQueue.events.removeLast();
+                queued.decrementAndGet();
+                dropped.incrementAndGet();
+            }
+            if (!symbolQueue.active) {
+                symbolQueue.active = true;
+                readySymbols.offer(symbol);
+            }
         }
     }
 
