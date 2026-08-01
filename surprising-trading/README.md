@@ -546,7 +546,7 @@ mvn -pl :surprising-matching-provider -am spring-boot:run
 - `surprising-trading-entry-provider` 是默认交易入口部署进程，承载普通订单和条件单流量。
 - `surprising-order-provider` 和 `surprising-trigger-provider` 仍然保留，可用于拆分部署。二者都可以多节点水平部署，但必须共享同一个 PostgreSQL 和 Kafka 集群。trigger 按 Kafka partition 和数据库 claim batch 扩展，不要做每个 symbol 一个 worker。
 - `surprising-matching-provider` 必须继续独立于 trading-entry；它持有 exchange-core 订单簿，应该单独扩缩容和重启恢复。
-- matching provider 使用 JDK 21 运行。exchange-core 依赖的 Chronicle/OpenHFT 需要显式 Java module opens/exports；生产进程使用本地运行示例里的 `JAVA_TOOL_OPTIONS`。
+- matching provider 使用 JDK 21 运行。`exchange.core2:exchange-core:0.5.3` 传递依赖 Chronicle/OpenHFT，父 POM 通过 BOM 统一到 JDK 21 可用的 2026.x 版本，生产进程仍需使用本地运行示例里的 `JAVA_TOOL_OPTIONS`。升级前旧版 Chronicle 查找 `FileChannelImpl.unmap0` 会导致 `Bytes` 初始化失败；升级后必须通过撮合模块全量测试再发布。
 - 新 symbol 必须先在 instrument 模块上线，确认 Kafka partition 足够，再开放下单。
 - MARKET 订单在订单入口和撮合阶段都要求 mark price 新鲜。订单入口会用配置的 mark 派生可成交区间校验 min/max notional，再发布撮合命令；线性合约 max-notional 和初始保证金按上边界计算，避免市价 SELL 开空在高买价成交时抵押不足。`surprising.trading.*.market-max-slippage-ppm` 需要按产品流动性配置。
 - 默认 application 配置已开启 LIMIT 订单价格带保护，`limit-price-band-ppm: 50000` 表示 5%。正式开放高频用户或做市商报价前，需要按具体产品流动性调整。

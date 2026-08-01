@@ -91,7 +91,16 @@ Topic 创建脚本是幂等的，不需要每次删除重建。本地测试可�
 export JAVA_TOOL_OPTIONS="--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED --add-opens=jdk.compiler/com.sun.tools.javac=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
 ```
 
-在 exchange-core 和 Chronicle 未针对新版 JDK 重新验证前，撮合服务必须保持 JDK 21。
+`exchange.core2:exchange-core:0.5.3` 会传递引入 Chronicle；Chronicle 不是打包在
+exchange-core 内部的私有代码，而是独立的 Maven 依赖。父 POM 通过 Chronicle BOM 统一管理版本，
+当前使用的版本为 `chronicle-wire 2026.7`、`chronicle-bytes 2026.4`、`chronicle-core 2026.5`
+和 `chronicle-threads 2026.3`。这样不需要修改 exchange-core 源码，也能修复旧版 Chronicle
+在 JDK 21 中查找已不存在的 `FileChannelImpl.unmap0` 所造成的 `Bytes` 初始化失败。
+
+撮合服务仍必须使用 JDK 21，并保留上面的 module opens/exports。升级 Chronicle 后必须至少执行
+`mvn -pl surprising-trading/surprising-matching-provider -am test`，确认订单簿恢复、撮合保护和
+撮合服务测试通过后再发布。启动时若仍看到 Chronicle 关于直接内存反射的非致命告警，只要测试和
+撮合运行正常即可；该告警不等同于 `Bytes` 初始化失败。
 
 ## 多节点规则
 

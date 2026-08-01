@@ -85,8 +85,9 @@ PRODUCT_LINES=LINEAR_PERPETUAL PARTITIONS=32 ACCOUNT_COMMAND_PARTITIONS=32 ./scr
 PRODUCT_LINE=LINEAR_PERPETUAL BUILD_SERVICES=false ./scripts/start-product-line-providers.sh
 ```
 
-matching 使用 exchange-core/OpenHFT，必须使用 [部署文档](docs/deployment.md) 中列出的
-`--add-opens/--add-exports` JVM 参数。默认合并进程和端口：
+matching 使用 `exchange.core2:exchange-core:0.5.3` 及其 Chronicle/OpenHFT 传递依赖，必须使用
+[部署文档](docs/deployment.md) 中列出的 `--add-opens/--add-exports` JVM 参数。Chronicle 版本由
+父 POM 的 BOM 统一管理，避免旧版在 JDK 21 中触发 `unmap0`/`Bytes` 初始化错误。默认合并进程和端口：
 
 | Provider | 端口 |
 |---|---:|
