@@ -45,6 +45,7 @@ surprising:
       product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       group-id: surprising-risk-v1
       position-events-topic: surprising.account.position.events.v1
+      account-state-events-topic: surprising.account.state.events.v1
       account-risk-events-topic: surprising.risk.account.events.v1
       position-risk-events-topic: surprising.risk.position.events.v1
       liquidation-candidates-topic: surprising.perp.liquidation.candidates.v1

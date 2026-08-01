@@ -3,6 +3,7 @@ package com.surprising.account.api.cache;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.product.api.ProductLine;
 import java.util.Optional;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -61,6 +62,16 @@ public final class PerpetualAccountStateSnapshotCache {
             return Optional.empty();
         }
         return Optional.ofNullable(states.get(userId));
+    }
+
+    /** 返回当前已经接收的完整用户快照，调用方不能修改缓存内部状态。 */
+    public List<PerpetualAccountStateUpdatedEvent> states() {
+        if (!ready()) {
+            return List.of();
+        }
+        return states.values().stream()
+                .sorted(java.util.Comparator.comparingLong(PerpetualAccountStateUpdatedEvent::userId))
+                .toList();
     }
 
     public boolean isUserReady(long userId) {
