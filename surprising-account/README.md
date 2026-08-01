@@ -207,6 +207,7 @@ surprising:
       product-topics-enabled: true
       position-events-topic: surprising.linear-perp.account.position.events.v1
       liquidation-fee-events-topic: surprising.linear-perp.account.liquidation-fee.events.v1
+      account-state-events-topic: surprising.linear-perp.account.state.events.v1
       concurrency: 2
       user-command-concurrency: 32
       max-poll-records: 500
@@ -235,7 +236,9 @@ surprising:
 - `contract-spec-max-entries` 按 `(symbol, instrumentVersion)` 缓存合约数学配置。
 
 余额、持仓、保证金冻结、命令幂等、ledger 和 outbox 状态仍以 PostgreSQL 为准。Redis 持仓只作为
-带 revision 的可重放查询投影。
+带 revision 的可重放查询投影。永续账户命令成功后，账户事务还会在同一 outbox 中写入
+`PerpetualAccountStateUpdatedEvent` 到 `account.state.events.v1`；该事件当前用于影子迁移和下游 JVM
+快照重建，不能在账户版本栅栏完成前直接替代账户写入校验。
 
 account outbox 发布不改变 Kafka key，并按 `topic + event_key` claim 有界连续到期前缀。
 普通事件 Topic 会按 id 顺序一次提交最多 `send-window-size` 条，只把连续 ACK 成功的前缀批量确认为已发布。

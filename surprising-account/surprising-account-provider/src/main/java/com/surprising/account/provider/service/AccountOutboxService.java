@@ -174,17 +174,20 @@ public class AccountOutboxService {
         String openInterestEventsTopic = kafka.getOpenInterestEventsTopic();
         String liquidationFeeEventsTopic = kafka.getLiquidationFeeEventsTopic();
         String riskWalletEventsTopic = kafka.getRiskWalletEventsTopic();
+        String accountStateEventsTopic = kafka.getAccountStateEventsTopic();
         String commandResultsTopic = kafka.getCommandResultsTopic();
         String userCommandsTopic = kafka.getUserCommandsTopic();
         if (!positionEventsTopic.equals(topic)
                 && !openInterestEventsTopic.equals(topic)
                 && !liquidationFeeEventsTopic.equals(topic)
                 && !riskWalletEventsTopic.equals(topic)
+                && !accountStateEventsTopic.equals(topic)
                 && !commandResultsTopic.equals(topic)
                 && !userCommandsTopic.equals(topic)) {
             throw new IllegalStateException("account outbox topic must match current product line: expected one of ["
                     + positionEventsTopic + ", " + openInterestEventsTopic + ", " + liquidationFeeEventsTopic
                     + ", " + riskWalletEventsTopic
+                    + ", " + accountStateEventsTopic
                     + ", " + commandResultsTopic
                     + ", " + userCommandsTopic + "] actual=" + topic);
         }

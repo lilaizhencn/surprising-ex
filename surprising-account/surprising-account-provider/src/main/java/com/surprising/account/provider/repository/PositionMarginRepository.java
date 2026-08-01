@@ -78,6 +78,18 @@ public class PositionMarginRepository {
                         Map.Entry::getKey, Map.Entry::getValue, Math::addExact, LinkedHashMap::new));
     }
 
+    /** 读取用户永续逐仓保证金完整快照，查询只触及本仓储负责的单表。 */
+    public List<PositionMarginRow> findByUser(ProductLine productLine, long userId) {
+        return jdbcTemplate.query("""
+                SELECT symbol, asset, margin_mode, position_side, margin_units, updated_at
+                  FROM account_position_margins
+                 WHERE product_line = ?
+                   AND user_id = ?
+                   AND margin_units > 0
+                 ORDER BY symbol ASC, asset ASC, margin_mode ASC, position_side ASC
+                """, (rs, rowNum) -> toRow(rs), productLine.name(), userId);
+    }
+
     public long lockUnits(ProductLine productLine,
                           long userId,
                           String symbol,

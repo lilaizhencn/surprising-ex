@@ -43,6 +43,7 @@ public class AccountUserCommandProcessor {
     private final AccountService accountService;
     private final PositionCacheAfterCommitSynchronizer positionCacheSynchronizer;
     private final AccountRiskWalletSnapshotService riskWalletSnapshotService;
+    private final PerpetualAccountStateSnapshotService accountStateSnapshotService;
 
     /** 保留测试和旧调用方构造签名；未注入风险钱包发布器时不改变原有命令语义。 */
     public AccountUserCommandProcessor(ObjectMapper objectMapper,
@@ -58,7 +59,7 @@ public class AccountUserCommandProcessor {
                                        PositionCacheAfterCommitSynchronizer positionCacheSynchronizer) {
         this(objectMapper, properties, commandRepository, outboxService, adlTargetSettlementService,
                 deficitSettlementService, fundingSettlementService, accountSettlementService,
-                orderReservationService, accountService, positionCacheSynchronizer, null);
+                orderReservationService, accountService, positionCacheSynchronizer, null, null);
     }
 
     @Autowired
@@ -73,7 +74,8 @@ public class AccountUserCommandProcessor {
                                        AccountOrderReservationService orderReservationService,
                                        AccountService accountService,
                                        PositionCacheAfterCommitSynchronizer positionCacheSynchronizer,
-                                       AccountRiskWalletSnapshotService riskWalletSnapshotService) {
+                                       AccountRiskWalletSnapshotService riskWalletSnapshotService,
+                                       PerpetualAccountStateSnapshotService accountStateSnapshotService) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.commandRepository = commandRepository;
@@ -86,6 +88,7 @@ public class AccountUserCommandProcessor {
         this.accountService = accountService;
         this.positionCacheSynchronizer = positionCacheSynchronizer;
         this.riskWalletSnapshotService = riskWalletSnapshotService;
+        this.accountStateSnapshotService = accountStateSnapshotService;
     }
 
     @Transactional
@@ -151,10 +154,15 @@ public class AccountUserCommandProcessor {
         try {
             resultPayload = dispatch(command);
             Instant completedAt = Instant.now();
-            if (riskWalletSnapshotService != null && command.productLine() == ProductLine.LINEAR_PERPETUAL
-                    && command.commandType() != com.surprising.account.api.model.AccountUserCommandType.POSITION_MODE_UPDATE) {
-                riskWalletSnapshotService.publish(command.productLine(), command.userId(),
-                        properties.getKafka().getRiskWalletEventsTopic(), completedAt, command.traceId());
+            if (riskWalletSnapshotService != null && command.productLine() == ProductLine.LINEAR_PERPETUAL) {
+                AccountRiskWalletSnapshotService.Publication publication = riskWalletSnapshotService.publishSnapshot(
+                        command.productLine(), command.userId(), properties.getKafka().getRiskWalletEventsTopic(),
+                        completedAt, command.traceId());
+                if (accountStateSnapshotService != null) {
+                    accountStateSnapshotService.publish(command.productLine(), command.userId(),
+                            publication.accountRevision(), properties.getKafka().getAccountStateEventsTopic(),
+                            completedAt, command.traceId());
+                }
             }
             commandRepository.markApplied(command.commandId(), resultPayload, completedAt);
             enqueueCommandResultIfObserved(command,

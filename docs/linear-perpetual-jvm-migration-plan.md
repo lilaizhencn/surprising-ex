@@ -346,8 +346,9 @@ PRODUCT_LINES=LINEAR_PERPETUAL ./scripts/product-line-funds-reconcile.sh
 
 本轮先不删除任何 Repository，也不关闭强平数据库最终校验，按以下顺序继续：
 
-1. 把本节审计结果作为后续改造的唯一清单，并为账户/持仓/订单/风险/强平事件补版本字段和 readiness 指标。
-2. 将 `PositionUpdatedEvent` 的全局缓存 revision 与用户账户 revision 分离，建立可检测的用户事件连续性。
-3. 建立永续账户 JVM 快照的启动恢复、事件重放和影子对账服务；现有 PostgreSQL 事务仍作为临时写入端。
-4. 先接入下单入口的余额/模式/持仓快照读取和明确的 fail-closed，再改账户预占的版本校验。
-5. 每完成一个子模块执行对应 Maven 测试、`check-*` 边界脚本和永续资金核对，独立提交。
+1. 已把本节审计结果作为后续改造的唯一清单；账户 outbox 已修复产品线模式下遗漏未平仓量和风险钱包 Topic 的问题。
+2. 已增加 `PerpetualAccountStateUpdatedEvent` 和 `PerpetualAccountStateSnapshotCache` 的基础协议；当前事件由数据库事务组合生成，仍属于影子迁移层，尚未用于放行资金操作。
+3. 将 `PositionUpdatedEvent` 的全局缓存 revision 与用户账户 revision 分离，建立可检测的用户事件连续性；账户完整状态事件已经复用同一 `accountRevision`。
+4. 建立永续账户 JVM 快照的启动恢复、事件重放和影子对账服务；现有 PostgreSQL 事务仍作为临时写入端。
+5. 先接入下单入口的余额/模式/持仓快照读取和明确的 fail-closed，再改账户预占的版本校验。
+6. 每完成一个子模块执行对应 Maven 测试、`check-*` 边界脚本和永续资金核对，独立提交。

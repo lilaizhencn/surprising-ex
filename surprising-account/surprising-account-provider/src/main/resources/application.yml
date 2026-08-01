@@ -61,6 +61,7 @@ surprising:
       position-events-topic: surprising.account.position.events.v1
       open-interest-events-topic: surprising.account.open-interest.events.v1
       liquidation-fee-events-topic: surprising.account.liquidation-fee.events.v1
+      account-state-events-topic: surprising.account.state.events.v1
       trigger-order-events-topic: surprising.perp.trigger-order.events.v1
       delivery-settlements-topic: surprising.linear-delivery.delivery.settlements.v1
       option-exercises-topic: surprising.option.option.exercises.v1

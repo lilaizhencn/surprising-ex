@@ -26,7 +26,8 @@ public class AccountSequenceRepository {
         COMMAND_RESULT_EVENT("public.account_command_result_event_seq"),
         COMMAND_RETRY_EVENT("public.account_command_retry_event_seq"),
         USER_COMMAND_OUTBOX_EVENT("public.account_user_command_outbox_event_seq"),
-        ACCOUNT_RISK_WALLET_EVENT("public.account_risk_wallet_event_seq");
+        ACCOUNT_RISK_WALLET_EVENT("public.account_risk_wallet_event_seq"),
+        ACCOUNT_STATE_EVENT("public.account_state_event_seq");
 
         private final String databaseSequence;
 
@@ -103,6 +104,10 @@ public class AccountSequenceRepository {
 
     public long nextRiskWalletEventId() {
         return nextSequence(Sequence.ACCOUNT_RISK_WALLET_EVENT);
+    }
+
+    public long nextAccountStateEventId() {
+        return nextSequence(Sequence.ACCOUNT_STATE_EVENT);
     }
 
     private long allocateRangeStart(String databaseSequence) {

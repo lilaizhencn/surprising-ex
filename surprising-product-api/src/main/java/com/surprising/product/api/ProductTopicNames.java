@@ -95,6 +95,11 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("account.risk-wallet.events");
     }
 
+    /** 永续账户单写者发布的完整用户状态快照事件。 */
+    public String accountStateEventsTopic() {
+        return topic("account.state.events");
+    }
+
     public String accountUserCommandsTopic() {
         return topic("account.user.commands");
     }

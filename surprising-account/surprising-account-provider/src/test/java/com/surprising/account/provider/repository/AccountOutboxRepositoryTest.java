@@ -75,18 +75,19 @@ class AccountOutboxRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
         assertThat(sql.getValue())
                 .contains("e.product_line = ?")
-                .contains("e.topic IN (?, ?, ?, ?, ?, ?)");
-        assertThat(args.getValue()).hasSize(15);
+                .contains("e.topic IN (?, ?, ?, ?, ?, ?, ?)");
+        assertThat(args.getValue()).hasSize(16);
         assertThat(args.getValue()[1]).isEqualTo("OPTION");
         assertThat(args.getValue()[2]).isEqualTo(properties.getKafka().getPositionEventsTopic());
         assertThat(args.getValue()[3]).isEqualTo(properties.getKafka().getOpenInterestEventsTopic());
         assertThat(args.getValue()[4]).isEqualTo(properties.getKafka().getLiquidationFeeEventsTopic());
         assertThat(args.getValue()[5]).isEqualTo(properties.getKafka().getRiskWalletEventsTopic());
-        assertThat(args.getValue()[6]).isEqualTo(properties.getKafka().getCommandResultsTopic());
-        assertThat(args.getValue()[7]).isEqualTo(properties.getKafka().getUserCommandsTopic());
-        assertThat(args.getValue()[9]).isEqualTo(100);
-        assertThat(args.getValue()[10]).isEqualTo(32);
-        assertThat(args.getValue()[12]).isEqualTo(100);
+        assertThat(args.getValue()[6]).isEqualTo(properties.getKafka().getAccountStateEventsTopic());
+        assertThat(args.getValue()[7]).isEqualTo(properties.getKafka().getCommandResultsTopic());
+        assertThat(args.getValue()[8]).isEqualTo(properties.getKafka().getUserCommandsTopic());
+        assertThat(args.getValue()[10]).isEqualTo(100);
+        assertThat(args.getValue()[11]).isEqualTo(32);
+        assertThat(args.getValue()[13]).isEqualTo(100);
     }
 
     @Test

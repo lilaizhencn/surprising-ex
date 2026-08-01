@@ -73,13 +73,22 @@ public class AccountRiskWalletSnapshotService {
                                                         String topic,
                                                         Instant eventTime,
                                                         String traceId) {
+        return publishSnapshot(productLine, userId, topic, eventTime, traceId).events();
+    }
+
+    /** 生成一次账户修订并发布风险钱包事件，完整账户快照必须复用同一个修订号。 */
+    public Publication publishSnapshot(ProductLine productLine,
+                                       long userId,
+                                       String topic,
+                                       Instant eventTime,
+                                       String traceId) {
         if (productLine != ProductLine.LINEAR_PERPETUAL) {
-            return List.of();
+            return new Publication(0L, List.of());
         }
         long accountRevision = revisionRepository.next(productLine, userId, eventTime);
         Map<String, Long> walletByAsset = walletByAsset(productLine, userId);
         if (walletByAsset.isEmpty()) {
-            return List.of();
+            return new Publication(accountRevision, List.of());
         }
         List<AccountRiskWalletUpdatedEvent> events = walletByAsset.entrySet().stream()
                 .map(entry -> new AccountRiskWalletUpdatedEvent(
@@ -99,7 +108,7 @@ public class AccountRiskWalletSnapshotService {
                     event.partitionKey(), "ACCOUNT_RISK_WALLET_UPDATED",
                     objectMapper.writeValueAsString(event), eventTime);
         }
-        return events;
+        return new Publication(accountRevision, events);
     }
 
     private Map<String, Long> walletByAsset(ProductLine productLine, long userId) {
@@ -138,5 +147,11 @@ public class AccountRiskWalletSnapshotService {
             result.put(asset, wallet);
         }
         return result;
+    }
+
+    public record Publication(long accountRevision, List<AccountRiskWalletUpdatedEvent> events) {
+        public Publication {
+            events = List.copyOf(events == null ? List.of() : events);
+        }
     }
 }

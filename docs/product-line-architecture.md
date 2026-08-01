@@ -100,6 +100,7 @@ surprising.<product-segment>.book.ticker.v1
 surprising.<product-segment>.mark.price.v1
 surprising.<product-segment>.account.position.events.v1
 surprising.<product-segment>.account.risk-wallet.events.v1
+surprising.<product-segment>.account.state.events.v1
 surprising.<product-segment>.account.liquidation-fee.events.v1
 surprising.<product-segment>.account.user.commands.v1
 surprising.<product-segment>.account.user.commands.dlt.v1

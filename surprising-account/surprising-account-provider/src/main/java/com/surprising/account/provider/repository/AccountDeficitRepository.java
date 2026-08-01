@@ -39,12 +39,13 @@ public class AccountDeficitRepository {
 
     public List<DeficitRow> findByUser(long userId) {
         return jdbcTemplate.query("""
-                SELECT asset, deficit_units
+                SELECT asset, deficit_units, reserved_units
                   FROM account_deficits
                  WHERE user_id = ?
                 """, (rs, rowNum) -> new DeficitRow(
                         rs.getString("asset"),
-                        rs.getLong("deficit_units")), userId);
+                        rs.getLong("deficit_units"),
+                        rs.getLong("reserved_units")), userId);
     }
 
     public boolean reserve(long userId, String asset, long amountUnits, Instant now) {
@@ -83,6 +84,9 @@ public class AccountDeficitRepository {
         return rows.size() == 1 ? OptionalLong.of(rows.getFirst()) : OptionalLong.empty();
     }
 
-    public record DeficitRow(String asset, long deficitUnits) {
+    public record DeficitRow(String asset, long deficitUnits, long reservedUnits) {
+        public DeficitRow(String asset, long deficitUnits) {
+            this(asset, deficitUnits, 0L);
+        }
     }
 }

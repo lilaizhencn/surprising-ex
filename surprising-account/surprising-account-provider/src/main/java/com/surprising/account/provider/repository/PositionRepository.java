@@ -97,6 +97,27 @@ public class PositionRepository {
                 normalizedPositionSide, normalizedPositionSide);
     }
 
+    /** 读取用户全部永续持仓（包括零仓位墓碑），用于构造可重放的账户状态快照。 */
+    public List<PositionSnapshotRow> findSnapshotByUser(ProductLine productLine, long userId) {
+        return jdbcTemplate.query("""
+                SELECT symbol, margin_mode, position_side, instrument_version, signed_quantity_steps,
+                       entry_price_ticks, entry_value_ticks, realized_pnl_units, updated_at
+                  FROM account_positions
+                 WHERE product_line = ?
+                   AND user_id = ?
+                 ORDER BY symbol ASC, margin_mode ASC, position_side ASC
+                """, (rs, rowNum) -> new PositionSnapshotRow(
+                rs.getString("symbol"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                PositionSide.fromNullableDbValue(rs.getString("position_side")),
+                longOrZero(rs, "instrument_version"),
+                rs.getLong("signed_quantity_steps"),
+                rs.getLong("entry_price_ticks"),
+                rs.getLong("entry_value_ticks"),
+                rs.getLong("realized_pnl_units"),
+                rs.getTimestamp("updated_at").toInstant()), productLine.name(), userId);
+    }
+
     public boolean existsOpen(ProductLine productLine, long userId) {
         Boolean exists = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
@@ -367,5 +388,16 @@ public class PositionRepository {
     }
 
     public record LockedPositionTarget(long instrumentVersion, long signedQuantitySteps) {
+    }
+
+    public record PositionSnapshotRow(String symbol,
+                                      MarginMode marginMode,
+                                      PositionSide positionSide,
+                                      long instrumentVersion,
+                                      long signedQuantitySteps,
+                                      long entryPriceTicks,
+                                      long entryValueTicks,
+                                      long realizedPnlUnits,
+                                      Instant updatedAt) {
     }
 }
