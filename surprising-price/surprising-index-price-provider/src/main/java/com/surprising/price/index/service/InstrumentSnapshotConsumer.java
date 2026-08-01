@@ -2,7 +2,6 @@ package com.surprising.price.index.service;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
-import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.product.api.ProductTopicNames;
 import com.surprising.price.index.config.IndexPriceProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -37,8 +36,7 @@ public class InstrumentSnapshotConsumer {
             containerFactory = "indexInstrumentSnapshotKafkaListenerContainerFactory")
     public void onInstrumentEvent(ConsumerRecord<String, String> record) {
         try {
-            InstrumentEvent event = objectMapper.readValue(record.value(), InstrumentEvent.class);
-            InstrumentSnapshotSupport.apply(snapshotCache, record.key(), event,
+            InstrumentSnapshotSupport.consume(objectMapper, record, snapshotCache,
                     properties.getKafka().getProductLine(), "指数价格服务");
             configService.refresh();
         } catch (Exception ex) {

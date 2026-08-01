@@ -3,7 +3,6 @@ package com.surprising.candlestick.provider.service;
 import com.surprising.candlestick.provider.config.CandlestickProperties;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
-import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.product.api.ProductTopicNames;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -37,8 +36,7 @@ public class InstrumentSnapshotConsumer {
             containerFactory = "candlestickInstrumentSnapshotKafkaListenerContainerFactory")
     public void onInstrumentEvent(ConsumerRecord<String, String> record) {
         try {
-            InstrumentEvent event = objectMapper.readValue(record.value(), InstrumentEvent.class);
-            InstrumentSnapshotSupport.apply(snapshotCache, record.key(), event,
+            InstrumentSnapshotSupport.consume(objectMapper, record, snapshotCache,
                     properties.getKafka().getProductLine(), "K 线服务");
             symbolRegistryService.refresh();
         } catch (Exception ex) {

@@ -2,7 +2,6 @@ package com.surprising.risk.provider.service;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
-import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.product.api.ProductTopicNames;
 import com.surprising.risk.provider.config.RiskProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -33,13 +32,8 @@ public class InstrumentSnapshotConsumer {
             groupId = "#{__listener.groupId()}",
             containerFactory = "riskInstrumentSnapshotKafkaListenerContainerFactory")
     public void onInstrumentEvent(ConsumerRecord<String, String> record) {
-        try {
-            InstrumentEvent event = objectMapper.readValue(record.value(), InstrumentEvent.class);
-            InstrumentSnapshotSupport.apply(snapshotCache, record.key(), event,
-                    properties.getKafka().getProductLine(), "风险服务");
-        } catch (Exception ex) {
-            throw new IllegalStateException("风险合约快照更新失败", ex);
-        }
+        InstrumentSnapshotSupport.consume(objectMapper, record, snapshotCache,
+                properties.getKafka().getProductLine(), "风险服务");
     }
 
     public String groupId() {

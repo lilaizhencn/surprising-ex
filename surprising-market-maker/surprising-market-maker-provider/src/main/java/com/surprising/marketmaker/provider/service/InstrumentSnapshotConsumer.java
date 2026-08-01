@@ -2,7 +2,6 @@ package com.surprising.marketmaker.provider.service;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
-import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.product.api.ProductTopicNames;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -29,13 +28,7 @@ public class InstrumentSnapshotConsumer {
     @KafkaListener(topics = "#{__listener.topic()}", groupId = "#{__listener.groupId()}",
             containerFactory = "marketMakerInstrumentSnapshotKafkaListenerContainerFactory")
     public void onInstrumentEvent(ConsumerRecord<String, String> record) {
-        try {
-            InstrumentEvent event = objectMapper.readValue(record.value(), InstrumentEvent.class);
-            InstrumentSnapshotSupport.apply(snapshotCache, record.key(), event,
-                    event.productLine(), "做市服务");
-        } catch (Exception ex) {
-            throw new IllegalStateException("做市合约快照更新失败", ex);
-        }
+        InstrumentSnapshotSupport.consumeAnyProductLine(objectMapper, record, snapshotCache, "做市服务");
     }
 
     public String topic() {

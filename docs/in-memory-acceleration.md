@@ -59,6 +59,8 @@ K 线热缓存、合约规格快照和 WebSocket 注册表暴露命中、未命�
 合约规格统一使用 `productLine + symbol + version` 作为 JVM 快照的内部定位键。`version` 是规格生命周期序号，
 历史订单、持仓和 Kafka 事件必须保留它，才能在重启、结算和风险重算时复原开仓时的精确规格。
 Instrument 事件只接受完整字段，不再兼容缺少产品线、序列或使用仅 SYMBOL key 的旧消息。
+各模块通过 `AbstractInstrumentSnapshotInitializer` 复用启动恢复模板，通过
+`InstrumentSnapshotSupport.consume` 复用增量事件处理模板；消费组、产品线和业务派生刷新仍由模块自行配置。
 
 ## 部署与故障处理
 

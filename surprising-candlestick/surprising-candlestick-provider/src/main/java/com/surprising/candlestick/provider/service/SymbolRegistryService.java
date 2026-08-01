@@ -2,12 +2,12 @@ package com.surprising.candlestick.provider.service;
 
 import com.surprising.candlestick.provider.aggregation.CandleKey;
 import com.surprising.candlestick.provider.config.CandlestickProperties;
+import com.surprising.instrument.api.cache.AbstractInstrumentSnapshotInitializer;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
-import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
 import com.surprising.instrument.api.client.InstrumentRpcApi;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
-import jakarta.annotation.PostConstruct;
+import com.surprising.product.api.ProductLine;
 import java.util.Set;
 import org.springframework.stereotype.Service;
 
@@ -15,25 +15,30 @@ import org.springframework.stereotype.Service;
  * K 线运行时 symbol 门禁；服务层组合品种版本与当前版本快照。
  */
 @Service
-public class SymbolRegistryService {
+public class SymbolRegistryService extends AbstractInstrumentSnapshotInitializer {
 
     private final CandlestickProperties properties;
-    private final InstrumentSnapshotCache snapshotCache;
-    private final InstrumentRpcApi instrumentRpcApi;
     private volatile Set<String> enabledSymbols = Set.of();
 
     public SymbolRegistryService(CandlestickProperties properties,
                                  InstrumentSnapshotCache snapshotCache,
                                  InstrumentRpcApi instrumentRpcApi) {
+        super(instrumentRpcApi, snapshotCache);
         this.properties = properties;
-        this.snapshotCache = snapshotCache;
-        this.instrumentRpcApi = instrumentRpcApi;
     }
 
-    @PostConstruct
-    public void initialize() {
-        var productLine = properties.getKafka().getProductLine();
-        InstrumentSnapshotSupport.initialize(instrumentRpcApi, snapshotCache, productLine, "K 线服务");
+    @Override
+    protected Set<ProductLine> productLines() {
+        return Set.of(properties.getKafka().getProductLine());
+    }
+
+    @Override
+    protected String serviceName() {
+        return "K 线服务";
+    }
+
+    @Override
+    protected void afterInitialize() {
         refresh();
     }
 

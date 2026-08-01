@@ -56,6 +56,7 @@ instrument-provider
 - 下游服务启动时通过 `GET /internal/v1/instruments/snapshot?productLine=...` 一次性加载完整聚合快照。
 - Instrument 变更通过 `surprising.instrument.events.v1` 广播；每个产品线使用独立 consumer group，在本 JVM 内原子替换快照。
 - 下单、撮合、账户、风控、指数价、标记价、K 线和做市热路径只读 JVM 快照；数据库仅用于 Instrument 服务写入、启动恢复和审计回源。
+- 启动加载统一由 `AbstractInstrumentSnapshotInitializer` 执行，增量事件统一由 `InstrumentSnapshotSupport.consume` 解析、校验并更新缓存；模块只保留产品线、消费组和派生配置刷新动作。
 
 ## 状态语义
 

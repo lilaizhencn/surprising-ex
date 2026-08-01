@@ -2,7 +2,6 @@ package com.surprising.trading.matching.service;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
-import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.product.api.ProductTopicNames;
 import com.surprising.trading.matching.config.MatchingProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -37,8 +36,7 @@ public class InstrumentSnapshotConsumer {
             containerFactory = "matchingInstrumentSnapshotKafkaListenerContainerFactory")
     public void onInstrumentEvent(ConsumerRecord<String, String> record) {
         try {
-            InstrumentEvent event = objectMapper.readValue(record.value(), InstrumentEvent.class);
-            InstrumentSnapshotSupport.apply(snapshotCache, record.key(), event,
+            InstrumentSnapshotSupport.consume(objectMapper, record, snapshotCache,
                     properties.getKafka().getProductLine(), "撮合服务");
             exchangeCoreEngine.refreshSymbols();
         } catch (Exception ex) {
