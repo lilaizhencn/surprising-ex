@@ -485,6 +485,10 @@ class RiskServiceTest {
         when(stateStore.renewProjection(projectionLease)).thenReturn(true);
         when(stateStore.startRebuild(any(ProductLine.class))).thenReturn("generation-1");
         when(stateStore.ready(any(ProductLine.class))).thenReturn(true);
+        when(stateStore.read(any(ProductLine.class), any(RiskGroupKey.class))).thenAnswer(invocation -> {
+            RiskGroupKey key = invocation.getArgument(1);
+            return new CachedRiskGroup(key, riskRepository.walletBalanceUnits, List.of(), Instant.now());
+        });
         when(stateStore.replace(
                 any(ProductLine.class), any(RiskGroupKey.class), any())).thenAnswer(invocation -> {
             @SuppressWarnings("unchecked")

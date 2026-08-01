@@ -191,6 +191,9 @@ import tools.jackson.databind.ObjectMapper;
         }
         requireRedisState();
         ProductLine productLine = properties.getKafka().getProductLine();
+        if (!stateStore.ready(productLine)) {
+            throw new IllegalStateException("风险 JVM/Redis 快照尚未完成恢复，暂停事件计算");
+        }
         List<CachedRiskGroup> states = new ArrayList<>(groups.size());
         try {
             for (RiskGroupKey key : groups.keySet()) {
@@ -241,6 +244,12 @@ import tools.jackson.databind.ObjectMapper;
                     Instant.now().minus(properties.getRedisState().getStateTtl()))) {
                 return new ProjectionUpdate(local, false);
             }
+            CachedRiskGroup projected = stateStore.read(productLine, key);
+            if (projected == null) {
+                stateStore.markNotReady(productLine);
+                throw new IllegalStateException("Redis 风险组快照缺失，暂停实时风险计算: " + key);
+            }
+            return new ProjectionUpdate(projected, false);
         }
         RedisRiskStateStore.ProjectionUpdate update =
                 stateStore.replace(productLine, key, () -> riskRepository.cachedRiskGroup(key));

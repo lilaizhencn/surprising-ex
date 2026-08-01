@@ -254,6 +254,19 @@ public class RedisRiskStateStore {
         return values.stream().sorted().toList();
     }
 
+    /** 读取已经完成恢复的单个风险组；实时事件路径不通过数据库回退。 */
+    public CachedRiskGroup read(ProductLine productLine, RiskGroupKey key) {
+        String payload = redis.opsForValue().get(stateKey(productLine, groupId(key)));
+        if (payload == null || payload.isBlank()) {
+            return null;
+        }
+        CachedRiskGroup state = objectMapper.readValue(payload, CachedRiskGroup.class);
+        if (!key.equals(state.key())) {
+            throw new IllegalStateException("Redis 风险组键与载荷不一致: " + groupId(key));
+        }
+        return state;
+    }
+
     public List<CachedRiskGroup> groups(ProductLine productLine, List<String> groupIds) {
         if (groupIds == null || groupIds.isEmpty()) {
             return List.of();
