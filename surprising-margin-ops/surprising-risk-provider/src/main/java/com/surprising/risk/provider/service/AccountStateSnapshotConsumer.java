@@ -4,7 +4,11 @@ import com.surprising.account.api.cache.PerpetualAccountStateSnapshotCache;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.risk.provider.config.RiskProperties;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -40,7 +44,8 @@ public class AccountStateSnapshotConsumer {
             topics = "#{__listener.topic()}",
             groupId = "#{__listener.groupId()}",
             containerFactory = "riskAccountWalletKafkaListenerContainerFactory")
-    public void onAccountStateUpdated(List<ConsumerRecord<String, String>> records) {
+    public void onAccountStateUpdated(List<ConsumerRecord<String, String>> records,
+                                      Consumer<String, String> consumer) {
         if (records == null || records.isEmpty()) {
             return;
         }
@@ -59,11 +64,17 @@ public class AccountStateSnapshotConsumer {
                             + event.userId() + " revision=" + event.accountRevision());
                 }
             }
+            markReadyWhenCaughtUp(consumer);
         } catch (Exception ex) {
             log.error("风险服务完整账户 JVM 快照消费失败，批次将重试，records={}: {}",
                     records.size(), ex.getMessage(), ex);
             throw new IllegalStateException("风险服务完整账户 JVM 快照消费失败", ex);
         }
+    }
+
+    /** 保留测试和本地调用签名；没有 Kafka 位点时不擅自标记全局就绪。 */
+    public void onAccountStateUpdated(List<ConsumerRecord<String, String>> records) {
+        onAccountStateUpdated(records, null);
     }
 
     public String topic() {
@@ -88,5 +99,22 @@ public class AccountStateSnapshotConsumer {
         if (!event.partitionKey().equals(key)) {
             throw new IllegalArgumentException("完整账户快照 Kafka key 必须为 " + event.partitionKey());
         }
+    }
+
+    private void markReadyWhenCaughtUp(Consumer<String, String> consumer) {
+        if (consumer == null) {
+            return;
+        }
+        Set<TopicPartition> assignment = consumer.assignment();
+        if (assignment.isEmpty()) {
+            return;
+        }
+        Map<TopicPartition, Long> endOffsets = consumer.endOffsets(assignment);
+        for (TopicPartition partition : assignment) {
+            if (consumer.position(partition) < endOffsets.getOrDefault(partition, 0L)) {
+                return;
+            }
+        }
+        snapshotCache.markReady();
     }
 }
