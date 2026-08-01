@@ -11,12 +11,13 @@ import org.springframework.stereotype.Service;
 /**
  * 风险服务启动时加载指定产品线的完整合约快照。
  */
-@Service
+@Service("riskInstrumentSnapshotInitializer")
 public class InstrumentSnapshotInitializer extends AbstractInstrumentSnapshotInitializer {
 
     private final RiskProperties properties;
 
     public InstrumentSnapshotInitializer(InstrumentRpcApi instrumentRpcApi,
+                                         @org.springframework.beans.factory.annotation.Qualifier("riskInstrumentSnapshotCache")
                                          InstrumentSnapshotCache snapshotCache,
                                          RiskProperties properties) {
         super(instrumentRpcApi, snapshotCache);

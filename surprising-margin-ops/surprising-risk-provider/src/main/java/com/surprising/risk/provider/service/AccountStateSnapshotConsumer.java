@@ -9,6 +9,7 @@ import java.util.Set;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -22,7 +23,7 @@ import tools.jackson.databind.ObjectMapper;
  * <p>这是风险服务的影子投影。事件解析、产品线、Kafka key 和账户修订号任一不满足要求
  * 都必须抛错让 Kafka 重试，不能回查账户数据库，也不能把缺失事件当成零余额。</p>
  */
-@Service
+@Service("riskAccountStateSnapshotConsumer")
 @ConditionalOnExpression("'${surprising.risk.kafka.product-line:LINEAR_PERPETUAL}' == 'LINEAR_PERPETUAL'")
 public class AccountStateSnapshotConsumer {
 
@@ -34,6 +35,7 @@ public class AccountStateSnapshotConsumer {
 
     public AccountStateSnapshotConsumer(ObjectMapper objectMapper,
                                        RiskProperties properties,
+                                       @Qualifier("riskAccountStateSnapshot")
                                        PerpetualAccountStateSnapshotCache snapshotCache) {
         this.objectMapper = objectMapper;
         this.properties = properties;

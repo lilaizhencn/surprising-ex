@@ -11,12 +11,13 @@ import org.springframework.stereotype.Service;
 /**
  * ADL 服务启动时加载本产品线完整合约快照。
  */
-@Service
+@Service("adlInstrumentSnapshotInitializer")
 public class InstrumentSnapshotInitializer extends AbstractInstrumentSnapshotInitializer {
 
     private final AdlProperties properties;
 
     public InstrumentSnapshotInitializer(InstrumentRpcApi instrumentRpcApi,
+                                         @org.springframework.beans.factory.annotation.Qualifier("adlInstrumentSnapshotCache")
                                          InstrumentSnapshotCache snapshotCache,
                                          AdlProperties properties) {
         super(instrumentRpcApi, snapshotCache);

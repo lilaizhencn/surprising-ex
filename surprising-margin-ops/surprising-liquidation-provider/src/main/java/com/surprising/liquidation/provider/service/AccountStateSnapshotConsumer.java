@@ -9,6 +9,7 @@ import java.util.Set;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -22,7 +23,7 @@ import tools.jackson.databind.ObjectMapper;
  * <p>完整快照就绪前强平仍使用现有持仓事件、候选锁和数据库最终校验；这里不允许回查账户库，
  * 也不允许丢弃版本间隙，否则重启后可能把旧持仓当成当前持仓执行强平。</p>
  */
-@Service
+@Service("liquidationAccountStateSnapshotConsumer")
 @ConditionalOnExpression("'${surprising.liquidation.kafka.product-line:LINEAR_PERPETUAL}' == 'LINEAR_PERPETUAL'")
 public class AccountStateSnapshotConsumer {
 
@@ -34,6 +35,7 @@ public class AccountStateSnapshotConsumer {
 
     public AccountStateSnapshotConsumer(ObjectMapper objectMapper,
                                        LiquidationProperties properties,
+                                       @Qualifier("liquidationAccountStateSnapshot")
                                        PerpetualAccountStateSnapshotCache snapshotCache) {
         this.objectMapper = objectMapper;
         this.properties = properties;

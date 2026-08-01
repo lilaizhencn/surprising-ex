@@ -11,12 +11,13 @@ import org.springframework.stereotype.Service;
 /**
  * 强平服务启动时加载指定产品线的完整合约快照。
  */
-@Service
+@Service("liquidationInstrumentSnapshotInitializer")
 public class InstrumentSnapshotInitializer extends AbstractInstrumentSnapshotInitializer {
 
     private final LiquidationProperties properties;
 
     public InstrumentSnapshotInitializer(InstrumentRpcApi instrumentRpcApi,
+                                         @org.springframework.beans.factory.annotation.Qualifier("liquidationInstrumentSnapshotCache")
                                          InstrumentSnapshotCache snapshotCache,
                                          LiquidationProperties properties) {
         super(instrumentRpcApi, snapshotCache);

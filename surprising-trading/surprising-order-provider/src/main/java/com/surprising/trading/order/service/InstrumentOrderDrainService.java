@@ -8,6 +8,7 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -37,7 +38,7 @@ public class InstrumentOrderDrainService {
                                        TradingOrderProperties properties,
                                        OrderService orderService,
                                        AlgoOrderService algoOrderService,
-                                       KafkaTemplate<String, String> kafkaTemplate,
+                                       @Qualifier("orderKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate,
                                        OrderInstrumentLifecycleFenceService lifecycleFenceService) {
         this.objectMapper = objectMapper;
         this.properties = properties;

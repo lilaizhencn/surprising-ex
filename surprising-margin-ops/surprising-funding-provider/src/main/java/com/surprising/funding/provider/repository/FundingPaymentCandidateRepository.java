@@ -36,6 +36,7 @@ public class FundingPaymentCandidateRepository {
     @org.springframework.beans.factory.annotation.Autowired
     public FundingPaymentCandidateRepository(JdbcTemplate jdbcTemplate,
                                              FundingProperties properties,
+                                             @org.springframework.beans.factory.annotation.Qualifier("fundingInstrumentSnapshotCache")
                                              InstrumentSnapshotCache snapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties;

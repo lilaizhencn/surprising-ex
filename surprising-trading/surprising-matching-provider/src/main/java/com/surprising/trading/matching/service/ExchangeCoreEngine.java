@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
-@DependsOn("instrumentSnapshotInitializer")
+@DependsOn("matchingInstrumentSnapshotInitializer")
 public class ExchangeCoreEngine {
 
     private static final Logger log = LoggerFactory.getLogger(ExchangeCoreEngine.class);

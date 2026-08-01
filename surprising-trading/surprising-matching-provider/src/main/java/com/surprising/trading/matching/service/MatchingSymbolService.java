@@ -14,6 +14,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.zip.CRC32;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 /**
@@ -34,7 +35,7 @@ public class MatchingSymbolService {
     private final ConcurrentMap<Integer, String> symbolOwners = new ConcurrentHashMap<>();
 
     public MatchingSymbolService(MatchingProperties properties,
-                                 InstrumentSnapshotCache snapshotCache) {
+                                 @Qualifier("matchingInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache) {
         this.properties = properties;
         this.snapshotCache = snapshotCache;
     }

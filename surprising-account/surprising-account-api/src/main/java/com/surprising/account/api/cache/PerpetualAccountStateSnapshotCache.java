@@ -52,13 +52,38 @@ public final class PerpetualAccountStateSnapshotCache {
                 return ApplyResult.REVISION_GAP;
             }
             states.put(event.userId(), event);
-            userReady.computeIfAbsent(event.userId(), ignored -> new AtomicBoolean()).set(true);
+            // Kafka 启动追赶完成前不能把历史中间态当成可下单快照；RPC 初始化的用户
+            // 由 initialize 标记为就绪，Kafka 后续只负责按修订号增量更新。
+            if (ready.get()) {
+                userReady.computeIfAbsent(event.userId(), ignored -> new AtomicBoolean()).set(true);
+            }
             return ApplyResult.APPLIED;
         }
     }
 
+    /** 使用账户模块内部 RPC 写入一个当前完整快照，不要求全局 Kafka 已追赶完成。 */
+    public ApplyResult initialize(PerpetualAccountStateUpdatedEvent event) {
+        if (event == null) {
+            throw new IllegalArgumentException("account state event is required");
+        }
+        if (event.productLine() != productLine) {
+            return ApplyResult.PRODUCT_LINE_MISMATCH;
+        }
+        Object lock = userLocks.computeIfAbsent(event.userId(), ignored -> new Object());
+        synchronized (lock) {
+            PerpetualAccountStateUpdatedEvent previous = states.get(event.userId());
+            if (previous != null && event.accountRevision() < previous.accountRevision()) {
+                return ApplyResult.STALE;
+            }
+            states.put(event.userId(), event);
+            userReady.computeIfAbsent(event.userId(), ignored -> new AtomicBoolean()).set(true);
+            return previous != null && event.accountRevision() == previous.accountRevision()
+                    ? ApplyResult.STALE : ApplyResult.APPLIED;
+        }
+    }
+
     public Optional<PerpetualAccountStateUpdatedEvent> state(long userId) {
-        if (!ready() || userId <= 0L || !isUserReady(userId)) {
+        if (userId <= 0L || !isUserReady(userId)) {
             return Optional.empty();
         }
         return Optional.ofNullable(states.get(userId));
@@ -89,6 +114,11 @@ public final class PerpetualAccountStateSnapshotCache {
 
     public void markReady() {
         ready.set(true);
+        // Kafka 追赶期间收到的历史事件不会提前创建 userReady 标记；全局追赶完成后，
+        // 将已有完整状态统一转换为可读快照，避免空 map 导致用户一直不可用。
+        states.keySet().forEach(userId ->
+                userReady.computeIfAbsent(userId, ignored -> new AtomicBoolean()).set(true));
+        userReady.forEach((userId, value) -> value.set(states.containsKey(userId)));
     }
 
     public void markNotReady() {

@@ -10,6 +10,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -38,7 +39,7 @@ public class PositionRiskTriggerConsumer {
     public PositionRiskTriggerConsumer(ObjectMapper objectMapper,
                                        RiskService riskService,
                                        RiskProperties properties,
-                                       PositionSnapshotCache snapshotCache) {
+                                       @Qualifier("riskPositionSnapshot") PositionSnapshotCache snapshotCache) {
         this.objectMapper = objectMapper;
         this.riskService = riskService;
         this.properties = properties;

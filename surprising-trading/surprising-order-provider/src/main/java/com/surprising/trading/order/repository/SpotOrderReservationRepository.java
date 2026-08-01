@@ -13,6 +13,7 @@ import java.math.BigInteger;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -41,7 +42,7 @@ public class SpotOrderReservationRepository {
                                           OrderRepository orderRepository,
                                           MarkPriceLookup markPriceLookup,
                                           TradingOrderProperties properties,
-                                          InstrumentSnapshotCache snapshotCache) {
+                                          @Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.markPriceLookup = markPriceLookup;
         this.properties = properties;

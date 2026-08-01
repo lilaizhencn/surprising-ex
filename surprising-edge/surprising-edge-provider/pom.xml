@@ -15,6 +15,15 @@
     <description>Combined deployable provider for REST gateway and WebSocket fanout</description>
 
     <dependencies>
+        <!-- API 模块只携带 OpenFeign 注解，聚合入口补齐其运行时公共类。 -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-commons</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-context</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-gateway-provider</artifactId>

@@ -41,6 +41,7 @@ public class RedisRiskCalculator {
     public RedisRiskCalculator(LatestMarkPriceCache markPriceCache,
                                RiskRepository repository,
                                RiskProperties properties,
+                               @org.springframework.beans.factory.annotation.Qualifier("riskInstrumentSnapshotCache")
                                InstrumentSnapshotCache snapshotCache) {
         this.markPriceCache = markPriceCache;
         this.repository = repository;

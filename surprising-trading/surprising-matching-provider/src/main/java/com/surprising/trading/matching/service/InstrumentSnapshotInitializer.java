@@ -6,18 +6,19 @@ import com.surprising.instrument.api.client.InstrumentRpcApi;
 import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.product.api.ProductLine;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 /**
  * 撮合服务启动时加载指定产品线的完整合约快照。
  */
-@Service
+@Service("matchingInstrumentSnapshotInitializer")
 public class InstrumentSnapshotInitializer extends AbstractInstrumentSnapshotInitializer {
 
     private final MatchingProperties properties;
 
     public InstrumentSnapshotInitializer(InstrumentRpcApi instrumentRpcApi,
-                                         InstrumentSnapshotCache snapshotCache,
+                                         @Qualifier("matchingInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache,
                                          MatchingProperties properties) {
         super(instrumentRpcApi, snapshotCache);
         this.properties = properties;

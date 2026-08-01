@@ -6,10 +6,11 @@ import com.surprising.instrument.api.client.InstrumentRpcApi;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.product.api.ProductLine;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 /** 指数服务统一通过 Instrument 聚合 RPC 初始化本地合约快照。 */
-@Component
+@Component("indexInstrumentSnapshotInitializer")
 public class InstrumentSnapshotInitializer extends AbstractInstrumentSnapshotInitializer {
 
     private final IndexPriceProperties properties;
@@ -17,7 +18,7 @@ public class InstrumentSnapshotInitializer extends AbstractInstrumentSnapshotIni
 
     public InstrumentSnapshotInitializer(IndexPriceProperties properties,
                                          InstrumentRpcApi instrumentRpcApi,
-                                         InstrumentSnapshotCache snapshotCache,
+                                         @Qualifier("indexInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache,
                                          IndexInstrumentConfigService configService) {
         super(instrumentRpcApi, snapshotCache);
         this.properties = properties;

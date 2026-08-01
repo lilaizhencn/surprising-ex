@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 /** 资金费服务消费合约增量事件并原子更新本地快照。 */
-@Service
+@Service("fundingInstrumentSnapshotConsumer")
 public class InstrumentSnapshotConsumer {
 
     private final ObjectMapper objectMapper;
@@ -19,6 +19,7 @@ public class InstrumentSnapshotConsumer {
 
     public InstrumentSnapshotConsumer(ObjectMapper objectMapper,
                                       FundingProperties properties,
+                                      @org.springframework.beans.factory.annotation.Qualifier("fundingInstrumentSnapshotCache")
                                       InstrumentSnapshotCache snapshotCache) {
         this.objectMapper = objectMapper;
         this.properties = properties;

@@ -9,13 +9,14 @@ import java.util.Set;
 import org.springframework.stereotype.Service;
 
 /** 启动时通过 Instrument 聚合 RPC 加载资金费计算所需的完整快照。 */
-@Service
+@Service("fundingInstrumentSnapshotInitializer")
 public class InstrumentSnapshotInitializer extends AbstractInstrumentSnapshotInitializer {
 
     private final FundingProperties properties;
 
     public InstrumentSnapshotInitializer(FundingProperties properties,
                                          InstrumentRpcApi instrumentRpcApi,
+                                         @org.springframework.beans.factory.annotation.Qualifier("fundingInstrumentSnapshotCache")
                                          InstrumentSnapshotCache snapshotCache) {
         super(instrumentRpcApi, snapshotCache);
         this.properties = properties;

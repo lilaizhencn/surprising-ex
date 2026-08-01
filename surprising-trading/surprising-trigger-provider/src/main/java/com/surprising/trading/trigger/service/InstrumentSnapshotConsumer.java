@@ -5,6 +5,7 @@ import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
 import com.surprising.product.api.ProductTopicNames;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -12,7 +13,7 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * 条件单服务消费 Instrument 增量事件并更新本地快照。
  */
-@Service
+@Service("triggerInstrumentSnapshotConsumer")
 public class InstrumentSnapshotConsumer {
 
     private final ObjectMapper objectMapper;
@@ -21,7 +22,7 @@ public class InstrumentSnapshotConsumer {
 
     public InstrumentSnapshotConsumer(ObjectMapper objectMapper,
                                       TriggerProperties properties,
-                                      InstrumentSnapshotCache snapshotCache) {
+                                      @Qualifier("triggerInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.snapshotCache = snapshotCache;

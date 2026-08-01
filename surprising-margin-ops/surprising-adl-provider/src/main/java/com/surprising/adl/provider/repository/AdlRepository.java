@@ -73,6 +73,7 @@ public class AdlRepository {
                          AdlInsuranceFundBalanceRepository insuranceFundRepository,
                          AdlProperties properties,
                          LatestMarkPriceCache markPriceCache,
+                         @org.springframework.beans.factory.annotation.Qualifier("adlInstrumentSnapshotCache")
                          InstrumentSnapshotCache snapshotCache) {
         this.positionRepository = positionRepository;
         this.marginRepository = marginRepository;

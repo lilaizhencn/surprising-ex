@@ -16,6 +16,7 @@ public class LiquidationInstrumentSnapshotService {
     private final InstrumentSnapshotCache snapshotCache;
 
     public LiquidationInstrumentSnapshotService(LiquidationProperties properties,
+                                                @org.springframework.beans.factory.annotation.Qualifier("liquidationInstrumentSnapshotCache")
                                                 InstrumentSnapshotCache snapshotCache) {
         this.properties = properties == null ? new LiquidationProperties() : properties;
         this.snapshotCache = snapshotCache;

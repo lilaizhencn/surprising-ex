@@ -1298,7 +1298,7 @@ product_provider_args() {
       printf '%s\n' \
         "--surprising.insurance.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.insurance.kafka.product-line=${product_line}" \
-        "--surprising.insurance.kafka.product-topics-enabled=false" \
+        "--surprising.insurance.kafka.product-topics-enabled=true" \
         "--surprising.insurance.kafka.liquidation-fee-events-topic=$(topic_name "${product_line}" "account.liquidation-fee.events")" \
         "--surprising.insurance.kafka.group-id=product-smoke-${RUN_ID}-${slug}-insurance" \
         "--surprising.insurance.kafka.concurrency=1" \
@@ -1359,7 +1359,7 @@ product_provider_args() {
         "--surprising.funding.coordination.node-id=product-smoke-${RUN_ID}-${slug}-funding" \
         "--surprising.insurance.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.insurance.kafka.product-line=${product_line}" \
-        "--surprising.insurance.kafka.product-topics-enabled=false" \
+        "--surprising.insurance.kafka.product-topics-enabled=true" \
         "--surprising.insurance.kafka.liquidation-fee-events-topic=$(topic_name "${product_line}" "account.liquidation-fee.events")" \
         "--surprising.insurance.kafka.group-id=product-smoke-${RUN_ID}-${slug}-insurance" \
         "--surprising.insurance.kafka.concurrency=1" \
@@ -1474,6 +1474,8 @@ start_provider() {
       "SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}" \
       "SPRING_DATASOURCE_USERNAME=${DB_USER}" \
       "SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}" \
+      "PRODUCT_LINE=${product_line}" \
+      "PRODUCT_TOPICS_ENABLED=true" \
       java ${java_args[@]+"${java_args[@]}"} -jar "${jar}" "${app_args[@]}"
   ) >"${log_file}" 2>&1 &
   register_provider_pid "${name}" "$!"

@@ -6,6 +6,7 @@ import com.surprising.account.provider.repository.AccountBalanceRepository;
 import com.surprising.account.provider.repository.AccountDeficitRepository;
 import com.surprising.account.provider.repository.AccountOrderLockRepository;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
+import com.surprising.account.provider.repository.AccountRiskStateRevisionRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
 import com.surprising.account.provider.repository.PositionMarginRepository;
 import com.surprising.account.provider.repository.PositionModeRepository;
@@ -14,6 +15,7 @@ import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -36,9 +38,12 @@ public class PerpetualAccountStateSnapshotService {
     private final PositionRepository positionRepository;
     private final PositionModeRepository positionModeRepository;
     private final AccountSequenceRepository sequenceRepository;
+    private final AccountRiskStateRevisionRepository revisionRepository;
     private final AccountOutboxRepository outboxRepository;
     private final ObjectMapper objectMapper;
 
+    /** 保留旧测试和嵌入式调用方构造签名；只有 RPC 初始化才需要修订号仓储。 */
+    @Autowired
     public PerpetualAccountStateSnapshotService(AccountBalanceRepository balanceRepository,
                                                 AccountDeficitRepository deficitRepository,
                                                 AccountOrderLockRepository orderLockRepository,
@@ -48,6 +53,20 @@ public class PerpetualAccountStateSnapshotService {
                                                 AccountSequenceRepository sequenceRepository,
                                                 AccountOutboxRepository outboxRepository,
                                                 ObjectMapper objectMapper) {
+        this(balanceRepository, deficitRepository, orderLockRepository, positionMarginRepository,
+                positionRepository, positionModeRepository, sequenceRepository, null, outboxRepository, objectMapper);
+    }
+
+    public PerpetualAccountStateSnapshotService(AccountBalanceRepository balanceRepository,
+                                                AccountDeficitRepository deficitRepository,
+                                                AccountOrderLockRepository orderLockRepository,
+                                                PositionMarginRepository positionMarginRepository,
+                                                PositionRepository positionRepository,
+                                                PositionModeRepository positionModeRepository,
+                                                AccountSequenceRepository sequenceRepository,
+                                                AccountRiskStateRevisionRepository revisionRepository,
+                                                AccountOutboxRepository outboxRepository,
+                                                ObjectMapper objectMapper) {
         this.balanceRepository = balanceRepository;
         this.deficitRepository = deficitRepository;
         this.orderLockRepository = orderLockRepository;
@@ -55,6 +74,7 @@ public class PerpetualAccountStateSnapshotService {
         this.positionRepository = positionRepository;
         this.positionModeRepository = positionModeRepository;
         this.sequenceRepository = sequenceRepository;
+        this.revisionRepository = revisionRepository;
         this.outboxRepository = outboxRepository;
         this.objectMapper = objectMapper;
     }
@@ -72,6 +92,40 @@ public class PerpetualAccountStateSnapshotService {
         if (userId <= 0L || accountRevision <= 0L || eventTime == null) {
             throw new IllegalArgumentException("userId, accountRevision and eventTime are required");
         }
+        PerpetualAccountStateUpdatedEvent event = build(productLine, userId, accountRevision, eventTime, traceId);
+        outboxRepository.insert(productLine.name(), "ACCOUNT_STATE", event.eventId(), topic,
+                event.partitionKey(), "ACCOUNT_STATE_UPDATED", objectMapper.writeValueAsString(event), eventTime);
+        return event;
+    }
+
+    /**
+     * 读取一个用户当前已提交的完整快照，供下游 JVM 缓存初始化使用。
+     *
+     * <p>该入口不会写账户 outbox，也不会被下单热路径直接调用；下游成功初始化后仍由
+     * Kafka 增量事件保持一致。没有账户修订号的用户不能被伪造为默认零余额快照。</p>
+     */
+    public PerpetualAccountStateUpdatedEvent snapshot(ProductLine productLine, long userId) {
+        if (productLine != ProductLine.LINEAR_PERPETUAL) {
+            throw new IllegalArgumentException("账户快照初始化只支持 LINEAR_PERPETUAL");
+        }
+        if (userId <= 0L) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        if (revisionRepository == null) {
+            throw new IllegalStateException("账户快照初始化修订号仓储未配置");
+        }
+        long accountRevision = revisionRepository.current(productLine, userId);
+        if (accountRevision <= 0L) {
+            throw new IllegalStateException("永续用户账户快照不存在: " + userId);
+        }
+        return build(productLine, userId, accountRevision, Instant.now(), "rpc-snapshot-init");
+    }
+
+    private PerpetualAccountStateUpdatedEvent build(ProductLine productLine,
+                                                    long userId,
+                                                    long accountRevision,
+                                                    Instant eventTime,
+                                                    String traceId) {
         List<PerpetualAccountStateUpdatedEvent.Balance> balances = balanceRepository.findByUser(userId).stream()
                 .map(row -> new PerpetualAccountStateUpdatedEvent.Balance(
                         row.asset(), row.availableUnits(), row.lockedUnits()))
@@ -117,8 +171,6 @@ public class PerpetualAccountStateSnapshotService {
                 mode,
                 eventTime,
                 traceId);
-        outboxRepository.insert(productLine.name(), "ACCOUNT_STATE", eventId, topic,
-                event.partitionKey(), "ACCOUNT_STATE_UPDATED", objectMapper.writeValueAsString(event), eventTime);
         return event;
     }
 }

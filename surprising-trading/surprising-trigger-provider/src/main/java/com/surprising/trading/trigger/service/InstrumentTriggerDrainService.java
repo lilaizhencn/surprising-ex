@@ -8,6 +8,7 @@ import com.surprising.trading.trigger.config.TriggerProperties;
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -34,7 +35,7 @@ public class InstrumentTriggerDrainService {
     public InstrumentTriggerDrainService(ObjectMapper objectMapper,
                                          TriggerProperties properties,
                                          TriggerOrderService triggerOrderService,
-                                         KafkaTemplate<String, String> kafkaTemplate,
+                                         @Qualifier("triggerKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate,
                                          TriggerInstrumentLifecycleFenceService lifecycleFenceService) {
         this.objectMapper = objectMapper;
         this.properties = properties;

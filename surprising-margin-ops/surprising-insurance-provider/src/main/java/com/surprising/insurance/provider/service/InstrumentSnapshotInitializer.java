@@ -11,12 +11,13 @@ import org.springframework.stereotype.Service;
 /**
  * 保险基金服务启动时加载本产品线完整合约快照。
  */
-@Service
+@Service("insuranceInstrumentSnapshotInitializer")
 public class InstrumentSnapshotInitializer extends AbstractInstrumentSnapshotInitializer {
 
     private final InsuranceProperties properties;
 
     public InstrumentSnapshotInitializer(InstrumentRpcApi instrumentRpcApi,
+                                         @org.springframework.beans.factory.annotation.Qualifier("insuranceInstrumentSnapshotCache")
                                          InstrumentSnapshotCache snapshotCache,
                                          InsuranceProperties properties) {
         super(instrumentRpcApi, snapshotCache);

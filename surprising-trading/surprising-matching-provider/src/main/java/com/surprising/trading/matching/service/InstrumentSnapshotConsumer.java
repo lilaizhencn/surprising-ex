@@ -5,6 +5,7 @@ import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
 import com.surprising.product.api.ProductTopicNames;
 import com.surprising.trading.matching.config.MatchingProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -12,7 +13,7 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * 撮合服务消费 Instrument 增量事件并更新本地快照。
  */
-@Service
+@Service("matchingInstrumentSnapshotConsumer")
 public class InstrumentSnapshotConsumer {
 
     private final ObjectMapper objectMapper;
@@ -22,7 +23,7 @@ public class InstrumentSnapshotConsumer {
 
     public InstrumentSnapshotConsumer(ObjectMapper objectMapper,
                                       MatchingProperties properties,
-                                      InstrumentSnapshotCache snapshotCache,
+                                      @Qualifier("matchingInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache,
                                       ExchangeCoreEngine exchangeCoreEngine) {
         this.objectMapper = objectMapper;
         this.properties = properties;

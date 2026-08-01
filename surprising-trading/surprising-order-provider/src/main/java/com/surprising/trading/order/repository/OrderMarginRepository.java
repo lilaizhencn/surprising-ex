@@ -18,6 +18,7 @@ import java.math.BigInteger;
 import java.util.Comparator;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Repository;
 
 /** 订单保证金计算入口，只读取合约、未平仓量和用户状态的 JVM 快照。 */
@@ -35,7 +36,7 @@ public class OrderMarginRepository {
     @Autowired
     public OrderMarginRepository(MarkPriceLookup markPriceLookup,
                                  TradingOrderProperties properties,
-                                 InstrumentSnapshotCache snapshotCache,
+                                 @Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache,
                                  OrderMarginSnapshotCache marginSnapshotCache,
                                  OpenInterestSnapshotCache openInterestSnapshotCache) {
         this.markPriceLookup = markPriceLookup;
@@ -90,6 +91,11 @@ public class OrderMarginRepository {
                 .orElseThrow(() -> new IllegalArgumentException("结算资产精度快照不存在: " + instrument.settleAsset()));
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
+        // 没有持仓和未成交订单的新用户不会在启动恢复结果中出现；零仓位和默认杠杆是
+        // 合约快照已经确认后的确定状态，直接补入 JVM，避免首单误判为快照缺失。
+        marginSnapshotCache.putPositionIfAbsent(productLine, userId, symbol, normalizedMarginMode,
+                normalizedPositionSide, instrumentVersion);
+        marginSnapshotCache.putDefaultLeverageIfAbsent(productLine, userId, symbol, normalizedMarginMode);
         Optional<OrderMarginSnapshotCache.MarginSnapshot> cached = marginSnapshotCache.lookup(
                         productLine, userId, symbol, normalizedMarginMode, normalizedPositionSide, side)
                 .filter(value -> value.instrumentVersion() == instrumentVersion);

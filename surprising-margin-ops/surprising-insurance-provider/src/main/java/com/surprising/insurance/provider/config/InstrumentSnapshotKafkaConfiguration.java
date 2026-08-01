@@ -13,7 +13,7 @@ import org.springframework.util.backoff.FixedBackOff;
 /**
  * 保险基金服务的 Instrument 增量事件消费者配置。
  */
-@Configuration
+@Configuration("insuranceInstrumentSnapshotKafkaConfiguration")
 public class InstrumentSnapshotKafkaConfiguration {
 
     @Bean

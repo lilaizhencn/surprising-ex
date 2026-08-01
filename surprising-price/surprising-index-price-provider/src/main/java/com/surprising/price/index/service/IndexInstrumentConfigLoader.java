@@ -6,6 +6,7 @@ import com.surprising.instrument.api.model.IndexSourceConfig;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import java.math.BigDecimal;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 /**
@@ -19,7 +20,7 @@ public class IndexInstrumentConfigLoader {
 
     @org.springframework.beans.factory.annotation.Autowired
     public IndexInstrumentConfigLoader(IndexPriceProperties properties,
-                                       InstrumentSnapshotCache snapshotCache) {
+                                       @Qualifier("indexInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache) {
         this.properties = properties;
         this.snapshotCache = snapshotCache;
     }

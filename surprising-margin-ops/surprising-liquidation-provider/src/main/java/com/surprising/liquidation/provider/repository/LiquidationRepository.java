@@ -65,6 +65,7 @@ public class LiquidationRepository {
     public LiquidationRepository(JdbcTemplate jdbcTemplate,
                                  LiquidationProperties properties,
                                  LatestMarkPriceCache markPriceCache,
+                                 @org.springframework.beans.factory.annotation.Qualifier("liquidationInstrumentSnapshotCache")
                                  InstrumentSnapshotCache snapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties == null ? new LiquidationProperties() : properties;

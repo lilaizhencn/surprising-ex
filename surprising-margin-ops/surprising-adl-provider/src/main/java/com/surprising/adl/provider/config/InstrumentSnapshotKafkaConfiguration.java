@@ -13,7 +13,7 @@ import org.springframework.util.backoff.FixedBackOff;
 /**
  * ADL 服务的 Instrument 增量事件消费者配置。
  */
-@Configuration
+@Configuration("adlInstrumentSnapshotKafkaConfiguration")
 public class InstrumentSnapshotKafkaConfiguration {
 
     @Bean

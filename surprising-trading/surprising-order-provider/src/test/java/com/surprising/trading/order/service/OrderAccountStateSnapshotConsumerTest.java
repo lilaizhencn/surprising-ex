@@ -31,6 +31,9 @@ class OrderAccountStateSnapshotConsumerTest {
         consumer.onAccountStateUpdated(List.of(new ConsumerRecord<>(
                 consumer.topic(), 0, 1L, event.partitionKey(), "value")));
 
+        // 没有 Kafka consumer 位点时，测试调用不会擅自宣布全局追赶完成。
+        assertThat(cache.isUserReady(event.userId())).isFalse();
+        cache.markReady();
         assertThat(cache.isUserReady(event.userId())).isTrue();
         assertThat(consumer.topic()).isEqualTo("surprising.linear-perp.account.state.events.v1");
         assertThat(consumer.groupId()).isEqualTo("surprising-linear-perp-order-account-state-v1");

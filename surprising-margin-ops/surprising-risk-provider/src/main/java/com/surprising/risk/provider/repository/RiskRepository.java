@@ -51,6 +51,7 @@ public class RiskRepository {
     @Autowired
     public RiskRepository(JdbcTemplate jdbcTemplate,
                           RiskProperties properties,
+                          @org.springframework.beans.factory.annotation.Qualifier("riskInstrumentSnapshotCache")
                           InstrumentSnapshotCache snapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties == null ? new RiskProperties() : properties;

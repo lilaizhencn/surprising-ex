@@ -38,6 +38,7 @@ public class FundingRateInputRepository {
     public FundingRateInputRepository(JdbcTemplate jdbcTemplate,
                                       FundingProperties properties,
                                       LatestMarkPriceCache markPriceCache,
+                                      @org.springframework.beans.factory.annotation.Qualifier("fundingInstrumentSnapshotCache")
                                       InstrumentSnapshotCache snapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties;

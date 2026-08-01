@@ -12,7 +12,7 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * 风险服务消费 Instrument 增量事件并更新本地快照。
  */
-@Service
+@Service("riskInstrumentSnapshotConsumer")
 public class InstrumentSnapshotConsumer {
 
     private final ObjectMapper objectMapper;
@@ -21,6 +21,7 @@ public class InstrumentSnapshotConsumer {
 
     public InstrumentSnapshotConsumer(ObjectMapper objectMapper,
                                       RiskProperties properties,
+                                      @org.springframework.beans.factory.annotation.Qualifier("riskInstrumentSnapshotCache")
                                       InstrumentSnapshotCache snapshotCache) {
         this.objectMapper = objectMapper;
         this.properties = properties;
