@@ -153,6 +153,7 @@ Topic 的精确清单、分区数量和创建后校验命令见 [部署文档](d
 - [数据库设计](docs/database.md)
 - [产品线架构](docs/product-line-architecture.md)
 - [账户单写者和单用户串行](docs/account-single-writer-command-lane.md)
+- [高并发与资金安全改造执行计划](docs/high-concurrency-stability-execution-plan.md)
 - [持仓 Redis 读模型](docs/position-redis-cache.md)
 - [未完成订单 Redis 投影](docs/open-order-redis-cache.md)
 - [测试与资金守恒](docs/product-line-testing-and-funds-reconciliation.md)

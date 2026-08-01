@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -106,6 +108,7 @@ public class PerpetualAccountStateSnapshotService {
      * <p>该入口不会写账户 outbox，也不会被下单热路径直接调用；下游成功初始化后仍由
      * Kafka 增量事件保持一致。没有账户修订号的用户不能被伪造为默认零余额快照。</p>
      */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PerpetualAccountStateUpdatedEvent snapshot(ProductLine productLine, long userId) {
         if (productLine != ProductLine.LINEAR_PERPETUAL) {
             throw new IllegalArgumentException("账户快照初始化只支持 LINEAR_PERPETUAL");

@@ -75,10 +75,14 @@ public final class PerpetualAccountStateSnapshotCache {
             if (previous != null && event.accountRevision() < previous.accountRevision()) {
                 return ApplyResult.STALE;
             }
+            // 同一修订号可能来自重复 RPC 或 Kafka 重放，不能用新的 eventId/时间覆盖已有快照。
+            if (previous != null && event.accountRevision() == previous.accountRevision()) {
+                userReady.computeIfAbsent(event.userId(), ignored -> new AtomicBoolean()).set(true);
+                return ApplyResult.STALE;
+            }
             states.put(event.userId(), event);
             userReady.computeIfAbsent(event.userId(), ignored -> new AtomicBoolean()).set(true);
-            return previous != null && event.accountRevision() == previous.accountRevision()
-                    ? ApplyResult.STALE : ApplyResult.APPLIED;
+            return ApplyResult.APPLIED;
         }
     }
 

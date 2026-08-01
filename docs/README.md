@@ -15,6 +15,7 @@
 - [内存与无锁热点路径](in-memory-acceleration.md)
 - [费率配置与 JVM 快照](fee-schedule-jvm-snapshot.md)
 - [永续 JVM 单写者迁移执行计划](linear-perpetual-jvm-migration-plan.md)
+- [高并发与资金安全改造执行计划](high-concurrency-stability-execution-plan.md)
 
 ## Redis 读模型与索引
 

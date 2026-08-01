@@ -35,6 +35,22 @@ class PerpetualAccountStateSnapshotCacheTest {
         assertThat(cache.revision(1001L)).isEqualTo(2L);
     }
 
+    @Test
+    void sameRevisionInitializationDoesNotReplaceExistingSnapshot() {
+        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
+        var first = event(2L);
+        var duplicate = new PerpetualAccountStateUpdatedEvent(
+                1, 999L, 2L, ProductLine.LINEAR_PERPETUAL, 1001L, "USDT_PERPETUAL",
+                List.of(), List.of(), List.of(), List.of(), List.of(), PositionMode.ONE_WAY,
+                Instant.parse("2026-07-02T00:00:00Z"), "duplicate");
+
+        assertThat(cache.initialize(first)).isEqualTo(
+                PerpetualAccountStateSnapshotCache.ApplyResult.APPLIED);
+        assertThat(cache.initialize(duplicate)).isEqualTo(
+                PerpetualAccountStateSnapshotCache.ApplyResult.STALE);
+        assertThat(cache.state(1001L)).contains(first);
+    }
+
     private PerpetualAccountStateUpdatedEvent event(long revision) {
         return new PerpetualAccountStateUpdatedEvent(
                 1, revision + 100L, revision, ProductLine.LINEAR_PERPETUAL, 1001L, "USDT_PERPETUAL",
