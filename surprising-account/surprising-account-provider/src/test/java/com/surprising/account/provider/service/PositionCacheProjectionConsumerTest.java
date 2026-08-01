@@ -1,5 +1,6 @@
 package com.surprising.account.provider.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -7,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.account.api.cache.PositionSnapshotCache;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
@@ -32,6 +34,24 @@ class PositionCacheProjectionConsumerTest {
 
         verify(cache).apply(event.cacheEvent(), false);
         verify(cache, never()).markNotReady(ProductLine.LINEAR_PERPETUAL);
+    }
+
+    @Test
+    void appliesTheSameDurableEventToTheLocalSnapshotBeforeRedisProjection() throws Exception {
+        ObjectMapper objectMapper = mock(ObjectMapper.class);
+        RedisPositionCache cache = mock(RedisPositionCache.class);
+        PositionSnapshotCache snapshotCache = new PositionSnapshotCache(ProductLine.LINEAR_PERPETUAL);
+        AccountProperties properties = properties();
+        PositionUpdatedEvent event = event();
+        when(objectMapper.readValue("{}", PositionUpdatedEvent.class)).thenReturn(event);
+        PositionCacheProjectionConsumer consumer = new PositionCacheProjectionConsumer(
+                objectMapper, cache, properties, snapshotCache);
+
+        consumer.onPositionUpdated(record(event.partitionKey(), "{}"));
+
+        assertThat(snapshotCache.position(event.userId(), event.symbol(), event.marginMode(), event.positionSide()))
+                .hasValue(event);
+        verify(cache).apply(event.cacheEvent(), false);
     }
 
     @Test

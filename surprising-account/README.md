@@ -32,6 +32,9 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
   事件投影，`PositionCacheProjectionRepository` 不参与普通查询。
   的最终状态快照；`AccountOutboxService` 编排事件、序列号和 outbox 写入，
   `AccountOutboxRepository` 只持久化账户 outbox 表。
+- 账户持仓事件同时进入按产品线隔离的 `PositionSnapshotCache`，按精确持仓键进行 revision 防回退。
+  该 JVM 快照当前用于迁移影子和恢复准备，尚未取代 PostgreSQL 资金事实源；正式切换必须遵循
+  [永续 JVM 单写者迁移计划](../docs/linear-perpetual-jvm-migration-plan.md)。
 - `AccountSettlementService` 只保留交易事务、幂等、锁顺序和资金计算编排，不再包含业务 SQL，
   也不在生产代码中构造 JDBC Repository；单元测试专用装配统一放在 `src/test`。
 - 只有在线正确性无法拆分的路径允许多表 Repository，并必须写明 `不可拆原因`：

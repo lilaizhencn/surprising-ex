@@ -1,8 +1,10 @@
 package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.account.api.cache.PositionSnapshotCache;
 import com.surprising.account.provider.config.AccountProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -23,14 +25,26 @@ public class PositionCacheProjectionConsumer {
 
     private final ObjectMapper objectMapper;
     private final RedisPositionCache cache;
+    private final PositionSnapshotCache snapshotCache;
     private final AccountProperties properties;
+
+    /** Spring 使用带本地快照的构造器；旧测试构造器保留，避免改变投影测试的边界。 */
+    @Autowired
+    public PositionCacheProjectionConsumer(ObjectMapper objectMapper,
+                                           RedisPositionCache cache,
+                                           AccountProperties properties,
+                                           PositionSnapshotCache snapshotCache) {
+        this.objectMapper = objectMapper;
+        this.cache = cache;
+        this.snapshotCache = snapshotCache;
+        this.properties = properties;
+    }
 
     public PositionCacheProjectionConsumer(ObjectMapper objectMapper,
                                            RedisPositionCache cache,
                                            AccountProperties properties) {
-        this.objectMapper = objectMapper;
-        this.cache = cache;
-        this.properties = properties;
+        this(objectMapper, cache, properties,
+                new PositionSnapshotCache(properties.getKafka().getProductLine()));
     }
 
     @KafkaListener(
@@ -46,6 +60,10 @@ public class PositionCacheProjectionConsumer {
             }
             if (!event.partitionKey().equals(record.key())) {
                 throw new IllegalArgumentException("position event Kafka key must be " + event.partitionKey());
+            }
+            PositionSnapshotCache.ApplyResult result = snapshotCache.apply(event);
+            if (result == PositionSnapshotCache.ApplyResult.PRODUCT_LINE_MISMATCH) {
+                throw new IllegalArgumentException("position event does not match local snapshot product line");
             }
             cache.apply(event.cacheEvent(), false);
         } catch (Exception ex) {

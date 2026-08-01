@@ -1,6 +1,8 @@
 package com.surprising.account.provider.service;
 
+import com.surprising.account.api.cache.PositionSnapshotCache;
 import com.surprising.account.api.model.PositionCacheEvent;
+import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.service.PositionCacheProjectionService.Cursor;
 import com.surprising.product.api.ProductLine;
@@ -20,16 +22,19 @@ import org.springframework.stereotype.Component;
     private final PositionCacheProjectionService projectionService;
     private final RedisPositionCache cache;
     private final PositionCacheRedisLease leaseLock;
+    private final PositionSnapshotCache snapshotCache;
     private final AccountProperties properties;
     private Cursor reconcileCursor = Cursor.start();
 
     public PositionCacheCoordinator(PositionCacheProjectionService projectionService,
                                     RedisPositionCache cache,
                                     PositionCacheRedisLease leaseLock,
+                                    PositionSnapshotCache snapshotCache,
                                     AccountProperties properties) {
         this.projectionService = projectionService;
         this.cache = cache;
         this.leaseLock = leaseLock;
+        this.snapshotCache = snapshotCache;
         this.properties = properties;
     }
 
@@ -42,10 +47,15 @@ import org.springframework.stereotype.Component;
         ProductLine productLine = properties.getKafka().getProductLine();
         if (cache.ready(productLine)) {
             try {
+                if (!snapshotCache.ready()) {
+                    rebuildLocal(productLine);
+                    snapshotCache.markReady();
+                }
                 cache.markReady(productLine);
                 reconcileOnePage(productLine);
             } catch (RuntimeException ex) {
                 cache.markNotReady(productLine);
+                snapshotCache.markNotReady();
                 log.warn("Redis position cache reconciliation failed for productLine={}: {}",
                         productLine, ex.getMessage());
             }
@@ -60,11 +70,13 @@ import org.springframework.stereotype.Component;
                 return;
             }
             rebuild(productLine, lease);
+            snapshotCache.markReady();
             cache.markReady(productLine);
             reconcileCursor = Cursor.start();
             log.info("Redis position cache ready for productLine={}", productLine);
         } catch (RuntimeException ex) {
             cache.markNotReady(productLine);
+            snapshotCache.markNotReady();
             log.warn("Redis position cache rebuild failed for productLine={}: {}", productLine, ex.getMessage());
         } finally {
             try {
@@ -85,6 +97,7 @@ import org.springframework.stereotype.Component;
                 return;
             }
             for (PositionCacheEvent event : page) {
+                applyLocal(event);
                 cache.apply(event, true);
                 cursor = projectionService.cursor(event);
                 synchronizedRows++;
@@ -106,6 +119,7 @@ import org.springframework.stereotype.Component;
             return;
         }
         for (PositionCacheEvent event : page) {
+            applyLocal(event);
             cache.apply(event, true);
             reconcileCursor = projectionService.cursor(event);
         }
@@ -116,5 +130,51 @@ import org.springframework.stereotype.Component;
 
     private int batchSize() {
         return Math.max(1, Math.min(properties.getPositionCache().getRebuildBatchSize(), 5_000));
+    }
+
+    /** 将数据库恢复页转换为统一持仓事件，供本地 JVM 快照和 Redis 使用同一份数据。 */
+    private void applyLocal(PositionCacheEvent event) {
+        PositionSnapshotCache.ApplyResult result = snapshotCache.apply(new PositionUpdatedEvent(
+                PositionUpdatedEvent.CURRENT_SCHEMA_VERSION,
+                event.eventId(),
+                0L,
+                event.productLine(),
+                event.revision(),
+                event.userId(),
+                event.symbol(),
+                event.instrumentVersion(),
+                event.marginMode(),
+                event.positionSide(),
+                event.signedQuantitySteps(),
+                event.entryPriceTicks(),
+                event.entryValueTicks(),
+                event.realizedPnlUnits(),
+                event.marginAsset(),
+                event.marginUnits(),
+                event.positionUpdatedAt(),
+                event.marginUpdatedAt(),
+                event.positionUpdatedAt(),
+                "position-cache-rebuild"));
+        if (result == PositionSnapshotCache.ApplyResult.PRODUCT_LINE_MISMATCH) {
+            throw new IllegalStateException("position rebuild product line does not match local snapshot");
+        }
+    }
+
+    private void rebuildLocal(ProductLine productLine) {
+        Cursor cursor = Cursor.start();
+        int batchSize = batchSize();
+        while (true) {
+            List<PositionCacheEvent> page = projectionService.page(productLine, cursor, batchSize);
+            if (page.isEmpty()) {
+                return;
+            }
+            for (PositionCacheEvent event : page) {
+                applyLocal(event);
+                cursor = projectionService.cursor(event);
+            }
+            if (page.size() < batchSize) {
+                return;
+            }
+        }
     }
 }

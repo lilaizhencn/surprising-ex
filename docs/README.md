@@ -14,6 +14,7 @@
 - [永续合约业务与实现说明](perpetual-contract-tutorial.md)
 - [内存与无锁热点路径](in-memory-acceleration.md)
 - [费率配置与 JVM 快照](fee-schedule-jvm-snapshot.md)
+- [永续 JVM 单写者迁移执行计划](linear-perpetual-jvm-migration-plan.md)
 
 ## Redis 读模型与索引
 
@@ -23,6 +24,9 @@
 PostgreSQL 始终是业务事实源。持仓读模型故障时用户查询返回 503；未完成订单投影故障时整页回退
 PostgreSQL。触发单、ADL 和强平 candidate 的 Redis ZSET 只做候选过滤、排序、lease 和重试调度，
 最终状态必须由 PostgreSQL 复核和条件更新。
+
+上面的说明描述当前稳定版本；永续 JVM 单写者迁移必须按迁移计划分阶段执行，完成正式切换并通过
+资金对账、故障恢复和多节点演练前，不得把 PostgreSQL 事实源声明改为异步投影。
 
 ## 测试
 
