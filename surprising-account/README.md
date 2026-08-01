@@ -26,7 +26,8 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - ADL、亏空回补和资金费分别由 `AdlTargetSettlementService`、`DeficitSettlementService`
   和 `FundingSettlementService` 聚合单表 Repository；ADL 的持仓、合约版本、资产精度、保证金、
   余额、亏空和流水不再由 Service 直接写 SQL。
-- `PositionCacheProjectionService` 通过专用在线投影 Repository 生成提交后写入 Redis
+- `PositionCacheProjectionService` 只负责启动重建页和事务提交前最终快照；在线持仓读取直接使用 Redis
+  事件投影，`PositionCacheProjectionRepository` 不参与普通查询。
   的最终状态快照；`AccountOutboxService` 编排事件、序列号和 outbox 写入，
   `AccountOutboxRepository` 只持久化账户 outbox 表。
 - `AccountSettlementService` 只保留交易事务、幂等、锁顺序和资金计算编排，不再包含业务 SQL，

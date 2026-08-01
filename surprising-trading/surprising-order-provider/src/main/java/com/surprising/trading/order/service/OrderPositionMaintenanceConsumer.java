@@ -4,6 +4,7 @@ import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
@@ -18,13 +19,23 @@ public class OrderPositionMaintenanceConsumer {
     private final ObjectMapper objectMapper;
     private final TradingOrderProperties properties;
     private final OrderService orderService;
+    private final OrderMarginSnapshotCache marginSnapshotCache;
 
     public OrderPositionMaintenanceConsumer(ObjectMapper objectMapper,
                                             TradingOrderProperties properties,
                                             OrderService orderService) {
+        this(objectMapper, properties, orderService, null);
+    }
+
+    @Autowired
+    public OrderPositionMaintenanceConsumer(ObjectMapper objectMapper,
+                                            TradingOrderProperties properties,
+                                            OrderService orderService,
+                                            OrderMarginSnapshotCache marginSnapshotCache) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.orderService = orderService;
+        this.marginSnapshotCache = marginSnapshotCache;
     }
 
     @KafkaListener(
@@ -51,6 +62,9 @@ public class OrderPositionMaintenanceConsumer {
                 events.add(event);
             }
             for (PositionUpdatedEvent event : events) {
+                if (marginSnapshotCache != null) {
+                    marginSnapshotCache.applyPosition(event);
+                }
                 orderService.onPositionUpdated(event);
             }
         } catch (Exception ex) {

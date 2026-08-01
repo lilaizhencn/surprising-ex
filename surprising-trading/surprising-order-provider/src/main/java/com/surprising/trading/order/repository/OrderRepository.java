@@ -354,6 +354,38 @@ public class OrderRepository {
                 """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), userId, afterOrderId, limit);
     }
 
+    /** 启动保证金快照使用的单表扫描，包含撤单请求期间仍需计入容量的订单。 */
+    public List<Long> activeMarginSnapshotUsers(ProductLine productLine, long afterUserId, int limit) {
+        return jdbcTemplate.query("""
+                SELECT DISTINCT user_id
+                  FROM trading_orders
+                 WHERE product_line = ?
+                   AND user_id > ?
+                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                 ORDER BY user_id ASC
+                 LIMIT ?
+                """, (rs, rowNum) -> rs.getLong(1), productLine(productLine).name(), afterUserId,
+                Math.max(1, Math.min(limit, 5_000)));
+    }
+
+    /** 启动保证金快照使用的单表分页。 */
+    public List<OrderRecord> activeOrdersForMarginSnapshot(ProductLine productLine,
+                                                            long userId,
+                                                            long afterOrderId,
+                                                            int limit) {
+        return jdbcTemplate.query("""
+                SELECT *
+                  FROM trading_orders
+                 WHERE product_line = ?
+                   AND user_id = ?
+                   AND order_id > ?
+                   AND status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED')
+                 ORDER BY order_id ASC
+                 LIMIT ?
+                """, (rs, rowNum) -> toRecord(rs), productLine(productLine).name(), userId, afterOrderId,
+                Math.max(1, Math.min(limit, 5_000)));
+    }
+
     public List<OrderRecord> openOrdersByOrderId(ProductLine productLine,
                                                    long userId,
                                                    String symbol,

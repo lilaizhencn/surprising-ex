@@ -249,6 +249,10 @@ matching 保证金释放只允许 `reduceOnly=true` 订单没有预占快照。�
 - 校验会用 PostgreSQL `FOR UPDATE` 锁住当前 `account_positions` 行和相关未完成 `trading_orders` 行，多节点 order-provider 并发下也不会超额平仓。
 - 持仓被成交、强平或 ADL 改变后，order-provider 消费按用户分区的持久化持仓事件，并在自己的事务里撤销事件发生前创建且反向、版本不一致或超过新持仓容量的订单。它与下单入口共用 advisory lock，并忽略事件之后创建的订单，避免延迟快照误撤重开仓位的新平仓单。
 
+下单保证金热路径还维护 `OrderMarginSnapshotCache`：持仓事件、订单投影和杠杆设置成功后更新本地快照，
+快照完整时不再做持仓、杠杆和挂单聚合 JOIN；全市场未平仓量仍从权威聚合读取。进程启动、投影未就绪或
+事件落后时自动回到原子 SQL，缓存不能替代账户最终落账。
+
 `surprising-matching-provider` 在撮合拒绝时释放全部冻结；撤单成功或 immediate order 终态时按未成交比例释放未使用保证金。`surprising-account-provider` 消费成交后，按实际成交价计算开仓保证金，把这部分从订单冻结迁移到 `account_position_margins`，并释放委托价改善或市价风险边界多冻结的差额。线性合约市价单即使是 SELL 也故意按上边界冻结，因为 SELL 市价单可能吃到高于 mark 的买一挂单。平仓成交释放旧持仓保证金，不消耗新的订单保证金。
 
 保证金释放使用 PostgreSQL 条件更新：`locked_units >= releaseUnits`。如果冻结余额不足，matching 事务会失败并触发 command failure 重启保护，等待进程重启后通过 DB 恢复订单簿和 Kafka 重放继续处理。这里不能用 `GREATEST(0, locked_units - releaseUnits)` 静默扣减，否则会在异常状态下把不存在的冻结金额释放成可用余额。

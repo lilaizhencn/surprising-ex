@@ -120,7 +120,8 @@ import tools.jackson.databind.ObjectMapper;
         List<CandidateInputRequest> inputRequests = claimed.stream()
                 .filter(candidate -> closeStates.containsKey(candidate.candidateId()))
                 .map(candidate -> new CandidateInputRequest(candidate, markPrices.get(
-                        new InstrumentKey(candidate.symbol(), candidate.instrumentVersion()))))
+                        new InstrumentKey(candidate.symbol(), candidate.instrumentVersion())),
+                        closeStates.get(candidate.candidateId())))
                 .toList();
         Map<Long, CandidateInputs> inputs = liquidationRepository.candidateInputs(inputRequests);
         long inputsLoaded = System.nanoTime();

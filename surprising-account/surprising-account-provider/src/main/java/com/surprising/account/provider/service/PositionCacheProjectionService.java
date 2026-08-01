@@ -20,7 +20,7 @@ public class PositionCacheProjectionService {
 
     public List<PositionCacheEvent> page(ProductLine productLine, Cursor after, int limit) {
         Cursor cursor = after == null ? Cursor.start() : after;
-        return repository.page(productLine, cursor.userId(), cursor.symbol(), cursor.marginMode(),
+        return repository.rebuildPage(productLine, cursor.userId(), cursor.symbol(), cursor.marginMode(),
                 cursor.positionSide(), limit);
     }
 
@@ -33,7 +33,7 @@ public class PositionCacheProjectionService {
                                                    String symbol,
                                                    MarginMode marginMode,
                                                    PositionSide positionSide) {
-        return repository.capture(productLine, userId, symbol, marginMode, positionSide);
+        return repository.captureFinalSnapshot(productLine, userId, symbol, marginMode, positionSide);
     }
 
     public Cursor cursor(PositionCacheEvent event) {

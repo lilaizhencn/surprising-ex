@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -22,16 +23,27 @@ public class OpenOrderViewConsumer {
     private final ObjectMapper mapper;
     private final OrderRepository repository;
     private final RedisOpenOrderView view;
+    private final OrderMarginSnapshotCache marginSnapshotCache;
     private final TradingOrderProperties properties;
 
     public OpenOrderViewConsumer(ObjectMapper mapper,
                                  OrderRepository repository,
                                  RedisOpenOrderView view,
                                  TradingOrderProperties properties) {
+        this(mapper, repository, view, properties, null);
+    }
+
+    @Autowired
+    public OpenOrderViewConsumer(ObjectMapper mapper,
+                                 OrderRepository repository,
+                                 RedisOpenOrderView view,
+                                 TradingOrderProperties properties,
+                                 OrderMarginSnapshotCache marginSnapshotCache) {
         this.mapper = mapper;
         this.repository = repository;
         this.view = view;
         this.properties = properties;
+        this.marginSnapshotCache = marginSnapshotCache;
     }
 
     @KafkaListener(
@@ -68,6 +80,9 @@ public class OpenOrderViewConsumer {
                 continue;
             }
             view.synchronize(order);
+            if (marginSnapshotCache != null) {
+                marginSnapshotCache.applyOrder(order);
+            }
         }
     }
 

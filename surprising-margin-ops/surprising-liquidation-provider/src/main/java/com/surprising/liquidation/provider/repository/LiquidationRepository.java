@@ -32,8 +32,9 @@ import org.springframework.stereotype.Repository;
 /**
  * 强平执行一致性仓储。
  *
- * <p>不可拆原因：候选输入从数据库读取风险状态、持仓和挂单等业务状态，再使用本地不可变合约快照补齐合约参数；
- * 完成候选与取消候选仍在同一事务中联动检查强平订单状态，避免资金与持仓状态发生竞态。
+ * <p>不可拆原因：候选输入必须复核最新风险状态，候选完成与取消仍在同一事务中联动检查强平订单状态，
+ * 避免资金与持仓状态发生竞态。候选事件和持仓锁已经提供风险值与当前数量，在线计算不再重复 JOIN
+ * 持仓及风险快照表；合约参数统一从本地不可变快照补齐。
  * 本仓储只服务实时强平安全链路，不承载后台时间线、资金对账或运营报表查询。
  */
 @Repository
@@ -78,8 +79,8 @@ public class LiquidationRepository {
         String values = String.join(", ", java.util.Collections.nCopies(requests.size(),
                 "(CAST(? AS bigint), CAST(? AS bigint), CAST(? AS bigint), CAST(? AS text), CAST(? AS text), "
                         + "CAST(? AS text), CAST(? AS bigint), CAST(? AS text), CAST(? AS text), CAST(? AS text), "
-                        + "CAST(? AS bigint))"));
-        List<Object> args = new ArrayList<>(requests.size() * 11);
+                        + "CAST(? AS bigint), CAST(? AS bigint), CAST(? AS bigint), CAST(? AS bigint), CAST(? AS bigint))"));
+        List<Object> args = new ArrayList<>(requests.size() * 15);
         for (CandidateInputRequest request : requests) {
             ClaimedCandidate candidate = request.candidate();
             args.add(candidate.candidateId());
@@ -93,10 +94,17 @@ public class LiquidationRepository {
             args.add(candidate.settleAsset());
             args.add(currentProductLine().name());
             args.add(request.markPriceTicks());
+            args.add(candidate.signedQuantitySteps());
+            args.add(candidate.equityUnits());
+            args.add(candidate.maintenanceMarginUnits());
+            args.add(request.closeState() == null
+                    ? candidate.signedQuantitySteps() : request.closeState().signedQuantitySteps());
         }
         List<Map.Entry<Long, CandidateInputs>> rows = jdbcTemplate.query("""
                 WITH requested(candidate_id, snapshot_id, user_id, symbol, margin_mode, position_side,
-                               instrument_version, account_type, settle_asset, product_line, mark_price_ticks) AS (
+                               instrument_version, account_type, settle_asset, product_line, mark_price_ticks,
+                               signed_quantity_steps, equity_units, maintenance_margin_units,
+                               current_signed_quantity_steps) AS (
                     VALUES %s
                 )
                 SELECT r.candidate_id,
@@ -105,38 +113,12 @@ public class LiquidationRepository {
                        r.instrument_version,
                        r.settle_asset,
                        COALESCE(latest_position.status, latest_account.status) AS latest_status,
-                       p.signed_quantity_steps AS current_signed_quantity_steps,
-                       ps.signed_quantity_steps AS snapshot_signed_quantity_steps,
+                       r.current_signed_quantity_steps,
+                       r.signed_quantity_steps AS snapshot_signed_quantity_steps,
                        r.mark_price_ticks,
-                       CASE
-                           WHEN ps.margin_mode = 'ISOLATED'
-                               THEN ps.position_margin_units + ps.unrealized_pnl_units
-                           ELSE acc.equity_units
-                       END AS equity_units,
-                       ps.maintenance_margin_units
+                       r.equity_units,
+                       r.maintenance_margin_units
                   FROM requested r
-                  JOIN account_positions p
-                    ON p.user_id = r.user_id
-                   AND p.product_line = r.product_line
-                   AND p.symbol = r.symbol
-                   AND p.margin_mode = r.margin_mode
-                   AND p.position_side = r.position_side
-                   AND p.instrument_version = r.instrument_version
-                   AND p.signed_quantity_steps <> 0
-                  JOIN risk_position_snapshots ps
-                    ON ps.snapshot_id = r.snapshot_id
-                   AND ps.user_id = r.user_id
-                   AND ps.product_line = r.product_line
-                   AND ps.symbol = r.symbol
-                   AND ps.margin_mode = r.margin_mode
-                   AND ps.position_side = r.position_side
-                   AND ps.instrument_version = r.instrument_version
-                   AND ps.signed_quantity_steps <> 0
-                  JOIN risk_account_snapshots acc
-                    ON acc.snapshot_id = ps.snapshot_id
-                   AND acc.user_id = ps.user_id
-                   AND acc.product_line = ps.product_line
-                   AND acc.settle_asset = ps.settle_asset
              LEFT JOIN LATERAL (
                     SELECT s.status
                       FROM risk_account_snapshots s
@@ -310,7 +292,12 @@ public class LiquidationRepository {
                 .stream().findFirst();
     }
 
-    public record CandidateInputRequest(ClaimedCandidate candidate, long markPriceTicks) {
+    public record CandidateInputRequest(ClaimedCandidate candidate,
+                                        long markPriceTicks,
+                                        LiquidationCloseState closeState) {
+        public CandidateInputRequest(ClaimedCandidate candidate, long markPriceTicks) {
+            this(candidate, markPriceTicks, null);
+        }
     }
 
     public record CandidateInputs(RiskStatus latestRiskStatus,

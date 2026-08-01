@@ -18,11 +18,20 @@ public class LeverageService {
 
     private final LeverageSettingRepository leverageSettingRepository;
     private final InstrumentRuleLookup instrumentRuleLookup;
+    private final OrderMarginSnapshotCache marginSnapshotCache;
 
     public LeverageService(LeverageSettingRepository leverageSettingRepository,
                            InstrumentRuleLookup instrumentRuleLookup) {
+        this(leverageSettingRepository, instrumentRuleLookup, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public LeverageService(LeverageSettingRepository leverageSettingRepository,
+                           InstrumentRuleLookup instrumentRuleLookup,
+                           OrderMarginSnapshotCache marginSnapshotCache) {
         this.leverageSettingRepository = leverageSettingRepository;
         this.instrumentRuleLookup = instrumentRuleLookup;
+        this.marginSnapshotCache = marginSnapshotCache;
     }
 
     @Transactional
@@ -46,7 +55,12 @@ public class LeverageService {
         LeverageSettingRequest normalized = new LeverageSettingRequest(request.userId(), productLine, symbol, marginMode,
                 request.leveragePpm(), request.reason());
         leverageSettingRepository.upsert(normalized, Instant.now());
-        return get(request.userId(), symbol, marginMode, productLine);
+        LeverageSettingResponse response = get(request.userId(), symbol, marginMode, productLine);
+        if (marginSnapshotCache != null) {
+            marginSnapshotCache.putLeverage(productLine, request.userId(), symbol, marginMode,
+                    "USER".equals(response.source()) ? response.leveragePpm() : null);
+        }
+        return response;
     }
 
     public LeverageSettingResponse get(long userId, String symbol, MarginMode marginMode) {
@@ -61,10 +75,16 @@ public class LeverageService {
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         InstrumentRule rule = tradingRule(normalizedSymbol);
         ProductLine resolvedProductLine = productLine(rule, productLine);
-        return leverageSettingRepository.userSetting(resolvedProductLine, userId, normalizedSymbol, normalizedMarginMode,
+        LeverageSettingResponse response = leverageSettingRepository.userSetting(resolvedProductLine, userId,
+                        normalizedSymbol, normalizedMarginMode,
                         rule.maxLeveragePpm())
                 .orElseGet(() -> leverageSettingRepository.instrumentDefault(resolvedProductLine, userId, normalizedSymbol,
                         normalizedMarginMode, rule.maxLeveragePpm(), rule.initialMarginRatePpm()));
+        if (marginSnapshotCache != null) {
+            marginSnapshotCache.putLeverage(resolvedProductLine, userId, normalizedSymbol, normalizedMarginMode,
+                    "USER".equals(response.source()) ? response.leveragePpm() : null);
+        }
+        return response;
     }
 
     private InstrumentRule tradingRule(String symbol) {

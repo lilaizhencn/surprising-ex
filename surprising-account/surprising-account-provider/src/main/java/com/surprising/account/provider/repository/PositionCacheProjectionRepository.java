@@ -39,7 +39,8 @@ public class PositionCacheProjectionRepository {
         this.snapshotCache = snapshotCache;
     }
 
-    public List<PositionCacheEvent> page(ProductLine productLine,
+    /** 仅供启动重建和低频核对扫描使用，在线读取不再经过此仓储。 */
+    public List<PositionCacheEvent> rebuildPage(ProductLine productLine,
                                          long afterUserId,
                                          String afterSymbol,
                                          String afterMarginMode,
@@ -82,7 +83,18 @@ public class PositionCacheProjectionRepository {
                 afterMarginMode, afterPositionSide, Math.max(1, limit));
     }
 
-    public PositionCacheEvent capture(ProductLine productLine,
+    /** 保留旧方法名，避免外部测试或迁移代码误把它当成在线查询入口。 */
+    public List<PositionCacheEvent> page(ProductLine productLine,
+                                         long afterUserId,
+                                         String afterSymbol,
+                                         String afterMarginMode,
+                                         String afterPositionSide,
+                                         int limit) {
+        return rebuildPage(productLine, afterUserId, afterSymbol, afterMarginMode, afterPositionSide, limit);
+    }
+
+    /** 事务提交前读取最终快照，供 outbox 事件构造使用。 */
+    public PositionCacheEvent captureFinalSnapshot(ProductLine productLine,
                                       long userId,
                                       String symbol,
                                       MarginMode marginMode,
@@ -131,6 +143,14 @@ public class PositionCacheProjectionRepository {
                     + normalizedMarginMode + " side=" + normalizedPositionSide);
         }
         return snapshots.getFirst();
+    }
+
+    public PositionCacheEvent capture(ProductLine productLine,
+                                      long userId,
+                                      String symbol,
+                                      MarginMode marginMode,
+                                      PositionSide positionSide) {
+        return captureFinalSnapshot(productLine, userId, symbol, marginMode, positionSide);
     }
 
     private PositionCacheEvent toEvent(java.sql.ResultSet rs) throws java.sql.SQLException {

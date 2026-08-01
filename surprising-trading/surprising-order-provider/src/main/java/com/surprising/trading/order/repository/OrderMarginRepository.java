@@ -12,6 +12,7 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.order.model.MarginRequirement;
 import com.surprising.trading.order.model.MarkPriceLookup;
 import com.surprising.trading.order.service.OrderMarginMath;
+import com.surprising.trading.order.service.OrderMarginSnapshotCache;
 import java.math.BigInteger;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -21,9 +22,9 @@ import org.springframework.stereotype.Repository;
 /**
  * 订单保证金与风险限额快照仓储。
  *
- * <p>不可拆原因：下单校验使用本地合约、风险档位和资产精度快照，并在一条 SQL 的一致快照中读取
- * 杠杆、持仓、开放订单和全市场未平仓量；拆成多条语句会在并发成交或撤单期间形成混合快照，
- * 可能造成少冻结或突破持仓上限。这里属于交易热路径风险校验，不是后台报表查询。</p>
+ * <p>在线优先使用订单侧 JVM 快照；快照尚未就绪时保留原子 SQL 兜底，避免启动恢复、事件延迟或
+ * Redis 投影异常时少冻结或突破持仓上限。不可拆原因是兜底 SQL 必须在同一数据库快照中读取杠杆、
+ * 持仓和开放订单，避免并发期间形成混合状态。这里属于交易热路径风险校验，不是后台报表查询。</p>
  */
 @Repository
 public class OrderMarginRepository {
@@ -34,16 +35,17 @@ public class OrderMarginRepository {
     private final MarkPriceLookup markPriceLookup;
     private final TradingOrderProperties properties;
     private final InstrumentSnapshotCache snapshotCache;
+    private final OrderMarginSnapshotCache marginSnapshotCache;
 
     public OrderMarginRepository(JdbcTemplate jdbcTemplate, OrderRepository orderRepository) {
         this(jdbcTemplate, orderRepository, (symbol, version, maxAge) -> java.util.OptionalLong.empty(),
-                new TradingOrderProperties(), null);
+                new TradingOrderProperties(), null, null);
     }
 
     public OrderMarginRepository(JdbcTemplate jdbcTemplate,
                                  OrderRepository orderRepository,
                                  MarkPriceLookup markPriceLookup) {
-        this(jdbcTemplate, orderRepository, markPriceLookup, new TradingOrderProperties(), null);
+        this(jdbcTemplate, orderRepository, markPriceLookup, new TradingOrderProperties(), null, null);
     }
 
     @Autowired
@@ -51,11 +53,85 @@ public class OrderMarginRepository {
                                  OrderRepository orderRepository,
                                  MarkPriceLookup markPriceLookup,
                                  TradingOrderProperties properties,
-                                 InstrumentSnapshotCache snapshotCache) {
+                                 InstrumentSnapshotCache snapshotCache,
+                                 OrderMarginSnapshotCache marginSnapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.markPriceLookup = markPriceLookup;
         this.properties = properties;
         this.snapshotCache = snapshotCache;
+        this.marginSnapshotCache = marginSnapshotCache;
+    }
+
+    /** 使用已准备好的本地状态计算保证金；数据库只补充仍未事件化的全市场未平仓量。 */
+    private MarginRequirement calculate(MarginInputs input,
+                                        InstrumentResponse instrument,
+                                        OrderSide side,
+                                        OrderType orderType,
+                                        long priceTicks,
+                                        long quantitySteps,
+                                        long marketMaxSlippagePpm) {
+        String accountType = accountType(input.contractType());
+        boolean protectAdverseFillPrice = mayOpenExposure(input.currentSignedQuantitySteps(), side,
+                input.pendingSameSideSteps(), quantitySteps);
+        long effectivePriceTicks;
+        try {
+            effectivePriceTicks = OrderMarginMath.collateralPriceTicks(side, orderType, priceTicks,
+                    input.markTicks(), marketMaxSlippagePpm, input.contractType(), protectAdverseFillPrice);
+        } catch (IllegalArgumentException ex) {
+            return new MarginRequirement(accountType, input.asset(), 0L, ex.getMessage(), leverage(input),
+                    input.instrumentMaxLeveragePpm(), input.instrumentInitialMarginRatePpm());
+        }
+        long projectedPositionNotionalUnits = projectedPositionNotionalUnits(input.contractType(),
+                input.currentSignedQuantitySteps(), side,
+                Math.addExact(input.pendingSameSideSteps(), quantitySteps), effectivePriceTicks,
+                input.notionalMultiplierUnits(), input.priceTickUnits(), input.settleScaleUnits());
+        long dynamicPositionLimitUnits = dynamicPositionLimitUnits(input.contractType(),
+                input.symbolOpenQuantitySteps(), effectivePriceTicks, input.notionalMultiplierUnits(),
+                input.priceTickUnits(), input.settleScaleUnits(), input.openInterestLimitRatePpm(),
+                input.openInterestLimitFloorUnits(), input.maxPositionNotionalUnits());
+        if (projectedPositionNotionalUnits > input.maxPositionNotionalUnits()) {
+            return new MarginRequirement(accountType, input.asset(), 0L,
+                    "position notional exceeds instrument limit", leverage(input),
+                    input.instrumentMaxLeveragePpm(), input.instrumentInitialMarginRatePpm());
+        }
+        if (projectedPositionNotionalUnits > dynamicPositionLimitUnits) {
+            return new MarginRequirement(accountType, input.asset(), 0L,
+                    "position notional exceeds open interest limit", leverage(input),
+                    input.instrumentMaxLeveragePpm(), input.instrumentInitialMarginRatePpm());
+        }
+        RiskBracket bracket = riskBracket(instrument, projectedPositionNotionalUnits)
+                .orElse(new RiskBracket(input.instrumentMaxLeveragePpm(), input.instrumentInitialMarginRatePpm(),
+                        input.maxPositionNotionalUnits()));
+        if (projectedPositionNotionalUnits > bracket.notionalCapUnits()) {
+            return new MarginRequirement(accountType, input.asset(), 0L,
+                    "position notional exceeds risk bracket", leverage(input), bracket.maxLeveragePpm(),
+                    bracket.initialMarginRatePpm());
+        }
+        if (input.configuredLeveragePpm() != null && input.configuredLeveragePpm() > bracket.maxLeveragePpm()) {
+            return new MarginRequirement(accountType, input.asset(), 0L,
+                    "leverage exceeds risk limit", input.configuredLeveragePpm(), bracket.maxLeveragePpm(),
+                    bracket.initialMarginRatePpm());
+        }
+        long selectedLeveragePpm = input.configuredLeveragePpm() == null
+                ? bracket.maxLeveragePpm() : input.configuredLeveragePpm();
+        long leverageInitialMarginRatePpm = OrderLeverageMath.initialMarginRateFromLeveragePpm(selectedLeveragePpm);
+        long effectiveInitialMarginRatePpm = Math.max(leverageInitialMarginRatePpm,
+                bracket.initialMarginRatePpm());
+        try {
+            long initialMarginUnits = OrderMarginMath.initialMarginUnits(input.contractType(), side, orderType,
+                    priceTicks, quantitySteps, input.markTicks(), marketMaxSlippagePpm,
+                    input.notionalMultiplierUnits(), input.priceTickUnits(), input.settleScaleUnits(),
+                    effectiveInitialMarginRatePpm, protectAdverseFillPrice);
+            return new MarginRequirement(accountType, input.asset(), initialMarginUnits, null,
+                    selectedLeveragePpm, bracket.maxLeveragePpm(), effectiveInitialMarginRatePpm);
+        } catch (IllegalArgumentException ex) {
+            return new MarginRequirement(accountType, input.asset(), 0L, ex.getMessage(),
+                    selectedLeveragePpm, bracket.maxLeveragePpm(), effectiveInitialMarginRatePpm);
+        }
+    }
+
+    private long leverage(MarginInputs input) {
+        return input.configuredLeveragePpm() == null ? 0L : input.configuredLeveragePpm();
     }
 
     public Optional<MarginRequirement> requirement(String symbol,
@@ -151,6 +227,26 @@ public class OrderMarginRepository {
         PositionSide normalizedPositionSide = PositionSide.defaultIfNull(positionSide);
         Long markPriceTicks = markPriceLookup.latestMarkPriceTicks(symbol, instrumentVersion,
                 marketMaxMarkAgeMs).stream().boxed().findFirst().orElse(null);
+        if (marginSnapshotCache != null) {
+            var cached = marginSnapshotCache.lookup(productLine, userId, symbol, normalizedMarginMode,
+                    normalizedPositionSide, side).filter(value -> value.instrumentVersion() == instrumentVersion);
+            if (cached.isPresent()) {
+                Long openInterest = jdbcTemplate.query("""
+                        SELECT open_quantity_steps
+                          FROM trading_symbol_open_interest
+                         WHERE product_line = ? AND symbol = ?
+                        """, (rs, rowNum) -> rs.getLong("open_quantity_steps"), productLine.name(), symbol)
+                        .stream().findFirst().orElse(0L);
+                return Optional.of(calculate(new MarginInputs(
+                        instrument.contractType(), instrument.settleAsset(), instrument.notionalMultiplierUnits(),
+                        instrument.priceTickUnits(), snapshotSettleScaleUnits, instrument.initialMarginRatePpm(),
+                        instrument.maxLeveragePpm(), instrument.maxPositionNotionalUnits(),
+                        instrument.userOpenInterestLimitRatePpm(), instrument.userOpenInterestLimitFloorUnits(),
+                        cached.get().configuredLeveragePpm(), cached.get().currentSignedQuantitySteps(),
+                        cached.get().pendingSameSideSteps(), openInterest, markPriceTicks), instrument,
+                        side, orderType, priceTicks, quantitySteps, marketMaxSlippagePpm));
+            }
+        }
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
             long markTicks = rs.getLong("mark_ticks");
             Long nullableMarkTicks = rs.wasNull() ? null : markTicks;
@@ -167,6 +263,12 @@ public class OrderMarginRepository {
             Long configuredLeveragePpm = nullableLong(rs, "leverage_ppm");
             long currentSignedQuantitySteps = rs.getLong("current_signed_quantity_steps");
             long pendingSameSideSteps = rs.getLong("pending_same_side_steps");
+            if (marginSnapshotCache != null) {
+                marginSnapshotCache.putPosition(productLine, userId, symbol, normalizedMarginMode,
+                        normalizedPositionSide, instrumentVersion, currentSignedQuantitySteps);
+                marginSnapshotCache.putLeverage(productLine, userId, symbol, normalizedMarginMode,
+                        configuredLeveragePpm);
+            }
             boolean protectAdverseFillPrice = mayOpenExposure(currentSignedQuantitySteps, side,
                     pendingSameSideSteps, quantitySteps);
             long effectivePriceTicks;
@@ -333,5 +435,22 @@ public class OrderMarginRepository {
     }
 
     private record RiskBracket(long maxLeveragePpm, long initialMarginRatePpm, long notionalCapUnits) {
+    }
+
+    private record MarginInputs(ContractType contractType,
+                                String asset,
+                                long notionalMultiplierUnits,
+                                long priceTickUnits,
+                                long settleScaleUnits,
+                                long instrumentInitialMarginRatePpm,
+                                long instrumentMaxLeveragePpm,
+                                long maxPositionNotionalUnits,
+                                long openInterestLimitRatePpm,
+                                long openInterestLimitFloorUnits,
+                                Long configuredLeveragePpm,
+                                long currentSignedQuantitySteps,
+                                long pendingSameSideSteps,
+                                long symbolOpenQuantitySteps,
+                                Long markTicks) {
     }
 }

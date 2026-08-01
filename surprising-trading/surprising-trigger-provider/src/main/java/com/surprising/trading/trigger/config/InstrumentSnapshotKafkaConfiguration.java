@@ -1,9 +1,6 @@
 package com.surprising.trading.trigger.config;
 
-import java.util.HashMap;
-import java.util.Map;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.common.serialization.StringDeserializer;
+import com.surprising.instrument.api.kafka.InstrumentKafkaConsumerProperties;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,13 +19,9 @@ public class InstrumentSnapshotKafkaConfiguration {
     @Bean
     public ConsumerFactory<String, String> triggerInstrumentSnapshotConsumerFactory(
             TriggerProperties properties) {
-        Map<String, Object> config = new HashMap<>();
-        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
-        config.put(ConsumerConfig.GROUP_ID_CONFIG, properties.getKafka().getInstrumentSnapshotGroupId());
-        config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        var config = InstrumentKafkaConsumerProperties.create(
+                properties.getKafka().getBootstrapServers(),
+                properties.getKafka().getInstrumentSnapshotGroupId(), null, 0);
         return new DefaultKafkaConsumerFactory<>(config);
     }
 
