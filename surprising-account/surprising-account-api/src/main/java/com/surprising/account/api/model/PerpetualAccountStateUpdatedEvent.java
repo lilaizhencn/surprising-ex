@@ -1,0 +1,165 @@
+package com.surprising.account.api.model;
+
+import com.surprising.product.api.ProductLine;
+import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.PositionMode;
+import com.surprising.trading.api.model.PositionSide;
+import java.time.Instant;
+import java.util.List;
+
+/**
+ * 永续账户单写者提交后的完整用户状态快照。
+ *
+ * <p>这是迁移期间的 canonical 账户读模型事件。当前快照仍由账户事务从单表仓储组合，
+ * 但只在账户 outbox 中写入一次，其他模块通过该事件建立自己的 JVM 快照。任何列表为空
+ * 都表示该类状态确实为空，不能把事件缺失解释成零余额或零持仓。</p>
+ */
+public record PerpetualAccountStateUpdatedEvent(
+        int schemaVersion,
+        long eventId,
+        long accountRevision,
+        ProductLine productLine,
+        long userId,
+        String accountType,
+        List<Balance> balances,
+        List<Deficit> deficits,
+        List<Position> positions,
+        List<PositionMargin> positionMargins,
+        List<OrderLock> orderLocks,
+        PositionMode positionMode,
+        Instant eventTime,
+        String traceId) {
+
+    public static final int CURRENT_SCHEMA_VERSION = 1;
+
+    public PerpetualAccountStateUpdatedEvent {
+        if (schemaVersion != CURRENT_SCHEMA_VERSION) {
+            throw new IllegalArgumentException("unsupported perpetual account state schemaVersion: "
+                    + schemaVersion);
+        }
+        if (eventId <= 0L || accountRevision <= 0L) {
+            throw new IllegalArgumentException("eventId and accountRevision must be positive");
+        }
+        if (productLine != ProductLine.LINEAR_PERPETUAL) {
+            throw new IllegalArgumentException("perpetual account state must use LINEAR_PERPETUAL");
+        }
+        if (userId <= 0L) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        accountType = requireText(accountType, "accountType");
+        balances = copyRequired(balances, "balances");
+        deficits = copyRequired(deficits, "deficits");
+        positions = copyRequired(positions, "positions");
+        positionMargins = copyRequired(positionMargins, "positionMargins");
+        orderLocks = copyRequired(orderLocks, "orderLocks");
+        positionMode = PositionMode.defaultIfNull(positionMode);
+        if (eventTime == null) {
+            throw new IllegalArgumentException("eventTime is required");
+        }
+        traceId = traceId == null || traceId.isBlank() ? null : traceId.trim();
+    }
+
+    public String partitionKey() {
+        return ProductLine.LINEAR_PERPETUAL.name() + ":" + userId;
+    }
+
+    public record Balance(String asset, long availableUnits, long lockedUnits) {
+        public Balance {
+            asset = normalizeAsset(asset);
+            if (availableUnits < 0L || lockedUnits < 0L) {
+                throw new IllegalArgumentException("account balance units must not be negative");
+            }
+        }
+    }
+
+    public record Deficit(String asset, long deficitUnits, long reservedUnits) {
+        public Deficit {
+            asset = normalizeAsset(asset);
+            if (deficitUnits < 0L || reservedUnits < 0L || reservedUnits > deficitUnits) {
+                throw new IllegalArgumentException("invalid account deficit units");
+            }
+        }
+    }
+
+    public record Position(String symbol,
+                           long instrumentVersion,
+                           MarginMode marginMode,
+                           PositionSide positionSide,
+                           long signedQuantitySteps,
+                           long entryPriceTicks,
+                           long entryValueTicks,
+                           long realizedPnlUnits,
+                           Instant updatedAt) {
+        public Position {
+            symbol = normalizeSymbol(symbol);
+            marginMode = MarginMode.defaultIfNull(marginMode);
+            positionSide = PositionSide.defaultIfNull(positionSide);
+            if (signedQuantitySteps == 0L) {
+                if (entryPriceTicks != 0L || entryValueTicks != 0L
+                        || (instrumentVersion < 0L)) {
+                    throw new IllegalArgumentException("flat position fields are invalid");
+                }
+            } else if (instrumentVersion <= 0L || entryPriceTicks <= 0L || entryValueTicks <= 0L) {
+                throw new IllegalArgumentException("open position fields are incomplete");
+            }
+            if (updatedAt == null) {
+                throw new IllegalArgumentException("position updatedAt is required");
+            }
+        }
+    }
+
+    public record PositionMargin(String symbol,
+                                 String asset,
+                                 MarginMode marginMode,
+                                 PositionSide positionSide,
+                                 long marginUnits) {
+        public PositionMargin {
+            symbol = normalizeSymbol(symbol);
+            asset = normalizeAsset(asset);
+            marginMode = MarginMode.defaultIfNull(marginMode);
+            positionSide = PositionSide.defaultIfNull(positionSide);
+            if (marginUnits < 0L) {
+                throw new IllegalArgumentException("position margin units must not be negative");
+            }
+        }
+    }
+
+    public record OrderLock(String asset, long lockedUnits) {
+        public OrderLock {
+            asset = normalizeAsset(asset);
+            if (lockedUnits < 0L) {
+                throw new IllegalArgumentException("order lock units must not be negative");
+            }
+        }
+    }
+
+    private static <T> List<T> copyRequired(List<T> values, String field) {
+        if (values == null) {
+            throw new IllegalArgumentException(field + " is required");
+        }
+        return List.copyOf(values);
+    }
+
+    private static String requireText(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(field + " is required");
+        }
+        return value.trim().toUpperCase();
+    }
+
+    private static String normalizeAsset(String value) {
+        String normalized = requireText(value, "asset");
+        if (!normalized.matches("[A-Z0-9]{2,20}")) {
+            throw new IllegalArgumentException("invalid asset: " + value);
+        }
+        return normalized;
+    }
+
+    private static String normalizeSymbol(String value) {
+        String normalized = requireText(value, "symbol");
+        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
+            throw new IllegalArgumentException("invalid symbol: " + value);
+        }
+        return normalized;
+    }
+}
