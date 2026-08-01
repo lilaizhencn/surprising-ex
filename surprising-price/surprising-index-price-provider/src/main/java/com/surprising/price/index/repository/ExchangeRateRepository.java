@@ -68,4 +68,19 @@ public class ExchangeRateRepository {
                         rs.getTimestamp("updated_at").toInstant()),
                 baseCurrency);
     }
+
+    /** 启动恢复读取当前汇率快照；历史查询仍可单独走仓储。 */
+    public List<ExchangeRateResponse> snapshot() {
+        return jdbcTemplate.query("""
+                SELECT base_currency, quote_currency, rate, provider, rate_time, updated_at
+                  FROM price_exchange_rates
+                 ORDER BY base_currency ASC, quote_currency ASC
+                """, (rs, rowNum) -> new ExchangeRateResponse(
+                rs.getString("base_currency"),
+                rs.getString("quote_currency"),
+                rs.getBigDecimal("rate"),
+                rs.getString("provider"),
+                rs.getTimestamp("rate_time").toInstant(),
+                rs.getTimestamp("updated_at").toInstant()));
+    }
 }

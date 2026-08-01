@@ -20,7 +20,7 @@ import org.springframework.stereotype.Component;
  * 撮合保护的本地热索引。
  *
  * <p>索引只保存仍在订单簿中的最小字段，服务重启时由数据库恢复快照重建。数据库仍然是最终
- * 状态和审计来源；索引未就绪时调用方必须回退到数据库，避免启动窗口产生漏检。</p>
+ * 状态和审计来源；索引未就绪时调用方必须失败关闭，避免启动窗口产生漏检。</p>
  */
 @Component
 public class MatchingProtectionIndex {

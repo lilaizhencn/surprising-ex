@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -29,6 +31,7 @@ public class ExchangeRateService {
 
     private final IndexPriceProperties properties;
     private final ExchangeRateRepository exchangeRateRepository;
+    private final ExchangeRateSnapshotCache snapshotCache;
     private final ExternalSpotPriceClient externalSpotPriceClient;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -37,13 +40,35 @@ public class ExchangeRateService {
                                ExchangeRateRepository exchangeRateRepository,
                                ExternalSpotPriceClient externalSpotPriceClient,
                                ObjectMapper objectMapper) {
+        this(properties, exchangeRateRepository, externalSpotPriceClient, objectMapper,
+                new ExchangeRateSnapshotCache());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ExchangeRateService(IndexPriceProperties properties,
+                               ExchangeRateRepository exchangeRateRepository,
+                               ExternalSpotPriceClient externalSpotPriceClient,
+                               ObjectMapper objectMapper,
+                               ExchangeRateSnapshotCache snapshotCache) {
         this.properties = properties;
         this.exchangeRateRepository = exchangeRateRepository;
+        this.snapshotCache = snapshotCache;
         this.externalSpotPriceClient = externalSpotPriceClient;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(properties.getHttp().getConnectTimeout())
                 .build();
+    }
+
+    /** 启动时一次性恢复当前汇率，恢复完成前所有换算请求均失败关闭。 */
+    @EventListener(ApplicationReadyEvent.class)
+    public void restoreSnapshot() {
+        try {
+            snapshotCache.restore(exchangeRateRepository.snapshot());
+        } catch (RuntimeException ex) {
+            snapshotCache.markNotReady();
+            log.error("汇率 JVM 快照恢复失败", ex);
+        }
     }
 
     public void refreshFiatRates() {
@@ -85,7 +110,7 @@ public class ExchangeRateService {
                     Instant.now(), Instant.now());
         } catch (Exception ex) {
             log.warn("Failed to refresh stable coin rate {}->{}: {}", stableCurrency, fiatCurrency, ex.getMessage());
-            if (exchangeRateRepository.latest(stableCurrency, fiatCurrency).isEmpty()
+            if (snapshotCache.latest(stableCurrency, fiatCurrency).isEmpty()
                     && stableCoin.getFallbackRate() != null
                     && stableCoin.getFallbackRate().signum() > 0) {
                 saveRateAndInverse(stableCurrency, fiatCurrency, stableCoin.getFallbackRate(), "STABLE_FALLBACK",
@@ -100,7 +125,7 @@ public class ExchangeRateService {
 
     public ExchangeRateQueryResponse rates(String baseCurrency) {
         String normalized = normalizeCurrency(baseCurrency);
-        List<ExchangeRateResponse> rates = exchangeRateRepository.byBaseCurrency(normalized).stream()
+        List<ExchangeRateResponse> rates = snapshotCache.byBaseCurrency(normalized).stream()
                 .filter(this::freshEnough)
                 .toList();
         return new ExchangeRateQueryResponse(normalized, rates.size(), rates);
@@ -158,13 +183,18 @@ public class ExchangeRateService {
         if (rate == null || rate.signum() <= 0) {
             throw new IllegalArgumentException("exchange rate must be positive");
         }
-        exchangeRateRepository.upsert(baseCurrency, quoteCurrency,
-                rate.setScale(properties.getCalculation().getScale(), RoundingMode.HALF_UP),
+        BigDecimal normalizedRate = rate.setScale(properties.getCalculation().getScale(), RoundingMode.HALF_UP);
+        exchangeRateRepository.upsert(baseCurrency, quoteCurrency, normalizedRate,
                 provider, rateTime, updatedAt);
+        snapshotCache.put(new ExchangeRateResponse(baseCurrency, quoteCurrency, normalizedRate,
+                provider, rateTime, updatedAt));
         if (!baseCurrency.equals(quoteCurrency)) {
-            exchangeRateRepository.upsert(quoteCurrency, baseCurrency,
-                    BigDecimal.ONE.divide(rate, properties.getCalculation().getScale(), RoundingMode.HALF_UP),
+            BigDecimal inverse = BigDecimal.ONE.divide(normalizedRate, properties.getCalculation().getScale(),
+                    RoundingMode.HALF_UP);
+            exchangeRateRepository.upsert(quoteCurrency, baseCurrency, inverse,
                     provider + ":INVERSE", rateTime, updatedAt);
+            snapshotCache.put(new ExchangeRateResponse(quoteCurrency, baseCurrency, inverse,
+                    provider + ":INVERSE", rateTime, updatedAt));
         }
     }
 
@@ -188,7 +218,7 @@ public class ExchangeRateService {
             return new ResolvedRate(BigDecimal.ONE, baseCurrency + "->" + quoteCurrency, "INTERNAL",
                     Instant.now(), Instant.now());
         }
-        return exchangeRateRepository.latest(baseCurrency, quoteCurrency)
+        return snapshotCache.latest(baseCurrency, quoteCurrency)
                 .filter(this::freshEnough)
                 .map(rate -> new ResolvedRate(rate.rate(), rate.baseCurrency() + "->" + rate.quoteCurrency(),
                         rate.provider(), rate.rateTime(), rate.updatedAt()))

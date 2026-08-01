@@ -112,7 +112,9 @@ BTC-USDT price from Coinbase = BTC-USD / USDT-USD
 
 默认使用 Coinbase `USDT-USD` ticker 作为稳定币换算源，`conversion-operation: DIVIDE`。如果稳定币换算源不可用，默认不会直接丢弃 Coinbase，而是按 `fallback-weight-multiplier` 折扣权重；如果风控政策更严格，可以把 `conversion-mode` 改为 `DISABLE`。
 
-客户国家法币展示和风控价格分开处理。系统会定时拉取 USD 基准法币汇率，写入 `price_exchange_rates` 表；前端、网关或账户展示层只查询本地接口，不直接访问第三方汇率源。
+客户国家法币展示和风控价格分开处理。系统会定时拉取 USD 基准法币汇率，写入 `price_exchange_rates` 表并更新
+`ExchangeRateSnapshotCache`；启动时一次性恢复 JVM 快照，换算和查询只读内存，前端、网关或账户展示层只查询本地接口，
+不直接访问第三方汇率源。快照未就绪或汇率过期时拒绝换算，不回查数据库。
 
 默认开发配置：
 

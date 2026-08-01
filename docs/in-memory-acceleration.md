@@ -10,7 +10,7 @@
 - `productLine + symbol`：合约规格标识一致性检查；
 - `orderId`：成交、撤单后的无锁更新。
 
-撮合订单簿恢复成功后由 `ExchangeCoreEngine` 重建索引，恢复完成前 `MatchingProtectionRepository` 继续走数据库兜底。撮合结果和成交持久化成功后才应用索引变更，避免未提交状态被后续指令看到。
+撮合订单簿恢复成功后由 `ExchangeCoreEngine` 重建索引，恢复完成前 `MatchingProtectionRepository` 失败关闭，绝不在撮合热路径回查数据库。撮合结果和成交持久化成功后才应用索引变更，避免未提交状态被后续指令看到。
 
 ## 行情与 K 线
 
@@ -55,6 +55,12 @@ Instrument Service 通过统一聚合 Service 组装合约正文、风险档位�
 
 快照未就绪时，相关实时流量拒绝启动或返回空候选，避免使用不完整规格计算资金结果。
 
+### 指数汇率快照
+
+`ExchangeRateSnapshotCache` 在指数模块启动时从 `price_exchange_rates` 一次性恢复全部当前汇率，运行中由汇率
+刷新 Service 在数据库写入成功后原子更新本 JVM。指数换算、最新汇率和汇率列表只读该快照，并按稳定币/法币
+新鲜度拒绝过期数据；数据库不再出现在换算热路径，仅承担启动恢复、更新落账和历史查询。
+
 ## WebSocket 背压
 
 每个 `ClientConnection` 使用有界内存 FIFO（环形队列语义）和独立虚拟线程发送。`SubscriptionRegistry.publishBatch` 将同一批事件一次性编码和入队；队列满或发送超时只关闭当前慢连接，不阻塞 Kafka 消费线程和其他连接。公共行情多节点仍必须使用不同 Kafka consumer group，产品线 topic 和订阅键不能混用。
@@ -72,6 +78,6 @@ Instrument 事件只接受完整字段，不再兼容缺少产品线、序列或
 
 ## 部署与故障处理
 
-四条产品线仍分别部署和配置：现货、永续、交割、期权使用各自的 topic、账户类型、撮合实例和 WebSocket consumer group。服务重启时先完成内存索引/快照恢复，再宣告 readiness；恢复失败必须保留数据库或 Redis 兜底，不得以空索引接受下单。
+四条产品线仍分别部署和配置：现货、永续、交割、期权使用各自的 topic、账户类型、撮合实例和 WebSocket consumer group。服务重启时先完成内存索引/快照恢复，再宣告 readiness；恢复失败必须保持对应交易入口不可用，不能以空索引接受下单，也不能把实时请求转成数据库兜底查询。
 
 发现账账不平、跨线 topic、风险组缺失或触发单候选异常时，应暂停对应产品线入口，保留 Kafka 位点、Redis readiness 和数据库快照，完成重建及逐项资金核对后再恢复流量。

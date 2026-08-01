@@ -9,6 +9,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -70,6 +71,22 @@ public class LeverageSettingRepository {
                 """, (rs, rowNum) -> rs.getLong("leverage_ppm"),
                 productLine(productLine).name(), userId, normalizeSymbol(symbol),
                 MarginMode.defaultIfNull(marginMode).name()).stream().findFirst();
+    }
+
+    /** 启动恢复使用的单表快照，不参与下单热路径。 */
+    public List<LeverageSnapshot> snapshot(ProductLine productLine) {
+        return jdbcTemplate.query("""
+                SELECT user_id, symbol, margin_mode, leverage_ppm
+                  FROM trading_leverage_settings
+                 WHERE product_line = ?
+                 ORDER BY user_id ASC, symbol ASC, margin_mode ASC
+                """, (rs, rowNum) -> new LeverageSnapshot(
+                rs.getLong("user_id"), rs.getString("symbol"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")), rs.getLong("leverage_ppm")),
+                productLine(productLine).name());
+    }
+
+    public record LeverageSnapshot(long userId, String symbol, MarginMode marginMode, long leveragePpm) {
     }
 
     public LeverageSettingResponse instrumentDefault(long userId,

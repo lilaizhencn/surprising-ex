@@ -253,8 +253,9 @@ matching 保证金释放只允许 `reduceOnly=true` 订单没有预占快照。�
 - 持仓被成交、强平或 ADL 改变后，order-provider 消费按用户分区的持久化持仓事件，并在自己的事务里撤销事件发生前创建且反向、版本不一致或超过新持仓容量的订单。它与下单入口共用 advisory lock，并忽略事件之后创建的订单，避免延迟快照误撤重开仓位的新平仓单。
 
 下单保证金热路径还维护 `OrderMarginSnapshotCache`：持仓事件、订单投影和杠杆设置成功后更新本地快照，
-快照完整时不再做持仓、杠杆和挂单聚合 JOIN；全市场未平仓量仍从权威聚合读取。进程启动、投影未就绪或
-事件落后时自动回到原子 SQL，缓存不能替代账户最终落账。
+快照完整时不再做持仓、杠杆和挂单聚合 JOIN；全市场未平仓量仍从权威聚合读取。进程启动时分别从
+`account_positions`、`trading_leverage_settings` 和 `trading_orders` 单表恢复，投影未就绪、事件落后或
+任一用户状态未命中时直接拒绝下单，不在下单线程回查数据库。数据库仍是最终落账和恢复来源。
 
 `surprising-matching-provider` 在撮合拒绝时释放全部冻结；撤单成功或 immediate order 终态时按未成交比例释放未使用保证金。`surprising-account-provider` 消费成交后，按实际成交价计算开仓保证金，把这部分从订单冻结迁移到 `account_position_margins`，并释放委托价改善或市价风险边界多冻结的差额。线性合约市价单即使是 SELL 也故意按上边界冻结，因为 SELL 市价单可能吃到高于 mark 的买一挂单。平仓成交释放旧持仓保证金，不消耗新的订单保证金。
 

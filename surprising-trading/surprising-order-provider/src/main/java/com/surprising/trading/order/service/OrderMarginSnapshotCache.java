@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
  * 下单保证金计算需要的本地状态快照。
  *
  * <p>快照只在订单和仓位事件成功到达后更新，不能替代数据库的最终落账。重建完成前
- * lookup 返回空值，调用方会走原有的一致性 SQL，这样不会因为进程刚启动或投影不完整而少冻结保证金。</p>
+ * lookup 返回空值，调用方必须失败关闭，不能把下单请求转成数据库查询。</p>
  */
 @Component
 public class OrderMarginSnapshotCache {
@@ -87,11 +87,28 @@ public class OrderMarginSnapshotCache {
                 ? new PositionValue(0L, instrumentVersion, signedQuantitySteps) : previous);
     }
 
+    /** 仅在启动恢复没有对应仓位行时补入零仓位。 */
+    public void putPositionIfAbsent(ProductLine productLine,
+                                    long userId,
+                                    String symbol,
+                                    MarginMode marginMode,
+                                    PositionSide positionSide,
+                                    long instrumentVersion) {
+        if (productLine == null || userId <= 0L || instrumentVersion <= 0L) {
+            return;
+        }
+        positions.putIfAbsent(new PositionKey(productLine, userId, symbol, marginMode, positionSide),
+                new PositionValue(0L, instrumentVersion, 0L));
+    }
+
     /** 记录订单投影，并按订单修订维护未成交数量，支持撤单请求仍占用容量。 */
     public void applyOrder(OrderRecord order) {
         if (order == null) {
             return;
         }
+        putPositionIfAbsent(order.productLine(), order.userId(), order.symbol(), order.marginMode(),
+                order.positionSide(), order.instrumentVersion());
+        putDefaultLeverageIfAbsent(order.productLine(), order.userId(), order.symbol(), order.marginMode());
         OrderValue next = new OrderValue(order.productLine(), order.userId(), order.symbol(), order.marginMode(),
                 order.positionSide(), order.side(), order.reduceOnly(), order.status().name(),
                 order.remainingQuantitySteps(), order.revision());
@@ -117,6 +134,18 @@ public class OrderMarginSnapshotCache {
         }
         leverages.put(new LeverageKey(productLine, userId, symbol.trim().toUpperCase(), marginMode),
                 new LeverageValue(true, leveragePpm));
+    }
+
+    /** 为没有用户特殊设置的用户预置“使用合约默认杠杆”的已知状态。 */
+    public void putDefaultLeverageIfAbsent(ProductLine productLine,
+                                           long userId,
+                                           String symbol,
+                                           MarginMode marginMode) {
+        if (productLine == null || userId <= 0L || symbol == null || symbol.isBlank()) {
+            return;
+        }
+        leverages.putIfAbsent(new LeverageKey(productLine, userId, symbol.trim().toUpperCase(), marginMode),
+                new LeverageValue(true, null));
     }
 
     public Optional<MarginSnapshot> lookup(ProductLine productLine,

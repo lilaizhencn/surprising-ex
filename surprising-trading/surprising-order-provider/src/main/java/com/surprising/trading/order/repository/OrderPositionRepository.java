@@ -5,6 +5,7 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
 import java.util.Optional;
+import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -41,6 +42,29 @@ public class OrderPositionRepository {
                 rs.getLong("signed_quantity_steps"), rs.getLong("instrument_version")),
                 productLine(productLine).name(), userId, symbol, MarginMode.defaultIfNull(marginMode).name(),
                 PositionSide.defaultIfNull(positionSide).name()).stream().findFirst();
+    }
+
+    /** 启动恢复使用的单表快照，不参与下单热路径。 */
+    public List<PositionSnapshot> snapshot(ProductLine productLine) {
+        return jdbcTemplate.query("""
+                SELECT user_id, symbol, margin_mode, position_side, instrument_version, signed_quantity_steps
+                  FROM account_positions
+                 WHERE product_line = ?
+                 ORDER BY user_id ASC, symbol ASC, margin_mode ASC, position_side ASC
+                """, (rs, rowNum) -> new PositionSnapshot(
+                rs.getLong("user_id"), rs.getString("symbol"),
+                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
+                PositionSide.fromNullableDbValue(rs.getString("position_side")),
+                (Long) rs.getObject("instrument_version"), rs.getLong("signed_quantity_steps")),
+                productLine(productLine).name());
+    }
+
+    public record PositionSnapshot(long userId,
+                                   String symbol,
+                                   MarginMode marginMode,
+                                   PositionSide positionSide,
+                                   Long instrumentVersion,
+                                   long signedQuantitySteps) {
     }
 
     private ProductLine productLine(ProductLine value) {

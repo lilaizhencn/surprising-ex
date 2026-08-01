@@ -1,6 +1,7 @@
 package com.surprising.trading.matching.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.OrderCommandEvent;
@@ -18,72 +19,61 @@ import org.springframework.jdbc.core.RowCallbackHandler;
 class MatchingProtectionRepositoryTest {
 
     @Test
-    void leavesProtectionQueriesUnfilteredForLegacyTopics() {
+    void failsClosedWhenProtectionIndexIsNotReady() {
         RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
         MatchingProtectionRepository repository = new MatchingProtectionRepository(jdbcTemplate);
 
-        repository.wouldSelfTrade(1001L, "BTC-USDT", 1L, OrderSide.BUY, 65_000L);
+        assertThatThrownBy(() -> repository.wouldSelfTrade(1001L, "BTC-USDT", 1L, OrderSide.BUY, 65_000L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("撮合保护索引尚未就绪");
 
-        assertThat(jdbcTemplate.sql).doesNotContain("product_line = ?");
-        assertThat(jdbcTemplate.args).hasSize(8);
+        assertThat(jdbcTemplate.sql).isNull();
     }
 
     @Test
-    void filtersSelfTradeProtectionByProductLineWhenProductTopicsAreEnabled() {
+    void doesNotQueryDatabaseForSelfTradeProtection() {
         RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
         MatchingProtectionRepository repository =
                 new MatchingProtectionRepository(jdbcTemplate, properties(ProductLine.OPTION));
 
-        repository.wouldSelfTrade(1001L, "BTC-USDT-260626-C-65000", 1L, OrderSide.BUY, 65_000L);
-
-        assertThat(jdbcTemplate.sql).contains("product_line = ?");
-        assertThat(jdbcTemplate.args).hasSize(9);
-        assertThat(jdbcTemplate.args[4]).isEqualTo("OPTION");
+        assertThatThrownBy(() -> repository.wouldSelfTrade(1001L, "BTC-USDT-260626-C-65000", 1L,
+                OrderSide.BUY, 65_000L)).isInstanceOf(IllegalStateException.class);
+        assertThat(jdbcTemplate.sql).isNull();
     }
 
     @Test
-    void filtersVersionProtectionByProductLineWhenProductTopicsAreEnabled() {
+    void doesNotQueryDatabaseForVersionProtection() {
         RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
         MatchingProtectionRepository repository =
                 new MatchingProtectionRepository(jdbcTemplate, properties(ProductLine.LINEAR_DELIVERY));
 
-        repository.hasOpenOrdersWithDifferentInstrumentVersion("BTC-USDT-260626", 2L, 101L);
-
-        assertThat(jdbcTemplate.sql).contains("product_line = ?");
-        assertThat(jdbcTemplate.args).hasSize(4);
-        assertThat(jdbcTemplate.args[3]).isEqualTo("LINEAR_DELIVERY");
+        assertThatThrownBy(() -> repository.hasOpenOrdersWithDifferentInstrumentVersion(
+                "BTC-USDT-260626", 2L, 101L)).isInstanceOf(IllegalStateException.class);
+        assertThat(jdbcTemplate.sql).isNull();
     }
 
     @Test
-    void batchesSelfTradeProtectionIntoOneQuery() {
+    void batchSelfTradeProtectionFailsClosed() {
         RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
         MatchingProtectionRepository repository =
                 new MatchingProtectionRepository(jdbcTemplate, properties(ProductLine.LINEAR_PERPETUAL));
 
-        repository.commandsThatWouldSelfTrade(List.of(command(101L, 1001L, OrderSide.BUY),
-                command(102L, 1002L, OrderSide.SELL)));
-
-        assertThat(jdbcTemplate.sql)
-                .contains("WITH input(command_id, user_id, symbol, instrument_version, side, effective_price_ticks)")
-                .contains("orders.product_line = ?");
-        assertThat(jdbcTemplate.args).hasSize(13);
-        assertThat(jdbcTemplate.args[12]).isEqualTo("LINEAR_PERPETUAL");
+        assertThatThrownBy(() -> repository.commandsThatWouldSelfTrade(List.of(
+                command(101L, 1001L, OrderSide.BUY), command(102L, 1002L, OrderSide.SELL))))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(jdbcTemplate.sql).isNull();
     }
 
     @Test
-    void batchesInstrumentVersionProtectionIntoOneQuery() {
+    void batchVersionProtectionFailsClosed() {
         RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
         MatchingProtectionRepository repository =
                 new MatchingProtectionRepository(jdbcTemplate, properties(ProductLine.LINEAR_PERPETUAL));
 
-        repository.commandsWithOpenOrdersAtDifferentInstrumentVersion(List.of(
-                command(101L, 1001L, OrderSide.BUY), command(102L, 1002L, OrderSide.SELL)));
-
-        assertThat(jdbcTemplate.sql)
-                .contains("WITH input(command_id, symbol, instrument_version, order_id)")
-                .contains("orders.product_line = ?");
-        assertThat(jdbcTemplate.args).hasSize(9);
-        assertThat(jdbcTemplate.args[8]).isEqualTo("LINEAR_PERPETUAL");
+        assertThatThrownBy(() -> repository.commandsWithOpenOrdersAtDifferentInstrumentVersion(List.of(
+                command(101L, 1001L, OrderSide.BUY), command(102L, 1002L, OrderSide.SELL))))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(jdbcTemplate.sql).isNull();
     }
 
     private OrderCommandEvent command(long commandId, long userId, OrderSide side) {
