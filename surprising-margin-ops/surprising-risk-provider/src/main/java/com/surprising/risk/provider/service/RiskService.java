@@ -264,7 +264,8 @@ import tools.jackson.databind.ObjectMapper;
                         ? state.key().settleAsset() : event.marginAsset();
                 positions.put(scope, new com.surprising.risk.provider.model.CachedRiskPosition(
                         event.symbol(), event.marginMode(), event.positionSide(), event.instrumentVersion(),
-                        settleAsset, event.signedQuantitySteps(), event.entryPriceTicks(), event.marginUnits()));
+                        settleAsset, event.signedQuantitySteps(), event.entryPriceTicks(), event.marginUnits(),
+                        event.revision()));
             }
         }
         return new CachedRiskGroup(state.key(), state.walletBalanceUnits(), List.copyOf(positions.values()),
@@ -572,7 +573,8 @@ import tools.jackson.databind.ObjectMapper;
             if (!positionStillOpen) {
                 CalculatedPositionRisk flatPosition = new CalculatedPositionRisk(eventTarget.userId(),
                         eventTarget.symbol(), eventTarget.marginMode(), eventTarget.positionSide(),
-                        eventTarget.instrumentVersion(), eventTarget.settleAsset(), 0L, 0L, 0L, 0L, 0L, 0L, 0L);
+                        eventTarget.instrumentVersion(), eventTarget.settleAsset(), 0L, 0L, 0L, 0L, 0L, 0L, 0L,
+                        0L);
                 flatPositions.add(flatPosition);
             }
         }
@@ -651,7 +653,8 @@ import tools.jackson.databind.ObjectMapper;
                     position.marginMode(), position.positionSide(), position.instrumentVersion(),
                     position.settleAsset(), position.signedQuantitySteps(), position.markPriceTicks(),
                     candidate.equityUnits(), position.maintenanceMarginUnits(),
-                    Math.max(account.marginRatioPpm(), candidate.positionMarginRatioPpm()), candidate.eventTime());
+                    Math.max(account.marginRatioPpm(), candidate.positionMarginRatioPpm()), candidate.eventTime(),
+                    position.positionRevision() > 0L ? position.positionRevision() : account.snapshotId());
             events.add(new PendingRiskOutboxEvent(properties.getKafka().getLiquidationCandidatesTopic(),
                     position.symbol(), "LIQUIDATION_CANDIDATE", payload(event), candidate.eventTime()));
         }

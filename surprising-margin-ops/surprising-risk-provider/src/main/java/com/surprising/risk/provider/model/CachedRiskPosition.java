@@ -12,7 +12,8 @@ public record CachedRiskPosition(
         String settleAsset,
         long signedQuantitySteps,
         long entryPriceTicks,
-        long positionMarginUnits) {
+        long positionMarginUnits,
+        long positionRevision) {
 
     public CachedRiskPosition {
         marginMode = MarginMode.defaultIfNull(marginMode);
@@ -21,8 +22,21 @@ public record CachedRiskPosition(
             throw new IllegalArgumentException("cached risk position symbol and settleAsset are required");
         }
         if (instrumentVersion <= 0L || signedQuantitySteps == 0L || entryPriceTicks <= 0L
-                || positionMarginUnits < 0L) {
+                || positionMarginUnits < 0L || positionRevision < 0L) {
             throw new IllegalArgumentException("invalid cached risk position fixed-point fields");
         }
+    }
+
+    /** 兼容数据库恢复的旧风险快照；没有账户持仓 revision 时由候选 snapshotId 兜底。 */
+    public CachedRiskPosition(String symbol,
+                              MarginMode marginMode,
+                              PositionSide positionSide,
+                              long instrumentVersion,
+                              String settleAsset,
+                              long signedQuantitySteps,
+                              long entryPriceTicks,
+                              long positionMarginUnits) {
+        this(symbol, marginMode, positionSide, instrumentVersion, settleAsset, signedQuantitySteps,
+                entryPriceTicks, positionMarginUnits, 0L);
     }
 }

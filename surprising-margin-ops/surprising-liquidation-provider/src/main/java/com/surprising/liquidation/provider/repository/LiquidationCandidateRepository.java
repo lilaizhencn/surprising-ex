@@ -50,7 +50,8 @@ public class LiquidationCandidateRepository {
         sql.append("""
                 RETURNING c.candidate_id, c.snapshot_id, c.user_id, c.symbol, c.margin_mode, c.position_side,
                           c.account_type, c.settle_asset, c.instrument_version, c.signed_quantity_steps,
-                          c.mark_price_ticks, c.equity_units, c.maintenance_margin_units, c.margin_ratio_ppm
+                          c.mark_price_ticks, c.equity_units, c.maintenance_margin_units, c.margin_ratio_ppm,
+                          c.position_revision
                 """);
         Map<Long, ClaimedCandidate> claimed = jdbcTemplate.query(sql.toString(), (rs, rowNum) ->
                 new ClaimedCandidate(
@@ -67,7 +68,8 @@ public class LiquidationCandidateRepository {
                         rs.getLong("mark_price_ticks"),
                         rs.getLong("equity_units"),
                         rs.getLong("maintenance_margin_units"),
-                        rs.getLong("margin_ratio_ppm")), args.toArray()).stream()
+                        rs.getLong("margin_ratio_ppm"),
+                        rs.getLong("position_revision")), args.toArray()).stream()
                 .collect(Collectors.toMap(ClaimedCandidate::candidateId, Function.identity()));
         return uniqueIds.stream().map(claimed::get).filter(java.util.Objects::nonNull).toList();
     }
@@ -77,7 +79,7 @@ public class LiquidationCandidateRepository {
         StringBuilder sql = new StringBuilder("""
                 SELECT candidate_id, snapshot_id, user_id, symbol, margin_mode, position_side, instrument_version,
                        settle_asset, signed_quantity_steps, mark_price_ticks, equity_units,
-                       maintenance_margin_units, margin_ratio_ppm, event_time
+                       maintenance_margin_units, margin_ratio_ppm, event_time, position_revision
                   FROM risk_liquidation_candidates c
                  WHERE status = 'NEW'
                 """);
@@ -90,7 +92,7 @@ public class LiquidationCandidateRepository {
                 PositionSide.fromNullableDbValue(rs.getString("position_side")), rs.getLong("instrument_version"),
                 rs.getString("settle_asset"), rs.getLong("signed_quantity_steps"), rs.getLong("mark_price_ticks"),
                 rs.getLong("equity_units"), rs.getLong("maintenance_margin_units"), rs.getLong("margin_ratio_ppm"),
-                rs.getTimestamp("event_time").toInstant()), args.toArray());
+                rs.getTimestamp("event_time").toInstant(), rs.getLong("position_revision")), args.toArray());
     }
 
     public void updateStatus(long candidateId, String status) {

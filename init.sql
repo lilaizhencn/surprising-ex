@@ -2700,7 +2700,8 @@ CREATE TABLE IF NOT EXISTS risk_liquidation_candidates (
 
 ALTER TABLE risk_liquidation_candidates
     ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'USDT_PERPETUAL',
-    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
+    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
+    ADD COLUMN IF NOT EXISTS position_revision BIGINT NOT NULL DEFAULT 0;
 
 UPDATE risk_liquidation_candidates
    SET product_line = CASE account_type

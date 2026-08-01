@@ -74,7 +74,7 @@ public class RedisRiskCalculator {
                     group.key().userId(), position.symbol(), position.marginMode(), position.positionSide(),
                     position.instrumentVersion(), position.settleAsset(), position.signedQuantitySteps(),
                     position.entryPriceTicks(), mark.markPriceTicks(), notional, unrealizedPnl,
-                    maintenanceMargin, position.positionMarginUnits()));
+                    maintenanceMargin, position.positionMarginUnits(), position.positionRevision()));
         }
         return List.copyOf(calculated);
     }

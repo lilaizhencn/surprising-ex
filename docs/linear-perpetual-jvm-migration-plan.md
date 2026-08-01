@@ -139,6 +139,10 @@ Redis 是查询投影，不应承担资金条件判断。迁移后保留 Redis �
 
 ### 阶段 6：强平 JVM 快照和版本校验
 
+当前已完成的前置改动：风险计算结果和强平候选已携带 `positionRevision`，并写入
+`risk_liquidation_candidates.position_revision`。旧构造方式和旧数据在读取时使用
+`snapshotId` 兼容，避免历史候选重放失败；这一步只增加校验信息，尚未切换强平实时数据库路径。
+
 改动：
 
 - 强平模块消费持仓事件和风险事件，维护本地持仓、保证金和风险状态。
@@ -196,4 +200,3 @@ PRODUCT_LINES=LINEAR_PERPETUAL ./scripts/product-line-funds-reconcile.sh
 ```
 
 跨模块阶段再运行 `integration-smoke.sh`、`kafka-trading-smoke.sh` 和 `live-runtime-trading-reconciliation.sh`。所有新增注释和文档使用中文；每个模块通过测试后单独提交，禁止提交运行产物。
-

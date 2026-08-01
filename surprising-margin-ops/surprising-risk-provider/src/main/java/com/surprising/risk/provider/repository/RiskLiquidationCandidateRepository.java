@@ -47,8 +47,8 @@ public class RiskLiquidationCandidateRepository {
                     product_line, candidate_id, snapshot_id, user_id, symbol, margin_mode, position_side,
                     instrument_version, account_type, settle_asset,
                     signed_quantity_steps, mark_price_ticks, equity_units,
-                    maintenance_margin_units, margin_ratio_ppm, status, event_time, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, now(), now())
+                    maintenance_margin_units, margin_ratio_ppm, position_revision, status, event_time, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, now(), now())
                 ON CONFLICT (product_line, user_id, symbol, margin_mode, position_side)
                     WHERE status IN ('NEW', 'PROCESSING') DO NOTHING
                 """, new BatchPreparedStatementSetter() {
@@ -72,7 +72,9 @@ public class RiskLiquidationCandidateRepository {
                 statement.setLong(13, row.equityUnits());
                 statement.setLong(14, position.maintenanceMarginUnits());
                 statement.setLong(15, Math.max(account.marginRatioPpm(), row.positionMarginRatioPpm()));
-                statement.setTimestamp(16, Timestamp.from(row.eventTime()));
+                statement.setLong(16, position.positionRevision() > 0L
+                        ? position.positionRevision() : account.snapshotId());
+                statement.setTimestamp(17, Timestamp.from(row.eventTime()));
             }
 
             @Override
