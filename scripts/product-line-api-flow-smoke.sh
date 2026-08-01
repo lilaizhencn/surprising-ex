@@ -73,6 +73,8 @@ STRESS_HOT_TRAFFIC_PERCENT="${STRESS_HOT_TRAFFIC_PERCENT:-80}"
 STRESS_INTERNAL_MARKET_MAKER_WHITELIST="${STRESS_INTERNAL_MARKET_MAKER_WHITELIST:-true}"
 STRESS_RESET_PG_STAT_STATEMENTS="${STRESS_RESET_PG_STAT_STATEMENTS:-true}"
 STRESS_KAFKA_LAG_SAMPLE_SECONDS="${STRESS_KAFKA_LAG_SAMPLE_SECONDS:-2}"
+ACCOUNT_RESTART_RECOVERY="${ACCOUNT_RESTART_RECOVERY:-false}"
+ACCOUNT_RESTART_MODE="${ACCOUNT_RESTART_MODE:-kill}"
 STRESS_PG_STAT_STATEMENTS_AVAILABLE=false
 STRESS_KAFKA_LAG_FILE=""
 STRESS_KAFKA_LAG_STOP_FILE=""
@@ -140,6 +142,28 @@ stop_provider_by_name() {
     fi
     PROVIDER_PIDS[$i]=""
   done
+}
+
+restart_account_for_recovery() {
+  local product_line="$1"
+  echo "Restarting ${product_line} account provider for recovery verification (mode=${ACCOUNT_RESTART_MODE})"
+  if [[ "${ACCOUNT_RESTART_MODE}" == "kill" ]]; then
+    local i pid
+    for ((i = 0; i < ${#PROVIDER_PIDS[@]}; i++)); do
+      if [[ "${PROVIDER_NAMES[$i]}" != "account" ]]; then
+        continue
+      fi
+      pid="${PROVIDER_PIDS[$i]}"
+      if [[ -n "${pid}" ]] && kill -0 "${pid}" >/dev/null 2>&1; then
+        kill -KILL "${pid}" >/dev/null 2>&1 || true
+        wait "${pid}" >/dev/null 2>&1 || true
+      fi
+      PROVIDER_PIDS[$i]=""
+    done
+  else
+    stop_provider_by_name account
+  fi
+  start_provider account "${product_line}"
 }
 
 stop_all_providers() {
@@ -3909,13 +3933,24 @@ run_market_maker_taker_flow() {
 
 run_order_api_controls() {
   local product_line="$1"
-  local price qty cancel_order_id amend_order_id self_maker self_taker self_taker_client post_maker post_taker post_taker_client replacement_price self_price post_price
+  local price qty cancel_order_id amend_order_id self_maker self_taker self_taker_client post_maker post_taker post_taker_client replacement_price self_price post_price duplicate_first duplicate_second duplicate_client
   price="$(price_ticks_for "${product_line}")"
   qty=2
   echo "Scenario ${product_line}: API order controls"
   place_order_expect_rejected "${product_line}" "${NO_FUNDS_USER}" "no-funds-${product_line}-${RUN_ID}" "BUY" "LIMIT" "GTC" "${price}" "${qty}" false false >/dev/null
 
   fund_user_for_line "${product_line}" "${CANCEL_USER}"
+  duplicate_client="duplicate-place-${product_line}-${RUN_ID}"
+  duplicate_first="$(place_order "${product_line}" "${CANCEL_USER}" "${duplicate_client}" "BUY" "LIMIT" "GTC" "$(price_with_offset "${product_line}" "${price}" -4500)" 1 false false)"
+  duplicate_second="$(place_order "${product_line}" "${CANCEL_USER}" "${duplicate_client}" "BUY" "LIMIT" "GTC" "$(price_with_offset "${product_line}" "${price}" -4500)" 1 false false)"
+  if [[ "${duplicate_first}" != "${duplicate_second}" ]]; then
+    echo "Duplicate clientOrderId created two orders: ${duplicate_first} vs ${duplicate_second}" >&2
+    exit 1
+  fi
+  wait_order_status "${product_line}" "${duplicate_first}" "ACCEPTED"
+  cancel_order "${product_line}" "${CANCEL_USER}" "${duplicate_first}"
+  wait_order_status "${product_line}" "${duplicate_first}" "CANCELED"
+
   cancel_order_id="$(place_order "${product_line}" "${CANCEL_USER}" "cancel-open-${product_line}-${RUN_ID}" "BUY" "LIMIT" "GTC" "$(price_with_offset "${product_line}" "${price}" -5000)" "${qty}" false false)"
   wait_order_status "${product_line}" "${cancel_order_id}" "ACCEPTED"
   cancel_order "${product_line}" "${CANCEL_USER}" "${cancel_order_id}"
@@ -3973,6 +4008,9 @@ run_manual_open_close_flow() {
   maker_order="$(place_order "${product_line}" "${MANUAL_MAKER_USER}" "manual-open-maker-${product_line}-${RUN_ID}" "SELL" "LIMIT" "GTC" "${price}" "${qty}" false false)"
   wait_order_status "${product_line}" "${maker_order}" "ACCEPTED"
   taker_order="$(place_order "${product_line}" "${TAKER_USER}" "manual-open-taker-${product_line}-${RUN_ID}" "BUY" "LIMIT" "IOC" "${price}" "${qty}" false false)"
+  if [[ "${ACCOUNT_RESTART_RECOVERY}" == "true" ]]; then
+    restart_account_for_recovery "${product_line}"
+  fi
   wait_order_filled "${product_line}" "${taker_order}" "${qty}"
   wait_account_processed_order "${product_line}" "${taker_order}"
   entry_price="$(query_value "SELECT price_ticks FROM trading_match_trades WHERE product_line = '${product_line}' AND taker_order_id = ${taker_order} ORDER BY event_time DESC LIMIT 1")"
