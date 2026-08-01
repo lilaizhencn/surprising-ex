@@ -142,6 +142,7 @@ Redis 是查询投影，不应承担资金条件判断。迁移后保留 Redis �
 当前已完成的前置改动：风险计算结果和强平候选已携带 `positionRevision`，并写入
 `risk_liquidation_candidates.position_revision`。旧构造方式和旧数据在读取时使用
 `snapshotId` 兼容，避免历史候选重放失败；这一步只增加校验信息，尚未切换强平实时数据库路径。
+强平服务另外以独立消费组消费账户持仓事件，维护按产品线和 revision 隔离的 JVM 快照；该快照目前仅用于影子校验与恢复准备，未替代实时执行中的数据库复核。
 
 改动：
 

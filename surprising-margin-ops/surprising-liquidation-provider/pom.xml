@@ -30,6 +30,10 @@
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
+            <artifactId>surprising-account-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
             <artifactId>surprising-instrument-api</artifactId>
         </dependency>
         <dependency>

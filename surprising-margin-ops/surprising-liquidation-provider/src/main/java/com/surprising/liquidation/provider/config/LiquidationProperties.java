@@ -75,7 +75,9 @@ public class LiquidationProperties {
         private String orderCommandsTopic = "surprising.perp.order.commands.v1";
         private String orderEventsTopic = "surprising.perp.order.events.v1";
         private String feeScheduleEventsTopic = "surprising.perp.fee.schedule.events.v1";
+        private String positionEventsTopic = "surprising.account.position.events.v1";
         private String instrumentSnapshotGroupId = "surprising-liquidation-instrument-snapshot-v1";
+        private String positionSnapshotGroupId = "surprising-liquidation-position-snapshot-v1";
         private int candidateConcurrency = 32;
         private int matchResultConcurrency = 8;
         private int maxPollRecords = 500;
@@ -150,6 +152,24 @@ public class LiquidationProperties {
 
         public void setFeeScheduleEventsTopic(String feeScheduleEventsTopic) {
             this.feeScheduleEventsTopic = feeScheduleEventsTopic;
+        }
+
+        public String getPositionEventsTopic() {
+            return productTopicsEnabled ? productTopics().accountPositionEventsTopic() : positionEventsTopic;
+        }
+
+        public void setPositionEventsTopic(String positionEventsTopic) {
+            this.positionEventsTopic = positionEventsTopic;
+        }
+
+        public String getPositionSnapshotGroupId() {
+            return productTopicsEnabled
+                    ? productTopics().consumerGroup("liquidation-position-snapshot")
+                    : positionSnapshotGroupId;
+        }
+
+        public void setPositionSnapshotGroupId(String positionSnapshotGroupId) {
+            this.positionSnapshotGroupId = positionSnapshotGroupId;
         }
 
         public String getInstrumentSnapshotGroupId() {
