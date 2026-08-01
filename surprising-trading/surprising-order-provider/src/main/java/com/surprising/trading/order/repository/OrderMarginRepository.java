@@ -23,9 +23,9 @@ import org.springframework.stereotype.Repository;
 /**
  * 订单保证金与风险限额快照仓储。
  *
- * <p>在线优先使用订单侧 JVM 快照；快照尚未就绪时保留原子 SQL 兜底，避免启动恢复、事件延迟或
- * Redis 投影异常时少冻结或突破持仓上限。不可拆原因是兜底 SQL 必须在同一数据库快照中读取杠杆、
- * 持仓和开放订单，避免并发期间形成混合状态。这里属于交易热路径风险校验，不是后台报表查询。</p>
+ * <p>在线优先使用订单侧 JVM 快照；未平仓量快照尚未就绪时直接失败关闭，不回查数据库或跳过动态持仓
+ * 上限校验。其他用户状态快照缺失时仍保留原子 SQL 兜底；不可拆原因是该兜底必须在同一数据库快照中
+ * 读取杠杆、持仓和开放订单，避免并发期间形成混合状态。这里属于交易热路径风险校验，不是后台报表查询。</p>
  */
 @Repository
 public class OrderMarginRepository {
@@ -66,7 +66,7 @@ public class OrderMarginRepository {
         this.openInterestSnapshotCache = openInterestSnapshotCache;
     }
 
-    /** 使用已准备好的本地状态计算保证金；数据库只补充仍未事件化的全市场未平仓量。 */
+    /** 使用已准备好的本地状态计算保证金；未平仓量始终来自本 JVM 快照。 */
     private MarginRequirement calculate(MarginInputs input,
                                         InstrumentResponse instrument,
                                         OrderSide side,
@@ -167,6 +167,13 @@ public class OrderMarginRepository {
             return Optional.empty();
         }
         var productLine = properties.getKafka().getProductLine();
+        if (openInterestSnapshotCache == null || !openInterestSnapshotCache.ready(productLine)) {
+            // 未平仓量快照未恢复时失败关闭，禁止回查数据库或跳过动态持仓上限校验。
+            return Optional.empty();
+        }
+        long openInterest = openInterestSnapshotCache.lookup(productLine, symbol)
+                .map(OpenInterestSnapshotCache.OpenInterestValue::openQuantitySteps)
+                .orElse(0L);
         InstrumentResponse instrument = snapshotCache.version(productLine, symbol, instrumentVersion)
                 .orElseThrow(() -> new IllegalArgumentException("下单合约快照不存在: " + symbol + "@" + instrumentVersion));
         long snapshotSettleScaleUnits = snapshotCache.scale(productLine, instrument.settleAsset())
@@ -185,7 +192,7 @@ public class OrderMarginRepository {
                        ls.leverage_ppm,
                        COALESCE(p.signed_quantity_steps, 0) AS current_signed_quantity_steps,
                        COALESCE(o.pending_same_side_steps, 0) AS pending_same_side_steps,
-                       COALESCE(oi.open_quantity_steps, 0) AS symbol_open_quantity_steps,
+                       CAST(? AS bigint) AS symbol_open_quantity_steps,
                        pm.mark_ticks
                   FROM (SELECT CAST(? AS text) AS symbol,
                                CAST(? AS text) AS contract_type,
@@ -198,9 +205,6 @@ public class OrderMarginRepository {
                                CAST(? AS bigint) AS user_open_interest_limit_rate_ppm,
                                CAST(? AS bigint) AS user_open_interest_limit_floor_units,
                                CAST(? AS bigint) AS settle_scale_units) i
-             LEFT JOIN trading_symbol_open_interest oi
-                    ON oi.product_line = '%s'
-                   AND oi.symbol = i.symbol
              LEFT JOIN trading_leverage_settings ls
                    ON ls.user_id = ?
                    AND ls.symbol = i.symbol
@@ -235,28 +239,6 @@ public class OrderMarginRepository {
             var cached = marginSnapshotCache.lookup(productLine, userId, symbol, normalizedMarginMode,
                     normalizedPositionSide, side).filter(value -> value.instrumentVersion() == instrumentVersion);
             if (cached.isPresent()) {
-                Long openInterest = openInterestSnapshotCache == null
-                        ? null
-                        : openInterestSnapshotCache.lookup(productLine, symbol)
-                        .map(OpenInterestSnapshotCache.OpenInterestValue::openQuantitySteps)
-                        .orElse(0L);
-                if (openInterest == null) {
-                    // 快照未就绪时保留原子 SQL 兜底，避免用不完整的内存状态冻结保证金。
-                    long fallbackOpenInterest = jdbcTemplate.query("""
-                            SELECT open_quantity_steps
-                              FROM trading_symbol_open_interest
-                             WHERE product_line = ? AND symbol = ?
-                            """, (rs, rowNum) -> rs.getLong("open_quantity_steps"), productLine.name(), symbol)
-                            .stream().findFirst().orElse(0L);
-                    return Optional.of(calculate(new MarginInputs(
-                                    instrument.contractType(), instrument.settleAsset(), instrument.notionalMultiplierUnits(),
-                                    instrument.priceTickUnits(), snapshotSettleScaleUnits, instrument.initialMarginRatePpm(),
-                                    instrument.maxLeveragePpm(), instrument.maxPositionNotionalUnits(),
-                                    instrument.userOpenInterestLimitRatePpm(), instrument.userOpenInterestLimitFloorUnits(),
-                                    cached.get().configuredLeveragePpm(), cached.get().currentSignedQuantitySteps(),
-                                    cached.get().pendingSameSideSteps(), fallbackOpenInterest, markPriceTicks), instrument,
-                                    side, orderType, priceTicks, quantitySteps, marketMaxSlippagePpm));
-                }
                 return Optional.of(calculate(new MarginInputs(
                         instrument.contractType(), instrument.settleAsset(), instrument.notionalMultiplierUnits(),
                         instrument.priceTickUnits(), snapshotSettleScaleUnits, instrument.initialMarginRatePpm(),
@@ -357,7 +339,7 @@ public class OrderMarginRepository {
             }
             return new MarginRequirement(accountType, rs.getString("asset"), initialMarginUnits, null,
                     selectedLeveragePpm, bracket.maxLeveragePpm(), effectiveInitialMarginRatePpm);
-        }, instrument.symbol(), instrument.contractType().name(), instrument.settleAsset(),
+        }, openInterest, instrument.symbol(), instrument.contractType().name(), instrument.settleAsset(),
                 instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.initialMarginRatePpm(),
                 instrument.maxLeveragePpm(), instrument.maxPositionNotionalUnits(),
                 instrument.userOpenInterestLimitRatePpm(), instrument.userOpenInterestLimitFloorUnits(),
