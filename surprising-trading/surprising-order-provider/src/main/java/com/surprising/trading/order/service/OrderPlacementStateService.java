@@ -1,5 +1,6 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.account.api.cache.PerpetualAccountStateSnapshotCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionMode;
@@ -23,6 +24,7 @@ public class OrderPlacementStateService {
     private final OrderRepository orderRepository;
     private final OrderTriggerStateRepository triggerRepository;
     private final OrderAlgoStateRepository algoRepository;
+    private final PerpetualAccountStateSnapshotCache accountStateSnapshotCache;
 
     public OrderPlacementStateService(OrderCoordinationRepository coordinationRepository,
                                       OrderPositionModeRepository positionModeRepository,
@@ -30,12 +32,25 @@ public class OrderPlacementStateService {
                                       OrderRepository orderRepository,
                                       OrderTriggerStateRepository triggerRepository,
                                       OrderAlgoStateRepository algoRepository) {
+        this(coordinationRepository, positionModeRepository, positionRepository, orderRepository,
+                triggerRepository, algoRepository, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public OrderPlacementStateService(OrderCoordinationRepository coordinationRepository,
+                                      OrderPositionModeRepository positionModeRepository,
+                                      OrderPositionRepository positionRepository,
+                                      OrderRepository orderRepository,
+                                      OrderTriggerStateRepository triggerRepository,
+                                      OrderAlgoStateRepository algoRepository,
+                                      PerpetualAccountStateSnapshotCache accountStateSnapshotCache) {
         this.coordinationRepository = coordinationRepository;
         this.positionModeRepository = positionModeRepository;
         this.positionRepository = positionRepository;
         this.orderRepository = orderRepository;
         this.triggerRepository = triggerRepository;
         this.algoRepository = algoRepository;
+        this.accountStateSnapshotCache = accountStateSnapshotCache;
     }
 
     public void lockUserPositionMode(ProductLine line, long userId) {
@@ -47,6 +62,14 @@ public class OrderPlacementStateService {
     }
 
     public PositionMode positionMode(ProductLine line, long userId) {
+        if (line == ProductLine.LINEAR_PERPETUAL && accountStateSnapshotCache != null) {
+            if (!accountStateSnapshotCache.ready()) {
+                throw new IllegalStateException("永续账户状态快照尚未就绪");
+            }
+            return accountStateSnapshotCache.state(userId)
+                    .map(com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent::positionMode)
+                    .orElseThrow(() -> new IllegalStateException("永续用户账户状态快照不存在: " + userId));
+        }
         return positionModeRepository.positionMode(line, userId);
     }
 

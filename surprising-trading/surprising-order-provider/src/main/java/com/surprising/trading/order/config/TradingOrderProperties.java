@@ -66,11 +66,13 @@ public class TradingOrderProperties {
         private String orderEventsTopic = "surprising.perp.order.events.v1";
         private String matchResultsTopic = "surprising.perp.match.results.v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
+        private String accountStateEventsTopic = "surprising.account.state.events.v1";
         private String openInterestEventsTopic = "surprising.account.open-interest.events.v1";
         private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
         private String feeScheduleEventsTopic = "surprising.perp.fee.schedule.events.v1";
         private String openOrderViewGroupId = "surprising-order-open-view-v1";
         private String positionMaintenanceGroupId = "surprising-order-position-maintenance-v1";
+        private String accountStateSnapshotGroupId = "surprising-order-account-state-v1";
         private int accountCommandResultsConcurrency = 32;
 
         public String getBootstrapServers() {
@@ -134,6 +136,14 @@ public class TradingOrderProperties {
             this.positionEventsTopic = positionEventsTopic;
         }
 
+        public String getAccountStateEventsTopic() {
+            return productTopicsEnabled ? productTopics().accountStateEventsTopic() : accountStateEventsTopic;
+        }
+
+        public void setAccountStateEventsTopic(String accountStateEventsTopic) {
+            this.accountStateEventsTopic = accountStateEventsTopic;
+        }
+
         public String getOpenInterestEventsTopic() {
             return productTopicsEnabled ? productTopics().accountOpenInterestEventsTopic() : openInterestEventsTopic;
         }
@@ -154,6 +164,12 @@ public class TradingOrderProperties {
         }
         public void setPositionMaintenanceGroupId(String positionMaintenanceGroupId) {
             this.positionMaintenanceGroupId = positionMaintenanceGroupId;
+        }
+
+        public String getAccountStateSnapshotGroupId() {
+            return productTopicsEnabled
+                    ? productTopics().consumerGroup("order-account-state")
+                    : accountStateSnapshotGroupId;
         }
         public String getInstrumentLifecycleDrainTopic() { return instrumentLifecycleDrainTopic; }
         public void setInstrumentLifecycleDrainTopic(String instrumentLifecycleDrainTopic) {
