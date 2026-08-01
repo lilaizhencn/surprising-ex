@@ -44,8 +44,16 @@ Instrument Service 通过统一聚合 Service 组装合约正文、风险档位�
 `RiskService.scanPositionUpdates` 先按 `productLine:userId:accountType:settleAsset` 聚合事件，在本地风险组快照上合并最新持仓，再调用现有风险计算和事务写入。定期 `scan` 仍从数据库重建，Redis 仍负责跨节点投影、租约和最终候选审计；缓存失效或租约丢失会清空本地组并恢复数据库路径。
 
 条件单、保险基金和 ADL 服务使用同一套 Instrument 内部快照初始化与 Kafka 增量消费约定。三者的 Repository
-均只读取单表，账户命令、持仓、保证金、缺口和保险余额由 Service 在事务内聚合，不使用 SQL JOIN；快照未就绪时
-相关实时流量拒绝启动或返回空候选，避免使用不完整规格计算资金结果。
+均只读取单表，账户命令、持仓、保证金、缺口和保险余额由 Service 在事务内聚合，不使用 SQL JOIN。
+
+### 未平仓量快照
+
+`account-provider` 是 `trading_symbol_open_interest_shards` 的唯一写入方，并通过
+`/internal/v1/accounts/open-interest/snapshot` 提供启动快照。每次仓位或 ADL 调整在同一事务写入
+账户 outbox，Kafka 发布分片绝对值和修订号；订单模块按产品线、合约和分片在 JVM 中幂等更新并聚合。
+下单保证金计算在快照就绪后不再查询未平仓量视图，账户数据库仍负责持久化、启动恢复和最终审计。
+
+快照未就绪时，相关实时流量拒绝启动或返回空候选，避免使用不完整规格计算资金结果。
 
 ## WebSocket 背压
 

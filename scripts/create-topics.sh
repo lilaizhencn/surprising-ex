@@ -140,6 +140,7 @@ create_product_topics() {
       create_topic "${prefix}.index.price.v1"
       create_topic "${prefix}.book.ticker.v1"
       create_topic "${prefix}.account.position.events.v1"
+      create_topic "${prefix}.account.open-interest.events.v1"
       create_topic "${prefix}.account.liquidation-fee.events.v1"
       create_topic "${prefix}.risk.account.events.v1"
       create_topic "${prefix}.risk.position.events.v1"
@@ -165,6 +166,7 @@ if [[ "${INCLUDE_SHARED_TOPICS}" == "true" ]]; then
   create_topic surprising.instrument.events.v1
   create_topic surprising.instrument.lifecycle-drain.v1
   create_topic surprising.account.position.events.v1
+  create_topic surprising.account.open-interest.events.v1
   create_topic surprising.account.liquidation-fee.events.v1
   create_topic surprising.risk.account.events.v1
   create_topic surprising.risk.position.events.v1

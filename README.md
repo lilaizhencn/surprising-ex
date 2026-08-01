@@ -31,6 +31,9 @@ Surprising-EX 是基于 Java 21、PostgreSQL、Kafka 和 Redis/Valkey 的多产�
 - Instrument 是唯一配置入口：各模块启动时通过 Instrument 内部聚合 RPC 加载本产品线快照，运行中消费
   `surprising.instrument.events.v1` 增量事件，在本 JVM 内以不可变引用整体替换。下单、撮合、账户、风控、
   价格、K 线和做市热路径不再逐笔访问 Instrument 主库；快照未完成时服务不得接受交易流量。
+- 未平仓量由 account-provider 唯一写入分片表；订单等模块启动时通过账户内部快照 RPC 初始化，运行中消费
+  产品线隔离的 Kafka 分片绝对值事件，在各自 JVM 聚合。下单保证金命中快照后不查询未平仓量视图，数据库
+  只承担账户持久化、启动恢复和最终审计。
 - 内部做市账户之间的自成交继续产生公共成交、盘口、K 线和 WebSocket 行情，但不生成经济成交、
   持仓、手续费和资金结算；做市账户与真实用户成交时执行完整结算。
 

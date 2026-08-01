@@ -81,6 +81,11 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("account.position.events");
     }
 
+    /** 产品线隔离的未平仓量分片快照事件 Topic。 */
+    public String accountOpenInterestEventsTopic() {
+        return topic("account.open-interest.events");
+    }
+
     public String accountLiquidationFeeEventsTopic() {
         return topic("account.liquidation-fee.events");
     }

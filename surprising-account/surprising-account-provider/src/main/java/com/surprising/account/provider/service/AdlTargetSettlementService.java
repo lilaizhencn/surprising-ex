@@ -2,6 +2,7 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AdlTargetSettlementAccountCommand;
+import com.surprising.account.api.model.OpenInterestShardSnapshot;
 import com.surprising.account.provider.model.ContractSpec;
 import com.surprising.account.provider.model.PositionState;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
@@ -21,6 +22,7 @@ import com.surprising.product.api.ProductLine;
 import java.math.BigInteger;
 import java.time.Instant;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 /** 在满足快照条件时结算 ADL 盈利目标侧。 */
@@ -38,6 +40,7 @@ public class AdlTargetSettlementService {
     private final ProductDeficitRepository productDeficitRepository;
     private final AccountLedgerRepository accountLedgerRepository;
     private final ProductLedgerRepository productLedgerRepository;
+    private final AccountOutboxService accountOutboxService;
 
     public AdlTargetSettlementService(AccountSequenceRepository sequenceRepository,
                                       PositionRepository positionRepository,
@@ -50,6 +53,25 @@ public class AdlTargetSettlementService {
                                       ProductDeficitRepository productDeficitRepository,
                                       AccountLedgerRepository accountLedgerRepository,
                                       ProductLedgerRepository productLedgerRepository) {
+        this(sequenceRepository, positionRepository, openInterestShardRepository, snapshotCache,
+                positionMarginRepository, accountBalanceRepository, productBalanceRepository,
+                accountDeficitRepository, productDeficitRepository, accountLedgerRepository,
+                productLedgerRepository, null);
+    }
+
+    @Autowired
+    public AdlTargetSettlementService(AccountSequenceRepository sequenceRepository,
+                                      PositionRepository positionRepository,
+                                      OpenInterestShardRepository openInterestShardRepository,
+                                      InstrumentSnapshotCache snapshotCache,
+                                      PositionMarginRepository positionMarginRepository,
+                                      AccountBalanceRepository accountBalanceRepository,
+                                      ProductBalanceRepository productBalanceRepository,
+                                      AccountDeficitRepository accountDeficitRepository,
+                                      ProductDeficitRepository productDeficitRepository,
+                                      AccountLedgerRepository accountLedgerRepository,
+                                      ProductLedgerRepository productLedgerRepository,
+                                      AccountOutboxService accountOutboxService) {
         this.sequenceRepository = sequenceRepository;
         this.positionRepository = positionRepository;
         this.openInterestShardRepository = openInterestShardRepository;
@@ -61,6 +83,7 @@ public class AdlTargetSettlementService {
         this.productDeficitRepository = productDeficitRepository;
         this.accountLedgerRepository = accountLedgerRepository;
         this.productLedgerRepository = productLedgerRepository;
+        this.accountOutboxService = accountOutboxService;
     }
 
     @Transactional
@@ -166,9 +189,15 @@ public class AdlTargetSettlementService {
         if (seeded < 0 || seeded > 1) {
             throw new IllegalStateException("unexpected ADL open interest shard seed rows: " + seeded);
         }
-        requireSingleRow(openInterestShardRepository.adjust(
-                productLine, command.symbol(), shardId, longDelta, shortDelta, now),
-                "ADL target open interest shard update");
+        OpenInterestShardRepository.OpenInterestShardState snapshot = openInterestShardRepository
+                .adjustAndSnapshot(productLine, command.symbol(), shardId, longDelta, shortDelta, now)
+                .orElseThrow(() -> new IllegalStateException("ADL target open interest shard update affected 0 rows"));
+        if (accountOutboxService != null) {
+            accountOutboxService.enqueueOpenInterestUpdated(
+                    new OpenInterestShardSnapshot(snapshot.productLine(), snapshot.symbol(), snapshot.shardId(),
+                            snapshot.longQuantitySteps(), snapshot.shortQuantitySteps(), snapshot.revision(),
+                            snapshot.updatedAt()), now);
+        }
     }
 
     private void releasePositionMargin(ProductLine productLine,

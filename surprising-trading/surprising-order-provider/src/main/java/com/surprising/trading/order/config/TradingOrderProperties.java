@@ -66,6 +66,7 @@ public class TradingOrderProperties {
         private String orderEventsTopic = "surprising.perp.order.events.v1";
         private String matchResultsTopic = "surprising.perp.match.results.v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
+        private String openInterestEventsTopic = "surprising.account.open-interest.events.v1";
         private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
         private String feeScheduleEventsTopic = "surprising.perp.fee.schedule.events.v1";
         private String openOrderViewGroupId = "surprising-order-open-view-v1";
@@ -132,10 +133,24 @@ public class TradingOrderProperties {
         public void setPositionEventsTopic(String positionEventsTopic) {
             this.positionEventsTopic = positionEventsTopic;
         }
+
+        public String getOpenInterestEventsTopic() {
+            return productTopicsEnabled ? productTopics().accountOpenInterestEventsTopic() : openInterestEventsTopic;
+        }
+
+        public void setOpenInterestEventsTopic(String openInterestEventsTopic) {
+            this.openInterestEventsTopic = openInterestEventsTopic;
+        }
         public String getPositionMaintenanceGroupId() {
             return productTopicsEnabled
                     ? productTopics().consumerGroup("order-position-maintenance")
                     : positionMaintenanceGroupId;
+        }
+
+        public String getOpenInterestSnapshotGroupId() {
+            return productTopicsEnabled
+                    ? productTopics().consumerGroup("order-open-interest-snapshot")
+                    : "surprising-order-open-interest-snapshot-v1";
         }
         public void setPositionMaintenanceGroupId(String positionMaintenanceGroupId) {
             this.positionMaintenanceGroupId = positionMaintenanceGroupId;

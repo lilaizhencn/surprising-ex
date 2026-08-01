@@ -13,6 +13,7 @@ import com.surprising.trading.order.model.MarginRequirement;
 import com.surprising.trading.order.model.MarkPriceLookup;
 import com.surprising.trading.order.service.OrderMarginMath;
 import com.surprising.trading.order.service.OrderMarginSnapshotCache;
+import com.surprising.trading.order.service.OpenInterestSnapshotCache;
 import java.math.BigInteger;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -36,16 +37,17 @@ public class OrderMarginRepository {
     private final TradingOrderProperties properties;
     private final InstrumentSnapshotCache snapshotCache;
     private final OrderMarginSnapshotCache marginSnapshotCache;
+    private final OpenInterestSnapshotCache openInterestSnapshotCache;
 
     public OrderMarginRepository(JdbcTemplate jdbcTemplate, OrderRepository orderRepository) {
         this(jdbcTemplate, orderRepository, (symbol, version, maxAge) -> java.util.OptionalLong.empty(),
-                new TradingOrderProperties(), null, null);
+                new TradingOrderProperties(), null, null, null);
     }
 
     public OrderMarginRepository(JdbcTemplate jdbcTemplate,
                                  OrderRepository orderRepository,
                                  MarkPriceLookup markPriceLookup) {
-        this(jdbcTemplate, orderRepository, markPriceLookup, new TradingOrderProperties(), null, null);
+        this(jdbcTemplate, orderRepository, markPriceLookup, new TradingOrderProperties(), null, null, null);
     }
 
     @Autowired
@@ -54,12 +56,14 @@ public class OrderMarginRepository {
                                  MarkPriceLookup markPriceLookup,
                                  TradingOrderProperties properties,
                                  InstrumentSnapshotCache snapshotCache,
-                                 OrderMarginSnapshotCache marginSnapshotCache) {
+                                 OrderMarginSnapshotCache marginSnapshotCache,
+                                 OpenInterestSnapshotCache openInterestSnapshotCache) {
         this.jdbcTemplate = jdbcTemplate;
         this.markPriceLookup = markPriceLookup;
         this.properties = properties;
         this.snapshotCache = snapshotCache;
         this.marginSnapshotCache = marginSnapshotCache;
+        this.openInterestSnapshotCache = openInterestSnapshotCache;
     }
 
     /** 使用已准备好的本地状态计算保证金；数据库只补充仍未事件化的全市场未平仓量。 */
@@ -231,12 +235,28 @@ public class OrderMarginRepository {
             var cached = marginSnapshotCache.lookup(productLine, userId, symbol, normalizedMarginMode,
                     normalizedPositionSide, side).filter(value -> value.instrumentVersion() == instrumentVersion);
             if (cached.isPresent()) {
-                Long openInterest = jdbcTemplate.query("""
-                        SELECT open_quantity_steps
-                          FROM trading_symbol_open_interest
-                         WHERE product_line = ? AND symbol = ?
-                        """, (rs, rowNum) -> rs.getLong("open_quantity_steps"), productLine.name(), symbol)
-                        .stream().findFirst().orElse(0L);
+                Long openInterest = openInterestSnapshotCache == null
+                        ? null
+                        : openInterestSnapshotCache.lookup(productLine, symbol)
+                        .map(OpenInterestSnapshotCache.OpenInterestValue::openQuantitySteps)
+                        .orElse(0L);
+                if (openInterest == null) {
+                    // 快照未就绪时保留原子 SQL 兜底，避免用不完整的内存状态冻结保证金。
+                    long fallbackOpenInterest = jdbcTemplate.query("""
+                            SELECT open_quantity_steps
+                              FROM trading_symbol_open_interest
+                             WHERE product_line = ? AND symbol = ?
+                            """, (rs, rowNum) -> rs.getLong("open_quantity_steps"), productLine.name(), symbol)
+                            .stream().findFirst().orElse(0L);
+                    return Optional.of(calculate(new MarginInputs(
+                                    instrument.contractType(), instrument.settleAsset(), instrument.notionalMultiplierUnits(),
+                                    instrument.priceTickUnits(), snapshotSettleScaleUnits, instrument.initialMarginRatePpm(),
+                                    instrument.maxLeveragePpm(), instrument.maxPositionNotionalUnits(),
+                                    instrument.userOpenInterestLimitRatePpm(), instrument.userOpenInterestLimitFloorUnits(),
+                                    cached.get().configuredLeveragePpm(), cached.get().currentSignedQuantitySteps(),
+                                    cached.get().pendingSameSideSteps(), fallbackOpenInterest, markPriceTicks), instrument,
+                                    side, orderType, priceTicks, quantitySteps, marketMaxSlippagePpm));
+                }
                 return Optional.of(calculate(new MarginInputs(
                         instrument.contractType(), instrument.settleAsset(), instrument.notionalMultiplierUnits(),
                         instrument.priceTickUnits(), snapshotSettleScaleUnits, instrument.initialMarginRatePpm(),

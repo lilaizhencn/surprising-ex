@@ -1312,12 +1312,15 @@ CREATE TABLE IF NOT EXISTS trading_algo_order_children (
 CREATE INDEX IF NOT EXISTS trading_algo_order_children_order_idx
     ON trading_algo_order_children (order_id);
 
+CREATE SEQUENCE IF NOT EXISTS account_open_interest_revision_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+
 CREATE TABLE IF NOT EXISTS trading_symbol_open_interest_shards (
     product_line            TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     symbol                  TEXT NOT NULL,
     shard_id                SMALLINT NOT NULL,
     long_quantity_steps     BIGINT NOT NULL DEFAULT 0,
     short_quantity_steps    BIGINT NOT NULL DEFAULT 0,
+    cache_revision          BIGINT NOT NULL DEFAULT nextval('account_open_interest_revision_seq'),
     updated_at              TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (product_line, symbol, shard_id),
     CONSTRAINT trading_symbol_open_interest_shards_symbol_fk
@@ -1332,6 +1335,12 @@ CREATE TABLE IF NOT EXISTS trading_symbol_open_interest_shards (
         AND short_quantity_steps >= 0
     )
 );
+
+ALTER TABLE trading_symbol_open_interest_shards
+    ADD COLUMN IF NOT EXISTS cache_revision BIGINT NOT NULL DEFAULT nextval('account_open_interest_revision_seq');
+
+CREATE INDEX IF NOT EXISTS trading_symbol_open_interest_shards_revision_idx
+    ON trading_symbol_open_interest_shards (product_line, cache_revision);
 
 CREATE OR REPLACE VIEW trading_symbol_open_interest AS
 SELECT product_line,
@@ -1777,6 +1786,7 @@ CREATE SEQUENCE IF NOT EXISTS account_product_ledger_entry_seq AS BIGINT START W
 CREATE SEQUENCE IF NOT EXISTS account_product_transfer_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 CREATE SEQUENCE IF NOT EXISTS account_spot_reservation_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_position_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
+CREATE SEQUENCE IF NOT EXISTS account_open_interest_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_liquidation_fee_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_command_result_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_command_retry_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;

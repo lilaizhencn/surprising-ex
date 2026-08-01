@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -39,6 +40,7 @@ public class OpenInterestShardRepository {
                 UPDATE trading_symbol_open_interest_shards
                    SET long_quantity_steps = long_quantity_steps + ?,
                        short_quantity_steps = short_quantity_steps + ?,
+                       cache_revision = nextval('account_open_interest_revision_seq'),
                        updated_at = ?
                  WHERE product_line = ?
                    AND symbol = ?
@@ -47,6 +49,62 @@ public class OpenInterestShardRepository {
                    AND short_quantity_steps + ? >= 0
                 """, longDelta, shortDelta, Timestamp.from(now), productLine.name(), symbol, shardId,
                 longDelta, shortDelta);
+    }
+
+    /**
+     * 原子调整分片并返回调整后的完整快照，供账户事务发布增量事件。
+     */
+    public Optional<OpenInterestShardState> adjustAndSnapshot(ProductLine productLine,
+                                                               String symbol,
+                                                               int shardId,
+                                                               long longDelta,
+                                                               long shortDelta,
+                                                               Instant now) {
+        Timestamp updatedAt = Timestamp.from(now == null ? Instant.now() : now);
+        List<OpenInterestShardState> rows = jdbcTemplate.query("""
+                UPDATE trading_symbol_open_interest_shards
+                   SET long_quantity_steps = long_quantity_steps + ?,
+                       short_quantity_steps = short_quantity_steps + ?,
+                       cache_revision = nextval('account_open_interest_revision_seq'),
+                       updated_at = ?
+                 WHERE product_line = ?
+                   AND symbol = ?
+                   AND shard_id = ?
+                   AND long_quantity_steps + ? >= 0
+                   AND short_quantity_steps + ? >= 0
+                RETURNING product_line, symbol, shard_id, long_quantity_steps,
+                          short_quantity_steps, cache_revision, updated_at
+                """, (rs, rowNum) -> new OpenInterestShardState(
+                ProductLine.valueOf(rs.getString("product_line")),
+                rs.getString("symbol"),
+                rs.getInt("shard_id"),
+                rs.getLong("long_quantity_steps"),
+                rs.getLong("short_quantity_steps"),
+                rs.getLong("cache_revision"),
+                rs.getTimestamp("updated_at").toInstant()),
+                longDelta, shortDelta, updatedAt, productLine.name(), symbol, shardId,
+                longDelta, shortDelta);
+        return rows.stream().findFirst();
+    }
+
+    /**
+     * 读取指定产品线的所有未平仓量分片，作为其他模块启动恢复的唯一数据库入口。
+     */
+    public List<OpenInterestShardState> snapshots(ProductLine productLine) {
+        return jdbcTemplate.query("""
+                SELECT product_line, symbol, shard_id, long_quantity_steps,
+                       short_quantity_steps, cache_revision, updated_at
+                  FROM trading_symbol_open_interest_shards
+                 WHERE product_line = ?
+                 ORDER BY symbol, shard_id
+                """, (rs, rowNum) -> new OpenInterestShardState(
+                ProductLine.valueOf(rs.getString("product_line")),
+                rs.getString("symbol"),
+                rs.getInt("shard_id"),
+                rs.getLong("long_quantity_steps"),
+                rs.getLong("short_quantity_steps"),
+                rs.getLong("cache_revision"),
+                rs.getTimestamp("updated_at").toInstant()), productLine.name());
     }
 
     public static int shardId(long userId) {
@@ -107,5 +165,14 @@ public class OpenInterestShardRepository {
     }
 
     public record OpenInterestShard(ProductLine productLine, String symbol, int shardId) {
+    }
+
+    public record OpenInterestShardState(ProductLine productLine,
+                                         String symbol,
+                                         int shardId,
+                                         long longQuantitySteps,
+                                         long shortQuantitySteps,
+                                         long revision,
+                                         Instant updatedAt) {
     }
 }

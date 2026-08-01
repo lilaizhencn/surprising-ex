@@ -18,6 +18,8 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - `PositionQueryService` 聚合持仓、合约结算资产和持仓保证金查询；`PositionModeCommandService`
   负责持仓模式切换编排；`PositionOpenInterestService` 在同一事务中分别调用持仓与分片未平仓量
   的单表 Repository，任一写入失败都会整体回滚。
+- account-provider 通过 `/internal/v1/accounts/open-interest/snapshot` 提供当前产品线未平仓量启动快照；
+  持仓或 ADL 调整在同一事务写入 outbox，发布带分片修订号的 Kafka 绝对值事件，其他模块不直接读取该表。
 - 账户启动时通过 Instrument 内部聚合 RPC 加载本产品线完整 JVM 快照，并消费
   `surprising.instrument.events.v1` 增量更新；`AccountInstrumentRepository`、资产精度读取和持仓投影
   只从本地快照取得合约正文、结算资产与精度，不再读取 Instrument 相关表。

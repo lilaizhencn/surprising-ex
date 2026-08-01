@@ -26,6 +26,8 @@ class ProductTopicNamesTest {
         assertThat(spot.instrumentEventsTopic()).isEqualTo(ProductTopicNames.INSTRUMENT_EVENTS_TOPIC);
         assertThat(linear.accountPositionEventsTopic())
                 .isEqualTo("surprising.linear-perp.account.position.events.v1");
+        assertThat(linear.accountOpenInterestEventsTopic())
+                .isEqualTo("surprising.linear-perp.account.open-interest.events.v1");
         assertThat(linear.accountLiquidationFeeEventsTopic())
                 .isEqualTo("surprising.linear-perp.account.liquidation-fee.events.v1");
         assertThat(linear.accountUserCommandsTopic())

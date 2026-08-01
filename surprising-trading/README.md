@@ -63,6 +63,9 @@ client / internal gateway
 
 订单 provider 不直接撮合，也不直接承担 WebSocket 推送。订单状态推送由独立服务消费当前产品线的订单和撮合 Topic 后完成 fanout。
 
+订单 provider 启动时通过 account-provider 内部 RPC 加载未平仓量 JVM 快照，运行中消费产品线隔离的分片事件并按修订号幂等聚合；
+保证金计算命中快照后不再查询未平仓量聚合视图，快照尚未恢复时才进入一致性兜底路径。
+
 ## 保证金模式
 
 订单、撮合 command、成交事件、账户 reservation 和账户持仓现在都会携带 `marginMode`。

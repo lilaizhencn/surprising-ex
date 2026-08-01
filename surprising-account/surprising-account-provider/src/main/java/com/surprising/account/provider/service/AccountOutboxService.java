@@ -7,6 +7,8 @@ import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.account.api.model.PositionCacheEvent;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.account.api.model.OpenInterestShardSnapshot;
+import com.surprising.account.api.model.OpenInterestShardUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
@@ -104,6 +106,27 @@ public class AccountOutboxService {
         return event;
     }
 
+    /** 在仓位和未平仓量分片同一事务提交前写入 Kafka outbox。 */
+    public OpenInterestShardUpdatedEvent enqueueOpenInterestUpdated(String topic,
+                                                                     OpenInterestShardSnapshot shard,
+                                                                     Instant now) {
+        requireCurrentProductTopic(topic);
+        OpenInterestShardUpdatedEvent event = new OpenInterestShardUpdatedEvent(
+                OpenInterestShardUpdatedEvent.CURRENT_SCHEMA_VERSION,
+                sequenceRepository.nextOpenInterestEventId(),
+                shard.productLine(), shard.symbol(), shard.shardId(),
+                shard.longQuantitySteps(), shard.shortQuantitySteps(), shard.revision(), now);
+        outboxRepository.insert(shard.productLine().name(), "OPEN_INTEREST", event.eventId(), topic,
+                event.partitionKey(), "OPEN_INTEREST_UPDATED", objectMapper.writeValueAsString(event), now);
+        return event;
+    }
+
+    /** 使用当前账户产品线配置发布未平仓量增量，避免调用方重复组装 Topic。 */
+    public OpenInterestShardUpdatedEvent enqueueOpenInterestUpdated(OpenInterestShardSnapshot shard,
+                                                                     Instant now) {
+        return enqueueOpenInterestUpdated(properties.getKafka().getOpenInterestEventsTopic(), shard, now);
+    }
+
     public AccountCommandResultEvent enqueueCommandResult(String topic,
                                                           AccountUserCommand command,
                                                           AccountCommandStatus status,
@@ -148,15 +171,18 @@ public class AccountOutboxService {
             return;
         }
         String positionEventsTopic = kafka.getPositionEventsTopic();
+        String openInterestEventsTopic = kafka.getOpenInterestEventsTopic();
         String liquidationFeeEventsTopic = kafka.getLiquidationFeeEventsTopic();
         String commandResultsTopic = kafka.getCommandResultsTopic();
         String userCommandsTopic = kafka.getUserCommandsTopic();
         if (!positionEventsTopic.equals(topic)
+                && !openInterestEventsTopic.equals(topic)
                 && !liquidationFeeEventsTopic.equals(topic)
                 && !commandResultsTopic.equals(topic)
                 && !userCommandsTopic.equals(topic)) {
             throw new IllegalStateException("account outbox topic must match current product line: expected one of ["
-                    + positionEventsTopic + ", " + liquidationFeeEventsTopic + ", " + commandResultsTopic
+                    + positionEventsTopic + ", " + openInterestEventsTopic + ", " + liquidationFeeEventsTopic
+                    + ", " + commandResultsTopic
                     + ", " + userCommandsTopic + "] actual=" + topic);
         }
     }

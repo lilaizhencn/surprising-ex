@@ -51,6 +51,7 @@ surprising:
         order-commands-topic: surprising.perp.order.commands.v1
         order-events-topic: surprising.perp.order.events.v1
         instrument-lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1
+        open-interest-events-topic: surprising.account.open-interest.events.v1
       redis-index:
         key-prefix: surprising:order:v1
         reconcile-delay-ms: 10000

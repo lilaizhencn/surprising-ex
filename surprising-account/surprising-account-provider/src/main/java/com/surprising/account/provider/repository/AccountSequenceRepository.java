@@ -21,6 +21,7 @@ public class AccountSequenceRepository {
         PRODUCT_TRANSFER("public.account_product_transfer_seq"),
         SPOT_RESERVATION("public.account_spot_reservation_seq"),
         POSITION_EVENT("public.account_position_event_seq"),
+        OPEN_INTEREST_EVENT("public.account_open_interest_event_seq"),
         LIQUIDATION_FEE_EVENT("public.account_liquidation_fee_event_seq"),
         COMMAND_RESULT_EVENT("public.account_command_result_event_seq"),
         COMMAND_RETRY_EVENT("public.account_command_retry_event_seq"),
@@ -77,6 +78,10 @@ public class AccountSequenceRepository {
 
     public long nextPositionEventId() {
         return nextSequence(Sequence.POSITION_EVENT);
+    }
+
+    public long nextOpenInterestEventId() {
+        return nextSequence(Sequence.OPEN_INTEREST_EVENT);
     }
 
     public long nextLiquidationFeeEventId() {
