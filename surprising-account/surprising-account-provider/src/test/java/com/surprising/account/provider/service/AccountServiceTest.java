@@ -1461,20 +1461,21 @@ class AccountServiceTest {
 
         @Override
         public OrderMarginApplication settleOptionPremium(AccountType accountType,
-                                        OrderSide side,
-                                        long userId,
-                                        String asset,
-                                        long orderId,
-                                        long tradeId,
-                                        String symbol,
-                                        MarginMode marginMode,
-                                        long premiumUnits,
-                                        AccountType reservationAccountType,
-                                        String reservationAsset,
-                                        long reservedUnits,
-                                        long orderQuantitySteps,
-                                        long fillQuantitySteps,
-                                        Instant now) {
+                                                           OrderSide side,
+                                                           long userId,
+                                                           String asset,
+                                                           long orderId,
+                                                           long tradeId,
+                                                           String symbol,
+                                                           MarginMode marginMode,
+                                                           boolean reduceOnly,
+                                                           long premiumUnits,
+                                                           AccountType reservationAccountType,
+                                                           String reservationAsset,
+                                                           long reservedUnits,
+                                                           long orderQuantitySteps,
+                                                           long fillQuantitySteps,
+                                                           Instant now) {
             assertThat(accountType).isEqualTo(AccountType.OPTION);
             assertThat(asset).isEqualTo("USDT");
             assertThat(symbol).isIn("BTC-USDT-260925-70000-C", "BTC-USDT-260925-70000-P");

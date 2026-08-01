@@ -1176,20 +1176,21 @@ public class AccountSettlementService {
     }
 
     public OrderMarginApplication settleOptionPremium(AccountType accountType,
-                                    OrderSide side,
-                                    long userId,
-                                    String asset,
-                                    long orderId,
-                                    long tradeId,
-                                    String symbol,
-                                    MarginMode marginMode,
-                                    long premiumUnits,
-                                    AccountType reservationAccountType,
-                                    String reservationAsset,
-                                    long reservedUnits,
-                                    long orderQuantitySteps,
-                                    long fillQuantitySteps,
-                                    Instant now) {
+                                                       OrderSide side,
+                                                       long userId,
+                                                       String asset,
+                                                       long orderId,
+                                                       long tradeId,
+                                                       String symbol,
+                                                       MarginMode marginMode,
+                                                       boolean reduceOnly,
+                                                       long premiumUnits,
+                                                       AccountType reservationAccountType,
+                                                       String reservationAsset,
+                                                       long reservedUnits,
+                                                       long orderQuantitySteps,
+                                                       long fillQuantitySteps,
+                                                       Instant now) {
         if (premiumUnits <= 0) {
             return OrderMarginApplication.NONE;
         }
@@ -1199,6 +1200,15 @@ public class AccountSettlementService {
         }
         String referenceId = tradeId + ":" + orderId + ":" + side.name();
         if (side == OrderSide.BUY) {
+            if (reduceOnly && reservationAccountType == null && reservationAsset == null && reservedUnits == 0L) {
+                // 强平/减仓订单由风控直接生成，无法在撮合前按实际成交价预占权利金。
+                // 这里在账户单写者内原子扣减可用余额和仓位锁定保证金；不足部分进入显式亏空，禁止余额列变负。
+                long balanceAfterUnits = applyAmountToBalance(normalizedType, userId, asset, symbol, marginMode,
+                        Math.negateExact(premiumUnits), now);
+                insertProductSettlementLedger(userId, normalizedType, asset, Math.negateExact(premiumUnits),
+                        balanceAfterUnits, "OPTION_PREMIUM", referenceId, "OPTION_PREMIUM_PAID_REDUCE_ONLY", now);
+                return OrderMarginApplication.NONE;
+            }
             if (reservationAccountType != AccountType.OPTION || !asset.equals(reservationAsset)
                     || reservedUnits < premiumUnits) {
                 throw new IllegalStateException("option premium reservation snapshot is insufficient");

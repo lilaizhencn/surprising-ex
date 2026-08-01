@@ -976,6 +976,7 @@ public class AccountService {
         if (fillSpec.contractType().isOption()) {
             marginApplication = accountSettlementService.settleOptionPremium(derivativeAccountType(fillSpec), side, userId,
                     fillSpec.settleAsset(), orderId, tradeId, symbol, normalizedMarginMode,
+                    reduceOnly,
                     MarginTransferMath.optionPremiumUnits(fillSpec, priceTicks, quantitySteps),
                     reservationAccountType, reservationAsset, reservedUnits,
                     orderQuantitySteps, quantitySteps, eventTime);
