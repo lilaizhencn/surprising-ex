@@ -214,3 +214,127 @@ PRODUCT_LINES=LINEAR_PERPETUAL ./scripts/product-line-funds-reconcile.sh
 ```
 
 跨模块阶段再运行 `integration-smoke.sh`、`kafka-trading-smoke.sh` 和 `live-runtime-trading-reconciliation.sh`。所有新增注释和文档使用中文；每个模块通过测试后单独提交，禁止提交运行产物。
+
+## 7. 当前代码审计结果（2026-08）
+
+以下结论来自当前源码，而不是目标设计。标记为“已完成”的内容只表示相应边界已经存在，不能等同于永续整链路已经完成 JVM 单写者切换。
+
+### 7.1 已存在且可以继续复用的边界
+
+| 边界 | 当前实现 | 迁移时的处理 |
+| --- | --- | --- |
+| 产品线隔离 | `ProductLine`、`ProductTopicNames`、provider 的 `product-line` 配置和 Topic/key 校验 | 保留，不允许为了性能合并产品线 Topic 或账户状态 |
+| Instrument | instrument provider 是管理入口，其他模块消费事件维护 `InstrumentSnapshotCache` | 保留 RPC 初始化加 Kafka 增量通知；业务模块不得保留 `InstrumentRepository` |
+| 费率 | order provider 使用 `FeeScheduleSnapshotCache`，缺失时使用 Instrument 默认费率 | 保留统一优先级；数据库只作为初始化和管理入口 |
+| 持仓事件 | `AccountOutboxService` 发布 `PositionUpdatedEvent`，风险、强平、订单和 Redis 投影分别消费 | 将 revision 语义从数据库全局序列扩展为用户/持仓可检测的版本链 |
+| Redis 持仓投影 | `RedisPositionCache` 使用 Lua revision CAS，`PositionSnapshotCache` 提供 JVM 读模型 | Redis 只做投影和跨节点查询，不参与资金决策 |
+| 风险组 | `RedisRiskStateStore` 提供租约、重建、反向索引和原子替换 | 保留协调能力，实时计算使用 JVM 风险组，缺失时失败关闭 |
+| 未平仓量 | `OpenInterestShardRepository` 原子调整分片并发布快照事件，订单侧有 JVM 缓存 | 后续将分片事实移入账户单写者，数据库分片只保留恢复/审计 |
+| 强平候选 | 候选带 `positionRevision`，强平消费持仓事件维护 JVM 快照 | 在账户命令版本栅栏完成前保留数据库最终锁定 |
+
+### 7.2 永续热路径仍然依赖数据库的地方
+
+1. `AccountUserCommandProcessor` 通过 `AccountCommandRepository` 注册、去重和完成命令，`AccountSettlementService` 及大量单表 Repository 在 PostgreSQL 事务内修改余额、冻结、保证金、持仓、流水和未平仓量。当前风险钱包事件只是同一事务中的过渡性聚合，并不是 JVM 账户事实源。
+2. `OrderService.place`、`amend`、`cancel` 仍在订单事务中读取 `OrderPositionModeRepository`、`OrderPositionRepository`、`OrderCoordinationRepository` 和订单表；`RedisOpenOrderView` 不可用时会回退 PostgreSQL。下单保证金缓存目前只覆盖持仓、杠杆和未成交数量，不覆盖账户可用余额的原子扣减。
+3. 撮合恢复由 `MatchingOrderBookRecoveryRepository` 读取数据库，订单和成交结果仍通过 outbox/数据库状态推进。撮合内存订单簿不是最终恢复事实，尚未完成事件日志加检查点切换。
+4. `RiskService` 的启动重建和持久风险快照、候选写入使用数据库；强平 `LiquidationCandidateRepository.claimAll`、`LiquidationPositionRepository.lockAll` 对持仓执行 `FOR UPDATE`，`LiquidationRepository.candidateInputs` 仍 JOIN 风险快照校验最新状态。
+5. Funding、ADL、Insurance 已通过账户命令进入账户边界，但候选、租约、执行 saga、审计和恢复扫描仍使用数据库。它们不能在账户单写者切换前自行删除 Repository。
+6. Trigger 的 Redis 索引负责热读和跨节点租约，`TriggerOrderIndexCoordinator` 启动/重建仍从订单表加载；重建完成前必须保持不可用，而不能把空索引解释成“没有触发单”。
+7. WebSocket、后台订单查询和资金流水查询仍是数据库/Redis 读模型，不能被误认为交易事实源；它们需要明确“快照未就绪”和“查询延迟”的返回语义。
+
+### 7.3 当前最危险的竞态
+
+| 竞态 | 可能后果 | 必须使用的保护 |
+| --- | --- | --- |
+| 主动平仓与强平同时读取同一持仓 | 重复平仓或超量平仓 | 账户单写者按 `positionRevision` 和预期数量原子拒绝旧命令；切换前保留数据库行锁 |
+| 订单冻结成功但事件尚未到达风险服务 | 风控钱包暂时偏大，错误放行后续风险判断 | 账户事务内写完整钱包事件；风险快照未就绪时暂停计算，不查库猜测 |
+| 持仓事件乱序/重复 | Redis、风控、强平回退到旧持仓 | 按用户键分区、事件 ID 幂等、持仓版本 CAS；发现版本间隙时暂停用户 |
+| Redis 清空或租约丢失 | 多节点重复重建或读到空状态 | 代次/租约/fencing token；只有完整重建后标记 ready |
+| Kafka 重平衡期间旧价格继续使用 | 过期标记价触发错误强平 | 分区重新分配时从最新位置开始，并在使用时再次校验序列、时间和 instrument 版本 |
+| 订单投影落后于交易事实 | 未成交订单容量、reduce-only 和查询结果不一致 | 交易事实事件先提交；投影落后返回未就绪，不回退成不完整空集合 |
+| 多个跨表事务按不同顺序加锁 | 死锁、吞吐下降 | 最终切换为用户单写者；过渡期统一锁顺序并限制跨用户批处理 |
+
+## 8. 详细执行顺序与代码改造清单
+
+### 阶段 A：建立审计基线（先做，当前阶段）
+
+- 固定永续产品线的 Topic、key、consumer group、分区数和每个事件的 schema。
+- 给账户、持仓、订单、风险、强平、行情、Trigger 和 WebSocket 增加 readiness、lag、applied revision、rejected reason、rebuild generation 指标。
+- 将每个热路径数据库调用登记到代码清单；新增调用必须在 Repository 边界测试中声明“恢复/审计/最终安全校验”用途。
+- 建立资金守恒基线：余额、冻结、订单预占、成交、手续费、资金费、强平费、保险基金、ADL、持仓保证金、未平仓量逐项对账。
+
+门禁：基线脚本和单模块测试通过，未完成项必须有明确 owner、输入事件和退出条件。
+
+### 阶段 B：账户单写者过渡层
+
+涉及：`AccountUserCommandProcessor`、`AccountService`、`AccountSettlementService`、`PositionRepository`、`PositionMarginRepository`、`OpenInterestShardRepository`、`AccountOutboxService`。
+
+1. 引入永续用户状态快照，至少包含余额/冻结、欠款、订单预占、逐仓保证金、持仓、持仓模式、杠杆、未平仓量和每个子状态版本。
+2. 命令进入固定的 `LINEAR_PERPETUAL:userId` 单用户执行队列；数据库事务暂时继续落账，JVM 先做影子计算并比较每个字段。
+3. 事件必须先持久化到同一事务 outbox，带 `commandId`、`eventId`、`accountRevision`、`positionRevision`、`productLine`、`instrumentVersion`、`traceId` 和前置版本。
+4. 账户重启先加载最新检查点，再按用户键重放事件；事件缺失、版本回退或校验失败时该用户保持 not-ready，不得返回零余额/零持仓。
+5. 为账户命令增加 fencing token。节点失去用户租约后，不能再提交命令结果或发布后续事件。
+
+门禁：同一用户并发下单/撤单/成交/资金费/强平、重复命令、乱序事件、进程中断和重放后，JVM 影子结果与数据库逐字段相同。
+
+### 阶段 C：下单、订单状态和下单模式
+
+涉及：`OrderService`、`OrderPlacementStateService`、`OrderMarginSnapshotCache`、`RedisOpenOrderView`、`OrderPositionModeRepository`、`OrderPositionRepository`、`OrderCoordinationRepository`。
+
+- 先消费账户余额/持仓/持仓模式/账户命令结果事件，形成完整的订单入口 JVM 快照。
+- `OrderService` 的永续校验只读 Instrument、费率、标记价、余额和订单索引快照；快照未 ready 直接拒绝并返回明确原因。
+- 账户预占命令携带 `accountRevision`、预期可用余额和订单版本，由账户单写者原子接受或拒绝；订单 provider 不再自己用数据库余额判断后再发命令。
+- 未成交订单索引由订单事件建立，Redis 只保存查询/协调投影；投影缺失不回退为“无订单”。
+- 持仓模式、逐仓/全仓、HEDGE/ONE_WAY、reduce-only 可用数量必须来自同一个用户快照，禁止分别查询再组装。
+
+门禁：下单、改单、撤单、批量撤单、平仓和触发单在余额不足、模式冲突、缓存延迟、重复请求及重启后结果一致。
+
+### 阶段 D：撮合、结算和资金相关模块
+
+涉及：`ExchangeCoreEngine`、`MatchingOrderBookRecoveryRepository`、`MatchingProtectionRepository`、`AccountService`、Funding/ADL/Insurance providers。
+
+- 撮合保护（自成交、用户挂单索引、订单版本）迁移到按 symbol 分片的无锁/单写者内存索引；Kafka 事件是增量来源，启动用检查点和事件重放恢复。
+- 订单簿恢复改成“持久事件日志 + 周期检查点 + 未确认尾部重放”，数据库恢复仓储只保留灾备入口。
+- 成交只发布一个 canonical `MatchResult/MatchTrade` 事件；账户按 `tradeId + participantRole` 幂等结算，手续费、资金费、强平费和 ADL/Insurance 均转成账户命令。
+- 账户结算完成后再发布持仓、未平仓量和订单状态事件；禁止模块自行写持仓或余额表。
+
+门禁：撮合重启、重复成交事件、Kafka 重放、订单簿检查点损坏、结算节点切换后，成交数、持仓、余额和流水逐项一致。
+
+### 阶段 E：风险、行情和强平
+
+涉及：`RiskService`、`RedisRiskStateStore`、`LatestMarkPriceCache`、`LatestIndexPriceCache`、`LiquidationService`、`LiquidationRepository`。
+
+- 风险 JVM 组以账户完整快照和持仓事件为输入，Redis 仅做跨节点租约/协调/恢复；实时计算不调用 `RiskRepository.cachedRiskGroup`。
+- 风险事件必须走可靠 outbox，不能只依赖异步 `KafkaTemplate.send` 的日志回调；强平消费组必须能从事件恢复风险状态。
+- 标记价、指数价必须带 `sequence`、`instrumentVersion`、事件时间和最大年龄；价格缺失或过期时停止产生强平候选。
+- 强平候选保存 `positionRevision`、`riskRevision`、`markSequence`、预期数量和账户版本。当前阶段保留数据库 claim 与 `FOR UPDATE`；版本栅栏上线并完成演练后才删除实时风险 JOIN。
+- 强平最终发账户命令，账户单写者原子校验持仓版本/数量/风险状态；校验失败只取消旧候选，不允许猜测新数量。
+
+门禁：价格断流、持仓先被主动平仓、重复候选、多节点租约丢失、Redis 清空和强平节点重启均不重复平仓、不漏平仓。
+
+### 阶段 F：Trigger、WebSocket、API 与读模型
+
+- Trigger 本地索引按产品线/symbol 分片，Redis 负责租约和跨节点协调；触发单事件版本落后时丢弃，重建期间不执行触发。
+- WebSocket 私有资金/订单/持仓/风险事件使用可恢复有界队列，公共行情使用合并和背压队列；慢连接不能阻塞 canonical Kafka 消费。
+- API 查询区分事实写入、JVM 快照和 Redis/数据库读模型；快照未 ready 返回可诊断的暂不可用，不返回空资金或空持仓。
+- cursor、订单状态墓碑、事件版本和产品线必须贯穿 API、WebSocket 和后台查询。
+
+### 阶段 G：正式切换与关闭旧热路径
+
+只有阶段 B-F 的门禁全部通过后，才允许：
+
+1. 永续账户 JVM 单写者成为唯一资金/持仓写入边界。
+2. 数据库降级为异步投影、恢复、审计和对账；删除永续实时查库回退，但保留显式灾备/人工入口。
+3. Redis、JVM、Kafka 和数据库投影做一致性抽样与全量资金对账。
+4. 进行滚动升级、双节点/多节点、Kafka 重平衡、Redis 故障、数据库不可用、SIGKILL、时钟漂移和检查点损坏演练。
+5. 通过永续全链路脚本后，再考虑推广到其他产品线；任何产品线不得共享永续账户状态或 Topic。
+
+## 9. 当前第一批实际动作
+
+本轮先不删除任何 Repository，也不关闭强平数据库最终校验，按以下顺序继续：
+
+1. 把本节审计结果作为后续改造的唯一清单，并为账户/持仓/订单/风险/强平事件补版本字段和 readiness 指标。
+2. 将 `PositionUpdatedEvent` 的全局缓存 revision 与用户账户 revision 分离，建立可检测的用户事件连续性。
+3. 建立永续账户 JVM 快照的启动恢复、事件重放和影子对账服务；现有 PostgreSQL 事务仍作为临时写入端。
+4. 先接入下单入口的余额/模式/持仓快照读取和明确的 fail-closed，再改账户预占的版本校验。
+5. 每完成一个子模块执行对应 Maven 测试、`check-*` 边界脚本和永续资金核对，独立提交。
