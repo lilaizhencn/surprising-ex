@@ -568,8 +568,10 @@ class TriggerOrderServiceTest {
         when(repository.positionClosedCancellations(ProductLine.INVERSE_PERPETUAL, 1001L, "BTC-USDT",
                 MarginMode.CROSS, PositionSide.NET, closedAt)).thenReturn(List.of(canceled));
 
-        service.onPositionClosed(new PositionUpdatedEvent(701L, 801L, 1001L, "btc-usdt", 1L,
-                MarginMode.CROSS, PositionSide.NET, 0L, 0L, 0L, closedAt, "trace-close"));
+        service.onPositionClosed(new PositionUpdatedEvent(
+                PositionUpdatedEvent.CURRENT_SCHEMA_VERSION, 701L, 801L, ProductLine.INVERSE_PERPETUAL,
+                701L, 1001L, "btc-usdt", 1L, MarginMode.CROSS, PositionSide.NET, 0L, 0L, 0L, 0L,
+                "USDT", 0L, closedAt, closedAt, closedAt, "trace-close"));
 
         verify(outboxRepository).enqueue(eq(canceled), any(TriggerOrderResponse.class));
         verify(index).synchronize(canceled);
