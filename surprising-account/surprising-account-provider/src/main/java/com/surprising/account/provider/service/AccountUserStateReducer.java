@@ -446,8 +446,9 @@ public class AccountUserStateReducer {
             return rejected(current, "INSUFFICIENT_AVAILABLE_BALANCE", "可用余额不足");
         }
         List<AccountUserReducerState.Reservation> reservations = new ArrayList<>(current.reservations());
-        reservations.add(new AccountUserReducerState.Reservation(reserve.orderId(), reserve.accountType(),
-                reserve.asset(), reserve.reservedUnits(), 0L, reserve.orderQuantitySteps()));
+        reservations.add(new AccountUserReducerState.Reservation(reserve.orderId(), reserve.symbol(),
+                reserve.accountType(), reserve.asset(), reserve.reservedUnits(), 0L,
+                reserve.orderQuantitySteps()));
         PerpetualAccountStateUpdatedEvent snapshot = nextSnapshot(
                 adjustOrderLock(mutation.snapshot(), reserve.asset(), reserve.reservedUnits()),
                 current.snapshot().accountRevision());
@@ -485,8 +486,9 @@ public class AccountUserStateReducer {
         }
         List<AccountUserReducerState.Reservation> reservations = current.reservations().stream()
                 .map(value -> value.orderId() == release.orderId()
-                        ? new AccountUserReducerState.Reservation(value.orderId(), value.accountType(), value.asset(),
-                        value.reservedUnits(), Math.addExact(value.releasedUnits(), amount), value.orderQuantitySteps())
+                        ? new AccountUserReducerState.Reservation(value.orderId(), value.symbol(), value.accountType(),
+                        value.asset(), value.reservedUnits(), Math.addExact(value.releasedUnits(), amount),
+                        value.orderQuantitySteps())
                         : value)
                 .toList();
         PerpetualAccountStateUpdatedEvent snapshot = nextSnapshot(
@@ -847,8 +849,8 @@ public class AccountUserStateReducer {
         long nextConsumed = Math.addExact(reservation.consumedUnits(), actualMarginUnits);
         List<AccountUserReducerState.Reservation> reservations = updated.reservations().stream()
                 .map(value -> value.orderId() == orderId
-                        ? new AccountUserReducerState.Reservation(value.orderId(), value.accountType(), value.asset(),
-                        value.reservedUnits(), nextReleased, nextConsumed, value.orderQuantitySteps())
+                        ? new AccountUserReducerState.Reservation(value.orderId(), value.symbol(), value.accountType(),
+                        value.asset(), value.reservedUnits(), nextReleased, nextConsumed, value.orderQuantitySteps())
                         : value)
                 .toList();
         return new AccountUserReducerState(updated.snapshot(), reservations, updated.settledTradeIds(),

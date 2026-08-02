@@ -32,9 +32,10 @@ public record AccountUserReducerState(
     }
 
     public record Reservation(
-            long orderId,
-            AccountType accountType,
-            String asset,
+        long orderId,
+        String symbol,
+        AccountType accountType,
+        String asset,
             long reservedUnits,
             long releasedUnits,
             long consumedUnits,
@@ -48,16 +49,28 @@ public record AccountUserReducerState(
                     || orderQuantitySteps <= 0L) {
                 throw new IllegalArgumentException("账户预占状态无效");
             }
+            symbol = symbol == null || symbol.isBlank() ? null : symbol.trim().toUpperCase(java.util.Locale.ROOT);
             asset = asset.trim().toUpperCase(java.util.Locale.ROOT);
         }
 
+        public Reservation(long orderId,
+                           String symbol,
+                           AccountType accountType,
+                           String asset,
+                           long reservedUnits,
+                           long releasedUnits,
+                           long orderQuantitySteps) {
+            this(orderId, symbol, accountType, asset, reservedUnits, releasedUnits, 0L, orderQuantitySteps);
+        }
+
+        /** 兼容已存在的本地状态快照；新命令必须携带交易对。 */
         public Reservation(long orderId,
                            AccountType accountType,
                            String asset,
                            long reservedUnits,
                            long releasedUnits,
                            long orderQuantitySteps) {
-            this(orderId, accountType, asset, reservedUnits, releasedUnits, 0L, orderQuantitySteps);
+            this(orderId, null, accountType, asset, reservedUnits, releasedUnits, 0L, orderQuantitySteps);
         }
     }
 }
