@@ -255,6 +255,49 @@ class RiskServiceTest {
     }
 
     @Test
+    void positionEventUsesLocalSnapshotWhenRedisExpiresBetweenReadAndReplace() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        riskRepository.positions = List.of();
+        RiskProperties properties = new RiskProperties();
+        FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
+        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        RedisRiskStateStore stateStore = mock(RedisRiskStateStore.class);
+        RedisRiskCalculator calculator = mock(RedisRiskCalculator.class);
+        AtomicReference<CachedRiskGroup> stored = new AtomicReference<>();
+        AtomicReference<Boolean> redisExpired = new AtomicReference<>(false);
+        RiskGroupKey key = new RiskGroupKey(2002L, "USDT");
+        stored.set(new CachedRiskGroup(key, 0L, List.of(), Instant.now()));
+        when(stateStore.ready(any(ProductLine.class))).thenReturn(true);
+        when(stateStore.read(any(ProductLine.class), any(RiskGroupKey.class)))
+                .thenAnswer(invocation -> redisExpired.get() ? null : stored.get());
+        when(stateStore.replace(any(ProductLine.class), any(RiskGroupKey.class), any()))
+                .thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    java.util.function.Supplier<CachedRiskGroup> supplier = invocation.getArgument(2);
+                    CachedRiskGroup state = supplier.get();
+                    stored.set(state);
+                    return new RedisRiskStateStore.ProjectionUpdate(state, true);
+                });
+        when(calculator.calculate(any(CachedRiskGroup.class))).thenReturn(List.of());
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                riskRepository.persistence, new FakeRiskSequenceRepository(), outboxRepository, null,
+                transactionManager, stateStore, calculator);
+
+        service.scanPositionUpdates(List.of(
+                positionEvent(31L, 2002L, "BTC-USDT", 7L, "USDT", "trace-initial")));
+        redisExpired.set(true);
+
+        service.scanPositionUpdates(List.of(
+                positionEvent(32L, 2002L, "BTC-USDT", 8L, "USDT", "trace-after-expiry")));
+
+        assertThat(riskRepository.cachedRiskGroupCalls).isZero();
+        assertThat(stored.get()).isNotNull();
+        assertThat(stored.get().key()).isEqualTo(key);
+        assertThat(transactionManager.commits).isEqualTo(2);
+        assertThat(transactionManager.rollbacks).isZero();
+    }
+
+    @Test
     void positionEventBatchWritesFlatTombstoneFromCompleteRedisProjection() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
         riskRepository.positions = List.of();

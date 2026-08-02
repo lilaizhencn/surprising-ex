@@ -199,13 +199,12 @@ import tools.jackson.databind.ObjectMapper;
         try {
             for (RiskGroupKey key : groups.keySet()) {
                 PositionEventGroup eventGroup = groups.get(key);
-                refreshState(productLine, key, true);
+                // 先读取本地/Redis 基础状态；Redis 短暂过期时仍可用本地快照重建，
+                // 不能因为跨节点投影暂时缺失而让 Kafka 分区永久重试。
+                ProjectionUpdate base = refreshState(productLine, key, true);
                 CachedRiskGroup state = stateStore.replace(productLine, key, () -> {
                     CachedRiskGroup current = stateStore.read(productLine, key);
-                    if (current == null) {
-                        throw new IllegalStateException("Redis 风险组快照缺失: " + key);
-                    }
-                    return mergePositionEvents(current, eventGroup);
+                    return mergePositionEvents(current == null ? base.state() : current, eventGroup);
                 }).state();
                 localGroups.put(new LocalGroupKey(productLine, key), state);
                 states.add(state);

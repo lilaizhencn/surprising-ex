@@ -1538,41 +1538,33 @@ start_price_refresher() {
   local product_line="$1"
   local log_file="${TMP_DIR}/${product_line}-price-refresher.log"
   local refresh_delay_seconds=5
+  local producer_cmd topic fifo
   if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
     refresh_delay_seconds="${STRESS_PRICE_REFRESH_DELAY_SECONDS}"
   fi
   echo "Starting ${product_line} synthetic mark-price refresher"
-  if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
-    local producer_cmd topic fifo
-    producer_cmd="$(kafka_producer_cmd)"
-    topic="$(topic_name "${product_line}" "mark.price")"
-    fifo="${TMP_DIR}/${product_line}-price-refresher.fifo"
-    rm -f "${fifo}"
-    mkfifo "${fifo}"
-    # Keep one Kafka producer alive for the whole stress run. Restarting the
-    # console producer for every snapshot can take longer than the 15-second
-    # limit-price freshness window when the host is under load.
-    "${producer_cmd}" \
-      --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
-      --topic "${topic}" \
-      --property parse.key=true \
-      --property key.separator=: <"${fifo}" >"${log_file}" 2>&1 &
-    register_provider_pid "price-refresher-producer" "$!"
-    (
-      while true; do
-        emit_stress_price_payloads "${product_line}" || true
-        sleep "${refresh_delay_seconds}"
-      done
-    ) >"${fifo}" &
-    register_provider_pid "price-refresher" "$!"
-    return
-  fi
+  producer_cmd="$(kafka_producer_cmd)"
+  topic="$(topic_name "${product_line}" "mark.price")"
+  fifo="${TMP_DIR}/${product_line}-price-refresher.fifo"
+  rm -f "${fifo}"
+  mkfifo "${fifo}"
+  # 使用一个常驻生产者，避免每次刷新重新启动命令行客户端导致价格断流。
+  "${producer_cmd}" \
+    --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
+    --topic "${topic}" \
+    --property parse.key=true \
+    --property key.separator=: <"${fifo}" >"${log_file}" 2>&1 &
+  register_provider_pid "price-refresher-producer" "$!"
   (
     while true; do
-      seed_prices_for_line "${product_line}" >/dev/null 2>&1 || true
+      if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+        emit_stress_price_payloads "${product_line}" || true
+      else
+        STRESS_SYMBOL_COUNT=1 emit_stress_price_payloads "${product_line}" || true
+      fi
       sleep "${refresh_delay_seconds}"
     done
-  ) >"${log_file}" 2>&1 &
+  ) >"${fifo}" &
   register_provider_pid "price-refresher" "$!"
 }
 
@@ -1605,6 +1597,12 @@ publish_mark_price() {
   produce_json "$(topic_name "${product_line}" "mark.price")" "${symbol}" "${payload}"
 }
 
+next_mark_sequence() {
+  local symbol="$1"
+  # 生命周期测试必须发布严格递增的序列，避免被行情模块按序列检查丢弃。
+  query_value "SELECT COALESCE(MAX(sequence), 0) + 1 FROM price_mark_ticks WHERE symbol = '${symbol}'"
+}
+
 current_epoch_millis() {
   python3 - <<'PY'
 import time
@@ -1629,7 +1627,7 @@ seed_lifecycle_settlement_price() {
   symbol="$(symbol_for "${product_line}")"
   price_ticks="$(price_ticks_for "${product_line}")"
   tick_units="$(price_tick_units_for "${product_line}")"
-  sequence="$(current_epoch_millis)"
+  sequence="$(next_mark_sequence "${symbol}")"
   if is_delivery_product "${product_line}"; then
     publish_mark_price "${product_line}" "${symbol}" "${tick_units}" "${sequence}" "$((price_ticks + 100))"
   elif is_option_product "${product_line}"; then
