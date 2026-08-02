@@ -3,7 +3,10 @@ package com.surprising.account.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 import com.surprising.account.api.model.AccountType;
@@ -121,14 +124,78 @@ class AccountUserStateCommandWorkerTest {
         }
     }
 
+    @Test
+    void recoversDependencyRejectionAfterResultWasWrittenBeforeStateCommit() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-worker-dependency-recovery-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+        when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+                .thenReturn(CompletableFuture.completedFuture((SendResult<String, String>) null));
+        UserPartitionKey partition = new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L);
+        AccountUserCommand rejected = reserveCommand(objectMapper, "worker-dependency-rejected", "9002",
+                2_000L, 2_000L, null);
+        AccountUserCommand dependent = reserveCommand(objectMapper, "worker-dependency-child", "9003",
+                100L, 100L, rejected.commandId());
+
+        try (UserPartitionWal wal = new UserPartitionWal(directory.resolve("wal"));
+             UserPartitionStateStore stateStore = new UserPartitionStateStore(directory.resolve("state"));
+             UserPartitionResultStore resultStore = new UserPartitionResultStore(directory.resolve("result"))) {
+            wal.append(partition, rejected.commandId(), rejected.commandType().name(),
+                    objectMapper.writeValueAsString(rejected).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    "dependency-rejected", rejected.occurredAt());
+            wal.append(partition, dependent.commandId(), dependent.commandType().name(),
+                    objectMapper.writeValueAsString(dependent).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    "dependency-child", dependent.occurredAt());
+            AccountUserStateReducer reducer = new AccountUserStateReducer(
+                    objectMapper, stateStore, new UserPartitionCommandLane());
+            reducer.initialize(snapshot());
+            AccountUserStateReducer reducerSpy = org.mockito.Mockito.spy(reducer);
+            doAnswer(invocation -> {
+                if (invocation.getArgument(1, Long.class) == 2L) {
+                    throw new IllegalStateException("模拟第二条命令提交崩溃");
+                }
+                return invocation.callRealMethod();
+            }).when(reducerSpy).commit(any(AccountUserCommand.class), eq(2L),
+                    any(AccountUserStateReducer.Reduction.class));
+            AccountUserStateCommandWorker firstWorker = new AccountUserStateCommandWorker(
+                    objectMapper, properties, wal, stateStore, resultStore, new UserPartitionCommandLane(),
+                    reducerSpy, kafkaTemplate);
+
+            firstWorker.applyPending();
+            assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(1L);
+            assertThat(resultStore.read(dependent.commandId())).isPresent();
+
+            AccountUserStateReducer restartedReducer = new AccountUserStateReducer(
+                    objectMapper, stateStore, new UserPartitionCommandLane());
+            AccountUserStateCommandWorker restartedWorker = new AccountUserStateCommandWorker(
+                    objectMapper, properties, wal, stateStore, resultStore, new UserPartitionCommandLane(),
+                    restartedReducer, kafkaTemplate);
+            assertThatCode(restartedWorker::applyPending).doesNotThrowAnyException();
+            assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(2L);
+            assertThat(resultStore.read(dependent.commandId())).isPresent();
+        }
+    }
+
     private static AccountUserCommand command(ObjectMapper objectMapper) {
-        return new AccountUserCommand(AccountUserCommand.CURRENT_SCHEMA_VERSION, "worker-reserve-1",
+        return reserveCommand(objectMapper, "worker-reserve-1", "9001", 100L, 300L, null);
+    }
+
+    private static AccountUserCommand reserveCommand(ObjectMapper objectMapper,
+                                                      String commandId,
+                                                      String orderId,
+                                                      long orderQuantity,
+                                                      long reservedUnits,
+                                                      String dependsOnCommandId) {
+        long parsedOrderId = Long.parseLong(orderId);
+        return new AccountUserCommand(AccountUserCommand.CURRENT_SCHEMA_VERSION, commandId,
                 ProductLine.LINEAR_PERPETUAL, 1001L, AccountUserCommandType.ORDER_RESERVE,
-                "ORDER", "9001", null,
+                "ORDER", orderId, dependsOnCommandId,
                 objectMapper.writeValueAsString(new OrderReserveAccountCommand(
-                        9001L, "BTC-USDT", OrderSide.BUY, OrderReservationKind.DERIVATIVE_MARGIN,
+                        parsedOrderId, "BTC-USDT", OrderSide.BUY, OrderReservationKind.DERIVATIVE_MARGIN,
                         AccountType.USDT_PERPETUAL, "USDT", MarginMode.CROSS, PositionSide.NET,
-                        100L, false, 300L)),
+                        orderQuantity, false, reservedUnits)),
                 Instant.parse("2026-08-02T00:00:00Z"), "worker-trace");
     }
 

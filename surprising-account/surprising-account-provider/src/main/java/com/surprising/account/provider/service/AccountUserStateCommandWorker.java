@@ -113,7 +113,11 @@ public class AccountUserStateCommandWorker {
                 }
                 if (persistedSequence < event.sequence()) {
                     // 结果已落盘但状态尚未提交，重算只用于校验，不能相信旧进程留下的任意结果。
-                    AccountUserStateReducer.Reduction recovery = reduce(command, event.sequence());
+                    AccountUserStateReducer.Reduction recovery = reduceWithDependency(command, event.sequence());
+                    if (recovery == null) {
+                        throw new IllegalStateException("账户命令依赖结果缺失，无法恢复 commandId="
+                                + command.commandId());
+                    }
                     AccountCommandTerminalResult recomputed = toTerminal(recovery);
                     if (!existing.equals(recomputed)) {
                         throw new IllegalStateException("账户命令终态重算不一致 commandId="
@@ -130,16 +134,10 @@ public class AccountUserStateCommandWorker {
                 continue;
             }
 
-            AccountUserStateReducer.Reduction reduction;
-            AccountCommandTerminalResult dependency = dependencyResult(command);
-            if (dependency == null && command.dependsOnCommandId() != null) {
+            AccountUserStateReducer.Reduction reduction = reduceWithDependency(command, event.sequence());
+            if (reduction == null) {
                 // 依赖命令尚未落盘时，本分区不能越过当前命令。
                 break;
-            } else if (dependency != null && dependency.status() == AccountCommandStatus.REJECTED) {
-                reduction = reducer.rejectWithoutCommit(command, event.sequence(), "DEPENDENCY_REJECTED",
-                        "依赖账户命令已拒绝");
-            } else {
-                reduction = reduce(command, event.sequence());
             }
             AccountCommandTerminalResult terminal = toTerminal(reduction);
             // 先保存终态再提交余额和持仓，崩溃后可以重算并补交状态，不会出现不可恢复的中间窗。
@@ -164,6 +162,22 @@ public class AccountUserStateCommandWorker {
                     + " code=" + reduction.errorCode());
         }
         return reduction;
+    }
+
+    /**
+     * 统一处理命令依赖，正常执行和崩溃恢复必须得到完全相同的下一状态。
+     * 依赖结果尚未落盘时返回 null，让当前用户分区停在原序号。
+     */
+    private AccountUserStateReducer.Reduction reduceWithDependency(AccountUserCommand command, long sequence) {
+        AccountCommandTerminalResult dependency = dependencyResult(command);
+        if (dependency == null && command.dependsOnCommandId() != null) {
+            return null;
+        }
+        if (dependency != null && dependency.status() == AccountCommandStatus.REJECTED) {
+            return reducer.rejectWithoutCommit(command, sequence, "DEPENDENCY_REJECTED",
+                    "依赖账户命令已拒绝");
+        }
+        return reduce(command, sequence);
     }
 
     private void ensureInitialized(UserPartitionKey partition) {
