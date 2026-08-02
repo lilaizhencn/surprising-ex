@@ -112,6 +112,23 @@ public final class UserPartitionWal implements AutoCloseable {
         }
     }
 
+    /** 按事件编号读取本用户分区中的事实；用于校验依赖命令不能跨用户分区引用。 */
+    public Optional<UserPartitionEvent> readEvent(UserPartitionKey partition, String eventId) {
+        if (partition == null || eventId == null || eventId.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            byte[] existing = database.get(idempotencyKey(partition, eventId.trim()));
+            if (existing == null) {
+                return Optional.empty();
+            }
+            ExistingEvent reference = decodeExisting(existing);
+            return readEvent(partition, reference.sequence());
+        } catch (RocksDBException ex) {
+            throw new IllegalStateException("failed to read user partition WAL event by id", ex);
+        }
+    }
+
     public List<UserPartitionEvent> replay(UserPartitionKey partition) {
         Objects.requireNonNull(partition, "partition");
         List<UserPartitionEvent> events = new ArrayList<>();

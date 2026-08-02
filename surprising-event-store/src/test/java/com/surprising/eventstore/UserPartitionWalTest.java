@@ -29,6 +29,10 @@ class UserPartitionWalTest {
             assertThat(wal.lastProjectedSequence(key)).isEqualTo(1L);
             assertThat(wal.replay(key)).extracting(UserPartitionEvent::eventId)
                     .containsExactly("cmd-1", "cmd-2");
+            assertThat(wal.readEvent(key, "cmd-1")).isPresent()
+                    .get().extracting(UserPartitionEvent::sequence).isEqualTo(1L);
+            assertThat(wal.readEvent(new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L), "cmd-1"))
+                    .isEmpty();
             assertThat(wal.partitions()).containsExactly(key);
             wal.markProjected(key, 2L);
             assertThat(wal.lastProjectedSequence(key)).isEqualTo(2L);

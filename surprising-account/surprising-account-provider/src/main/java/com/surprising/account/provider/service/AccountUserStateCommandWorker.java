@@ -113,7 +113,8 @@ public class AccountUserStateCommandWorker {
                 }
                 if (persistedSequence < event.sequence()) {
                     // 结果已落盘但状态尚未提交，重算只用于校验，不能相信旧进程留下的任意结果。
-                    AccountUserStateReducer.Reduction recovery = reduceWithDependency(command, event.sequence());
+                    AccountUserStateReducer.Reduction recovery = reduceWithDependency(partition, command,
+                            event.sequence());
                     if (recovery == null) {
                         throw new IllegalStateException("账户命令依赖结果缺失，无法恢复 commandId="
                                 + command.commandId());
@@ -134,7 +135,7 @@ public class AccountUserStateCommandWorker {
                 continue;
             }
 
-            AccountUserStateReducer.Reduction reduction = reduceWithDependency(command, event.sequence());
+            AccountUserStateReducer.Reduction reduction = reduceWithDependency(partition, command, event.sequence());
             if (reduction == null) {
                 // 依赖命令尚未落盘时，本分区不能越过当前命令。
                 break;
@@ -168,8 +169,10 @@ public class AccountUserStateCommandWorker {
      * 统一处理命令依赖，正常执行和崩溃恢复必须得到完全相同的下一状态。
      * 依赖结果尚未落盘时返回 null，让当前用户分区停在原序号。
      */
-    private AccountUserStateReducer.Reduction reduceWithDependency(AccountUserCommand command, long sequence) {
-        AccountCommandTerminalResult dependency = dependencyResult(command);
+    private AccountUserStateReducer.Reduction reduceWithDependency(UserPartitionKey partition,
+                                                                    AccountUserCommand command,
+                                                                    long sequence) {
+        AccountCommandTerminalResult dependency = dependencyResult(partition, command);
         if (dependency == null && command.dependsOnCommandId() != null) {
             return null;
         }
@@ -207,8 +210,13 @@ public class AccountUserStateCommandWorker {
         }
     }
 
-    private AccountCommandTerminalResult dependencyResult(AccountUserCommand command) {
+    private AccountCommandTerminalResult dependencyResult(UserPartitionKey partition,
+                                                           AccountUserCommand command) {
         if (command.dependsOnCommandId() == null) {
+            return null;
+        }
+        // 依赖命令必须属于同一个用户分区；不能因为全局结果库中存在同名编号而跨用户裁决资金。
+        if (wal.readEvent(partition, command.dependsOnCommandId()).isEmpty()) {
             return null;
         }
         return readResult(command.dependsOnCommandId()).orElse(null);
