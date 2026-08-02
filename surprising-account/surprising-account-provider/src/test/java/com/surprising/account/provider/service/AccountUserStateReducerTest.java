@@ -20,6 +20,10 @@ import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.product.api.ProductLine;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.InstrumentResponse;
+import com.surprising.instrument.api.model.InstrumentStatus;
+import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
@@ -126,8 +130,7 @@ class AccountUserStateReducerTest {
         ObjectMapper objectMapper = new ObjectMapper();
         InstrumentSnapshotCache instruments = new InstrumentSnapshotCache();
         instruments.replace(ProductLine.LINEAR_PERPETUAL,
-                List.of(AccountSettlementServiceTestFactory.instrument("BTC-USDT", 1L,
-                        ProductLine.LINEAR_PERPETUAL)),
+                List.of(instrument("BTC-USDT", 1L)),
                 java.util.Map.of("USDT", 1L));
         try (UserPartitionStateStore store = new UserPartitionStateStore(directory)) {
             AccountUserStateReducer reducer = new AccountUserStateReducer(
@@ -224,5 +227,18 @@ class AccountUserStateReducerTest {
         return new AccountUserCommand(AccountUserCommand.CURRENT_SCHEMA_VERSION, commandId,
                 ProductLine.LINEAR_PERPETUAL, 1001L, type, "TEST", commandId, null,
                 payload, Instant.parse("2026-08-02T00:00:00Z"), "trace-" + commandId);
+    }
+
+    private InstrumentResponse instrument(String symbol, long version) {
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        return new InstrumentResponse(symbol, version, InstrumentType.PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT", 1_000_000L, "USDT",
+                1L, 1L, 1L, 100_000L, 1L, 1_000_000_000L, 1L,
+                1, 3, List.of("LIMIT"), List.of("GTC"), true, true, true,
+                100_000_000L, 10_000L, 5_000L, 2L, 5L,
+                500_000_000_000_000L, 300_000L, 25_000_000_000_000L,
+                8, 0L, 100_000L, -100_000L, 1_000_000_000L, 1,
+                null, null, null, null, null, null, null,
+                InstrumentStatus.TRADING, now, now, now, List.of(), List.of());
     }
 }
