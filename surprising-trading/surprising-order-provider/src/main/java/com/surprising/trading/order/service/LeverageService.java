@@ -7,6 +7,7 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.InstrumentRuleLookup;
 import com.surprising.trading.order.repository.LeverageSettingRepository;
+import com.surprising.trading.order.repository.OrderLeverageMath;
 import java.time.Instant;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,11 +20,6 @@ public class LeverageService {
     private final LeverageSettingRepository leverageSettingRepository;
     private final InstrumentRuleLookup instrumentRuleLookup;
     private final OrderMarginSnapshotCache marginSnapshotCache;
-
-    public LeverageService(LeverageSettingRepository leverageSettingRepository,
-                           InstrumentRuleLookup instrumentRuleLookup) {
-        this(leverageSettingRepository, instrumentRuleLookup, null);
-    }
 
     @org.springframework.beans.factory.annotation.Autowired
     public LeverageService(LeverageSettingRepository leverageSettingRepository,
@@ -46,6 +42,9 @@ public class LeverageService {
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         InstrumentRule rule = tradingRule(symbol);
         ProductLine productLine = productLine(rule, request.productLine());
+        if (marginSnapshotCache == null || !marginSnapshotCache.leverageReady(productLine)) {
+            throw new IllegalStateException("杠杆 JVM 快照尚未就绪，禁止写入未同步配置: " + productLine);
+        }
         if (request.leveragePpm() < MIN_LEVERAGE_PPM) {
             throw new IllegalArgumentException("leveragePpm must be at least 1x");
         }
@@ -54,13 +53,13 @@ public class LeverageService {
         }
         LeverageSettingRequest normalized = new LeverageSettingRequest(request.userId(), productLine, symbol, marginMode,
                 request.leveragePpm(), request.reason());
-        leverageSettingRepository.upsert(normalized, Instant.now());
-        LeverageSettingResponse response = get(request.userId(), symbol, marginMode, productLine);
-        if (marginSnapshotCache != null) {
-            marginSnapshotCache.putLeverage(productLine, request.userId(), symbol, marginMode,
-                    "USER".equals(response.source()) ? response.leveragePpm() : null);
-        }
-        return response;
+        Instant updatedAt = Instant.now();
+        leverageSettingRepository.upsert(normalized, updatedAt);
+        marginSnapshotCache.putLeverage(productLine, request.userId(), symbol, marginMode, request.leveragePpm());
+        return new LeverageSettingResponse(request.userId(), productLine, symbol, marginMode,
+                request.leveragePpm(), rule.maxLeveragePpm(),
+                OrderLeverageMath.initialMarginRateFromLeveragePpm(request.leveragePpm()),
+                "USER", updatedAt);
     }
 
     public LeverageSettingResponse get(long userId, String symbol, MarginMode marginMode) {
@@ -75,16 +74,16 @@ public class LeverageService {
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
         InstrumentRule rule = tradingRule(normalizedSymbol);
         ProductLine resolvedProductLine = productLine(rule, productLine);
-        LeverageSettingResponse response = leverageSettingRepository.userSetting(resolvedProductLine, userId,
-                        normalizedSymbol, normalizedMarginMode,
-                        rule.maxLeveragePpm())
-                .orElseGet(() -> leverageSettingRepository.instrumentDefault(resolvedProductLine, userId, normalizedSymbol,
-                        normalizedMarginMode, rule.maxLeveragePpm(), rule.initialMarginRatePpm()));
-        if (marginSnapshotCache != null) {
-            marginSnapshotCache.putLeverage(resolvedProductLine, userId, normalizedSymbol, normalizedMarginMode,
-                    "USER".equals(response.source()) ? response.leveragePpm() : null);
+        if (marginSnapshotCache == null || !marginSnapshotCache.leverageReady(resolvedProductLine)) {
+            throw new IllegalStateException("杠杆 JVM 快照尚未就绪，禁止查询数据库回退: " + resolvedProductLine);
         }
-        return response;
+        return marginSnapshotCache.lookupConfiguredLeverage(resolvedProductLine, userId, normalizedSymbol,
+                        normalizedMarginMode)
+                .map(leverage -> new LeverageSettingResponse(userId, resolvedProductLine, normalizedSymbol,
+                        normalizedMarginMode, leverage, rule.maxLeveragePpm(),
+                        OrderLeverageMath.initialMarginRateFromLeveragePpm(leverage), "USER", Instant.EPOCH))
+                .orElseGet(() -> instrumentDefault(userId, resolvedProductLine, normalizedSymbol,
+                        normalizedMarginMode, rule));
     }
 
     private InstrumentRule tradingRule(String symbol) {
@@ -102,6 +101,20 @@ public class LeverageService {
             throw new IllegalArgumentException("productLine does not match instrument contractType");
         }
         return instrumentProductLine;
+    }
+
+    /** 快照中没有用户覆盖时使用当前 Instrument 规则计算默认杠杆。 */
+    private LeverageSettingResponse instrumentDefault(long userId,
+                                                       ProductLine productLine,
+                                                       String symbol,
+                                                       MarginMode marginMode,
+                                                       InstrumentRule rule) {
+        long leveragePpm = Math.min(OrderLeverageMath.leveragePpmFromInitialMarginRate(
+                rule.initialMarginRatePpm()), rule.maxLeveragePpm());
+        long effectiveRate = Math.max(rule.initialMarginRatePpm(),
+                OrderLeverageMath.initialMarginRateFromLeveragePpm(leveragePpm));
+        return new LeverageSettingResponse(userId, productLine, symbol, marginMode, leveragePpm,
+                rule.maxLeveragePpm(), effectiveRate, "INSTRUMENT_DEFAULT", Instant.EPOCH);
     }
 
     private String normalizeSymbol(String symbol) {

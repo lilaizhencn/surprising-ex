@@ -25,7 +25,6 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.ValidationResult;
-import com.surprising.trading.order.repository.OrderMarginRepository;
 import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -47,7 +46,7 @@ class OrderServiceTest {
     @Mock
     private OrderPlacementStateService placementStateService;
     @Mock
-    private OrderMarginRepository orderMarginRepository;
+    private OrderMarginCalculator orderMarginCalculator;
     @Mock
     private SpotReservationCalculator spotReservationCalculator;
     @Mock
@@ -66,8 +65,8 @@ class OrderServiceTest {
         assertThat(service.place(request)).isEqualTo(expected);
 
         verify(userState).place(any(OrderRecord.class));
-        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
-                anyLong(), anyLong(), anyLong(), anyLong());
+        verify(orderMarginCalculator, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
+                any(), anyLong(), anyLong(), anyLong(), anyLong());
     }
 
     @Test
@@ -135,7 +134,7 @@ class OrderServiceTest {
         when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(100L, 200L, "JVM")));
         return new OrderService(properties, orderValidator, reduceOnlyValidator, placementStateService,
-                orderMarginRepository, spotReservationCalculator, feeSnapshotLookup, userState);
+                orderMarginCalculator, spotReservationCalculator, feeSnapshotLookup, userState);
     }
 
     private PlaceOrderRequest request(String clientOrderId) {

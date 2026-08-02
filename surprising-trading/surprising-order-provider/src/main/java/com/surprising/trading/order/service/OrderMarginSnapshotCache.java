@@ -29,6 +29,7 @@ public class OrderMarginSnapshotCache {
     private final ConcurrentMap<ReduceOnlyScope, Long> pendingReduceOnly = new ConcurrentHashMap<>();
     private final Set<ProductLine> accountReadyLines = ConcurrentHashMap.newKeySet();
     private final Set<ProductLine> orderReadyLines = ConcurrentHashMap.newKeySet();
+    private final Set<ProductLine> leverageReadyLines = ConcurrentHashMap.newKeySet();
 
     public void markNotReady(ProductLine productLine) {
         if (productLine == null) {
@@ -36,6 +37,7 @@ public class OrderMarginSnapshotCache {
         }
         markOrderProjectionNotReady(productLine);
         accountReadyLines.remove(productLine);
+        leverageReadyLines.remove(productLine);
         positions.keySet().removeIf(key -> key.productLine() == productLine);
         leverages.keySet().removeIf(key -> key.productLine() == productLine);
     }
@@ -54,7 +56,40 @@ public class OrderMarginSnapshotCache {
         if (productLine != null) {
             accountReadyLines.add(productLine);
             orderReadyLines.add(productLine);
+            leverageReadyLines.add(productLine);
         }
+    }
+
+    /** 杠杆配置快照开始重建，重建完成前禁止读取用户特殊杠杆。 */
+    public void markLeverageSnapshotNotReady(ProductLine productLine) {
+        if (productLine != null) {
+            leverageReadyLines.remove(productLine);
+            leverages.keySet().removeIf(key -> key.productLine() == productLine);
+        }
+    }
+
+    /** 杠杆配置快照已经从恢复来源完整加载。 */
+    public void markLeverageSnapshotReady(ProductLine productLine) {
+        if (productLine != null) {
+            leverageReadyLines.add(productLine);
+        }
+    }
+
+    public boolean leverageReady(ProductLine productLine) {
+        return productLine != null && leverageReadyLines.contains(productLine);
+    }
+
+    /** 只返回已经加载的用户特殊杠杆；空值表示使用合约默认杠杆。 */
+    public Optional<Long> lookupConfiguredLeverage(ProductLine productLine,
+                                                    long userId,
+                                                    String symbol,
+                                                    MarginMode marginMode) {
+        if (!leverageReady(productLine) || userId <= 0L || symbol == null || symbol.isBlank()) {
+            return Optional.empty();
+        }
+        LeverageValue value = leverages.get(new LeverageKey(productLine, userId, symbol, marginMode));
+        return value == null || value.leveragePpm() == null
+                ? Optional.empty() : Optional.of(value.leveragePpm());
     }
 
     /** 账户完整快照已经追平 Kafka 位点。 */
@@ -72,7 +107,8 @@ public class OrderMarginSnapshotCache {
 
     public boolean ready(ProductLine productLine) {
         return productLine != null && accountReadyLines.contains(productLine)
-                && orderReadyLines.contains(productLine);
+                && orderReadyLines.contains(productLine)
+                && leverageReadyLines.contains(productLine);
     }
 
     /**

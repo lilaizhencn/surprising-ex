@@ -43,7 +43,6 @@ import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.model.ValidationResult;
-import com.surprising.trading.order.repository.OrderMarginRepository;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -62,7 +61,7 @@ public class OrderService {
     private final OrderValidator orderValidator;
     private final ReduceOnlyValidator reduceOnlyValidator;
     private final OrderPlacementStateService placementStateService;
-    private final OrderMarginRepository orderMarginRepository;
+    private final OrderMarginCalculator orderMarginCalculator;
     private final SpotReservationCalculator spotReservationCalculator;
     private final OrderFeeSnapshotLookup feeSnapshotLookup;
     private final OrderUserStateService orderUserStateService;
@@ -72,7 +71,7 @@ public class OrderService {
                         OrderValidator orderValidator,
                         ReduceOnlyValidator reduceOnlyValidator,
                         OrderPlacementStateService placementStateService,
-                        OrderMarginRepository orderMarginRepository,
+                        OrderMarginCalculator orderMarginCalculator,
                         SpotReservationCalculator spotReservationCalculator,
                         OrderFeeSnapshotLookup feeSnapshotLookup,
                         OrderUserStateService orderUserStateService) {
@@ -80,7 +79,7 @@ public class OrderService {
         this.orderValidator = orderValidator;
         this.reduceOnlyValidator = reduceOnlyValidator;
         this.placementStateService = placementStateService;
-        this.orderMarginRepository = orderMarginRepository;
+        this.orderMarginCalculator = orderMarginCalculator;
         this.spotReservationCalculator = spotReservationCalculator;
         this.feeSnapshotLookup = feeSnapshotLookup;
         this.orderUserStateService = orderUserStateService;
@@ -395,7 +394,7 @@ public class OrderService {
                                                       long orderId,
                                                       long instrumentVersion,
                                                       BatchReservationSequence sequence) {
-        var requirement = orderMarginRepository.requirement(
+        var requirement = orderMarginCalculator.requirement(
                 request.symbol(), instrumentVersion, request.userId(), request.marginMode(), request.positionSide(), request.side(),
                 request.orderType(), request.priceTicks(), request.quantitySteps(),
                 properties.getRisk().getMarketMaxSlippagePpm(),
@@ -448,7 +447,7 @@ public class OrderService {
             return new TestOrderResponse(true, null, validation.instrumentVersion(), "ACCEPTED",
                     "SPOT", value.asset(), value.reservedUnits());
         }
-        var requirement = orderMarginRepository.requirement(
+        var requirement = orderMarginCalculator.requirement(
                 request.symbol(), validation.instrumentVersion(), request.userId(), request.marginMode(),
                 request.positionSide(), request.side(), request.orderType(), request.priceTicks(),
                 request.quantitySteps(), properties.getRisk().getMarketMaxSlippagePpm(),

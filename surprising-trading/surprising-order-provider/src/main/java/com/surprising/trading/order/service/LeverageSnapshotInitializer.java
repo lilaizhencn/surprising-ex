@@ -27,9 +27,11 @@ public class LeverageSnapshotInitializer {
         if (productLine == null) {
             throw new IllegalArgumentException("产品线不能为空");
         }
+        marginSnapshotCache.markLeverageSnapshotNotReady(productLine);
         for (LeverageSettingRepository.LeverageSnapshot setting : repository.snapshot(productLine)) {
             marginSnapshotCache.putLeverage(productLine, setting.userId(), setting.symbol(),
                     setting.marginMode(), setting.leveragePpm());
         }
+        marginSnapshotCache.markLeverageSnapshotReady(productLine);
     }
 }

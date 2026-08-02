@@ -1,4 +1,4 @@
-package com.surprising.trading.order.repository;
+package com.surprising.trading.order.service;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.ContractType;
@@ -11,19 +11,17 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.MarginRequirement;
 import com.surprising.trading.order.model.MarkPriceLookup;
-import com.surprising.trading.order.service.OpenInterestSnapshotCache;
-import com.surprising.trading.order.service.OrderMarginMath;
-import com.surprising.trading.order.service.OrderMarginSnapshotCache;
+import com.surprising.trading.order.repository.OrderLeverageMath;
 import java.math.BigInteger;
 import java.util.Comparator;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.stereotype.Repository;
+import org.springframework.stereotype.Service;
 
 /** 订单保证金计算入口，只读取合约、未平仓量和用户状态的 JVM 快照。 */
-@Repository
-public class OrderMarginRepository {
+@Service
+public class OrderMarginCalculator {
 
     private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);
 
@@ -34,11 +32,11 @@ public class OrderMarginRepository {
     private final OpenInterestSnapshotCache openInterestSnapshotCache;
 
     @Autowired
-    public OrderMarginRepository(MarkPriceLookup markPriceLookup,
-                                 TradingOrderProperties properties,
-                                 @Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache,
-                                 OrderMarginSnapshotCache marginSnapshotCache,
-                                 OpenInterestSnapshotCache openInterestSnapshotCache) {
+    public OrderMarginCalculator(MarkPriceLookup markPriceLookup,
+                                  TradingOrderProperties properties,
+                                  @Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache,
+                                  OrderMarginSnapshotCache marginSnapshotCache,
+                                  OpenInterestSnapshotCache openInterestSnapshotCache) {
         this.markPriceLookup = markPriceLookup;
         this.properties = properties;
         this.snapshotCache = snapshotCache;

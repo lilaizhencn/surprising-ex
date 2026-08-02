@@ -42,7 +42,7 @@ public class OpenInterestSnapshotInitializer {
             }
             cache.replace(productLine, response.shards());
         } catch (RuntimeException ex) {
-            // 初始化失败时保持未就绪，下单保证金会进入数据库一致性兜底，避免使用过期快照。
+            // 初始化失败时保持未就绪；调用方必须失败关闭，禁止使用过期快照或回查数据库。
             log.error("未平仓量 JVM 快照初始化失败 productLine={}", productLine, ex);
         }
     }
