@@ -109,7 +109,9 @@ public class OrderService {
                 return existing.get();
             }
         }
-        PositionMode positionMode = placementStateService.localPositionMode(productLine, normalized.userId());
+        PositionMode positionMode = productLine == ProductLine.SPOT
+                ? PositionMode.ONE_WAY
+                : placementStateService.localPositionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
         Instant now = Instant.now();
         ValidationResult validation = validateMarginModeForLocalState(productLine, normalized);
@@ -165,7 +167,7 @@ public class OrderService {
      * 产品线接入本地账户状态机后再开放对应入口。
      */
     private void requireLocalAccountProductLine(ProductLine productLine) {
-        if (productLine != ProductLine.LINEAR_PERPETUAL) {
+        if (productLine != ProductLine.SPOT && productLine != ProductLine.LINEAR_PERPETUAL) {
             throw new IllegalStateException("产品线尚未接入本地账户事实流: " + productLine);
         }
     }
@@ -173,6 +175,9 @@ public class OrderService {
     /** 本地订单事实流使用账户快照和用户分区状态完成保证金模式校验，不打开数据库事务。 */
     private ValidationResult validateMarginModeForLocalState(ProductLine productLine,
                                                              PlaceOrderRequest request) {
+        if (productLine == ProductLine.SPOT) {
+            return ValidationResult.ok();
+        }
         if (productLine != ProductLine.LINEAR_PERPETUAL) {
             throw new IllegalStateException("产品线尚未接入本地账户事实流: " + productLine);
         }
@@ -216,7 +221,9 @@ public class OrderService {
         PlaceOrderRequest normalized = normalize(request);
         ProductLine productLine = currentProductLine();
         requireLocalAccountProductLine(productLine);
-        PositionMode positionMode = placementStateService.localPositionMode(productLine, normalized.userId());
+        PositionMode positionMode = productLine == ProductLine.SPOT
+                ? PositionMode.ONE_WAY
+                : placementStateService.localPositionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
         ValidationResult validation = validateMarginModeForLocalState(productLine, normalized);
         if (!validation.accepted()) {
@@ -829,6 +836,12 @@ public class OrderService {
     }
 
     private PlaceOrderRequest normalizePositionMode(PlaceOrderRequest request, PositionMode positionMode) {
+        if (currentProductLine() == ProductLine.SPOT) {
+            if (PositionSide.defaultIfNull(request.positionSide()).isHedgeSide()) {
+                throw new IllegalArgumentException("现货订单不支持 LONG/SHORT 仓位方向");
+            }
+            return request;
+        }
         PositionMode normalizedMode = PositionMode.defaultIfNull(positionMode);
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
         if (normalizedMode == PositionMode.ONE_WAY) {

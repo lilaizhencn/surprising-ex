@@ -3,7 +3,6 @@ package com.surprising.account.provider.service;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -15,7 +14,6 @@ import tools.jackson.databind.ObjectMapper;
  * 顺序事件推进状态。</p>
  */
 @Service
-@ConditionalOnExpression("'${surprising.account.kafka.product-line:LINEAR_PERPETUAL}' == 'LINEAR_PERPETUAL'")
 public class AccountStateSnapshotReducerConsumer {
 
     private final ObjectMapper objectMapper;

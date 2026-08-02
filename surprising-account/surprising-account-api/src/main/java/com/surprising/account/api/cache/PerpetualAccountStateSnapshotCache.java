@@ -10,7 +10,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 按永续用户维护完整账户状态快照。
+ * 按产品线和用户维护完整账户状态快照。
  *
  * <p>快照只接受同一用户更大的账户修订号；发现修订间隙时暂停该用户，不能把缺失事件
  * 当作零余额或零持仓。启动恢复完成后由协调器显式标记 ready。</p>
@@ -23,13 +23,9 @@ public final class PerpetualAccountStateSnapshotCache {
     private final ConcurrentMap<Long, AtomicBoolean> userReady = new ConcurrentHashMap<>();
     private final AtomicBoolean ready = new AtomicBoolean();
 
-    public PerpetualAccountStateSnapshotCache() {
-        this(ProductLine.LINEAR_PERPETUAL);
-    }
-
     public PerpetualAccountStateSnapshotCache(ProductLine productLine) {
-        if (productLine != ProductLine.LINEAR_PERPETUAL) {
-            throw new IllegalArgumentException("account state cache only supports LINEAR_PERPETUAL");
+        if (productLine == null) {
+            throw new IllegalArgumentException("account state cache productLine is required");
         }
         this.productLine = productLine;
     }

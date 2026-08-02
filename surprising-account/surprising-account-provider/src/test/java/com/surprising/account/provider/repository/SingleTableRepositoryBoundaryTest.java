@@ -75,30 +75,30 @@ class SingleTableRepositoryBoundaryTest {
     }
 
     @Test
-    void accountBalanceRepositoryOnlyQueriesAccountBalanceTable() {
+    void accountProductBalanceRepositoryOnlyQueriesProductBalanceTable() {
         JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
-        AccountBalanceRepository repository = new AccountBalanceRepository(jdbcTemplate);
+        AccountProductBalanceRepository repository = new AccountProductBalanceRepository(jdbcTemplate);
 
-        repository.findByUser(1001L);
+        repository.findByUser(com.surprising.account.api.model.AccountType.USDT_PERPETUAL, 1001L);
 
         String sql = capturedQuery(jdbcTemplate);
         assertThat(sql)
-                .contains("FROM account_balances")
-                .doesNotContain("account_deficits")
+                .contains("FROM account_product_balances")
+                .doesNotContain("account_product_deficits")
                 .doesNotContain("account_ledger_entries");
     }
 
     @Test
-    void accountDeficitRepositoryOnlyQueriesAccountDeficitTable() {
+    void accountProductDeficitRepositoryOnlyQueriesProductDeficitTable() {
         JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
-        AccountDeficitRepository repository = new AccountDeficitRepository(jdbcTemplate);
+        AccountProductDeficitRepository repository = new AccountProductDeficitRepository(jdbcTemplate);
 
-        repository.findByUser(1001L);
+        repository.findByUser(com.surprising.account.api.model.AccountType.USDT_PERPETUAL, 1001L);
 
         String sql = capturedQuery(jdbcTemplate);
         assertThat(sql)
-                .contains("FROM account_deficits")
-                .doesNotContain("account_balances")
+                .contains("FROM account_product_deficits")
+                .doesNotContain("account_product_balances")
                 .doesNotContain("account_ledger_entries");
     }
 

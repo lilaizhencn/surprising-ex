@@ -27,7 +27,7 @@ class AccountStateSnapshotConsumerTest {
         ObjectMapper objectMapper = mock(ObjectMapper.class);
         LiquidationProperties properties = new LiquidationProperties();
         properties.getKafka().setProductTopicsEnabled(true);
-        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
+        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache(ProductLine.LINEAR_PERPETUAL);
         PerpetualAccountStateUpdatedEvent event = event(1L);
         when(objectMapper.readValue("value", PerpetualAccountStateUpdatedEvent.class)).thenReturn(event);
         AccountStateSnapshotConsumer consumer = new AccountStateSnapshotConsumer(objectMapper, properties, cache);
@@ -49,7 +49,7 @@ class AccountStateSnapshotConsumerTest {
     void rejectsWrongKey() throws Exception {
         ObjectMapper objectMapper = mock(ObjectMapper.class);
         LiquidationProperties properties = new LiquidationProperties();
-        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
+        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache(ProductLine.LINEAR_PERPETUAL);
         PerpetualAccountStateUpdatedEvent event = event(1L);
         when(objectMapper.readValue("value", PerpetualAccountStateUpdatedEvent.class)).thenReturn(event);
         AccountStateSnapshotConsumer consumer = new AccountStateSnapshotConsumer(objectMapper, properties, cache);

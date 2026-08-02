@@ -2,8 +2,8 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
-import com.surprising.account.provider.repository.AccountBalanceRepository;
-import com.surprising.account.provider.repository.AccountDeficitRepository;
+import com.surprising.account.provider.repository.AccountProductBalanceRepository;
+import com.surprising.account.provider.repository.AccountProductDeficitRepository;
 import com.surprising.account.provider.repository.AccountRiskStateRevisionRepository;
 import com.surprising.account.provider.repository.AccountStateOrderLockRepository;
 import com.surprising.account.provider.repository.PositionMarginRepository;
@@ -27,19 +27,16 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AccountStateProjectionService {
 
-    private static final ProductLine PRODUCT_LINE = ProductLine.LINEAR_PERPETUAL;
-    private static final AccountType ACCOUNT_TYPE = AccountType.USDT_PERPETUAL;
-
-    private final AccountBalanceRepository balanceRepository;
-    private final AccountDeficitRepository deficitRepository;
+    private final AccountProductBalanceRepository balanceRepository;
+    private final AccountProductDeficitRepository deficitRepository;
     private final PositionRepository positionRepository;
     private final PositionMarginRepository positionMarginRepository;
     private final PositionModeRepository positionModeRepository;
     private final AccountStateOrderLockRepository orderLockRepository;
     private final AccountRiskStateRevisionRepository revisionRepository;
 
-    public AccountStateProjectionService(AccountBalanceRepository balanceRepository,
-                                         AccountDeficitRepository deficitRepository,
+    public AccountStateProjectionService(AccountProductBalanceRepository balanceRepository,
+                                         AccountProductDeficitRepository deficitRepository,
                                          PositionRepository positionRepository,
                                          PositionMarginRepository positionMarginRepository,
                                          PositionModeRepository positionModeRepository,
@@ -59,15 +56,17 @@ public class AccountStateProjectionService {
     public boolean project(PerpetualAccountStateUpdatedEvent event) {
         validate(event);
         Instant projectedAt = event.eventTime();
-        if (!revisionRepository.beginProjection(PRODUCT_LINE, event.userId(), event.accountRevision(), projectedAt)) {
+        ProductLine productLine = event.productLine();
+        AccountType accountType = AccountType.valueOf(event.accountType());
+        if (!revisionRepository.beginProjection(productLine, event.userId(), event.accountRevision(), projectedAt)) {
             return false;
         }
-        balanceRepository.replaceProjection(event.userId(), event.balances(), projectedAt);
-        deficitRepository.replaceProjection(event.userId(), event.deficits(), projectedAt);
-        positionRepository.replaceProjection(PRODUCT_LINE, event.userId(), event.positions(), projectedAt);
-        positionMarginRepository.replaceProjection(PRODUCT_LINE, event.userId(), event.positionMargins(), projectedAt);
-        positionModeRepository.upsert(PRODUCT_LINE, event.userId(), event.positionMode(), projectedAt);
-        orderLockRepository.replaceProjection(PRODUCT_LINE, event.userId(),
+        balanceRepository.replaceProjection(accountType, event.userId(), event.balances(), projectedAt);
+        deficitRepository.replaceProjection(accountType, event.userId(), event.deficits(), projectedAt);
+        positionRepository.replaceProjection(productLine, event.userId(), event.positions(), projectedAt);
+        positionMarginRepository.replaceProjection(productLine, event.userId(), event.positionMargins(), projectedAt);
+        positionModeRepository.upsert(productLine, event.userId(), event.positionMode(), projectedAt);
+        orderLockRepository.replaceProjection(productLine, event.userId(),
                 event.orderLocks().stream()
                         .map(lock -> new AccountStateOrderLockRepository.LockProjectionRow(
                                 lock.asset(), lock.lockedUnits(), projectedAt))
@@ -76,11 +75,19 @@ public class AccountStateProjectionService {
     }
 
     private void validate(PerpetualAccountStateUpdatedEvent event) {
-        if (event == null || event.productLine() != PRODUCT_LINE) {
-            throw new IllegalArgumentException("账户状态投影只支持 LINEAR_PERPETUAL");
+        if (event == null || event.productLine() == null) {
+            throw new IllegalArgumentException("账户状态投影缺少产品线");
         }
-        if (!ACCOUNT_TYPE.name().equals(event.accountType())) {
-            throw new IllegalArgumentException("账户状态类型不匹配: " + event.accountType());
+        AccountType accountType;
+        try {
+            accountType = AccountType.valueOf(event.accountType());
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("账户状态类型不匹配: " + event.accountType(), ex);
+        }
+        if (accountType == AccountType.FUNDING
+                || accountType.productLine().orElse(null) != event.productLine()) {
+            throw new IllegalArgumentException("账户状态类型与产品线不匹配: "
+                    + event.accountType() + " / " + event.productLine());
         }
         requireUnique(event.balances().stream().map(PerpetualAccountStateUpdatedEvent.Balance::asset).toList(),
                 "balances");

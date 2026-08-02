@@ -11,7 +11,6 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -23,7 +22,6 @@ import tools.jackson.databind.ObjectMapper;
  * 不再通过订单服务回查账户数据库。</p>
  */
 @Service
-@ConditionalOnExpression("'${surprising.trading.order.kafka.product-line:LINEAR_PERPETUAL}' == 'LINEAR_PERPETUAL'")
 public class OrderAccountStateSnapshotConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(OrderAccountStateSnapshotConsumer.class);

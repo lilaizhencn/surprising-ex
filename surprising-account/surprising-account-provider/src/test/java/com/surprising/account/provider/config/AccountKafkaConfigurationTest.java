@@ -22,6 +22,7 @@ class AccountKafkaConfigurationTest {
     @Test
     void consumerUsesReplaySafeBatchAckSettings() {
         AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.getKafka().setBootstrapServers("kafka-d:9092");
         properties.getKafka().setClientId("account-node-a");
         properties.getKafka().setConcurrency(3);
@@ -53,6 +54,7 @@ class AccountKafkaConfigurationTest {
     @Test
     void userCommandFactoryIsDedicatedAndAlignedWithThirtyTwoPartitions() {
         AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.getKafka().setUserCommandConcurrency(32);
         AccountKafkaConfiguration configuration = new AccountKafkaConfiguration();
         var consumerFactory = configuration.accountConsumerFactory(properties);
@@ -92,6 +94,7 @@ class AccountKafkaConfigurationTest {
     @Test
     void resolvesAllTopicsFromConfiguredProductLine() {
         AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
 
         assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-linear-perp-account-v1");
         assertThat(properties.getKafka().getOrderCommandsTopic())

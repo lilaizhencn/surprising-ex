@@ -75,7 +75,7 @@ public class AccountService {
     }
 
     public BalanceResponse balance(long userId, String asset) {
-        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(userId);
+        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(currentProductLine(), userId);
         String normalizedAsset = normalizeAsset(asset);
         return snapshot.balances().stream()
                 .filter(value -> value.asset().equalsIgnoreCase(normalizedAsset))
@@ -86,7 +86,7 @@ public class AccountService {
     }
 
     public BalanceQueryResponse balances(long userId) {
-        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(userId);
+        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(currentProductLine(), userId);
         List<BalanceResponse> rows = snapshot.balances().stream()
                 .map(value -> new BalanceResponse(userId, value.asset(), value.availableUnits(), value.lockedUnits(),
                         Math.addExact(value.availableUnits(), value.lockedUnits()), snapshot.eventTime()))
@@ -96,7 +96,7 @@ public class AccountService {
 
     public ProductBalanceResponse adjustProductBalance(ProductBalanceAdjustmentRequest request) {
         requireRequest(request);
-        requirePerpetualAccount(request.accountType());
+        requireProductAccount(request.accountType());
         return commandGateway.adjustProductBalance(request, null, null);
     }
 
@@ -104,22 +104,31 @@ public class AccountService {
                                                             String adminUsername,
                                                             ProductBalanceAdjustmentRequest request) {
         requireRequest(request);
-        requirePerpetualAccount(request.accountType());
+        requireProductAccount(request.accountType());
         return commandGateway.adjustProductBalance(request, adminUserId, adminUsername);
     }
 
     public ProductBalanceResponse productBalance(long userId, AccountType accountType, String asset) {
-        requirePerpetualAccount(accountType);
-        BalanceResponse balance = balance(userId, asset);
-        return new ProductBalanceResponse(userId, AccountType.USDT_PERPETUAL, balance.asset(),
+        requireProductAccount(accountType);
+        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(accountType.productLine().orElseThrow(), userId);
+        String normalizedAsset = normalizeAsset(asset);
+        BalanceResponse balance = snapshot.balances().stream()
+                .filter(value -> value.asset().equalsIgnoreCase(normalizedAsset))
+                .findFirst()
+                .map(value -> new BalanceResponse(userId, value.asset(), value.availableUnits(), value.lockedUnits(),
+                        Math.addExact(value.availableUnits(), value.lockedUnits()), snapshot.eventTime()))
+                .orElseGet(() -> new BalanceResponse(userId, normalizedAsset, 0L, 0L, 0L, snapshot.eventTime()));
+        return new ProductBalanceResponse(userId, accountType, balance.asset(),
                 balance.availableUnits(), balance.lockedUnits(), balance.equityUnits(), balance.updatedAt());
     }
 
     public ProductBalanceQueryResponse productBalances(long userId, AccountType accountType) {
-        requirePerpetualAccount(accountType);
-        List<ProductBalanceResponse> rows = balances(userId).balances().stream()
-                .map(value -> new ProductBalanceResponse(userId, AccountType.USDT_PERPETUAL, value.asset(),
-                        value.availableUnits(), value.lockedUnits(), value.equityUnits(), value.updatedAt()))
+        requireProductAccount(accountType);
+        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(accountType.productLine().orElseThrow(), userId);
+        List<ProductBalanceResponse> rows = snapshot.balances().stream()
+                .map(value -> new ProductBalanceResponse(userId, accountType, value.asset(),
+                        value.availableUnits(), value.lockedUnits(),
+                        Math.addExact(value.availableUnits(), value.lockedUnits()), snapshot.eventTime()))
                 .toList();
         return new ProductBalanceQueryResponse(rows.size(), rows);
     }
@@ -162,8 +171,8 @@ public class AccountService {
                                                     String cursor,
                                                     String sort) {
         requireUserId(userId);
-        requirePerpetualAccount(accountType);
-        var page = projectionQueryService.productLedgerPage(userId, AccountType.USDT_PERPETUAL,
+        requireProductAccount(accountType);
+        var page = projectionQueryService.productLedgerPage(userId, accountType,
                 optionalAsset(asset), optionalReferenceType(referenceType), normalizeLimit(limit), cursor, sort);
         return new ProductLedgerQueryResponse(page.items().size(), page.items(), page.nextCursor(), page.hasMore(),
                 page.sort(), page.limit());
@@ -184,8 +193,8 @@ public class AccountService {
                                                                String cursor,
                                                                String sort) {
         requireUserId(userId);
-        requirePerpetualAccount(accountType);
-        var page = projectionQueryService.productTransferPage(userId, AccountType.USDT_PERPETUAL,
+        requireProductAccount(accountType);
+        var page = projectionQueryService.productTransferPage(userId, accountType,
                 optionalAsset(asset), normalizeLimit(limit), cursor, sort);
         return new ProductTransferRecordQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
@@ -215,7 +224,7 @@ public class AccountService {
         requireUserId(adminUserId);
         requireUserId(userId);
         if (accountType != null) {
-            requirePerpetualAccount(accountType);
+            requireProductAccount(accountType);
         }
         var page = projectionQueryService.adminBalanceAdjustmentPage(adminUserId, userId,
                 optionalAdjustmentKind(adjustmentKind), accountType, optionalAsset(asset),
@@ -226,8 +235,8 @@ public class AccountService {
 
     public ProductTransferResponse transfer(ProductTransferRequest request) {
         requireRequest(request);
-        requirePerpetualAccount(request.sourceAccountType());
-        requirePerpetualAccount(request.targetAccountType());
+        requireProductAccount(request.sourceAccountType());
+        requireProductAccount(request.targetAccountType());
         return commandGateway.transfer(request);
     }
 
@@ -238,14 +247,15 @@ public class AccountService {
     public PositionModeResponse positionMode(ProductLine productLine, long userId) {
         requireUserId(userId);
         requireCurrentProduct(productLine);
-        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(userId);
-        return new PositionModeResponse(ProductLine.LINEAR_PERPETUAL, userId, snapshot.positionMode(),
+        requireDerivativeProduct(productLine);
+        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(productLine, userId);
+        return new PositionModeResponse(productLine, userId, snapshot.positionMode(),
                 snapshot.eventTime());
     }
 
     public PositionModeResponse updatePositionMode(PositionModeUpdateRequest request) {
         requireRequest(request);
-        requireCurrentProduct(ProductLine.LINEAR_PERPETUAL);
+        requireDerivativeProduct(currentProductLine());
         return commandGateway.updatePositionMode(request);
     }
 
@@ -259,19 +269,21 @@ public class AccountService {
 
     public PositionResponse position(long userId, String symbol, String marginMode, String positionSide) {
         requireUserId(userId);
+        requireDerivativeProduct(currentProductLine());
         String normalizedSymbol = normalizeSymbol(symbol);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
         com.surprising.trading.api.model.PositionSide normalizedPositionSide = normalizePositionSide(positionSide);
-        return localPosition(localSnapshot(userId), userId, normalizedSymbol, normalizedMarginMode,
+        return localPosition(localSnapshot(currentProductLine(), userId), userId, normalizedSymbol, normalizedMarginMode,
                 normalizedPositionSide).orElseGet(() -> new PositionResponse(userId, normalizedSymbol, 0L,
                         normalizedMarginMode, normalizedPositionSide, 0L, 0L, 0L, Instant.EPOCH));
     }
 
     public PositionMarginResponse positionMargin(long userId, String symbol, String marginMode) {
         requireUserId(userId);
+        requireDerivativeProduct(currentProductLine());
         String normalizedSymbol = normalizeSymbol(symbol);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
-        return localPositionMargin(localSnapshot(userId), userId, normalizedSymbol, normalizedMarginMode,
+        return localPositionMargin(localSnapshot(currentProductLine(), userId), userId, normalizedSymbol, normalizedMarginMode,
                 com.surprising.trading.api.model.PositionSide.NET).orElseGet(() -> new PositionMarginResponse(
                         userId, normalizedSymbol, "", normalizedMarginMode,
                         com.surprising.trading.api.model.PositionSide.NET, 0L, Instant.EPOCH));
@@ -283,9 +295,10 @@ public class AccountService {
 
     public PositionQueryResponse positions(long userId, String positionSide) {
         requireUserId(userId);
+        requireDerivativeProduct(currentProductLine());
         com.surprising.trading.api.model.PositionSide normalized = positionSide == null || positionSide.isBlank()
                 ? null : normalizePositionSide(positionSide);
-        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(userId);
+        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(currentProductLine(), userId);
         List<PositionResponse> rows = snapshot.positions().stream()
                 .filter(value -> normalized == null || value.positionSide() == normalized)
                 .map(value -> toPositionResponse(userId, value))
@@ -306,7 +319,7 @@ public class AccountService {
         if (request.amountUnits() == 0L) {
             throw new IllegalArgumentException("amountUnits must not be zero");
         }
-        requireCurrentProduct(ProductLine.LINEAR_PERPETUAL);
+        requireDerivativeProduct(currentProductLine());
         return commandGateway.adjustPositionMargin(request);
     }
 
@@ -327,13 +340,12 @@ public class AccountService {
                                              ExpiringPositionSettlementAccountCommand command) {
     }
 
-    private PerpetualAccountStateUpdatedEvent localSnapshot(long userId) {
+    private PerpetualAccountStateUpdatedEvent localSnapshot(ProductLine productLine, long userId) {
         requireUserId(userId);
-        if (currentProductLine() != ProductLine.LINEAR_PERPETUAL) {
-            throw new IllegalStateException("当前产品线尚未接入账户用户分区快照: " + currentProductLine());
-        }
-        return stateReducer.snapshot(new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, userId))
-                .orElseThrow(() -> new AccountStateUnavailableException("账户 JVM 快照尚未初始化: " + userId));
+        requireCurrentProduct(productLine);
+        return stateReducer.snapshot(new UserPartitionKey(productLine, userId))
+                .orElseThrow(() -> new AccountStateUnavailableException("账户 JVM 快照尚未初始化: "
+                        + productLine + ":" + userId));
     }
 
     private Optional<PositionResponse> localPosition(PerpetualAccountStateUpdatedEvent snapshot,
@@ -381,16 +393,21 @@ public class AccountService {
     private void requireCurrentProduct(ProductLine productLine) {
         ProductLine current = currentProductLine();
         ProductLineConfiguration.requireSame(current, productLine, "account.product-line");
-        if (current != ProductLine.LINEAR_PERPETUAL) {
-            throw new IllegalStateException("当前产品线尚未接入账户用户分区 reducer: " + current);
-        }
     }
 
-    private void requirePerpetualAccount(AccountType accountType) {
-        if (accountType != AccountType.USDT_PERPETUAL) {
-            throw new IllegalStateException("当前账户入口只支持永续账户快照: " + accountType);
+    private void requireProductAccount(AccountType accountType) {
+        if (accountType == null || accountType == AccountType.FUNDING
+                || accountType.productLine().isEmpty()) {
+            throw new IllegalArgumentException("产品账户类型无效: " + accountType);
         }
-        requireCurrentProduct(ProductLine.LINEAR_PERPETUAL);
+        requireCurrentProduct(accountType.productLine().orElseThrow());
+    }
+
+    private void requireDerivativeProduct(ProductLine productLine) {
+        requireCurrentProduct(productLine);
+        if (productLine == ProductLine.SPOT) {
+            throw new IllegalStateException("现货账户不支持持仓业务");
+        }
     }
 
     private static RuntimeException unsupportedLifecycle(String operation) {

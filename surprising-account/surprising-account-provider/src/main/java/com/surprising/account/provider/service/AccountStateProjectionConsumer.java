@@ -2,9 +2,7 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
-import com.surprising.product.api.ProductLine;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -16,7 +14,6 @@ import tools.jackson.databind.ObjectMapper;
  * 消息。消费失败会停在当前 Kafka offset，直到投影事务成功，不能跳过资金状态。</p>
  */
 @Service
-@ConditionalOnExpression("'${surprising.account.kafka.product-line:LINEAR_PERPETUAL}' == 'LINEAR_PERPETUAL'")
 public class AccountStateProjectionConsumer {
 
     private final ObjectMapper objectMapper;
@@ -42,7 +39,7 @@ public class AccountStateProjectionConsumer {
             }
             PerpetualAccountStateUpdatedEvent event = objectMapper.readValue(
                     record.value(), PerpetualAccountStateUpdatedEvent.class);
-            if (event.productLine() != ProductLine.LINEAR_PERPETUAL
+            if (event.productLine() != properties.getKafka().getProductLine()
                     || !event.partitionKey().equals(record.key())) {
                 throw new IllegalArgumentException("账户状态投影产品线或 Kafka key 不匹配");
             }

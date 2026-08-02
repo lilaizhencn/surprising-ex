@@ -74,7 +74,7 @@ class AccountServiceLocalSnapshotTest {
                     .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> service.transfer(new com.surprising.account.api.model.ProductTransferRequest(
                     1001L, AccountType.USDT_PERPETUAL, AccountType.FUNDING, "USDT", 1L, "ref", "test")))
-                    .isInstanceOf(IllegalStateException.class);
+                    .isInstanceOf(IllegalArgumentException.class);
             verifyNoInteractions(projection);
         }
     }

@@ -17,7 +17,7 @@ class FundingPaymentCandidateRepositoryTest {
     void paymentCandidatesReadOnlyFromReadyAccountSnapshot() {
         InstrumentSnapshotCache snapshotCache = new InstrumentSnapshotCache();
         snapshotCache.replace(ProductLine.LINEAR_PERPETUAL, List.of(), java.util.Map.of());
-        PerpetualAccountStateSnapshotCache accountCache = new PerpetualAccountStateSnapshotCache();
+        PerpetualAccountStateSnapshotCache accountCache = new PerpetualAccountStateSnapshotCache(ProductLine.LINEAR_PERPETUAL);
         accountCache.markReady();
         FundingPaymentCandidateRepository repository =
                 new FundingPaymentCandidateRepository(new FundingProperties(), snapshotCache, accountCache);

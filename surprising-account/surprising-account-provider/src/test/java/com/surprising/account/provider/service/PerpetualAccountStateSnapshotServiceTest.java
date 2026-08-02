@@ -6,8 +6,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.surprising.account.provider.repository.AccountBalanceRepository;
-import com.surprising.account.provider.repository.AccountDeficitRepository;
+import com.surprising.account.provider.repository.AccountProductBalanceRepository;
+import com.surprising.account.provider.repository.AccountProductDeficitRepository;
 import com.surprising.account.provider.repository.AccountRiskStateRevisionRepository;
 import com.surprising.account.provider.repository.AccountStateOrderLockRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
@@ -26,8 +26,8 @@ class PerpetualAccountStateSnapshotServiceTest {
 
     @Test
     void restoresOneCompleteVersionedUserSnapshotFromDatabase() {
-        AccountBalanceRepository balances = mock(AccountBalanceRepository.class);
-        AccountDeficitRepository deficits = mock(AccountDeficitRepository.class);
+        AccountProductBalanceRepository balances = mock(AccountProductBalanceRepository.class);
+        AccountProductDeficitRepository deficits = mock(AccountProductDeficitRepository.class);
         AccountStateOrderLockRepository orderLocks = mock(AccountStateOrderLockRepository.class);
         PositionMarginRepository margins = mock(PositionMarginRepository.class);
         PositionRepository positions = mock(PositionRepository.class);
@@ -35,10 +35,14 @@ class PerpetualAccountStateSnapshotServiceTest {
         AccountSequenceRepository sequences = mock(AccountSequenceRepository.class);
         AccountRiskStateRevisionRepository revisions = mock(AccountRiskStateRevisionRepository.class);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
-        when(balances.findByUser(1001L)).thenReturn(List.of(
-                new AccountBalanceRepository.BalanceRow(1001L, "USDT", 90L, 10L, now)));
-        when(deficits.findByUser(1001L)).thenReturn(List.of(
-                new AccountDeficitRepository.DeficitRow("USDT", 5L, 2L)));
+        when(balances.findByUser(com.surprising.account.api.model.AccountType.USDT_PERPETUAL, 1001L))
+                .thenReturn(List.of(new AccountProductBalanceRepository.BalanceRow(
+                        com.surprising.account.api.model.AccountType.USDT_PERPETUAL,
+                        1001L, "USDT", 90L, 10L, now)));
+        when(deficits.findByUser(com.surprising.account.api.model.AccountType.USDT_PERPETUAL, 1001L))
+                .thenReturn(List.of(new AccountProductDeficitRepository.DeficitRow(
+                        com.surprising.account.api.model.AccountType.USDT_PERPETUAL,
+                        1001L, "USDT", 5L, 2L, now)));
         when(orderLocks.findByUser(ProductLine.LINEAR_PERPETUAL, 1001L))
                 .thenReturn(List.of(new AccountStateOrderLockRepository.LockProjectionRow(
                         "USDT", 30L, now)));

@@ -20,6 +20,7 @@ class AccountCommandResultWaiterTest {
     @Test
     void receivesTerminalResultFromKafkaWithoutDatabasePolling() {
         AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         ObjectMapper objectMapper = new ObjectMapper();
         AccountCommandResultWaiter waiter = new AccountCommandResultWaiter(objectMapper, properties);
         AccountCommandResultEvent event = event("command-1", AccountCommandStatus.APPLIED, "{\"ok\":true}");
@@ -33,6 +34,7 @@ class AccountCommandResultWaiterTest {
     @Test
     void rejectedResultIsReturnedWithoutDatabaseFallback() {
         AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         ObjectMapper objectMapper = new ObjectMapper();
         AccountCommandResultWaiter waiter = new AccountCommandResultWaiter(objectMapper, properties);
         AccountCommandResultEvent event = event("command-2", AccountCommandStatus.REJECTED, null);

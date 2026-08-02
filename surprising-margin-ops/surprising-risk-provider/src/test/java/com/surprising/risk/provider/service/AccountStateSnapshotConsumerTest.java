@@ -26,7 +26,7 @@ class AccountStateSnapshotConsumerTest {
     void appliesValidatedSnapshotAndRejectsRevisionGap() throws Exception {
         ObjectMapper objectMapper = mock(ObjectMapper.class);
         RiskProperties properties = new RiskProperties();
-        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
+        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache(ProductLine.LINEAR_PERPETUAL);
         PerpetualAccountStateUpdatedEvent first = event(1L);
         PerpetualAccountStateUpdatedEvent gap = event(3L);
         when(objectMapper.readValue("first", PerpetualAccountStateUpdatedEvent.class)).thenReturn(first);
@@ -49,7 +49,7 @@ class AccountStateSnapshotConsumerTest {
     void rejectsWrongPartitionKey() throws Exception {
         ObjectMapper objectMapper = mock(ObjectMapper.class);
         RiskProperties properties = new RiskProperties();
-        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
+        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache(ProductLine.LINEAR_PERPETUAL);
         PerpetualAccountStateUpdatedEvent event = event(1L);
         when(objectMapper.readValue("value", PerpetualAccountStateUpdatedEvent.class)).thenReturn(event);
         AccountStateSnapshotConsumer consumer = new AccountStateSnapshotConsumer(objectMapper, properties, cache);

@@ -113,6 +113,94 @@ class AccountUserStateReducerTest {
     }
 
     @Test
+    void spotReservationUsesSpotAssetAccountAndNeverCreatesPosition() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-reducer-spot-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        try (UserPartitionStateStore store = new UserPartitionStateStore(directory)) {
+            AccountUserStateReducer reducer = new AccountUserStateReducer(
+                    objectMapper, store, new UserPartitionCommandLane());
+            reducer.initialize(new PerpetualAccountStateUpdatedEvent(
+                    PerpetualAccountStateUpdatedEvent.CURRENT_SCHEMA_VERSION, 1L, 1L,
+                    ProductLine.SPOT, 1001L, AccountType.SPOT.name(),
+                    List.of(new PerpetualAccountStateUpdatedEvent.Balance("USDT", 2_000L, 0L)),
+                    List.of(), List.of(), List.of(), List.of(), PositionMode.ONE_WAY,
+                    Instant.parse("2026-08-02T00:00:00Z"), "spot-test"));
+
+            AccountUserCommand reserve = new AccountUserCommand(
+                    AccountUserCommand.CURRENT_SCHEMA_VERSION, "spot-reserve-1", ProductLine.SPOT, 1001L,
+                    AccountUserCommandType.ORDER_RESERVE, "TEST", "spot-reserve-1", null,
+                    objectMapper.writeValueAsString(new OrderReserveAccountCommand(
+                            9101L, "BTC-USDT", OrderSide.BUY, OrderReservationKind.SPOT_ASSET,
+                            AccountType.SPOT, "USDT", MarginMode.CROSS, PositionSide.NET,
+                            100L, false, 1_000L, 1L)),
+                    Instant.parse("2026-08-02T00:00:00Z"), "trace-spot-reserve");
+
+            AccountUserStateReducer.Reduction result = reducer.apply(reserve, 1L);
+
+            assertThat(result.status()).isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
+            AccountUserReducerState state = reducer.state(new UserPartitionKey(ProductLine.SPOT, 1001L))
+                    .orElseThrow();
+            assertThat(state.snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 1_000L, 1_000L));
+            assertThat(state.snapshot().positions()).isEmpty();
+            assertThat(state.snapshot().positionMargins()).isEmpty();
+            assertThat(state.snapshot().accountType()).isEqualTo(AccountType.SPOT.name());
+        }
+    }
+
+    @Test
+    void spotTradeSettlesQuoteAndBaseLocallyAndDuplicateTradeIsIdempotent() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-reducer-spot-trade-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        InstrumentSnapshotCache instruments = new InstrumentSnapshotCache();
+        instruments.replace(ProductLine.SPOT, List.of(spotInstrument("BTC-USDT", 1L)),
+                java.util.Map.of("BTC", 1L, "USDT", 1L));
+        try (UserPartitionStateStore store = new UserPartitionStateStore(directory)) {
+            AccountUserStateReducer reducer = new AccountUserStateReducer(
+                    objectMapper, store, new UserPartitionCommandLane(), instruments, new PositionCalculator());
+            reducer.initialize(new PerpetualAccountStateUpdatedEvent(
+                    PerpetualAccountStateUpdatedEvent.CURRENT_SCHEMA_VERSION, 1L, 1L,
+                    ProductLine.SPOT, 1001L, AccountType.SPOT.name(),
+                    List.of(new PerpetualAccountStateUpdatedEvent.Balance("USDT", 1_000L, 0L),
+                            new PerpetualAccountStateUpdatedEvent.Balance("BTC", 0L, 0L)),
+                    List.of(), List.of(), List.of(), List.of(), PositionMode.ONE_WAY,
+                    Instant.parse("2026-08-02T00:00:00Z"), "spot-trade-test"));
+            AccountUserCommand reserve = new AccountUserCommand(
+                    AccountUserCommand.CURRENT_SCHEMA_VERSION, "spot-trade-reserve", ProductLine.SPOT, 1001L,
+                    AccountUserCommandType.ORDER_RESERVE, "TEST", "spot-trade-reserve", null,
+                    objectMapper.writeValueAsString(new OrderReserveAccountCommand(
+                            9201L, "BTC-USDT", OrderSide.BUY, OrderReservationKind.SPOT_ASSET,
+                            AccountType.SPOT, "USDT", MarginMode.CROSS, PositionSide.NET,
+                            2L, false, 202L, 1L)),
+                    Instant.parse("2026-08-02T00:00:00Z"), "trace-spot-trade-reserve");
+            reducer.apply(reserve, 1L);
+            MatchTradeEvent trade = new MatchTradeEvent(
+                    8201L, 7201L, "BTC-USDT", 9201L, 1L, 1001L, OrderSide.BUY,
+                    9202L, 1L, 2002L, 10_000L, 10_000L, 100L, 2L,
+                    true, true, Instant.parse("2026-08-02T00:00:01Z"), "spot-trade-1");
+            AccountUserCommand settlement = new AccountUserCommand(
+                    AccountUserCommand.CURRENT_SCHEMA_VERSION, "spot-trade-settle", ProductLine.SPOT, 1001L,
+                    AccountUserCommandType.TRADE_SIDE_SETTLE, "TEST", "spot-trade-settle", null,
+                    objectMapper.writeValueAsString(new TradeSideSettlementCommand(
+                            trade, TradeParticipantRole.TAKER, 2L, false,
+                            AccountType.SPOT, "USDT", 202L)),
+                    Instant.parse("2026-08-02T00:00:02Z"), "trace-spot-trade-settle");
+
+            assertThat(reducer.apply(settlement, 2L).status())
+                    .isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
+            assertThat(reducer.apply(settlement, 3L).status())
+                    .isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
+            AccountUserReducerState state = reducer.state(new UserPartitionKey(ProductLine.SPOT, 1001L))
+                    .orElseThrow();
+            assertThat(state.snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 798L, 0L),
+                    new PerpetualAccountStateUpdatedEvent.Balance("BTC", 2L, 0L));
+            assertThat(state.snapshot().positions()).isEmpty();
+            assertThat(state.settledTradeIds()).containsExactly(8201L);
+        }
+    }
+
+    @Test
     void missingSnapshotFailsClosedWithoutDatabaseFallback() throws Exception {
         Path directory = Files.createTempDirectory("account-state-reducer-missing-");
         AccountUserCommand command = command("reserve-missing", AccountUserCommandType.ORDER_RESERVE, "{}");
@@ -256,5 +344,16 @@ class AccountUserStateReducerTest {
                 8, 0L, 100_000L, -100_000L, 1_000_000_000L, 1,
                 null, null, null, null, null, null, null,
                 InstrumentStatus.TRADING, now, now, now, List.of(), List.of());
+    }
+
+    private InstrumentResponse spotInstrument(String symbol, long version) {
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        return new InstrumentResponse(symbol, version, InstrumentType.SPOT, ContractType.SPOT,
+                "BTC", "USDT", "USDT", 1L, "USDT", 1L, 1L, 1L, 1_000_000L,
+                1L, 1_000_000_000L, 1L, 8, 8, List.of("LIMIT"), List.of("GTC"),
+                false, false, true, 1_000_000L, 1_000_000L, 1_000_000L,
+                10_000L, 10_000L, 0L, 0L, 0L, 0, 0L, 0L, 0L, 0L, 1,
+                null, null, null, null, null, null, null, InstrumentStatus.TRADING,
+                now, now, now, List.of(), List.of());
     }
 }

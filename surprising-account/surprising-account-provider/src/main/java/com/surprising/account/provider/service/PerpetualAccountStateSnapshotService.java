@@ -2,8 +2,8 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
-import com.surprising.account.provider.repository.AccountBalanceRepository;
-import com.surprising.account.provider.repository.AccountDeficitRepository;
+import com.surprising.account.provider.repository.AccountProductBalanceRepository;
+import com.surprising.account.provider.repository.AccountProductDeficitRepository;
 import com.surprising.account.provider.repository.AccountRiskStateRevisionRepository;
 import com.surprising.account.provider.repository.AccountStateOrderLockRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
@@ -19,7 +19,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 构造永续用户账户的启动恢复快照。
+ * 构造产品线用户账户的启动恢复快照。
  *
  * <p>用户分区 WAL 和本地 reducer 才是在线资金事实源。本服务只在本地分区尚未初始化时
  * 从数据库恢复一份带修订号的基线；下游初始化完成后由账户事实流发布的 Kafka 快照保持更新，
@@ -28,10 +28,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class PerpetualAccountStateSnapshotService {
 
-    private static final AccountType ACCOUNT_TYPE = AccountType.USDT_PERPETUAL;
-
-    private final AccountBalanceRepository balanceRepository;
-    private final AccountDeficitRepository deficitRepository;
+    private final AccountProductBalanceRepository balanceRepository;
+    private final AccountProductDeficitRepository deficitRepository;
     private final AccountStateOrderLockRepository orderLockRepository;
     private final PositionMarginRepository positionMarginRepository;
     private final PositionRepository positionRepository;
@@ -40,8 +38,8 @@ public class PerpetualAccountStateSnapshotService {
     private final AccountRiskStateRevisionRepository revisionRepository;
 
     @Autowired
-    public PerpetualAccountStateSnapshotService(AccountBalanceRepository balanceRepository,
-                                                AccountDeficitRepository deficitRepository,
+    public PerpetualAccountStateSnapshotService(AccountProductBalanceRepository balanceRepository,
+                                                AccountProductDeficitRepository deficitRepository,
                                                 AccountStateOrderLockRepository orderLockRepository,
                                                 PositionMarginRepository positionMarginRepository,
                                                 PositionRepository positionRepository,
@@ -66,8 +64,9 @@ public class PerpetualAccountStateSnapshotService {
      */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PerpetualAccountStateUpdatedEvent snapshot(ProductLine productLine, long userId) {
-        if (productLine != ProductLine.LINEAR_PERPETUAL) {
-            throw new IllegalArgumentException("账户快照初始化只支持 LINEAR_PERPETUAL");
+        AccountType accountType = accountType(productLine);
+        if (accountType == null) {
+            throw new IllegalArgumentException("账户快照初始化不支持该产品线: " + productLine);
         }
         if (userId <= 0L) {
             throw new IllegalArgumentException("userId must be positive");
@@ -79,19 +78,20 @@ public class PerpetualAccountStateSnapshotService {
         if (accountRevision <= 0L) {
             throw new IllegalStateException("永续用户账户快照不存在: " + userId);
         }
-        return build(productLine, userId, accountRevision, Instant.now(), "rpc-snapshot-init");
+        return build(productLine, accountType, userId, accountRevision, Instant.now(), "rpc-snapshot-init");
     }
 
     private PerpetualAccountStateUpdatedEvent build(ProductLine productLine,
+                                                    AccountType accountType,
                                                     long userId,
                                                     long accountRevision,
                                                     Instant eventTime,
                                                     String traceId) {
-        List<PerpetualAccountStateUpdatedEvent.Balance> balances = balanceRepository.findByUser(userId).stream()
+        List<PerpetualAccountStateUpdatedEvent.Balance> balances = balanceRepository.findByUser(accountType, userId).stream()
                 .map(row -> new PerpetualAccountStateUpdatedEvent.Balance(
                         row.asset(), row.availableUnits(), row.lockedUnits()))
                 .toList();
-        List<PerpetualAccountStateUpdatedEvent.Deficit> deficits = deficitRepository.findByUser(userId).stream()
+        List<PerpetualAccountStateUpdatedEvent.Deficit> deficits = deficitRepository.findByUser(accountType, userId).stream()
                 .map(row -> new PerpetualAccountStateUpdatedEvent.Deficit(
                         row.asset(), row.deficitUnits(), row.reservedUnits()))
                 .toList();
@@ -121,7 +121,7 @@ public class PerpetualAccountStateSnapshotService {
                 accountRevision,
                 productLine,
                 userId,
-                ACCOUNT_TYPE.name(),
+                accountType.name(),
                 balances,
                 deficits,
                 positions,
@@ -131,5 +131,19 @@ public class PerpetualAccountStateSnapshotService {
                 eventTime,
                 traceId);
         return event;
+    }
+
+    private AccountType accountType(ProductLine productLine) {
+        if (productLine == null) {
+            return null;
+        }
+        return switch (productLine) {
+            case SPOT -> AccountType.SPOT;
+            case LINEAR_PERPETUAL -> AccountType.USDT_PERPETUAL;
+            case INVERSE_PERPETUAL -> AccountType.COIN_PERPETUAL;
+            case LINEAR_DELIVERY -> AccountType.USDT_DELIVERY;
+            case INVERSE_DELIVERY -> AccountType.COIN_DELIVERY;
+            case OPTION -> AccountType.OPTION;
+        };
     }
 }

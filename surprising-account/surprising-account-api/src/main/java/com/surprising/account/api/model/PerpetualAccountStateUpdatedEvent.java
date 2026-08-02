@@ -8,7 +8,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * 永续账户单写者提交后的完整用户状态快照。
+ * 产品线账户单写者提交后的完整用户状态快照。
  *
  * <p>这是账户用户分区单写者提交后的 canonical 状态事件。事件先由本地 WAL/RocksDB
  * 固化，再发布到 Kafka；其他模块通过该事件建立自己的 JVM 快照，数据库只异步投影该完整
@@ -34,19 +34,29 @@ public record PerpetualAccountStateUpdatedEvent(
 
     public PerpetualAccountStateUpdatedEvent {
         if (schemaVersion != CURRENT_SCHEMA_VERSION) {
-            throw new IllegalArgumentException("unsupported perpetual account state schemaVersion: "
+            throw new IllegalArgumentException("unsupported account state schemaVersion: "
                     + schemaVersion);
         }
         if (eventId <= 0L || accountRevision <= 0L) {
             throw new IllegalArgumentException("eventId and accountRevision must be positive");
         }
-        if (productLine != ProductLine.LINEAR_PERPETUAL) {
-            throw new IllegalArgumentException("perpetual account state must use LINEAR_PERPETUAL");
+        if (productLine == null) {
+            throw new IllegalArgumentException("productLine is required");
         }
         if (userId <= 0L) {
             throw new IllegalArgumentException("userId must be positive");
         }
         accountType = requireText(accountType, "accountType");
+        AccountType accountTypeValue;
+        try {
+            accountTypeValue = AccountType.valueOf(accountType);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("unsupported accountType: " + accountType, ex);
+        }
+        if (accountTypeValue.productLine().orElse(null) != productLine) {
+            throw new IllegalArgumentException("accountType 与 productLine 不匹配: "
+                    + accountType + " / " + productLine);
+        }
         balances = copyRequired(balances, "balances");
         deficits = copyRequired(deficits, "deficits");
         positions = copyRequired(positions, "positions");
@@ -60,7 +70,7 @@ public record PerpetualAccountStateUpdatedEvent(
     }
 
     public String partitionKey() {
-        return ProductLine.LINEAR_PERPETUAL.name() + ":" + userId;
+        return productLine.name() + ":" + userId;
     }
 
     public record Balance(String asset, long availableUnits, long lockedUnits) {

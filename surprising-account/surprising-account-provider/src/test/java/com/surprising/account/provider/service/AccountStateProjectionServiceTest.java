@@ -9,8 +9,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
-import com.surprising.account.provider.repository.AccountBalanceRepository;
-import com.surprising.account.provider.repository.AccountDeficitRepository;
+import com.surprising.account.provider.repository.AccountProductBalanceRepository;
+import com.surprising.account.provider.repository.AccountProductDeficitRepository;
 import com.surprising.account.provider.repository.AccountRiskStateRevisionRepository;
 import com.surprising.account.provider.repository.AccountStateOrderLockRepository;
 import com.surprising.account.provider.repository.PositionMarginRepository;
@@ -26,8 +26,8 @@ class AccountStateProjectionServiceTest {
 
     @Test
     void projectsWholeSnapshotOnlyAfterRevisionFenceIsAcquired() {
-        AccountBalanceRepository balances = mock(AccountBalanceRepository.class);
-        AccountDeficitRepository deficits = mock(AccountDeficitRepository.class);
+        AccountProductBalanceRepository balances = mock(AccountProductBalanceRepository.class);
+        AccountProductDeficitRepository deficits = mock(AccountProductDeficitRepository.class);
         PositionRepository positions = mock(PositionRepository.class);
         PositionMarginRepository margins = mock(PositionMarginRepository.class);
         PositionModeRepository modes = mock(PositionModeRepository.class);
@@ -43,8 +43,10 @@ class AccountStateProjectionServiceTest {
 
         assertThat(service.project(event)).isTrue();
 
-        verify(balances).replaceProjection(eq(1001L), eq(event.balances()), eq(eventTime));
-        verify(deficits).replaceProjection(eq(1001L), eq(event.deficits()), eq(eventTime));
+        verify(balances).replaceProjection(eq(com.surprising.account.api.model.AccountType.USDT_PERPETUAL),
+                eq(1001L), eq(event.balances()), eq(eventTime));
+        verify(deficits).replaceProjection(eq(com.surprising.account.api.model.AccountType.USDT_PERPETUAL),
+                eq(1001L), eq(event.deficits()), eq(eventTime));
         verify(positions).replaceProjection(ProductLine.LINEAR_PERPETUAL, 1001L,
                 event.positions(), eventTime);
         verify(margins).replaceProjection(ProductLine.LINEAR_PERPETUAL, 1001L,
@@ -58,8 +60,8 @@ class AccountStateProjectionServiceTest {
         AccountRiskStateRevisionRepository revisions = mock(AccountRiskStateRevisionRepository.class);
         when(revisions.beginProjection(eq(ProductLine.LINEAR_PERPETUAL), eq(1001L), eq(8L), any()))
                 .thenReturn(false);
-        AccountBalanceRepository balances = mock(AccountBalanceRepository.class);
-        AccountDeficitRepository deficits = mock(AccountDeficitRepository.class);
+        AccountProductBalanceRepository balances = mock(AccountProductBalanceRepository.class);
+        AccountProductDeficitRepository deficits = mock(AccountProductDeficitRepository.class);
         PositionRepository positions = mock(PositionRepository.class);
         PositionMarginRepository margins = mock(PositionMarginRepository.class);
         PositionModeRepository modes = mock(PositionModeRepository.class);

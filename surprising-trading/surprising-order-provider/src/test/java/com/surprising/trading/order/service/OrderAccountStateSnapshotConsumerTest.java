@@ -24,7 +24,7 @@ class OrderAccountStateSnapshotConsumerTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.getKafka().setProductTopicsEnabled(true);
-        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
+        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache(ProductLine.LINEAR_PERPETUAL);
         PerpetualAccountStateUpdatedEvent event = event(1L);
         when(objectMapper.readValue("value", PerpetualAccountStateUpdatedEvent.class)).thenReturn(event);
         OrderAccountStateSnapshotConsumer consumer = new OrderAccountStateSnapshotConsumer(
@@ -46,7 +46,7 @@ class OrderAccountStateSnapshotConsumerTest {
         ObjectMapper objectMapper = mock(ObjectMapper.class);
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
+        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache(ProductLine.LINEAR_PERPETUAL);
         PerpetualAccountStateUpdatedEvent event = event(1L);
         when(objectMapper.readValue("value", PerpetualAccountStateUpdatedEvent.class)).thenReturn(event);
         OrderAccountStateSnapshotConsumer consumer = new OrderAccountStateSnapshotConsumer(

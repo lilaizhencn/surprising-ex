@@ -38,7 +38,11 @@ public class OrderPlacementStateService {
     }
 
     public PositionMode positionMode(ProductLine line, long userId) {
-        if (line != ProductLine.LINEAR_PERPETUAL || accountStateSnapshotCache == null) {
+        if (line == ProductLine.SPOT) {
+            return PositionMode.ONE_WAY;
+        }
+        requireCacheLine(line);
+        if (accountStateSnapshotCache == null) {
             throw new IllegalStateException("订单本地状态尚未支持该产品线的仓位模式快照: " + line);
         }
         if (!accountStateSnapshotCache.ready()) {
@@ -53,7 +57,11 @@ public class OrderPlacementStateService {
      * 订单 WAL 热路径使用的仓位模式读取；永续只允许从账户 JVM 快照读取，不能退回数据库。
      */
     public PositionMode localPositionMode(ProductLine line, long userId) {
-        if (line != ProductLine.LINEAR_PERPETUAL || accountStateSnapshotCache == null) {
+        if (line == ProductLine.SPOT) {
+            return PositionMode.ONE_WAY;
+        }
+        requireCacheLine(line);
+        if (accountStateSnapshotCache == null) {
             throw new IllegalStateException("订单本地状态尚未支持该产品线的仓位模式快照: " + line);
         }
         return positionMode(line, userId);
@@ -66,7 +74,11 @@ public class OrderPlacementStateService {
                                                      long userId,
                                                      String symbol,
                                                      MarginMode marginMode) {
-        if (line != ProductLine.LINEAR_PERPETUAL || accountStateSnapshotCache == null) {
+        if (line == ProductLine.SPOT) {
+            return false;
+        }
+        requireCacheLine(line);
+        if (accountStateSnapshotCache == null) {
             throw new IllegalStateException("订单本地状态尚未支持该产品线的保证金模式快照: " + line);
         }
         // positionMode 会在需要时通过账户内部 RPC 初始化单个用户，初始化完成后只读 JVM 快照。
@@ -80,7 +92,7 @@ public class OrderPlacementStateService {
 
     /** 返回订单计算所依据的永续账户修订号；非永续或影子快照未启用时返回零。 */
     public long accountRevision(ProductLine line, long userId) {
-        if (line != ProductLine.LINEAR_PERPETUAL || accountStateSnapshotCache == null) {
+        if (accountStateSnapshotCache == null || accountStateSnapshotCache.productLine() != line) {
             return 0L;
         }
         if (!accountStateSnapshotCache.ready()) {
@@ -90,21 +102,23 @@ public class OrderPlacementStateService {
     }
 
     private PerpetualAccountStateUpdatedEvent state(ProductLine line, long userId) {
+        requireCacheLine(line);
         Optional<PerpetualAccountStateUpdatedEvent> state = accountStateSnapshotCache.state(userId);
         if (state.isPresent()) {
             return state.get();
         }
         initializeAccountState(line, userId);
         return accountStateSnapshotCache.state(userId)
-                .orElseThrow(() -> new IllegalStateException("永续用户账户状态快照不存在: " + userId));
+                .orElseThrow(() -> new IllegalStateException("用户账户状态快照不存在: " + line + ":" + userId));
     }
 
     private void initializeAccountState(ProductLine line, long userId) {
+        requireCacheLine(line);
         if (accountStateRpcApi == null) {
             if (!accountStateSnapshotCache.ready()) {
-                throw new IllegalStateException("永续账户状态快照尚未就绪");
+                throw new IllegalStateException("账户状态快照尚未就绪: " + line);
             }
-            throw new IllegalStateException("永续用户账户状态快照不存在: " + userId);
+            throw new IllegalStateException("用户账户状态快照不存在: " + line + ":" + userId);
         }
         Object lock = snapshotInitializationLocks.computeIfAbsent(userId, ignored -> new Object());
         try {
@@ -115,10 +129,10 @@ public class OrderPlacementStateService {
                 PerpetualAccountStateUpdatedEvent event = accountStateRpcApi.snapshot(line, userId);
                 PerpetualAccountStateSnapshotCache.ApplyResult result = accountStateSnapshotCache.initialize(event);
                 if (result == PerpetualAccountStateSnapshotCache.ApplyResult.PRODUCT_LINE_MISMATCH) {
-                    throw new IllegalStateException("永续账户初始化快照产品线不一致");
+                    throw new IllegalStateException("账户初始化快照产品线不一致");
                 }
                 if (result == PerpetualAccountStateSnapshotCache.ApplyResult.CONFLICT) {
-                    throw new IllegalStateException("永续账户初始化快照同一修订号内容冲突");
+                    throw new IllegalStateException("账户初始化快照同一修订号内容冲突");
                 }
                 if (marginSnapshotCache != null) {
                     marginSnapshotCache.applyAccountSnapshot(event);
@@ -126,7 +140,7 @@ public class OrderPlacementStateService {
                 }
             }
         } catch (RuntimeException ex) {
-            throw new IllegalStateException("永续用户账户状态快照初始化失败: " + userId, ex);
+            throw new IllegalStateException("用户账户状态快照初始化失败: " + line + ":" + userId, ex);
         } finally {
             snapshotInitializationLocks.remove(userId, lock);
         }
@@ -140,7 +154,11 @@ public class OrderPlacementStateService {
                                                       String symbol,
                                                       MarginMode mode,
                                                       PositionSide side) {
-        if (line != ProductLine.LINEAR_PERPETUAL || accountStateSnapshotCache == null) {
+        if (line == ProductLine.SPOT) {
+            return Optional.empty();
+        }
+        requireCacheLine(line);
+        if (accountStateSnapshotCache == null) {
             throw new IllegalStateException("订单本地状态尚未支持该产品线的持仓快照: " + line);
         }
         PerpetualAccountStateUpdatedEvent state = state(line, userId);
@@ -154,6 +172,15 @@ public class OrderPlacementStateService {
                 .map(position -> new ReduceOnlyPosition(position.signedQuantitySteps(),
                         position.instrumentVersion()))
                 .findFirst();
+    }
+
+    private void requireCacheLine(ProductLine line) {
+        if (line == null) {
+            throw new IllegalArgumentException("产品线不能为空");
+        }
+        if (accountStateSnapshotCache != null && accountStateSnapshotCache.productLine() != line) {
+            throw new IllegalStateException("订单账户快照产品线不一致: " + line);
+        }
     }
 
 }

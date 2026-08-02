@@ -16,7 +16,7 @@ public class InstrumentSnapshotConfiguration {
 
     /** 资金费候选持仓只读取账户发布的完整用户 JVM 快照。 */
     @Bean
-    public PerpetualAccountStateSnapshotCache fundingAccountStateSnapshotCache() {
-        return new PerpetualAccountStateSnapshotCache();
+    public PerpetualAccountStateSnapshotCache fundingAccountStateSnapshotCache(FundingProperties properties) {
+        return new PerpetualAccountStateSnapshotCache(properties.getKafka().getProductLine());
     }
 }

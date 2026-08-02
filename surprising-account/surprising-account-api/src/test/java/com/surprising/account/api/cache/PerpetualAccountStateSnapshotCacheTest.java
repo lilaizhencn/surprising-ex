@@ -13,7 +13,7 @@ class PerpetualAccountStateSnapshotCacheTest {
 
     @Test
     void rejectsRevisionGapAndDoesNotExposePartialState() {
-        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
+        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache(ProductLine.LINEAR_PERPETUAL);
         assertThat(cache.apply(event(1L))).isEqualTo(
                 PerpetualAccountStateSnapshotCache.ApplyResult.APPLIED);
         cache.markReady();
@@ -25,7 +25,7 @@ class PerpetualAccountStateSnapshotCacheTest {
 
     @Test
     void ignoresOldEventsAndExposesOnlyReadySnapshot() {
-        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
+        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache(ProductLine.LINEAR_PERPETUAL);
         cache.apply(event(2L));
         cache.markReady();
 
@@ -37,7 +37,7 @@ class PerpetualAccountStateSnapshotCacheTest {
 
     @Test
     void sameRevisionInitializationDoesNotReplaceExistingSnapshot() {
-        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
+        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache(ProductLine.LINEAR_PERPETUAL);
         var first = event(2L);
         var duplicate = new PerpetualAccountStateUpdatedEvent(
                 1, 999L, 2L, ProductLine.LINEAR_PERPETUAL, 1001L, "USDT_PERPETUAL",
@@ -53,7 +53,7 @@ class PerpetualAccountStateSnapshotCacheTest {
 
     @Test
     void rejectsSameRevisionWithDifferentBusinessState() {
-        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
+        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache(ProductLine.LINEAR_PERPETUAL);
         var first = event(2L);
         var conflict = new PerpetualAccountStateUpdatedEvent(
                 1, 1000L, 2L, ProductLine.LINEAR_PERPETUAL, 1001L, "USDT_PERPETUAL",
