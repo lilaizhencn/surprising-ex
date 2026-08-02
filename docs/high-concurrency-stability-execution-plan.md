@@ -127,7 +127,7 @@
 
 本轮还验证了三处真实故障修复或测试护栏：风险快照在 Redis 恰好过期的读写窗口内改用本地 JVM 快照继续完成版本化替换，避免把 Kafka 分区处理阻塞在数据库回退上；行情刷新器持续消费最新消息，生命周期测试使用 `MAX(sequence)+1` 生成单调序列，避免新标记价被历史序列误判为过期；首次现货重建数据库但未删除共享账户 Topic 时，消费者按 `earliest` 重放旧释放命令并正确阻断（缺少预占），随后用清理共享 Topic 的正确测试前置条件复验通过。风险 Provider 变更后同步重建包含它的宿主 fat JAR，防止部署产物继续运行旧类。
 
-本次四条产品线的独立运行日志如下：`LINEAR_PERPETUAL` 保存在 `/tmp/surprising-product-line-api.SpJe4g`，`SPOT` 保存在 `/tmp/surprising-product-line-api.xRFuRr`，`LINEAR_DELIVERY` 保存在 `/tmp/surprising-product-line-api.lcleeQ`，`OPTION` 保存在 `/tmp/surprising-product-line-api.t38LII`。四次均包含 Instrument 首启、账户 `SIGKILL` 重启恢复和逐项资金对账；交割的交割结算流水、期权的行权流水均在对账报告中出现且最终持仓归零。
+本次四条产品线的独立运行日志如下：`LINEAR_PERPETUAL` 保存在 `/tmp/surprising-product-line-api.n8mLsO`，`SPOT` 保存在 `/tmp/surprising-product-line-api.xRFuRr`，`LINEAR_DELIVERY` 保存在 `/tmp/surprising-product-line-api.lcleeQ`，`OPTION` 保存在 `/tmp/surprising-product-line-api.t38LII`。四次均包含 Instrument 首启、账户 `SIGKILL` 重启恢复和逐项资金对账；交割的交割结算流水、期权的行权流水均在对账报告中出现且最终持仓归零。
 
 ## 6. 允许关闭旧路径的条件
 
