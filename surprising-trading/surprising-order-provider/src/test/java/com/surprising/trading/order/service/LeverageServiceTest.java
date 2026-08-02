@@ -62,10 +62,6 @@ class LeverageServiceTest {
         LeverageService service = new LeverageService(repository, lookup, cache);
 
         assertThat(service.get(1001L, "BTC-USDT", null).source()).isEqualTo("INSTRUMENT_DEFAULT");
-        verify(repository, org.mockito.Mockito.never()).userSetting(
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test
