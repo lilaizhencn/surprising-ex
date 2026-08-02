@@ -12,10 +12,13 @@ import static org.mockito.Mockito.when;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
+import com.surprising.account.api.model.BalanceAdjustmentAccountCommand;
+import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.OrderReservationKind;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.account.provider.model.AccountCommandTerminalResult;
 import com.surprising.eventstore.UserPartitionCommandLane;
 import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.eventstore.UserPartitionResultStore;
@@ -37,6 +40,45 @@ import org.springframework.kafka.support.SendResult;
 import tools.jackson.databind.ObjectMapper;
 
 class AccountUserStateCommandWorkerTest {
+
+    @Test
+    void persistsDeterministicLedgerDeltaAlongsideTheLocalTerminalResult() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-worker-ledger-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+        when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+                .thenReturn(CompletableFuture.completedFuture((SendResult<String, String>) null));
+        UserPartitionKey partition = new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L);
+        AccountUserCommand command = new AccountUserCommand(
+                AccountUserCommand.CURRENT_SCHEMA_VERSION, "worker-balance-adjust", ProductLine.LINEAR_PERPETUAL,
+                1001L, AccountUserCommandType.BALANCE_ADJUST, "TEST", "balance-adjust-1", null,
+                objectMapper.writeValueAsString(new BalanceAdjustmentAccountCommand(
+                        new BalanceAdjustmentRequest(1001L, "USDT", -200L, "balance-adjust-1", "测试调整"),
+                        "admin-1", "管理员")), Instant.parse("2026-08-02T00:00:00Z"), "worker-trace");
+
+        try (UserPartitionWal wal = new UserPartitionWal(directory.resolve("wal"));
+             UserPartitionStateStore stateStore = new UserPartitionStateStore(directory.resolve("state"));
+             UserPartitionResultStore resultStore = new UserPartitionResultStore(directory.resolve("result"))) {
+            wal.append(partition, command.commandId(), command.commandType().name(),
+                    objectMapper.writeValueAsString(command).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    "worker-balance-fingerprint", command.occurredAt());
+            AccountUserStateReducer reducer = new AccountUserStateReducer(
+                    objectMapper, stateStore, new UserPartitionCommandLane());
+            reducer.initialize(snapshot());
+            new AccountUserStateCommandWorker(objectMapper, properties, wal, stateStore, resultStore,
+                    new UserPartitionCommandLane(), reducer, kafkaTemplate).applyPending();
+
+            AccountCommandTerminalResult terminal = objectMapper.readValue(
+                    new String(resultStore.read(command.commandId()).orElseThrow(),
+                            java.nio.charset.StandardCharsets.UTF_8), AccountCommandTerminalResult.class);
+            assertThat(terminal.ledgerDeltas()).containsExactly(
+                    new AccountCommandTerminalResult.LedgerDelta(
+                            "USDT", -200L, 800L, "BALANCE_ADJUSTMENT", command.commandId(),
+                            "BALANCE_ADJUST", null));
+        }
+    }
 
     @Test
     void restartsAfterResultPublishFailureWithoutReapplyingBalanceMutation() throws Exception {

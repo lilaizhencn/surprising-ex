@@ -4,14 +4,17 @@ import com.surprising.account.api.model.AccountLedgerEntryResponse;
 import com.surprising.account.api.model.AdminCursorPage;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Timestamp;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+/**
+ * 基础账户账本单表查询仓储。
+ *
+ * <p>资金命令不再调用该仓储写入。在线 reducer 的终态由产品账本异步投影器处理；该表保留
+ * 作为基础账户历史查询和兼容审计数据源，避免旧的逐类写入方法继续形成第二套事实流。</p>
+ */
 @Repository
 public class AccountLedgerRepository {
 
@@ -78,201 +81,6 @@ public class AccountLedgerRepository {
                 AccountLedgerEntryResponse::entryId);
     }
 
-    public int insertBalanceAdjustment(long entryId,
-                                       long userId,
-                                       String asset,
-                                       long amountUnits,
-                                       String referenceId,
-                                       String reason,
-                                       Instant now) {
-        return jdbcTemplate.update("""
-                INSERT INTO account_ledger_entries (
-                    entry_id, user_id, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, created_at
-                ) VALUES (?, ?, ?, ?, 0, 'BALANCE_ADJUSTMENT', ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, entryId, userId, asset, amountUnits, referenceId, reason, Timestamp.from(now));
-    }
-
-    public Optional<AdjustmentReference> findBalanceAdjustment(long userId,
-                                                                String asset,
-                                                                String referenceId) {
-        return jdbcTemplate.query("""
-                SELECT amount_units, reason
-                  FROM account_ledger_entries
-                 WHERE reference_type = 'BALANCE_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, (rs, rowNum) -> new AdjustmentReference(
-                        rs.getLong("amount_units"),
-                        rs.getString("reason")), referenceId, userId, asset)
-                .stream().findFirst();
-    }
-
-    public int updateBalanceAdjustmentBalance(long userId,
-                                              String asset,
-                                              String referenceId,
-                                              long balanceAfterUnits) {
-        return jdbcTemplate.update("""
-                UPDATE account_ledger_entries
-                   SET balance_after_units = ?
-                 WHERE reference_type = 'BALANCE_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, balanceAfterUnits, referenceId, userId, asset);
-    }
-
-    public int insertDeficitSettlement(long entryId,
-                                       long userId,
-                                       String asset,
-                                       long amountUnits,
-                                       long balanceAfterUnits,
-                                       String referenceType,
-                                       String referenceId,
-                                       String reason,
-                                       Instant now) {
-        return jdbcTemplate.update("""
-                INSERT INTO account_ledger_entries (
-                    entry_id, user_id, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, entryId, userId, asset, amountUnits, balanceAfterUnits, referenceType,
-                referenceId, reason, Timestamp.from(now));
-    }
-
-    public int insertFunding(long entryId,
-                             long userId,
-                             String asset,
-                             long amountUnits,
-                             String referenceId,
-                             String reason,
-                             Instant now) {
-        return jdbcTemplate.update("""
-                INSERT INTO account_ledger_entries (
-                    entry_id, user_id, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, created_at
-                ) VALUES (?, ?, ?, ?, 0, 'FUNDING', ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, entryId, userId, asset, amountUnits, referenceId, reason, Timestamp.from(now));
-    }
-
-    public int updateFundingBalance(long userId,
-                                    String asset,
-                                    String referenceId,
-                                    long balanceAfterUnits) {
-        return jdbcTemplate.update("""
-                UPDATE account_ledger_entries
-                   SET balance_after_units = ?
-                 WHERE reference_type = 'FUNDING'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, balanceAfterUnits, referenceId, userId, asset);
-    }
-
-    public int insertAdl(long entryId,
-                         long userId,
-                         String asset,
-                         long amountUnits,
-                         long balanceAfterUnits,
-                         String referenceType,
-                         String referenceId,
-                         String reason,
-                         Instant now) {
-        return jdbcTemplate.update("""
-                INSERT INTO account_ledger_entries (
-                    entry_id, user_id, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, entryId, userId, asset, amountUnits, balanceAfterUnits,
-                referenceType, referenceId, reason, Timestamp.from(now));
-    }
-
-    public int insertSettlement(long entryId,
-                                long userId,
-                                String asset,
-                                long amountUnits,
-                                long balanceAfterUnits,
-                                String referenceType,
-                                String referenceId,
-                                String reason,
-                                Long tradeId,
-                                Long orderId,
-                                String symbol,
-                                Long feeRatePpm,
-                                Instant now) {
-        return jdbcTemplate.update("""
-                INSERT INTO account_ledger_entries (
-                    entry_id, user_id, asset, amount_units, balance_after_units,
-                    reference_type, reference_id, reason, trade_id, order_id, symbol,
-                    fee_rate_ppm, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-                """, entryId, userId, asset, amountUnits, balanceAfterUnits,
-                referenceType, referenceId, reason, tradeId, orderId, symbol, feeRatePpm,
-                Timestamp.from(now));
-    }
-
-    public int updateSettlementBalance(long userId,
-                                       String asset,
-                                       String referenceType,
-                                       String referenceId,
-                                       long balanceAfterUnits) {
-        return jdbcTemplate.update("""
-                UPDATE account_ledger_entries
-                   SET balance_after_units = ?
-                 WHERE reference_type = ?
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, balanceAfterUnits, referenceType, referenceId, userId, asset);
-    }
-
-    public Optional<PositionMarginAdjustmentRow> findPositionMarginAdjustmentBySymbol(
-            long userId, String symbol, String referenceId) {
-        return jdbcTemplate.query("""
-                SELECT asset, amount_units, reason, symbol
-                  FROM account_ledger_entries
-                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND symbol = ?
-                """, (rs, rowNum) -> new PositionMarginAdjustmentRow(
-                        rs.getString("asset"), rs.getLong("amount_units"),
-                        rs.getString("reason"), rs.getString("symbol")),
-                referenceId, userId, symbol).stream().findFirst();
-    }
-
-    public Optional<PositionMarginAdjustmentRow> findPositionMarginAdjustmentByAsset(
-            long userId, String asset, String referenceId) {
-        return jdbcTemplate.query("""
-                SELECT asset, amount_units, reason, symbol
-                  FROM account_ledger_entries
-                 WHERE reference_type = 'POSITION_MARGIN_ADJUSTMENT'
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, (rs, rowNum) -> new PositionMarginAdjustmentRow(
-                        rs.getString("asset"), rs.getLong("amount_units"),
-                        rs.getString("reason"), rs.getString("symbol")),
-                referenceId, userId, asset).stream().findFirst();
-    }
-
-    public boolean exists(long userId, String asset, String referenceType, String referenceId) {
-        return !jdbcTemplate.query("""
-                SELECT 1
-                  FROM account_ledger_entries
-                 WHERE reference_type = ?
-                   AND reference_id = ?
-                   AND user_id = ?
-                   AND asset = ?
-                """, (rs, rowNum) -> 1, referenceType, referenceId, userId, asset).isEmpty();
-    }
-
     private static AdminCursorPage.SortSpec createdAtSort(String sort, String idColumn) {
         AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
                 "createdAt", "created_at", idColumn, true);
@@ -288,15 +96,5 @@ public class AccountLedgerRepository {
 
     private static String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
-    }
-
-    public record AdjustmentReference(long amountUnits, String reason) {
-    }
-
-    public record PositionMarginAdjustmentRow(
-            String asset,
-            long amountUnits,
-            String reason,
-            String symbol) {
     }
 }

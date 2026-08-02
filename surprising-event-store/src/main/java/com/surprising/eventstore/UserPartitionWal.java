@@ -27,7 +27,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * 基于 RocksDB 的用户分区 WAL。
  *
  * <p>每个分区使用独立锁，事件、幂等索引和下一序列号在同一个同步写批次中提交。
- * 因此进程崩溃后不会出现事件已落盘但幂等索引或序列号缺失的半提交状态。</p>
+ * 因此进程崩溃后不会出现事件已落盘但幂等索引或序列号缺失的半提交状态。数据库审计、
+ * 订单完整快照和账本明细可以使用各自独立的连续投影水位。</p>
  */
 public final class UserPartitionWal implements AutoCloseable {
 
@@ -36,6 +37,7 @@ public final class UserPartitionWal implements AutoCloseable {
     private static final byte[] EVENT_PREFIX = "event/".getBytes(StandardCharsets.UTF_8);
     private static final byte[] PARTITION_PREFIX = "partition/".getBytes(StandardCharsets.UTF_8);
     private static final byte[] PROJECTED_PREFIX = "projected/".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] LEDGER_PROJECTED_PREFIX = "projected-ledger/".getBytes(StandardCharsets.UTF_8);
     private static final int MAX_STRING_BYTES = 1_048_576;
     private static final int MAX_PAYLOAD_BYTES = 16 * 1_024 * 1_024;
 
@@ -230,6 +232,41 @@ public final class UserPartitionWal implements AutoCloseable {
         }
     }
 
+    /** 返回账户账本异步投影已经完成的最后一条连续事件序号。 */
+    public long lastLedgerProjectedSequence(UserPartitionKey partition) {
+        Objects.requireNonNull(partition, "partition");
+        try {
+            byte[] value = database.get(ledgerProjectedKey(partition));
+            return value == null ? 0L : decodeLong(value);
+        } catch (RocksDBException ex) {
+            throw new IllegalStateException("failed to read ledger projected WAL sequence", ex);
+        }
+    }
+
+    /** 账本数据库事务成功后推进独立的账本投影水位，不与命令审计水位共用。 */
+    public void markLedgerProjected(UserPartitionKey partition, long sequence) {
+        Objects.requireNonNull(partition, "partition");
+        ReentrantLock lock = locks.computeIfAbsent(partition, ignored -> new ReentrantLock());
+        lock.lock();
+        try {
+            if (sequence <= 0L || readEvent(partition, sequence).isEmpty()) {
+                throw new IllegalArgumentException("ledger projected WAL event must exist");
+            }
+            long current = lastLedgerProjectedSequence(partition);
+            if (sequence != current + 1L) {
+                throw new IllegalStateException("ledger projected WAL sequence must be continuous: current="
+                        + current + " next=" + sequence);
+            }
+            try {
+                database.put(writeOptions, ledgerProjectedKey(partition), encodeLong(sequence));
+            } catch (RocksDBException ex) {
+                throw new IllegalStateException("failed to mark ledger projected WAL event", ex);
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
     /** 投影水位只能覆盖已经存在的每一条连续事件，损坏或缺口必须停住。 */
     private void requireProjectionRange(UserPartitionKey partition, long first, long last) {
         for (long sequence = first; sequence <= last; sequence++) {
@@ -289,6 +326,10 @@ public final class UserPartitionWal implements AutoCloseable {
 
     private byte[] projectedKey(UserPartitionKey partition) {
         return key(PROJECTED_PREFIX, partition.value());
+    }
+
+    private byte[] ledgerProjectedKey(UserPartitionKey partition) {
+        return key(LEDGER_PROJECTED_PREFIX, partition.value());
     }
 
     private byte[] key(byte[] prefix, String value) {

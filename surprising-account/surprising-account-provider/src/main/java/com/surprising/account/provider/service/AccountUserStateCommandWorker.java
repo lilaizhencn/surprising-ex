@@ -3,6 +3,8 @@ package com.surprising.account.provider.service;
 import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.api.model.AccountCommandStatus;
 import com.surprising.account.api.model.AccountUserCommand;
+import com.surprising.account.api.model.AccountUserCommandType;
+import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountCommandTerminalResult;
@@ -120,7 +122,10 @@ public class AccountUserStateCommandWorker {
                         throw new IllegalStateException("账户命令依赖结果缺失，无法恢复 commandId="
                                 + command.commandId());
                     }
-                    AccountCommandTerminalResult recomputed = toTerminal(recovery);
+                    AccountUserReducerState before = reducer.state(partition)
+                            .orElseThrow(() -> new AccountStateUnavailableException(
+                                    "账户状态快照不存在: " + partition.value()));
+                    AccountCommandTerminalResult recomputed = toTerminal(command, before, recovery);
                     if (!existing.equals(recomputed)) {
                         throw new IllegalStateException("账户命令终态重算不一致 commandId="
                                 + command.commandId());
@@ -136,12 +141,15 @@ public class AccountUserStateCommandWorker {
                 continue;
             }
 
+            AccountUserReducerState before = reducer.state(partition)
+                    .orElseThrow(() -> new AccountStateUnavailableException(
+                            "账户状态快照不存在: " + partition.value()));
             AccountUserStateReducer.Reduction reduction = reduceWithDependency(partition, command, event.sequence());
             if (reduction == null) {
                 // 依赖命令尚未落盘时，本分区不能越过当前命令。
                 break;
             }
-            AccountCommandTerminalResult terminal = toTerminal(reduction);
+            AccountCommandTerminalResult terminal = toTerminal(command, before, reduction);
             // 先保存终态再提交余额和持仓，崩溃后可以重算并补交状态，不会出现不可恢复的中间窗。
             resultStore.put(command.commandId(), serialize(terminal));
             reducer.commit(command, event.sequence(), reduction);
@@ -234,14 +242,101 @@ public class AccountUserStateCommandWorker {
         });
     }
 
-    private AccountCommandTerminalResult toTerminal(AccountUserStateReducer.Reduction reduction) {
+    private AccountCommandTerminalResult toTerminal(AccountUserCommand command,
+                                                    AccountUserReducerState before,
+                                                    AccountUserStateReducer.Reduction reduction) {
         AccountCommandStatus status = switch (reduction.status()) {
             case APPLIED, ALREADY_APPLIED -> AccountCommandStatus.APPLIED;
             case REJECTED -> AccountCommandStatus.REJECTED;
             case UNSUPPORTED -> throw new IllegalStateException("unsupported reducer result");
         };
         return new AccountCommandTerminalResult(status, reduction.resultPayload(), reduction.errorCode(),
-                reduction.errorMessage());
+                reduction.errorMessage(), ledgerDeltas(command, before, reduction));
+    }
+
+    /**
+     * 从 reducer 的前后完整快照计算净权益变更，作为数据库账本的异步输入。
+     *
+     * <p>这里只读取已经在本地单写者中计算好的状态，不重新执行资金规则，也不查询数据库。
+     * 预占、释放和持仓保证金在可用/锁定之间移动但不改变净权益，因此不产生普通净变更行；
+     * 逐仓保证金调整则保留一条以可用余额为基准的审计行。</p>
+     */
+    private List<AccountCommandTerminalResult.LedgerDelta> ledgerDeltas(
+            AccountUserCommand command,
+            AccountUserReducerState before,
+            AccountUserStateReducer.Reduction reduction) {
+        if (reduction.status() != AccountUserStateReducer.ApplyStatus.APPLIED
+                || reduction.nextState() == null) {
+            return List.of();
+        }
+        String referenceType = ledgerReferenceType(command);
+        String referenceId = command.commandId();
+        String symbol = null;
+        java.util.Map<String, Long> beforeEquity = equity(before.snapshot());
+        java.util.Map<String, Long> afterEquity = equity(reduction.nextState().snapshot());
+        java.util.Map<String, Long> beforeAvailable = available(before.snapshot());
+        java.util.Map<String, Long> afterAvailable = available(reduction.nextState().snapshot());
+        if (command.commandType() == AccountUserCommandType.POSITION_MARGIN_ADJUST) {
+            try {
+                PositionMarginAdjustmentRequest request = objectMapper.readValue(
+                        command.payload(), PositionMarginAdjustmentRequest.class);
+                symbol = request.symbol();
+            } catch (Exception ex) {
+                throw new AccountCommandPoisonPillException("逐仓保证金审计负载无法解析", ex);
+            }
+        }
+        java.util.Set<String> assets = new java.util.TreeSet<>();
+        assets.addAll(beforeEquity.keySet());
+        assets.addAll(afterEquity.keySet());
+        List<AccountCommandTerminalResult.LedgerDelta> deltas = new java.util.ArrayList<>();
+        for (String asset : assets) {
+            long amount = Math.subtractExact(afterEquity.getOrDefault(asset, 0L),
+                    beforeEquity.getOrDefault(asset, 0L));
+            long balanceAfter = afterEquity.getOrDefault(asset, 0L);
+            if (command.commandType() == AccountUserCommandType.POSITION_MARGIN_ADJUST) {
+                amount = Math.subtractExact(afterAvailable.getOrDefault(asset, 0L),
+                        beforeAvailable.getOrDefault(asset, 0L));
+                balanceAfter = afterAvailable.getOrDefault(asset, 0L);
+            }
+            if (amount != 0L) {
+                deltas.add(new AccountCommandTerminalResult.LedgerDelta(asset, amount, balanceAfter,
+                        referenceType, referenceId, command.commandType().name(), symbol));
+            }
+        }
+        return List.copyOf(deltas);
+    }
+
+    private String ledgerReferenceType(AccountUserCommand command) {
+        return switch (command.commandType()) {
+            case BALANCE_ADJUST -> "BALANCE_ADJUSTMENT";
+            case PRODUCT_BALANCE_ADJUST -> "PRODUCT_BALANCE_ADJUSTMENT";
+            case FUNDING_SETTLE -> "FUNDING";
+            case TRADE_SIDE_SETTLE -> "TRADE_SETTLEMENT";
+            case POSITION_MARGIN_ADJUST -> "POSITION_MARGIN_ADJUSTMENT";
+            case DELIVERY_SETTLE -> "DELIVERY_SETTLEMENT";
+            case OPTION_EXERCISE -> "OPTION_EXERCISE";
+            case ADL_DEFICIT_RESERVE, ADL_TARGET_SETTLE, ADL_DEFICIT_FINALIZE, ADL_DEFICIT_RELEASE -> "ADL";
+            case INSURANCE_DEFICIT_RESERVE, INSURANCE_DEFICIT_FINALIZE, INSURANCE_DEFICIT_RELEASE -> "INSURANCE";
+            default -> "ACCOUNT_COMMAND";
+        };
+    }
+
+    private java.util.Map<String, Long> equity(
+            com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent snapshot) {
+        java.util.Map<String, Long> values = new java.util.HashMap<>();
+        for (var balance : snapshot.balances()) {
+            values.put(balance.asset(), Math.addExact(balance.availableUnits(), balance.lockedUnits()));
+        }
+        return values;
+    }
+
+    private java.util.Map<String, Long> available(
+            com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent snapshot) {
+        java.util.Map<String, Long> values = new java.util.HashMap<>();
+        for (var balance : snapshot.balances()) {
+            values.put(balance.asset(), balance.availableUnits());
+        }
+        return values;
     }
 
     private byte[] serialize(AccountCommandTerminalResult result) {

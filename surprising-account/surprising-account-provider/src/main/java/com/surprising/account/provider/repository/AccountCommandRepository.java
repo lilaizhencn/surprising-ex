@@ -65,8 +65,8 @@ public class AccountCommandRepository {
         }
     }
 
-    /** 只读取审计表中的终态，账户命令执行器不会调用此方法。 */
-    public Optional<AccountCommandTerminalResult> terminalResult(String commandId) {
+    /** 只供审计终态幂等校验使用，不能暴露给账户命令执行器作为事实来源。 */
+    private Optional<AccountCommandTerminalResult> terminalResult(String commandId) {
         requireCommandId(commandId);
         return jdbcTemplate.query("""
                 SELECT status, result_payload::text AS result_payload, error_code, error_message

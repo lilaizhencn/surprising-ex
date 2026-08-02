@@ -73,6 +73,33 @@ class AccountUserStateReducerTest {
     }
 
     @Test
+    void replayedPublicSnapshotCannotOverwriteLocalReservationAndSettlementIndexes() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-reducer-snapshot-replay-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        try (UserPartitionStateStore store = new UserPartitionStateStore(directory)) {
+            AccountUserStateReducer reducer = new AccountUserStateReducer(
+                    objectMapper, store, new UserPartitionCommandLane());
+            reducer.initialize(snapshot());
+            AccountUserCommand adjustment = command("snapshot-replay-adjust", AccountUserCommandType.BALANCE_ADJUST,
+                    objectMapper.writeValueAsString(new BalanceAdjustmentAccountCommand(
+                            new BalanceAdjustmentRequest(1001L, "USDT", -200L, "snapshot-replay", "测试调整"),
+                            "admin-1", "管理员")));
+            reducer.apply(adjustment, 1L);
+
+            reducer.initialize(new PerpetualAccountStateUpdatedEvent(
+                    PerpetualAccountStateUpdatedEvent.CURRENT_SCHEMA_VERSION, 99L, 99L,
+                    ProductLine.LINEAR_PERPETUAL, 1001L, AccountType.USDT_PERPETUAL.name(),
+                    List.of(new PerpetualAccountStateUpdatedEvent.Balance("USDT", 9_999L, 0L)),
+                    List.of(), List.of(), List.of(), List.of(), PositionMode.ONE_WAY,
+                    Instant.parse("2026-08-02T00:00:00Z"), "replayed-public-snapshot"));
+
+            assertThat(reducer.state(new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L))
+                    .orElseThrow().snapshot().balances())
+                    .containsExactly(new PerpetualAccountStateUpdatedEvent.Balance("USDT", 800L, 0L));
+        }
+    }
+
+    @Test
     void reserveAndReleaseOnlyChangeTheLocalUserStateInOrder() throws Exception {
         Path directory = Files.createTempDirectory("account-state-reducer-");
         ObjectMapper objectMapper = new ObjectMapper();

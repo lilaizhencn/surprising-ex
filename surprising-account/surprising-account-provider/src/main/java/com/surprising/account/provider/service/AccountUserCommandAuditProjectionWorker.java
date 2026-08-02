@@ -37,19 +37,22 @@ public class AccountUserCommandAuditProjectionWorker {
     private final UserPartitionResultStore resultStore;
     private final UserPartitionCommandLane lane;
     private final AccountCommandRepository commandRepository;
+    private final AccountLedgerProjectionService ledgerProjectionService;
 
     public AccountUserCommandAuditProjectionWorker(ObjectMapper objectMapper,
                                                     AccountProperties properties,
                                                     UserPartitionWal wal,
                                                     UserPartitionResultStore resultStore,
                                                     UserPartitionCommandLane lane,
-                                                    AccountCommandRepository commandRepository) {
+                                                    AccountCommandRepository commandRepository,
+                                                    AccountLedgerProjectionService ledgerProjectionService) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.wal = wal;
         this.resultStore = resultStore;
         this.lane = lane;
         this.commandRepository = commandRepository;
+        this.ledgerProjectionService = ledgerProjectionService;
     }
 
     @Scheduled(fixedDelayString = "${surprising.account.wal.projection-delay-ms:25}")
@@ -69,26 +72,52 @@ public class AccountUserCommandAuditProjectionWorker {
         for (UserPartitionEvent event : events) {
             AccountUserCommand command = decode(event);
             String serialized = new String(event.payload(), StandardCharsets.UTF_8);
-            if (event.sequence() > projected) {
-                if (event.sequence() != projected + 1L) {
-                    throw new IllegalStateException("账户审计投影序号断裂 partition=" + partition.value());
-                }
-                commandRepository.projectCommand(command, serialized, Instant.now());
-                wal.markProjected(partition, event.sequence());
-                projected = event.sequence();
+            if (event.sequence() <= projected) {
+                continue;
             }
-            if (commandRepository.terminalResult(command.commandId()).isEmpty()) {
-                terminal(command.commandId()).ifPresent(result -> {
-                    if (result.status() == AccountCommandStatus.APPLIED) {
-                        commandRepository.markApplied(command.commandId(), result.resultPayload(), Instant.now());
-                    } else {
-                        commandRepository.markRejected(command.commandId(), result.resultPayload(), result.errorCode(),
-                                result.errorMessage(), Instant.now());
-                    }
-                });
+            Optional<AccountCommandTerminalResult> localTerminal = terminal(command.commandId());
+            if (event.sequence() != projected + 1L) {
+                throw new IllegalStateException("账户审计投影序号断裂 partition=" + partition.value());
             }
+            commandRepository.projectCommand(command, serialized, Instant.now());
+            if (localTerminal.isEmpty()) {
+                // 本地 reducer 尚未写入终态时不推进审计水位，避免数据库只留下永久 PROCESSING。
+                return null;
+            }
+            AccountCommandTerminalResult result = localTerminal.get();
+            if (result.status() == AccountCommandStatus.APPLIED) {
+                commandRepository.markApplied(command.commandId(), result.resultPayload(), Instant.now());
+            } else {
+                commandRepository.markRejected(command.commandId(), result.resultPayload(), result.errorCode(),
+                        result.errorMessage(), Instant.now());
+            }
+            wal.markProjected(partition, event.sequence());
+            projected = event.sequence();
         }
+        projectLedgerPartition(partition, events);
         return null;
+    }
+
+    /** 账本使用独立投影水位，避免审计水位推进后每轮重复扫描数据库。 */
+    private void projectLedgerPartition(UserPartitionKey partition, List<UserPartitionEvent> events) {
+        long projected = wal.lastLedgerProjectedSequence(partition);
+        for (UserPartitionEvent event : events) {
+            if (event.sequence() <= projected) {
+                continue;
+            }
+            if (event.sequence() != projected + 1L) {
+                throw new IllegalStateException("账户账本投影序号断裂 partition=" + partition.value());
+            }
+            AccountUserCommand command = decode(event);
+            Optional<AccountCommandTerminalResult> terminal = terminal(command.commandId());
+            if (terminal.isEmpty()) {
+                // 终态尚未写入结果库时，账本不能越过当前命令；下一轮继续重试。
+                return;
+            }
+            ledgerProjectionService.project(command, terminal.get(), Instant.now());
+            wal.markLedgerProjected(partition, event.sequence());
+            projected = event.sequence();
+        }
     }
 
     private Optional<AccountCommandTerminalResult> terminal(String commandId) {

@@ -78,6 +78,13 @@ public class AccountUserStateReducer {
             throw new IllegalArgumentException("账户快照不完整");
         }
         UserPartitionKey partition = new UserPartitionKey(snapshot.productLine(), snapshot.userId());
+        Optional<AccountUserReducerState> existing = state(partition);
+        if (existing.isPresent()) {
+            // Kafka 会重放同一用户的历史完整快照。已有本地状态可能已经包含 WAL 中的
+            // 预占、成交指纹和依赖索引，不能用不带这些索引的公共快照覆盖它；本地状态库
+            // 才是该进程的单写者事实源，后续快照只交给其他模块更新 JVM 读模型。
+            return;
+        }
         AccountUserReducerState state = new AccountUserReducerState(snapshot, List.of());
         stateStore.initialize(partition, serialize(state));
         states.putIfAbsent(partition, state);

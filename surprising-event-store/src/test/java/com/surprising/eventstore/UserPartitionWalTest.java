@@ -27,6 +27,9 @@ class UserPartitionWalTest {
             assertThat(wal.lastProjectedSequence(key)).isZero();
             wal.markProjected(key, 1L);
             assertThat(wal.lastProjectedSequence(key)).isEqualTo(1L);
+            assertThat(wal.lastLedgerProjectedSequence(key)).isZero();
+            wal.markLedgerProjected(key, 1L);
+            assertThat(wal.lastLedgerProjectedSequence(key)).isEqualTo(1L);
             assertThat(wal.replay(key)).extracting(UserPartitionEvent::eventId)
                     .containsExactly("cmd-1", "cmd-2");
             assertThat(wal.readEvent(key, "cmd-1")).isPresent()
@@ -36,6 +39,8 @@ class UserPartitionWalTest {
             assertThat(wal.partitions()).containsExactly(key);
             wal.markProjected(key, 2L);
             assertThat(wal.lastProjectedSequence(key)).isEqualTo(2L);
+            wal.markLedgerProjected(key, 2L);
+            assertThat(wal.lastLedgerProjectedSequence(key)).isEqualTo(2L);
             assertThatThrownBy(() -> wal.markProjected(key, 4L))
                     .isInstanceOf(IllegalArgumentException.class);
         }

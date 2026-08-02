@@ -37,6 +37,8 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
   [账户单写者与单用户串行通道](../docs/account-single-writer-command-lane.md)。
 - 账户用户分区执行器只保留命令幂等、顺序、资金守恒和崩溃恢复编排，不在生产热路径构造 JDBC Repository；
   数据库写入由独立异步投影器完成。
+- `account_commands` 审计和 `account_product_ledger_entries` 账本使用独立的 WAL 投影水位；账本投影
+  失败不会推进账本水位，也不会让下一轮重复扫描已经成功的历史明细。
 - 只有在线正确性无法拆分的路径允许多表 Repository，并必须写明 `不可拆原因`：
   余额与亏空的联合锁、余额变更与幂等流水的单语句快速路径、持仓模式切换前的未结算成交检查，
   以及 Redis 最终状态投影。这些路径都禁止复用于后台时间线、财务对账或运营报表。
@@ -79,8 +81,12 @@ account-provider 使用独立的批量 listener factory、32 个 listener lane �
 - maker 用户持仓，方向为 taker 的反方向。
 - 成交中的开仓数量只会把按实际成交价计算出的初始保证金迁移到 `account_position_margins`；委托价改善或市价保护价多冻结的部分会释放回 `availableUnits`。
 - 成交中的平仓数量会按比例把旧持仓保证金从 `lockedUnits` 释放回 `availableUnits`。
-- 平仓产生的已实现盈亏会写入 `account_ledger_entries`，`reference_type = TRADE_PNL`。
-- 每笔成交的 maker/taker 手续费会写入 `account_ledger_entries`，`reference_type = TRADE_FEE`，并保存 `trade_id`、`order_id`、`symbol`、`fee_rate_ppm` 方便对账。
+- 成交、资金费、余额调整和其他已接入命令的净权益变化会随本地终态生成不可变账本增量，由
+  `AccountLedgerProjectionService` 异步写入 `account_product_ledger_entries`；成交手续费和已实现盈亏
+  先在同一用户 reducer 中合并到余额变化，数据库投影不重新计算资金规则。
+- 订单预占、释放以及持仓保证金在可用/锁定之间的转移不产生净权益账本行；逐仓保证金调整会保留带
+  `symbol` 的审计明细。账本投影使用 `(reference_type, reference_id, user_id, account_type, asset)`
+  幂等键，重复投影内容不变，内容冲突直接失败关闭。
 - 如果成交订单是强平订单，account-provider 还会写 `reference_type = LIQUIDATION_FEE` 的强平费流水。扣款按实际可收 collateral 封顶：全仓可使用同结算资产的可用余额和全仓持仓保证金；逐仓只使用该逐仓持仓保证金。收不上的部分不会生成新的 deficit，也不会进入保险基金。
 - 强平费收取成功后会通过 account transactional outbox 发送到 `surprising.<product-segment>.account.liquidation-fee.events.v1`，Kafka key 是结算资产。insurance-provider 消费后按 `tradeId:orderId` 幂等写入 `insurance_fund_ledger(reference_type = LIQUIDATION_FEE)`。
 - 翻仓成交先平旧仓，再把剩余成交数量作为新仓处理。
@@ -178,6 +184,7 @@ admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Use
 - `account_balances`
 - `account_deficits`
 - `account_ledger_entries`
+- `account_product_ledger_entries`
 - `account_admin_balance_adjustments`
 - `account_position_margins`
 - `account_positions`
