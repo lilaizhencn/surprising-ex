@@ -17,11 +17,4 @@ public record LeverageSettingRequest(
         marginMode = MarginMode.defaultIfNull(marginMode);
     }
 
-    public LeverageSettingRequest(long userId,
-                                  String symbol,
-                                  MarginMode marginMode,
-                                  long leveragePpm,
-                                  String reason) {
-        this(userId, ProductLine.LINEAR_PERPETUAL, symbol, marginMode, leveragePpm, reason);
-    }
 }

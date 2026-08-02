@@ -38,8 +38,8 @@ class OrderFeeRepositoryTest {
 
     @Test
     void validatesVipScheduleWithMakerRebate() {
-        FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(null, 1001L, "BTC-USDT",
-                -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip fee tier",
+        FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(null, ProductLine.LINEAR_PERPETUAL,
+                1001L, "BTC-USDT", -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip fee tier",
                 FeeScheduleStatus.ACTIVE, Instant.parse("2026-07-01T00:00:00Z"), null);
 
         OrderFeeRepository.validateSchedule(request);
@@ -47,8 +47,8 @@ class OrderFeeRepositoryTest {
 
     @Test
     void rejectsScheduleWhenMakerRateIsWorseThanTakerRate() {
-        FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(null, 1001L, "BTC-USDT",
-                600L, 500L, FeeScheduleSourceType.USER_OVERRIDE, null, "bad fee",
+        FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(null, ProductLine.LINEAR_PERPETUAL,
+                1001L, "BTC-USDT", 600L, 500L, FeeScheduleSourceType.USER_OVERRIDE, null, "bad fee",
                 FeeScheduleStatus.ACTIVE, Instant.parse("2026-07-01T00:00:00Z"), null);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> OrderFeeRepository.validateSchedule(request))

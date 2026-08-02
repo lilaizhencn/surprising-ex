@@ -85,11 +85,8 @@ public class OrderFeeRepository {
                 Timestamp.from(now), Timestamp.from(now));
     }
 
-    public boolean disableSchedule(long feeScheduleId, Instant now) {
-        return disableSchedule(feeScheduleId, null, now);
-    }
-
     public boolean disableSchedule(long feeScheduleId, ProductLine productLine, Instant now) {
+        requireProductLine(productLine);
         return jdbcTemplate.update("""
                 UPDATE trading_fee_schedules
                    SET status = 'DISABLED',
@@ -98,34 +95,26 @@ public class OrderFeeRepository {
                    AND (CAST(? AS text) IS NULL OR product_line = ?)
                    AND status <> 'DISABLED'
                 """, Timestamp.from(now), feeScheduleId,
-                productLine == null ? null : productLine.name(),
-                productLine == null ? null : productLine.name()) == 1;
-    }
-
-    public Optional<FeeScheduleResponse> findSchedule(long feeScheduleId) {
-        return findSchedule(feeScheduleId, null);
+                productLine.name(), productLine.name()) == 1;
     }
 
     public Optional<FeeScheduleResponse> findSchedule(long feeScheduleId, ProductLine productLine) {
+        requireProductLine(productLine);
         return jdbcTemplate.query("""
                 SELECT *
                   FROM trading_fee_schedules
                  WHERE fee_schedule_id = ?
                    AND (CAST(? AS text) IS NULL OR product_line = ?)
                 """, (rs, rowNum) -> toResponse(rs), feeScheduleId,
-                productLine == null ? null : productLine.name(),
-                productLine == null ? null : productLine.name()).stream().findFirst();
-    }
-
-    public FeeScheduleQueryResponse querySchedules(long userId, String symbol, FeeScheduleStatus status, int limit) {
-        return querySchedules(null, userId, symbol, status, limit);
+                productLine.name(), productLine.name()).stream().findFirst();
     }
 
     public FeeScheduleQueryResponse querySchedules(ProductLine productLine,
                                                    long userId,
                                                    String symbol,
-                                                   FeeScheduleStatus status,
-                                                   int limit) {
+                                                       FeeScheduleStatus status,
+                                                       int limit) {
+        requireProductLine(productLine);
         int normalizedLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
         String normalizedSymbol = emptyToNull(symbol);
         String statusName = status == null ? null : status.name();
@@ -139,20 +128,10 @@ public class OrderFeeRepository {
                  ORDER BY product_line ASC, user_id ASC, symbol ASC NULLS FIRST, effective_time DESC, fee_schedule_id DESC
                  LIMIT ?
                 """, (rs, rowNum) -> toResponse(rs),
-                productLine == null ? null : productLine.name(),
-                productLine == null ? null : productLine.name(),
+                productLine.name(), productLine.name(),
                 userId, userId, normalizedSymbol, normalizedSymbol,
                 statusName, statusName, normalizedLimit);
         return new FeeScheduleQueryResponse(schedules.size(), schedules);
-    }
-
-    public FeeScheduleQueryResponse querySchedulesPage(long userId,
-                                                       String symbol,
-                                                       FeeScheduleStatus status,
-                                                       int limit,
-                                                       String cursor,
-                                                       String sort) {
-        return querySchedulesPage(null, userId, symbol, status, limit, cursor, sort);
     }
 
     public FeeScheduleQueryResponse querySchedulesPage(ProductLine productLine,
@@ -162,14 +141,15 @@ public class OrderFeeRepository {
                                                        int limit,
                                                        String cursor,
                                                        String sort) {
+        requireProductLine(productLine);
         int normalizedLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
         String normalizedSymbol = emptyToNull(symbol);
         String statusName = status == null ? null : status.name();
         AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, SCHEDULE_UPDATED_DESC, SCHEDULE_SORTS);
         AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
         List<Object> args = new ArrayList<>();
-        args.add(productLine == null ? null : productLine.name());
-        args.add(productLine == null ? null : productLine.name());
+        args.add(productLine.name());
+        args.add(productLine.name());
         args.add(userId);
         args.add(userId);
         args.add(normalizedSymbol);
@@ -256,7 +236,14 @@ public class OrderFeeRepository {
     }
 
     private static ProductLine productLine(ProductLine productLine) {
-        return productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        return requireProductLine(productLine);
+    }
+
+    private static ProductLine requireProductLine(ProductLine productLine) {
+        if (productLine == null) {
+            throw new IllegalArgumentException("productLine is required");
+        }
+        return productLine;
     }
 
     private static void validateFeeRate(long feeRatePpm, String field) {

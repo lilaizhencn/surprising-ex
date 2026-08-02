@@ -13,14 +13,4 @@ public record EffectiveTradingFeeResponse(
         String source,
         Instant resolvedAt) {
 
-    public EffectiveTradingFeeResponse(long userId,
-                                       String symbol,
-                                       long instrumentVersion,
-                                       long makerFeeRatePpm,
-                                       long takerFeeRatePpm,
-                                       String source,
-                                       Instant resolvedAt) {
-        this(userId, ProductLine.LINEAR_PERPETUAL, symbol, instrumentVersion, makerFeeRatePpm,
-                takerFeeRatePpm, source, resolvedAt);
-    }
 }

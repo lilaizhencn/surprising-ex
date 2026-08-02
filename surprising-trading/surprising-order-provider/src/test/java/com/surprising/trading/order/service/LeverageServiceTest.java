@@ -29,8 +29,9 @@ class LeverageServiceTest {
         cache.markLeverageSnapshotReady(ProductLine.LINEAR_PERPETUAL);
         LeverageService service = new LeverageService(repository, lookup, cache);
 
-        LeverageSettingResponse response = service.set(new LeverageSettingRequest(1001L, "btc-usdt",
-                MarginMode.ISOLATED, 10_000_000L, "user changed leverage"));
+        LeverageSettingResponse response = service.set(new LeverageSettingRequest(1001L,
+                ProductLine.LINEAR_PERPETUAL, "btc-usdt", MarginMode.ISOLATED, 10_000_000L,
+                "user changed leverage"));
 
         assertThat(response.leveragePpm()).isEqualTo(10_000_000L);
         assertThat(response.source()).isEqualTo("USER");
@@ -47,8 +48,8 @@ class LeverageServiceTest {
         cache.markLeverageSnapshotReady(ProductLine.LINEAR_PERPETUAL);
         LeverageService service = new LeverageService(repository, symbol -> Optional.of(rule(symbol)), cache);
 
-        assertThatThrownBy(() -> service.set(new LeverageSettingRequest(1001L, "BTC-USDT",
-                MarginMode.CROSS, 125_000_000L, "too high")))
+        assertThatThrownBy(() -> service.set(new LeverageSettingRequest(1001L,
+                ProductLine.LINEAR_PERPETUAL, "BTC-USDT", MarginMode.CROSS, 125_000_000L, "too high")))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("max leverage");
     }

@@ -78,15 +78,15 @@ class TradingFeeServiceTest {
         InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
         TradingFeeService service = service(feeRepository, orderRepository, instrumentRuleLookup, null);
         Instant effectiveTime = Instant.parse("2026-07-01T00:00:00Z");
-        FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(null, 1001L, "BTC-USDT",
-                -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip tier",
+        FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(null, ProductLine.LINEAR_PERPETUAL,
+                1001L, "BTC-USDT", -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip tier",
                 FeeScheduleStatus.ACTIVE, effectiveTime, null);
-        FeeScheduleResponse persisted = new FeeScheduleResponse(777L, 1001L, "BTC-USDT",
-                -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip tier",
+        FeeScheduleResponse persisted = new FeeScheduleResponse(777L, ProductLine.LINEAR_PERPETUAL, 1001L,
+                "BTC-USDT", -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip tier",
                 FeeScheduleStatus.ACTIVE, effectiveTime, null, effectiveTime, effectiveTime);
 
         when(orderRepository.nextSequence("fee-schedule")).thenReturn(777L);
-        when(feeRepository.findSchedule(777L)).thenReturn(Optional.of(persisted));
+        when(feeRepository.findSchedule(777L, ProductLine.LINEAR_PERPETUAL)).thenReturn(Optional.of(persisted));
 
         FeeScheduleResponse response = service.upsertSchedule(request);
 

@@ -83,7 +83,7 @@ public class TradingFeeService {
         }
         Instant now = Instant.now();
         orderFeeRepository.upsertSchedule(request, feeScheduleId, now);
-        FeeScheduleResponse response = orderFeeRepository.findSchedule(feeScheduleId)
+        FeeScheduleResponse response = orderFeeRepository.findSchedule(feeScheduleId, request.productLine())
                 .orElseThrow(() -> new IllegalStateException("fee schedule upsert failed: " + feeScheduleId));
         if (eventPublisher != null) {
             eventPublisher.publish(response);
@@ -93,7 +93,7 @@ public class TradingFeeService {
 
     @Transactional
     public FeeScheduleResponse disableSchedule(long feeScheduleId) {
-        return disableSchedule(feeScheduleId, null);
+        return disableSchedule(feeScheduleId, currentProductLine());
     }
 
     @Transactional
@@ -124,7 +124,7 @@ public class TradingFeeService {
     }
 
     public FeeScheduleQueryResponse querySchedules(long userId, String symbol, FeeScheduleStatus status, int limit) {
-        return querySchedules(null, userId, symbol, status, limit);
+        return querySchedules(currentProductLine(), userId, symbol, status, limit);
     }
 
     public FeeScheduleQueryResponse querySchedules(ProductLine productLine,
@@ -143,8 +143,8 @@ public class TradingFeeService {
                                                    int limit,
                                                    String cursor,
                                                    String sort) {
-        return orderFeeRepository.querySchedulesPage(userId, normalizeOptionalSymbol(symbol), status,
-                limit <= 0 ? DEFAULT_LIMIT : limit, cursor, sort);
+        return orderFeeRepository.querySchedulesPage(currentProductLine(), userId, normalizeOptionalSymbol(symbol),
+                status, limit <= 0 ? DEFAULT_LIMIT : limit, cursor, sort);
     }
 
     public FeeScheduleQueryResponse querySchedules(ProductLine productLine,
@@ -170,6 +170,14 @@ public class TradingFeeService {
             throw new IllegalStateException("交易费率服务未配置产品线");
         }
         ProductLineConfiguration.requireSame(properties.getKafka().getProductLine(), requested, "trading fee");
+    }
+
+    private ProductLine currentProductLine() {
+        if (properties == null || properties.getKafka() == null
+                || properties.getKafka().getProductLine() == null) {
+            throw new IllegalStateException("交易费率服务未配置产品线");
+        }
+        return properties.getKafka().getProductLine();
     }
 
     private String normalizeSymbol(String symbol) {
