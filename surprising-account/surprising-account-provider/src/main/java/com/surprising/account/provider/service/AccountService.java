@@ -322,20 +322,6 @@ public class AccountService {
         throw unsupportedLifecycle("期权行权");
     }
 
-    public Optional<PositionResponse> processExpiringPosition(ProductLine productLine,
-                                                               long userId,
-                                                               String commandId,
-                                                               ExpiringPositionSettlementAccountCommand command) {
-        throw unsupportedLifecycle("到期持仓结算");
-    }
-
-    /** 成交只允许由匹配模块发布账户命令，账户服务不再保留同步数据库结算入口。 */
-    public void processTradeSide(ProductLine productLine,
-                                 String commandId,
-                                 com.surprising.account.api.model.TradeSideSettlementCommand command) {
-        throw new IllegalStateException("成交必须通过账户用户分区命令流处理，禁止调用旧同步入口");
-    }
-
     public record UserExpiringSettlementPlan(ProductLine productLine,
                                              long userId,
                                              ExpiringPositionSettlementAccountCommand command) {
