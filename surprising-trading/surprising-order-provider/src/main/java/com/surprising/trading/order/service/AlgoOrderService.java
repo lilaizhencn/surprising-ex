@@ -45,16 +45,19 @@ public class AlgoOrderService {
     private final TradingOrderProperties properties;
     private final OrderService orderService;
     private final OrderUserStateService orderUserStateService;
+    private final OrderUserCommandGateway orderUserCommandGateway;
     private final OrderScheduleIndex scheduleIndex;
 
     @Autowired
     public AlgoOrderService(TradingOrderProperties properties,
                             OrderService orderService,
                             OrderUserStateService orderUserStateService,
-                            OrderScheduleIndex scheduleIndex) {
+                            OrderScheduleIndex scheduleIndex,
+                            OrderUserCommandGateway orderUserCommandGateway) {
         this.properties = properties;
         this.orderService = orderService;
         this.orderUserStateService = orderUserStateService;
+        this.orderUserCommandGateway = orderUserCommandGateway;
         this.scheduleIndex = scheduleIndex;
     }
 
@@ -72,7 +75,7 @@ public class AlgoOrderService {
                 normalized.durationSeconds(), normalized.marginMode(), normalized.positionSide(), normalized.reduceOnly(),
                 normalized.postOnly(), normalized.timeInForce(), AlgoOrderStatus.PENDING, null, null,
                 TraceContext.currentOrCreate(), startAt, startAt, null, now, now);
-        AlgoOrderResponse response = orderUserStateService.placeAlgo(record);
+        AlgoOrderResponse response = orderUserCommandGateway.placeAlgo(record);
         scheduleIndex.synchronizeAlgo(record);
         return response;
     }
@@ -150,7 +153,7 @@ public class AlgoOrderService {
             try {
                 executeDue(record, now);
             } catch (RuntimeException ex) {
-                orderUserStateService.updateAlgo(withStatus(record, AlgoOrderStatus.FAILED, ex.getMessage(),
+                orderUserCommandGateway.updateAlgo(withStatus(record, AlgoOrderStatus.FAILED, ex.getMessage(),
                         null, now, now, record.currentOrderId()));
             }
         }
@@ -160,20 +163,20 @@ public class AlgoOrderService {
         AlgoOrderProgress progress = orderUserStateService.algoProgress(record.userId(), record.algoOrderId());
         if (progress.executedQuantitySteps() >= record.quantitySteps()
                 && progress.activeChildOrderCount() == 0) {
-            orderUserStateService.updateAlgo(withStatus(record, AlgoOrderStatus.COMPLETED, null,
+        orderUserCommandGateway.updateAlgo(withStatus(record, AlgoOrderStatus.COMPLETED, null,
                     null, now, now, record.currentOrderId()));
             scheduleIndex.removeAlgo(record.productLine(), record.algoOrderId());
             return;
         }
         if (progress.activeChildOrderCount() > 0) {
-            orderUserStateService.updateAlgo(withStatus(record, AlgoOrderStatus.RUNNING, null,
+        orderUserCommandGateway.updateAlgo(withStatus(record, AlgoOrderStatus.RUNNING, null,
                     now.plusMillis(properties.getAlgo().getScanDelayMs()), null, now, record.currentOrderId()));
             return;
         }
 
         long remainingTarget = Math.subtractExact(record.quantitySteps(), progress.executedQuantitySteps());
         if (remainingTarget <= 0L) {
-            orderUserStateService.updateAlgo(withStatus(record, AlgoOrderStatus.COMPLETED, null,
+        orderUserCommandGateway.updateAlgo(withStatus(record, AlgoOrderStatus.COMPLETED, null,
                     null, now, now, record.currentOrderId()));
             scheduleIndex.removeAlgo(record.productLine(), record.algoOrderId());
             return;
@@ -182,14 +185,14 @@ public class AlgoOrderService {
         PlaceOrderRequest childRequest = childRequest(record, progress.nextSliceIndex(), childQuantity);
         OrderResponse child = orderService.place(childRequest);
         if (child.status() == OrderStatus.REJECTED) {
-            orderUserStateService.updateAlgo(withStatus(record, AlgoOrderStatus.FAILED, child.rejectReason(),
+        orderUserCommandGateway.updateAlgo(withStatus(record, AlgoOrderStatus.FAILED, child.rejectReason(),
                     null, now, now, null));
             return;
         }
         Instant nextSliceAt = nextSliceAt(record, now);
         AlgoOrderRecord updated = withStatus(record, AlgoOrderStatus.RUNNING, null, nextSliceAt,
                 null, now, child.orderId());
-        orderUserStateService.linkAlgoChild(updated,
+        orderUserCommandGateway.linkAlgoChild(updated,
                 new AlgoOrderChild(record.algoOrderId(), progress.nextSliceIndex(), child.orderId(), childQuantity));
         scheduleIndex.synchronizeAlgo(updated);
     }
@@ -201,7 +204,7 @@ public class AlgoOrderService {
         Instant now = Instant.now();
         AlgoOrderRecord requested = withStatus(record, AlgoOrderStatus.CANCEL_REQUESTED, null,
                 null, null, now, record.currentOrderId());
-        orderUserStateService.updateAlgo(requested);
+        orderUserCommandGateway.updateAlgo(requested);
         for (AlgoOrderChild child : orderUserStateService.algoChildren(record.userId(), record.algoOrderId())) {
             try {
                 orderService.cancel(new CancelOrderRequest(record.userId(), child.orderId()));
@@ -211,7 +214,7 @@ public class AlgoOrderService {
         }
         AlgoOrderRecord canceled = withStatus(requested, AlgoOrderStatus.CANCELED, null,
                 null, now, Instant.now(), record.currentOrderId());
-        orderUserStateService.updateAlgo(canceled);
+        orderUserCommandGateway.updateAlgo(canceled);
         scheduleIndex.removeAlgo(record.productLine(), record.algoOrderId());
         return orderUserStateService.algoResponse(canceled);
     }

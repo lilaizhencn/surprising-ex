@@ -69,6 +69,8 @@ public class TradingOrderProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
+        /** 结果广播消费组的实例唯一标识；每个订单节点必须使用不同值。 */
+        private String clientId = "order-provider-" + java.util.UUID.randomUUID();
         /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
         private ProductLine productLine;
         private boolean productTopicsEnabled;
@@ -84,6 +86,8 @@ public class TradingOrderProperties {
         private String positionMaintenanceGroupId = "surprising-order-position-maintenance-v1";
         private String accountStateSnapshotGroupId = "surprising-order-account-state-v1";
         private int accountCommandResultsConcurrency = 32;
+        private int userCommandConcurrency = 32;
+        private Duration userCommandTimeout = Duration.ofSeconds(5);
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -91,6 +95,13 @@ public class TradingOrderProperties {
 
         public void setBootstrapServers(String bootstrapServers) {
             this.bootstrapServers = bootstrapServers;
+        }
+        public String getClientId() { return clientId; }
+        public void setClientId(String clientId) {
+            if (clientId == null || clientId.isBlank()) {
+                throw new IllegalArgumentException("订单节点 clientId 不能为空");
+            }
+            this.clientId = clientId.trim();
         }
 
         public ProductLine getProductLine() {
@@ -132,12 +143,35 @@ public class TradingOrderProperties {
         public String getAccountCommandResultsTopic() {
             return productTopics().accountCommandResultsTopic();
         }
+        public String getOrderUserCommandsTopic() {
+            return productTopics().orderUserCommandsTopic();
+        }
+        public String getOrderUserCommandResultsTopic() {
+            return productTopics().orderUserCommandResultsTopic();
+        }
+        public String getOrderUserCommandGroupId() {
+            return productTopics().consumerGroup("order-user-state");
+        }
+        public String getOrderUserCommandResultsGroupId() {
+            return productTopics().consumerGroup("order-user-command-results") + "-" + clientId;
+        }
         public String getAccountCommandResultsGroupId() {
             return productTopics().consumerGroup("order-account-results");
         }
         public int getAccountCommandResultsConcurrency() { return accountCommandResultsConcurrency; }
         public void setAccountCommandResultsConcurrency(int accountCommandResultsConcurrency) {
             this.accountCommandResultsConcurrency = Math.max(1, accountCommandResultsConcurrency);
+        }
+        public int getUserCommandConcurrency() { return userCommandConcurrency; }
+        public void setUserCommandConcurrency(int userCommandConcurrency) {
+            this.userCommandConcurrency = Math.max(1, userCommandConcurrency);
+        }
+        public Duration getUserCommandTimeout() { return userCommandTimeout; }
+        public void setUserCommandTimeout(Duration userCommandTimeout) {
+            if (userCommandTimeout == null || userCommandTimeout.isZero() || userCommandTimeout.isNegative()) {
+                throw new IllegalArgumentException("订单用户命令等待时间必须为正数");
+            }
+            this.userCommandTimeout = userCommandTimeout;
         }
         public String getPositionEventsTopic() {
             return productTopics().accountPositionEventsTopic();

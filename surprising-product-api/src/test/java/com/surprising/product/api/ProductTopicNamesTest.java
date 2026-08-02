@@ -38,6 +38,10 @@ class ProductTopicNamesTest {
                 .isEqualTo("surprising.linear-perp.account.user.commands.dlt.v1");
         assertThat(linear.accountCommandResultsTopic())
                 .isEqualTo("surprising.linear-perp.account.command.results.v1");
+        assertThat(linear.orderUserCommandsTopic())
+                .isEqualTo("surprising.linear-perp.order.user.commands.v1");
+        assertThat(linear.orderUserCommandResultsTopic())
+                .isEqualTo("surprising.linear-perp.order.user.command.results.v1");
         assertThat(linear.accountRiskEventsTopic()).isEqualTo("surprising.linear-perp.risk.account.events.v1");
         assertThat(linear.positionRiskEventsTopic()).isEqualTo("surprising.linear-perp.risk.position.events.v1");
         assertThat(linear.liquidationCandidatesTopic())

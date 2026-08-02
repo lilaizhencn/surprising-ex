@@ -53,6 +53,8 @@ class OrderServiceTest {
     private OrderFeeSnapshotLookup feeSnapshotLookup;
     @Mock
     private OrderUserStateService userState;
+    @Mock
+    private OrderUserCommandGateway commandGateway;
 
     @Test
     void placeUsesUserWalAndDoesNotNeedDatabaseState() {
@@ -60,11 +62,11 @@ class OrderServiceTest {
         PlaceOrderRequest request = request("client-1");
         OrderResponse expected = response(901L, request.clientOrderId(), OrderStatus.ACCEPTED);
         when(userState.nextOrderId()).thenReturn(901L);
-        when(userState.place(any(OrderRecord.class))).thenReturn(expected);
+        when(commandGateway.place(any(OrderRecord.class))).thenReturn(expected);
 
         assertThat(service.place(request)).isEqualTo(expected);
 
-        verify(userState).place(any(OrderRecord.class));
+        verify(commandGateway).place(any(OrderRecord.class));
         verify(orderMarginCalculator, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
                 any(), anyLong(), anyLong(), anyLong(), anyLong());
     }
@@ -74,24 +76,24 @@ class OrderServiceTest {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL);
         when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
                 .thenReturn(Optional.empty());
-        when(userState.place(any(OrderRecord.class)))
+        when(commandGateway.place(any(OrderRecord.class)))
                 .thenReturn(response(904L, "no-fee", OrderStatus.REJECTED));
 
         assertThat(service.place(request("no-fee")).status()).isEqualTo(OrderStatus.REJECTED);
-        verify(userState).place(any(OrderRecord.class));
+        verify(commandGateway).place(any(OrderRecord.class));
     }
 
     @Test
     void cancelAndReadCommandsDelegateToLocalUserPartition() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL);
         OrderResponse canceled = response(902L, "cancel-1", OrderStatus.CANCEL_REQUESTED);
-        when(userState.cancel(1001L, 902L, null)).thenReturn(canceled);
+        when(commandGateway.cancel(ProductLine.LINEAR_PERPETUAL, 1001L, 902L, null)).thenReturn(canceled);
         when(userState.get(902L)).thenReturn(canceled);
 
         assertThat(service.cancel(new CancelOrderRequest(1001L, 902L))).isEqualTo(canceled);
         assertThat(service.get(902L)).isEqualTo(canceled);
 
-        verify(userState).cancel(1001L, 902L, null);
+        verify(commandGateway).cancel(ProductLine.LINEAR_PERPETUAL, 1001L, 902L, null);
         verify(userState).get(902L);
     }
 
@@ -99,15 +101,17 @@ class OrderServiceTest {
     void adminCancelUsesLocalPartitionAndProductLine() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL);
         OrderResponse canceled = response(903L, "admin-1", OrderStatus.CANCEL_REQUESTED);
-        when(userState.cancelAdminOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 10,
+        when(commandGateway.cancelOpen(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 10,
                 "admin cancel: risk"))
-                .thenReturn(java.util.List.of(canceled));
+                .thenReturn(new com.surprising.trading.api.model.OrderBatchResponse(1, 1, 0,
+                        java.util.List.of(new com.surprising.trading.api.model.OrderBatchItemResponse(
+                                0, true, "cancel requested", canceled))));
 
         var result = service.adminCancelOrders(new AdminBatchCancelOrdersRequest(
                 1001L, "BTC-USDT", 10, "risk"));
 
         assertThat(result.requested()).isEqualTo(1);
-        verify(userState).cancelAdminOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 10,
+        verify(commandGateway).cancelOpen(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 10,
                 "admin cancel: risk");
     }
 
@@ -134,7 +138,7 @@ class OrderServiceTest {
         when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, 100L, 200L, "JVM")));
         return new OrderService(properties, orderValidator, reduceOnlyValidator, placementStateService,
-                orderMarginCalculator, spotReservationCalculator, feeSnapshotLookup, userState);
+                orderMarginCalculator, spotReservationCalculator, feeSnapshotLookup, userState, commandGateway);
     }
 
     private PlaceOrderRequest request(String clientOrderId) {

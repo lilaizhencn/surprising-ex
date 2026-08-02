@@ -3,6 +3,7 @@ package com.surprising.trading.order.config;
 import com.surprising.eventstore.UserPartitionCommandLane;
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.eventstore.UserPartitionWal;
+import com.surprising.eventstore.UserPartitionResultStore;
 import com.surprising.trading.order.service.OrderIdSequenceStore;
 import com.surprising.trading.order.service.CancelAllAfterLocalStateStore;
 import tools.jackson.databind.ObjectMapper;
@@ -26,6 +27,12 @@ public class OrderWalConfiguration {
         Path directory = Path.of(properties.getWal().getDirectory(),
                 properties.getKafka().getProductLine().name(), "state");
         return new UserPartitionStateStore(directory);
+    }
+
+    @Bean(destroyMethod = "close")
+    public UserPartitionResultStore orderUserPartitionResultStore(TradingOrderProperties properties) {
+        return new UserPartitionResultStore(Path.of(properties.getWal().getDirectory(),
+                properties.getKafka().getProductLine().name(), "results"));
     }
 
     @Bean

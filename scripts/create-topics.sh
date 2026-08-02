@@ -136,6 +136,8 @@ create_product_topics() {
   create_topic_with_partitions "${prefix}.account.user.commands.v1" "${ACCOUNT_COMMAND_PARTITIONS}"
   create_topic_with_partitions "${prefix}.account.user.commands.dlt.v1" "${ACCOUNT_COMMAND_PARTITIONS}"
   create_topic_with_partitions "${prefix}.account.command.results.v1" "${ACCOUNT_COMMAND_PARTITIONS}"
+  create_topic_with_partitions "${prefix}.order.user.commands.v1" "${ACCOUNT_COMMAND_PARTITIONS}"
+  create_topic_with_partitions "${prefix}.order.user.command.results.v1" "${ACCOUNT_COMMAND_PARTITIONS}"
   case "${product_line}" in
     linear-perp|inverse-perp|linear-delivery|inverse-delivery|option)
       create_topic "${prefix}.index.price.v1"

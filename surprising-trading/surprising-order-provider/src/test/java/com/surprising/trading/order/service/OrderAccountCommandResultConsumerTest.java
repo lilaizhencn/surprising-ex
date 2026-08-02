@@ -23,15 +23,16 @@ class OrderAccountCommandResultConsumerTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        OrderService orderService = mock(OrderService.class);
+        OrderUserCommandGateway commandGateway = mock(OrderUserCommandGateway.class);
         OrderAccountCommandResultConsumer consumer =
-                new OrderAccountCommandResultConsumer(objectMapper, properties, orderService);
+                new OrderAccountCommandResultConsumer(objectMapper, properties, commandGateway);
         AccountCommandResultEvent first = result(1L, "ORDER:1", 1001L);
         AccountCommandResultEvent second = result(2L, "ORDER:2", 1002L);
 
         consumer.onResult(List.of(record(consumer, objectMapper, first), record(consumer, objectMapper, second)));
 
-        verify(orderService).processAccountCommandResults(List.of(first, second));
+        verify(commandGateway).forwardAccountResult(first);
+        verify(commandGateway).forwardAccountResult(second);
     }
 
     private ConsumerRecord<String, String> record(OrderAccountCommandResultConsumer consumer,

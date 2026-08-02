@@ -16,24 +16,15 @@ public class OrderAccountCommandResultConsumer {
 
     private final ObjectMapper objectMapper;
     private final TradingOrderProperties properties;
-    private final OrderService orderService;
-    private final OrderUserStateService userStateService;
-
-    public OrderAccountCommandResultConsumer(ObjectMapper objectMapper,
-                                             TradingOrderProperties properties,
-                                             OrderService orderService) {
-        this(objectMapper, properties, orderService, null);
-    }
+    private final OrderUserCommandGateway commandGateway;
 
     @Autowired
     public OrderAccountCommandResultConsumer(ObjectMapper objectMapper,
                                              TradingOrderProperties properties,
-                                             OrderService orderService,
-                                             OrderUserStateService userStateService) {
+                                             OrderUserCommandGateway commandGateway) {
         this.objectMapper = objectMapper;
         this.properties = properties;
-        this.orderService = orderService;
-        this.userStateService = userStateService;
+        this.commandGateway = commandGateway;
     }
 
     @KafkaListener(
@@ -61,10 +52,8 @@ public class OrderAccountCommandResultConsumer {
                 }
                 results.add(result);
             }
-            if (userStateService != null) {
-                userStateService.processAccountCommandResults(results);
-            } else {
-                orderService.processAccountCommandResults(results);
+            for (AccountCommandResultEvent result : results) {
+                commandGateway.forwardAccountResult(result);
             }
         } catch (Exception ex) {
             throw new IllegalStateException("failed to process order account command result batch", ex);

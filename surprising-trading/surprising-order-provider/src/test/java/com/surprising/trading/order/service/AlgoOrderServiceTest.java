@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -139,8 +140,20 @@ class AlgoOrderServiceTest {
         UserPartitionStateStore state = new UserPartitionStateStore(root.resolve("state"));
         OrderUserStateService user = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
                 new UserPartitionCommandLane(), kafka);
+        OrderUserCommandGateway gateway = mock(OrderUserCommandGateway.class);
+        when(gateway.placeAlgo(any())).thenAnswer(invocation ->
+                user.placeAlgo(invocation.getArgument(0, AlgoOrderRecord.class)));
+        doAnswer(invocation -> {
+            user.updateAlgo(invocation.getArgument(0, AlgoOrderRecord.class));
+            return null;
+        }).when(gateway).updateAlgo(any());
+        doAnswer(invocation -> {
+            user.linkAlgoChild(invocation.getArgument(0, AlgoOrderRecord.class),
+                    invocation.getArgument(1, AlgoOrderChild.class));
+            return null;
+        }).when(gateway).linkAlgoChild(any(), any());
         AlgoOrderService service = new AlgoOrderService(properties, orderService, user,
-                OrderScheduleIndex.disabled());
+                OrderScheduleIndex.disabled(), gateway);
         return new Fixture(service, user, wal, state);
     }
 

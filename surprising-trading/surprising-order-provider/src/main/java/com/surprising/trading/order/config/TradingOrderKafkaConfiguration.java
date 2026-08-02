@@ -81,6 +81,30 @@ public class TradingOrderKafkaConfiguration {
         return factory;
     }
 
+    /** 用户订单命令按用户分区串行消费；同一用户不会在两个订单节点同时写 WAL。 */
+    @Bean(name = "orderUserCommandKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String> orderUserCommandKafkaListenerContainerFactory(
+            @Qualifier("orderStateConsumerFactory") ConsumerFactory<String, String> consumerFactory,
+            TradingOrderProperties properties) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory);
+        factory.setConcurrency(properties.getKafka().getUserCommandConcurrency());
+        factory.setBatchListener(true);
+        factory.getContainerProperties().setAckMode(org.springframework.kafka.listener.ContainerProperties.AckMode.BATCH);
+        factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
+        return factory;
+    }
+
+    /** 结果 Topic 每个 HTTP 节点使用独立消费组，保证等待请求能在发起节点完成。 */
+    @Bean(name = "orderUserCommandResultKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String> orderUserCommandResultKafkaListenerContainerFactory(
+            @Qualifier("orderStateConsumerFactory") ConsumerFactory<String, String> consumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory);
+        factory.getContainerProperties().setAckMode(org.springframework.kafka.listener.ContainerProperties.AckMode.RECORD);
+        return factory;
+    }
+
     @Bean(name = "orderMatchResultKafkaListenerContainerFactory")
     public ConcurrentKafkaListenerContainerFactory<String, String> orderMatchResultKafkaListenerContainerFactory(
             @Qualifier("orderStateConsumerFactory") ConsumerFactory<String, String> consumerFactory) {

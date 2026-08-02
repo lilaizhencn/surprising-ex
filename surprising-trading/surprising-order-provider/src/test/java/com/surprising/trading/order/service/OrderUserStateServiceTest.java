@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.eventstore.UserPartitionCommandLane;
 import com.surprising.eventstore.UserPartitionStateStore;
+import com.surprising.eventstore.UserPartitionResultStore;
 import com.surprising.eventstore.UserPartitionWal;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MatchResultEvent;
@@ -17,6 +18,8 @@ import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.OrderUserCommand;
+import com.surprising.trading.api.model.OrderUserCommandType;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
@@ -164,6 +167,36 @@ class OrderUserStateServiceTest {
             assertThatThrownBy(() -> service.processMatchResults(java.util.List.of(invalid)))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("缺少成交事实");
+        }
+    }
+
+    @Test
+    void userCommandResultIsPartitionedAndConflictingPayloadIsRejected() throws Exception {
+        Path root = Files.createTempDirectory("order-user-command-result-");
+        TradingOrderProperties properties = properties();
+        OrderRecord order = order("command-1", 9401L, 10L);
+        try (UserPartitionWal wal = new UserPartitionWal(root.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(root.resolve("state"));
+             UserPartitionResultStore results = new UserPartitionResultStore(root.resolve("results"))) {
+            OrderUserStateService service = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
+                    new UserPartitionCommandLane(), kafka(), null, null, null, results);
+            OrderUserCommand command = new OrderUserCommand(OrderUserCommand.CURRENT_SCHEMA_VERSION,
+                    "ORDER_PLACE:9401", ProductLine.LINEAR_PERPETUAL, order.userId(), OrderUserCommandType.PLACE,
+                    new ObjectMapper().writeValueAsString(order), Instant.now(), null);
+
+            var first = service.executeUserCommand(command);
+            var retry = service.executeUserCommand(command);
+
+            assertThat(retry).isEqualTo(first);
+            assertThat(wal.replay(new com.surprising.eventstore.UserPartitionKey(
+                    ProductLine.LINEAR_PERPETUAL, order.userId()))).hasSize(1);
+            OrderRecord conflicting = orderFor(order.userId(), "command-2", 9402L, 10L);
+            OrderUserCommand conflict = new OrderUserCommand(OrderUserCommand.CURRENT_SCHEMA_VERSION,
+                    command.commandId(), command.productLine(), command.userId(), command.commandType(),
+                    new ObjectMapper().writeValueAsString(conflicting), Instant.now(), null);
+            assertThatThrownBy(() -> service.executeUserCommand(conflict))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("载荷指纹冲突");
         }
     }
 

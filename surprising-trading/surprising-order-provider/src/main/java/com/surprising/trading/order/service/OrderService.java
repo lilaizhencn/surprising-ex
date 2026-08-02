@@ -1,7 +1,6 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
-import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.OrderReservationKind;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
@@ -65,6 +64,7 @@ public class OrderService {
     private final SpotReservationCalculator spotReservationCalculator;
     private final OrderFeeSnapshotLookup feeSnapshotLookup;
     private final OrderUserStateService orderUserStateService;
+    private final OrderUserCommandGateway orderUserCommandGateway;
 
     @Autowired
     public OrderService(TradingOrderProperties properties,
@@ -74,7 +74,8 @@ public class OrderService {
                         OrderMarginCalculator orderMarginCalculator,
                         SpotReservationCalculator spotReservationCalculator,
                         OrderFeeSnapshotLookup feeSnapshotLookup,
-                        OrderUserStateService orderUserStateService) {
+                        OrderUserStateService orderUserStateService,
+                        OrderUserCommandGateway orderUserCommandGateway) {
         this.properties = properties;
         this.orderValidator = orderValidator;
         this.reduceOnlyValidator = reduceOnlyValidator;
@@ -83,6 +84,7 @@ public class OrderService {
         this.spotReservationCalculator = spotReservationCalculator;
         this.feeSnapshotLookup = feeSnapshotLookup;
         this.orderUserStateService = orderUserStateService;
+        this.orderUserCommandGateway = orderUserCommandGateway;
     }
 
     public OrderResponse place(PlaceOrderRequest request) {
@@ -159,7 +161,7 @@ public class OrderService {
                 reservation == null ? null : reservation.accountType().name(),
                 reservation == null ? null : reservation.asset(), reservation == null ? 0L : reservation.reservedUnits(),
                 status, validation.rejectReason(), now, now, 1L);
-        return orderUserStateService.place(order);
+        return orderUserCommandGateway.place(order);
     }
 
     /** 订单事实流只开放已接入本地账户 reducer 的产品线，未接入的产品线必须失败关闭。 */
@@ -292,7 +294,7 @@ public class OrderService {
                 return new AmendOrderResponse(original, existing.get(), false, "replacement order already exists");
             }
         }
-        OrderResponse canceled = orderUserStateService.cancel(original.userId(), original.orderId(),
+        OrderResponse canceled = orderUserCommandGateway.cancel(currentProductLine(), original.userId(), original.orderId(),
                 "order amend replace");
         if (canceled.status() != OrderStatus.CANCEL_REQUESTED && canceled.status() != OrderStatus.CANCELED) {
             throw new IllegalStateException("cancel requested failed for amend: " + canceled.status());
@@ -487,7 +489,7 @@ public class OrderService {
         if (request.userId() <= 0 || request.orderId() <= 0) {
             throw new IllegalArgumentException("userId and orderId must be positive");
         }
-        return orderUserStateService.cancel(request.userId(), request.orderId(), null);
+        return orderUserCommandGateway.cancel(currentProductLine(), request.userId(), request.orderId(), null);
     }
 
     public OrderBatchResponse cancelBatch(BatchCancelOrdersRequest request) {
@@ -518,12 +520,7 @@ public class OrderService {
         }
         String symbol = request.symbol() == null || request.symbol().isBlank()
                 ? null : normalizeSymbol(request.symbol());
-        List<OrderResponse> canceled = orderUserStateService.cancelOpenOrders(request.userId(), symbol, limit);
-        List<OrderBatchItemResponse> results = new ArrayList<>();
-        for (int index = 0; index < canceled.size(); index++) {
-            results.add(new OrderBatchItemResponse(index, true, "cancel requested", canceled.get(index)));
-        }
-        return orderBatchResponse(results);
+        return orderUserCommandGateway.cancelOpen(currentProductLine(), request.userId(), symbol, limit);
     }
 
     public OrderResponse get(long orderId) {
@@ -599,7 +596,10 @@ public class OrderService {
     public AdminCancelOrderResult adminCancelOrder(long orderId, String reason, ProductLine productLine) {
         requireOrderId(orderId);
         ProductLine resolved = productLine == null ? currentProductLine() : productLine;
-        OrderResponse canceled = orderUserStateService.cancelAny(resolved, orderId, adminCancelReason(reason));
+        OrderResponse local = orderUserStateService.findAnyLocal(resolved, orderId)
+                .orElseThrow(() -> new IllegalStateException("订单所属用户分区不在当前节点，不能直接管理撤单: " + orderId));
+        OrderResponse canceled = orderUserCommandGateway.cancel(resolved, local.userId(), orderId,
+                adminCancelReason(reason));
         boolean requested = canceled.status() == OrderStatus.CANCEL_REQUESTED;
         return new AdminCancelOrderResult(canceled.orderId(), canceled.userId(), canceled.symbol(),
                 canceled.status(), requested, requested ? "cancel requested" : "order is already "
@@ -622,9 +622,14 @@ public class OrderService {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
+        if (userId == null) {
+            throw new IllegalStateException("管理员跨用户撤单必须先按用户分区路由，已禁止本地全量扫描");
+        }
         String reason = adminCancelReason(request == null ? null : request.reason());
         ProductLine resolved = productLine == null ? currentProductLine() : productLine;
-        List<OrderResponse> canceled = orderUserStateService.cancelAdminOrders(resolved, userId, symbol, limit, reason);
+        OrderBatchResponse batch = orderUserCommandGateway.cancelOpen(resolved, userId, symbol, limit, reason);
+        List<OrderResponse> canceled = batch.results().stream().filter(OrderBatchItemResponse::success)
+                .map(OrderBatchItemResponse::order).toList();
         List<AdminCancelOrderResult> results = canceled.stream()
                 .map(order -> new AdminCancelOrderResult(order.orderId(), order.userId(), order.symbol(),
                         order.status(), order.status() == OrderStatus.CANCEL_REQUESTED,
@@ -670,8 +675,13 @@ public class OrderService {
      */
     public int requestLifecycleCancellation(String symbol, int limit) {
         String normalizedSymbol = normalizeSymbol(symbol);
-        return orderUserStateService.cancelLifecycleOrders(currentProductLine(), normalizedSymbol, limit,
-                "INSTRUMENT_SETTLING").size();
+        ProductLine line = currentProductLine();
+        int requested = 0;
+        for (long userId : orderUserStateService.localUserIds(line)) {
+            requested += orderUserCommandGateway.cancelOpen(line, userId, normalizedSymbol, limit,
+                    "INSTRUMENT_SETTLING").completed();
+        }
+        return requested;
     }
 
     public boolean hasLifecycleActiveOrders(String symbol) {
@@ -688,7 +698,7 @@ public class OrderService {
         if (event == null || event.productLine() != currentProductLine()) {
             throw new IllegalArgumentException("position event product line does not match order provider");
         }
-        orderUserStateService.pruneReduceOnlyOrders(event, REDUCE_ONLY_PRUNE_REASON);
+        orderUserCommandGateway.pruneReduceOnly(event, REDUCE_ONLY_PRUNE_REASON);
     }
 
     private String adminCancelReason(String reason) {
@@ -716,10 +726,6 @@ public class OrderService {
     private OrderBatchResponse orderBatchResponse(List<OrderBatchItemResponse> results) {
         int completed = (int) results.stream().filter(OrderBatchItemResponse::success).count();
         return new OrderBatchResponse(results.size(), completed, results.size() - completed, results);
-    }
-
-    public void processAccountCommandResults(List<AccountCommandResultEvent> results) {
-        orderUserStateService.processAccountCommandResults(results);
     }
 
     private String reservationCommandId(ProductLine productLine, long orderId) {

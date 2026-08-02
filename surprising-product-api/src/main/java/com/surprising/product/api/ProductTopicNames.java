@@ -112,6 +112,16 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("account.command.results");
     }
 
+    /** 订单用户分区单写入命令 Topic，必须使用 productLine:userId 作为 Kafka key。 */
+    public String orderUserCommandsTopic() {
+        return topic("order.user.commands");
+    }
+
+    /** 订单用户命令终态 Topic，供 HTTP 等同步调用等待结果。 */
+    public String orderUserCommandResultsTopic() {
+        return topic("order.user.command.results");
+    }
+
     public String accountRiskEventsTopic() {
         return topic("risk.account.events");
     }

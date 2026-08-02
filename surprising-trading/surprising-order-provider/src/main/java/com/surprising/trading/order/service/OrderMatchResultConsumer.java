@@ -1,6 +1,7 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.trading.api.model.MatchResultEvent;
+import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import java.util.ArrayList;
 import java.util.List;
@@ -9,20 +10,20 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
-/** 撮合结果直接进入订单用户分区 WAL，数据库读模型不参与订单状态变更。 */
+/** 撮合结果先按参与用户转入订单用户命令 Topic，数据库读模型不参与订单状态变更。 */
 @Service
 public class OrderMatchResultConsumer {
 
     private final ObjectMapper objectMapper;
     private final TradingOrderProperties properties;
-    private final OrderUserStateService stateService;
+    private final OrderUserCommandGateway commandGateway;
 
     public OrderMatchResultConsumer(ObjectMapper objectMapper,
                                     TradingOrderProperties properties,
-                                    OrderUserStateService stateService) {
+                                    OrderUserCommandGateway commandGateway) {
         this.objectMapper = objectMapper;
         this.properties = properties;
-        this.stateService = stateService;
+        this.commandGateway = commandGateway;
     }
 
     @KafkaListener(
@@ -55,7 +56,14 @@ public class OrderMatchResultConsumer {
                 }
                 results.add(result);
             }
-            stateService.processMatchResults(results);
+            for (MatchResultEvent result : results) {
+                commandGateway.forwardMatchResult(result, result.userId());
+                result.trades().stream()
+                        .map(MatchTradeEvent::makerUserId)
+                        .filter(userId -> userId != result.userId())
+                        .distinct()
+                        .forEach(userId -> commandGateway.forwardMatchResult(result, userId));
+            }
         } catch (Exception ex) {
             throw new IllegalStateException("撮合结果写入订单事实流失败", ex);
         }

@@ -12,6 +12,7 @@ import com.surprising.account.api.cache.PerpetualAccountStateSnapshotCache;
 import com.surprising.eventstore.UserPartitionCommandLane;
 import com.surprising.eventstore.UserPartitionEvent;
 import com.surprising.eventstore.UserPartitionKey;
+import com.surprising.eventstore.UserPartitionResultStore;
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.eventstore.UserPartitionWal;
 import com.surprising.product.api.ProductLine;
@@ -23,8 +24,14 @@ import com.surprising.trading.api.model.OrderEvent;
 import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
+import com.surprising.trading.api.model.OrderBatchResponse;
+import com.surprising.trading.api.model.OrderBatchItemResponse;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
+import com.surprising.trading.api.model.OrderUserCommand;
+import com.surprising.trading.api.model.OrderUserCommandResult;
+import com.surprising.trading.api.model.OrderUserCommandStatus;
+import com.surprising.trading.api.model.OrderUserCommandType;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.AlgoOrderChild;
 import com.surprising.trading.order.model.AlgoOrderProgress;
@@ -32,6 +39,10 @@ import com.surprising.trading.order.model.AlgoOrderRecord;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.OrderUserEvent;
 import com.surprising.trading.order.model.OrderUserState;
+import com.surprising.trading.order.model.OrderUserAlgoChildCommand;
+import com.surprising.trading.order.model.OrderUserCancelCommand;
+import com.surprising.trading.order.model.OrderUserCancelOpenCommand;
+import com.surprising.trading.order.model.OrderUserPruneReduceOnlyCommand;
 import com.surprising.trading.api.model.AlgoOrderResponse;
 import com.surprising.trading.api.model.AdminCancelOrdersPreviewResponse;
 import java.nio.charset.StandardCharsets;
@@ -60,8 +71,8 @@ import tools.jackson.databind.ObjectMapper;
  * 订单用户分区的单写者状态机。
  *
  * <p>下单、账户预占结果、撤单和撮合结果都先进入同一个用户 WAL，再由本地状态快照按序应用。
- * Kafka 只承担跨模块通知；数据库不参与订单状态裁决。外部重复消息由 WAL 事件编号和状态机
- * 的 appliedEventIds 双重幂等。</p>
+ * Kafka 用户命令 Topic 负责跨节点分区路由，数据库不参与订单状态裁决。外部重复消息由
+ * WAL 事件编号、结果库和状态机的 appliedEventIds 三重幂等。</p>
  */
 @Service
 public class OrderUserStateService {
@@ -72,6 +83,7 @@ public class OrderUserStateService {
     private final TradingOrderProperties properties;
     private final UserPartitionWal wal;
     private final UserPartitionStateStore stateStore;
+    private final UserPartitionResultStore resultStore;
     private final UserPartitionCommandLane lane;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final PerpetualAccountStateSnapshotCache accountStateSnapshotCache;
@@ -86,7 +98,7 @@ public class OrderUserStateService {
                                  UserPartitionStateStore stateStore,
                                  UserPartitionCommandLane lane,
                                  KafkaTemplate<String, String> kafkaTemplate) {
-        this(objectMapper, properties, wal, stateStore, lane, kafkaTemplate, null, null, null);
+        this(objectMapper, properties, wal, stateStore, lane, kafkaTemplate, null, null, null, null);
     }
 
     @Autowired
@@ -98,11 +110,13 @@ public class OrderUserStateService {
                                  KafkaTemplate<String, String> kafkaTemplate,
                                  @Nullable PerpetualAccountStateSnapshotCache accountStateSnapshotCache,
                                  @Nullable OrderIdSequenceStore orderIdSequenceStore,
-                                 @Nullable OrderMarginSnapshotCache marginSnapshotCache) {
+                                 @Nullable OrderMarginSnapshotCache marginSnapshotCache,
+                                 @Nullable UserPartitionResultStore resultStore) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.wal = wal;
         this.stateStore = stateStore;
+        this.resultStore = resultStore;
         this.lane = lane;
         this.kafkaTemplate = kafkaTemplate;
         this.accountStateSnapshotCache = accountStateSnapshotCache;
@@ -120,7 +134,7 @@ public class OrderUserStateService {
                                  @Nullable PerpetualAccountStateSnapshotCache accountStateSnapshotCache,
                                  @Nullable OrderIdSequenceStore orderIdSequenceStore) {
         this(objectMapper, properties, wal, stateStore, lane, kafkaTemplate,
-                accountStateSnapshotCache, orderIdSequenceStore, null);
+                accountStateSnapshotCache, orderIdSequenceStore, null, null);
     }
 
     /** 订单编号不依赖数据库序列；低两位预留给同一订单的命令编号。 */
@@ -151,6 +165,126 @@ public class OrderUserStateService {
             throw new IllegalStateException("订单编号溢出");
         }
         return value;
+    }
+
+    /**
+     * 用户命令消费者的本地执行入口。
+     *
+     * <p>只有该入口可以把跨节点命令转换成当前用户 WAL 事实。结果先保存到本地结果库，再
+     * 由消费者发布到结果 Topic；相同命令重放时直接返回原终态，不会再次冻结资金或推进订单。</p>
+     */
+    public OrderUserCommandResult executeUserCommand(OrderUserCommand command) {
+        if (command == null || command.productLine() != properties.getKafka().getProductLine()) {
+            throw new IllegalArgumentException("订单用户命令产品线不匹配");
+        }
+        UserPartitionKey partition = new UserPartitionKey(command.productLine(), command.userId());
+        if (resultStore == null) {
+            throw new IllegalStateException("订单用户命令结果库尚未配置");
+        }
+        return lane.execute(partition, () -> {
+            OrderUserCommandResult existing = readCommandResult(partition, command.commandId()).orElse(null);
+            if (existing != null) {
+                if (!commandFingerprint(command).equals(existing.commandFingerprint())) {
+                    throw new IllegalStateException("订单用户命令编号与载荷指纹冲突: " + command.commandId());
+                }
+                return existing;
+            }
+            String payload;
+            switch (command.commandType()) {
+                case PLACE -> {
+                    OrderRecord order = readPayload(command.payload(), OrderRecord.class);
+                    requireCommandIdentity(command, order.productLine(), order.userId());
+                    payload = objectMapper.writeValueAsString(place(order));
+                }
+                case CANCEL -> {
+                    OrderUserCancelCommand cancel = readPayload(command.payload(), OrderUserCancelCommand.class);
+                    payload = objectMapper.writeValueAsString(cancel(command.userId(),
+                            cancel.orderId(), cancel.reason()));
+                }
+                case CANCEL_OPEN -> {
+                    OrderUserCancelOpenCommand cancel = readPayload(command.payload(), OrderUserCancelOpenCommand.class);
+                    List<OrderResponse> canceled = cancelOpenOrders(command.userId(), cancel.symbol(), cancel.limit(),
+                            cancel.reason());
+                    List<OrderBatchItemResponse> items = new ArrayList<>(canceled.size());
+                    for (int index = 0; index < canceled.size(); index++) {
+                        items.add(new OrderBatchItemResponse(index, true, "cancel requested", canceled.get(index)));
+                    }
+                    payload = objectMapper.writeValueAsString(new OrderBatchResponse(items.size(), items.size(), 0,
+                            items));
+                }
+                case PRUNE_REDUCE_ONLY -> {
+                    OrderUserPruneReduceOnlyCommand prune =
+                            readPayload(command.payload(), OrderUserPruneReduceOnlyCommand.class);
+                    requireCommandIdentity(command, prune.position().productLine(), prune.position().userId());
+                    int requested = pruneReduceOnlyOrders(prune.position(), prune.reason());
+                    payload = objectMapper.writeValueAsString(java.util.Map.of("requested", requested));
+                }
+                case ALGO_PLACE -> {
+                    AlgoOrderRecord order = readPayload(command.payload(), AlgoOrderRecord.class);
+                    requireCommandIdentity(command, order.productLine(), order.userId());
+                    payload = objectMapper.writeValueAsString(placeAlgo(order));
+                }
+                case ALGO_UPDATE -> {
+                    AlgoOrderRecord order = readPayload(command.payload(), AlgoOrderRecord.class);
+                    requireCommandIdentity(command, order.productLine(), order.userId());
+                    updateAlgo(order);
+                    payload = objectMapper.writeValueAsString(algoResponse(order));
+                }
+                case ALGO_CHILD -> {
+                    OrderUserAlgoChildCommand child = readPayload(command.payload(), OrderUserAlgoChildCommand.class);
+                    requireCommandIdentity(command, child.order().productLine(), child.order().userId());
+                    linkAlgoChild(child.order(), child.child());
+                    payload = objectMapper.writeValueAsString(algoResponse(child.order()));
+                }
+                case ACCOUNT_RESULT -> {
+                    AccountCommandResultEvent result = readPayload(command.payload(), AccountCommandResultEvent.class);
+                    requireCommandIdentity(command, result.productLine(), result.userId());
+                    processAccountCommandResultForUser(result);
+                    payload = objectMapper.writeValueAsString(java.util.Map.of("applied", true));
+                }
+                case MATCH_RESULT -> {
+                    MatchResultEvent result = readPayload(command.payload(), MatchResultEvent.class);
+                    processMatchResultForUser(command.userId(), result);
+                    payload = objectMapper.writeValueAsString(java.util.Map.of("applied", true));
+                }
+                default -> throw new IllegalStateException("未知订单用户命令: " + command.commandType());
+            }
+            OrderUserCommandResult terminal = new OrderUserCommandResult(
+                    OrderUserCommandResult.CURRENT_SCHEMA_VERSION, command.commandId(), command.productLine(),
+                    command.userId(), command.commandType(), commandFingerprint(command),
+                    OrderUserCommandStatus.APPLIED, payload,
+                    null, null, Instant.now(), command.traceId());
+            resultStore.put(partition, command.commandId(), serialize(terminal));
+            return terminal;
+        });
+    }
+
+    private <T> T readPayload(String payload, Class<T> type) {
+        try {
+            return objectMapper.readValue(payload, type);
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("订单用户命令载荷无法解析: " + type.getSimpleName(), ex);
+        }
+    }
+
+    private void requireCommandIdentity(OrderUserCommand command, ProductLine productLine, long userId) {
+        if (productLine != command.productLine() || userId != command.userId()) {
+            throw new IllegalArgumentException("订单用户命令载荷分区与命令不一致");
+        }
+    }
+
+    private Optional<OrderUserCommandResult> readCommandResult(UserPartitionKey partition, String commandId) {
+        return resultStore.read(partition, commandId).map(bytes -> readPayload(
+                new String(bytes, StandardCharsets.UTF_8), OrderUserCommandResult.class));
+    }
+
+    private String commandFingerprint(OrderUserCommand command) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(
+                    serialize(command)));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 不可用", ex);
+        }
     }
 
     public OrderResponse place(OrderRecord order) {
@@ -571,6 +705,23 @@ public class OrderUserStateService {
         throw new IllegalStateException("订单不存在: " + orderId);
     }
 
+    /** 只读地查找当前节点拥有的订单分区；管理写操作随后仍必须回到用户命令 Topic。 */
+    public Optional<OrderResponse> findAnyLocal(ProductLine productLine, long orderId) {
+        requireCurrentProductLine(productLine);
+        return orderedPartitions(productLine).stream()
+                .map(partition -> lane.execute(partition, () -> stateAfterApply(partition).orders().stream()
+                        .filter(order -> order.orderId() == orderId)
+                        .findFirst().map(this::toResponse)))
+                .flatMap(Optional::stream)
+                .findFirst();
+    }
+
+    /** 返回当前节点本地持有的用户分区，供生命周期任务逐用户投递命令。 */
+    public List<Long> localUserIds(ProductLine productLine) {
+        requireCurrentProductLine(productLine);
+        return orderedPartitions(productLine).stream().map(UserPartitionKey::userId).distinct().toList();
+    }
+
     public OrderResponse getByClientOrderId(long userId, String clientOrderId) {
         return findByClientOrderId(userId, clientOrderId)
                 .orElseThrow(() -> new IllegalStateException("order not found for clientOrderId: " + clientOrderId));
@@ -689,6 +840,10 @@ public class OrderUserStateService {
     }
 
     public List<OrderResponse> cancelOpenOrders(long userId, String symbol, int limit) {
+        return cancelOpenOrders(userId, symbol, limit, "USER_CANCEL_ALL");
+    }
+
+    private List<OrderResponse> cancelOpenOrders(long userId, String symbol, int limit, String reason) {
         UserPartitionKey partition = partition(properties.getKafka().getProductLine(), userId);
         return lane.execute(partition, () -> {
             applyPartition(partition);
@@ -702,7 +857,7 @@ public class OrderUserStateService {
                     .toList();
             List<OrderResponse> responses = new ArrayList<>(orders.size());
             for (OrderRecord order : orders) {
-                append(partition, OrderUserEvent.cancel(order.orderId(), "USER_CANCEL_ALL"));
+                append(partition, OrderUserEvent.cancel(order.orderId(), reason));
             }
             applyPartition(partition);
             for (OrderRecord order : orders) {
@@ -724,13 +879,23 @@ public class OrderUserStateService {
             }
             requireCurrentProductLine(result.productLine());
             validateAccountResultIdentity(result);
-            UserPartitionKey partition = partition(result.productLine(), result.userId());
-            lane.execute(partition, () -> {
-                append(partition, OrderUserEvent.accountResult(result));
-                applyPartition(partition);
-                return null;
-            });
+            processAccountCommandResultForUser(result);
         }
+    }
+
+    /** 账户结果已经位于用户命令单写入入口后，只允许在当前分区 lane 中追加一次事实。 */
+    public void processAccountCommandResultForUser(AccountCommandResultEvent result) {
+        if (result == null) {
+            throw new IllegalArgumentException("账户结果不能为空");
+        }
+        requireCurrentProductLine(result.productLine());
+        validateAccountResultIdentity(result);
+        UserPartitionKey partition = partition(result.productLine(), result.userId());
+        lane.execute(partition, () -> {
+            append(partition, OrderUserEvent.accountResult(result));
+            applyPartition(partition);
+            return null;
+        });
     }
 
     /** 账户结果只能确认订单事实流为该订单生成的那一条预占命令。 */
@@ -764,6 +929,15 @@ public class OrderUserStateService {
                 }
             }
         }
+    }
+
+    /** 只把撮合结果应用到已经由用户命令 Topic 路由到的目标分区。 */
+    public void processMatchResultForUser(long userId, MatchResultEvent result) {
+        if (result == null || userId <= 0L) {
+            throw new IllegalArgumentException("撮合结果用户分区参数无效");
+        }
+        validateMatchResult(result);
+        appendMatch(userId, result);
     }
 
     private void appendMatch(long userId, MatchResultEvent result) {
