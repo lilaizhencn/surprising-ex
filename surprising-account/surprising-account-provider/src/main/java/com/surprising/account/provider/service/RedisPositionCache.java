@@ -21,8 +21,8 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * Redis-only user position read model.
  *
- * <p>All three hashes use the same Redis Cluster hash tag. The Lua script compares the PostgreSQL
- * revision and atomically updates position, collateral, and revision values.</p>
+ * <p>All three hashes use the same Redis Cluster hash tag. The Lua script compares the账户 JVM
+ * 快照修订号并原子更新持仓、抵押品和修订号；Redis 丢失后可由 Kafka 持仓事件重放。</p>
  */
 @Component
 public class RedisPositionCache {

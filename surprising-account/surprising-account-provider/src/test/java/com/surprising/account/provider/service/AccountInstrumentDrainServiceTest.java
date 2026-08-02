@@ -59,13 +59,19 @@ class AccountInstrumentDrainServiceTest {
     }
 
     @Test
-    void rejectsUnsupportedProductLineWithoutDatabaseFallback() {
+    void deliveryUsesTheSameLocalFactDrainWithoutDatabaseFallback() {
         try (UserPartitionStateStore stateStore = new UserPartitionStateStore(directory.resolve("state"));
              UserPartitionWal wal = new UserPartitionWal(directory.resolve("wal"))) {
-            assertThatThrownBy(() -> service(stateStore, wal, kafkaTemplate(), ProductLine.LINEAR_DELIVERY)
-                    .confirmReleased(orderReady(ProductLine.LINEAR_DELIVERY)))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("禁止数据库生命周期核对");
+            KafkaTemplate<String, String> kafkaTemplate = kafkaTemplate();
+            when(kafkaTemplate.send(any(String.class), any(String.class), any(String.class)))
+                    .thenReturn(CompletableFuture.completedFuture(null));
+
+            service(stateStore, wal, kafkaTemplate, ProductLine.LINEAR_DELIVERY)
+                    .confirmReleased(orderReady(ProductLine.LINEAR_DELIVERY));
+
+            verify(kafkaTemplate).send(
+                    org.mockito.ArgumentMatchers.eq("surprising.instrument.lifecycle-drain.v1"),
+                    org.mockito.ArgumentMatchers.eq("BTC-USDT"), any(String.class));
         }
     }
 

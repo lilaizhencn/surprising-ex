@@ -73,7 +73,7 @@ public class AccountUserCommandAuditProjectionWorker {
                 if (event.sequence() != projected + 1L) {
                     throw new IllegalStateException("账户审计投影序号断裂 partition=" + partition.value());
                 }
-                commandRepository.register(command, serialized, Instant.now());
+                commandRepository.projectCommand(command, serialized, Instant.now());
                 wal.markProjected(partition, event.sequence());
                 projected = event.sequence();
             }

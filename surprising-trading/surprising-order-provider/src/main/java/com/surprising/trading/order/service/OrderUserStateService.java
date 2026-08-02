@@ -360,7 +360,7 @@ public class OrderUserStateService {
 
     private void validateMarginModeInPartition(OrderUserState current, OrderRecord order) {
         if (order.status() == OrderStatus.REJECTED
-                || order.productLine() != ProductLine.LINEAR_PERPETUAL) {
+                || !order.productLine().supportsUserPositionMarginFlow()) {
             return;
         }
         var normalized = com.surprising.trading.api.model.MarginMode.defaultIfNull(order.marginMode());

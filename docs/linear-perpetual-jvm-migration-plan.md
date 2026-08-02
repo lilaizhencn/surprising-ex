@@ -6,7 +6,7 @@
 
 ## 1. 目标和不可突破的边界
 
-本计划只切换 `LINEAR_PERPETUAL`，现货、交割和期权继续使用各自的账户、风险、撮合和 Topic。永续切换完成后，交易热路径的可变资金事实由账户单写者维护，其他模块只提交命令或消费事件，不得直接修改账户事实。
+本文是永续迁移过程的历史记录。当前订单与账户已统一使用产品线隔离的用户分区 WAL/RocksDB 和 JVM 快照；现货、永续、交割和期权共用顺序/幂等边界，只有结算规则保持产品线专属。文中旧的数据库事务、锁和 outbox 仅用于说明迁移前风险，不得作为新增热路径设计。
 
 必须保证：
 
@@ -16,18 +16,18 @@
 - 数据库成为异步投影、审计、恢复和对账存储后，仍必须按事件版本幂等写入，不能出现第二个可写事实源。
 - 永续的资金费、标记价、指数价、风险、强平、ADL 和保险基金均按 `LINEAR_PERPETUAL` 独立隔离。
 
-迁移期间不能一次性删除恢复、审计和投影 Repository；每个热路径切换都要经过顺序、幂等、资金守恒和崩溃恢复验证后才能关闭旧路径。
+恢复、审计和投影 Repository 仍可保留，但只能由启动恢复、异步投影、查询和对账调用；订单与账户在线命令不得重新调用它们。
 
 ## 2. 当前实现盘点
 
 ### 2.1 账户和持仓
 
-当前账户命令由 [`AccountUserCommandProcessor`](../surprising-account/surprising-account-provider/src/main/java/com/surprising/account/provider/service/AccountUserCommandProcessor.java) 在一个 PostgreSQL 事务中处理，先注册 `account_commands`，再调用 `AccountService`、`AccountSettlementService` 和各 Repository 修改余额、保证金、持仓、账本和未平仓量。单用户 Kafka key 已经是 `LINEAR_PERPETUAL:userId`，这是后续单写者的基础。
+当前账户命令由 [`AccountUserStateCommandWorker`](../surprising-account/surprising-account-provider/src/main/java/com/surprising/account/provider/service/AccountUserStateCommandWorker.java) 按产品线和用户分区读取 WAL，使用本地 reducer 修改余额、保证金、持仓和结果库。`account_commands` 只保存异步审计副本，单用户 Kafka key 为 `<PRODUCT_LINE>:<userId>`。
 
 账户单写者只生成 `account.state.events.v1` 完整状态事件。风险服务从同一事件中的余额、欠款、持仓保证金
 和订单冻结计算钱包，并通过 JVM/Redis 风险组消费；风险实时路径缺失快照时失败关闭，不再回查账户库。
 
-成交侧由 [`AccountService`](../surprising-account/surprising-account-provider/src/main/java/com/surprising/account/provider/service/AccountService.java) 依次执行锁仓、盈亏、保证金、手续费、仓位更新和结算侧完成记录。`PositionUpdatedEvent` 当前由 `AccountOutboxService` 读取数据库事务内最终快照后写入 outbox，revision 来自 PostgreSQL。
+成交侧由 [`AccountService`](../surprising-account/surprising-account-provider/src/main/java/com/surprising/account/provider/service/AccountService.java) 构造命令，账户 reducer 依次执行锁仓、盈亏、保证金、手续费和仓位更新；`PositionUpdatedEvent` 由本地账户状态提交后发布 Kafka，revision 来自账户用户分区。
 
 ### 2.2 Redis 持仓投影
 
@@ -120,7 +120,7 @@ Redis 是查询投影，不应承担资金条件判断。迁移后保留 Redis �
 
 改动：
 
-- JVM 单写者与当前 PostgreSQL 事务并行计算，但只有旧路径写入正式结果。
+- JVM 单写者直接写入本地事实状态，数据库只接收异步投影。
 - 比较余额、冻结、保证金、仓位数量、开仓价、已实现盈亏、手续费、资金费、未平仓量和账本流水。
 - 对差异保存完整 command/event/revision 上下文，不允许自动修正资金。
 
@@ -175,7 +175,7 @@ Redis 是查询投影，不应承担资金条件判断。迁移后保留 Redis �
 改动：
 
 - 强平模块消费持仓事件和风险事件，维护本地持仓、保证金和风险状态。
-- `LiquidationService` 移除实时 `account_positions FOR UPDATE`、风险快照 JOIN 和数据库标记价回退。
+- `LiquidationService` 的后续改造必须保持只读 JVM 快照和版本命令边界，不得重新增加实时 `account_positions FOR UPDATE`、风险快照 JOIN 或数据库标记价回退。
 - `LiquidationCandidateEvent` 增加候选对应的持仓版本、风险版本、行情序列和预期数量。
 - Redis 队列只做优先级、租约和重试；最终动作发送带版本条件的 reduce-only 账户命令。
 - 账户单写者再次校验持仓版本和数量，不一致时取消旧候选并等待新风险事件。
@@ -331,7 +331,7 @@ PRODUCT_LINES=LINEAR_PERPETUAL ./scripts/product-line-funds-reconcile.sh
 - 风险 JVM 组以账户完整快照和持仓事件为输入，Redis 仅做跨节点租约/协调/恢复；实时计算不调用 `RiskRepository.cachedRiskGroup`。
 - 风险事件必须走可靠 outbox，不能只依赖异步 `KafkaTemplate.send` 的日志回调；强平消费组必须能从事件恢复风险状态。
 - 标记价、指数价必须带 `sequence`、`instrumentVersion`、事件时间和最大年龄；价格缺失或过期时停止产生强平候选。
-- 强平候选保存 `positionRevision`、`riskRevision`、`markSequence`、预期数量和账户版本。当前阶段保留数据库 claim 与 `FOR UPDATE`；版本栅栏上线并完成演练后才删除实时风险 JOIN。
+- 强平候选保存 `positionRevision`、`riskRevision`、`markSequence`、预期数量和账户版本；数据库 claim 只作为跨节点协调和审计，最终动作必须发送带版本条件的账户命令。
 - 强平最终发账户命令，账户单写者原子校验持仓版本/数量/风险状态；校验失败只取消旧候选，不允许猜测新数量。
 
 门禁：价格断流、持仓先被主动平仓、重复候选、多节点租约丢失、Redis 清空和强平节点重启均不重复平仓、不漏平仓。

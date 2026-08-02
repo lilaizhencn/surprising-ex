@@ -3,6 +3,7 @@ package com.surprising.account.provider.service;
 import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.api.model.AccountCommandStatus;
 import com.surprising.account.api.model.AccountUserCommand;
+import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountCommandTerminalResult;
 import com.surprising.eventstore.UserPartitionCommandLane;
@@ -268,15 +269,62 @@ public class AccountUserStateCommandWorker {
 
     /**
      * 状态快照必须先于账户命令结果发布，其他模块才能按同一修订号更新 JVM 缓存。
-     * 发送失败时不保存终态结果，下一轮会按相同 eventId 重试；消费者按修订号幂等。
+     * 发布失败时保留本地终态和状态序号，下一轮会按相同 eventId 重试；消费者按修订号幂等。
      */
     private void publishStateSnapshot(com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent snapshot) {
         try {
             kafkaTemplate.send(properties.getKafka().getAccountStateEventsTopic(), snapshot.partitionKey(),
                     objectMapper.writeValueAsString(snapshot)).get(3L, TimeUnit.SECONDS);
+            publishPositionSnapshots(snapshot);
         } catch (Exception ex) {
             throw new KafkaException("账户状态快照发布失败 userId=" + snapshot.userId()
                     + " revision=" + snapshot.accountRevision(), ex);
+        }
+    }
+
+    /**
+     * 从同一份账户 canonical 快照派生持仓事件。
+     *
+     * <p>持仓事件与账户状态快照共用用户分区 key 和账户修订号，不能再从数据库拼装。状态
+     * 快照发布成功后才发布持仓事件；任一步失败都会保留本地结果并在下一轮按相同内容重发，
+     * 下游按修订号幂等。</p>
+     */
+    private void publishPositionSnapshots(
+            com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent snapshot) throws Exception {
+        for (com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent.Position position
+                : snapshot.positions()) {
+            if (position.instrumentVersion() <= 0L) {
+                // 尚未有过有效合约版本的空仓不需要向持仓读模型发布事件。
+                continue;
+            }
+            var margin = snapshot.positionMargins().stream()
+                    .filter(value -> value.symbol().equalsIgnoreCase(position.symbol()))
+                    .filter(value -> value.marginMode() == position.marginMode())
+                    .filter(value -> value.positionSide() == position.positionSide())
+                    .findFirst();
+            PositionUpdatedEvent event = new PositionUpdatedEvent(
+                    PositionUpdatedEvent.CURRENT_SCHEMA_VERSION,
+                    snapshot.eventId(),
+                    0L,
+                    snapshot.productLine(),
+                    snapshot.accountRevision(),
+                    snapshot.userId(),
+                    position.symbol(),
+                    position.instrumentVersion(),
+                    position.marginMode(),
+                    position.positionSide(),
+                    position.signedQuantitySteps(),
+                    position.entryPriceTicks(),
+                    position.entryValueTicks(),
+                    position.realizedPnlUnits(),
+                    margin.map(value -> value.asset()).orElse(""),
+                    margin.map(value -> value.marginUnits()).orElse(0L),
+                    position.updatedAt(),
+                    position.updatedAt(),
+                    snapshot.eventTime(),
+                    snapshot.traceId());
+            kafkaTemplate.send(properties.getKafka().getPositionEventsTopic(), event.partitionKey(),
+                    objectMapper.writeValueAsString(event)).get(3L, TimeUnit.SECONDS);
         }
     }
 }

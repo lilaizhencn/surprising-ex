@@ -11,8 +11,8 @@
 | --- | --- | --- | --- | --- | --- |
 | 现货 | `SPOT` | `SPOT` | `SPOT` | `surprising.spot.*.v1` | 已接入下单、撮合、资产互换、冻结释放、产品账户流水 |
 | U 本位永续 | `LINEAR_PERPETUAL` | `USDT_PERPETUAL` | `LINEAR_PERPETUAL` | `surprising.linear-perp.*.v1` | 已接入保证金、资金费、风控、强平、保险基金、ADL |
-| U 本位交割 | `LINEAR_DELIVERY` | `USDT_DELIVERY` | `LINEAR_DELIVERY` | `surprising.linear-delivery.*.v1` | 已接入交割 instrument、独立撮合链路、现金交割事件和持仓归零 |
-| 欧式期权 | `OPTION` | `OPTION` | `VANILLA_OPTION` | `surprising.option.*.v1` | 已接入期权 instrument、权利金/保证金账户链路、欧式自动行权事件和持仓归零 |
+| U 本位交割 | `LINEAR_DELIVERY` | `USDT_DELIVERY` | `LINEAR_DELIVERY` | `surprising.linear-delivery.*.v1` | 已接入产品线隔离、Instrument 和基础订单边界；交割价确认、结算命令仍需单独验收 |
+| 欧式期权 | `OPTION` | `OPTION` | `VANILLA_OPTION` | `surprising.option.*.v1` | 已接入产品线隔离和 Instrument 生命周期事件；权利金、行权和期权 reducer 仍未开放热路径 |
 
 `INVERSE_PERPETUAL` 和 `INVERSE_DELIVERY` 的枚举、账户类型和 topic 映射已经保留，当前 smoke 主覆盖集中在 `SPOT`、`LINEAR_PERPETUAL`、`LINEAR_DELIVERY`、`OPTION` 四条线。
 
@@ -35,14 +35,12 @@ LINEAR_PERPETUAL:
   -> funding
 
 LINEAR_DELIVERY:
-  trading-entry/order-provider -> matching-provider -> account derivative settlement
-  -> margin-ops/risk -> liquidation -> insurance -> adl
-  -> delivery settlement event
+  trading-entry/order-provider -> matching-provider -> account derivative settlement（基础链路）
+  -> 交割价确认 -> delivery settlement user command（待启用）
 
 OPTION:
-  trading-entry/order-provider -> matching-provider -> account derivative settlement
-  -> margin-ops/risk -> liquidation -> insurance -> adl
-  -> option exercise event
+  instrument lifecycle -> option exercise event（当前仅事件边界）
+  -> option premium/exercise reducer（待启用，未允许普通下单热路径）
 ```
 
 撮合 provider 仍使用同一个 `exchange-core` 封装，但每条产品线实例只消费当前产品线的 `order.commands`，只发布当前产品线的 `match.results`、`match.trades` 和 `orderbook.depth`。consumer 会校验实际 Kafka topic 与当前 `ProductLine` 一致，避免跨线误消费。
@@ -56,7 +54,11 @@ OPTION:
 - `surprising-margin-ops`：保证金产品共用的风控、强平、资金费、保险基金和 ADL 链路，按产品线和账户类型隔离。
 - `surprising-edge`：客户端使用 `productLine` 路由 REST 和订阅实时推送；`surprising-gateway` 和 `surprising-websocket` 仍保留在 edge 模块下，可按生产容量独立部署。
 
-## 交割合约执行模型
+## 交割合约执行模型（设计边界）
+
+交割的 Kafka 生命周期事件已经有统一格式，但当前账户 reducer 尚未接入交割价来源和
+`DELIVERY_SETTLE` 命令，因此不能把以下步骤描述为已完成生产能力。只有交割价经过独立的
+结算价服务确认、事件携带不可变结算价并通过用户分区单写者验收后，才允许开启本流程。
 
 交割合约复用永续的下单、撮合、保证金、风控和强平链路，但没有资金费。区别在生命周期：
 
@@ -67,10 +69,13 @@ OPTION:
 5. order 排空确认发布后，account 逐笔核对 `ORDER_RESERVE`、`ORDER_RELEASE` 和成交侧保证金审计，确认冻结资金已全部消费或释放。
 6. instrument 只在 `ORDER`、`TRIGGER`、`ACCOUNT` 三类确认均按相同 symbol、版本和产品线持久化后进入 `CLOSED`。
 7. 交割 lifecycle 事件随后发布到 `surprising.linear-delivery.delivery.settlements.v1`。
-8. account 按结算价把未平仓位现金结算为 `DELIVERY_SETTLEMENT` 流水，释放持仓保证金，持仓归零。
+8. 账户 reducer（待实现）按结算价把未平仓位现金结算为 `DELIVERY_SETTLEMENT` 流水，释放持仓保证金，持仓归零。
 9. gateway、WebSocket 和后台展示交割状态、结算价、交割流水和最终余额。
 
-## 期权执行模型
+## 期权执行模型（设计边界）
+
+期权当前只保留 Instrument 生命周期事件和产品线 topic 隔离。账户 reducer 尚未支持期权开仓、
+权利金、卖方保证金和自动行权，OPTION 订单入口会失败关闭，不能按下面的目标流程运行。
 
 当前期权路线是现金结算欧式期权，先不做提前行权：
 

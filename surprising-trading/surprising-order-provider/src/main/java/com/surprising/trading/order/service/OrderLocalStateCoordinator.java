@@ -46,7 +46,7 @@ public class OrderLocalStateCoordinator {
         if (marginSnapshotCache.ready(line)) {
             return;
         }
-        if (line != ProductLine.LINEAR_PERPETUAL || !accountSnapshotCache.ready()) {
+        if (!line.supportsUserPositionMarginFlow() || !accountSnapshotCache.ready()) {
             marginSnapshotCache.markNotReady(line);
             return;
         }

@@ -44,6 +44,12 @@ class ProductLineTest {
         assertThat(ProductLine.LINEAR_DELIVERY.isFundingProduct()).isFalse();
         assertThat(ProductLine.LINEAR_DELIVERY.isDeliveryProduct()).isTrue();
         assertThat(ProductLine.OPTION.isOptionProduct()).isTrue();
+        assertThat(ProductLine.SPOT.supportsUserPositionMarginFlow()).isFalse();
+        assertThat(ProductLine.LINEAR_PERPETUAL.supportsUserPositionMarginFlow()).isTrue();
+        assertThat(ProductLine.INVERSE_PERPETUAL.supportsUserPositionMarginFlow()).isTrue();
+        assertThat(ProductLine.LINEAR_DELIVERY.supportsUserPositionMarginFlow()).isTrue();
+        assertThat(ProductLine.INVERSE_DELIVERY.supportsUserPositionMarginFlow()).isTrue();
+        assertThat(ProductLine.OPTION.supportsUserPositionMarginFlow()).isFalse();
     }
 
     @Test

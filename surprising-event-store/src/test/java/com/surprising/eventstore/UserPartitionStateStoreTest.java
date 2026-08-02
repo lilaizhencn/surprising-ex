@@ -17,7 +17,11 @@ class UserPartitionStateStoreTest {
         UserPartitionKey partition = new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L);
         try (UserPartitionStateStore store = new UserPartitionStateStore(directory)) {
             store.initialize(partition, bytes("zero"));
+            store.initialize(partition, bytes("zero"));
             assertThat(store.lastAppliedSequence(partition)).isZero();
+            assertThatThrownBy(() -> store.initialize(partition, bytes("other")))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("初始化快照冲突");
             store.apply(partition, 1L, bytes("one"));
             store.apply(partition, 1L, bytes("one"));
             assertThat(store.read(partition).orElseThrow().state())

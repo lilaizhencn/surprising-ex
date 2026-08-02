@@ -27,6 +27,7 @@ public class AccountMaintenanceTask {
 
     @Scheduled(fixedDelayString = "${surprising.account.position-cache.reconcile-delay-ms:10000}")
     public void reconcilePositionCache() {
+        // 只从本地 JVM 快照重放 Redis，不允许定时任务访问数据库恢复持仓。
         positionCacheCoordinator.reconcile();
     }
 }

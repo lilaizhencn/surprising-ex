@@ -51,6 +51,10 @@ public final class PositionSnapshotCache {
             long lastUserRevision = userRevisions.getOrDefault(event.userId(), 0L);
             PositionUpdatedEvent previous = positions.get(key);
             long previousRevision = previous == null ? 0L : previous.revision();
+            if (event.revision() < lastUserRevision) {
+                // 同一用户的旧修订不能因为对应持仓键尚未出现而重新创建陈旧仓位。
+                return ApplyResult.STALE;
+            }
             if (event.revision() < previousRevision) {
                 return ApplyResult.STALE;
             }

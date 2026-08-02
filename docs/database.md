@@ -419,8 +419,8 @@ Kafka topic/partition/offset 和 `order_id`、`command_id`、`trade_id`。相关
 `account_deficits` 显式记录穿仓，`account_balances` 列不允许为负。已实现盈利先偿还穿仓，再增加
 可用余额。全仓亏损和费用依次扣可用余额、由 `account_position_margins` 支撑的全仓锁定抵押品，
 剩余部分增加穿仓。逐仓亏损只消耗准确持仓范围的抵押品，不能扣全仓可用余额。订单冻结资金不能
-用于盈亏、手续费或资金费亏损。消耗持仓抵押品时必须以 `FOR UPDATE` 同步减少保证金行，避免后续
-重复释放。
+用于盈亏、手续费或资金费亏损。消耗持仓抵押品时由用户分区 reducer 在同一 RocksDB 状态提交中
+同步减少持仓保证金，投影表只接受修订号递增的异步结果，避免后续重复释放。
 
 `account_positions` 按持仓桶保存永续敞口：
 
@@ -435,9 +435,10 @@ Kafka topic/partition/offset 和 `order_id`、`command_id`、`trade_id`。相关
   `LIQUIDATION_FEE`，金额不超过可收取抵押品且不能制造新的穿仓。保险基金只接收实际收取额，
   不能按估算金额入账。
 
-account-provider 通过 `account_commands` 执行每个成交参与方。不可变命令 ID 和信封 SHA-256
-保证执行幂等；身份冲突回滚整个参与方事务。所有余额、持仓、保证金、穿仓、流水和冻结迁移在一个
-PostgreSQL 事务内完成，并锁定所需行。预期更新未命中时必须快速失败，不能静默跳过。
+account-provider 通过用户分区 WAL 和本地 reducer 执行每个成交参与方。不可变命令 ID 和
+事件指纹保证执行幂等；身份冲突会阻塞该用户分区。所有余额、持仓、保证金、穿仓、流水和
+冻结迁移在同一用户分区的 RocksDB 状态提交中完成。`account_commands` 只作为异步审计投影，
+PostgreSQL 不参与在线资金裁决。
 
 `TRADE_PNL`、`TRADE_FEE` 和 `LIQUIDATION_FEE` 流水在扣款成功后才写入最终
 `balance_after_units`。人工逐仓保证金调整使用
@@ -461,32 +462,14 @@ PostgreSQL 事务内完成，并锁定所需行。预期更新未命中时必须
 `scripts/check-entry-layer-boundaries.sh` 保证 Controller 只校验协议输入、提取非持久化上下文、
 调用 Service 并转换响应；定时入口只能位于 `task` 包并委托 Service。
 
-### `account_outbox_events`
+### 账户事件投影边界
 
-账户状态变化与 Kafka 事件在同一事务写入本表。它承载 WebSocket、风控和条件单使用的
-`POSITION_UPDATED`，以及保险基金入账使用的 `LIQUIDATION_FEE_SETTLED`。Redis 持仓快照不是
-业务事件，不进入本表。
+账户状态和持仓事件由用户分区 WAL/RocksDB reducer 提交后直接发布 Kafka，事件 key 固定为
+`<PRODUCT_LINE>:<userId>`。账户数据库不再承担在线 Outbox 或资金事务；`account_commands`、余额、持仓、保证金和流水表
+只由异步投影器写入，用于查询、审计、恢复和对账。
 
-- `id`：数据库分配的 Outbox ID。
-- `topic` / `product_line`：目标 Topic 和发布者所属产品线。
-- `event_key`：持仓更新使用 `<PRODUCT_LINE>:<userId>`，保证同一账户修订顺序；强平费事件
-  使用结算资产，保证基金更新按资产串行。
-- `payload`：JSONB 事件体。
-- `attempts`、`next_attempt_at`、`published_at`、`last_error`：重试和发布状态。
-- 持仓事件携带完整持仓及抵押品快照、PostgreSQL `revision`、产品线和原成交 `traceId`。
-- 强平费事件携带 `tradeId`、`orderId`、`liquidationOrderId`、`candidateId`、资产、
-  实收金额、费率和 `traceId`。
-
-账户事务按发生变化的精确 key 生成完整快照并插入 Outbox。提交后，相同快照还会进入有界合并
-Redis 工作队列以降低延迟，专用 Kafka 消费者负责持久回放。Redis Lua CAS 拒绝旧修订；队列溢出、
-消息非法或 Redis 失败会把产品线投影标记为不可用，直到回放或 PostgreSQL 对账修复。
-
-发布者对每个 `topic + event_key` 组合使用事务级 advisory lock 和原子租约更新，使多个节点可以
-安全处理不同流。发布语义为至少一次，消费者按事件 ID、成交 ID 或最新持仓版本去重。未来重试项
-必须阻塞相同 key 的后续记录，轮询顺序应避免深队列独占整个批次。
-
-已发布 Outbox 是临时投递记录。发布者每分钟按最多十个、每批 10,000 行的短事务清理七天前数据，
-使用 `FOR UPDATE SKIP LOCKED`；未发布或失败记录绝不能进入清理范围。
+投影器必须按账户修订号幂等：旧修订忽略、同修订相同内容忽略、同修订不同内容使产品线投影进入不可用状态并触发重建。
+Kafka 重复、数据库不可用或 Redis 投影失败都不能回滚或改变用户分区事实；恢复必须从 WAL、结果库和 Kafka 快照重放。
 
 ## 强平表
 

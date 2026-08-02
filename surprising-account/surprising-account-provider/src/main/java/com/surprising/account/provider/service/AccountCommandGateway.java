@@ -132,9 +132,9 @@ public class AccountCommandGateway {
     }
 
     private void requirePerpetualProductAccount(AccountType accountType, String operation) {
-        if (properties.getKafka().getProductLine() != ProductLine.LINEAR_PERPETUAL
-                || accountType != AccountType.USDT_PERPETUAL) {
-            throw new IllegalStateException(operation + "当前只支持永续账户快照");
+        ProductLine current = properties.getKafka().getProductLine();
+        if (accountType == null || accountType.productLine().orElse(null) != current) {
+            throw new IllegalStateException(operation + "的账户类型与当前产品线不匹配: " + current);
         }
     }
 }

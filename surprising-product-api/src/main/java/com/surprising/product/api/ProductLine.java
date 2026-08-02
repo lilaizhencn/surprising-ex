@@ -71,6 +71,15 @@ public enum ProductLine {
         return optionProduct;
     }
 
+    /**
+     * 当前已经接入统一订单保证金与用户持仓事实流的产品线。
+     * 期权虽然属于保证金产品，但它的权利金、行权和到期结算仍需独立规则，
+     * 在对应 reducer 完成前不能伪装成普通线性合约。
+     */
+    public boolean supportsUserPositionMarginFlow() {
+        return isMarginProduct() && !isOptionProduct();
+    }
+
     public static Optional<ProductLine> fromAccountTypeCode(String accountTypeCode) {
         String normalized = normalize(accountTypeCode);
         for (ProductLine productLine : values()) {

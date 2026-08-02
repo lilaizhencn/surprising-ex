@@ -32,8 +32,8 @@ surprising.<product-segment>.account.command.results.v1
 每次 poll 最多 500 条并先同步追加本地 WAL。同一产品线、同一用户的所有指令进入同一分区并保持顺序；不同用户可并行。总消费者并发超过 32
 不会增加该产品线吞吐。某个技术故障会阻塞所在分区，系统不会为了可用性跳过资金指令。
 
-产品线 Topic 和消费组始终隔离，不再提供共享/legacy 账户指令 Topic。跨产品线共享钱包行仍由
-PostgreSQL 行锁和非负约束做最终并发保护；产品线级串行不能被误解为跨所有产品线的全局线程。
+产品线 Topic 和消费组始终隔离，不再提供共享/legacy 账户指令 Topic。每条产品线的账户余额、
+持仓和保证金都在自己的用户分区中裁决；产品线级串行不能被误解为跨所有产品线的全局线程。
 
 ## 一致性模型
 
@@ -54,8 +54,9 @@ Redis 持仓和数据库表都是异步投影。用户持仓查询优先读本�
 - HTTP 写接口必须传稳定的 `referenceId`。网关在发送 Kafka 前根据规范化命令生成稳定的
   `commandId`；本地 WAL 以命令身份摘要做幂等判断。相同 reference、相同 payload 返回同一个
   command，相同 reference、不同 payload 在任何资金写入前拒绝，不再依赖独立的数据库提交表。
-- `account_commands.command_id` 是执行幂等键，并保存完整 envelope 的 SHA-256。重复 command
-  只有全部身份字段和 payload 完全一致才允许；冲突重复被视为数据完整性故障。
+- `UserPartitionWal` 的 `(productLine:userId, commandId)` 是执行幂等键，并保存完整 envelope 的
+  指纹。`account_commands` 只异步保存同一命令的审计副本和 SHA-256，不参与执行裁决。
+  重复 command 只有全部身份字段和 payload 完全一致才允许；冲突重复被视为数据完整性故障。
 - 账本、订单 reservation、资金费 payment、ADL execution、保险 coverage 继续保留各自的业务唯一键。
 - Kafka 和本地 WAL 发布都是至少一次投递；消费端必须允许同一消息重复出现。
 
@@ -64,16 +65,14 @@ HTTP 超时表示“结果未知”，调用方必须用原 `referenceId` 重试
 
 ## 不依赖跨 Topic 顺序
 
-任何有先后条件的指令都带 `dependsOnCommandId`。依赖不存在或未完成时，子命令持久化为
-`WAITING_DEPENDENCY`，不修改资金；父命令终态后通过 outbox 重投子命令。子命令重新执行时直接查询
-`account_commands`：
+任何有先后条件的指令都带 `dependsOnCommandId`，并且依赖命令必须属于同一用户分区。依赖
+不存在或尚未写入本地结果库时，当前分区停在原序号；父命令终态写入
+`UserPartitionResultStore` 后，下一轮重放同一条子命令。父命令被拒绝时，子命令只在本地
+reducer 中生成 `DEPENDENCY_REJECTED` 终态。整个过程不查询 `account_commands`，也不依赖
+数据库 outbox。
 
-- 父命令 `APPLIED`：子命令进入 `PROCESSING`；
-- 父命令 `REJECTED`：子命令以 `DEPENDENCY_REJECTED` 终止；
-- 父命令仍未终态或尚未到达：继续等待。
-
-因此，生产者先后发送、结果 Topic 延迟或消费者重平衡都不会改变状态机正确性。恢复任务只能扫描
-数据库审计投影中缺失的记录，不能用数据库结果反向修改本地账户状态。
+因此，生产者先后发送、结果 Topic 延迟或消费者重平衡都不会改变状态机正确性。数据库审计
+投影只能记录事实，不能反向修改本地账户状态。
 
 ## 关键业务状态机
 
@@ -89,7 +88,7 @@ trading_orders.PENDING_RESERVE
 订单不能在 reservation 成功前进入撮合。撤单、拒单和成交后的释放使用 `ORDER_RELEASE`；
 需要等待成交侧结算时，release 依赖该侧的 `TRADE_SIDE_SETTLE`。
 
-`ORDER_RESERVE` 会把订单总量和 `reduceOnly` 写入 account 自己的 reservation 行；
+`ORDER_RESERVE` 会把订单总量和 `reduceOnly` 写入账户 reducer 的本地 reservation 状态；
 `TRADE_SIDE_SETTLE` 与 `ORDER_RELEASE` 都携带同一份不可变快照。account 必须校验
 产品线、账户类型、用户、订单总量和 `reduceOnly` 后才可迁移或释放保证金，成交热路径不再读取
 `trading_orders`。快照不一致、非 reduce-only 订单缺 reservation 或命令用户不匹配都必须整笔回滚。
@@ -144,21 +143,16 @@ insurance-provider 先在本地事务预留保险基金，再发 `INSURANCE_DEFI
 必须采集：
 
 - Kafka `account.user.commands` 消费 lag、最老消息年龄和分区阻塞时间；
-- `surprising.account.command.events{outcome=applied|rejected|waiting_dependency|duplicate|failed}`；
+- `surprising.account.command.events{outcome=applied|rejected|duplicate|failed}`；
 - `surprising.account.command.processing` 和 `surprising.account.command.event_lag`；
 - `accountTradeSettlement` health；
-- account outbox 未发布数量、最老行年龄和重试次数；
+- WAL 未投影序号、结果库缺失和 Kafka 结果发布失败次数；
 - DLT 消息数，生产环境应以非零立即告警；
 - funding `WAITING_ACCOUNTS`、ADL pending saga、insurance pending coverage 的最老年龄。
 
-推荐数据库巡检：
+推荐投影与事实流巡检：
 
 ```sql
-SELECT product_line, status, COUNT(*), MIN(started_at) AS oldest
-FROM account_commands
-WHERE status IN ('WAITING_DEPENDENCY', 'PROCESSING')
-GROUP BY product_line, status;
-
 SELECT product_line, COUNT(*), MIN(applied_at) AS oldest
 FROM account_trade_settlement_sides
 WHERE reconciled_at IS NULL
@@ -166,10 +160,8 @@ WHERE reconciled_at IS NULL
 GROUP BY product_line, symbol, trade_id
 HAVING COUNT(*) < 2;
 
-SELECT product_line, topic, COUNT(*), MIN(created_at) AS oldest
-FROM account_outbox_events
-WHERE published_at IS NULL
-GROUP BY product_line, topic;
+-- 账户状态 Kafka 事件由本地事实流直接发布；数据库不再有在线 account outbox。
+-- 账户命令审计表只记录已写入 WAL 的事实，投影积压应从本地 WAL 水位、结果库和 Kafka lag 核对。
 
 SELECT status, COUNT(*), MIN(funding_time) AS oldest
 FROM funding_settlements
@@ -187,15 +179,14 @@ WHERE status IN ('PENDING_RESERVE', 'PENDING_FINALIZE')
 GROUP BY status;
 ```
 
-持续存在的 `PROCESSING` 不属于正常状态，因为注册、资金变更和终态在同一个事务内；应立即排查
-人工数据修改或事务边界错误。
+持续存在的账户投影延迟只表示数据库审计投影尚未追平，不得据此回滚或重放账户资金；应从 WAL、结果库和 Kafka 位点定位原因。
 
 ## 故障恢复
 
 - 技术异常：保留分区阻塞，修复数据库、配置或代码后让原记录继续重试；禁止跳 offset。
 - poison 消息：进入同分区号 DLT。修复生产者后，以原 key、原 commandId 和正确 payload 重放。
 - API 超时：查询 command 状态或使用同一 `referenceId` 重试，绝不创建第二笔资金意图。
-- 依赖长期等待：先查父 command，再查 account outbox。父已终态时可安全重放原子命令；不要手工改状态。
+- 依赖长期等待：先查父 command 的本地结果库，再查 Kafka lag。父已终态时可安全重放原子命令；不要手工改数据库状态。
 - 双边成交不完整：对照 taker/maker commandId、outbox 和 DLT，恢复缺失侧；不要直接补余额或持仓。
 - Redis 或数据库投影异常：从本地 WAL、结果库和 Kafka 完整快照重建；资金链路继续以用户 reducer 为准。
 

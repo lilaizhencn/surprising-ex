@@ -86,7 +86,8 @@ public class AccountInstrumentDrainService {
     }
 
     private void requireLocalProductLine(ProductLine productLine) {
-        if (productLine != ProductLine.LINEAR_PERPETUAL) {
+        if (productLine == null || (!productLine.supportsUserPositionMarginFlow()
+                && productLine != ProductLine.SPOT)) {
             throw new IllegalStateException("产品线尚未接入本地账户事实流，禁止数据库生命周期核对: " + productLine);
         }
     }

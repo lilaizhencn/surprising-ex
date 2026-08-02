@@ -4,6 +4,8 @@ import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.api.cache.PositionSnapshotCache;
 import com.surprising.account.provider.config.AccountProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.common.TopicPartition;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,7 +53,8 @@ public class PositionCacheProjectionConsumer {
             topics = "#{__listener.positionEventsTopic()}",
             groupId = "#{__listener.groupId()}",
             containerFactory = "accountPositionCacheKafkaListenerContainerFactory")
-    public void onPositionUpdated(ConsumerRecord<String, String> record) {
+    public void onPositionUpdated(ConsumerRecord<String, String> record,
+                                  Consumer<String, String> consumer) {
         try {
             requireCurrentProductTopic(record.topic());
             PositionUpdatedEvent event = objectMapper.readValue(record.value(), PositionUpdatedEvent.class);
@@ -69,12 +72,18 @@ public class PositionCacheProjectionConsumer {
                 throw new IllegalStateException("position event has conflicting same-revision state");
             }
             cache.apply(event.cacheEvent(), false);
+            markReadyWhenCaughtUp(consumer);
         } catch (Exception ex) {
             cache.markNotReady(properties.getKafka().getProductLine());
             log.error("Failed to project durable position event topic={} partition={} offset={}: {}",
                     record.topic(), record.partition(), record.offset(), ex.getMessage(), ex);
             throw new IllegalStateException("failed to project durable position event", ex);
         }
+    }
+
+    /** 保留测试调用签名；没有 Kafka 位点时不能臆判历史事件已经追平。 */
+    public void onPositionUpdated(ConsumerRecord<String, String> record) {
+        onPositionUpdated(record, null);
     }
 
     public String positionEventsTopic() {
@@ -91,5 +100,24 @@ public class PositionCacheProjectionConsumer {
             throw new IllegalArgumentException(
                     "position event topic must match current product line: expected=" + expected + " actual=" + topic);
         }
+    }
+
+    /** 只有消费组追平当前 Topic 后才把 Redis/JVM 持仓读模型标记为可读。 */
+    private void markReadyWhenCaughtUp(Consumer<String, String> consumer) {
+        if (consumer == null) {
+            return;
+        }
+        java.util.Set<TopicPartition> assignment = consumer.assignment();
+        if (assignment.isEmpty()) {
+            return;
+        }
+        var endOffsets = consumer.endOffsets(assignment);
+        for (TopicPartition partition : assignment) {
+            if (consumer.position(partition) < endOffsets.getOrDefault(partition, 0L)) {
+                return;
+            }
+        }
+        snapshotCache.markReady();
+        cache.markReady(properties.getKafka().getProductLine());
     }
 }

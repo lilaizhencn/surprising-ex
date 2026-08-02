@@ -83,7 +83,11 @@ public final class UserPartitionStateStore implements AutoCloseable {
         ReentrantLock lock = locks.computeIfAbsent(partition, ignored -> new ReentrantLock());
         lock.lock();
         try {
-            if (database.get(stateKey(partition)) != null) {
+            byte[] existing = database.get(stateKey(partition));
+            if (existing != null) {
+                if (!Arrays.equals(existing, state)) {
+                    throw new IllegalStateException("用户分区初始化快照冲突: " + partition.value());
+                }
                 return;
             }
             try (WriteBatch batch = new WriteBatch()) {
@@ -205,6 +209,9 @@ public final class UserPartitionStateStore implements AutoCloseable {
     }
 
     private long decodeLong(byte[] value) {
+        if (value == null || value.length != Long.BYTES) {
+            throw new IllegalStateException("invalid state sequence");
+        }
         try (DataInputStream input = new DataInputStream(new ByteArrayInputStream(value))) {
             return input.readLong();
         } catch (Exception ex) {

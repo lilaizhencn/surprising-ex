@@ -6,11 +6,11 @@ import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 
 /**
- * Durable, complete position state emitted by the account single writer.
+ * 账户单写者发布的完整持仓状态事件。
  *
- * <p>The same event drives risk, trigger cleanup, WebSocket fanout, and the Redis position read model.
- * PostgreSQL allocates {@code revision}; Redis applies it with compare-and-set semantics. Producers must use
- * {@link #partitionKey()} as the Kafka key so every position update for one user remains ordered.</p>
+ * <p>同一事件驱动风控、触发单清理、WebSocket 推送和 Redis 持仓读模型。账户用户分区单写者
+ * 分配 {@code revision}，消费者按修订号幂等应用；PostgreSQL 只作为异步投影。生产者必须使用
+ * {@link #partitionKey()} 作为 Kafka key，保证同一用户的持仓更新有序。</p>
  */
 public record PositionUpdatedEvent(
         int schemaVersion,

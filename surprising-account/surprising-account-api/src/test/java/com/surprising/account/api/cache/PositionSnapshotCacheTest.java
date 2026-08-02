@@ -37,6 +37,19 @@ class PositionSnapshotCacheTest {
     }
 
     @Test
+    void doesNotRecreateASecondPositionFromAnOlderUserRevision() {
+        PositionSnapshotCache cache = new PositionSnapshotCache(ProductLine.LINEAR_PERPETUAL);
+
+        assertThat(cache.apply(event("BTC-USDT", 10L, 5L)))
+                .isEqualTo(PositionSnapshotCache.ApplyResult.APPLIED);
+        assertThat(cache.apply(event("ETH-USDT", 11L, 2L)))
+                .isEqualTo(PositionSnapshotCache.ApplyResult.APPLIED);
+        assertThat(cache.apply(event("SOL-USDT", 10L, 3L)))
+                .isEqualTo(PositionSnapshotCache.ApplyResult.STALE);
+        assertThat(cache.position(1001L, "SOL-USDT", MarginMode.CROSS, PositionSide.NET)).isEmpty();
+    }
+
+    @Test
     void rejectsEventsFromAnotherProductLineWithoutChangingState() {
         PositionSnapshotCache cache = new PositionSnapshotCache(ProductLine.LINEAR_PERPETUAL);
 
@@ -59,10 +72,18 @@ class PositionSnapshotCacheTest {
     }
 
     private PositionUpdatedEvent event(long revision, long quantity) {
-        return event(ProductLine.LINEAR_PERPETUAL, revision, quantity);
+        return event(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", revision, quantity);
     }
 
     private PositionUpdatedEvent event(ProductLine productLine, long revision, long quantity) {
+        return event(productLine, "BTC-USDT", revision, quantity);
+    }
+
+    private PositionUpdatedEvent event(String symbol, long revision, long quantity) {
+        return event(ProductLine.LINEAR_PERPETUAL, symbol, revision, quantity);
+    }
+
+    private PositionUpdatedEvent event(ProductLine productLine, String symbol, long revision, long quantity) {
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         return new PositionUpdatedEvent(
                 PositionUpdatedEvent.CURRENT_SCHEMA_VERSION,
@@ -71,7 +92,7 @@ class PositionSnapshotCacheTest {
                 productLine,
                 revision,
                 1001L,
-                "BTC-USDT",
+                symbol,
                 7L,
                 MarginMode.CROSS,
                 PositionSide.NET,

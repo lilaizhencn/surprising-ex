@@ -1,7 +1,7 @@
 # surprising-account
 
 
-Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础余额、产品账户、余额流水、成交幂等处理、现货资产结算、衍生品持仓更新、成交后订单保证金到持仓保证金的迁移、maker/taker 手续费结算、资金费结算、交割/行权流水，以及强平成交后的实际强平费收取和保险基金入账事件。
+Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础余额、产品账户、余额流水、成交幂等处理、现货资产结算、永续/交割基础持仓更新、成交后订单保证金到持仓保证金的迁移、maker/taker 手续费结算、资金费结算，以及强平成交后的实际强平费收取和保险基金入账事件。交割价结算和期权权利金/行权仍处于边界设计阶段，未开放账户热路径。
 
 ## 模块
 
@@ -27,14 +27,14 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
   不通过同步 Repository 组合业务状态。
 - ADL、亏空回补和资金费统一提交账户用户分区命令；账户 reducer 是唯一资金写者，数据库只保留异步投影、
   启动恢复和审计入口。
-- `PositionCacheProjectionService` 只负责启动重建页和最终投影；在线持仓读取直接使用账户 JVM 快照，
-  Redis 与 `PositionCacheProjectionRepository` 只作为跨节点读模型和审计恢复来源。
+- `PositionCacheCoordinator` 只把本地账户持仓快照重放到 Redis；在线持仓读取直接使用账户 JVM 快照，
+  Redis 只作为跨节点读模型和恢复投影，不参与资金裁决。
 - 账户状态事件由用户分区 WAL 在本地提交后直接发布 Kafka，数据库不再作为热路径 outbox；
   `AccountStateProjectionConsumer` 使用独立消费组把完整状态异步投影到余额、负债、持仓、逐仓保证金、
   仓位模式和订单锁定汇总表，重复或过期修订号幂等忽略。
 - 账户持仓事件同时进入按产品线隔离的 `PositionSnapshotCache`，按精确持仓键进行 revision 防回退。
   该 JVM 快照是订单、风控和强平实时计算输入；数据库只接受异步投影，正式部署仍必须遵循
-  [永续 JVM 单写者迁移计划](../docs/linear-perpetual-jvm-migration-plan.md)。
+  [账户单写者与单用户串行通道](../docs/account-single-writer-command-lane.md)。
 - 账户用户分区执行器只保留命令幂等、顺序、资金守恒和崩溃恢复编排，不在生产热路径构造 JDBC Repository；
   数据库写入由独立异步投影器完成。
 - 只有在线正确性无法拆分的路径允许多表 Repository，并必须写明 `不可拆原因`：
@@ -221,20 +221,21 @@ surprising:
 ```
 
 启动独立产品线实例时，把 `product-line` 设置为 `SPOT`、`LINEAR_PERPETUAL`、
-`LINEAR_DELIVERY` 或 `OPTION`。账户命令、DLT 和结果 Topic 始终按产品线隔离。
+`LINEAR_DELIVERY` 或 `OPTION`。账户命令、DLT 和结果 Topic 始终按产品线隔离；OPTION 在
+账户 reducer 完成前只允许生命周期事件边界，不允许普通下单资金热路径。
 
 本地缓存只用于不可变读快照：
 
 - `contract-spec-max-entries` 按 `(symbol, instrumentVersion)` 缓存合约数学配置。
 
 余额、持仓、保证金冻结、命令幂等和账本事实由用户分区本地 WAL/状态库维护；PostgreSQL 只作为异步
-投影、启动恢复和审计存储。永续账户命令成功后发布 `PerpetualAccountStateUpdatedEvent` 到
+投影、启动恢复和审计存储。当前产品线账户命令成功后发布 `PerpetualAccountStateUpdatedEvent` 到
 `account.state.events.v1`，下游按用户修订号建立 JVM 快照。
 
 Kafka 发布沿用用户分区 key；发布失败时本地结果库和 WAL 保留待重试状态，不提交后续用户分区序号。
 
-`TRADE_SIDE_SETTLE` 仍会在 `account_commands` 中保留持久终态；订单冻结和资金费结算通过用户分区结果事件
-更新各自本地状态，数据库只异步保存审计结果。
+`TRADE_SIDE_SETTLE` 的终态通过用户分区结果库和 Kafka 结果事件保存；`account_commands` 只保留异步审计副本。
+订单冻结和资金费结算通过用户分区结果事件更新各自本地状态，数据库不参与在线裁决。
 
 账户资金指令默认并发为 32，Hikari 连接池仅供异步投影、恢复和查询使用。
 多产品线、多副本部署时应一起调整 `ACCOUNT_USER_COMMAND_CONCURRENCY` 和
@@ -242,7 +243,7 @@ Kafka 发布沿用用户分区 key；发布失败时本地结果库和 WAL 保�
 
 账户指令消费者通过 Actuator/Prometheus 暴露：
 
-- `surprising.account.command.events{outcome=applied|rejected|waiting_dependency|duplicate|failed}`
+- `surprising.account.command.events{outcome=applied|rejected|duplicate|failed}`
 - `surprising.account.command.processing{outcome=...}`
 - `surprising.account.command.event_lag{outcome=...}`
 - `accountTradeSettlement` 单侧成交超时健康状态
@@ -268,7 +269,7 @@ mvn -pl :surprising-account-provider -am spring-boot:run
 ## 生产注意事项
 
 - 余额调整必须携带全局唯一 `referenceId`，防止充值/冲正重复入账。同一 reference 的重放只有在 `amountUnits` 和 `reason` 与原流水一致时才会幂等返回；payload 不一致会在改余额前失败。
-- 除 `AccountUserCommandProcessor` 外不能调用账户写服务。CI 运行
+- 除 `AccountCommandGateway` 和 `AccountUserStateCommandWorker` 外不能调用账户写服务。CI 运行
   `scripts/check-account-single-writer.sh`，防止其他模块重新引入账户资金表 DML。
 - 账户命令 Kafka key 不能从 `<PRODUCT_LINE>:<userId>` 改掉；并发数超过 32 个 Topic 分区不会增加吞吐。
 - HTTP 超时表示结果未知，不代表失败。调用方必须使用原 `referenceId` 重试；新 reference 表示一笔新资金意图。
@@ -282,10 +283,10 @@ mvn -pl :surprising-account-provider -am spring-boot:run
 - 已实现亏损可以扣 `availableUnits` 和由持仓保证金支撑的 `lockedUnits`，但不能扣未成交订单冻结。只要扣了持仓保证金支撑的 locked，就必须在同一事务内同步减少 `account_position_margins`。
 - 手续费扣款复用已实现亏损的余额/deficit 安全路径。手续费返佣先清理 deficit，再增加 available balance。matching 会把订单接受时的不可变费率快照写入 `MatchTradeEvent`；account 结算直接使用命令快照，不查询 `trading_orders`，也不能按当前用户等级重算。
 - 余额结算会锁定 `account_deficits` 保证权益计算一致，但当 `deficit_units` 没有变化时会跳过 `UPDATE account_deficits`。不要在成交热路径重新引入无变化的 deficit 写入；真正产生或清理 deficit 时仍必须写入并检查 1 行。
-- 成交侧结算在计算下一版持仓前已经锁定当前持仓。后续维护时继续使用传入已锁定旧持仓数量的
-  更新路径；每侧额外做 `SELECT ... FOR UPDATE` 或更新后回查会增加两次不必要 SQL 往返。
+- 成交侧结算在用户分区 reducer 中按上一版 JVM 快照计算下一版状态。异步数据库投影不能重新
+  增加 `SELECT ... FOR UPDATE` 或更新后回查，否则会把数据库重新带回资金热路径。
 - 不能根据跨 Topic 到达顺序推断依赖。必须持久化 `dependsOnCommandId`；结果 Topic 只用于降低延迟
-  和观测，reconciliation 以 `account_commands` 为准。
+  和观测，恢复以用户 WAL、RocksDB 状态库和结果库为准，`account_commands` 只用于异步审计。
 - 强平费扣款故意不创建新的 `account_deficits`。保险基金只接收 account-provider 已经从用户 collateral 实际收上的金额，避免把未收上的惩罚费记成保险基金收入。
 - `surprising.linear-perp.account.liquidation-fee.events.v1` 是 at-least-once 投递。insurance 消费端必须使用 `(reference_type, reference_id, asset)` 幂等，其中 `reference_id = tradeId:orderId`。
 - `contract_type` 决定已实现盈亏公式：`LINEAR_PERPETUAL` 使用 `signedQty * (exitTicks - entryTicks) * notional_multiplier_units`；`INVERSE_PERPETUAL` 使用 `signedQty * faceValueUnits * settleScaleUnits * (exitTicks - entryTicks) / (entryTicks * exitTicks * price_tick_units)`。

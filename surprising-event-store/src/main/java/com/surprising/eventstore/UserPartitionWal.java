@@ -83,6 +83,9 @@ public final class UserPartitionWal implements AutoCloseable {
             }
 
             long sequence = nextSequence(partition);
+            if (sequence <= 0L || sequence == Long.MAX_VALUE) {
+                throw new IllegalStateException("用户分区 WAL 序号耗尽: " + partition.value());
+            }
             UserPartitionEvent event = new UserPartitionEvent(partition, sequence, eventId, eventType, payload,
                     fingerprint, occurredAt);
             try (WriteBatch batch = new WriteBatch()) {
@@ -399,7 +402,11 @@ public final class UserPartitionWal implements AutoCloseable {
         if (length < 0 || length > MAX_STRING_BYTES) {
             throw new IllegalStateException("invalid WAL string length");
         }
-        return new String(input.readNBytes(length), StandardCharsets.UTF_8);
+        byte[] bytes = input.readNBytes(length);
+        if (bytes.length != length) {
+            throw new EOFException("truncated WAL string");
+        }
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     private void writeBytes(DataOutputStream output, byte[] value, int maxLength) throws Exception {
@@ -415,7 +422,11 @@ public final class UserPartitionWal implements AutoCloseable {
         if (length < 0 || length > maxLength) {
             throw new IllegalStateException("invalid WAL payload length");
         }
-        return input.readNBytes(length);
+        byte[] bytes = input.readNBytes(length);
+        if (bytes.length != length) {
+            throw new EOFException("truncated WAL payload");
+        }
+        return bytes;
     }
 
     private boolean startsWith(byte[] value, byte[] prefix) {
