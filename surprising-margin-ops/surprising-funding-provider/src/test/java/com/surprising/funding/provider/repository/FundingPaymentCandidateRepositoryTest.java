@@ -9,6 +9,8 @@ import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.model.FundingPaymentCursor;
 import com.surprising.funding.provider.model.FundingPaymentPage;
 import com.surprising.funding.provider.model.FundingSettlementWork;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -27,8 +29,11 @@ class FundingPaymentCandidateRepositoryTest {
 
     @Test
     void paymentCandidatesUseStableCompositeKeysetCursor() {
+        InstrumentSnapshotCache snapshotCache = new InstrumentSnapshotCache();
+        // 测试明确模拟启动 RPC 已完成，候选查询只能在快照就绪后读取账户持仓。
+        snapshotCache.replace(ProductLine.LINEAR_PERPETUAL, List.of(), java.util.Map.of());
         FundingPaymentCandidateRepository repository =
-                new FundingPaymentCandidateRepository(jdbcTemplate, new FundingProperties());
+                new FundingPaymentCandidateRepository(jdbcTemplate, new FundingProperties(), snapshotCache);
         when(jdbcTemplate.query(any(String.class), any(RowMapper.class), any(Object[].class)))
                 .thenReturn(List.of());
         FundingSettlementWork settlement = new FundingSettlementWork(
