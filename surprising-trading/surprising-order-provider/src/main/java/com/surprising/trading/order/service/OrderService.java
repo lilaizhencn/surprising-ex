@@ -489,8 +489,7 @@ public class OrderService {
                                                 OrderFeeSnapshot feeSnapshot) {
         var requirement = spotOrderReservationRepository.requirement(
                 request.symbol(), instrumentVersion, request.side(), request.orderType(), request.priceTicks(),
-                request.quantitySteps(), properties.getRisk().getMarketMaxSlippagePpm(),
-                properties.getRisk().getMarketMaxMarkAgeMs(), feeSnapshot);
+                request.quantitySteps(), feeSnapshot);
         if (requirement.isEmpty()) {
             return ReservationPlan.reject("spot reservation requirement unavailable");
         }
@@ -549,8 +548,7 @@ public class OrderService {
         if (validation.instrumentType() == InstrumentType.SPOT) {
             var requirement = spotOrderReservationRepository.requirement(
                     request.symbol(), validation.instrumentVersion(), request.side(), request.orderType(),
-                    request.priceTicks(), request.quantitySteps(), properties.getRisk().getMarketMaxSlippagePpm(),
-                    properties.getRisk().getMarketMaxMarkAgeMs(), feeSnapshot);
+                    request.priceTicks(), request.quantitySteps(), feeSnapshot);
             if (requirement.isEmpty()) {
                 return new TestOrderResponse(false, "spot reservation requirement unavailable",
                         validation.instrumentVersion(), "RESERVE_REQUIREMENT", "SPOT", null, 0L);

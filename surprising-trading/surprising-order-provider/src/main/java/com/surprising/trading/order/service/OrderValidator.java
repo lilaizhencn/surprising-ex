@@ -110,6 +110,12 @@ public class OrderValidator {
         if (!rule.marketOrderEnabled()) {
             return ValidationResult.reject("market order is disabled", rule.version(), rule.instrumentType());
         }
+        // 现货市价单需要按订单簿可成交价或报价金额预占余额；标记价只属于衍生品风险价格。
+        // 在订单簿保护价接入前保持拒绝，不能把衍生品标记价当成现货成交依据。
+        if (rule.spot()) {
+            return ValidationResult.reject("spot market order requires order-book reference price",
+                    rule.version(), rule.instrumentType());
+        }
         if (request.priceTicks() != 0) {
             return ValidationResult.reject("market order priceTicks must be zero", rule.version(), rule.instrumentType());
         }
@@ -138,9 +144,13 @@ public class OrderValidator {
         if (request.priceTicks() <= 0) {
             return ValidationResult.reject("limit order priceTicks must be positive", rule.version(), rule.instrumentType());
         }
-        ValidationResult priceBand = validateLimitPriceBand(request, rule);
-        if (!priceBand.accepted()) {
-            return priceBand;
+        // 现货限价单的成交价格由用户直接给出，保证金产品才需要用标记价做价格带保护。
+        // 现货余额预占和成交结算不应因为衍生品行情缓存短暂不可用而被拒绝。
+        if (!rule.spot()) {
+            ValidationResult priceBand = validateLimitPriceBand(request, rule);
+            if (!priceBand.accepted()) {
+                return priceBand;
+            }
         }
         return validateNotionalRange(request, rule, request.priceTicks(), request.priceTicks());
     }

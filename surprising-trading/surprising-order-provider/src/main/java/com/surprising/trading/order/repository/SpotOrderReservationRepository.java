@@ -6,9 +6,7 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
-import com.surprising.trading.order.model.MarkPriceLookup;
 import com.surprising.trading.order.model.SpotReservationRequirement;
-import com.surprising.trading.order.service.OrderMarginMath;
 import java.math.BigInteger;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,15 +18,12 @@ public class SpotOrderReservationRepository {
 
     private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);
 
-    private final MarkPriceLookup markPriceLookup;
     private final TradingOrderProperties properties;
     private final InstrumentSnapshotCache snapshotCache;
 
     @Autowired
-    public SpotOrderReservationRepository(MarkPriceLookup markPriceLookup,
-                                          TradingOrderProperties properties,
+    public SpotOrderReservationRepository(TradingOrderProperties properties,
                                           @Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache) {
-        this.markPriceLookup = markPriceLookup;
         this.properties = properties;
         this.snapshotCache = snapshotCache;
     }
@@ -39,8 +34,6 @@ public class SpotOrderReservationRepository {
                                                             OrderType orderType,
                                                             long priceTicks,
                                                             long quantitySteps,
-                                                            long marketMaxSlippagePpm,
-                                                            long marketMaxMarkAgeMs,
                                                             OrderFeeSnapshot feeSnapshot) {
         if (snapshotCache == null || properties == null) {
             return Optional.empty();
@@ -50,19 +43,15 @@ public class SpotOrderReservationRepository {
                 .filter(value -> value.instrumentType() == InstrumentType.SPOT
                         && value.contractType() == com.surprising.instrument.api.model.ContractType.SPOT)
                 .orElseThrow(() -> new IllegalArgumentException("现货合约快照不存在: " + symbol + "@" + instrumentVersion));
-        Long markPriceTicks = markPriceLookup.latestMarkPriceTicks(symbol, instrumentVersion, marketMaxMarkAgeMs)
-                .stream().boxed().findFirst().orElse(null);
-        if (orderType == OrderType.MARKET && markPriceTicks == null) {
+        // 现货市价单尚未接入订单簿保护价，禁止用标记价估算冻结金额。
+        if (orderType == OrderType.MARKET) {
             return Optional.empty();
         }
         if (side == OrderSide.SELL) {
             long baseUnits = multiplyToLong(quantitySteps, instrument.quantityStepUnits());
             return Optional.of(new SpotReservationRequirement(instrument.baseAsset(), baseUnits));
         }
-        long effectivePriceTicks = orderType == OrderType.MARKET
-                ? OrderMarginMath.upperBoundPriceTicks(orderType, priceTicks, markPriceTicks, marketMaxSlippagePpm)
-                : priceTicks;
-        long notionalUnits = multiplyToLong(effectivePriceTicks, quantitySteps, instrument.notionalMultiplierUnits());
+        long notionalUnits = multiplyToLong(priceTicks, quantitySteps, instrument.notionalMultiplierUnits());
         long feeUnits = feeUnits(notionalUnits, feeSnapshot);
         return Optional.of(new SpotReservationRequirement(instrument.quoteAsset(), Math.addExact(notionalUnits, feeUnits)));
     }

@@ -104,6 +104,26 @@ class OrderValidatorTest {
     }
 
     @Test
+    void acceptsSpotLimitOrderWhenMarkPriceIsUnavailableEvenIfProtectionIsEnabled() {
+        OrderValidator validator = limitPriceBandValidator(spotRule(), OptionalLong.empty(), 50_000L);
+
+        var result = validator.validate(limit(1_000_000L, 10L));
+
+        assertThat(result.accepted()).isTrue();
+        assertThat(result.rejectReason()).isNull();
+    }
+
+    @Test
+    void rejectsSpotMarketOrderWithoutOrderBookReferenceInsteadOfMarkPrice() {
+        OrderValidator validator = validator(spotMarketRule(), OptionalLong.empty(), 10_000L);
+
+        var result = validator.validate(market(10L));
+
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.rejectReason()).isEqualTo("spot market order requires order-book reference price");
+    }
+
+    @Test
     void rejectsSpotReduceOnlyOrderBeforePerpetualPositionValidation() {
         OrderValidator validator = new OrderValidator(lookup(spotRule()));
         var request = new PlaceOrderRequest(1001L, "spot-reduce", "BTC-USDT", OrderSide.SELL,
@@ -404,6 +424,31 @@ class OrderValidatorTest {
                 Set.of("LIMIT"),
                 Set.of("GTC", "IOC", "FOK", "GTX"),
                 false,
+                true,
+                false,
+                100_000L,
+                1L,
+                100_000L,
+                1_000L,
+                1_000_000_000_000L,
+                10_000L,
+                1_000_000L,
+                1_000_000L);
+    }
+
+    private InstrumentRule spotMarketRule() {
+        return new InstrumentRule(
+                "BTC-USDT",
+                3L,
+                "TRADING",
+                InstrumentType.SPOT,
+                ContractType.SPOT,
+                "BTC",
+                "USDT",
+                "USDT",
+                Set.of("LIMIT", "MARKET"),
+                Set.of("GTC", "IOC", "FOK", "GTX"),
+                true,
                 true,
                 false,
                 100_000L,

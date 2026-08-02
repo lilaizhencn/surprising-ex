@@ -406,7 +406,7 @@ class OrderServiceTest {
         when(orderRepository.nextSequence("command")).thenReturn(9200L);
         when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
         when(spotOrderReservationRepository.requirement(eq("BTC-USDT"), eq(11L), eq(OrderSide.BUY),
-                eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(), anyLong(), any()))
+                eq(OrderType.LIMIT), eq(65_000L), eq(10L), any()))
                 .thenReturn(Optional.of(new SpotReservationRequirement("USDT", 651L)));
         var response = service.place(request("spot-1"));
 
