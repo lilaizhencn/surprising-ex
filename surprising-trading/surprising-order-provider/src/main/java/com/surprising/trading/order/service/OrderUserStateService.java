@@ -721,12 +721,27 @@ public class OrderUserStateService {
                 continue;
             }
             requireCurrentProductLine(result.productLine());
+            validateAccountResultIdentity(result);
             UserPartitionKey partition = partition(result.productLine(), result.userId());
             lane.execute(partition, () -> {
                 append(partition, OrderUserEvent.accountResult(result));
                 applyPartition(partition);
                 return null;
             });
+        }
+    }
+
+    /** 账户结果只能确认订单事实流为该订单生成的那一条预占命令。 */
+    private void validateAccountResultIdentity(AccountCommandResultEvent result) {
+        String sourceReference = result.sourceReference();
+        long orderId;
+        try {
+            orderId = Long.parseLong(sourceReference);
+        } catch (RuntimeException ex) {
+            throw new IllegalArgumentException("账户结果订单编号无效", ex);
+        }
+        if (orderId <= 0L || !reservationCommandId(result.productLine(), orderId).equals(result.commandId())) {
+            throw new IllegalArgumentException("账户结果命令编号与订单预占命令不一致");
         }
     }
 
