@@ -140,7 +140,7 @@ class AlgoOrderServiceTest {
         OrderUserStateService user = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
                 new UserPartitionCommandLane(), kafka);
         AlgoOrderService service = new AlgoOrderService(properties, orderService, user,
-                OrderScheduleIndex.disabled(), null);
+                OrderScheduleIndex.disabled());
         return new Fixture(service, user, wal, state);
     }
 

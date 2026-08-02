@@ -775,7 +775,7 @@ public class OrderService {
             String dependency = previousCommands.get(userId);
             previousCommands.put(userId, reservationCommandId(productLine, orderId));
             // 账户修订号由异步账户命令推进，批次之外可能在消息到达前变化；
-            // 不把下单时读取的旧值写入命令，最终资金裁决仍由账户数据库原子预占完成。
+            // 不把下单时读取的旧值写入命令，最终资金裁决由账户用户分区 reducer 按 WAL 顺序完成。
             return new ReservationSequenceSlot(0L, dependency);
         }
     }

@@ -36,8 +36,6 @@ class InstrumentOrderDrainServiceTest {
     void publishesReadyAfterOrdersAndAlgosAreDrained() throws Exception {
         OrderService orderService = mock(OrderService.class);
         AlgoOrderService algoOrderService = mock(AlgoOrderService.class);
-        OrderInstrumentLifecycleFenceService lifecycleFenceService =
-                mock(OrderInstrumentLifecycleFenceService.class);
         KafkaTemplate<String, String> kafkaTemplate = kafkaTemplate();
         when(kafkaTemplate.send(
                 org.mockito.ArgumentMatchers.eq("surprising.instrument.lifecycle-drain.v1"),
@@ -48,10 +46,8 @@ class InstrumentOrderDrainServiceTest {
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         new InstrumentOrderDrainService(
                 new ObjectMapper(), properties, orderService, algoOrderService,
-                kafkaTemplate, lifecycleFenceService).drain(event());
+                kafkaTemplate).drain(event());
 
-        verify(lifecycleFenceService).blockForSettlement(
-                ProductLine.LINEAR_DELIVERY, "BTC-USDT-260327", 2L);
         verify(kafkaTemplate).send(
                 org.mockito.ArgumentMatchers.eq("surprising.instrument.lifecycle-drain.v1"),
                 org.mockito.ArgumentMatchers.eq("BTC-USDT-260327"),

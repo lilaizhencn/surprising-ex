@@ -23,39 +23,23 @@ public class InstrumentOrderDrainService {
     private final OrderService orderService;
     private final AlgoOrderService algoOrderService;
     private final KafkaTemplate<String, String> kafkaTemplate;
-    private final OrderInstrumentLifecycleFenceService lifecycleFenceService;
-
-    public InstrumentOrderDrainService(ObjectMapper objectMapper,
-                                       TradingOrderProperties properties,
-                                       OrderService orderService,
-                                       AlgoOrderService algoOrderService,
-                                       KafkaTemplate<String, String> kafkaTemplate) {
-        this(objectMapper, properties, orderService, algoOrderService, kafkaTemplate, null);
-    }
-
     @Autowired
     public InstrumentOrderDrainService(ObjectMapper objectMapper,
                                        TradingOrderProperties properties,
                                        OrderService orderService,
                                        AlgoOrderService algoOrderService,
-                                       @Qualifier("orderKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate,
-                                       OrderInstrumentLifecycleFenceService lifecycleFenceService) {
+                                       @Qualifier("orderKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.orderService = orderService;
         this.algoOrderService = algoOrderService;
         this.kafkaTemplate = kafkaTemplate;
-        this.lifecycleFenceService = lifecycleFenceService;
     }
 
     public void drain(InstrumentEvent event) {
         if (event.status() != InstrumentStatus.SETTLING
                 || event.productLine() != properties.getKafka().getProductLine()) {
             return;
-        }
-        if (lifecycleFenceService != null) {
-            lifecycleFenceService.blockForSettlement(
-                    properties.getKafka().getProductLine(), event.symbol(), event.version());
         }
         algoOrderService.cancelLifecycleOrders(event.symbol(), BATCH_SIZE);
         orderService.requestLifecycleCancellation(event.symbol(), BATCH_SIZE);

@@ -29,7 +29,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 /**
@@ -47,28 +46,22 @@ public class AlgoOrderService {
     private final OrderService orderService;
     private final OrderUserStateService orderUserStateService;
     private final OrderScheduleIndex scheduleIndex;
-    private final OrderInstrumentLifecycleFenceService lifecycleFenceService;
 
     @Autowired
     public AlgoOrderService(TradingOrderProperties properties,
                             OrderService orderService,
                             OrderUserStateService orderUserStateService,
-                            OrderScheduleIndex scheduleIndex,
-                            @Nullable OrderInstrumentLifecycleFenceService lifecycleFenceService) {
+                            OrderScheduleIndex scheduleIndex) {
         this.properties = properties;
         this.orderService = orderService;
         this.orderUserStateService = orderUserStateService;
         this.scheduleIndex = scheduleIndex;
-        this.lifecycleFenceService = lifecycleFenceService;
     }
 
     public AlgoOrderResponse place(PlaceAlgoOrderRequest request) {
         PlaceAlgoOrderRequest normalized = normalize(request);
         ProductLine productLine = currentProductLine();
         requireLocalProductLine(productLine);
-        if (lifecycleFenceService != null) {
-            lifecycleFenceService.requirePlacementAllowed(productLine, normalized.symbol());
-        }
         Instant now = Instant.now();
         Instant startAt = normalized.startAt() == null || normalized.startAt().isBefore(now)
                 ? now : normalized.startAt();

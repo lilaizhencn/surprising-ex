@@ -376,19 +376,6 @@ CREATE TABLE IF NOT EXISTS instrument_lifecycle_drain_acks (
 CREATE INDEX IF NOT EXISTS instrument_lifecycle_drain_ready_idx
     ON instrument_lifecycle_drain_acks (product_line, symbol, instrument_version);
 
-CREATE TABLE IF NOT EXISTS trading_order_instrument_lifecycle_fences (
-    product_line        TEXT NOT NULL,
-    symbol              TEXT NOT NULL,
-    instrument_version  BIGINT NOT NULL DEFAULT 0,
-    blocked             BOOLEAN NOT NULL DEFAULT FALSE,
-    updated_at          TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (product_line, symbol),
-    CONSTRAINT trading_order_instrument_lifecycle_fence_product_line_check CHECK (
-        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-    )
-);
-
 CREATE TABLE IF NOT EXISTS trading_trigger_instrument_lifecycle_fences (
     product_line        TEXT NOT NULL,
     symbol              TEXT NOT NULL,
