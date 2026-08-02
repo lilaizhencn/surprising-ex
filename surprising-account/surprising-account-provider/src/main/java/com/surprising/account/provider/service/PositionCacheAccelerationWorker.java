@@ -16,11 +16,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Best-effort low-latency Redis accelerator.
+ * 低延迟 Redis 加速器。
  *
- * <p>PostgreSQL remains authoritative. The bounded queue coalesces newer snapshots for a hot position and uses
- * revisions to prevent stale asynchronous writes. Overflow marks the product-line cache unavailable so the
- * coordinator rebuilds it from PostgreSQL instead of serving a silently stale snapshot.</p>
+ * <p>账户用户事实流快照是唯一权威来源。有限队列会合并同一持仓的新快照，并使用修订号阻止旧事件覆盖新
+ * 事件；队列溢出时标记缓存不可用，由异步投影协调器重新加载，而不是继续提供可能过期的持仓。</p>
  */
 @Component
 public class PositionCacheAccelerationWorker {

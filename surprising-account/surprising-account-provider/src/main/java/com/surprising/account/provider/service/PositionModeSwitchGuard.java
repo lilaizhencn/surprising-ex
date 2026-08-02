@@ -7,9 +7,10 @@ import com.surprising.account.provider.repository.PositionModeTriggerOrderReposi
 import com.surprising.account.provider.repository.PositionModeUnsettledTradeRepository;
 import com.surprising.account.provider.repository.PositionRepository;
 import com.surprising.product.api.ProductLine;
-import org.springframework.stereotype.Component;
-
-@Component
+/**
+ * 旧数据库仓位模式切换守卫，仅保留历史测试类型；生产入口统一由账户用户 reducer 裁决。
+ */
+@Deprecated(forRemoval = true)
 public class PositionModeSwitchGuard {
 
     private final PositionModeLockRepository lockRepository;
