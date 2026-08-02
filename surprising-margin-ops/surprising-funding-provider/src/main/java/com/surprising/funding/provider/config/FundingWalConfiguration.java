@@ -2,6 +2,7 @@ package com.surprising.funding.provider.config;
 
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.eventstore.UserPartitionWal;
+import com.surprising.funding.provider.service.FundingLocalSequenceStore;
 import java.nio.file.Path;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,5 +21,11 @@ public class FundingWalConfiguration {
     public UserPartitionStateStore fundingAccountCommandPublishState(FundingProperties properties) {
         return new UserPartitionStateStore(Path.of(properties.getWal().getDirectory(),
                 properties.getKafka().getProductLine().name(), "account-command-publish-state"));
+    }
+
+    @Bean(destroyMethod = "close")
+    public FundingLocalSequenceStore fundingLocalSequenceStore(FundingProperties properties) {
+        return new FundingLocalSequenceStore(Path.of(properties.getWal().getDirectory(),
+                properties.getKafka().getProductLine().name(), "rate-sequences"));
     }
 }

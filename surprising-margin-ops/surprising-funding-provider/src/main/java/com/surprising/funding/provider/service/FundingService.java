@@ -54,7 +54,10 @@ public class FundingService {
     private final TransactionTemplate transactionTemplate;
     private final String nodeId;
     private final tools.jackson.databind.ObjectMapper objectMapper;
+    /** 生产环境使用本地持久序号；旧数据库序号只保留给未装配本地状态的单元测试。 */
+    private final FundingLocalSequenceStore localSequenceStore;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public FundingService(FundingProperties properties,
                           FundingLeaseRepository leaseRepository,
                           FundingSequenceRepository sequenceRepository,
@@ -67,7 +70,8 @@ public class FundingService {
                           LatestFundingRateCache latestFundingRateCache,
                           @Qualifier("fundingKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
                           tools.jackson.databind.ObjectMapper objectMapper,
-                          PlatformTransactionManager transactionManager) {
+                          PlatformTransactionManager transactionManager,
+                          FundingLocalSequenceStore localSequenceStore) {
         this.properties = properties;
         this.leaseRepository = leaseRepository;
         this.sequenceRepository = sequenceRepository;
@@ -82,6 +86,26 @@ public class FundingService {
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
+        this.localSequenceStore = localSequenceStore;
+    }
+
+    /** 仅供现有单元测试构造服务；生产 Bean 必须注入本地序号库。 */
+    FundingService(FundingProperties properties,
+                   FundingLeaseRepository leaseRepository,
+                   FundingSequenceRepository sequenceRepository,
+                   FundingRateInputRepository rateInputRepository,
+                   FundingRateRepository rateRepository,
+                   FundingSettlementRepository settlementRepository,
+                   FundingPaymentCandidateRepository paymentCandidateRepository,
+                   FundingPaymentRepository paymentRepository,
+                   FundingAccountCommandWalService accountCommandWalService,
+                   LatestFundingRateCache latestFundingRateCache,
+                   KafkaTemplate<String, Object> kafkaTemplate,
+                   tools.jackson.databind.ObjectMapper objectMapper,
+                   PlatformTransactionManager transactionManager) {
+        this(properties, leaseRepository, sequenceRepository, rateInputRepository, rateRepository,
+                settlementRepository, paymentCandidateRepository, paymentRepository, accountCommandWalService,
+                latestFundingRateCache, kafkaTemplate, objectMapper, transactionManager, null);
     }
 
     public void publishRates() {
@@ -93,7 +117,8 @@ public class FundingService {
             if (!ownsSymbol(input.symbol())) {
                 continue;
             }
-            long sequence = sequenceRepository.next(input.symbol());
+            long sequence = localSequenceStore == null
+                    ? sequenceRepository.next(input.symbol()) : localSequenceStore.next(input.symbol());
             long rawRate = Math.addExact(input.interestRatePpm(), input.premiumRatePpm());
             long fundingRate = FundingMath.clampRate(rawRate, input.fundingRateFloorPpm(), input.fundingRateCapPpm());
             Instant fundingTime = FundingTime.nextFundingTime(now, input.fundingIntervalHours());
