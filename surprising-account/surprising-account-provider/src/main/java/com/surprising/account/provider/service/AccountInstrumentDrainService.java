@@ -1,11 +1,15 @@
 package com.surprising.account.provider.service;
 
 import com.surprising.account.provider.config.AccountProperties;
-import com.surprising.account.provider.repository.AccountCommandRepository;
-import com.surprising.account.provider.repository.TradeSettlementSideRepository;
+import com.surprising.eventstore.UserPartitionKey;
+import com.surprising.eventstore.UserPartitionStateStore;
+import com.surprising.eventstore.UserPartitionWal;
 import com.surprising.instrument.api.model.InstrumentLifecycleDrainComponent;
 import com.surprising.instrument.api.model.InstrumentLifecycleDrainEvent;
+import com.surprising.product.api.ProductLine;
 import java.time.Instant;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.concurrent.TimeUnit;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
@@ -14,23 +18,24 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class AccountInstrumentDrainService {
 
-    private static final int PAGE_SIZE = 500;
-
     private final ObjectMapper objectMapper;
     private final AccountProperties properties;
-    private final AccountCommandRepository commandRepository;
-    private final TradeSettlementSideRepository tradeSettlementSideRepository;
+    private final UserPartitionStateStore stateStore;
+    private final UserPartitionWal wal;
+    private final AccountUserStateReducer reducer;
     private final KafkaTemplate<String, String> kafkaTemplate;
 
     public AccountInstrumentDrainService(ObjectMapper objectMapper,
                                          AccountProperties properties,
-                                         AccountCommandRepository commandRepository,
-                                         TradeSettlementSideRepository tradeSettlementSideRepository,
+                                         UserPartitionStateStore stateStore,
+                                         UserPartitionWal wal,
+                                         AccountUserStateReducer reducer,
                                          KafkaTemplate<String, String> kafkaTemplate) {
         this.objectMapper = objectMapper;
         this.properties = properties;
-        this.commandRepository = commandRepository;
-        this.tradeSettlementSideRepository = tradeSettlementSideRepository;
+        this.stateStore = stateStore;
+        this.wal = wal;
+        this.reducer = reducer;
         this.kafkaTemplate = kafkaTemplate;
     }
 
@@ -39,6 +44,7 @@ public class AccountInstrumentDrainService {
                 || orderReady.productLine() != properties.getKafka().getProductLine()) {
             return;
         }
+        requireLocalProductLine(orderReady.productLine());
         if (!allReservationsReleased(orderReady.symbol())) {
             throw new IllegalStateException("订单冻结资金尚未全部释放: " + orderReady.symbol());
         }
@@ -46,33 +52,42 @@ public class AccountInstrumentDrainService {
     }
 
     private boolean allReservationsReleased(String symbol) {
-        var productLine = properties.getKafka().getProductLine();
-        if (commandRepository.hasPendingOrderReservations(productLine, symbol)) {
-            return false;
+        ProductLine productLine = properties.getKafka().getProductLine();
+        Set<UserPartitionKey> statePartitions = stateStore.partitions().stream()
+                .filter(partition -> partition.productLine() == productLine)
+                .collect(Collectors.toSet());
+        for (UserPartitionKey partition : wal.partitions()) {
+            if (partition.productLine() != productLine) {
+                continue;
+            }
+            long pending = wal.lastSequence(partition) - stateStore.lastAppliedSequence(partition);
+            if (pending > 0L) {
+                // 本地事实流尚未追平时不能提前确认生命周期完成，避免漏掉尚未落地的释放命令。
+                return false;
+            }
+            statePartitions.add(partition);
         }
-        long afterOrderId = 0L;
-        while (true) {
-            var reservations = commandRepository.orderReservationSnapshots(
-                    productLine, symbol, afterOrderId, PAGE_SIZE);
-            if (reservations.isEmpty()) {
-                return true;
+        for (UserPartitionKey partition : statePartitions) {
+            AccountUserReducerState state = reducer.state(partition).orElse(null);
+            if (state == null) {
+                return false;
             }
-            var usage = tradeSettlementSideRepository.marginUsage(productLine,
-                    reservations.stream().map(AccountCommandRepository.OrderReservationSnapshot::orderId).toList());
-            for (var reservation : reservations) {
-                TradeSettlementSideRepository.MarginUsage tradeUsage =
-                        usage.getOrDefault(reservation.orderId(),
-                                new TradeSettlementSideRepository.MarginUsage(0L, 0L));
-                long unavailable = Math.addExact(reservation.releasedUnits(),
-                        Math.addExact(tradeUsage.consumedUnits(), tradeUsage.releasedUnits()));
-                if (unavailable < reservation.reservedUnits()) {
-                    return false;
+            for (AccountUserReducerState.Reservation reservation : state.reservations()) {
+                // 旧快照没有交易对时无法证明该预占属于哪个生命周期，宁可阻塞也不能误放行。
+                if (reservation.symbol() == null || reservation.symbol().equalsIgnoreCase(symbol)) {
+                    long unavailable = Math.addExact(reservation.releasedUnits(), reservation.consumedUnits());
+                    if (unavailable < reservation.reservedUnits()) {
+                        return false;
+                    }
                 }
-                afterOrderId = reservation.orderId();
             }
-            if (reservations.size() < PAGE_SIZE) {
-                return true;
-            }
+        }
+        return true;
+    }
+
+    private void requireLocalProductLine(ProductLine productLine) {
+        if (productLine != ProductLine.LINEAR_PERPETUAL) {
+            throw new IllegalStateException("产品线尚未接入本地账户事实流，禁止数据库生命周期核对: " + productLine);
         }
     }
 
